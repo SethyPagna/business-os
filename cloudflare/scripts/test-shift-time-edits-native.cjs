@@ -24,9 +24,19 @@ async function main() {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: "import worker from './src/index.ts'; export default worker" },
     bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:workers'], logLevel: 'silent' })
   const outbound = []
+  const telegramSent = []
+  const BOT_TOKEN = 'test-token-not-real'
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
-    d1Databases: ['DB'], kvNamespaces: ['CACHE'], cache: false, bindings: { PLAN_TIER: 'paid', BUSINESS_OS_ADMIN_URL: ORIGIN },
-    outboundService: (request) => { outbound.push(request.url); return new Response('refused', { status: 503 }) }, log: new Log(LogLevel.ERROR) })
+    d1Databases: ['DB'], kvNamespaces: ['CACHE'], cache: false, bindings: { PLAN_TIER: 'paid', BUSINESS_OS_ADMIN_URL: ORIGIN, TELEGRAM_BOT_TOKEN: BOT_TOKEN },
+    outboundService: async (request) => {
+      if (request.url.startsWith('https://api.telegram.org/')) {
+        const body = await request.json().catch(() => ({}))
+        telegramSent.push({ text: String(body.text || ''), thread: body.message_thread_id })
+        return Response.json({ ok: true, result: { message_id: telegramSent.length } })
+      }
+      outbound.push(request.url)
+      return new Response('refused', { status: 503 })
+    }, log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     for (const name of fs.readdirSync(path.join(root, 'migrations')).filter((file) => file.endsWith('.sql')).sort()) {
@@ -57,6 +67,10 @@ async function main() {
     for (const [index, key] of ['b1', 'b2', 'b3', 'b4'].entries()) await addPerson(key, 41 + index, employeeRole, '{"pos":true,"sales":true}')
     await db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Shop','shop',1,1)").run()
     await db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+    const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run()
+    await setting('telegram_chat_id', '-1001111111111')
+    await setting('telegram_language', 'both')
+    await setting('telegram_shift_overview_enabled', 'false')
 
     const call = async (who, method, route, body) => {
       const response = await mf.dispatchFetch(`${ORIGIN}/api/shifts${route}`, { method,
@@ -118,8 +132,10 @@ async function main() {
       refused('opened_at now-5min', await amend('b1', b1, { expected_revision: revision, opened_at: new Date(Date.now() - 5 * MIN).toISOString() }), 'shift_time_admin_only')
       assert.equal(await orphanCount('b1'), 0, 'no sale was pushed outside the shift')
     }))
+    let b2Open = null
     await check('B2: an employee moving the opening of an OPEN shift later is refused, nothing written', async () => {
       const open = await openShift('b2', 40)
+      b2Open = open
       await sell('b2', 30)
       await sell('b2', 20)
       await untouched('open shift opened_at later', open, async () => {
@@ -145,6 +161,149 @@ async function main() {
       const row = await rowOf(b1)
       const done = await amend('admin', b1, { expected_revision: row.revision, closed_at: new Date(Date.parse(row.closed_at) - 2 * MIN).toISOString() })
       assert.equal(done.status, 200, done.text)
+    })
+
+    // ---- S4: an administrator's time edit that leaves money outside every shift is flagged, durably --------
+    const SECRET = createHash('sha256').update(BOT_TOKEN).digest('hex')
+    const waitFor = async (what, condition) => {
+      for (let i = 0; i < 100; i += 1) { if (await condition()) return; await new Promise((done) => setTimeout(done, 100)) }
+      throw new Error(`timed out waiting for ${what}`)
+    }
+    const reportsAbout = (mark, code) => telegramSent.slice(mark).map((message) => message.text).filter((text) => text.includes(code) && !/Overview|ទិដ្ឋភាព/.test(text.split('\n')[0]))
+    const shiftReportBlock = (text, code) => text.split('🧑‍💼').find((block) => block.includes(code)) || ''
+    const shiftCommand = async (language, code) => {
+      await setting('telegram_language', language)
+      const mark = telegramSent.length
+      const response = await mf.dispatchFetch(`${ORIGIN}/api/telegram/webhook`, { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': SECRET },
+        body: JSON.stringify({ message: { text: '/shift', chat: { id: -1001111111111 } } }) })
+      assert.equal(response.status, 200)
+      await waitFor('the /shift reply', () => telegramSent.length > mark)
+      return shiftReportBlock(telegramSent.slice(mark).map((message) => message.text).join('\n'), code)
+    }
+    const EARLIER = { en: 'Closed at an earlier time by', km: 'បិទនៅម៉ោងមុនដោយ' }
+    const LATER = { en: 'Opened at a later time by', km: 'បើកនៅម៉ោងក្រោយដោយ' }
+    const lineWith = (text, phrase) => text.split('\n').find((line) => line.includes(phrase)) || null
+    const timeReviewOf = async (id) => {
+      const row = await first("SELECT json_extract(after_json,'$.time_review') AS review FROM shift_session_amendments WHERE shift_session_id=? AND json_type(after_json,'$.time_review')='array' ORDER BY id DESC LIMIT 1", id)
+      return row ? JSON.parse(row.review) : null
+    }
+    const reviewCodesOf = async (who, id) => (await call(who, 'GET', `/${id}/history`)).json.shift.reconciliation?.review_codes ?? null
+    const expectMark = (label, text, phrases, present) => {
+      for (const [language, phrase] of Object.entries(phrases)) {
+        const line = lineWith(text, phrase)
+        if (present[language]) {
+          assert.ok(line, `${label}: the ${language} mark is there`)
+          assert.ok(line.includes('cashier_admin'), `${label}: the mark names the administrator: ${line}`)
+          assert.equal(/[$៛\d]/.test(line.replace(/cashier_admin/g, '')), false, `${label}: the mark carries no amount: ${line}`)
+        } else assert.equal(line, null, `${label}: no ${language} mark`)
+      }
+    }
+
+    const s4 = await openShift('b3', 60)
+    await sell('b3', 50)
+    await sell('b3', 30)
+    const s4Closed = await call('b3', 'POST', `/${s4}/close`, { expected_revision: 0, closing_counted_usd: 60, closing_counted_khr: 0 })
+    assert.equal(s4Closed.status, 200, s4Closed.text)
+    const s4Code = (await rowOf(s4)).shift_code
+    await check('S4: the cashier close is not flagged', async () => {
+      assert.deepEqual((await timeReviewOf(s4)), [], 'the close journals an evaluated, empty review')
+      assert.equal((await reviewCodesOf('admin', s4)).includes('closed_at_earlier_time'), false)
+    })
+    await check('S4: an administrator moving the close before the last sale flags it, durably, and the amend re-send carries the mark', async () => {
+      await setting('telegram_language', 'both')
+      const mark = telegramSent.length
+      const row = await rowOf(s4)
+      const done = await amend('admin', s4, { expected_revision: row.revision, closed_at: new Date(Date.now() - 40 * MIN).toISOString() })
+      assert.equal(done.status, 200, done.text)
+      assert.equal(await orphanCount('b3'), 1, 'one sale now sits outside every shift')
+      const review = await timeReviewOf(s4)
+      assert.deepEqual(review, [{ code: 'closed_at_earlier_time', by: 'cashier_admin' }])
+      assert.ok((await reviewCodesOf('admin', s4)).includes('closed_at_earlier_time'), 'the app reads the flag')
+      await waitFor('the amend re-send', () => reportsAbout(mark, s4Code).length > 0)
+      const text = reportsAbout(mark, s4Code).join('\n')
+      expectMark('amend re-send (both)', text, EARLIER, { en: true, km: true })
+      assert.ok(text.includes('Amended by'), 'it is the amend re-send')
+    })
+    await check('S4: /shift carries the mark in English, Khmer and both', async () => {
+      expectMark('/shift en', await shiftCommand('en', s4Code), EARLIER, { en: true, km: false })
+      expectMark('/shift km', await shiftCommand('km', s4Code), EARLIER, { en: false, km: true })
+      expectMark('/shift both', await shiftCommand('both', s4Code), EARLIER, { en: true, km: true })
+    })
+    await check('S4: an administrator note amend and an employee count amend keep the flag', async () => {
+      await setting('telegram_language', 'both')
+      const mark = telegramSent.length
+      let row = await rowOf(s4)
+      assert.equal((await amend('admin', s4, { expected_revision: row.revision, closing_note: 'Checked by owner' })).status, 200)
+      row = await rowOf(s4)
+      assert.equal((await amend('b3', s4, { expected_revision: row.revision, closing_counted_usd: 61 })).status, 200)
+      assert.deepEqual(await timeReviewOf(s4), [{ code: 'closed_at_earlier_time', by: 'cashier_admin' }], 'no evaluation without a time change; the last one stands')
+      await waitFor('the re-sends', () => reportsAbout(mark, s4Code).length >= 2)
+      for (const text of reportsAbout(mark, s4Code)) expectMark('re-send after a non-time amend', text, EARLIER, { en: true, km: true })
+      assert.ok((await reviewCodesOf('admin', s4)).includes('closed_at_earlier_time'))
+    })
+    await check('S4: moving the close back so nothing is orphaned clears the flag everywhere', async () => {
+      await setting('telegram_language', 'both')
+      const mark = telegramSent.length
+      const row = await rowOf(s4)
+      const done = await amend('admin', s4, { expected_revision: row.revision, closed_at: new Date(Date.now() - 2 * MIN).toISOString() })
+      assert.equal(done.status, 200, done.text)
+      assert.equal(await orphanCount('b3'), 0)
+      assert.deepEqual(await timeReviewOf(s4), [], 'the evaluation that cleared it is journaled')
+      assert.equal((await reviewCodesOf('admin', s4)).includes('closed_at_earlier_time'), false)
+      await waitFor('the amend re-send', () => reportsAbout(mark, s4Code).length > 0)
+      expectMark('re-send after the move back', reportsAbout(mark, s4Code).join('\n'), EARLIER, { en: false, km: false })
+      expectMark('/shift after the move back', await shiftCommand('both', s4Code), EARLIER, { en: false, km: false })
+    })
+    await check('S4: an administrator moving the opening later past a sale flags it with the sibling code, and moving it back clears it', async () => {
+      await setting('telegram_language', 'both')
+      const mark = telegramSent.length
+      let row = await rowOf(s4)
+      const done = await amend('admin', s4, { expected_revision: row.revision, opened_at: new Date(Date.now() - 20 * MIN).toISOString() })
+      assert.equal(done.status, 200, done.text)
+      assert.equal(await orphanCount('b3'), 2)
+      assert.deepEqual(await timeReviewOf(s4), [{ code: 'opened_at_later_time', by: 'cashier_admin' }])
+      assert.ok((await reviewCodesOf('admin', s4)).includes('opened_at_later_time'))
+      await waitFor('the amend re-send', () => reportsAbout(mark, s4Code).length > 0)
+      expectMark('opening later (both)', reportsAbout(mark, s4Code).join('\n'), LATER, { en: true, km: true })
+      expectMark('opening later /shift en', await shiftCommand('en', s4Code), LATER, { en: true, km: false })
+      row = await rowOf(s4)
+      assert.equal((await amend('admin', s4, { expected_revision: row.revision, opened_at: new Date(Date.now() - 60 * MIN).toISOString() })).status, 200)
+      assert.deepEqual(await timeReviewOf(s4), [])
+      assert.equal(await orphanCount('b3'), 0)
+    })
+    await check('S4: the flag does not live only in the stored figures: a shift closed without them is flagged and marked all the same', async () => {
+      await setting('telegram_language', 'both')
+      const opened = new Date(Date.now() - 50 * MIN).toISOString()
+      const closed = new Date(Date.now() - 5 * MIN).toISOString()
+      await db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr,
+          opening_float_usd_registered,opening_float_khr_registered,closed_at,closing_counted_usd,closing_counted_khr,closed_by_user_id,closed_by_user_name)
+        VALUES('S-LEGACY-NOFIGURES','per_account',?,?,1,'Shop',date(?, '+7 hours'),?,50,0,1,1,?,60,0,?,?)`)
+        .bind(people.b4.id, 'cashier_b4', opened, opened, closed, people.b4.id, 'cashier_b4').run()
+      const legacy = (await first("SELECT id FROM shift_sessions WHERE shift_code='S-LEGACY-NOFIGURES'")).id
+      await sell('b4', 20)
+      assert.equal((await first('SELECT COUNT(*) AS n FROM shift_close_figures WHERE shift_session_id=?', legacy)).n, 0, 'the fixture carries no stored figures')
+      const mark = telegramSent.length
+      const row = await rowOf(legacy)
+      const done = await amend('admin', legacy, { expected_revision: row.revision, closed_at: new Date(Date.now() - 30 * MIN).toISOString() })
+      assert.equal(done.status, 200, done.text)
+      assert.deepEqual(await timeReviewOf(legacy), [{ code: 'closed_at_earlier_time', by: 'cashier_admin' }])
+      assert.ok((await reviewCodesOf('admin', legacy)).includes('closed_at_earlier_time'))
+      await waitFor('the amend re-send', () => reportsAbout(mark, 'S-LEGACY-NOFIGURES').length > 0)
+      expectMark('legacy shift re-send', reportsAbout(mark, 'S-LEGACY-NOFIGURES').join('\n'), EARLIER, { en: true, km: true })
+      expectMark('legacy shift /shift', await shiftCommand('both', 'S-LEGACY-NOFIGURES'), EARLIER, { en: true, km: true })
+    })
+    await check('S4: an administrator past close is flagged in the close journal and marked on the close message', async () => {
+      await setting('telegram_language', 'both')
+      const open = b2Open
+      const mark = telegramSent.length
+      const row = await rowOf(open)
+      const closed = await call('admin', 'POST', `/${open}/close`, { expected_revision: row.revision, closed_at: row.opened_at, closing_counted_usd: 50, closing_counted_khr: 0 })
+      assert.equal(closed.status, 200, closed.text)
+      assert.deepEqual(await timeReviewOf(open), [{ code: 'closed_at_earlier_time', by: 'cashier_admin' }])
+      await waitFor('the close message', () => reportsAbout(mark, row.shift_code).length > 0)
+      expectMark('close message', reportsAbout(mark, row.shift_code).join('\n'), EARLIER, { en: true, km: true })
+      expectMark('/shift after the close', await shiftCommand('km', row.shift_code), EARLIER, { en: false, km: true })
     })
 
     // (later rounds of this file append their scenarios here)

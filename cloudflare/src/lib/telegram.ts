@@ -17,8 +17,9 @@ import {
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
-  shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere, type ShiftCashResult, type ShiftMoney, type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, readShiftTimeReview,
+  SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
+  type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -1154,6 +1155,7 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 // every fee surface already follow.
 
 export type ShiftReportSession = {
+  id?: number
   shift_code: string
   scope_mode?: 'per_account' | 'shop_wide'
   user_id: number
@@ -1188,11 +1190,18 @@ export type ShiftReportSession = {
  *  - `closedBy`: the account that closed it (closed_by_user_name). Shown only when
  *    it is not the cashier, who is already on the Cashier row. `closedById` is that
  *    account's id: when given the two are compared by account, so a cashier renamed
- *    since opening is still the cashier; without it, by name. `closedEarlier` marks an
- *    administrator's close at a time a cashier could not have chosen: the row then reads
- *    "Closed at an earlier time by" and is shown whoever the closer is.
+ *    since opening is still the cashier; without it, by name.
+ *  - `timeReview`: the shift's standing time review (lib/shiftReconciliation
+ *    readShiftTimeReview) -- an administrator's time edit that left money records
+ *    outside every shift. Every send of the shift carries it, so the mark outlives
+ *    the close message: the amend re-send and /shift read it from the journal. The
+ *    rows read "Closed at an earlier time by" / "Opened at a later time by" with the
+ *    account that made the edit, and no amount.
  */
-export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null; closedById?: number | null; closedEarlier?: boolean }
+export type ShiftReportOptions = {
+  amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null; closedById?: number | null
+  timeReview?: readonly ShiftTimeReview[] | null
+}
 
 export type ShiftReportFigures = {
   invoices: number
@@ -1315,6 +1324,7 @@ const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
   sale_limit_reached: 'reviewLimit',
   cash_method_unresolved: 'reviewCashMethod',
   closed_at_earlier_time: 'reviewEarlierClose',
+  opened_at_later_time: 'reviewLaterOpen',
 }
 /** A cash review's reasons, from lib/shiftReconciliation.ts's codes, in the chat's words. */
 function reviewReasons(codes: readonly string[]): string {
@@ -1373,8 +1383,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // A cashier closing their own till is already on the Cashier row; naming them
   // again would be noise on the commonest close of all.
   const closerIsCashier = options.closedById != null ? options.closedById === shift.user_id : closedBy.toLowerCase() === cashier
-  if (closedBy && options.closedEarlier) lines.push(labeled('closedEarlierBy', closedBy))
-  else if (closedBy && !closerIsCashier) lines.push(labeled('closedBy', closedBy))
+  const earlierClose = options.timeReview?.find((entry) => entry.code === SHIFT_REVIEW.earlierClose)
+  const laterOpen = options.timeReview?.find((entry) => entry.code === SHIFT_REVIEW.laterOpen)
+  const earlierBy = cleanLine(earlierClose?.by, 60)
+  if (closedBy && !closerIsCashier && !(earlierBy && earlierBy.toLowerCase() === closedBy.toLowerCase())) lines.push(labeled('closedBy', closedBy))
+  if (earlierClose && earlierBy) lines.push(labeled('closedEarlierBy', earlierBy))
+  const laterOpenBy = cleanLine(laterOpen?.by, 60)
+  if (laterOpen && laterOpenBy) lines.push(labeled('openedLaterBy', laterOpenBy))
   const reopenedBy = cleanLine(options.reopenedBy, 60)
   if (reopenedBy) lines.push(labeled('reopenedBy', reopenedBy))
   const amendedBy = cleanLine(options.amendedBy, 60)
@@ -1514,7 +1529,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   return lines.join('\n')
 }
 
-const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
+const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at,
   CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
   CASE WHEN opening_float_khr_registered=1 THEN opening_float_khr ELSE NULL END AS opening_float_khr,
@@ -1659,8 +1674,8 @@ async function shopName(env: Env): Promise<string> {
 }
 
 async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
-  const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language)])
-  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, options))
+  const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language), shift.id == null ? null : readShiftTimeReview(env, shift.id)])
+  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, { ...options, timeReview: options.timeReview ?? timeReview }))
 }
 
 /**
@@ -1968,7 +1983,7 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   return lines
 }
 
-const OVERVIEW_SHIFT_COLUMNS = `id, revision, ${SHIFT_COLUMNS}`
+const OVERVIEW_SHIFT_COLUMNS = `revision, ${SHIFT_COLUMNS}`
 type OverviewShift = ShiftReportSession & { id: number; revision: number }
 
 type SummaryScope = {

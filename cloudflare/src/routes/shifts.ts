@@ -9,8 +9,8 @@ import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/t
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  readShiftCloseInputsDigest, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
-  type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
+  applyShiftTimeReview, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
+  type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect, type BranchEffect } from '../lib/branchRedirectWrite'
@@ -270,6 +270,8 @@ function requiredReason(value: unknown): string | null {
  * `user.name` remains the fallback only for accounts that carry no username.
  */
 function displayName(user: SessionUser): string | null { return user.username || user.name || null }
+/** The account a time review names: the username, never a phone number or an email. */
+function reviewerName(user: SessionUser): string { return displayName(user) ?? `#${user.id}` }
 function canUseShifts(user: SessionUser): boolean { return hasAnyPermission(user, ['pos', 'sales']) }
 function shiftPermissionError(c: { json: (body: object, status: 403) => Response }, user: SessionUser): Response | null {
   return canUseShifts(user) ? null : c.json({ error: 'You do not have permission to use shifts.' }, 403)
@@ -357,22 +359,66 @@ function withinServerClock(requestedMs: number, now: number): number | null {
  * and the Telegram report says it was closed at an earlier time by them.
  *
  * Owner, 14 Oct 2026: an employee closes now and never picks a past time, however
- * old the shift is.
- * `moveOnly` is the amend of an already closed shift: only moving the close
- * EARLIER can hide a record, and there is no "now" to compare against.
+ * old the shift is. An employee never edits a time afterwards either (PATCH /:id
+ * answers shift_time_admin_only); an administrator's edit is judged by
+ * timeReviewAfterEdit.
  */
 const CLOSE_TIME_REFUSALS = {
   beforeActivity: { code: 'shift_close_before_last_activity', error: 'Close the shift after its last sale, return or expense. An earlier time is not allowed.' },
   tooEarly: { code: 'shift_close_too_early', error: 'Close the shift now. A close time more than 5 minutes in the past needs an administrator.' },
 } as const
 type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null }
-async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, closedAtMs: number, nowMs: number, moveOnly = false): Promise<CloseTimeVerdict> {
+async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, closedAtMs: number, nowMs: number): Promise<CloseTimeVerdict> {
   const last = await shiftLastActivityMs(env, shift, nowMs)
   const beforeActivity = last != null && Math.floor(closedAtMs / 1000) <= Math.floor(last / 1000)
-  const tooEarly = !moveOnly && closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
+  const tooEarly = closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
   if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null }
   if (canManageShifts(user)) return { earlier: true, refusal: null }
   return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly }
+}
+/** The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, an evaluated empty list otherwise. */
+function closeTimeReview(timing: CloseTimeVerdict, actorName: string): ShiftTimeReview[] {
+  return timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []
+}
+const businessDayStartIso = (businessDate: string) => new Date(Date.parse(`${businessDate}T00:00:00Z`) - BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString()
+/**
+ * ---- What an administrator's time edit leaves behind ---------------------
+ *
+ * Moving the close earlier, or the opening later, leaves the money records in
+ * between outside every shift's half-open window, so no drawer counts them. The
+ * edit is allowed (an administrator may correct a time) but is judged here and
+ * the verdict is journaled with the edit itself (`time_review` in the amendment's
+ * after_json, lib/shiftReconciliation readShiftTimeReview): the closing side by
+ * the records from the new close up to the next segment of the same drawer, the
+ * opening side by the records from the previous segment's end (or the business
+ * day's start) up to the new opening. A side whose time did not move keeps its
+ * standing flag; a side that moved is judged afresh, so moving a time back so
+ * that nothing is orphaned clears its flag. Null means no time moved: nothing
+ * is journaled and the standing review stands.
+ */
+async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, before: ShiftDbRow, openedAt: string, closedAt: string | null, nowMs: number): Promise<ShiftTimeReview[] | null> {
+  const second = (iso: string) => Math.floor(utcMs(iso) / 1000)
+  const openedMoved = second(openedAt) !== second(before.opened_at)
+  const closedMoved = closedAt != null && before.closed_at != null && second(closedAt) !== second(before.closed_at)
+  if (!openedMoved && !closedMoved) return null
+  const standing = (await readShiftTimeReview(env, before.id)) ?? []
+  const session = storedShift(before)
+  let close = standing.find((entry) => entry.code === SHIFT_REVIEW.earlierClose) ?? null
+  let open = standing.find((entry) => entry.code === SHIFT_REVIEW.laterOpen) ?? null
+  if (closedMoved) {
+    const next = await readAdjacentShift(db, session, before.opened_at, 'next')
+    const stranded = await shiftLastActivityMs(env, { ...session, opened_at: openedAt }, nowMs, { from: closedAt as string, until: next?.opened_at ?? null })
+    close = stranded == null ? null : { code: SHIFT_REVIEW.earlierClose, by: actorName }
+  }
+  if (openedMoved) {
+    let stranded: number | null = null
+    if (second(openedAt) > second(before.opened_at)) {
+      const previous = await readAdjacentShift(db, session, before.opened_at, 'previous')
+      stranded = await shiftLastActivityMs(env, session, nowMs, { from: previous?.closed_at ?? businessDayStartIso(before.business_date), until: openedAt })
+    }
+    open = stranded == null ? null : { code: SHIFT_REVIEW.laterOpen, by: actorName }
+  }
+  return [close, open].filter((entry): entry is ShiftTimeReview => entry != null)
 }
 const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an administrator can change the opening or closing time of a shift.' } as const
 /** Whether an amend asks for a different opening or closing instant (second resolution, the stored text's own). */
@@ -821,7 +867,8 @@ async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: 
   if (options.drift && computed) {
     try { drift = await loadShiftCloseDrift(env, shift, stored, computed, nowMs) } catch { drift = null }
   }
-  return { reconciliation: stored.reconciliation, reconciliation_source: 'stored',
+  const standing = await readShiftTimeReview(env, shift.id)
+  return { reconciliation: applyShiftTimeReview(stored.reconciliation, standing), reconciliation_source: 'stored',
     close_figures_taken_at: stored.taken_at || null, close_drift: drift }
 }
 /**
@@ -1176,6 +1223,8 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   request?: ReturnType<typeof mutationRequest>
   /** closeFiguresFor's figures and input digest, or null when they could not be computed. */
   figures: CloseFigures | null
+  /** The time review this close stands on (closeTimeReview), journaled with it. */
+  timeReview: ShiftTimeReview[]
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
@@ -1197,7 +1246,7 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
         SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
         WHERE changes()=1 AND id=@id AND revision=@newRevision`,
       params: { id: shift.id, actorId: user.id, actorName, reason: input.reason, beforeJson: JSON.stringify(shift),
-        afterJson: JSON.stringify(after), createdAt: input.recordedAt, newRevision: after.revision } },
+        afterJson: JSON.stringify({ ...after, time_review: input.timeReview }), createdAt: input.recordedAt, newRevision: after.revision } },
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.close', shiftId: shift.id,
         details: JSON.stringify({ reason: input.reason, revision: after.revision, request: input.request }), oldValue: JSON.stringify(shift),
         newValue: JSON.stringify(after), deviceName: input.deviceName } },
@@ -1236,15 +1285,16 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
  */
 const CLOSE_FIGURE_ATTEMPTS = 3
 async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
-  input: Omit<Parameters<typeof writeClose>[3], 'figures'> & { extraReviewCodes?: readonly string[] }) {
-  const { extraReviewCodes, ...closeInput } = input
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  const { timeReview, ...closeInput } = input
+  const extraReviewCodes = timeReview.map((entry) => entry.code)
   for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
     const figures = await closeFiguresFor(env, closing, extraReviewCodes)
-    try { return await writeClose(db, user, row, { ...closeInput, figures }) } catch (error) {
+    try { return await writeClose(db, user, row, { ...closeInput, timeReview, figures }) } catch (error) {
       if (!figures || !isCloseInputsChangedError(error)) throw error
     }
   }
-  return writeClose(db, user, row, { ...closeInput, figures: null })
+  return writeClose(db, user, row, { ...closeInput, timeReview, figures: null })
 }
 
 /**
@@ -1298,11 +1348,11 @@ app.post('/close', async (c) => {
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
-    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
+    timeReview: closeTimeReview(timing, reviewerName(user)) })
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
-    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
+    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
     try { c.executionCtx.waitUntil(report) } catch { void report }
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
@@ -1348,9 +1398,9 @@ app.post('/:id/close', async (c) => {
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
-    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
+    timeReview: closeTimeReview(timing, reviewerName(user)) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
+  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
@@ -1474,10 +1524,6 @@ app.patch('/:id', async (c) => {
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
   if (closedAt && utcMs(closedAt) < utcMs(openedAt)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
-  if (before.closed_at && closedAt && utcMs(closedAt) < utcMs(before.closed_at)) {
-    const timing = await closeTimeVerdict(c.env, user, before, utcMs(closedAt), now, true)
-    if (timing.refusal) return c.json(timing.refusal, 409)
-  }
   const openingUsdParsed = 'opening_float_usd' in body
     ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
   const openingKhrParsed = 'opening_float_khr' in body
@@ -1527,6 +1573,7 @@ app.patch('/:id', async (c) => {
     const overlap = await intervalError(db, beforeStored, openedAt, closedAt)
     if (overlap) return c.json({ error: overlap }, 400)
   }
+  const timeReview = canManageShifts(user) ? await timeReviewAfterEdit(c.env, db, reviewerName(user), before, openedAt, closedAt, now) : null
   const comparableBefore = { ...beforeStored }; delete (comparableBefore as Partial<ShiftRow>).revision
   const comparableAfter = { ...after }; delete (comparableAfter as Partial<ShiftRow>).revision
   if (JSON.stringify(comparableBefore) === JSON.stringify(comparableAfter)) return c.json({ error: 'No shift fields changed.' }, 400)
@@ -1549,7 +1596,7 @@ app.patch('/:id', async (c) => {
         SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
         WHERE changes()=1 AND id=@id AND revision=@newRevision`,
       params: { id, actorId: user.id, actorName, reason, beforeJson: JSON.stringify(beforeStored),
-        afterJson: JSON.stringify(after), createdAt: nowIso, newRevision: after.revision } },
+        afterJson: JSON.stringify(timeReview ? { ...after, time_review: timeReview } : after), createdAt: nowIso, newRevision: after.revision } },
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.amend', shiftId: id,
         details: JSON.stringify({ reason, revision: after.revision, request: mutationRequest(body, id) }), oldValue: JSON.stringify(beforeStored),
         newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },

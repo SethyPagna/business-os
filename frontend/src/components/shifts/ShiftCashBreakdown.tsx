@@ -25,6 +25,7 @@ const REVIEW_KEYS: Record<string, string> = {
   sale_limit_reached: 'shift_review_limit',
   cash_method_unresolved: 'shift_review_cash_method',
   closed_at_earlier_time: 'shift_review_earlier_close',
+  opened_at_later_time: 'shift_review_later_open',
 }
 
 export default function ShiftCashBreakdown({ reconciliation, className = '' }: Props) {

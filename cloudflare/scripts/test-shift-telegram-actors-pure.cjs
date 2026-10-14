@@ -250,7 +250,7 @@ async function main() {
   const actorRow = (mode, key, name) => `· ${packLabel(mode, key)}: ${name}`
   const idRow = (mode, code) => `· ${idLabel(mode)}: ${code}`
   const codeOf = (id) => sqlite.prepare('SELECT shift_code FROM shift_sessions WHERE id = ?').get(id).shift_code
-  const ACTOR_KEYS = ['shift_closed_by', 'shift_closed_earlier_by', 'shift_reopened_by', 'shift_amended_by']
+  const ACTOR_KEYS = ['shift_closed_by', 'shift_closed_earlier_by', 'shift_opened_later_by', 'shift_reopened_by', 'shift_amended_by']
   const anyActorRow = (text) => rowsOf(text).filter((row) => ACTOR_KEYS.some((key) => [pack.en[key], pack.km[key], `${pack.en[key]}${SEP}${pack.km[key]}`].some((label) => row.startsWith(`· ${label}: `))))
 
   const failures = []
@@ -310,15 +310,25 @@ async function main() {
     assert.deepEqual(await rowsFor({ closedBy: 'owner' }), named('owner'), 'and a different name is named')
   })
 
-  await section('1c. an administrator\'s close at an earlier time is marked, in en, km and both', async () => {
+  await section('1c. an administrator\'s time edit is marked, in en, km and both', async () => {
+    const earlier = (by) => ({ timeReview: [{ code: 'closed_at_earlier_time', by }] })
     for (const mode of ['en', 'km', 'both']) {
-      const rows = anyActorRow(await replay({ shiftId: opened.za.id, options: { closedBy: 'owner', closedById: users.owner.id, closedEarlier: true } }, mode))
+      const rows = anyActorRow(await replay({ shiftId: opened.za.id, options: { closedBy: 'owner', closedById: users.owner.id, ...earlier('owner') } }, mode))
       assert.deepEqual(rows, [actorRow(mode, 'shift_closed_earlier_by', 'owner')], mode)
+      const later = anyActorRow(await replay({ shiftId: opened.za.id, options: { timeReview: [{ code: 'opened_at_later_time', by: 'owner' }] } }, mode))
+      assert.deepEqual(later, [actorRow(mode, 'shift_opened_later_by', 'owner')], mode + ': the sibling mark for an opening moved later')
     }
+    assert.ok(KHMER.test(pack.km.shift_opened_later_by) && pack.km.shift_opened_later_by !== pack.en.shift_opened_later_by)
+    assert.deepEqual(lang.TELEGRAM_LABELS.openedLaterBy, { en: pack.en.shift_opened_later_by, km: pack.km.shift_opened_later_by })
     assert.ok(KHMER.test(pack.km.shift_closed_earlier_by) && pack.km.shift_closed_earlier_by !== pack.en.shift_closed_earlier_by)
     assert.deepEqual(lang.TELEGRAM_LABELS.closedEarlierBy, { en: pack.en.shift_closed_earlier_by, km: pack.km.shift_closed_earlier_by })
     // shown even when the closer is the cashier, in place of the plain Closed by row
-    assert.deepEqual(anyActorRow(await replay({ shiftId: opened.za.id, options: { closedBy: 'za', closedById: users.za.id, closedEarlier: true } }, 'en')), [actorRow('en', 'shift_closed_earlier_by', 'za')])
+    assert.deepEqual(anyActorRow(await replay({ shiftId: opened.za.id, options: { closedBy: 'za', closedById: users.za.id, ...earlier('za') } }, 'en')), [actorRow('en', 'shift_closed_earlier_by', 'za')])
+    // the mark names who MOVED the time; a different closer is still named as the closer
+    assert.deepEqual(anyActorRow(await replay({ shiftId: opened.za.id, options: { closedBy: 'owner', closedById: users.owner.id, ...earlier('boss') } }, 'en')),
+      [actorRow('en', 'shift_closed_by', 'owner'), actorRow('en', 'shift_closed_earlier_by', 'boss')])
+    // and with no name on the review there is no row at all, never an amount or an empty label
+    assert.deepEqual(anyActorRow(await replay({ shiftId: opened.za.id, options: earlier('') }, 'en')), [])
   })
 
   await section('2. an administrator closing a cashier\'s till (live close): "Closed by: owner" under the cashier\'s ID', async () => {

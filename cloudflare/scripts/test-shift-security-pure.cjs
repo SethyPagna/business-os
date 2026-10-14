@@ -83,6 +83,9 @@ async function main() {
     // 500 the cashier retries, and the assertions below prove it does not.
     '../lib/shiftReconciliation': {
       shiftLastActivityMs: async () => null,
+      readShiftTimeReview: async () => null,
+      applyShiftTimeReview: (reconciliation) => reconciliation,
+      SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time', laterOpen: 'opened_at_later_time' },
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
   })
