@@ -345,6 +345,8 @@ function finish(finding) {
 //   --wrong=tie-strict          mutant: a lot created in the same second as the removal does not count as existing before it (M6g, M6h go RED)
 //   --wrong=string-time         mutant: lot and movement times are compared as text, not through datetime() (M6j goes RED)
 //   --wrong=ignore-watermark    mutant: the refusal ignores the migration's movement-id mark, so a recording removal can be refused (M16 goes RED)
+//   --wrong=own-time-only       mutant: a back-dated CSV removal is judged by its own business date only (M17 goes RED)
+//   --wrong=proxy-uncapped      mutant: the write-time bound counts movements dated in the future (M17c goes RED)
 //   --wrong=watermark-strict    mutant: the movement at the mark itself is not refused (M16b goes RED)
 //   --wrong=zero-as-share       mutant: a zero record is read as a lot share (M12e goes RED)
 //   --wrong=recorded-ignores-zero  mutant: the refusal does not see a zero record, so a database without the mark refuses a recording removal (M12 goes RED)
@@ -396,10 +398,16 @@ const PATCHES = {
     { name: 'string-time', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) <= datetime(m.created_at)', to: 'AND pb.created_at <= m.created_at' },
   ],
   'ignore-watermark': [
-    { name: 'ignore-watermark', file: STOCK_REVERT, from: 'return watermark == null || Number(row.id) <= watermark', to: 'return true' },
+    { name: 'ignore-watermark', file: STOCK_REVERT, from: 'if (watermark != null && Number(row.id) > watermark) return false', to: '' },
   ],
   'watermark-strict': [
-    { name: 'watermark-strict', file: STOCK_REVERT, from: 'return watermark == null || Number(row.id) <= watermark', to: 'return watermark == null || Number(row.id) < watermark' },
+    { name: 'watermark-strict', file: STOCK_REVERT, from: 'if (watermark != null && Number(row.id) > watermark) return false', to: 'if (watermark != null && Number(row.id) >= watermark) return false' },
+  ],
+  'own-time-only': [
+    { name: 'own-time-only', file: STOCK_REVERT, from: 'return Boolean(Number(earlier?.existed))', to: 'return false' },
+  ],
+  'proxy-uncapped': [
+    { name: 'proxy-uncapped', file: STOCK_REVERT, from: " AND datetime(created_at) <= datetime('now'))) AS existed", to: ')) AS existed' },
   ],
   'zero-as-share': [
     { name: 'zero-as-share', file: STOCK_REVERT, from: 'WHERE a.movement_id = @movementId AND a.quantity <> 0', to: 'WHERE a.movement_id = @movementId' },
@@ -649,7 +657,8 @@ async function main() {
         H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','remove',?,?,?)")
           .bind(s.p, s.name, LC, s.total - branchNow, reason, createdAt),
       ])
-      const movement = (await snap(H, s)).movements[0]
+      const all = (await snap(H, s)).movements
+      const movement = all[all.length - 1]
       await setWatermark(watermark === 'covers' ? movement.id : watermark === 'absent' ? null : watermark)
       return movement
     }
@@ -692,7 +701,7 @@ async function main() {
 
     await check('M6d', 'control: an old removal written BEFORE any lot of its product existed drew on none, so its Revert is the exact aggregate restore even though a lot exists now', 'control', async (t) => {
       const s = await seed(H, { lots: [5], undated: 3 })
-      const old = await oldRemoval(s, [5], 6, { lotsExistedBefore: false })
+      const old = await oldRemoval(s, [5], 6, { lotCreatedAt: '2099-01-01 00:00:00' })
       const r = await revert(H, old.id)
       const a = await snap(H, s)
       t.eq('Revert answered', r.status, 200)
@@ -768,6 +777,20 @@ async function main() {
       t.eq('the mark is absent', (await H.q('SELECT value FROM system_flags WHERE key=?', WATERMARK)).length, 0)
       const r = await revert(H, old.id)
       t.eq('refused', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+    })
+
+    // ------------------------------------------------------------------ M17: a back-dated CSV removal (R3 refute SF-1, Q11)
+    // The pre-fix CSV import stored the user's business date in created_at, long before the lots it drew on (written after them). Ids are written
+    // in order, so the newest created_at among lower ids bounds its write time: a lot at or before that bound existed.
+    await check('M17', 'an OLD CSV removal dated 2026-01-15 that drew on lots created 2026-09-01 (written after them) is refused, not reverted aggregate-only', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      await H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','in',1,'ML earlier write','2026-09-10 10:00:00')").bind(s.p, s.name, LC).run()
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-01-15 00:00:00', lotCreatedAt: '2026-09-01 00:00:00' })
+      const before = await snap(H, s)
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('refused with a stable code', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+      t.eq('nothing was written (lots, branch, movements)', [a.lots, a.branch, a.movements.length], [[0, 3], 3, before.movements.length])
     })
 
     // ------------------------------------------------------------------ M16: the mark separates old removals from recording ones (R2 refute, round 2 SF-A)
@@ -1158,6 +1181,18 @@ async function main() {
       const auto = await adjustRemove(H, s, 4, 'c')
       const drained = await snap(H, s)
       t.eq('an auto-routed Remove skips the inactive lot and takes the active one', [auto.status, drained.lots], [200, [1, 5]])
+    })
+
+    // ------------------------------------------------------------------ M17c: a movement dated in the future does not bound the write time
+    // Last among the old-row cases on purpose: the future row has a lower id than every later old row, so it would bound all of them.
+    await check('M17c', 'a lower-id movement dated in the future does not make an old removal that predates its lot look written after it', 'high', async (t) => {
+      const s = await seed(H, { lots: [5] , undated: 3 })
+      await H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','in',1,'ML typo date','2099-06-01 00:00:00')").bind(s.p, s.name, LC).run()
+      const old = await oldRemoval(s, [5], 6, { createdAt: '2026-09-20 10:00:00', lotCreatedAt: '2098-01-01 00:00:00' })
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('Revert answered (the removal predates every lot; the future-dated row is no write time)', r.status, 200)
+      t.eq('the 2 undated units are back, the lot is untouched', [a.lots, a.branch], [[5], 8])
     })
 
     // ------------------------------------------------------------------ M15b: a CSV row that RAISES stock writes no lot record, and the group estimate does not count one

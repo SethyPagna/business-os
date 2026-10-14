@@ -299,6 +299,9 @@ const MULTILOT_WATERMARK_KEY = 'multilot_revert_watermark'
 // Lot and movement times are whole seconds (CURRENT_TIMESTAMP) or ISO text, so they are compared through datetime() and a
 // tie counts as "the lot existed": that refuses, which fails safe. Without a watermark row (a database not yet migrated)
 // the timestamps alone decide, as before.
+// A pre-fix CSV removal stored the user's business date in created_at, which can be long before the lots it drew on (the write
+// time is what matters). Ids are written in order, so the newest created_at among LOWER ids (never in the future) is a lower bound
+// of its write time: a lot at or before that bound existed when the row was written.
 async function lotDrawUnrecorded(db: D1Compat, rootId: number, productId: number): Promise<boolean> {
   const row = await db.prepare(`
     SELECT m.id AS id, m.reason AS reason, time(m.created_at) AS stampTime,
@@ -307,9 +310,15 @@ async function lotDrawUnrecorded(db: D1Compat, rootId: number, productId: number
       (SELECT value FROM system_flags WHERE key = @watermarkKey) AS watermark
     FROM inventory_movements m WHERE m.id = @rootId
   `).get<{ id: number; reason: string | null; stampTime: string | null; recorded: number; lotted: number; watermark: string | null }>({ rootId, productId, watermarkKey: MULTILOT_WATERMARK_KEY })
-  if (!row || (row.reason === DATED_STOCK_COUNT_REASON && row.stampTime === DATED_STOCK_COUNT_STAMP_TIME) || Number(row.recorded) || !Number(row.lotted)) return false
+  if (!row || (row.reason === DATED_STOCK_COUNT_REASON && row.stampTime === DATED_STOCK_COUNT_STAMP_TIME) || Number(row.recorded)) return false
   const watermark = typeof row.watermark === 'string' && /^\d+$/.test(row.watermark) ? Number(row.watermark) : null
-  return watermark == null || Number(row.id) <= watermark
+  if (watermark != null && Number(row.id) > watermark) return false
+  if (Number(row.lotted)) return true
+  const earlier = await db.prepare(`
+    SELECT EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) <= (
+      SELECT MAX(datetime(created_at)) FROM inventory_movements WHERE id < @rootId AND datetime(created_at) <= datetime('now'))) AS existed
+  `).get<{ existed: number }>({ rootId, productId })
+  return Boolean(Number(earlier?.existed))
 }
 
 // The aggregate-only move (branch_stock + products.stock_quantity) -- used for
