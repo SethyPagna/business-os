@@ -331,7 +331,9 @@ function finish(finding) {
 //
 // An OLD removal (written before the fix) has no record at all. If a lot of its product already existed, its Revert would
 // have to guess which lots to refill, so it is REFUSED (revert_lots_not_recorded, nothing written). Otherwise the
-// aggregate-only restore is exact and still works.
+// aggregate-only restore is exact and still works. "Old" is decided by the mark migration 0250 stores in system_flags (the
+// highest movement id at apply time): a record-less removal ABOVE it was written by recording code and is never refused (M16, M16c),
+// whatever a product merge did to its product's lots since. Without a mark row the timestamps alone decide (M6k).
 //
 // Run (from cloudflare/):  node scripts/test-multilot-revert-native.cjs
 //   --wrong=no-adjust-shares    mutant: /adjust writes the movement but not its lot shares    (M1, M3, M4, M7, M8, M9 go RED)
@@ -340,6 +342,12 @@ function finish(finding) {
 //   --wrong=no-old-refusal      mutant: an old share-less removal on a lot-tracked product is reverted aggregate-only (M6 goes RED)
 //   --wrong=no-zero-record      mutant: a removal that took nothing from lots records nothing, so its Revert is refused (M12, M12b, M12c go RED)
 //   --wrong=refuse-any-lot      mutant: the refusal fires for any lot of the product, not only lots that existed before the removal (M12d, M6d go RED)
+//   --wrong=tie-strict          mutant: a lot created in the same second as the removal does not count as existing before it (M6g, M6h go RED)
+//   --wrong=string-time         mutant: lot and movement times are compared as text, not through datetime() (M6j goes RED)
+//   --wrong=ignore-watermark    mutant: the refusal ignores the migration's movement-id mark, so a recording removal can be refused (M16 goes RED)
+//   --wrong=watermark-strict    mutant: the movement at the mark itself is not refused (M16b goes RED)
+//   --wrong=zero-as-share       mutant: a zero record is read as a lot share (M12e goes RED)
+//   --wrong=recorded-ignores-zero  mutant: the refusal does not see a zero record, so a database without the mark refuses a recording removal (M12 goes RED)
 //   --wrong=no-dated-exemption  mutant: a dated-count removal with no record is refused too (M6e goes RED)
 //   --wrong=no-move-row-shares  mutant: /move-row writes its move_out without the per-lot shares (M14 goes RED)
 //   --wrong=import-estimate-blind  mutant: the CSV group cost estimate forgets the share statement, so a group outgrows the 300-statement chunk (M15 goes RED)
@@ -377,10 +385,28 @@ const PATCHES = {
     { name: 'no-zero-record', file: 'src/lib/productBatches.ts', from: 'if (shares.length) return shares', to: 'return shares' },
   ],
   'refuse-any-lot': [
-    { name: 'refuse-any-lot', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) < datetime(m.created_at)', to: 'AND 1' },
+    { name: 'refuse-any-lot', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) <= datetime(m.created_at)', to: 'AND 1' },
+  ],
+  'tie-strict': [
+    { name: 'tie-strict', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) <= datetime(m.created_at)', to: 'AND datetime(pb.created_at) < datetime(m.created_at)' },
+  ],
+  'string-time': [
+    { name: 'string-time', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) <= datetime(m.created_at)', to: 'AND pb.created_at <= m.created_at' },
+  ],
+  'ignore-watermark': [
+    { name: 'ignore-watermark', file: STOCK_REVERT, from: 'return watermark == null || Number(row.id) <= watermark', to: 'return true' },
+  ],
+  'watermark-strict': [
+    { name: 'watermark-strict', file: STOCK_REVERT, from: 'return watermark == null || Number(row.id) <= watermark', to: 'return watermark == null || Number(row.id) < watermark' },
+  ],
+  'zero-as-share': [
+    { name: 'zero-as-share', file: STOCK_REVERT, from: 'WHERE a.movement_id = @movementId AND a.quantity <> 0', to: 'WHERE a.movement_id = @movementId' },
+  ],
+  'recorded-ignores-zero': [
+    { name: 'recorded-ignores-zero', file: STOCK_REVERT, from: 'WHERE a.movement_id = m.id) AS recorded', to: 'WHERE a.movement_id = m.id AND a.quantity <> 0) AS recorded' },
   ],
   'no-dated-exemption': [
-    { name: 'no-dated-exemption', file: STOCK_REVERT, from: 'row!.reason !== DATED_STOCK_COUNT_REASON && ', to: '' },
+    { name: 'no-dated-exemption', file: STOCK_REVERT, from: 'row.reason === DATED_STOCK_COUNT_REASON || ', to: '' },
   ],
   'no-move-row-shares': [
     { name: 'no-move-row-shares', file: 'src/routes/inventory.ts',
@@ -595,18 +621,29 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ M6: an OLD movement (written before the fix) has no shares
-    const oldRemoval = async (s, lotsNow, branchNow, { reason = 'ML old multi-lot remove', lotsExistedBefore = true } = {}) => {
+    // The migration's mark (system_flags 'multilot_revert_watermark'): the highest movement id that existed before removals recorded.
+    // The migrated test database holds 0, so a movement written by the code under test is above it; a fixture standing for an OLD
+    // removal calls setWatermark to cover itself, or deletes the mark to stand for a database not yet migrated.
+    const WATERMARK = 'multilot_revert_watermark'
+    const setWatermark = (value) => value == null
+      ? H.db.prepare('DELETE FROM system_flags WHERE key=?').bind(WATERMARK).run()
+      : H.db.prepare('INSERT INTO system_flags(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(WATERMARK, String(value)).run()
+    const maxMovementId = async () => (await H.q1('SELECT COALESCE(MAX(id),0) m FROM inventory_movements')).m
+    const oldRemoval = async (s, lotsNow, branchNow, { reason = 'ML old multi-lot remove', lotsExistedBefore = true, createdAt = '2026-09-20 10:00:00', lotCreatedAt = '2026-09-01 00:00:00', watermark = 'covers' } = {}) => {
       // Exactly what the pre-fix writers left behind: lots and branch already drained, one batch-less 'remove' movement, no share rows,
-      // written (2026-09-20) after the product's lots existed unless `lotsExistedBefore` is false.
-      if (lotsExistedBefore && s.ids.length) await H.db.prepare("UPDATE product_batches SET created_at='2026-09-01 00:00:00' WHERE id IN (" + s.ids.join(',') + ')').run()
+      // written (2026-09-20) after the product's lots existed unless `lotsExistedBefore` is false. `watermark`: 'covers' = the mark sits
+      // at this movement (written before removals recorded), 'absent' = a database without the mark, or a number = the mark itself.
+      if (lotsExistedBefore && s.ids.length) await H.db.prepare('UPDATE product_batches SET created_at=? WHERE id IN (' + s.ids.join(',') + ')').bind(lotCreatedAt).run()
       await H.db.batch([
         ...s.ids.map((id, i) => H.db.prepare('UPDATE branch_batch_stock SET quantity=? WHERE batch_id=? AND branch_id=?').bind(lotsNow[i], id, LC)),
         H.db.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?').bind(branchNow, s.p, LC),
         H.db.prepare('UPDATE products SET stock_quantity=? WHERE id=?').bind(branchNow, s.p),
-        H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','remove',?,?,'2026-09-20 10:00:00')")
-          .bind(s.p, s.name, LC, s.total - branchNow, reason),
+        H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','remove',?,?,?)")
+          .bind(s.p, s.name, LC, s.total - branchNow, reason, createdAt),
       ])
-      return (await snap(H, s)).movements[0]
+      const movement = (await snap(H, s)).movements[0]
+      await setWatermark(watermark === 'covers' ? movement.id : watermark === 'absent' ? null : watermark)
+      return movement
     }
     await check('M6', 'an OLD batch-less removal on a product that uses lots has no shares: Revert is refused whole (nothing written), never a guess', 'high', async (t) => {
       const s = await seed(H, { lots: [5, 5] })
@@ -678,16 +715,121 @@ async function main() {
       t.eq('no purchase was booked: received quantity and cost are unchanged', lots.map(x => [x.rq, x.rc]), [[5, 15], [5, 20]])
     })
 
+    // ------------------------------------------------------------------ M6g..M6k: the refusal's time test (R2 refute, round 2 SF-B)
+    // Lot and movement times are whole seconds (CURRENT_TIMESTAMP) or ISO text with milliseconds (an import), so a removal written in the
+    // same second as the lots it drew on must still count as "a lot existed", and mixed formats must compare as times, not as text.
+    await check('M6g', 'an OLD multi-lot removal written in the SAME SECOND as the lots it drew on is refused, not reverted aggregate-only', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-09-20 10:00:00', lotCreatedAt: '2026-09-20 10:00:00' })
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('refused with a stable code', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+      t.eq('nothing was written (lots, branch, movements)', [a.lots, a.branch, a.movements.length], [[0, 3], 3, 1])
+    })
+    await check('M6h', 'the same, the removal stamped ISO with milliseconds 0.9 s after its lot (an import)', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-09-20T10:00:00.900Z', lotCreatedAt: '2026-09-20 10:00:00' })
+      const r = await revert(H, old.id)
+      t.eq('refused', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+      t.eq('nothing was refilled by a guess', (await snap(H, s)).lots, [0, 3])
+    })
+    await check('M6i', 'control: one second after its lots the same old removal is refused', 'control', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-09-20 10:00:01', lotCreatedAt: '2026-09-20 10:00:00' })
+      const r = await revert(H, old.id)
+      t.eq('refused', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+    })
+    await check('M6j', 'a lot stamped ISO with milliseconds, an old removal stamped in the database format 5 s later: the lot existed first, so it is refused (times, not text, are compared)', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-09-20 10:00:05', lotCreatedAt: '2026-09-20T10:00:00.900Z' })
+      const r = await revert(H, old.id)
+      t.eq('refused', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+      t.eq('nothing was refilled by a guess', (await snap(H, s)).lots, [0, 3])
+    })
+    await check('M6k', 'a database without the migration mark decides by time alone: the same-second old removal is refused there too', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { createdAt: '2026-09-20 10:00:00', lotCreatedAt: '2026-09-20 10:00:00', watermark: 'absent' })
+      t.eq('the mark is absent', (await H.q('SELECT value FROM system_flags WHERE key=?', WATERMARK)).length, 0)
+      const r = await revert(H, old.id)
+      t.eq('refused', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+    })
+
+    // ------------------------------------------------------------------ M16: the mark separates old removals from recording ones (R2 refute, round 2 SF-A)
+    // A product merge re-points the duplicate's lots onto the keeper and keeps their old created_at. A NEW removal on a product that had
+    // no lot wrote no record (it had none to record against), and after the merge "a lot existed before it" is true by time alone.
+    const duplicateOf = async (k, { lotUnits = 0, undated = 0 } = {}) => {
+      const d = 7000 + k.p, lot = d * 10 + 1
+      await H.db.batch([
+        H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,2,0,10,40000,?,1)').bind(d, k.name, k.barcode, lotUnits + undated),
+        H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(d, LC, lotUnits + undated),
+        ...(lotUnits ? [
+          H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,'2026-08-01',1,2,1,'2026-08-01 00:00:00')").bind(lot, d, 'dup' + lot, 'dup' + lot),
+          H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(lot, LC, lotUnits),
+        ] : []),
+      ])
+      return { p: d, ids: lotUnits ? [lot] : [], name: k.name, barcode: k.barcode, total: lotUnits + undated, lot }
+    }
+    const mergeInto = (k, d) => H.api('POST', '/api/products/possible-duplicates/merge', { keepId: k.p, mergeId: d.p, stock: 'merge' })
+    const branchQty = async (p) => (await H.q1('SELECT quantity q FROM branch_stock WHERE product_id=? AND branch_id=?', p, LC)).q
+    await check('M16', 'a NEW removal on a lot-less keeper, then a merge brings an OLDER lot onto it: Revert still puts the 3 undated units back, and so does the Redo', 'high', async (t) => {
+      const k = await seed(H, { lots: [], undated: 10 })
+      const d = await duplicateOf(k, { lotUnits: 5 })
+      await setWatermark(await maxMovementId())
+      const removed = await adjustRemove(H, k, 3, 'q2')
+      const a1 = await snap(H, k)
+      t.eq('Remove answered; the keeper had no lot, so there was nothing to record against', [removed.status, a1.shares.length], [200, 0])
+      const merged = await mergeInto(k, d)
+      t.eq('merge answered', merged.status, 200)
+      t.eq('the older lot now belongs to the keeper', (await H.q1('SELECT variant_product_id v FROM product_batches WHERE id=?', d.lot)).v, k.p)
+      const before = await branchQty(k.p)
+      const r = await revert(H, a1.movements[0].id)
+      t.eq('Revert answered 200 and put the 3 undated units back', [r.status, (await branchQty(k.p)) - before], [200, 3])
+      const lot = await H.q1('SELECT quantity q FROM branch_batch_stock WHERE batch_id=? AND branch_id=?', d.lot, LC)
+      t.eq('the merged-in lot kept its 5', lot.q, 5)
+      const a2 = await snap(H, k)
+      const redo = await revert(H, a2.movements[a2.movements.length - 1].id)
+      t.eq('the Redo answered 200 and took the 3 undated units again', [redo.status, (await branchQty(k.p)) - before], [200, 0])
+    })
+    await check('M16c', 'a NEW removal on the DUPLICATE (no lot) before the merge, whose movement moves to a keeper that has older lots: Revert puts its units back', 'high', async (t) => {
+      const k = await seed(H, { lots: [5], undated: 0 })
+      const d = await duplicateOf(k, { undated: 4 })
+      await setWatermark(await maxMovementId())
+      const removed = await adjustRemove(H, d, 2, 'q2c')
+      t.eq('Remove on the duplicate answered', removed.status, 200)
+      const merged = await mergeInto(k, d)
+      t.eq('merge answered', merged.status, 200)
+      const moved = await H.q1("SELECT id, product_id p FROM inventory_movements WHERE movement_type='remove' AND product_id IN (?, ?) ORDER BY id DESC LIMIT 1", k.p, d.p)
+      t.eq('the removal now sits on the keeper', moved.p, k.p)
+      const before = await branchQty(k.p)
+      const r = await revert(H, moved.id)
+      t.eq('Revert answered 200 and put the 2 units back', [r.status, (await branchQty(k.p)) - before], [200, 2])
+    })
+    await check('M16b', 'the mark is inclusive: a record-less removal AT the mark is refused, one just above it is the exact aggregate restore', 'high', async (t) => {
+      const at = await seed(H, { lots: [5, 5] })
+      const atOld = await oldRemoval(at, [0, 3], 3, { watermark: 'covers' })
+      const refused = await revert(H, atOld.id)
+      t.eq('at the mark: refused', [refused.status, refused.body && refused.body.code], [400, 'revert_lots_not_recorded'])
+      const above = await seed(H, { lots: [5, 5] })
+      const aboveOld = await oldRemoval(above, [0, 3], 3, { watermark: 'covers' })
+      await setWatermark(aboveOld.id - 1)
+      const r = await revert(H, aboveOld.id)
+      t.eq('just above the mark: not refused', r.status, 200)
+      t.eq('the 7 units came back as undated units (what a removal that recorded nothing because it had nothing to record gets)', [(await snap(H, above)).lots, await branchQty(above.p)], [[0, 3], 10])
+    })
+
     // ------------------------------------------------------------------ M12: a removal taken wholly from units that sit under no lot (R2 refute SF-1)
     // Written AFTER the fix, so it must say so: with no record it is indistinguishable from an old multi-lot removal and its
     // Revert would be refused on any product that has a lot row, even a dead one.
+    // The dead lot is dated a day before the removal (R2 refute Q10), and M12, M12b and M12c run on a database without the mark, so the
+    // ONLY thing that lets the Revert through is the zero record: not a same-second tie, not the mark.
     const deadLot = async (s) => {
       const id = s.p * 100 + 50
-      await H.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,1,3,0)')
+      await H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,?,1,3,0,'2026-08-01 00:00:00')")
         .bind(id, s.p, 'dead' + id, 'dead' + id, '2026-08-01').run()
       return id
     }
     await check('M12', '/adjust Remove 3 of 10 units under no lot (the product only has a dead lot): the removal records that it drew nothing from lots; Revert / Redo / Revert restore the aggregate exactly', 'high', async (t) => {
+      await setWatermark(null)
       const s = await seed(H, { lots: [], undated: 10 })
       const dead = await deadLot(s)
       const removed = await adjustRemove(H, s, 3, 'a')
@@ -699,6 +841,7 @@ async function main() {
       await chain(t, H, s, 'M12', after, { drained: [], restored: [], undatedDrained: 7, undatedRestored: 10 })
     })
     await check('M12b', 'CSV Remove 3 of 10 units under no lot (dead lot only): the same zero record, and Revert / Redo / Revert restore the aggregate exactly', 'high', async (t) => {
+      await setWatermark(null)
       const s = await seed(H, { lots: [], undated: 10 })
       const dead = await deadLot(s)
       const imported = await importCsv(H, 'remove', [row(s, 3)])
@@ -709,6 +852,7 @@ async function main() {
       await chain(t, H, s, 'M12b', after, { drained: [], restored: [], undatedDrained: 7, undatedRestored: 10 })
     })
     await check('M12c', 'a TRACKED pair (an active, empty lot beside 5 undated units): Remove 3 takes undated units only, and Revert / Redo / Revert put exactly them back', 'high', async (t) => {
+      await setWatermark(null)
       const s = await seed(H, { lots: [0], undated: 5 })
       const removed = await adjustRemove(H, s, 3, 'a')
       const after = await snap(H, s)
@@ -716,6 +860,16 @@ async function main() {
       expectLedgers(t, 'after the Remove', after, s, { lots: [0], undated: 2 })
       t.eq('the zero record sits on that lot', after.shares.map(x => [x.m, x.b, x.q]), [[after.movements[0].id, s.ids[0], 0]])
       await chain(t, H, s, 'M12c', after, { drained: [0], restored: [0], undatedDrained: 2, undatedRestored: 5 })
+    })
+    await check('M12e', 'a zero record is not a lot movement: when the lot it sits on has since moved to another product, the Revert still restores the undated units', 'high', async (t) => {
+      const s = await seed(H, { lots: [], undated: 10 })
+      const dead = await deadLot(s)
+      const other = await seed(H, { lots: [], undated: 1 })
+      const removed = await adjustRemove(H, s, 3, 'a')
+      t.eq('Remove answered with its zero record', [removed.status, (await snap(H, s)).shares.map(x => [x.b, x.q])], [200, [[dead, 0]]])
+      await H.db.prepare('UPDATE product_batches SET variant_product_id=? WHERE id=?').bind(other.p, dead).run()
+      const r = await revert(H, (await snap(H, s)).movements[0].id)
+      t.eq('Revert answered 200 and put the 3 undated units back', [r.status, await branchQty(s.p)], [200, 10])
     })
     await check('M12d', 'a removal made while its product had no lot at all needs no record; a lot received afterwards does not make its Revert refused', 'high', async (t) => {
       const s = await seed(H, { lots: [], undated: 10 })

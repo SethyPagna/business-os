@@ -280,17 +280,29 @@ const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record wh
 // (pinned by test-ops-branch-exceeds-lots-pure.cjs).
 const DATED_STOCK_COUNT_REASON = 'Dated stock count import'
 
+// Migration 0250 stores, in system_flags, the highest inventory_movements.id that existed when removals began to record what
+// they drew from lots. Only a movement at or below it can be a record-less removal that drew on lots; every later one wrote
+// its record (lot shares, or a zero row when it took nothing from a lot) or had no lot to record against.
+// Pinned to the migration and to ops/queries/branch-exceeds-lots.sql by test-ops-branch-exceeds-lots-pure.cjs.
+const MULTILOT_WATERMARK_KEY = 'multilot_revert_watermark'
+
 // True when the root removal has no record of what it drew from lots although a lot of its product already existed
-// when it was written. A dated count always records its lot effects, and a removal that predates every lot of the
-// product drew on none, so neither is refused.
+// when it was written, and it was written before removals recorded (at or below the watermark). A dated count always
+// records its lot effects, and a removal that predates every lot of the product drew on none, so neither is refused.
+// Lot and movement times are whole seconds (CURRENT_TIMESTAMP) or ISO text, so they are compared through datetime() and a
+// tie counts as "the lot existed": that refuses, which fails safe. Without a watermark row (a database not yet migrated)
+// the timestamps alone decide, as before.
 async function lotDrawUnrecorded(db: D1Compat, rootId: number, productId: number): Promise<boolean> {
   const row = await db.prepare(`
-    SELECT m.reason AS reason,
+    SELECT m.id AS id, m.reason AS reason,
       EXISTS (SELECT 1 FROM dated_stock_count_batch_actions a WHERE a.movement_id = m.id) AS recorded,
-      EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) < datetime(m.created_at)) AS lotted
+      EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) <= datetime(m.created_at)) AS lotted,
+      (SELECT value FROM system_flags WHERE key = @watermarkKey) AS watermark
     FROM inventory_movements m WHERE m.id = @rootId
-  `).get<{ reason: string | null; recorded: number; lotted: number }>({ rootId, productId })
-  return Boolean(row) && row!.reason !== DATED_STOCK_COUNT_REASON && !Number(row!.recorded) && Boolean(Number(row!.lotted))
+  `).get<{ id: number; reason: string | null; recorded: number; lotted: number; watermark: string | null }>({ rootId, productId, watermarkKey: MULTILOT_WATERMARK_KEY })
+  if (!row || row.reason === DATED_STOCK_COUNT_REASON || Number(row.recorded) || !Number(row.lotted)) return false
+  const watermark = typeof row.watermark === 'string' && /^\d+$/.test(row.watermark) ? Number(row.watermark) : null
+  return watermark == null || Number(row.id) <= watermark
 }
 
 // The aggregate-only move (branch_stock + products.stock_quantity) -- used for
