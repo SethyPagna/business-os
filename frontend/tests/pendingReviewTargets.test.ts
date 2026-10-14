@@ -32,8 +32,8 @@ import * as realQuery from '../src/api/query.ts'
 import * as realTransport from '../src/api/pendingReviewTargetsTransport.ts'
 
 const require = createRequire(import.meta.url)
-const storeSource = fs.readFileSync(new URL('../src/utils/pendingReviewTargets.ts', import.meta.url), 'utf8')
-const transportSource = fs.readFileSync(new URL('../src/api/pendingReviewTargetsTransport.ts', import.meta.url), 'utf8')
+const storeSource = fs.readFileSync(new URL('../src/utils/pendingReviewTargets.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const transportSource = fs.readFileSync(new URL('../src/api/pendingReviewTargetsTransport.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 // ---- a React stand-in: just enough hook semantics for the three hooks the store uses ----
 type HookSlot = { value?: unknown; deps?: unknown[]; cleanup?: () => void }

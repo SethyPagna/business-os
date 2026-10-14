@@ -30,7 +30,7 @@ function load(relative, source = null) {
   new Function('require', 'module', 'exports', code)(withProductStockGuard(next), mod, mod.exports)
   return mod.exports
 }
-const gateSource = fs.readFileSync(path.join(root, 'src/lib/courierCostAccess.ts'), 'utf8')
+const gateSource = fs.readFileSync(path.join(root, 'src/lib/courierCostAccess.ts'), 'utf8').replace(/\r\n/g, '\n')
 const access = load('src/lib/courierCostAccess.ts')
 const records = load('src/lib/saleRecords.ts')
 const creation = load('src/lib/saleCreationSnapshot.ts')
