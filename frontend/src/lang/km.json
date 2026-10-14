@@ -3744,7 +3744,6 @@
   "passed": "ជាប់",
   "password": "ពាក្យសម្ងាត់",
   "password_confirm_mismatch": "ការបញ្ជាក់ពាក្យសម្ងាត់មិនត្រូវគ្នា។",
-  "password_min_6": "សូមប្រើយ៉ាងតិច 6 តួអក្សរ។",
   "password_too_short": "សូមប្រើយ៉ាងតិច {min} តួអក្សរ។",
   "password_too_long": "វែងពេក៖ យ៉ាងច្រើន {max} តួអក្សរ (អក្សរខ្មែរ {khmer} តួ)។",
   "password_edge_whitespace": "សូមលុបដកឃ្លានៅខាងដើម ឬខាងចុងពាក្យសម្ងាត់។",
