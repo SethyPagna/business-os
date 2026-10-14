@@ -148,6 +148,7 @@ const EN: Record<string, string> = {
   portal_legal_footer_contact: 'Contact',
   portal_legal_footer_quick_links: 'Quick links',
   portal_legal_footer_follow: 'Follow us',
+  portal_legal_footer_notices: 'Open-source notices',
 
   // --- Privacy Policy ------------------------------------------------------
   portal_legal_privacy_who_h: 'Who we are',
@@ -270,6 +271,7 @@ const KM: Record<string, string> = {
   portal_legal_footer_contact: 'ទំនាក់ទំនង',
   portal_legal_footer_quick_links: 'តំណភ្ជាប់រហ័ស',
   portal_legal_footer_follow: 'តាមដានយើង',
+  portal_legal_footer_notices: 'សេចក្ដីជូនដំណឹងប្រភពបើកចំហ',
 
   portal_legal_privacy_who_h: 'យើងជានរណា',
   portal_legal_privacy_who_b: 'សូមស្វាគមន៍! កាតាឡុកអនឡាញនេះដំណើរការដោយហាងក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង") ដែលក៏ជាកន្លែងសម្រាប់ទាក់ទងយើងអំពីព័ត៌មានរបស់អ្នកផងដែរ។',

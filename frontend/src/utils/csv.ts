@@ -156,7 +156,7 @@ function supportsDeflate(): boolean {
 // use on the read side. Returns null (never throws) when unsupported or on
 // any encoding failure, so callers always have a safe STORE fallback -- the
 // same never-block-on-a-compression-failure contract as
-// imageCompression.ts/videoCompression.ts.
+// imageCompression.ts.
 async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array | null> {
   if (!supportsDeflate()) return null
   try {

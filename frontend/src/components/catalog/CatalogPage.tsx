@@ -10,10 +10,8 @@ import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
@@ -33,6 +31,7 @@ import { pickFiles } from '../../utils/filePicker.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
+import { FacebookIcon, InstagramIcon } from '../shared/BrandIcons.tsx'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import {
@@ -125,7 +124,6 @@ const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
 const CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
-const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000
 const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
 const CATALOG_IMAGE_READ_CONCURRENCY = 2
@@ -2258,17 +2256,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         previewUrl: localPreview,
       })
 
-      const uploaded = await withLoaderTimeout(
-        () => getCatalogApi().uploadFileAsset({
-          file,
-          userId: user?.id,
-          userName: user?.name,
-          signal: controller.signal,
-          onProgress: ({ percent }: { percent: number }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
-        }),
-        'Upload portal media',
-        CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
-      )
+      const uploaded = await getCatalogApi().uploadFileAsset({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        signal: controller.signal,
+        onProgress: ({ percent }: { percent: number }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
+      })
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current || controller.signal.aborted) return ''
 
@@ -3007,8 +3001,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // social/map icons next to them, and no promotions row below the section
   // tabs at all (promotionsSection was never passed either, further down).
   const socialIconByKey: Record<string, LucideIcon> = {
-    facebook: Facebook,
-    instagram: Instagram,
+    facebook: FacebookIcon,
+    instagram: InstagramIcon,
     telegram: Send,
     website: Globe,
   }

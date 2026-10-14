@@ -20,7 +20,7 @@ const transform = (html: string, bundle?: OutputBundle) => {
   return result as string
 }
 
-// I6-2: generic 'vendor' (print/QR/ffmpeg, dynamic-import only) is not an
+// I6-2: generic 'vendor' (print/QR, dynamic-import only) is not an
 // admin startup chunk; it is listed in `excluded` below so re-adding it fails.
 // I6-3: app-shared is a static import of both roots, so all three startup
 // lists name it rather than leaving it to be discovered after the root parses.

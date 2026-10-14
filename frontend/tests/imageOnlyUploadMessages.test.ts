@@ -105,7 +105,6 @@ const STUBS: Record<string, unknown> = {
   },
   '/actorReadScope.ts': { captureActorReadScope: () => ({}), assertActorReadScope() {}, assertActorSessionDispatchAllowed() {} },
   '/imageCompression.ts': { compressImageFile: async (file: File) => file, isCompressibleImageFile: () => false, createImageThumbnails: async () => [], appendImageThumbnails: () => {} },
-  '/videoCompression.ts': { compressVideoFile: async (file: File) => file, isCompressibleVideoFile: () => false },
   '/mediaUpload.ts': { canonicalizePersistedMediaPath: (value: unknown) => String(value || '') },
   '/multipartHeaders.ts': { buildMultipartHeaders: () => ({}) },
   '/deviceInfo.ts': { getClientDeviceInfo: () => ({}) },

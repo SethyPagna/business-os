@@ -199,9 +199,9 @@ function emitBuildManifest(): Plugin {
 }
 
 const routePreloadChunkNames = {
-  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas, qrcode
-  // and @ffmpeg/ffmpeg (241 KB raw / 63 KB gz), and no startup chunk imports
-  // it: Receipt, printReceipt, file-api and settings-otp-modal import() it,
+  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas and
+  // qrcode, and no startup chunk imports it: Receipt, printReceipt and
+  // settings-otp-modal import() it,
   // and only the lazy scanner chunk (vendor-zxing) imports it statically
   // (measured in the emitted graph) -- yet it was preloaded at
   // fetchpriority=high on every admin cold load. It stays in the eager
@@ -583,7 +583,6 @@ const appShellIconNames = new Set([
 
 const authLoginIconNames = new Set([
   'arrow-left',
-  'chrome',
   'key-round',
   'loader-2',
   'lock-keyhole',
@@ -629,14 +628,12 @@ const routeSharedIconNames = new Set([
   'eye',
   'eye-off',
   'external-link',
-  'facebook',
   'flame',
   'globe',
   'help-circle',
   'image-off',
   'images',
   'info',
-  'instagram',
   'languages',
   'mail',
   'map-pin',
@@ -882,15 +879,16 @@ function manualChunks(id: string): string | undefined {
       // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
       || normalized.includes('/src/components/catalog/portalMotion.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
-      // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
-      // PublicCatalogPage -> catalog-public). Left to the generic
+      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PublicCatalogPage
+      // -> catalog-public, CatalogPage -> catalog, CatalogSecondaryTabs,
+      // LegalPages -> catalog-legal). Left to the generic
       // '/src/components/shared/' catch-all further down, it lands in 'app-shared' --
       // and since PublicCatalogPage (catalog-public) statically imports it, that
       // creates a catalog-public -> app-shared back-edge with no corresponding
       // forward edge, which is exactly the class of cycle this file's other
       // "keep it with its only consumers" comments already warn about (observed as
       // `catalog-public -> app-shared -> catalog-public` in a real build). Since
-      // it's shared by two catalog chunks rather than one, put it in
+      // it's shared by several catalog chunks rather than one, put it in
       // 'catalog-public-core' -- the chunk this file already uses for exactly that
       // "shared by multiple catalog surfaces" case (catalogImages/catalogUi/etc.
       // above) -- instead of either individual consumer's chunk.
@@ -1145,10 +1143,8 @@ export default defineConfig({
   // a named key; AppContext only ever reads `default`. stringify emits
   // `export default JSON.parse('...')` instead: the pack is its own JSON
   // text again, and JSON.parse is faster to parse than an object literal of
-  // the same size. The option is global, so @ffmpeg/ffmpeg's package.json in
-  // the lazy `vendor` chunk is now carried whole (+2 KB raw, measured) -- a
-  // trade kept for the simpler config. The chunks keep their names (lang-en /
-  // lang-km), so the precache and the early head preload above still find them.
+  // the same size. The chunks keep their names (lang-en / lang-km), so the
+  // precache and the early head preload above still find them.
   json: {
     stringify: true,
   },

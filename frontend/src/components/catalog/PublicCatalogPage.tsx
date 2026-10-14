@@ -11,8 +11,6 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
@@ -31,7 +29,7 @@ import Headset from 'lucide-react/dist/esm/icons/headset.js'
 import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
-import { MessengerIcon } from '../shared/BrandIcons.tsx'
+import { FacebookIcon, InstagramIcon, MessengerIcon } from '../shared/BrandIcons.tsx'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
@@ -901,8 +899,8 @@ export default function PublicCatalogPage() {
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address') || null
   const socialIconByKey: Record<string, LucideIcon> = {
-    facebook: Facebook,
-    instagram: Instagram,
+    facebook: FacebookIcon,
+    instagram: InstagramIcon,
     telegram: Send,
     website: Globe,
   }
@@ -911,7 +909,7 @@ export default function PublicCatalogPage() {
     telegram: Send,
     whatsapp: PhoneCall,
     phone: PhoneCall,
-    instagram: Instagram,
+    instagram: InstagramIcon,
   }
   const socialAccentByKey: Record<string, string> = {
     facebook: 'hover:text-amber-600 hover:border-amber-600/40 dark:hover:text-amber-400 dark:hover:border-amber-400/40',

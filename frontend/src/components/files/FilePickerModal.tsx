@@ -14,12 +14,12 @@ import { canonicalizePersistedMediaPath } from '../../utils/mediaUpload.ts'
 import {
   deleteFileAsset as deletePickerFileAsset,
   getFiles as fetchPickerFiles,
+  isUploadTooLarge,
   uploadFileAsset as uploadPickerFileAsset,
 } from '../../api/fileTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 
 const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
-const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000
 const FILE_PICKER_DELETE_TIMEOUT_MS = 12000
 const EMPTY_INITIAL_SELECTED: string[] = []
 
@@ -71,7 +71,7 @@ function normalizeFileAssets(value: unknown): FileAsset[] {
     .map((asset) => ({ ...asset, public_path: canonicalizePersistedMediaPath(asset.public_path) }))
 }
 
-async function uploadFileAssetRequest(payload: { file: File; userId?: string | number; userName?: string }): Promise<FileAsset> {
+async function uploadFileAssetRequest(payload: { file: File; userId?: string | number; userName?: string; signal?: AbortSignal }): Promise<FileAsset> {
   return await uploadPickerFileAsset(payload) as FileAsset
 }
 
@@ -131,6 +131,7 @@ export default function FilePickerModal({
   const inputRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
   const uploadInFlightRef = useRef(false)
+  const uploadAbortRef = useRef<AbortController | null>(null)
   const deleteInFlightRef = useRef(false)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const notifyRef = useRef(notify)
@@ -186,8 +187,13 @@ export default function FilePickerModal({
     loadFiles()
   }, [normalizedInitialSelectedKey, loadFiles, open])
 
+  useEffect(() => {
+    if (!open) uploadAbortRef.current?.abort()
+  }, [open])
+
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)
+    uploadAbortRef.current?.abort()
   }, [])
 
   const accept = useMemo(() => {
@@ -217,18 +223,24 @@ export default function FilePickerModal({
     if (uploadInFlightRef.current) return
     uploadInFlightRef.current = true
     setUploading(true)
+    const controller = new AbortController()
+    uploadAbortRef.current = controller
     try {
       const uploadedAssets: FileAsset[] = []
       for (const file of selectedFiles) {
-        const asset = await withLoaderTimeout<FileAsset>(
-          () => uploadFileAssetRequest({ file, userId: user?.id, userName: user?.name }),
-          'Upload picker file asset',
-          FILE_PICKER_UPLOAD_TIMEOUT_MS,
-        )
+        let asset: FileAsset
+        try {
+          asset = await uploadFileAssetRequest({ file, userId: user?.id, userName: user?.name, signal: controller.signal })
+        } catch (error) {
+          if (!isUploadTooLarge(error)) throw error
+          notify(`${file.name}: ${getErrorMessage(error, 'Upload failed')}`, 'error')
+          continue
+        }
         const publicPath = canonicalizePersistedMediaPath(asset?.public_path)
         if (!publicPath) throw new Error('Upload completed without a stored file path.')
         uploadedAssets.push({ ...asset, public_path: publicPath })
       }
+      if (!uploadedAssets.length) return
       notify(tr('upload_complete', 'Upload complete'), 'success')
       await loadFiles()
       if (!multiple) {
@@ -247,8 +259,9 @@ export default function FilePickerModal({
         })
       }
     } catch (error) {
-      notify(getErrorMessage(error, 'Upload failed'), 'error')
+      if (!controller.signal.aborted) notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null
       uploadInFlightRef.current = false
       setUploading(false)
     }

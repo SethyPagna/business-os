@@ -33,7 +33,6 @@ function load(name: string): any {
       route: async (_key: string, server: () => Promise<any>, fallback?: () => any) => { try { return await server() } catch (error) { if (fallback) return fallback(); throw error } },
     }
     if (path.endsWith('/imageCompression.ts')) return { compressImageFile: () => compression.promise, isCompressibleImageFile: () => true, createImageThumbnails: async () => [], appendImageThumbnails: () => {} }
-    if (path.endsWith('/videoCompression.ts')) return { isCompressibleVideoFile: () => false }
     if (path.endsWith('/multipartHeaders.ts')) return { buildMultipartHeaders: () => ({}) }
     if (path.endsWith('/deviceInfo.ts')) return { getClientDeviceInfo: () => ({}) }
     if (path.endsWith('/mediaUpload.ts')) return { canonicalizePersistedMediaPath: (v: unknown) => v }

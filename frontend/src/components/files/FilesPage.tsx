@@ -40,6 +40,7 @@ import {
   deleteFileAsset as deleteFileAssetRequest,
   getFiles as getFilesRequest,
   LIBRARY_IMAGE_COMPRESS_OPTIONS,
+  MAX_UPLOAD_MEGABYTES,
   renameFileAsset as renameFileAssetRequest,
   getFileUsage as getFileUsageRequest,
   rewireFileAsset as rewireFileAssetRequest,
@@ -65,7 +66,6 @@ const AI_PROVIDERS_LOAD_TIMEOUT_MS = 8000
 const AI_RESPONSES_LOAD_TIMEOUT_MS = 8000
 const AI_PROVIDER_MUTATION_TIMEOUT_MS = 12000
 const AI_PROVIDER_TEST_TIMEOUT_MS = 30000
-const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000
 const FILES_ASSET_DELETE_TIMEOUT_MS = 12000
 
 type TranslateFunction = (key: string) => string | undefined
@@ -256,7 +256,7 @@ interface FilesApi {
     options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean; includeStorageMeta?: boolean },
     requestOptions?: { searchGroup?: string },
   ) => Promise<FilesResponse>
-  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS }) => Promise<unknown>
+  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS; signal?: AbortSignal }) => Promise<unknown>
   deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string; force?: boolean; confirmText?: string }) => Promise<unknown>
   renameFileAsset: (id: string | number, originalName: string) => Promise<unknown>
   getFileUsage: (id: string | number) => Promise<FileUsageDetail>
@@ -757,6 +757,7 @@ export default function FilesPage() {
   const responseLoadRequestRef = useRef(0)
   const filesLoadedOnceRef = useRef(false)
   const uploadInFlightRef = useRef(false)
+  const uploadAbortRef = useRef<AbortController | null>(null)
   const deleteInFlightRef = useRef(false)
   const saveProviderInFlightRef = useRef(false)
   const testProviderInFlightRef = useRef(false)
@@ -1086,6 +1087,7 @@ export default function FilesPage() {
     invalidateTrackedRequest(fileLoadRequestRef)
     invalidateTrackedRequest(providerLoadRequestRef)
     invalidateTrackedRequest(responseLoadRequestRef)
+    uploadAbortRef.current?.abort()
   }, [])
 
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -1095,21 +1097,26 @@ export default function FilesPage() {
     if (uploadInFlightRef.current) return
     uploadInFlightRef.current = true
     setUploading(true)
+    const controller = new AbortController()
+    uploadAbortRef.current = controller
     try {
-      await withLoaderTimeout(
-        // Library uploads get a tighter compression budget than the
-        // shared default (see LIBRARY_IMAGE_COMPRESS_OPTIONS) -- these
-        // are content/reference thumbnails, not full-bleed product
-        // photography, so they can afford to compress harder.
-        () => filesApi.uploadFileAsset({ file, userId: user?.id, userName: user?.name, compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS }),
-        'Upload file asset',
-        FILES_ASSET_UPLOAD_TIMEOUT_MS,
-      )
+      // Library uploads get a tighter compression budget than the
+      // shared default (see LIBRARY_IMAGE_COMPRESS_OPTIONS) -- these
+      // are content/reference thumbnails, not full-bleed product
+      // photography, so they can afford to compress harder.
+      await filesApi.uploadFileAsset({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS,
+        signal: controller.signal,
+      })
       notify(tr('upload_complete', 'Upload complete'), 'success')
       await loadFiles({ refreshMeta: true })
     } catch (error) {
-      notify(getErrorMessage(error, 'Upload failed'), 'error')
+      if (!controller.signal.aborted) notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null
       uploadInFlightRef.current = false
       setUploading(false)
     }
@@ -1551,8 +1558,8 @@ export default function FilesPage() {
                     videos; the Worker refuses documents (lib/uploadSecurity.ts). */}
                 <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
               </label>
-              <p className="basis-full text-right text-xs text-slate-500 dark:text-slate-400">
-                {tr('library_upload_media_hint', 'Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only.')}
+              <p className="basis-full text-right text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {tr('library_upload_media_hint', 'Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only. Up to {mb} MB each.').replace('{mb}', String(MAX_UPLOAD_MEGABYTES))}
               </p>
             </div>
           ) : (

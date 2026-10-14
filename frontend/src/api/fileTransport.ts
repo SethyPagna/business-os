@@ -10,7 +10,6 @@ import {
 } from './http.ts'
 import { buildMultipartHeaders } from './multipartHeaders.ts'
 import { appendImageThumbnails, compressImageFile, createImageThumbnails, isCompressibleImageFile, type CompressImageOptions } from '../utils/imageCompression.ts'
-import { compressVideoFile, isCompressibleVideoFile } from '../utils/videoCompression.ts'
 
 type FileListResponse = {
   items?: unknown[]
@@ -127,21 +126,73 @@ const AVATAR_TYPE_REFUSALS: ReadonlySet<string> = new Set([
 // value (the test pins it).
 const AVATAR_UNSUPPORTED_TYPE_ENGLISH = 'Avatars must be JPEG, PNG, WebP, GIF or AVIF images. Choose another image.'
 
+export const MAX_UPLOAD_MEGABYTES = 25
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MEGABYTES * 1024 * 1024
+type UploadKind = 'video' | 'image' | 'other'
+const UPLOAD_TOO_LARGE_MESSAGES: Record<UploadKind, { key: string; english: string }> = {
+  video: { key: 'upload_video_too_large', english: 'This file is larger than {mb} MB. Choose a smaller file, or trim or compress the video first.' },
+  image: { key: 'upload_image_too_large', english: 'This image is larger than {mb} MB. Choose a smaller image.' },
+  other: { key: 'upload_file_too_large', english: 'This file is larger than {mb} MB. Choose a smaller file.' },
+}
+const VIDEO_FILE_NAME = /\.(mp4|m4v|mov|webm|mkv|avi)$/i
+const IMAGE_FILE_NAME = /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg)$/i
+const WORKER_TOO_LARGE_MESSAGE = /^File is too large \(max \d+MB\)$/
+
+const UPLOAD_TIMEOUT_BASE_MS = 30_000
+const UPLOAD_TIMEOUT_PER_MEGABYTE_MS = 4_000
+const UPLOAD_TIMEOUT_CAP_MS = 180_000
+const UPLOAD_TIMED_OUT_ENGLISH = 'The upload took too long and was stopped. Check your connection and try again.'
+
+export function uploadTimeoutMs(bytes: number): number {
+  const megabytes = Math.ceil(Math.max(0, Number(bytes) || 0) / (1024 * 1024))
+  return Math.min(UPLOAD_TIMEOUT_CAP_MS, UPLOAD_TIMEOUT_BASE_MS + megabytes * UPLOAD_TIMEOUT_PER_MEGABYTE_MS)
+}
+
+export function isUploadTooLarge(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'upload_too_large'
+}
+
+function uploadCancelled(): Error {
+  return Object.assign(new Error('Upload cancelled'), { code: 'upload_cancelled' })
+}
+
 // The message in the UI language AppContext applies to <html lang>, read from
 // the same language pack the screens use. Callers show error.message as is.
 // productImageUploadTransport.ts's productImageTypeRefusal is the product
 // surface's twin (that transport may not import this one).
-async function avatarTypeRefusal(): Promise<Error> {
-  let message = AVATAR_UNSUPPORTED_TYPE_ENGLISH
+async function packMessage(key: string, english: string): Promise<string> {
   try {
     const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
     const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
-    const value = pack['avatar_unsupported_type']
-    if (typeof value === 'string' && value.trim()) message = value
+    const value = pack[key]
+    if (typeof value === 'string' && value.trim()) return value
   } catch {
     // Keep the English.
   }
+  return english
+}
+
+async function avatarTypeRefusal(): Promise<Error> {
+  const message = await packMessage('avatar_unsupported_type', AVATAR_UNSUPPORTED_TYPE_ENGLISH)
   return Object.assign(new Error(message), { code: 'unsupported_image_type' })
+}
+
+function uploadKind(file: File): UploadKind {
+  const type = String(file.type || '').toLowerCase()
+  if (type.startsWith('video/') || VIDEO_FILE_NAME.test(file.name)) return 'video'
+  if (type.startsWith('image/') || IMAGE_FILE_NAME.test(file.name)) return 'image'
+  return 'other'
+}
+
+async function uploadTooLargeRefusal(file: File): Promise<Error> {
+  const { key, english } = UPLOAD_TOO_LARGE_MESSAGES[uploadKind(file)]
+  const template = await packMessage(key, english)
+  return Object.assign(new Error(template.replace('{mb}', String(MAX_UPLOAD_MEGABYTES))), { code: 'upload_too_large' })
+}
+
+async function uploadTimedOutRefusal(): Promise<Error> {
+  const message = await packMessage('upload_timed_out', UPLOAD_TIMED_OUT_ENGLISH)
+  return Object.assign(new Error(message), { code: 'upload_timeout' })
 }
 
 function isAvatarTypeRefusal(serverMessage: unknown): boolean {
@@ -234,17 +285,8 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
     notConfiguredMessage: 'Server is not connected. File uploads are invalid until a live server is configured.',
   })
 
-  // Images get re-encoded/resized client-side before leaving the browser --
-  // the Workers backend has no `sharp` and can't compress on its end (see
-  // routes/files.ts). Video now gets the same treatment via ffmpeg.wasm
-  // (utils/videoCompression.ts) -- automatic settings, no manual
-  // codec/bitrate picker. Documents still pass through untouched; there is
-  // no meaningful client-side compression to do for those file types.
-  const uploadFile = isCompressibleImageFile(file)
-    ? await compressImageFile(file, compressOptions)
-    : isCompressibleVideoFile(file)
-      ? await compressVideoFile(file)
-      : file
+  const uploadFile = isCompressibleImageFile(file) ? await compressImageFile(file, compressOptions) : file
+  if (uploadFile.size > MAX_UPLOAD_BYTES) throw await uploadTooLargeRefusal(uploadFile)
 
   const base = getSyncServerUrl().replace(/\/$/, '')
   const form = new FormData()
@@ -257,10 +299,18 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     let settled = false
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimer = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
+    }
 
     const finish = (handler: (value: unknown) => void, value: unknown): void => {
       if (settled) return
       settled = true
+      clearTimer()
       if (signal) signal.removeEventListener('abort', abortListener)
       handler(value)
     }
@@ -285,10 +335,18 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
     }
 
     xhr.onerror = () => finish(reject, new Error('File upload failed. Check your server connection and try again.'))
-    xhr.onabort = () => finish(reject, new Error('Upload cancelled'))
+    xhr.onabort = () => {
+      if (timedOut) void uploadTimedOutRefusal().then((refusal) => finish(reject, refusal))
+      else finish(reject, uploadCancelled())
+    }
     xhr.onload = () => {
+      clearTimer()
       const parsed = parseJsonResponse(xhr.responseText)
       if (xhr.status < 200 || xhr.status >= 300) {
+        if (xhr.status === 413 || WORKER_TOO_LARGE_MESSAGE.test(String(parsed?.error || '').trim())) {
+          void uploadTooLargeRefusal(uploadFile).then((refusal) => finish(reject, refusal))
+          return
+        }
         const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
         // serverMessage: the Worker's own sentence, so a surface that is not
         // the Library (uploadUserAvatar) can tell a type refusal apart.
@@ -300,13 +358,17 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
 
     if (signal) {
       if (signal.aborted) {
-        finish(reject, new Error('Upload cancelled'))
+        finish(reject, uploadCancelled())
         return
       }
       signal.addEventListener('abort', abortListener, { once: true })
     }
 
     try { assertActorSessionDispatchAllowed(scope) } catch (error) { finish(reject, error); return }
+    timer = setTimeout(() => {
+      timedOut = true
+      try { xhr.abort() } catch (_) {}
+    }, uploadTimeoutMs(uploadFile.size))
     xhr.send(form)
   })
 }

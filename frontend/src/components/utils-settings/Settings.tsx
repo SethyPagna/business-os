@@ -48,7 +48,6 @@ import {
   validateLowStockSettingsWrite,
 } from '../../utils/lowStockSettings.ts'
 import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
-import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -168,8 +167,6 @@ function toNumberValue(value: unknown, fallback = 0): number {
   const parsed = Number.parseFloat(toStringValue(value))
   return Number.isFinite(parsed) ? parsed : fallback
 }
-
-const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 // The form mirrors the whole settings map, but Google Drive rows are owned by
 // the Worker and the Drive panel's dedicated endpoints (connection, recorded
@@ -949,17 +946,13 @@ export default function Settings() {
         fileName: file.name,
         previewUrl: localPreview,
       })
-      const uploaded = await withLoaderTimeout(
-        () => getSettingsApi().uploadFileAsset?.({
-          file,
-          userId: user?.id,
-          userName: user?.name,
-          signal: controller.signal,
-          onProgress: ({ percent }) => updateUploadState(key, { type: 'progress', progress: percent }),
-        }),
-        'Upload settings image',
-        SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,
-      )
+      const uploaded = await getSettingsApi().uploadFileAsset?.({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        signal: controller.signal,
+        onProgress: ({ percent }) => updateUploadState(key, { type: 'progress', progress: percent }),
+      })
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current) return
       const { buildCacheBustedMediaPath } = await import('../../utils/mediaUpload.ts')
@@ -2392,6 +2385,18 @@ export default function Settings() {
         <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
           {savingSettings ? (t('saving') || 'Saving...') : t('save')}
         </button>
+
+        <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          <a
+            href="/THIRD_PARTY_NOTICES.txt"
+            target="_blank"
+            rel="noreferrer"
+            data-settings-notices="true"
+            className="underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
+          >
+            {t('open_source_notices') || 'Open-source notices'}
+          </a>
+        </p>
       </div>
       {confirmDialog}
     </div>
