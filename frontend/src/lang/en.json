@@ -6708,6 +6708,8 @@
   "shift_close_saved": "Shift closed with the entered cash count and time.",
   "shift_reopen_title": "Reopen this shift",
   "shift_reopen_hint": "This creates a linked open segment and preserves the original close record.",
+  "shift_reopen_float_hint": "Continues the drawer counted when this shift closed.",
+  "shift_reopen_needs_count": "Enter the closing cash count for this shift first, then reopen it.",
   "shift_reopen_reason": "Reason for reopening (required)",
   "shift_reopen_saved": "Shift reopened. The original close record was preserved.",
   "shift_reopen_failed": "Could not reopen shift.",

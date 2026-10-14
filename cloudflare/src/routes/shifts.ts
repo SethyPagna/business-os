@@ -1478,9 +1478,7 @@ app.post('/:id/reopen', async (c) => {
   const expectedRevision = Number(body.expected_revision); const reason = requiredReason(body.reason)
   if (body.expected_revision == null || !Number.isInteger(expectedRevision) || expectedRevision < 0) return c.json({ error: 'A valid expected revision is required.' }, 400)
   if (!reason) return c.json({ error: 'A reopen reason is required.' }, 400)
-  const floatUsdParsed = countedMoney(body.opening_float_usd); const floatKhrParsed = countedMoney(body.opening_float_khr)
-  if (!floatUsdParsed.ok || !floatKhrParsed.ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
-  const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
+  if (!countedMoney(body.opening_float_usd).ok || !countedMoney(body.opening_float_khr).ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
   const db = getDb(c.env); const parent = await readShiftById(db, id)
   if (!parent) return c.json({ error: 'Shift not found.' }, 404)
   if (!canSeeShift(user, await readShiftPolicy(db), parent)) return c.json({ error: 'Shift not found.' }, 404)
@@ -1493,6 +1491,14 @@ app.post('/:id/reopen', async (c) => {
   if (parent.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   if (parent.business_date !== businessDateFor(new Date().toISOString())) return c.json({ error: 'Only a shift closed today can be reopened.' }, 409)
   if (parent.has_reopened_child) return c.json({ error: 'This shift segment was already reopened.' }, 409)
+  // The reopened segment is the same physical drawer, so it opens with the cash counted when the parent closed. A
+  // float typed by the client is only validated, never used: a fresh count at reopen already holds the cash of every sale rung in
+  // between, and the segment's window would add that cash a second time.
+  if (parent.closing_counted_usd == null && parent.closing_counted_khr == null) {
+    return c.json({ error: 'Count the cash when closing a shift before it can be reopened.', code: 'shift_reopen_needs_count' }, 409)
+  }
+  const floatUsd = parent.closing_counted_usd == null ? null : Number(parent.closing_counted_usd)
+  const floatKhr = parent.closing_counted_khr == null ? null : Number(parent.closing_counted_khr)
   // The reopened segment opens where the closed one ended, not at the moment of the press: a sale rung in between
   // belongs to this drawer, not to no drawer at all.
   const reopenedAt = new Date(utcMs(parent.closed_at)).toISOString()

@@ -100,7 +100,8 @@ const closeBody = gate.slice(gate.indexOf('const submitClose'), gate.indexOf('co
 ok(/const counts = shiftClosingCounts\(countedUsd, countedKhr\)/.test(closeBody),
   'the POS close step preserves two blanks as an unknown report count')
 ok(modal.includes('shiftOpeningCounts(edit.openingUsd, edit.openingKhr)'), 'the Shifts popup preserves nullable opening counts when amending')
-ok(modal.includes('shiftOpeningCounts(reopen.openingUsd, reopen.openingKhr)'), 'the Shifts popup preserves nullable opening counts when reopening')
+ok(modal.includes('openingFloatUsd: selected.closing_counted_usd ?? null') && modal.includes('openingFloatKhr: selected.closing_counted_khr ?? null'),
+  'the Shifts popup reopens with the parent counted close, a blank count staying blank')
 ok(modal.includes('shiftClosingCounts(edit.closingUsd, edit.closingKhr)'), 'the Shifts popup applies the shared close-count rule when amending')
 ok(modal.includes('shiftClosingCounts(close.closingUsd, close.closingKhr)'), 'the Shifts popup applies the shared close-count rule when closing')
 ok(!/Number\((?:float|counted|edit|close|reopen)[^)]+\) \|\| 0/.test(gate + modal),
@@ -334,6 +335,7 @@ try {
     const notices: any[] = []
     const delayed = () => new Promise((resolve, reject) => { resolveMutation = resolve; rejectMutation = reject })
     const fixture = { ...historyShift, closed_at: action === 'Reopen' ? '2026-09-05T02:00:00Z' : null,
+      closing_counted_usd: 55, closing_counted_khr: 0,
       capabilities: { can_edit: true, can_close: true, can_reopen: true, can_cancel: true } }
     let source = modal.replace('  const editDirty =', `  capture({ saveEdit, saveClose, saveReopen, saveCancel, setOpen, setSelected, setEdit, setClose, setReopen, setCancelReason, selected, saving, pending, detailsError, edit, close, reopen, cancelReason });\n  const editDirty =`)
     if (mutant) source = source.replaceAll('if (!isCurrent()) return', '').replaceAll('if (isCurrent())', 'if (true)')
@@ -357,7 +359,7 @@ try {
     probe.setSelected(fixture)
     probe.setEdit({ expectedRevision: 2, reason: 'correction', openedAt: '2026-09-05T08:00', closedAt: '', openingUsd: '', openingKhr: '', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', openingNote: '', closingNote: '' })
     probe.setClose({ closedAt: '2026-09-05T10:00', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
-    probe.setReopen({ reason: 'continue', openingUsd: '', openingKhr: '', openingNote: '' })
+    probe.setReopen({ reason: 'continue', openingNote: '' })
     probe.setCancelReason('correction')
     draw()
     const operation = probe[`save${action}`]()

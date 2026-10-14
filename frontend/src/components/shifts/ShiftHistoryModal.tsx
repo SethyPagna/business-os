@@ -66,7 +66,7 @@ type EditDraft = {
 }
 
 type CloseDraft = { closedAt: string; closingUsd: string; closingKhr: string; additionalUsd: string; additionalKhr: string; closingNote: string }
-type ReopenDraft = { reason: string; openingUsd: string; openingKhr: string; openingNote: string }
+type ReopenDraft = { reason: string; openingNote: string }
 type ActionMode = 'edit' | 'close' | 'reopen' | 'cancel' | null
 
 // A historic close still needs an explicit closing timestamp so the server can
@@ -91,7 +91,8 @@ const blankClose = (shift?: Shift | null): CloseDraft => ({
     : dateTimeLocal(new Date().toISOString()),
   closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '',
 })
-const blankReopen = (): ReopenDraft => ({ reason: '', openingUsd: '', openingKhr: '', openingNote: '' })
+const blankReopen = (): ReopenDraft => ({ reason: '', openingNote: '' })
+const countText = (value: number | null | undefined) => value == null ? '' : String(value)
 const refreshMountedShiftState = () => window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
 
 function operationalBranchId(): number | null {
@@ -360,7 +361,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
           setAction(saved.action)
           if (saved.action === 'close') setCloseBase(blankClose(result.shift))
           if (saved.action === 'close') setClose({ closedAt: dateTimeLocal(value('closed_at')), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingNote: value('closing_note') })
-          if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), openingNote: value('opening_note') })
+          if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingNote: value('opening_note') })
           if (saved.action === 'cancel') setCancelReason(value('reason'))
           if (saved.action === 'edit') setEdit({ expectedRevision: Number(saved.body.expected_revision), reason: value('reason'), openedAt: 'opened_at' in saved.body ? dateTimeLocal(value('opened_at')) : dateTimeLocal(result.shift.opened_at), closedAt: 'closed_at' in saved.body ? dateTimeLocal(value('closed_at')) : dateTimeLocal(result.shift.closed_at), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), openingNote: value('opening_note'), closingNote: value('closing_note') })
         } else setPending(false)
@@ -480,8 +481,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
 
   const saveReopen = async () => {
     if (!selected || !reopen.reason.trim() || saving) return
-    const opening = shiftOpeningCounts(reopen.openingUsd, reopen.openingKhr)
-    if (closingCountInvalid(reopen.openingUsd) || closingCountInvalid(reopen.openingKhr)) return
+    if (selected.closing_counted_usd == null && selected.closing_counted_khr == null) return
     const isCurrent = beginMutation()
     if (!isCurrent) return
     try {
@@ -489,8 +489,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         actorId: app.user?.id,
         expectedRevision: selected.revision,
         reason: reopen.reason.trim(),
-        openingFloatUsd: opening.usd,
-        openingFloatKhr: opening.khr,
+        openingFloatUsd: selected.closing_counted_usd ?? null,
+        openingFloatKhr: selected.closing_counted_khr ?? null,
         openingNote: reopen.openingNote.trim() || null,
       })
       if (!isCurrent()) return
@@ -548,9 +548,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('invalid'))
       : null
-  const reopenCountBlocker = shiftCountPairBlocker(reopen.openingUsd, reopen.openingKhr, { blankMeansUncounted: true })
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
-    : reopenCountBlocker ? t(shiftCountBlockerKey(reopenCountBlocker))
+    : selected && selected.closing_counted_usd == null && selected.closing_counted_khr == null ? t('shift_reopen_needs_count')
       : null
   const cancelAction = <button type="button" className="btn-secondary" onClick={resetAction} disabled={saving || pending}>{t('shift_action_cancel')}</button>
   const dismiss = () => {
@@ -639,7 +638,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                       <div><h3 className="text-sm font-semibold">{t('shift_reopen_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_reopen_hint')}</p></div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reopen_reason')}<textarea className="input mt-1 min-h-20" required value={reopen.reason} onChange={(event) => setReopen({ ...reopen, reason: event.target.value })} /></label>
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={reopen.openingUsd} khr={reopen.openingKhr} onUsd={(value) => setReopen({ ...reopen, openingUsd: value })} onKhr={(value) => setReopen({ ...reopen, openingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" disabled label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} hint={t('shift_reopen_float_hint')} usd={countText(selected.closing_counted_usd)} khr={countText(selected.closing_counted_khr)} onUsd={() => undefined} onKhr={() => undefined} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={reopen.openingNote} onChange={(event) => setReopen({ ...reopen, openingNote: event.target.value })} /></label>
                       </fieldset>
                       <ShiftSubmitRow reason={reopenReason} busy={saving} label={pending ? t('retry') : t('shift_action_reopen')} onClick={() => void saveReopen()} secondary={cancelAction} />
