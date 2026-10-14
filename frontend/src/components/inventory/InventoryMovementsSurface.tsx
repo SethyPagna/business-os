@@ -7,6 +7,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ExportMenu from '../shared/ExportMenu'
+import CostValue from '../shared/CostValue.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -57,7 +58,8 @@ type MovementRecord = {
   user_name?: string
   reason?: string
   quantity?: number
-  total_cost_usd?: number
+  /** null = no recorded cost (unknown); absent = hidden by permission; 0 = a recorded $0. */
+  total_cost_usd?: number | null
   // N13: resolved server-side; the client never derives which table a
   // reference_id points at (cloudflare/src/lib/movementReference.ts).
   reference_kind?: 'sale' | 'return' | null
@@ -79,6 +81,9 @@ type MovementGroup = {
   reasonExtraCount?: number
   totalQuantity: number
   totalCostUsd?: number
+  costUnknownLines?: number
+  costKnownLines?: number
+  costHidden?: boolean
   items: MovementRecord[]
 }
 
@@ -172,6 +177,20 @@ type InventoryMovementsSurfaceProps = {
 // bundle spans. Every actual record, first included, is an equal child row
 // in the expanded table below; the old productSummary concatenated many
 // names into the collapsed row instead.
+// The known cost of a group, with the unknown records counted beside it. All unknown reads "Unknown cost", never $0.00;
+// a group whose records carry no cost key at all is hidden by permission and shows nothing.
+export function MovementGroupCost({ group, fmtUSD, t }: { group: MovementGroup; fmtUSD: MoneyFormatter; t: Translator }) {
+  if (group.costHidden) return null
+  const unknown = group.costUnknownLines || 0
+  return <CostValue value={unknown > 0 && !group.costKnownLines ? null : group.totalCostUsd || 0} fmt={fmtUSD} t={t} unknownCount={unknown} />
+}
+
+// One record's cost: a recorded $0 prints $0.00, a NULL cost is unknown, an absent key is hidden by permission.
+export function MovementItemCost({ movement, fmtUSD, t }: { movement: MovementRecord; fmtUSD: MoneyFormatter; t: Translator }) {
+  if (movement.total_cost_usd === undefined) return null
+  return <CostValue value={movement.total_cost_usd} fmt={fmtUSD} t={t} />
+}
+
 function movementGroupTitle(group: MovementGroup, tr: TranslationWithFallback): string {
   const names = new Set<string>()
   for (const item of group.items || []) {
@@ -320,7 +339,7 @@ export default function InventoryMovementsSurface({
                     </button>
                   </td>
                   <td className={`${cellClass} text-right font-semibold tabular-nums text-gray-900 dark:text-white`}>{movement.quantity}</td>
-                  <td className={`${cellClass} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{(movement.total_cost_usd || 0) > 0 ? fmtUSD(movement.total_cost_usd || 0) : ''}</td>
+                  <td className={`${cellClass} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}><MovementItemCost movement={movement} fmtUSD={fmtUSD} t={t} /></td>
                   <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyField(movement.branch_name)}</td>
                   <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyActor(movement.user_name)}</td>
                   <td className={`${cellClass} whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300`}>{fmtTime(movement.created_at)}</td>
@@ -542,7 +561,7 @@ export default function InventoryMovementsSurface({
                                 <div className="flex items-start gap-2 text-right">
                                   <div>
                                     <div className="text-sm font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
-                                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</div>
+                                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400"><MovementGroupCost group={group} fmtUSD={fmtUSD} t={t} /></div>
                                   </div>
                                   <ChevronDown className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                 </div>
@@ -685,7 +704,7 @@ export default function InventoryMovementsSurface({
                                     </button>
                                   </td>
                                   <td className="px-3 py-2 text-right font-bold text-gray-900 dark:text-white">{group.totalQuantity}</td>
-                                  <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</td>
+                                  <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400"><MovementGroupCost group={group} fmtUSD={fmtUSD} t={t} /></td>
                                   <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{group.branchSummary || ''}</td>
                                   <td className="px-3 py-2 text-gray-500 hidden xl:table-cell">{group.userSummary || ''}</td>
                                 </tr>

@@ -9,6 +9,8 @@ import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
+import { partialCostNote, unknownCostLabel } from '../../utils/costDisplay.ts'
+import { costCoverage, costFigureText } from '../../utils/costCoverage.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -1813,6 +1815,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const showProfit = stripStatus === 'ready' ? typeof totals.profit_usd === 'number' : costReader
     const cogsUsd = Number(totals.cost_usd) || 0
     const profitUsd = Number(totals.profit_usd) || 0
+    // A cached strip written before the count keys existed is not measured: no marker, never "unknown".
+    const coverage = costCoverage(totals)
+    const cogsText = costFigureText(fmtUSD(cogsUsd), coverage, t)
+    const profitText = costFigureText(fmtUSD(profitUsd), coverage, t)
+    const coverageNote = partialCostNote(coverage.unknown, t) || undefined
     // AL finding L4 (13 Oct 2026): a cost viewer who is not an administrator
     // gets profit on goods alone (revenue - cost) and no courier cost, so the
     // card names it that way and leaves the delivery pair out of its drill.
@@ -1893,21 +1900,22 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
       ...(showCogs ? [{
         key: 'cogs',
         label: t('cogs') || 'COGS',
-        value: fmtUSD(cogsUsd),
+        value: coverage.allUnknown ? unknownCostLabel(t) : fmtUSD(cogsUsd),
+        sub: coverage.allUnknown ? undefined : coverageNote,
         tone: cogsUsd > 0 ? ('warn' as const) : undefined,
         hint: translateOr('stats_cogs_hint', 'Cost of the products sold in this range, using the recorded cost on each sale line.'),
         details: [
-          { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd) },
+          { label: t('cogs') || 'COGS', value: cogsText },
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
-          { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          { label: profitCardLabel, value: profitText, tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
         ],
       }] : []),
       ...(showProfit ? [{
         key: 'profit',
         label: profitExclDelivery ? profitCardLabel : (t('gross_profit') || 'Gross Profit'),
-        value: fmtUSD(profitUsd),
+        value: coverage.allUnknown ? unknownCostLabel(t) : fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
-        sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
+        sub: (revenueUsd > 0 && !coverage.allUnknown ? [`${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}`, coverageNote].filter(Boolean).join(' · ') : coverage.allUnknown ? undefined : coverageNote) || undefined,
         hint: `${profitExclDelivery
           ? translateOr('rpt_hint_profit_excl_delivery', 'Revenue − cost of goods sold. Delivery fees and actual delivery cost are not included. Includes Not Paid sales; operating expenses are separate.')
           : translateOr('stats_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales.', 'ចំណេញ = ចំណូល − ថ្លៃដើមទំនិញលក់ + ថ្លៃដឹកគិតពីអតិថិជន − ថ្លៃដឹកដើម។ រួមបញ្ចូលការលក់ជាប្រាក់ជំពាក់។')}
@@ -1915,7 +1923,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
 ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback: 'Profit (excl. delivery)', usd: profitUsd } : { key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms({ ...formulaTotals, profit_excludes_delivery: profitExclDelivery }), fmtUSD, translateOr)}`,
         details: [
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
-          { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd), tone: 'warn' as const },
+          { label: t('cogs') || 'COGS', value: cogsText, tone: 'warn' as const },
           // The hint has said "+ delivery fees charged − courier cost" since
           // the delivery correction; the drill still listed the WAIVED fee,
           // which profit does not subtract. These are the real two terms.
@@ -1923,12 +1931,12 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
             { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
           ]),
-          { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          { label: profitCardLabel, value: profitText, tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
           // Same excluding/including pair the Dashboard's Profit card shows,
           // same keys/labels (Dashboard.tsx), never a new pair of strings.
           ...(hasLosses ? [
             { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(removalLossUsd), tone: 'warn' as const },
-            { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(profitInclLosses), tone: profitInclLosses < 0 ? ('crit' as const) : undefined },
+            { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: costFigureText(fmtUSD(profitInclLosses), coverage, t), tone: profitInclLosses < 0 ? ('crit' as const) : undefined },
           ] : []),
         ],
       }] : []),

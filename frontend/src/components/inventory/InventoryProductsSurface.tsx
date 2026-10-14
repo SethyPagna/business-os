@@ -6,6 +6,7 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import PendingReviewSync from '../shared/PendingReviewSync.tsx'
 import PendingReviewTag from '../shared/PendingReviewTag.tsx'
+import CostValue from '../shared/CostValue.tsx'
 
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
@@ -27,6 +28,7 @@ export type InventoryProductRow = Record<string, any> & {
   cogs_usd?: number | null
   cogs_khr?: number | null
   profit_usd?: number | null
+  cogs_unknown_lines?: number | null
 }
 
 export type InventoryProductsPayload = {
@@ -81,10 +83,41 @@ export function mergedInventoryMetric(product: InventoryProductRow, items: Inven
   return ids.size ? total : null
 }
 
+/** A cost figure across the real rows behind one display row: the known part, how many rows had none, and whether the field was sent at all. */
+export type InventoryCostMetric = { total: number | null; unknown: number; hidden: boolean }
+
+/**
+ * Cost-derived columns (stock value, COGS, profit). null from the Worker = no recorded cost = UNKNOWN (counted, never summed as 0);
+ * a missing key = hidden by permission or not on this page (no figure, no marker); a number, 0 included, is a recorded cost.
+ * `extraUnknown` adds the rows' own sold-line counts (cogs_unknown_lines) for the COGS and profit columns.
+ */
+export function mergedInventoryCostMetric(product: InventoryProductRow, items: InventoryProductRow[], field: InventoryMetric, extraUnknown = false): InventoryCostMetric {
+  const ids = new Set<number>((product.__mergedProductIds || [product.id]).map(Number))
+  const byId = new Map(items.map((item) => [Number(item.id), item]))
+  let total: number | null = null
+  let unknown = 0
+  let seen = 0
+  for (const id of ids) {
+    const row = byId.get(id)
+    if (!row) return { total: null, unknown: 0, hidden: true }
+    const raw = row[field]
+    if (raw === undefined) continue
+    seen += 1
+    const value = inventoryMoney(raw)
+    if (raw === null || value === null) unknown += 1
+    else total = (total ?? 0) + value
+    const soldUnknown = extraUnknown ? Number(row.cogs_unknown_lines) : 0
+    if (soldUnknown > 0) unknown += Math.floor(soldUnknown)
+  }
+  return { total, unknown, hidden: seen === 0 }
+}
+
 export function inventoryCost(product: InventoryProductRow, currency: 'usd' | 'khr'): number | null {
   if (product.__mergedRowCount > 1) return inventoryMoney(product[`cost_price_${currency}`])
   const purchase = inventoryMoney(product[`purchase_price_${currency}`])
-  return purchase ? purchase : inventoryMoney(product[`cost_price_${currency}`]) ?? purchase
+  // purchase_price_* mirrors the cost but defaults to 0, so a 0 there is an unfilled mirror: the catalog cost decides,
+  // and a NULL catalog cost stays unknown (the same rule as the Worker's stock-value expression).
+  return purchase !== null && purchase > 0 ? purchase : inventoryMoney(product[`cost_price_${currency}`])
 }
 
 /** Value uses each real row's branch quantity/cost, never the merged display cost. */
@@ -183,10 +216,23 @@ export default function InventoryProductsSurface({
       title={t('cost_breakdown_title') || 'Calculated cost price'}
       onClick={(event) => { event.stopPropagation(); setCostFloatProduct({ id: product.id as number | string, name: String(product.name || '') }) }}
     >
-      {money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}
+      {inventoryCost(product, 'usd') === null && product.cost_price_usd === null
+        ? <span className="block whitespace-nowrap text-right"><CostValue value={null} fmt={fmtUSD} t={t} /></span>
+        : money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}
     </button>
   )
   const priceTone = 'text-green-700 dark:text-green-400'
+  const costMetric = (product: InventoryProductRow, field: InventoryMetric, khrField?: InventoryMetric, tone?: string, withLineCounts = false) => {
+    const result = mergedInventoryCostMetric(product, items, field, withLineCounts)
+    if (result.hidden) return money(null)
+    if (result.total === null) return <span className="block whitespace-nowrap text-right"><CostValue value={null} fmt={fmtUSD} t={t} unknownCount={result.unknown} /></span>
+    if (result.unknown === 0) return money(result.total, khrField ? metric(product, khrField) : null, tone)
+    const khr = khrField ? metric(product, khrField) : null
+    return <span className="block text-right">
+      <span className={`block font-semibold ${tone ?? 'text-slate-800 dark:text-slate-100'}`}><CostValue value={result.total} fmt={fmtUSD} t={t} unknownCount={result.unknown} /></span>
+      {khr !== null && khr !== 0 ? <span className="block text-[11px] font-normal text-slate-400">{fmtKHR(khr)}</span> : null}
+    </span>
+  }
   const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
     .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
     .map((row) => <div key={String(row.branch_id)} className="break-words">{row.branch_name || row.branch_id}: <span className="font-semibold">{Number(row.quantity) || 0}</span></div>)
@@ -230,7 +276,7 @@ export default function InventoryProductsSurface({
       {/* ONE read of the open review requests for this table, shared by every row's tag (renders nothing). */}
       <PendingReviewSync active={active} />
       <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700" aria-busy={statsLoading}>
-        {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? fmtUSD(Number(serverStats?.[field])) : Number(serverStats?.[field])}</strong></div>)}
+        {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : field === 'stock_value_usd' && serverStats?.[field] === null ? <CostValue value={null} fmt={fmtUSD} t={t} unknownCount={Number(serverStats?.stock_value_unknown_products) || 0} /> : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? (Number(serverStats?.stock_value_unknown_products) > 0 ? <CostValue value={Number(serverStats?.[field])} fmt={fmtUSD} t={t} unknownCount={Number(serverStats?.stock_value_unknown_products)} /> : fmtUSD(Number(serverStats?.[field]))) : Number(serverStats?.[field])}</strong></div>)}
       </div>
       {statsError ? <p role="alert" className="text-xs text-red-600">{statsError}</p> : null}
       <div className="card hidden max-w-full overflow-x-auto md:block">
@@ -278,11 +324,11 @@ export default function InventoryProductsSurface({
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
                     <td className="col-highlight-red px-3 py-1.5">{costCell(product)}</td>
                     <td className="col-highlight-green px-3 py-1.5">{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</td>
-                    <td className="px-3 py-1.5">{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</td>
+                    <td className="px-3 py-1.5">{costMetric(product, 'stock_value_usd', 'stock_value_khr')}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</td>
                     <td className="px-3 py-1.5">{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</td>
-                    <td className="px-3 py-1.5">{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</td>
-                    <td className="px-3 py-1.5">{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</td>
+                    <td className="px-3 py-1.5">{costMetric(product, 'cogs_usd', 'cogs_khr', undefined, true)}</td>
+                    <td className="px-3 py-1.5">{costMetric(product, 'profit_usd', undefined, profitTone(metric(product, 'profit_usd')), true)}</td>
                   </tr>
                 ))}
               </Fragment>
@@ -310,11 +356,11 @@ export default function InventoryProductsSurface({
                   <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs">
                     <dt className="text-red-600 dark:text-red-400">{t('cost') || 'Cost'}</dt><dd>{costCell(product)}</dd>
                     <dt className="text-green-600 dark:text-green-400">{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</dd>
-                    <dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</dd>
+                    <dt>{t('stock_val') || 'Stock value'}</dt><dd>{costMetric(product, 'stock_value_usd', 'stock_value_khr')}</dd>
                     <dt>{t('net_sold') || 'Net sold'}</dt><dd className="text-right font-semibold tabular-nums">{metric(product, 'qty_sold') ?? '—'}</dd>
                     <dt>{t('revenue') || 'Revenue'}</dt><dd>{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</dd>
-                    <dt>{t('cogs') || 'COGS'}</dt><dd>{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</dd>
-                    <dt className="text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</dt><dd>{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</dd>
+                    <dt>{t('cogs') || 'COGS'}</dt><dd>{costMetric(product, 'cogs_usd', 'cogs_khr', undefined, true)}</dd>
+                    <dt className="text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</dt><dd>{costMetric(product, 'profit_usd', undefined, profitTone(metric(product, 'profit_usd')), true)}</dd>
                   </dl>
                   {mobileActions(product)}
                 </div>)}

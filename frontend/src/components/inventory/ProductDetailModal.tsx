@@ -1,5 +1,8 @@
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { knownCost, partialCostNote, unknownCostLabel } from '../../utils/costDisplay.ts'
+import CostValue from '../shared/CostValue.tsx'
+import { inventoryCost, type InventoryProductRow } from './InventoryProductsSurface.tsx'
 import ProductNameRail from '../shared/ProductNameRail'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { createPortal } from 'react-dom'
@@ -69,7 +72,8 @@ interface InventoryProduct {
   // No special_price_*: the "VIP" tier it backed was deleted on 2026-09-04.
   qty_sold?: number
   revenue_usd?: number
-  cogs_usd?: number
+  cogs_usd?: number | null
+  cogs_unknown_lines?: number
   branch_stock?: BranchStockEntry[]
   batch_count?: number
   [key: string]: unknown
@@ -149,7 +153,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   }, [lotReadKey])
   if (!p) return null
 
-  const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
+  // null = no recorded cost (shown as unknown, never $0.00); a recorded $0 is a real cost.
+  const costKnownUsd = inventoryCost(p as InventoryProductRow, 'usd')
+  const costPriceUsd = costKnownUsd ?? 0
+  const costT = (key: string) => T(key, '')
   const costPriceKhr = Number(p.purchase_price_khr || 0)
   const sellingPriceUsd = Number(p.selling_price_usd || 0)
   const sellingPriceKhr = Number(p.selling_price_khr || 0)
@@ -180,6 +187,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const stockValueUsd = Math.max(0, stockQuantity) * costPriceUsd
   const marginUsd = Math.max(0, activePriceUsd - costPriceUsd)
   const marginPct = costPriceUsd > 0 ? ((marginUsd / costPriceUsd) * 100) : 0
+  const stockValueText = costKnownUsd === null && stockQuantity > 0 ? unknownCostLabel(costT) : fmtUSD(stockValueUsd)
+  const marginText = costKnownUsd === null ? '—' : fmtUSD(marginUsd)
+  const cogsUnknownLines = Math.max(0, Math.floor(Number(p.cogs_unknown_lines) || 0))
+  const cogsAllUnknown = p.cogs_usd === null || (p.cogs_usd !== undefined && knownCost(p.cogs_usd) === null)
+  const cogsPartialNote = cogsAllUnknown ? null : partialCostNote(cogsUnknownLines, costT)
+  const withPartial = (text: string) => (cogsPartialNote ? `${text} · ${cogsPartialNote}` : text)
   // One active branch: its chip and the Branches tile would only repeat the
   // product quantity, so they go (branchScope.ts).
   const allBranchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
@@ -301,7 +314,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 title={T('cost_breakdown_title', 'Calculated cost price')}
               >
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
-                <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
+                <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300"><CostValue value={costKnownUsd} fmt={fmtUSD} t={costT} /></div>
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
               </button> : null}
               <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
@@ -319,15 +332,15 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               {canViewCosts ? <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
                 <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
                 <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                  {fmtUSD(marginUsd)}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
+                  {marginText}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
                 </div>
               </div> : null}
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[
-                ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
+                ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: stockValueText, tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
                 { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-                ...(canViewCosts ? [{ label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }] : []),
+                ...(canViewCosts ? [{ label: T('margin', 'Margin'), value: `${marginText}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }] : []),
                 ...(branchesCollapsed ? [] : [{ label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' }]),
               ].map((item) => (
                 <div key={item.label} className={`${item.bg} rounded-xl px-2.5 py-2`}>
@@ -370,8 +383,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 {[
                   { value: Math.max(0, p.qty_sold || 0), label: T('net_sold', 'Net Sold'), className: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
                   { value: fmtUSD(Math.max(0, p.revenue_usd || 0)), label: T('revenue', 'Revenue'), className: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20' },
-                  ...(canViewCosts ? [{ value: fmtUSD(Math.max(0, p.cogs_usd || 0)), label: T('cogs', 'COGS'), className: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' }] : []),
-                  ...(canViewCosts ? [{ value: fmtUSD(profit), label: T('profit', 'Profit'), className: profit >= 0 ? 'text-purple-600' : 'text-red-600', bg: 'bg-purple-50 dark:bg-purple-900/20' }] : []),
+                  ...(canViewCosts ? [{ value: cogsAllUnknown ? unknownCostLabel(costT) : withPartial(fmtUSD(Math.max(0, p.cogs_usd || 0))), label: T('cogs', 'COGS'), className: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' }] : []),
+                  ...(canViewCosts ? [{ value: cogsAllUnknown ? unknownCostLabel(costT) : withPartial(fmtUSD(profit)), label: T('profit', 'Profit'), className: profit >= 0 ? 'text-purple-600' : 'text-red-600', bg: 'bg-purple-50 dark:bg-purple-900/20' }] : []),
                 ].map((item) => (
                   <div key={item.label} className={`${item.bg} rounded-xl px-2 py-2`}>
                     <div className={`text-xs font-bold ${item.className}`}>{item.value}</div>

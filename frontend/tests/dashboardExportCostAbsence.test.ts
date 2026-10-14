@@ -89,4 +89,33 @@ await test('presence decides, not value: a cost reader with a genuinely zero win
   assert.equal(kpi.find((row) => row.Metric === 'COGS (USD)')?.Value, '0.00')
 })
 
+const withSummary = (ctx: ReturnType<typeof context>, summary: Record<string, unknown>) => ({ ...ctx, summary: { product_count: 1, in_stock_count: 1, low_stock: [], out_of_stock: [], recent_sales: [], ...summary } })
+const kpiRows = async (ctx: unknown) => (await run('exportDashboardKpis', ctx)).xlsx!['dashboard-kpi-T.xlsx']
+
+await test('stock value: null is an empty cell, absent (hidden) is left out, partial adds the unknown-products count', async () => {
+  const unknown = await kpiRows(withSummary(costReader, { stock_value_usd: null }))
+  assert.equal(unknown.find((row) => row.Metric === 'Stock Value (USD)')?.Value, '', 'unknown stock value is an empty cell, never 0.00')
+  const hidden = await kpiRows(withSummary(plainReader, {}))
+  assert.equal(hidden.some((row) => row.Metric === 'Stock Value (USD)'), false, 'hidden by permission is absent, not unknown')
+  const partial = await kpiRows(withSummary(costReader, { stock_value_usd: 10, stock_value_unknown_products: 2 }))
+  assert.equal(partial.find((row) => row.Metric === 'Stock Value (USD)')?.Value, '10.00')
+  assert.equal(partial.find((row) => row.Metric === 'Unknown-cost products (not in stock value)')?.Value, 2)
+  const zero = await kpiRows(withSummary(costReader, { stock_value_usd: 0 }))
+  assert.equal(zero.find((row) => row.Metric === 'Stock Value (USD)')?.Value, '0.00', 'a recorded zero value stays 0.00')
+})
+
+await test('COGS and profit: all lines unknown exports empty cells; partial keeps the figure and adds Unknown-cost lines; stale payload adds nothing', async () => {
+  const allUnknown = await kpiRows(context({ cost_usd: 0, profit_usd: 42, cost_missing_snapshot_lines: 3, cost_known_lines: 0 }))
+  assert.equal(allUnknown.find((row) => row.Metric === 'COGS (USD)')?.Value, '')
+  assert.equal(allUnknown.find((row) => row.Metric === 'Est. Profit (USD)')?.Value, '')
+  assert.equal(allUnknown.find((row) => row.Metric === 'Unknown-cost lines')?.Value, 3)
+  const partial = await kpiRows(context({ cost_usd: 12, profit_usd: 28, cost_missing_snapshot_lines: 3, cost_known_lines: 2 }))
+  assert.equal(partial.find((row) => row.Metric === 'COGS (USD)')?.Value, '12.00')
+  assert.equal(partial.find((row) => row.Metric === 'Unknown-cost lines')?.Value, 3)
+  const stale = await kpiRows(context({ cost_usd: 12, profit_usd: 28 }))
+  assert.equal(stale.some((row) => row.Metric === 'Unknown-cost lines'), false, 'no count key = not measured')
+  const chart = (await run('exportDashboardSalesChart', context({ cost_usd: 0, profit_usd: 42, cost_missing_snapshot_lines: 1, cost_known_lines: 0 }))).xlsx!['dashboard-sales-T.xlsx']
+  assert.deepEqual([chart[0].COGS_USD, chart[0].Profit_USD], ['', ''], 'a period with only unknown lines is empty, not 0')
+})
+
 console.log(`${passed} dashboard export cost-absence tests passed`)

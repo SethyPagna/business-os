@@ -521,7 +521,8 @@ assert.equal(requested, 0)
 const csvCall = find(inventory, (node) => ts.isCallExpression(node) && node.expression.getText() === 'downloadCSV'
   && node.arguments[0]?.getText().includes('inventory-stats-'))[0] as ts.CallExpression
 const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '', range: { startTime: '', endTime: '' },
-  totalProducts: 17, inStockCount: 10, lowStockCount: 3, outStockCount: 4, totalValue: 80,
+  totalProducts: 17, inStockCount: 10, lowStockCount: 3, outStockCount: 4, totalValue: 80, totalValueKnown: 80, stockUnknownProducts: 0,
+  exportCoverage: { measured: false, unknown: 0, allUnknown: false },
   totals: { revenue_usd: 999 }, cust: { count: 999 }, supp: { count: 999 },
 })
 assert.equal(exportRows.find((row: any) => row.metric === 'products_current').value, 17)

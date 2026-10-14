@@ -21,7 +21,7 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
-import { shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
+import { shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows, shiftUnknownCostLines } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -87,6 +87,12 @@ export default function ShiftReport(p: ReportViewProps) {
         USD: row.usd,
         KHR: row.khr ?? '',
       })),
+      ...(shiftUnknownCostLines(shiftFiguresOf(shift)) > 0 ? [{
+        Section: tr('shift_report_figures', 'Business results'),
+        Line: `${tr('rpt_unknown_cost_lines', 'Unknown-cost lines')}: ${shiftUnknownCostLines(shiftFiguresOf(shift))}`,
+        USD: '',
+        KHR: '',
+      }] : []),
       ...shiftComparisonRows(shift).map((row) => ({
         Section: tr('shift_cash_breakdown', 'Cash breakdown'),
         Line: tr(row.key, row.key),

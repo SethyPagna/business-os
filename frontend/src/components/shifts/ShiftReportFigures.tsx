@@ -2,6 +2,7 @@ import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { shiftCountedPairText, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from './shiftReportModel.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
+import { partialCostNote } from '../../utils/costDisplay.ts'
 
 /**
  * The admin half of the shift report, in the order the owner reads it
@@ -86,6 +87,11 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
                   {row.unvaluedCount ? (
                     <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
                       {tr('rpt_note_removal_unvalued', '{count} removed row(s) had no recorded cost').replace('{count}', String(row.unvaluedCount))}
+                    </span>
+                  ) : null}
+                  {row.unknownCostCount ? (
+                    <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      {partialCostNote(row.unknownCostCount, t)}
                     </span>
                   ) : null}
                 </dd>

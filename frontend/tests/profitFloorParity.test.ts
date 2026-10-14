@@ -53,7 +53,7 @@ assert.match(dashboard, /dashboard_formula_profit/,
 assert.match(pane, /const profit = Math\.max\(0, p\.revenue_usd \|\| 0\) - Math\.max\(0, p\.cogs_usd \|\| 0\)/,
   'the pane clamps each operand -- that is the formula the list has to agree with')
 // The list passes the server's figure straight through, unclamped.
-assert.match(surface, /money\(metric\(product, 'profit_usd'\), null, profitTone\(metric\(product, 'profit_usd'\)\)\)/,
+assert.match(surface, /costMetric\(product, 'profit_usd', undefined, profitTone\(metric\(product, 'profit_usd'\)\), true\)/,
   'the list renders the server profit as it comes')
 assert.doesNotMatch(stripComments(surface), /Math\.max\(0,[^)]*profit/,
   'the list must NOT acquire a display floor of its own: a wrong negative is a ledger defect, and flooring it here would hide the next one')

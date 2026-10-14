@@ -126,6 +126,12 @@ export type ShiftFiguresShape = {
    *  "i see the report says row removed has 1 no cost price. this is
    *  impossible find issue and fix"). Never dropped silently. */
   removal_loss_unvalued_rows?: number
+  /**
+   * Sold lines in the window that carry no recorded cost. Absent = the Worker did not measure it (an older
+   * Worker, a shift closed before the count existed): no marker, and never "unknown". Display only: the
+   * figures above are the server's and a closed shift's numbers do not change.
+   */
+  cost_missing_snapshot_lines?: number
 }
 
 type ShiftWithFigures = Shift & { figures?: ShiftFiguresShape | null }
@@ -250,6 +256,14 @@ export type ShiftFigureRow = {
   /** Set only on the removal-loss row when some of its rows had no
    *  recorded cost -- rendered as a count, never silently dropped. */
   unvaluedCount?: number
+  /** Set on the COGS / profit rows when some sold lines had no recorded cost: the figure covers the rest. */
+  unknownCostCount?: number
+}
+
+/** Sold lines without a recorded cost behind a shift's COGS and profit; 0 when none or not measured. */
+export function shiftUnknownCostLines(figures: ShiftFiguresShape | null | undefined): number {
+  const count = Number(figures?.cost_missing_snapshot_lines)
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
 }
 
 /** Business results in reading order. Credit is a positive memo already inside sales/profit. */
@@ -260,6 +274,8 @@ export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): 
   // is a POSITIVE amount and is never subtracted from sales/profit above:
   // those stay the canonical figures and these say what the same shift looks
   // like including the loss. Rendered only when the server sent the block.
+  const unknownLines = shiftUnknownCostLines(figures)
+  const partial = unknownLines > 0 ? { unknownCostCount: unknownLines } : {}
   const losses: ShiftFigureRow[] = typeof figures.removal_loss_usd !== 'number' ? [] : [
     {
       key: 'rpt_removal_loss', usd: figures.removal_loss_usd, hintKey: 'rpt_hint_removal_loss',
@@ -272,12 +288,13 @@ export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): 
       // Unclamped on purpose: a shift that destroyed more than it earned is
       // exactly the case the owner asked to be able to see.
       tone: (figures.profit_after_losses_usd > 0 ? 'positive' : figures.profit_after_losses_usd < 0 ? 'negative' : undefined) as ShiftFigureRow['tone'],
+      ...partial,
     }] : []),
   ]
   return [
     { key: 'sales', usd: figures.sales_usd },
-    { key: 'cogs', usd: figures.cogs_usd },
-    { key: 'profit', usd: figures.profit_usd, tone: figures.profit_usd > 0 ? 'positive' : figures.profit_usd < 0 ? 'negative' : undefined },
+    { key: 'cogs', usd: figures.cogs_usd, ...partial },
+    { key: 'profit', usd: figures.profit_usd, tone: figures.profit_usd > 0 ? 'positive' : figures.profit_usd < 0 ? 'negative' : undefined, ...partial },
     { key: 'delivery_fees', usd: figures.delivery_fee_usd },
     { key: 'delivery_actual_cost', usd: figures.delivery_cost.usd, khr: figures.delivery_cost.khr },
     { key: 'shift_other_expenses', usd: figures.other_expenses.usd, khr: figures.other_expenses.khr },

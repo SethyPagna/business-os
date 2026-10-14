@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { knownCost, partialCostNote, unknownCostLabel } from '../../utils/costDisplay.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
@@ -194,6 +195,8 @@ interface BranchStockSummary {
   out_of_stock_products?: number | string
   positive_value_usd?: number | string
   total_value_usd?: number | string
+  positive_stock_value_unknown_products?: number | string
+  stock_value_unknown_products?: number | string
 }
 
 interface BranchStockPage {
@@ -765,6 +768,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const transferBlockedReason = tr('transfer_single_branch', 'Only one active branch, so there is nothing to transfer.')
   // The overview's "Branches" count tile: only worth a tile while it can say more than one.
   const showBranchCountTile = branchSummary?.branch_count == null || Number(branchSummary.branch_count) > 1
+  const orgStockValueKnown = knownCost(branchSummary?.stock_value_usd)
+  const orgStockPartialNote = orgStockValueKnown === null ? null : partialCostNote(Math.max(0, Math.floor(Number(branchSummary?.stock_value_unknown_products) || 0)), t)
+  const orgStockValueText = orgStockValueKnown === null ? unknownCostLabel(t) : `${fmtUSD(orgStockValueKnown)}${orgStockPartialNote ? ` · ${orgStockPartialNote}` : ''}`
   // The tile it replaces: with one active branch its name is shown instead of a count of one.
   const soleBranchName = showBranchCountTile ? '' : String(soleActiveBranch(branches)?.name || '')
   // The Stock Session's AppSelect option shape ({value,label}), distinct
@@ -1373,7 +1379,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             <div className={`grid grid-cols-2 gap-2 ${showBranchCountTile ? 'sm:grid-cols-3' : ''}`}>
               {showBranchCountTile ? <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} /> : null}
               <BranchStatTile label={tr('products', 'Products')} value={branchSummary.total_products ?? 0} />
-              <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} />
+              {canViewCosts ? <BranchStatTile label={tr('stock_value', 'Stock Value')} value={orgStockValueText} /> : null}
             </div>
           ) : null}
         </section>
@@ -1425,7 +1431,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             const healthyCount = Number(stockSummary.healthy_products ?? 0)
             const lowStockCount = Number(stockSummary.low_stock_products ?? 0)
             const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
-            const totalValue = Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? 0)
+            // Without product_cost_view the Worker sends no value key and the tile is not drawn; a null/unknown cost reads
+            // "Unknown cost", and products without one are counted beside the figure instead of being priced at $0.
+            const valueKnown = knownCost(stockSummary.positive_value_usd ?? stockSummary.total_value_usd)
+            const valueUnknownProducts = Math.max(0, Math.floor(Number(stockSummary.positive_stock_value_unknown_products ?? stockSummary.stock_value_unknown_products) || 0))
+            const valueAllUnknown = valueUnknownProducts > 0 && valueUnknownProducts >= Number(stockSummary.positive_products ?? Infinity)
+            const valuePartialNote = valueAllUnknown ? null : partialCostNote(valueUnknownProducts, t)
+            const valueText = valueKnown === null || valueAllUnknown ? unknownCostLabel(t) : `${fmtUSD(valueKnown)}${valuePartialNote ? ` · ${valuePartialNote}` : ''}`
 
             return (
               <div
@@ -1510,7 +1522,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                 { key: 'healthy', label: tr('healthy_stock_short', 'Healthy'), value: healthyCount, color: 'text-teal-600 dark:text-teal-300', detail: tr('branch_stock_healthy_detail', 'Products in this branch above their low stock threshold (a strict subset of In Stock).') },
                                 { key: 'low', label: tr('low_stock_short', 'Low'), value: lowStockCount, color: 'text-amber-600 dark:text-amber-300', detail: tr('branch_stock_low_detail', 'Products in this branch at or below low stock threshold.') },
                                 { key: 'out', label: tr('out_of_stock_short', 'Out'), value: outStockCount, color: 'text-red-600 dark:text-red-300', detail: tr('branch_stock_out_detail', 'Products in this branch at or below out of stock threshold.') },
-                                { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(totalValue), color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stock_value_detail', 'Estimated value for positive branch stock.') },
+                                ...(canViewCosts ? [{ key: 'value', label: tr('stock_value_short', 'Value'), value: valueText, color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stock_value_detail', 'Estimated value for positive branch stock.') }] : []),
                               ].map(({ key, label, value, color, detail }) => (
                                 <BranchStatTile
                                   key={`${branch.id}-${key}`}
@@ -1525,7 +1537,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                             <span className="hidden text-sm font-semibold text-gray-700 dark:text-gray-300">
                               {tr('branch_stock_count', '{n} products in stock').replace('{n}', String(stockCount))}
                               {' | '}
-                              {tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
+                              {canViewCosts ? <>{tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{valueText}</span></> : null}
                             </span>
                             {transferBlocked ? null : <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
                               {tr('transfer_stock_link', 'Transfer stock')}

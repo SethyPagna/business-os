@@ -38,14 +38,24 @@ function priceCsv(value: unknown): string {
 // formatHistoryReference's contract intends.
 const MOVEMENT_EXPORT_REFERENCE_WORDS = { sale: 'Sale', return: 'Return' }
 
+// An unknown cost is an EMPTY cell (never 0), so the file round-trips as unknown; a group whose records carry no cost
+// key was hidden by permission and is empty too. Groups with unknown records add an Unknown_Cost_Records count.
+function costCell(group: AnyRecord): string {
+  if (group.costHidden) return ''
+  if ((group.costUnknownLines || 0) > 0 && !group.costKnownLines) return ''
+  return priceCsv(group.totalCostUsd || 0)
+}
+
 function buildMovementRows(groups: AnyRecord[]): AnyRecord[] {
+  const anyUnknown = groups.some((group) => (group.costUnknownLines || 0) > 0)
   return groups.map((group) => ({
     Date: group.latest_at || '',
     Activity: group.movementLabel || '',
     Products: group.productSummary || '',
     Records: group.items?.length || 0,
     Qty: group.totalQuantity || 0,
-    Total_Cost_USD: priceCsv(group.totalCostUsd || 0),
+    Total_Cost_USD: costCell(group),
+    ...(anyUnknown ? { Unknown_Cost_Records: group.costUnknownLines || 0 } : {}),
     Branch: group.branchSummary || '',
     // The record the group belongs to -- "Sale 20260901-193100" -- a Revert's
     // "#<id>" of the row it reverts, and the raw reference_id only for the

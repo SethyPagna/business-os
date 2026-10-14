@@ -1,4 +1,5 @@
 import { lotCodeAsDate } from '../../utils/batchLabel.ts'
+import { isKnownCost } from '../../utils/costDisplay.ts'
 import { isStockInCorrectionRow, isStockSetMovement, revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type MovementRecord = Record<string, unknown>
@@ -35,6 +36,12 @@ type MovementGroup = {
   reasonSummary?: string
   reasonPrimary?: string
   reasonExtraCount?: number
+  /** Records whose cost is unknown (NULL): left out of totalCostUsd and counted here. Zero-quantity records carry no cost. */
+  costUnknownLines?: number
+  /** Records with a recorded cost, $0 included. */
+  costKnownLines?: number
+  /** No record carried a cost key at all: hidden by permission, so the cost is shown as nothing, not as unknown. */
+  costHidden?: boolean
 }
 
 type MovementGroupPageOptions = {
@@ -381,8 +388,16 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         ? Math.max(group.totalCostKhrIn, group.totalCostKhrOut)
         : group.totalCostKhr
 
+      const costed = group.items.filter((item) => Number(item.quantity) !== 0)
+      const costUnknownLines = costed.filter((item) => item.total_cost_usd === null).length
+      const costKnownLines = costed.filter((item) => isKnownCost(item.total_cost_usd)).length
+      const costHidden = group.items.every((item) => item.total_cost_usd === undefined)
+
       return {
         ...group,
+        costUnknownLines,
+        costKnownLines,
+        costHidden,
         totalQuantity: displayQuantity,
         totalCostUsd: displayCostUsd,
         totalCostKhr: displayCostKhr,

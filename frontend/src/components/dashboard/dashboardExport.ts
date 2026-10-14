@@ -7,6 +7,8 @@ import { financialCalculationValue } from '../../utils/financialPrecision.ts'
 import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 import { fmtDayFirst } from '../../utils/formatters.ts'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
+import { knownCost } from '../../utils/costDisplay.ts'
+import { costCoverage } from '../../utils/costCoverage.ts'
 
 type MetricMap = Record<string, number | undefined>
 type Row = Record<string, unknown>
@@ -56,7 +58,8 @@ interface DashboardExportAnalytics extends Row {
 interface DashboardExportSummary extends Row {
   product_count?: number
   in_stock_count?: number
-  stock_value_usd?: number
+  stock_value_usd?: number | null
+  stock_value_unknown_products?: number
   low_stock?: DashboardExportProduct[]
   out_of_stock?: DashboardExportProduct[]
   recent_sales?: DashboardExportSale[]
@@ -102,6 +105,11 @@ function priceCsv(value: unknown): string {
   return formatPriceNumber(value || 0)
 }
 
+/** A cost-derived cell: an EMPTY cell (never 0) when nothing behind it had a recorded cost, so the file round-trips as unknown. */
+function costCsv(value: unknown, allUnknown: boolean): string {
+  return allUnknown || knownCost(value) === null ? '' : priceCsv(value)
+}
+
 /** A sales-period row splits the KPI total: 4 places, so the exported rows
  *  add up to it exactly (owner, 13 Oct 2026). Headline KPIs keep priceCsv. */
 function splitCsv(value: unknown): string {
@@ -129,6 +137,9 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
   // being written as a $0.00 that reads as a period that broke even.
   const hasCost = typeof metricTotals.cost_usd === 'number'
   const hasProfit = typeof metricTotals.profit_usd === 'number'
+  const coverage = costCoverage(metricTotals)
+  const stockValue = ctx.summary?.stock_value_usd
+  const stockUnknown = Math.max(0, Math.floor(Number(ctx.summary?.stock_value_unknown_products) || 0))
   return [
     { Section: 'KPI', Metric: 'Period', Value: ctx.periodShort, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Gross Sales (USD)', Value: priceCsv(metricTotals.gross_sales_usd), Period: ctx.rangeLabel },
@@ -138,10 +149,13 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Tax (USD)', Value: priceCsv(metricTotals.tax_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Delivery (USD)', Value: priceCsv(metricTotals.delivery_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Products', Value: ctx.summary?.product_count || 0, Period: 'current inventory' },
-    { Section: 'KPI', Metric: 'Stock Value (USD)', Value: priceCsv(ctx.summary?.stock_value_usd), Period: 'current inventory' },
-    ...(hasCost ? [{ Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel }] : []),
+    // Absent stock value = hidden by permission (left out); null = no recorded cost (empty cell).
+    ...(stockValue !== undefined ? [{ Section: 'KPI', Metric: 'Stock Value (USD)', Value: costCsv(stockValue, false), Period: 'current inventory' }] : []),
+    ...(stockValue !== undefined && stockUnknown > 0 ? [{ Section: 'KPI', Metric: 'Unknown-cost products (not in stock value)', Value: stockUnknown, Period: 'current inventory' }] : []),
+    ...(hasCost ? [{ Section: 'KPI', Metric: 'COGS (USD)', Value: costCsv(metricTotals.cost_usd, coverage.allUnknown), Period: ctx.rangeLabel }] : []),
+    ...(hasCost && coverage.unknown > 0 ? [{ Section: 'KPI', Metric: 'Unknown-cost lines', Value: coverage.unknown, Period: ctx.rangeLabel }] : []),
     // L4: a cost viewer's profit arrives on goods alone (revenue - cost), and is named so.
-    ...(hasProfit ? [{ Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel }] : []),
+    ...(hasProfit ? [{ Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: costCsv(metricTotals.profit_usd, coverage.allUnknown), Period: ctx.rangeLabel }] : []),
     { Section: 'KPI', Metric: 'Transactions', Value: metricTotals.tx_count || 0, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Avg Order (USD)', Value: priceCsv(metricTotals.avg_order_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Returns', Value: returns.return_count || 0, Period: ctx.rangeLabel },
@@ -161,7 +175,7 @@ function buildDashboardFormulaRows(ctx: DashboardExportContext): Row[] {
     { Section: 'Calculation', Metric: 'Selected Range', Formula: ctx.rangeLabel, Example: ctx.periodShort },
     { Section: 'Calculation', Metric: 'Net revenue', Formula: ctx.revenueFormulaText, Example: ctx.revenueExampleText },
     { Section: 'Calculation', Metric: 'Collected total', Formula: ctx.collectedFormulaText, Example: ctx.collectedExampleText },
-    ...(typeof metricTotals.profit_usd === 'number' && typeof metricTotals.cost_usd === 'number' ? [{
+    ...(typeof metricTotals.profit_usd === 'number' && typeof metricTotals.cost_usd === 'number' && !costCoverage(metricTotals).allUnknown ? [{
       Section: 'Calculation',
       Metric: 'Estimated profit',
       Formula: 'Profit = Net revenue - COGS',
@@ -215,8 +229,8 @@ function buildDashboardSalesRows(ctx: DashboardExportContext): Row[] {
     Delivery_USD: splitCsv(d.delivery_usd),
     Refund_USD: splitCsv(d.refund_usd),
     Revenue_USD: splitCsv(d.revenue_usd),
-    ...(typeof d.cost_usd === 'number' ? { COGS_USD: splitCsv(d.cost_usd) } : {}),
-    ...(typeof d.profit_usd === 'number' ? { Profit_USD: splitCsv(d.profit_usd) } : {}),
+    ...(typeof d.cost_usd === 'number' ? { COGS_USD: costCoverage(d).allUnknown ? '' : splitCsv(d.cost_usd) } : {}),
+    ...(typeof d.profit_usd === 'number' ? { Profit_USD: costCoverage(d).allUnknown ? '' : splitCsv(d.profit_usd) } : {}),
     Tx: d.count || 0,
   }))
 }
@@ -356,8 +370,8 @@ export function exportDashboardSalesChart(ctx: DashboardExportContext): void {
     Delivery_USD: d.delivery_usd || 0,
     Refund_USD: d.refund_usd || 0,
     Revenue_USD: d.revenue_usd || 0,
-    ...(typeof d.cost_usd === 'number' ? { COGS_USD: d.cost_usd } : {}),
-    ...(typeof d.profit_usd === 'number' ? { Profit_USD: d.profit_usd } : {}),
+    ...(typeof d.cost_usd === 'number' ? { COGS_USD: costCoverage(d).allUnknown ? '' : d.cost_usd } : {}),
+    ...(typeof d.profit_usd === 'number' ? { Profit_USD: costCoverage(d).allUnknown ? '' : d.profit_usd } : {}),
     Tx: d.count || 0,
   }))
   downloadXLSX(`dashboard-sales-${ctx.exportStamp}.xlsx`, rows)

@@ -11,6 +11,8 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { knownCost, partialCostNote, unknownCostLabel } from '../../utils/costDisplay.ts'
+import { costCoverage, costFigureText } from '../../utils/costCoverage.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
@@ -1201,8 +1203,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       name: movement?.product_name || t('product') || 'Product',
       stock_quantity: Number(movement?.quantity || 0),
       unit: movement?.unit || '',
-      purchase_price_usd: Number(movement?.unit_cost_usd || 0),
-      purchase_price_khr: Number(movement?.unit_cost_khr || 0),
+      // null stays null: a movement with no recorded unit cost is an unknown cost, not $0.00.
+      purchase_price_usd: movement?.unit_cost_usd ?? undefined,
+      cost_price_usd: movement?.unit_cost_usd ?? undefined,
+      purchase_price_khr: movement?.unit_cost_khr ?? undefined,
       branch_stock: movement?.branch_id ? [{
         branch_id: movement.branch_id,
         branch_name: movement.branch_name || '',
@@ -1638,7 +1642,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       movementColorClass(group.movement_type, Number(group.signedQuantity || 0)),
     [],
   )
-  const totalValue = Number(stockStats?.stock_value_usd || 0)
+  // null = no product has a recorded cost; the unknown products are counted beside the figure, never priced at $0.
+  const totalValueKnown = knownCost(stockStats?.stock_value_usd)
+  const totalValue = totalValueKnown ?? 0
+  const stockUnknownProducts = Math.max(0, Math.floor(Number(stockStats?.stock_value_unknown_products) || 0))
   const lowStockCount = Number(stockStats?.low_stock || 0)
   const outStockCount = Number(stockStats?.out_of_stock || 0)
   const inStockCount = Number(stockStats?.in_stock || 0)
@@ -1712,6 +1719,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const stripCount = (value: number): string => (!stripHasRange ? '—' : stripLoading ? '···' : String(value))
   const stripRevenue = Number(kernelTotals.revenue_usd) || 0
   const stripCogs = Number(kernelTotals.cost_usd) || 0
+  const stripCoverage = costCoverage(kernelTotals)
   const stripProfit = Number(kernelTotals.profit_usd) || 0
   const stripGross = Number(stripDisplayTotals.gross_sales_usd) || 0
   const stripItemDiscount = Number(kernelTotals.item_discount_usd) || 0
@@ -1772,12 +1780,12 @@ ${inventoryThresholdFormulaText}`,
       hint: `${tr('inventory_info_stock_value', 'What the stock you are holding right now cost you to buy. Not what it will sell for.')}
 
 ${inventoryStockValueFormulaText}`,
-      value: statsValue(fmtUSD(totalValue)),
+      value: statsValue(totalValueKnown === null ? unknownCostLabel(t) : fmtUSD(totalValue)),
       tone: 'accent',
-      sub: matchStockShortLabel,
+      sub: (totalValueKnown === null ? null : partialCostNote(stockUnknownProducts, t)) || matchStockShortLabel,
       details: [
-        { label: String(inventoryStatLabels.stockValue), value: fmtUSD(totalValue) },
-        { label: tr('avg_value_per_product', 'Avg value / product'), value: fmtUSD(totalProducts > 0 ? totalValue / totalProducts : 0) },
+        { label: String(inventoryStatLabels.stockValue), value: totalValueKnown === null ? unknownCostLabel(t) : costFigureText(fmtUSD(totalValue), { measured: true, unknown: stockUnknownProducts, allUnknown: false }, t) },
+        { label: tr('avg_value_per_product', 'Avg value / product'), value: totalValueKnown === null ? unknownCostLabel(t) : fmtUSD(totalProducts > 0 ? totalValue / Math.max(1, totalProducts - stockUnknownProducts) : 0) },
         { label: String(inventoryStatLabels.lowStock), value: lowStockCount, tone: lowStockCount > 0 ? 'warn' : undefined },
         { label: String(inventoryStatLabels.outOfStock), value: outStockCount, tone: outStockCount > 0 ? 'crit' : undefined },
       ],
@@ -1793,14 +1801,14 @@ ${inventoryStockValueFormulaText}`,
 ${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} − ${String(inventoryStatLabels.cogs)}`,
       value: stripMoney(stripRevenue),
       tone: 'ok',
-      sub: stripLoading || !canViewCosts ? undefined : `${tr('gross_profit', 'Gross profit')} ${fmtUSD(stripProfit)}`,
+      sub: stripLoading || !canViewCosts ? undefined : `${tr('gross_profit', 'Gross profit')} ${stripCoverage.allUnknown ? unknownCostLabel(t) : fmtUSD(stripProfit)}`,
       details: [
         { label: tr('stats_gross', 'Gross sales'), value: fmtUSD(stripGross) },
         { label: String(inventoryStatLabels.revenue), value: fmtUSD(stripRevenue) },
         ...(canViewCosts ? [
-          { label: String(inventoryStatLabels.cogs), value: fmtUSD(stripCogs) },
-          { label: tr('gross_profit', 'Gross profit'), value: fmtUSD(stripProfit), tone: 'ok' as const },
-          { label: marginShortLabel, value: stripRevenue > 0 ? `${((stripProfit / stripRevenue) * 100).toFixed(1)}%` : '—' },
+          { label: String(inventoryStatLabels.cogs), value: costFigureText(fmtUSD(stripCogs), stripCoverage, t) },
+          { label: tr('gross_profit', 'Gross profit'), value: costFigureText(fmtUSD(stripProfit), stripCoverage, t), tone: 'ok' as const },
+          { label: marginShortLabel, value: stripRevenue > 0 && !stripCoverage.allUnknown ? costFigureText(`${((stripProfit / stripRevenue) * 100).toFixed(1)}%`, stripCoverage, t) : '—' },
         ] : []),
       ],
     },
@@ -1938,6 +1946,7 @@ ${inventoryFeesFormulaText}`,
     const totals = (kernel?.totals || {}) as Record<string, number>
     const cust = (customer?.totals || {}) as Record<string, number>
     const supp = (supplier?.totals || {}) as Record<string, number>
+    const exportCoverage = costCoverage(totals)
     const { downloadCSV } = await import('../../utils/csv.ts')
     downloadCSV(`inventory-stats-${startDate || 'all'}-${endDate || 'all'}.csv`, [
       { metric: 'range_start', value: startDate || 'all' },
@@ -1948,10 +1957,12 @@ ${inventoryFeesFormulaText}`,
       { metric: 'in_stock_current', value: inStockCount },
       { metric: 'low_stock_current', value: lowStockCount },
       { metric: 'out_of_stock_current', value: outStockCount },
-      { metric: 'stock_value_usd_current', value: totalValue },
+      { metric: 'stock_value_usd_current', value: totalValueKnown === null ? '' : totalValue },
+      ...(stockUnknownProducts > 0 ? [{ metric: 'stock_value_unknown_products_current', value: stockUnknownProducts }] : []),
       { metric: 'revenue_usd', value: Number(totals.revenue_usd) || 0 },
-      { metric: 'cogs_usd', value: Number(totals.cost_usd) || 0 },
-      { metric: 'profit_usd', value: Number(totals.profit_usd) || 0 },
+      { metric: 'cogs_usd', value: exportCoverage.allUnknown ? '' : Number(totals.cost_usd) || 0 },
+      { metric: 'profit_usd', value: exportCoverage.allUnknown ? '' : Number(totals.profit_usd) || 0 },
+      ...(exportCoverage.unknown > 0 ? [{ metric: 'unknown_cost_lines', value: exportCoverage.unknown }] : []),
       { metric: 'gross_sales_usd', value: Number(totals.gross_sales_usd) || 0 },
       { metric: 'store_discount_usd', value: Number(totals.store_discount_usd) || 0 },
       { metric: 'membership_discount_usd', value: Number(totals.membership_discount_usd) || 0 },
@@ -1962,9 +1973,9 @@ ${inventoryFeesFormulaText}`,
       { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
       { metric: 'supplier_returns', value: Number(supp.count) || 0 },
       { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
-    ].filter((row) => canViewCosts || !['stock_value_usd_current', 'cogs_usd', 'profit_usd', 'supplier_loss_usd'].includes(row.metric)).map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
+    ].filter((row) => canViewCosts || !['stock_value_usd_current', 'stock_value_unknown_products_current', 'cogs_usd', 'profit_usd', 'unknown_cost_lines', 'supplier_loss_usd'].includes(row.metric)).map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
       ? { ...row, value: '—' } : row))
-  }, [canViewCosts, inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
+  }, [canViewCosts, inStockCount, lowStockCount, outStockCount, stockUnknownProducts, stripRange.endDate, stripRange.startDate, totalProducts, totalValue, totalValueKnown])
 
   const inventoryExportItems = useMemo<any[]>(() => {
     if (tab !== 'movements') return []

@@ -8,6 +8,8 @@ import { buildEquation, revenueTerms, profitTerms, equationResidual } from '../s
 import { formatUsd4 } from '../src/utils/reportMoney.ts'
 // The REAL client mirror of the Worker's cost gate, injected like the formulas above.
 import { canViewAcquisitionCosts } from '../src/utils/acquisitionCostAccess.ts'
+import { costCoverage, costFigureText } from '../src/utils/costCoverage.ts'
+import { partialCostNote, unknownCostLabel } from '../src/utils/costDisplay.ts'
 
 const source = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const lifecycleStart = source.indexOf('  type SalesStripPayload =')
@@ -25,7 +27,7 @@ function render(hooks: any, props: any, api: any, helpers: any) {
   const { useState, useRef, useMemo, useCallback, useEffect } = hooks
   const { stripRange, isActive, user, canViewSales, canViewFees, getPermissionTier } = props
   const { getSalesStatsStrip, getFeesReport } = api
-  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts } = helpers
+  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts, costCoverage, costFigureText, partialCostNote, unknownCostLabel } = helpers
   const settings = props.settings
   const withLoaderTimeout = (load: () => unknown) => load()
   const t = (key: string) => key
@@ -95,7 +97,7 @@ function harness() {
   const enqueue = (queue: Pending[], params: Record<string, unknown>) => new Promise((resolve, reject) => queue.push({ params, resolve, reject }))
   const api = { getSalesStatsStrip: (params: Record<string, unknown>) => enqueue(requests.sales, params), getFeesReport: (params: Record<string, unknown>) => enqueue(requests.fees, params) }
   let view: View
-  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts }); return view }
+  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts, costCoverage, costFigureText, partialCostNote, unknownCostLabel }); return view }
   const commit = () => {
     for (const [index, effect] of effects) { slots[index].cleanup?.(); slots[index].cleanup = effect() || undefined }
     effects.clear()

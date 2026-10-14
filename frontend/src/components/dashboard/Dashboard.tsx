@@ -5,6 +5,8 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
+import { knownCost, partialCostNote, unknownCostLabel } from '../../utils/costDisplay.ts'
+import { costCoverage, costFigureText } from '../../utils/costCoverage.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
@@ -202,8 +204,10 @@ interface DashboardSummary {
   in_stock_count: number
   low_stock_count: number
   out_of_stock_count: number
-  stock_value_usd: number
-  stock_value_khr: number
+  stock_value_usd?: number | null
+  stock_value_khr?: number | null
+  stock_value_unknown_products?: number
+  stock_value_unknown_quantity?: number
   low_stock: DashboardProduct[]
   out_of_stock: DashboardProduct[]
   expiring_products: DashboardProduct[]
@@ -307,8 +311,6 @@ const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   in_stock_count: 0,
   low_stock_count: 0,
   out_of_stock_count: 0,
-  stock_value_usd: 0,
-  stock_value_khr: 0,
   low_stock: [],
   out_of_stock: [],
   expiring_products: [],
@@ -725,7 +727,7 @@ function isDashboardSummaryPayload(value: unknown): value is DashboardSummary {
   return (
     Number.isFinite(Number(payload.product_count))
     && Number.isFinite(Number(payload.today_count))
-    && Number.isFinite(Number(payload.stock_value_usd))
+    && (payload.stock_value_usd == null || Number.isFinite(Number(payload.stock_value_usd)))
     && Number.isFinite(Number(payload.expiring_count))
     && Array.isArray(payload.recent_sales)
     && Array.isArray(payload.low_stock)
@@ -1397,7 +1399,13 @@ export default function Dashboard() {
   const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aInvoiceDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
-  const aStockValue = summary?.stock_value_usd || 0
+  // Absent = hidden by permission (the Worker strips stock_value_* without product_cost_view); null = no product has a recorded cost.
+  const aStockValueShown = summary == null || summary.stock_value_usd !== undefined
+  const aStockValueKnown = knownCost(summary?.stock_value_usd)
+  const aStockValue = aStockValueKnown ?? 0
+  const aStockUnknownProducts = Math.max(0, Math.floor(Number(summary?.stock_value_unknown_products) || 0))
+  const aStockValueText = summary == null ? '—' : aStockValueKnown === null ? unknownCostLabel(t) : fmtUSD(aStockValueKnown)
+  const aStockPartialNote = aStockValueKnown === null ? null : partialCostNote(aStockUnknownProducts, t)
   const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
   const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
   const aStoreDelivery = analytics?.totals?.store_delivery_usd || 0
@@ -1455,6 +1463,7 @@ export default function Dashboard() {
   // The no-negative rule governs the canonical aProfit above, not this.
   const aProfitInclLosses = analytics?.totals?.profit_after_losses_usd ?? (aProfit - aRemovalLoss)
   const aCost     = analytics?.totals?.cost_usd   || 0
+  const aCostCoverage = costCoverage(analytics?.totals)
   const aAvgOrder = analytics?.totals?.avg_order_usd || 0
   // "What actually changed hands" = net revenue + tax + customer-paid
   // delivery (the kernel exposes it; fall back to the sum for an older
@@ -1462,7 +1471,7 @@ export default function Dashboard() {
   const aCollected = analytics?.totals?.collected_total_usd ?? (aRevenue + aTax + aDelivery)
   const aProductCount = summary?.product_count || 0
   const aDiscountRate = aGrossSales > 0 ? (aDiscounts / aGrossSales) * 100 : 0
-  const aAvgStockValue = aProductCount > 0 ? aStockValue / aProductCount : 0
+  const aAvgStockValue = aProductCount > 0 ? aStockValue / Math.max(1, aProductCount - aStockUnknownProducts) : 0
   // RETURN-DATE ACTIVITY: how many returns were processed in this range and
   // what was paid out for them, counted on the date the RETURN happened. It
   // answers "how busy was the returns desk", and it is NOT the figure revenue
@@ -1619,23 +1628,26 @@ export default function Dashboard() {
         { label: translateOr('product_expiry_alerts', 'Expiry alerts'), value: summary?.expiring_count ?? summary?.expiring_products?.length ?? 0 },
       ],
     },
-    {
+    ...(aStockValueShown ? [{
       id: 'stock-value',
-      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range."),
+      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range.")
+        + (aStockUnknownProducts > 0 ? `
+
+${(t('stock_value_partial') || '{count} product(s) with unknown cost are not in this value').replace('{count}', String(aStockUnknownProducts))}` : ''),
       label: translateOr('stock_value', 'Stock value'),
-      value: fmtUSD(aStockValue),
+      value: aStockValueText,
       color: 'text-cyan-600',
-      sub: matchStockShortLabel,
+      sub: aStockPartialNote || matchStockShortLabel,
       // Evened out (user, Aug 29): the money on the shelf plus what's behind
       // it -- average value per product and the risk counts (low/out) -- so
       // this card carries a real drill instead of two lines.
       details: [
-        { label: translateOr('stock_value', 'Stock value'), value: fmtUSD(aStockValue) },
-        { label: translateOr('avg_value_per_product', 'Avg value / product'), value: fmtUSD(aAvgStockValue) },
+        { label: translateOr('stock_value', 'Stock value'), value: aStockPartialNote ? `${aStockValueText} · ${aStockPartialNote}` : aStockValueText },
+        { label: translateOr('avg_value_per_product', 'Avg value / product'), value: aStockValueKnown === null ? aStockValueText : aStockPartialNote ? `${fmtUSD(aAvgStockValue)} · ${aStockPartialNote}` : fmtUSD(aAvgStockValue) },
         { label: translateOr('low_stock', 'Low stock'), value: lowStockCount },
         { label: translateOr('out_of_stock', 'Out of stock'), value: outOfStockCount },
       ],
-    },
+    }] : []),
     {
       id: 'revenue',
       // Part 388: expressive/expression-based info -- the FORMULA with this
@@ -1712,14 +1724,14 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
 ${buildEquation(aProfitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback: 'Profit (excl. delivery)', usd: aProfit } : { key: 'gross_profit', fallback: 'Gross profit', usd: aProfit }, profitTerms({ ...aFormulaTotals, profit_excludes_delivery: aProfitExclDelivery }), fmtUSD, translateOr)}
 ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profit')} ÷ ${translateOr('revenue_short', 'Revenue')} = ${aRevenue > 0 ? ((aProfit / aRevenue) * 100).toFixed(2) : '0.00'}%`,
       label: aProfitExclDelivery ? translateOr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : translateOr('gross_profit', 'Gross Profit'),
-      value: fmtUSD(aProfit),
+      value: aCostCoverage.allUnknown ? unknownCostLabel(t) : fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
-      sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : '',
+      sub: [aRevenue > 0 && !aCostCoverage.allUnknown ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : '', partialCostNote(aCostCoverage.unknown, t) || ''].filter(Boolean).join(' · '),
       // Evened out (user, Aug 29): dropped the duplicate "Revenue" line (it
       // headlines its own card) -- the profit formula's own parts remain.
       details: [
-        { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
-        { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
+        { label: translateOr('est_profit', 'Est. profit'), value: costFigureText(fmtUSD(aProfit), aCostCoverage, t) },
+        { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: costFigureText(fmtUSD(aCost), aCostCoverage, t) },
         // The two delivery terms profit actually carries. Store-paid delivery
         // is NOT one of them and moved to the Delivery card, where it is a
         // memo figure rather than a subtraction nothing performs.
@@ -1727,10 +1739,10 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
           { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
           { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         ]),
-        { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
+        { label: translateOr('profit_margin', 'Profit margin'), value: aCostCoverage.allUnknown ? '—' : costFigureText(aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%', aCostCoverage, t) },
         ...(aHasLosses ? [
           { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
-          { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(aProfitInclLosses) },
+          { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: costFigureText(fmtUSD(aProfitInclLosses), aCostCoverage, t) },
         ] : []),
       ],
     }] : []),
@@ -1818,6 +1830,12 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     aDiscountRate,
     aAvgStockValue,
     aCost,
+    aCostCoverage,
+    aStockPartialNote,
+    aStockUnknownProducts,
+    aStockValueKnown,
+    aStockValueShown,
+    aStockValueText,
     aDelivery,
     aDiscounts,
     aGrossSales,
@@ -1863,6 +1881,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     summary?.expiring_products?.length,
     summary?.in_stock_count,
     summary?.product_count,
+    t,
     translateOr,
   ])
 
