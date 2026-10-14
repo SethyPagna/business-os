@@ -97,7 +97,7 @@ import { classifyUnifiedStockActions, type StockActionImportResult } from './sto
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
-import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
+import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES, planHistoricalSaleReceiptNumbers } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import { branchCanSell, branchRole } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
@@ -5867,7 +5867,7 @@ type SalesApplyReceipt = { rowNumber: number; data: unknown }
 export async function applyHistoricalSalesReceipts(
   db: D1Compat,
   receipts: SalesApplyReceipt[],
-  input: { jobId: string; nowIso: string; actor: SessionUser; accrueLoyalty: boolean; concurrency: number },
+  input: { jobId: string; nowIso: string; actor: SessionUser; accrueLoyalty: boolean; concurrency: number; receiptNumbers?: ReadonlyMap<number, string> },
 ): Promise<number> {
   const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
   let done = 0
@@ -5883,6 +5883,7 @@ export async function applyHistoricalSalesReceipts(
       data: receipt.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
       nowIso: input.nowIso,
       actor: input.actor,
+      plannedReceiptNumber: input.receiptNumbers?.get(receipt.rowNumber),
       accrueLoyalty: input.accrueLoyalty,
     })))
     const block = resolveSalesApplyBlock(settled)
@@ -7410,12 +7411,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
       // Tier-aware: paid 12, free 6 -- see lib/planTier.ts. The module-level
       // export keeps its Paid value for existing readers.
+      // Receipts of one moment commit concurrently: number the whole window first so they cannot race for one number.
+      const receiptNumbers = await planHistoricalSaleReceiptNumbers(db, jobId, actionable, nowIso)
       // Bounded by the per-invocation call budget, not by the row window: see applyHistoricalSalesReceipts.
       const callBudget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
       if (callBudget) Object.assign(callBudget, { unit: 'call', enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })
       try {
         appliedReceipts = await applyHistoricalSalesReceipts(db, actionable, {
-          jobId, nowIso, actor: authority.actor, accrueLoyalty, concurrency: limits.historicalSalesImportConcurrency,
+          jobId, nowIso, actor: authority.actor, accrueLoyalty, concurrency: limits.historicalSalesImportConcurrency, receiptNumbers,
         })
       } finally {
         if (callBudget) Object.assign(callBudget, { unit: 'statement', enabled: false, reserve: 0 })

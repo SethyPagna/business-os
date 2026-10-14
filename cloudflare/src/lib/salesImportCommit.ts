@@ -1,6 +1,6 @@
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
-import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
+import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
 import { actorSnapshot, type ActorLike } from './actorSnapshot'
@@ -28,8 +28,55 @@ export type HistoricalSaleCommitResult = { alreadyApplied: boolean; clientReques
 
 // Re-mints after losing an in-batch receipt race before failing the row; each
 // retry re-runs the whole atomic batch, so the bound caps a burst's cost.
-// Same bound as POST /api/sales.
+// Same bound as POST /api/sales. A race with a sale from OUTSIDE the import is
+// all this covers: receipts of one import never race each other, because the
+// window plans their numbers up front (planHistoricalSaleReceiptNumbers).
 const RECEIPT_NUMBER_RETRY_LIMIT = 3
+
+const historicalSaleClientRequestId = (jobId: string, rowNumber: number) => `sales-import:${jobId}:${rowNumber}`
+
+// The moment a receipt number is minted from: the sale's own moment, or the run's when the file has none (or an
+// unreadable one). Shared by the writer and the planner so both stamp a receipt identically.
+const historicalSaleMintMoment = (createdAt: string | null | undefined, nowIso: string): Date => {
+  const moment = new Date(createdAt || nowIso)
+  return Number.isNaN(moment.getTime()) ? new Date(nowIso) : moment
+}
+
+/**
+ * Numbers a whole window of receipts at once. Receipts that share a sale moment (an old system's date-only dates put a
+ * whole day on one second) are committed concurrently, and probing for "the first free number" gives every one of them
+ * the same answer. The k-th receipt of a moment instead takes the k-th number that no OTHER sale holds, so the numbers
+ * are distinct however the batches interleave and identical when the window is replayed after a cut: a sale this same
+ * window already committed does not count as taken, it is simply planned the same number again.
+ * One read per window. Pass the result to applyHistoricalSaleImport as `plannedReceiptNumber`.
+ */
+export async function planHistoricalSaleReceiptNumbers(
+  db: D1Compat,
+  jobId: string,
+  receipts: ReadonlyArray<{ rowNumber: number; data: unknown }>,
+  nowIso: string,
+): Promise<Map<number, string>> {
+  const entries = receipts.map(({ rowNumber, data }) => {
+    const sale = data as { receipt_number?: unknown; created_at?: string | null }
+    return {
+      key: rowNumber,
+      moment: historicalSaleMintMoment(sale.created_at, nowIso),
+      supplied: normalizeClientReceiptNumber(typeof sale.receipt_number === 'string' ? sale.receipt_number.trim() : ''),
+    }
+  })
+  if (!entries.length) return new Map()
+  const stamps = [...new Set(entries.map((entry) => businessDateTimeId(entry.moment)))]
+  const windowRequests = new Set(entries.map((entry) => historicalSaleClientRequestId(jobId, entry.key)))
+  // Every number of a stamp is the stamp itself or the stamp plus a "-suffix", so a range scan from the stamp up to
+  // (not including) "stamp." reads exactly those, through idx_sales_receipt_number.
+  const held = await db.prepare(`SELECT s.receipt_number AS receipt_number, s.client_request_id AS client_request_id
+    FROM json_each(@stamps) stamp JOIN sales s ON s.receipt_number >= stamp.value AND s.receipt_number < stamp.value || '.'`)
+    .all<{ receipt_number: string; client_request_id: string | null }>({ stamps: JSON.stringify(stamps) })
+  const taken = new Set(held.filter((sale) => !windowRequests.has(String(sale.client_request_id))).map((sale) => sale.receipt_number))
+  // A receipt that brought a valid business number of its own keeps it, so no sibling may be planned onto it.
+  for (const entry of entries) if (entry.supplied) taken.add(entry.supplied)
+  return planBusinessDateTimeNumbers(entries, taken)
+}
 
 const pendingGuard = `(SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key) = 'pending'`
 
@@ -100,7 +147,8 @@ export async function applyHistoricalSaleImport(
   // review screen (default OFF -- migrated history should not inflate
   // balances, which are summed from sales). Set true only when the operator
   // explicitly opts a sales import into earning points.
-  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; actor: ActorLike; accrueLoyalty?: boolean },
+  // `plannedReceiptNumber` is this receipt's number from planHistoricalSaleReceiptNumbers; without one the writer probes.
+  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; actor: ActorLike; accrueLoyalty?: boolean; plannedReceiptNumber?: string | null },
 ): Promise<HistoricalSaleCommitResult> {
   const jobId = String(input.jobId || '').trim()
   const rowNumber = Number(input.rowNumber)
@@ -117,7 +165,7 @@ export async function applyHistoricalSaleImport(
   }
 
   const groupKey = `row:${rowNumber}`
-  const clientRequestId = `sales-import:${jobId}:${rowNumber}`
+  const clientRequestId = historicalSaleClientRequestId(jobId, rowNumber)
   const existing = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
@@ -213,7 +261,6 @@ export async function applyHistoricalSaleImport(
   const createdAt = d.created_at || input.nowIso
   const suppliedReceipt = typeof d.receipt_number === 'string' ? d.receipt_number.trim() : ''
   const ownReceipt = normalizeClientReceiptNumber(suppliedReceipt)
-  const mintMoment = new Date(createdAt)
   // receipt_number carries no UNIQUE index, so the probe only picks a
   // CANDIDATE: the write batch re-asserts uniqueness in-transaction
   // (receiptFreeGuard below) and a lost race re-mints, bounded by
@@ -223,11 +270,16 @@ export async function applyHistoricalSaleImport(
   // fresh id and the supplied one survives as legacy_receipt_number.
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
-  const mintReceiptNumber = () => uniqueBusinessDateTimeNumber(
-    '',
-    receiptNumberTaken,
-    Number.isNaN(mintMoment.getTime()) ? new Date(input.nowIso) : mintMoment,
-  )
+  let plannedReceiptNumber = input.plannedReceiptNumber || null
+  const mintReceiptNumber = async () => {
+    // The planned number is tried once; a lost race re-probes from the current state.
+    if (plannedReceiptNumber) {
+      const planned = plannedReceiptNumber
+      plannedReceiptNumber = null
+      return planned
+    }
+    return uniqueBusinessDateTimeNumber('', receiptNumberTaken, historicalSaleMintMoment(createdAt, input.nowIso))
+  }
   let receiptNumber = ownReceipt && !(await receiptNumberTaken(ownReceipt)) ? ownReceipt : await mintReceiptNumber()
   let legacyReceiptNumber = receiptNumber === ownReceipt ? null : suppliedReceipt || null
   const importedCustomerId = Number(d.customer_id)

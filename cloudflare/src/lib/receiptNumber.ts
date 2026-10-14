@@ -37,7 +37,10 @@ export function businessDateTimeId(now: Date = new Date()): string {
 // `moment` defaults to now (a live checkout or return). A historical sales
 // import passes the sale's OWN moment instead, so an imported receipt gets
 // the id the POS would have minted the day it happened rather than the id of
-// the day someone happened to run the import.
+// the day someone happened to run the import. (An import commits receipts
+// concurrently, so it plans a whole window at once with
+// planBusinessDateTimeNumbers below and only falls back to this probe when a
+// planned number is lost to a sale from outside the import.)
 export async function uniqueBusinessDateTimeNumber(
   prefix: string,
   exists: (candidate: string) => Promise<boolean>,
@@ -52,6 +55,42 @@ export async function uniqueBusinessDateTimeNumber(
     candidate = `${base}-${n}`
   }
   return candidate
+}
+
+// A batch of receipts that share a moment (a historical import of date-only sale dates mints a whole day from one
+// second) cannot be numbered by probing: concurrent writers all see the same free candidate and race for it. The
+// caller instead plans the whole batch against one snapshot of the numbers that are already taken. The k-th entry of
+// a moment takes the k-th free slot -- the bare stamp, then -2, -3, ... up to RECEIPT_SLOT_LIMIT (the shape guard
+// below accepts a 1-4 character suffix) -- so the numbers are unique by construction and depend only on the entries'
+// order and on `taken`, never on which writer happens to land first. Past the limit a random suffix is the last resort.
+export const RECEIPT_SLOT_LIMIT = 9999
+
+export function planBusinessDateTimeNumbers(
+  entries: ReadonlyArray<{ key: number; moment: Date }>,
+  taken: ReadonlySet<string>,
+  prefix = '',
+): Map<number, string> {
+  const used = new Set(taken)
+  const nextSlot = new Map<string, number>()
+  const plan = new Map<number, string>()
+  for (const { key, moment } of entries) {
+    const stamp = businessDateTimeId(moment)
+    const base = prefix ? `${prefix}-${stamp}` : stamp
+    let slot = nextSlot.get(base) ?? 1
+    let candidate = ''
+    for (; slot <= RECEIPT_SLOT_LIMIT; slot++) {
+      candidate = slot === 1 ? base : `${base}-${slot}`
+      if (!used.has(candidate)) break
+    }
+    if (slot > RECEIPT_SLOT_LIMIT) {
+      do candidate = `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      while (used.has(candidate))
+    }
+    used.add(candidate)
+    nextSlot.set(base, slot + 1)
+    plan.set(key, candidate)
+  }
+  return plan
 }
 
 // ---------------------------------------------------------------------------

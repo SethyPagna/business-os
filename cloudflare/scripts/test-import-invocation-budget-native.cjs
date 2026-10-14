@@ -14,6 +14,7 @@
 // Heavy: several Miniflare worlds and ~1,500 receipts. Run alone, serially:
 //   NATIVE_TEST_TIMEOUT_MS=1500000 node scripts/test-import-invocation-budget-native.cjs
 //   BUDGET_FULL=0 skips the 600-receipt cases (300 at most).
+//   BUDGET_CASES=sameday runs only the same-moment receipt numbering case ('sameday,budget' is the default).
 //   BUDGET_MUTANT=none runs the "uncut" world on the unmodified engine: against an engine without the budget the test
 //   goes red at the first budgeted assertion, which is how the pre-fix tree is checked.
 'use strict'
@@ -26,6 +27,7 @@ const root = path.resolve(__dirname, '..')
 const sha256 = (text) => createHash('sha256').update(text).digest('hex')
 const FULL = process.env.BUDGET_FULL !== '0'
 const LIMIT = { paid: 1000, free: 50 }
+const CASES = new Set((process.env.BUDGET_CASES || 'sameday,budget').split(','))
 const UNCUT_MUTANT = process.env.BUDGET_MUTANT === 'none' ? null : 'no-sales-budget'
 
 const MUTANTS = {
@@ -286,6 +288,17 @@ async function bigReceiptScenario(H) {
   }
 }
 
+// Every receipt carries a date-only sale date, so all of them mint their number from the same second (00:00:00).
+async function sameMomentScenario(H, n) {
+  const ps = await seedProducts(H, n)
+  const day = (H.day = (H.day || 0) + 1)
+  return {
+    type: 'sales', policy: { source: 'budget' }, products: ps, stamp: `202607${String(day).padStart(2, '0')}-000000`,
+    csv: csvOf(['receipt_number', 'sale_date', 'branch', 'barcode', 'name', 'quantity', 'unit_price_usd', 'payment_method'],
+      ps.map((p, i) => [`SAME-${i}`, `2026-07-${String(day).padStart(2, '0')}`, 'Shop', p.barcode, p.name, '1', '10', 'cash'])),
+  }
+}
+
 async function stockAddScenario(H, n) {
   const ps = await seedProducts(H, n)
   return {
@@ -367,6 +380,26 @@ async function main() {
   const worlds = []
   const open = async (options) => { const H = await world(options); worlds.push(H); return H }
   try {
+    if (CASES.has('sameday')) {
+      // 30 receipts of one moment commit 12 at a time. Probing for "the first free number" gave all twelve the same answer
+      // and the job failed with "Sale on row N lost its receipt number ... to another sale saved at the same moment".
+      const sameDay = await open({ plan: 'paid' })
+      const SAME = 30
+      const spec = await sameMomentScenario(sameDay, SAME)
+      const run = await runJob(sameDay, spec, 'paid-same-moment-30')
+      assertCompleted(run, SAME)
+      await assertExactlyOnce(sameDay, run, SAME)
+      const numbers = (await snapshot(sameDay, run, spec.products)).sales.map((sale) => sale.receipt_number)
+      assert.deepEqual(numbers, Array.from({ length: SAME }, (_, i) => (i === 0 ? spec.stamp : `${spec.stamp}-${i + 1}`)), 'receipts of one moment are numbered in file order, bare then -2, -3, ...')
+      note(`Paid ${SAME} receipts of one moment: ${run.apply.length} apply invocation(s), numbered ${numbers[0]} .. ${numbers.at(-1)} in file order`)
+      await sameDay.dispose()
+      worlds.splice(worlds.indexOf(sameDay), 1)
+    }
+    if (!CASES.has('budget')) {
+      console.log('PASS receipts of one sale moment are numbered distinctly and in file order')
+      return
+    }
+
     const SMALL = 150
     const MID = 300
     const BIG = FULL ? 600 : MID
@@ -468,7 +501,7 @@ async function main() {
       await assertExactlyOnce(free, freeBig, BIG)
       note(`Free ${BIG} receipts: ${freeBig.apply.length} apply invocations, worst ${freeBig.maxSub} of ${LIMIT.free} calls`)
     }
-    console.log(`PASS sales imports stay inside the per-invocation call budget on Paid and Free, resume exactly, and the unbudgeted control is red`)
+    console.log('PASS sales imports number same-moment receipts, stay inside the per-invocation call budget on Paid and Free, resume exactly, and the unbudgeted control is red')
   } finally {
     for (const H of worlds) await H.dispose().catch(() => {})
   }
