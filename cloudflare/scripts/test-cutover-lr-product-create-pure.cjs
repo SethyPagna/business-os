@@ -16,9 +16,13 @@ const createBody = (branchId, extra = {}) => ({ name: 'Toner', barcode: '8850009
 const opening = (db) => W.plain(db.prepare(`SELECT bs.branch_id, bs.quantity, (SELECT SUM(quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
     WHERE pb.variant_product_id=p.id AND bbs.branch_id=bs.branch_id) AS lots FROM products p JOIN branch_stock bs ON bs.product_id=p.id WHERE p.name='Toner' ORDER BY bs.branch_id`).all())
 
-function queue(db, branchId) {
+// The oracle (eb5dd0ba3) leaves an omitted cost to the column DEFAULT 0; since S7 an omitted cost is NULL. The byte-identity
+// below is about the branch-redirect statements, so both worlds are given the same explicit recorded 0.
+const recordedZeroCost = { cost_price_usd: 0, cost_price_khr: 0 }
+
+function queue(db, branchId, extra = {}) {
   db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,summary,status,requested_by,requested_by_name)
-    VALUES(50,'products','create','product',?,'Create product "Toner"','open',99,'Requester')`).run([JSON.stringify(createBody(branchId))])
+    VALUES(50,'products','create','product',?,'Create product "Toner"','open',99,'Requester')`).run([JSON.stringify(createBody(branchId, extra))])
   return db
 }
 
@@ -27,14 +31,14 @@ async function main() {
     for (const url of ['/', '/variant']) {
       const dbNew = W.build('before'); const dbOld = W.build('before')
       const capNew = []; const capOld = []
-      const a = await W.call(products(fresh), dbNew, 'POST', url, createBody(2), { capture: capNew, redirect: 1 })
-      const b = await W.call(products(oracle), dbOld, 'POST', url, createBody(2), { capture: capOld })
+      const a = await W.call(products(fresh), dbNew, 'POST', url, createBody(2, recordedZeroCost), { capture: capNew, redirect: 1 })
+      const b = await W.call(products(oracle), dbOld, 'POST', url, createBody(2, recordedZeroCost), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), url)
       assert.equal(W.normalised(capNew), W.normalised(capOld), url)
       assert.deepEqual(opening(dbNew), [{ branch_id: 1, quantity: 0, lots: null }, { branch_id: 2, quantity: 5, lots: 5 }])
     }
-    const dbNew = queue(W.build('before'), 2); const dbOld = queue(W.build('before'), 2)
+    const dbNew = queue(W.build('before'), 2, recordedZeroCost); const dbOld = queue(W.build('before'), 2, recordedZeroCost)
     const capNew = []; const capOld = []
     const a = await W.call(reviewQueue(fresh), dbNew, 'POST', '/50/approve', {}, { capture: capNew, redirect: 1 })
     const b = await W.call(reviewQueue(oracle), dbOld, 'POST', '/50/approve', {}, { capture: capOld })

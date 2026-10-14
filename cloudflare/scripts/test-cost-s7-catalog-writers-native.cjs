@@ -101,6 +101,18 @@ const productColumns = () => new Set(raw.prepare('PRAGMA table_info(products)').
     assert.deepEqual(entries(fromUnknown).map((entry) => [entry.cost_usd, entry.previous_cost_usd]), [[0, null]], 'unknown -> $0 is a typed zero with its entry')
   })
 
+  await check('PUT clearing the cost of a product whose on-hand lot has a cost: no entry, and the catalog re-derives from the lot exactly as the next stock movement would', async () => {
+    const id = seedCosted('S7 Clear With Lot', 9, null)
+    raw.prepare("INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'S7 Shop',1)").run()
+    const lot = Number(raw.prepare('INSERT INTO product_batches(variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(?,?,1,3.25)').run(id, 's7-clear-lot').lastInsertRowid)
+    raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,2)').run(lot)
+    raw.prepare('UPDATE products SET cost_price_usd = 9, purchase_price_usd = 9 WHERE id = ?').run(id)
+    assert.equal((await request(products, 'PUT', '/' + id, { cost_price_usd: null })).status, 200)
+    assert.equal(costs(id).usd, 3.25, 'the lot gives the formula a cost, so the cleared field is not left unknown')
+    assert.equal(entries(id).length, 0, 'base wrote a $0 override entry here')
+    assert.equal(overrideAudit(id).length, 1)
+  })
+
   await check('PUT that only changes KHR on an unknown-USD product records no entry (cost_usd is NOT NULL) but is audited', async () => {
     const id = seedCosted('S7 Khr Only', null, null)
     assert.equal((await request(products, 'PUT', '/' + id, { cost_price_khr: 8000 })).status, 200)
