@@ -38,18 +38,64 @@ const ALWAYS_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000
 // duration got silently logged out every 24h -- now matches the new
 // default so "haven't touched the setting" behaves the same as "picked
 // Always stay signed in" instead of the shortest possible option.
-const DEFAULT_SESSION_MS = ALWAYS_SESSION_MS
+const DEFAULT_SESSION_DURATION = 'always'
+const BROWSER_SESSION_DURATION = 'session'
 const SESSION_DURATIONS_MS: Record<string, number> = {
   always: ALWAYS_SESSION_MS,
   // Deliberately short -- "Until I close the browser" is the shared-device
   // security option, must stay the shortest choice, not get folded into
   // the new long default.
-  session: 24 * 60 * 60 * 1000,
+  [BROWSER_SESSION_DURATION]: 24 * 60 * 60 * 1000,
   '1d': 24 * 60 * 60 * 1000,
   '3d': 3 * 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '14d': 14 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+function isNamedDuration(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SESSION_DURATIONS_MS, key)
+}
+
+export function resolveSessionDuration(requested: unknown): { key: string; ms: number } {
+  const asked = String(requested ?? '').trim().toLowerCase()
+  const key = isNamedDuration(asked) ? asked : DEFAULT_SESSION_DURATION
+  return { key, ms: SESSION_DURATIONS_MS[key] }
+}
+
+// The chosen duration travels inside the token (`<random>.<duration>`). Only
+// the token's hash is stored, so the suffix cannot be edited without
+// producing a token that matches no session, and it needs no schema change.
+// 'session' and '1d' last the same 24 hours, so the server-side window alone
+// cannot tell them apart; the token can.
+function durationOfToken(token: string): string | null {
+  const dot = token.lastIndexOf('.')
+  if (dot < 0) return null
+  const key = token.slice(dot + 1)
+  return isNamedDuration(key) ? key : null
+}
+
+const NAMED_DURATIONS_MS = [...new Set(Object.values(SESSION_DURATIONS_MS))].sort((a, b) => a - b)
+// created_at is stored to the second after expires_at was computed in
+// JavaScript, so a fresh window can read a moment under its duration.
+const DURATION_INFERENCE_SLACK_MS = 60 * 1000
+
+// Tokens issued before the suffix existed: the largest named duration the
+// row's window covers. Exact only until the session is first renewed, after
+// which the window may have grown past the original choice; the renewal
+// length is still always a named duration, never the grown window itself.
+function inferDurationMs(createdAt: string | null, expiresAt: string | null): number | null {
+  if (!createdAt || !expiresAt) return null
+  const windowMs = asUtc(expiresAt) - asUtc(createdAt)
+  if (!Number.isFinite(windowMs)) return null
+  let inferred: number | null = null
+  for (const ms of NAMED_DURATIONS_MS) if (ms <= windowMs + DURATION_INFERENCE_SLACK_MS) inferred = ms
+  return inferred
+}
+
+function sessionDurationMs(token: string, createdAt: string | null, expiresAt: string | null): number | null {
+  const key = durationOfToken(token)
+  return key ? SESSION_DURATIONS_MS[key] : inferDurationMs(createdAt, expiresAt)
 }
 
 // SHA-256 via Web Crypto (crypto.subtle) -- a Workers-native standard API,
@@ -110,8 +156,8 @@ type SessionLookupRow = SessionUser & {
 }
 
 type SessionExpiryMetadata = {
-  created_at: string | null
   expires_at: string | null
+  duration_ms: number | null
 }
 
 // Persisting last_seen_at on every authenticated request turns a read-heavy
@@ -135,6 +181,37 @@ function isSessionTouchDue(lastSeenAt: string | null, nowMs: number): boolean {
   return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - SESSION_TOUCH_INTERVAL_MS
 }
 
+type NewSessionOptions = {
+  sessionDuration?: string
+  deviceName?: string
+  deviceTz?: string
+  userAgent?: string
+  ip?: string
+  deviceId?: string | null
+  limitFamilyId?: number | null
+}
+
+async function prepareSession(userId: number, options: NewSessionOptions) {
+  const duration = resolveSessionDuration(options.sessionDuration)
+  const token = `${randomToken()}.${duration.key}`
+  const expiresAt = new Date(Date.now() + duration.ms).toISOString()
+  const limitFamilyId = Number(options.limitFamilyId || 0)
+  return {
+    session: { token, expiresAt, sessionDuration: duration.key },
+    limitFamilyId: Number.isSafeInteger(limitFamilyId) && limitFamilyId > 0 ? limitFamilyId : null,
+    params: {
+      user_id: userId,
+      token_hash: await hashToken(token),
+      device_name: options.deviceName || null,
+      device_tz: options.deviceTz || null,
+      user_agent: options.userAgent || null,
+      ip: options.ip || null,
+      device_id: options.deviceId || null,
+      expires_at: expiresAt,
+    },
+  }
+}
+
 export async function createSession(
   env: Env,
   userId: number,
@@ -148,30 +225,15 @@ export async function createSession(
   // one that a future device revoke can't immediately terminate.
   //
   // `limitFamilyId`: pass ONLY when this session is re-issued from an existing
-  // one without a fresh sign-in (POST /session-duration). It is the id of
+  // one without a fresh sign-in (reissueSession). It is the id of
   // the sign-in's own session row, so the child shares that sign-in's
   // current-password allowance (see currentSessionLimitFamily below). A real
   // sign-in omits it: the column stays NULL and the row is its own family.
-  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null; limitFamilyId?: number | null } = {},
-): Promise<{ token: string; expiresAt: string }> {
-  const token = randomToken()
-  const tokenHash = await hashToken(token)
-  const ttlMs = SESSION_DURATIONS_MS[options.sessionDuration || ''] || DEFAULT_SESSION_MS
-  const expiresAt = new Date(Date.now() + ttlMs).toISOString()
-
+  options: NewSessionOptions = {},
+): Promise<{ token: string; expiresAt: string; sessionDuration: string }> {
+  const { session, limitFamilyId, params } = await prepareSession(userId, options)
   const db = getDb(env)
-  const limitFamilyId = Number(options.limitFamilyId || 0)
-  const params = {
-    user_id: userId,
-    token_hash: tokenHash,
-    device_name: options.deviceName || null,
-    device_tz: options.deviceTz || null,
-    user_agent: options.userAgent || null,
-    ip: options.ip || null,
-    device_id: options.deviceId || null,
-    expires_at: expiresAt,
-  }
-  if (Number.isSafeInteger(limitFamilyId) && limitFamilyId > 0) {
+  if (limitFamilyId) {
     // Only the re-issue path names limit_family_id (migration 0201), so the
     // sign-in INSERT below never depends on it.
     await db.prepare(`
@@ -185,7 +247,49 @@ export async function createSession(
     `).run(params)
   }
 
-  return { token, expiresAt }
+  return session
+}
+
+// POST /session-duration: replaces the request's session with a new one in the
+// sign-in's family. Claiming the old session and inserting the new one are one
+// D1 batch (one transaction), and the INSERT only selects a row while the
+// claim changed exactly one, so of any number of calls made with the same
+// cookie exactly one gets a session; the others get null and nothing is
+// written. A failed insert rolls the claim back with it, so the old session
+// is never revoked without a replacement. If the batch commits but its
+// acknowledgement is lost, the transport's retry claims nothing; the caller is
+// still answered with the session its first attempt wrote (the new token's row
+// exists, in this user's sign-in family), never a conflict.
+export async function reissueSession<E extends { Bindings: Env } = { Bindings: Env }>(
+  c: Context<E>,
+  userId: number,
+  options: NewSessionOptions & { limitFamilyId: number },
+): Promise<{ token: string; expiresAt: string; sessionDuration: string } | null> {
+  const sourceToken = getCookie(c, SESSION_COOKIE_NAME)
+  if (!sourceToken) return null
+  const { session, limitFamilyId, params } = await prepareSession(userId, options)
+  if (!limitFamilyId) throw new Error('A re-issued session needs the sign-in family it descends from')
+  sessionLookupMemo.delete(c)
+  const db = getDb(c.env)
+  const [claim, insert] = await db.batch([
+    {
+      sql: 'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = @source_hash AND user_id = @user_id AND revoked_at IS NULL',
+      params: { source_hash: await hashToken(sourceToken), user_id: userId },
+    },
+    {
+      sql: `
+        INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, limit_family_id)
+        SELECT @user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @limit_family_id
+        WHERE changes() = 1
+      `,
+      params: { ...params, limit_family_id: limitFamilyId },
+    },
+  ])
+  if (claim?.meta?.changes === 1 && insert?.meta?.changes === 1) return session
+  const written = await db.prepare(
+    'SELECT 1 AS found FROM user_sessions WHERE token_hash = @token_hash AND user_id = @user_id AND limit_family_id = @limit_family_id AND revoked_at IS NULL',
+  ).get<{ found: number }>({ token_hash: params.token_hash, user_id: userId, limit_family_id: limitFamilyId })
+  return written ? session : null
 }
 
 // Called from routes/devices.ts when an admin rejects a pending device or
@@ -228,6 +332,13 @@ export async function revokeSessionsForDevice(env: Env, userId: number, deviceId
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
 
 export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string, expiresAt: string): void {
+  const attributes = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/' } as const
+  // "Until I close the browser" gets a browser-session cookie: no Expires and
+  // no Max-Age, so it ends with the browser instead of outliving it.
+  if (durationOfToken(token) === BROWSER_SESSION_DURATION) {
+    setCookie(c, SESSION_COOKIE_NAME, token, attributes)
+    return
+  }
   const requested = new Date(expiresAt)
   // The cookie is only a transport for an opaque token; user_sessions expiry
   // remains the authentication authority. Keep it long enough for server-side
@@ -238,13 +349,7 @@ export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }
   const cookieExpires = requested.getTime() > Date.now()
     ? new Date(Date.now() + MAX_COOKIE_AGE_MS)
     : requested
-  setCookie(c, SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    expires: cookieExpires,
-  })
+  setCookie(c, SESSION_COOKIE_NAME, token, { ...attributes, expires: cookieExpires })
 }
 
 export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): void {
@@ -355,8 +460,8 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   }
 
   c.executionCtx.waitUntil(slideSessionExpiry(c, tokenHash, {
-    created_at: createdAt,
     expires_at: expiresAt,
+    duration_ms: sessionDurationMs(token, createdAt, expiresAt),
   }))
 
   return user
@@ -382,9 +487,10 @@ const SESSION_SLIDE_AFTER_FRACTION = 0.5
  * rather than "N days from login", which is what people already assume it
  * means and what the wording ("Keep me signed in for 30 days") implies.
  *
- * The existing renewal policy infers TTL from `expires_at - created_at`.
- * Since created_at does not move, this inferred interval can grow after
- * renewal. That pre-existing duration policy is intentionally unchanged here.
+ * The renewal length is the duration chosen at sign-in (sessionDurationMs),
+ * not `expires_at - created_at`: created_at never moves, so that interval only
+ * equals the chosen duration until the first renewal. A session whose
+ * duration cannot be determined is not renewed.
  * The browser retains newly issued transport cookies for at most 399 days;
  * longer/"always" sessions still need an explicit auth operation by that cap.
  *
@@ -399,18 +505,17 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
 ): Promise<void> {
   try {
     const db = getDb(c.env)
-    if (!session?.created_at || !session?.expires_at) return
+    if (!session?.expires_at) return
 
     // SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (UTC, no
     // zone marker). Date.parse treats that as LOCAL time in some runtimes,
     // which would skew every comparison here, so the marker is added when
     // it is missing rather than trusting the default parse.
-    const createdAt = asUtc(session.created_at)
     const expiresAt = asUtc(session.expires_at)
-    if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return
+    if (!Number.isFinite(expiresAt)) return
 
-    const ttlMs = expiresAt - createdAt
-    if (ttlMs <= 0) return
+    const ttlMs = session.duration_ms
+    if (!ttlMs || ttlMs <= 0) return
 
     const now = Date.now()
     const remaining = expiresAt - now
@@ -455,18 +560,43 @@ export async function currentSessionLimitFamily<E extends { Bindings: Env } = { 
 // What a session re-issued from the request's session inherits: its sign-in
 // family and its device. The device comes from the row, never the request
 // body, so Devices -> Revoke / Reject still reaches the new session.
-export type SessionReissueSource = { limitFamilyId: number; deviceId: string | null; deviceName: string | null }
+// `duration` is what the session was signed in for; null when it cannot be
+// determined (a token from before the duration suffix, with a window shorter
+// than every named duration).
+export type SessionReissueSource = {
+  limitFamilyId: number
+  deviceId: string | null
+  deviceName: string | null
+  duration: { key: string | null; ms: number } | null
+}
 
 export async function currentSessionReissueSource<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<SessionReissueSource | null> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return null
   const tokenHash = await hashToken(token)
   const row = await getDb(c.env).prepare(
-    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
-  ).get<{ family: number | null; device_id: string | null; device_name: string | null }>({ token_hash: tokenHash })
+    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name, created_at, expires_at FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
+  ).get<{ family: number | null; device_id: string | null; device_name: string | null; created_at: string | null; expires_at: string | null }>({ token_hash: tokenHash })
   const family = Number(row?.family || 0)
   if (!row || !Number.isSafeInteger(family) || family <= 0) return null
-  return { limitFamilyId: family, deviceId: row.device_id || null, deviceName: row.device_name || null }
+  const ms = sessionDurationMs(token, row.created_at, row.expires_at)
+  return {
+    limitFamilyId: family,
+    deviceId: row.device_id || null,
+    deviceName: row.device_name || null,
+    duration: ms === null ? null : { key: durationOfToken(token), ms },
+  }
+}
+
+// "Until I close the browser" reaches less than '1d' although both last 24
+// hours on the server: it ends with the browser, '1d' survives a restart.
+const durationReach = (key: string | null, ms: number): number => (key === BROWSER_SESSION_DURATION ? ms - 1 : ms)
+
+// True when `requested` keeps someone signed in for longer than the session it
+// is chosen from. An unknown current duration counts as shorter, so asking
+// for more is never waved through.
+export function lengthensSession(current: SessionReissueSource['duration'], requested: { key: string; ms: number }): boolean {
+  return !current || durationReach(requested.key, requested.ms) > durationReach(current.key, current.ms)
 }
 
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {

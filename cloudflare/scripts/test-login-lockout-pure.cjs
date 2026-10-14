@@ -45,6 +45,7 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const { getLoginLockoutState, recordFailedLogin, clearLoginLockout } = loadReal('lib/loginLockout.ts', {
   './db': { getDb: () => db },
+  './rateLimit': loadReal('lib/rateLimit.ts', { './db': { getDb: () => db } }),
 })
 
 const fakeEnv = {}

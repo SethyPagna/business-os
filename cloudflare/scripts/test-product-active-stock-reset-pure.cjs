@@ -26,7 +26,7 @@ function load(name, dependencies = {}) {
 }
 const core = load('lib/coreDataInvariants.ts', {
  './db': {getDb:()=>db}, './productStockGuard':guard,
- './customTableName':load('lib/customTableName.ts'), './sqlBinding':load('lib/sqlBinding.ts'), './passwordHash':{hashPassword:async()=> 'test-hash'},
+ './customTableName':load('lib/customTableName.ts'), './sqlBinding':load('lib/sqlBinding.ts'), './passwordHash':{hashPassword:async()=> 'test-hash'}, './passwordPolicy':load('lib/passwordPolicy.ts'),
 })
 const backup = async()=>{backupCalls++; if(backupFails) throw new Error('fixture backup refused')}
 const noop = async()=>{}

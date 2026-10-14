@@ -22,6 +22,7 @@ import { assertCustomTableName } from './customTableName'
 import { buildInClause } from './sqlBinding'
 import type { Env } from '../index'
 import { hashPassword } from './passwordHash'
+import { newPasswordProblem, setPasswordMustChange } from './passwordPolicy'
 
 // Default posture (progress.md "Permissions -- default posture"): every
 // page's default permission tier is None unless the role is Admin. Manager
@@ -109,7 +110,11 @@ export type CoreDataInvariants = {
 
 // The password a first-run admin is seeded with, or null for "do not seed".
 //
-//   - BUSINESS_OS_ADMIN_PASSWORD, when non-blank, exactly as given.
+//   - BUSINESS_OS_ADMIN_PASSWORD, when non-blank, exactly as given. One that
+//     fails the new-password rule (shorter than 10 characters, say) still
+//     seeds, with must_change_password = 1: the operator's secret is never
+//     refused and never logged, and the first sign-in is sent to the forced
+//     change screen (seedAdminMustChangePassword).
 //   - Otherwise the demo password 'admin123', ONLY in local development:
 //     BUSINESS_OS_LOCAL_DEV=1/true (an opt-in that belongs in the gitignored
 //     .dev.vars, which only `wrangler dev` reads) AND an unstamped build
@@ -138,6 +143,14 @@ export function resolveSeedAdminPassword(env: Env): string | null {
   const localFlag = String(vars.BUSINESS_OS_LOCAL_DEV ?? '').trim().toLowerCase()
   if ((localFlag === '1' || localFlag === 'true') && isUnstampedBuild()) return LOCAL_DEV_ADMIN_PASSWORD
   return null
+}
+
+// True when the admin would be seeded from a configured BUSINESS_OS_ADMIN_PASSWORD
+// that does not meet the new-password rule. The local-development demo
+// password is not a configured secret and keeps signing in without the prompt.
+export function seedAdminMustChangePassword(env: Env): boolean {
+  const configured = (env as unknown as { BUSINESS_OS_ADMIN_PASSWORD?: string }).BUSINESS_OS_ADMIN_PASSWORD
+  return typeof configured === 'string' && !!configured.trim() && newPasswordProblem(configured) !== null
 }
 
 // The organization identity this deployment is configured with. See the
@@ -443,6 +456,7 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
     `).run({ password: passwordHash, roleId: adminRole?.id ?? null, orgId: organizationId, groupId: organizationGroupId })
     adminUserId = inserted.lastInsertRowid
     adminUserCreated = true
+    if (seedAdminMustChangePassword(env)) await setPasswordMustChange(db, adminUserId, true)
   }
 
   // Backfill: any product that has never received a branch_stock row (created

@@ -16,14 +16,20 @@
 // Pins:
 //   - a re-issue carries the caller's session device_id and device_name,
 //     whatever the body says (none, or another device's id);
+//   - a call that loses the claim on the session it re-issues from is
+//     answered 409 session_duration_conflict and mints nothing;
 //   - Devices -> Revoke and Reject kill the sign-in AND every re-issued
-//     session of it, including one minted from a minted one;
+//     session of it, including one minted from a minted one. The route revokes
+//     the session it re-issues from, so re-issues that stay live beside their
+//     sign-in (liveReissue: the shape of every session re-issued before that)
+//     are built directly, and one chain is built through the real route;
 //   - a row re-issued before this fix (device_id NULL, limit_family_id set)
 //     is revoked with its family too;
 //   - controls: the same account's session on another device, and another
 //     account's session with the same device id, stay signed in.
 
 const assert = require('node:assert/strict')
+const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -67,13 +73,13 @@ const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
 const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
 const isAdminControlUser = (u) => Number(u?.id) === 1
 
-const authRoute = load('routes/auth.ts', {
+const loadAuthRoute = (authModule) => load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
   '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': libDb,
-  '../lib/auth': authLib,
+  '../lib/auth': authModule,
   '../lib/verification': {
     issuePasswordResetLink: noop, consumePasswordResetLink: noop, isEmailConfigured: () => false,
     normalizeEmail: (v) => String(v || '').trim().toLowerCase(),
@@ -94,6 +100,20 @@ const authRoute = load('routes/auth.ts', {
   '../lib/googleOauth': {},
   '../index': {},
 }).default
+
+const authRoute = loadAuthRoute(authLib)
+
+// requireAuth that does not ask whether the session is still live: what a
+// call that authenticated before a parallel call won the claim has behind it.
+const looseAuthRoute = loadAuthRoute({
+  ...authLib,
+  requireAuth: async (c, next) => {
+    const token = cookie.getCookie(c, 'bos_session')
+    const row = db.prepare('SELECT user_id FROM user_sessions WHERE token_hash = @hash').get({ hash: createHash('sha256').update(token).digest('hex') })
+    c.set('user', { id: row.user_id, username: 'cashier' })
+    return next()
+  },
+})
 
 const devicesRoute = load('routes/devices.ts', {
   hono: require('hono'),
@@ -147,6 +167,17 @@ async function reissue(token, body = APP_BODY) {
   return res.minted
 }
 
+// A re-issue that leaves its source live: the shape of every session re-issued
+// before POST /session-duration revoked its source. Same family and the
+// source's device, as the route sets.
+async function liveReissue(token) {
+  const row = db.prepare('SELECT user_id, device_id, device_name, COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @hash')
+    .get({ hash: createHash('sha256').update(token).digest('hex') })
+  return (await authLib.createSession(env, row.user_id, {
+    sessionDuration: 'always', deviceId: row.device_id, deviceName: row.device_name || undefined, limitFamilyId: row.family,
+  })).token
+}
+
 const alive = async (token) => (await send(authRoute, 'GET', '/me', token)).status === 200
 const rowCount = () => db.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n
 const lastRow = () => db.prepare('SELECT * FROM user_sessions ORDER BY id DESC LIMIT 1').get({})
@@ -170,6 +201,20 @@ async function check(name, fn) {
     assert.equal(row.device_name, 'Cashier phone', 're-issued row carries the device name')
   })
 
+  await check('a call that loses the claim is answered 409 and mints nothing', async () => {
+    const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
+    const won = await send(looseAuthRoute, 'POST', '/session-duration', signedIn, { ...APP_BODY, sessionDuration: '7d' })
+    assert.equal(won.status, 200, won.text)
+    const rows = rowCount()
+    const lost = await send(looseAuthRoute, 'POST', '/session-duration', signedIn, { ...APP_BODY, sessionDuration: '7d' })
+    assert.equal(lost.status, 409, lost.text)
+    assert.equal(lost.body.code, 'session_duration_conflict')
+    assert.equal(lost.minted, null, 'a refused call issues no cookie')
+    assert.equal(rowCount(), rows, 'the losing call inserted nothing')
+    assert.equal(await alive(won.minted), true)
+    assert.equal(await alive(signedIn), false)
+  })
+
   await check('the body cannot re-home a re-issue onto another device id or name', async () => {
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
     await reissue(signedIn, { ...APP_BODY, deviceId: 'somewhere-else', deviceName: 'Front till' })
@@ -181,19 +226,22 @@ async function check(name, fn) {
   await check('Devices -> Revoke kills the sign-in and every re-issued session of it', async () => {
     addDevice(1, 2, 'phone-D', 'approved')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
-    const child = await reissue(signedIn)
-    const grandchild = await reissue(child, { sessionDuration: '7d' })
-    const renamed = await reissue(signedIn, { ...APP_BODY, deviceId: 'somewhere-else' })
+    const child = await liveReissue(signedIn)
+    const grandchild = await liveReissue(child)
+    const second = await liveReissue(signedIn)
+    const chainRoot = await signIn(2, 'phone-D', 'Cashier phone')
+    const chained = await reissue(chainRoot, { sessionDuration: '7d' })
+    assert.equal(await alive(chainRoot), false, 'the route revoked the session it re-issued from')
     const otherDevice = await signIn(2, 'tablet-E', 'Shop tablet')
-    const otherDeviceChild = await reissue(otherDevice)
+    const otherDeviceChild = await liveReissue(otherDevice)
     const otherUser = await signIn(3, 'phone-D', 'Cashier phone')
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
-    for (const t of [signedIn, child, grandchild, renamed]) assert.equal(await alive(t), true, 'live before the revoke')
+    for (const t of [signedIn, child, grandchild, second, chained]) assert.equal(await alive(t), true, 'live before the revoke')
 
     const res = await send(devicesRoute, 'POST', '/1/revoke', admin)
     assert.equal(res.status, 200, res.text)
-    assert.equal(res.body.revokedSessions, 4, `the audit count names every session of the device: ${res.text}`)
-    for (const [label, t] of [['sign-in', signedIn], ['re-issue', child], ['re-issue of a re-issue', grandchild], ['re-issue with a body device id', renamed]]) {
+    assert.equal(res.body.revokedSessions, 5, `the audit count names every live session of the device: ${res.text}`)
+    for (const [label, t] of [['sign-in', signedIn], ['re-issue', child], ['re-issue of a re-issue', grandchild], ['second re-issue', second], ['re-issue minted through the route', chained]]) {
       assert.equal(await alive(t), false, `${label} is signed out by the device revoke`)
     }
     assert.equal(await alive(otherDevice), true, 'control: same account, another device, still signed in')
@@ -205,7 +253,7 @@ async function check(name, fn) {
   await check('Devices -> Reject kills the re-issued session too', async () => {
     addDevice(2, 2, 'phone-D', 'pending')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
-    const child = await reissue(signedIn)
+    const child = await liveReissue(signedIn)
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
     const res = await send(devicesRoute, 'POST', '/2/reject', admin)
     assert.equal(res.status, 200, res.text)
@@ -218,13 +266,13 @@ async function check(name, fn) {
     addDevice(3, 2, 'phone-D', 'approved')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
     const root = lastRow()
-    const orphanChild = await reissue(signedIn)
-    const orphanGrandchild = await reissue(orphanChild)
+    const orphanChild = await liveReissue(signedIn)
+    const orphanGrandchild = await liveReissue(orphanChild)
     // Rewrite both to the shape the old route stored: no device id or name.
     db.prepare('UPDATE user_sessions SET device_id = NULL, device_name = NULL WHERE limit_family_id = @root').run({ root: root.id })
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_sessions WHERE limit_family_id = @root AND device_id IS NULL').get({ root: root.id }).n, 2)
     const otherFamily = await signIn(2, 'tablet-E', 'Shop tablet')
-    const otherFamilyChild = await reissue(otherFamily)
+    const otherFamilyChild = await liveReissue(otherFamily)
     db.prepare("UPDATE user_sessions SET device_id = NULL WHERE device_id = 'tablet-E' AND limit_family_id IS NOT NULL").run({})
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
 

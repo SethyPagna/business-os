@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifyPassword, verifySignInPassword } from '../lib/passwordHash'
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from '../lib/failedSignInCost'
-import { createSession, currentSessionReissueSource, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionReissueSource, lengthensSession, reissueSession, resolveSessionDuration, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -11,7 +11,7 @@ import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
+import { checkRateLimit, clientNetworkKey, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
 import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
@@ -207,12 +207,13 @@ app.post('/login', async (c) => {
   }
 
   const ip = getClientIp(c.req.raw)
+  const network = clientNetworkKey(ip)
 
   // Checked before touching the DB for credentials so a saturated bucket
   // can't be worked around by varying the username -- the per-IP limit
   // below the username lookup would otherwise still let an attacker burn
   // through the per-user bucket for many different usernames in parallel.
-  const ipLimit = await checkRateLimit(c.env, 'auth:login_ip', ip, LOGIN_IP_LIMIT_MAX, LOGIN_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:login_ip', network, LOGIN_IP_LIMIT_MAX, LOGIN_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) {
     return c.json({ error: 'Too many login attempts from this network. Please try again later.', code: 'login_rate_limited_network' }, 429)
   }
@@ -291,7 +292,7 @@ app.post('/login', async (c) => {
     if (candidates && candidates.length === 1) user = candidates[0]
   }
 
-  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${ip}`
+  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${network}`
   const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.', code: 'login_rate_limited_account' }, 429)
@@ -303,7 +304,7 @@ app.post('/login', async (c) => {
   // is resolved, the same limiter and lockout are ALSO keyed on its id,
   // which every alias shares. The answers are the same shapes as above.
   const resolvedLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
-  const accountLimitKey = user ? `uid:${user.id}@${ip}` : null
+  const accountLimitKey = user ? `uid:${user.id}@${network}` : null
   const accountWideKey = user ? `uid:${user.id}` : null
   if (user && resolvedLockoutKey && accountLimitKey && accountWideKey) {
     const accountWide = await peekRateLimit(c.env, 'auth:login_account', accountWideKey, LOGIN_ACCOUNT_WIDE_MAX, LOGIN_ACCOUNT_WIDE_WINDOW_MS)
@@ -394,7 +395,7 @@ app.post('/login', async (c) => {
 
   // A right password is not a guess: hand back the network slot reserved
   // above, so shared tills behind one IP never fill the per-IP ceiling.
-  await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
+  await releaseRateLimitSlot(c.env, 'auth:login_ip', network, ipLimit.slot)
 
   // Password matched -- clear the lockout counter here (not only at full
   // session creation further down) so an OTP-enabled account's counter
@@ -608,7 +609,8 @@ app.post('/password-reset/email', async (c) => {
     LIMIT 1
   `).get<{ id: number; email: string | null }>({ identifier })
 
-  const requesterIp = c.req.header('cf-connecting-ip') || null
+  const connectingIp = c.req.header('cf-connecting-ip')
+  const requesterIp = connectingIp ? clientNetworkKey(connectingIp) : null
   if (user?.email) {
     await issuePasswordResetLink(c.env, user.id, normalizeEmail(user.email), String(body.redirectTo || ''), requesterIp)
     // Deliberately not branching on { issued, sent } here -- see comment
@@ -646,7 +648,7 @@ app.post('/password-reset/admin-request', async (c) => {
   if (!identifier || identifier.length > 200) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
 
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', ip, ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', clientNetworkKey(ip), ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
   if (!ipLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
   const identifierLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_identifier', identifier.toLowerCase(), ADMIN_RESET_REQUEST_IDENTIFIER_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
   if (!identifierLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
@@ -762,7 +764,7 @@ app.post('/otp/verify', async (c) => {
   if (!body.userId || !body.token) return c.json({ error: 'userId and token required', code: 'otp_code_required' }, 400)
 
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', clientNetworkKey(ip), OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.', code: 'otp_rate_limited_network' }, 429)
 
   // The first factor must have run, recently, for THIS user -- checked
@@ -881,18 +883,30 @@ app.post('/otp/verify', async (c) => {
 })
 
 // POST /api/auth/session-duration -- re-issues the current session's
-// cookie with a new expiry/remember-me duration, without re-entering a
-// password. Matches backend/src/routes/auth.ts's grace-period rotation:
-// the caller's *current* cookie is left valid (no revoke) since the
-// response also sets the new cookie in the same round trip and there's no
-// second in-flight request racing to hand off here in the Workers port.
+// cookie with a new expiry/remember-me duration. The old session is claimed
+// and the new one inserted in one batch (lib/auth.ts reissueSession), so of
+// any number of parallel calls with one cookie exactly one succeeds. A loser
+// that reaches the claim after the winner's batch is answered 409
+// session_duration_conflict; one that arrives at requireAuth after the batch
+// committed finds its cookie revoked and is answered 401 invalid_session, with
+// no Set-Cookie either way (the app answers that 401 with a recovery
+// bootstrap on the shared cookie jar, not a sign-out). A call replaces the
+// session and never adds a second live one.
+// Asking for a longer duration than the current session was signed in for
+// (lib/auth.ts lengthensSession) needs the current password: a stolen or
+// unattended session must not be able to promote itself to "Always"; a shorter
+// or equal choice needs nothing.
 //
-// Because the old cookie stays valid, every call yields one more live
-// session with no password. The new session therefore inherits the caller's
-// sign-in family (lib/auth.ts currentSessionLimitFamily) so it shares, not
-// renews, that sign-in's current-password allowance (S-auth4), and the route
-// itself is capped per family as defence in depth. The frontend calls it
-// only when someone saves the "Default login duration" setting.
+// The app fences the requests it dispatches while a cookie-changing request is
+// pending (frontend api/actorReadScope.ts beginActorCookieMutation). A request
+// another tab already has in flight when the old token is revoked is answered
+// 401 and applies nothing.
+//
+// The new session inherits the caller's sign-in family (lib/auth.ts
+// currentSessionLimitFamily) so it shares, not renews, that sign-in's
+// current-password allowance (S-auth4), and the route itself is capped per
+// family as defence in depth. The frontend calls it only when someone saves
+// the "Default login duration" setting.
 //
 // The new session also keeps the caller's device id and name, read from the
 // session row and never from the body (SEC1-01): the app sends no device id
@@ -901,7 +915,7 @@ const SESSION_DURATION_LIMIT_BUCKET = 'auth:session_duration'
 const SESSION_DURATION_LIMIT_MAX = 10
 const SESSION_DURATION_LIMIT_WINDOW_MS = 15 * 60 * 1000
 app.post('/session-duration', requireAuth, async (c) => {
-  const body = await c.req.json<{ sessionDuration?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceTz?: string; clientTime?: string }))
+  const body = await c.req.json<{ sessionDuration?: string; currentPassword?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; currentPassword?: string; deviceTz?: string; clientTime?: string }))
   const user = c.get('user')
   if (!user?.id) return c.json({ error: 'Please sign in again to continue.' }, 401)
 
@@ -915,7 +929,20 @@ app.post('/session-duration', requireAuth, async (c) => {
     return c.json({ error: 'Too many login duration changes. Please try again later.', code: 'session_duration_rate_limited', retryAfterSeconds: cap.retryAfterSeconds }, 429)
   }
 
-  const session = await createSession(c.env, user.id, {
+  if (lengthensSession(source.duration, resolveSessionDuration(body.sessionDuration))) {
+    const currentPassword = String(body.currentPassword ?? '')
+    if (!currentPassword.trim()) {
+      return c.json({ error: 'Enter your current password to stay signed in for longer.', code: 'session_duration_password_required' }, 400)
+    }
+    const account = await getDb(c.env).prepare('SELECT password FROM users WHERE id = ?').get<{ password: string }>([user.id])
+    const verdict = await verifyCurrentPassword(c, { actorId: user.id, targetId: user.id }, currentPassword, account?.password || '')
+    if (!verdict.ok && verdict.rateLimited) {
+      return c.json({ error: CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+    }
+    if (!verdict.ok) return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
+  }
+
+  const session = await reissueSession(c, user.id, {
     sessionDuration: body.sessionDuration,
     deviceName: source.deviceName || undefined,
     deviceId: source.deviceId,
@@ -924,10 +951,13 @@ app.post('/session-duration', requireAuth, async (c) => {
     ip: c.req.header('cf-connecting-ip') || undefined,
     limitFamilyId,
   })
+  if (!session) {
+    return c.json({ error: 'The login duration was just changed from another window. Reload and check it before changing it again.', code: 'session_duration_conflict' }, 409)
+  }
   setSessionCookie(c, session.token, session.expiresAt)
 
   await audit(c.env, user.id, user.username, 'session_duration_updated', 'user', user.id, {
-    sessionDuration: String(body.sessionDuration || 'session').trim().toLowerCase() || 'session',
+    sessionDuration: session.sessionDuration,
   })
 
   return c.json({ sessionExpiresAt: session.expiresAt, authMode: 'cookie' })
@@ -1094,7 +1124,7 @@ app.post('/password-reset/otp', async (c) => {
   // its whole validity window; and the three failure answers differed, so
   // the endpoint told a caller which accounts exist and which have 2FA.
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', clientNetworkKey(ip), OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
 
   const db = getDb(c.env)

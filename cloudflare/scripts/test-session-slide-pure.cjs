@@ -53,13 +53,13 @@ function isSessionTouchDue(lastSeenAt, nowMs) {
 }
 
 // Mirrors slideSessionExpiry's decision. Returns the new expiry, or null for
-// "leave it alone".
+// "leave it alone". The renewal length is the chosen duration (duration_ms),
+// not expires_at - created_at, which only equals it until the first renewal.
 function nextExpiryFor(session, now) {
-  const createdAt = asUtc(session.created_at)
   const expiresAt = asUtc(session.expires_at)
-  if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return null
-  const ttlMs = expiresAt - createdAt
-  if (ttlMs <= 0) return null
+  if (!Number.isFinite(expiresAt)) return null
+  const ttlMs = session.duration_ms
+  if (!ttlMs || ttlMs <= 0) return null
   const remaining = expiresAt - now
   if (remaining > ttlMs * (1 - SESSION_SLIDE_AFTER_FRACTION)) return null
   const next = Math.min(now + ttlMs, now + MAX_COOKIE_AGE_MS)
@@ -95,8 +95,10 @@ check('auth reads session metadata once and race-protects a stale touch', () => 
   assert.match(source, /s\.created_at AS session_created_at[\s\S]*s\.expires_at AS session_expires_at[\s\S]*s\.last_seen_at AS session_last_seen_at/)
   assert.doesNotMatch(source, /SELECT created_at, expires_at FROM user_sessions/,
     'sliding expiry must not issue a second session metadata SELECT')
-  assert.match(source, /slideSessionExpiry\(c, tokenHash, \{[\s\S]*created_at: createdAt,[\s\S]*expires_at: expiresAt/,
-    'the initial auth row must feed sliding expiry directly')
+  assert.match(source, /slideSessionExpiry\(c, tokenHash, \{[\s\S]*expires_at: expiresAt,[\s\S]*duration_ms: sessionDurationMs\(token, createdAt, expiresAt\)/,
+    'the initial auth row must feed sliding expiry directly, with the chosen duration')
+  assert.doesNotMatch(source.slice(source.indexOf('async function slideSessionExpiry')), /expiresAt - createdAt/,
+    'renewal must not infer its length from the (ever-growing) expires_at - created_at window')
 
   const touchSql = source.match(/UPDATE user_sessions\s+SET last_seen_at = CURRENT_TIMESTAMP[\s\S]*?\)\s*\n\s*`\)\.run/)
   assert.ok(touchSql, 'conditional last-seen UPDATE must exist')
@@ -121,20 +123,20 @@ check('SQLite\'s zone-less "YYYY-MM-DD HH:MM:SS" is read as UTC, not local time'
 // --- when it renews, and when it stays out of the way ------------------
 
 check('a fresh session is NOT renewed -- no write, no Set-Cookie on every call', () => {
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 30 * DAY) }
+  const s = { expires_at: iso(T0 + 30 * DAY), duration_ms: 30 * DAY }
   assert.equal(nextExpiryFor(s, T0 + 1 * DAY), null)
   assert.equal(nextExpiryFor(s, T0 + 14 * DAY), null, 'still under halfway')
 })
 
-check('a session past halfway IS renewed, by its own original TTL', () => {
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 30 * DAY) }
+check('a session past halfway IS renewed, by its chosen duration', () => {
+  const s = { expires_at: iso(T0 + 30 * DAY), duration_ms: 30 * DAY }
   const now = T0 + 20 * DAY
   const next = nextExpiryFor(s, now)
   assert.equal(next, now + 30 * DAY, 'renewed to a full TTL from now, not from the old expiry')
 })
 
 check('the renewal window opens exactly at the halfway point', () => {
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 10 * DAY) }
+  const s = { expires_at: iso(T0 + 10 * DAY), duration_ms: 10 * DAY }
   assert.equal(nextExpiryFor(s, T0 + 5 * DAY - 1000), null, 'a second before halfway: untouched')
   assert.ok(nextExpiryFor(s, T0 + 5 * DAY + 1000), 'a second after halfway: renewed')
 })
@@ -142,7 +144,7 @@ check('the renewal window opens exactly at the halfway point', () => {
 check('a short session renews on the same rule as a long one', () => {
   // "Until I close the browser" is 24h and is the shared-device option --
   // it must still slide, but only within its own 24h shape.
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 1 * DAY) }
+  const s = { expires_at: iso(T0 + 1 * DAY), duration_ms: 1 * DAY }
   const now = T0 + 20 * 60 * 60 * 1000
   assert.equal(nextExpiryFor(s, now), now + 1 * DAY)
 })
@@ -150,7 +152,7 @@ check('a short session renews on the same rule as a long one', () => {
 // --- the safety properties --------------------------------------------
 
 check('renewal only ever moves expiry FORWARD', () => {
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 30 * DAY) }
+  const s = { expires_at: iso(T0 + 30 * DAY), duration_ms: 30 * DAY }
   for (const offset of [16, 20, 25, 29]) {
     const now = T0 + offset * DAY
     const next = nextExpiryFor(s, now)
@@ -163,7 +165,7 @@ check('an ALREADY-EXPIRED session is never resurrected', () => {
   // so this should be unreachable -- asserted anyway, because a future
   // caller that skipped that check would otherwise silently revive dead
   // sessions.
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + 30 * DAY) }
+  const s = { expires_at: iso(T0 + 30 * DAY), duration_ms: 30 * DAY }
   const now = T0 + 31 * DAY
   const next = nextExpiryFor(s, now)
   // It would extend; the protection lives in the caller's WHERE clause and
@@ -172,22 +174,23 @@ check('an ALREADY-EXPIRED session is never resurrected', () => {
   assert.ok(next === null || next > now, 'must never produce an expiry in the past')
 })
 
-check('a corrupt or missing timestamp changes nothing', () => {
-  assert.equal(nextExpiryFor({ created_at: '', expires_at: '' }, T0), null)
-  assert.equal(nextExpiryFor({ created_at: 'not-a-date', expires_at: iso(T0) }, T0), null)
-  assert.equal(nextExpiryFor({ created_at: sqlite(T0), expires_at: 'nonsense' }, T0), null)
+check('a corrupt or missing expiry changes nothing', () => {
+  assert.equal(nextExpiryFor({ expires_at: '', duration_ms: DAY }, T0), null)
+  assert.equal(nextExpiryFor({ expires_at: 'nonsense', duration_ms: DAY }, T0), null)
 })
 
-check('a session whose expiry precedes its creation is ignored', () => {
-  const s = { created_at: sqlite(T0 + 5 * DAY), expires_at: iso(T0) }
-  assert.equal(nextExpiryFor(s, T0 + 6 * DAY), null, 'a negative TTL must not be extended')
+check('a session whose duration is unknown or non-positive is never renewed', () => {
+  const expires_at = iso(T0 + 1000)
+  assert.equal(nextExpiryFor({ expires_at, duration_ms: null }, T0), null)
+  assert.equal(nextExpiryFor({ expires_at, duration_ms: 0 }, T0), null)
+  assert.equal(nextExpiryFor({ expires_at, duration_ms: -DAY }, T0), null)
 })
 
 check('renewal is capped at the cookie ceiling', () => {
   // An "always" session has a TTL longer than a cookie may live. The new
   // expiry must not exceed what the browser will actually hold.
   const hugeTtl = 10 * 365 * DAY
-  const s = { created_at: sqlite(T0), expires_at: iso(T0 + hugeTtl) }
+  const s = { expires_at: iso(T0 + hugeTtl), duration_ms: hugeTtl }
   const now = T0 + hugeTtl * 0.9
   const next = nextExpiryFor(s, now)
   assert.ok(next !== null)
@@ -197,14 +200,15 @@ check('renewal is capped at the cookie ceiling', () => {
 // --- the behaviour that actually fixes the report ----------------------
 
 check('continuous use keeps a session alive indefinitely; idling still expires it', () => {
-  let session = { created_at: sqlite(T0), expires_at: iso(T0 + 7 * DAY) }
+  let session = { expires_at: iso(T0 + 7 * DAY), duration_ms: 7 * DAY }
   let now = T0
   // Someone using the app every few days for a month.
   for (let i = 0; i < 10; i += 1) {
     now += 4 * DAY
     const next = nextExpiryFor(session, now)
-    if (next !== null) session = { created_at: sqlite(now), expires_at: iso(next) }
+    if (next !== null) session = { ...session, expires_at: iso(next) }
     assert.ok(asUtc(session.expires_at) > now, 'an actively-used session must never lapse mid-use')
+    assert.ok(asUtc(session.expires_at) - now <= 7 * DAY, 'renewal never makes the window longer than the chosen duration')
   }
   // Then they stop. A full TTL of silence still ends it -- sliding expiry
   // is not the same as never expiring.

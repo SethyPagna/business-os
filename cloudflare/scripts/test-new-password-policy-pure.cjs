@@ -1,7 +1,7 @@
 // AUTH-P1 (P1-B): one rule for every NEW password, enforced by the Worker and
 // mirrored by the app (frontend/src/utils/passwordRules.ts, parity pinned by
 // frontend/tests/passwordRules.test.ts):
-//   - at least MIN_PASSWORD_LENGTH characters (6 until the owner rules on Q4);
+//   - at least MIN_PASSWORD_LENGTH characters (10, owner ruling of 14 Oct 2026);
 //   - no leading or trailing whitespace: refused, never trimmed, so the value
 //     a password manager saves is the value that was hashed;
 //   - at most 72 UTF-8 bytes (bcrypt ignores everything after byte 72).
@@ -115,33 +115,33 @@ const storedHash = (id) => db.prepare('SELECT password FROM users WHERE id = @id
 const userCount = () => db.prepare('SELECT COUNT(*) AS n FROM users').get().n
 
 const REFUSED = [
-  { password: 'abcde', code: 'password_too_short' },
-  { password: ' abcdef', code: 'password_edge_whitespace' },
-  { password: 'abcdef ', code: 'password_edge_whitespace' },
-  { password: '\tabcdefg', code: 'password_edge_whitespace' },
+  { password: 'abcdefghi', code: 'password_too_short' },
+  { password: ' abcdefghij', code: 'password_edge_whitespace' },
+  { password: 'abcdefghij ', code: 'password_edge_whitespace' },
+  { password: '\tabcdefghij', code: 'password_edge_whitespace' },
   { password: KHMER_KA.repeat(25), code: 'password_too_long' },
   { password: 'a'.repeat(73), code: 'password_too_long' },
 ]
 
 ;(async () => {
   // ---- Part A: the rule --------------------------------------------------
-  await check('the minimum stays 6 (owner Q4 open) and the byte ceiling is 72', async () => {
-    assert.equal(policy.MIN_PASSWORD_LENGTH, 6)
+  await check('the minimum is 10 and the byte ceiling is 72', async () => {
+    assert.equal(policy.MIN_PASSWORD_LENGTH, 10)
     assert.equal(policy.MAX_PASSWORD_BYTES, 72)
   })
 
-  await check('too short: 5 characters refused, 6 accepted', async () => {
+  await check('too short: 9 characters refused, 10 accepted', async () => {
     assert.equal(policy.newPasswordProblem(''), 'password_too_short')
     assert.equal(policy.newPasswordProblem(undefined), 'password_too_short')
-    assert.equal(policy.newPasswordProblem('abcde'), 'password_too_short')
-    assert.equal(policy.newPasswordProblem('abcdef'), null)
+    assert.equal(policy.newPasswordProblem('abcdefghi'), 'password_too_short')
+    assert.equal(policy.newPasswordProblem('abcdefghij'), null)
   })
 
   await check('edge whitespace is refused, inner spaces are fine', async () => {
-    for (const value of [' abcdef', 'abcdef ', '\tabcdef', 'abcdef\n', ' abcdef']) {
+    for (const value of [' abcdefghij', 'abcdefghij ', '\tabcdefghij', 'abcdefghij\n', ' abcdefghij']) {
       assert.equal(policy.newPasswordProblem(value), 'password_edge_whitespace', JSON.stringify(value))
     }
-    assert.equal(policy.newPasswordProblem('abc def'), null)
+    assert.equal(policy.newPasswordProblem('abc def ghij'), null)
     assert.equal(policy.newPasswordProblem('correct horse battery'), null)
   })
 
@@ -159,7 +159,7 @@ const REFUSED = [
       assert.equal(typeof text, 'string')
       assert.ok(text.trim().length > 10, code)
     }
-    assert.match(policy.newPasswordProblemError('password_too_short'), /6/)
+    assert.match(policy.newPasswordProblemError('password_too_short'), /10/)
   })
 
   // ---- Part B: routes/users.ts ---------------------------------------------

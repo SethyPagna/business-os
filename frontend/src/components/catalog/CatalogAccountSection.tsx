@@ -18,9 +18,9 @@ import type { PortalAccountProfile } from './portalAccount.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
-const PORTAL_MIN_PASSWORD_LENGTH = 6
-const PASSWORD_HINT_EN = 'At least 6 characters. Use a password you do not reuse elsewhere.'
-const PASSWORD_HINT_KM = 'យ៉ាងតិច ៦ តួអក្សរ។ ប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើឡើងវិញនៅកន្លែងផ្សេង។'
+const PORTAL_MIN_PASSWORD_LENGTH = 10
+const PASSWORD_HINT_EN = 'At least 10 characters. Use a password you do not reuse elsewhere.'
+const PASSWORD_HINT_KM = 'យ៉ាងតិច ១០ តួអក្សរ។ ប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើឡើងវិញនៅកន្លែងផ្សេង។'
 const REMINDER = 'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
 const REMINDER_KM = 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។'
 

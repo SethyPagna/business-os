@@ -112,7 +112,7 @@ await runTest('the Worker refuses: nothing is saved and the refusal is in the op
       [refusedWith('incorrect_password'), /^current_password_incorrect: /],
       [thrownWith('current_password_rate_limited'), /^current_password_rate_limited: /],
       [refusedWith('current_password_rate_limited'), /^current_password_rate_limited: /],
-      [thrownWith('password_too_short'), /^password_too_short: Use at least 6 characters\.$/],
+      [thrownWith('password_too_short'), /^password_too_short: Use at least 10 characters\.$/],
       [async () => ({ success: false, error: 'Server busy' }), /^Server busy$/],
       [async () => { throw new Error('Change password timed out') }, /^Change password timed out$/],
     ]

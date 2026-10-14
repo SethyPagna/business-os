@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { clientNetworkKey } from './rateLimit'
 import type { Env } from '../index'
 
 // checkRateLimit (lib/rateLimit.ts) already guards /login with a sliding
@@ -42,9 +43,11 @@ export function userIdLockoutKey(userId: number | string): string {
 // and the owner's does not. Guessing spread across many networks is bounded
 // separately by the routes' account-wide failure ceiling. The '@' suffix is
 // applied after the lowercasing above, so every alias still shares one key
-// per network (P2-1).
+// per network (P2-1). A network is an IPv4 address or an IPv6 /64
+// (rateLimit.ts clientNetworkKey): one IPv6 subscriber holds 2^64 addresses
+// and would otherwise start every guess on a fresh key.
 export function perNetworkLockoutKey(key: string, ip: string | null | undefined): string {
-  return `${lockoutKey(key)}@${String(ip || 'unknown').trim().toLowerCase()}`
+  return `${lockoutKey(key)}@${ip ? clientNetworkKey(String(ip)) : 'unknown'}`
 }
 
 function computeWaitSeconds(failedCount: number): number {

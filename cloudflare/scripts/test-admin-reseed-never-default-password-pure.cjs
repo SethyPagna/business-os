@@ -81,6 +81,7 @@ const core = loadReal('lib/coreDataInvariants.ts', {
 
   '../index': {},
   './passwordHash': { hashPassword: async (password) => { hashed.push(password); return `hash:${password.length}` } },
+  './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
 })
 
 const baseEnv = { BUSINESS_OS_ORGANIZATION_NAME: 'Test OS', BUSINESS_OS_ORGANIZATION_SLUG: 'test-os' }
@@ -193,6 +194,34 @@ async function main() {
     assert.deepEqual(hashed, ['Configured-Secret-1'])
     assert.equal(result.adminUserCreated, true)
     assert.equal(result.adminPassword, 'Configured-Secret-1')
+  })
+
+  const seededFlag = (raw) => raw.prepare("SELECT must_change_password AS flag FROM users WHERE username = 'admin'").get({}).flag
+
+  await check('R2-S1: a configured secret under 10 characters still seeds the admin, with a forced password change', async () => {
+    const raw = fresh()
+    stamped = true
+    const lines = await withConsole(() => core.ensureCoreDataInvariants({ ...baseEnv, BUSINESS_OS_ADMIN_PASSWORD: 'Short1' }))
+    assert.equal(adminRows(raw).length, 1, 'the operator secret is not refused')
+    assert.deepEqual(hashed, ['Short1'])
+    assert.equal(seededFlag(raw), 1)
+    assert.equal(lines.filter((line) => line.includes('Short1')).length, 0, 'the secret is never logged')
+  })
+
+  await check('R2-S1: a secret of 10 characters or more, and the local-dev demo password, seed without the forced change', async () => {
+    let raw = fresh()
+    stamped = true
+    await core.ensureCoreDataInvariants({ ...baseEnv, BUSINESS_OS_ADMIN_PASSWORD: 'Ten-chars-1' })
+    assert.equal(seededFlag(raw), 0)
+    raw = fresh()
+    await withConsole(() => core.ensureCoreDataInvariants({ ...baseEnv, BUSINESS_OS_LOCAL_DEV: 'true' }))
+    assert.equal(seededFlag(raw), 0, 'the unstamped local-dev demo seed keeps signing in')
+    raw = fresh()
+    await core.ensureCoreDataInvariants({ ...baseEnv, BUSINESS_OS_ADMIN_PASSWORD: 'x'.repeat(9) })
+    assert.equal(seededFlag(raw), 1, 'nine characters is still under the minimum')
+    raw = fresh()
+    await core.ensureCoreDataInvariants({ ...baseEnv, BUSINESS_OS_ADMIN_PASSWORD: 'x'.repeat(10) })
+    assert.equal(seededFlag(raw), 0, 'ten characters meets it')
   })
 
   // --- P0 takeover: seeding is keyed on "no active admin-role user", never on
