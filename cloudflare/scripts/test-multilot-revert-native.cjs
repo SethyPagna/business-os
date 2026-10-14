@@ -349,6 +349,7 @@ function finish(finding) {
 //   --wrong=zero-as-share       mutant: a zero record is read as a lot share (M12e goes RED)
 //   --wrong=recorded-ignores-zero  mutant: the refusal does not see a zero record, so a database without the mark refuses a recording removal (M12 goes RED)
 //   --wrong=no-dated-exemption  mutant: a dated-count removal with no record is refused too (M6e goes RED)
+//   --wrong=reason-only-exemption  mutant: the dated-count exemption goes by the reason text alone, so an old removal typed with it skips the refusal (M6l goes RED)
 //   --wrong=no-move-row-shares  mutant: /move-row writes its move_out without the per-lot shares (M14 goes RED)
 //   --wrong=import-estimate-blind  mutant: the CSV group cost estimate forgets the share statement, so a group outgrows the 300-statement chunk (M15 goes RED)
 //   --wrong=hold-cost-null      mutant: a held row of a lot with no unit cost carries no cost, so Dispose books it at the later catalog cost (M13 goes RED)
@@ -405,8 +406,11 @@ const PATCHES = {
   'recorded-ignores-zero': [
     { name: 'recorded-ignores-zero', file: STOCK_REVERT, from: 'WHERE a.movement_id = m.id) AS recorded', to: 'WHERE a.movement_id = m.id AND a.quantity <> 0) AS recorded' },
   ],
+  'reason-only-exemption': [
+    { name: 'reason-only-exemption', file: STOCK_REVERT, from: ' && row.stampTime === DATED_STOCK_COUNT_STAMP_TIME', to: '' },
+  ],
   'no-dated-exemption': [
-    { name: 'no-dated-exemption', file: STOCK_REVERT, from: 'row.reason === DATED_STOCK_COUNT_REASON || ', to: '' },
+    { name: 'no-dated-exemption', file: STOCK_REVERT, from: '(row.reason === DATED_STOCK_COUNT_REASON && row.stampTime === DATED_STOCK_COUNT_STAMP_TIME) || ', to: '' },
   ],
   'no-move-row-shares': [
     { name: 'no-move-row-shares', file: 'src/routes/inventory.ts',
@@ -692,11 +696,19 @@ async function main() {
     })
     await check('M6e', 'control: a removal made by the dated stock count importer with no lot record drew nothing from lots (it always records its lot effects), so its Revert is not refused', 'control', async (t) => {
       const s = await seed(H, { lots: [5], undated: 3 })
-      const old = await oldRemoval(s, [5], 6, { reason: 'Dated stock count import' })
+      const old = await oldRemoval(s, [5], 6, { reason: 'Dated stock count import', createdAt: '2026-09-20 00:00:00' })
       const r = await revert(H, old.id)
       const a = await snap(H, s)
       t.eq('Revert answered', r.status, 200)
       t.eq('the 2 undated units are back, the lot is untouched', [a.lots, a.branch, a.product], [[5], 8, 8])
+    })
+    await check('M6l', 'an OLD multi-lot removal whose reason was typed as the dated-count text (stamped at a real clock time) is still refused: the reason alone does not exempt it', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const old = await oldRemoval(s, [0, 3], 3, { reason: 'Dated stock count import' })
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('refused with a stable code', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
+      t.eq('nothing was written (lots, branch, movements)', [a.lots, a.branch, a.movements.length], [[0, 3], 3, 1])
     })
 
     await check('M6f', 'the way back the refusal names works: a scoped lot Set puts each lot back, moves branch_stock with it, and books no purchase', 'high', async (t) => {

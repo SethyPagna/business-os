@@ -93,7 +93,7 @@ removals AS (
   SELECT m.id, m.product_id, m.branch_id,
     m.id IN (SELECT original_id FROM reverted) AS is_reverted,
     m.id IN (SELECT movement_id FROM dated_stock_count_batch_actions) AS has_shares,
-    COALESCE(m.reason, '') = 'Dated stock count import' AS is_dated_count,
+    (COALESCE(m.reason, '') = 'Dated stock count import' AND time(m.created_at) = '00:00:00') AS is_dated_count,
     EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id) AS product_has_lots,
     EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id AND datetime(pb.created_at) <= datetime(m.created_at)) AS lot_before,
     (NOT EXISTS (SELECT 1 FROM mark) OR m.id <= (SELECT id FROM mark)) AS before_mark,
