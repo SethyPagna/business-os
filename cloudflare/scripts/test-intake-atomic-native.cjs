@@ -4,6 +4,7 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
 const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const sourceRoot = process.env.INTAKE_SOURCE_ROOT || path.join(__dirname, '..')
 function modules(actor = user, realEffects = false) {
@@ -120,16 +121,19 @@ async function main() {
     for (let index = 0; index <= length; index++) await check(`${mode} rollback before statement ${index} of ${length}`, async () => {
       const f = await setup(mode)
       const before = f.state()
+      const batch = f.env.DB.batch
       if (index === length) {
-        const batch = f.env.DB.batch
         f.env.DB.batch = statements => batch([...statements, { text: 'SELECT 1', params: [] }])
       }
       f.failBatchStatement(index)
-      const refused = await f.send()
+      let refused
+      try { refused = await f.send() } finally { f.env.DB.batch = batch }
       assert.notEqual(refused.status, 200, JSON.stringify(refused))
       assert.equal(f.state(), before)
       assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts').get().n, 0)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       assert.equal((await f.send()).status, 200, 'same request is retryable after rollback')
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     })
     await check(`${mode} durable lost acknowledgement never repeats stock`, async () => {
       const f = await setup(mode)
@@ -232,7 +236,7 @@ async function main() {
     const before = f.state()
     assert.equal((await f.send({ ...f.body, batchId: 9999 })).status, 409)
     assert.equal(f.state(), before)
-    f.sql.exec('INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,\'Removed fixture\',0,0)')
+    seedStockFixture(f.sql, () => f.sql.exec('INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,\'Removed fixture\',0,0)'))
     const removed = f.state()
     assert.equal((await f.send({ ...f.body, productId: 2, batchId: 'new', attribution: undefined, unitCostUsd: 2, supplierName: 'Fixture Supplier' })).status, 409)
     assert.equal(f.state(), removed)
