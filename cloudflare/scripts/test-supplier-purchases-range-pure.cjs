@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // P3-10: the supplier Purchases float's Start->End range, proven against the
 // REAL route code and the REAL migration chain.
 //
@@ -73,17 +79,17 @@ function freshDb() {
   for (const file of migrationFiles) sqlite.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
   sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
   sqlite.prepare('INSERT INTO suppliers (id, name) VALUES (?, ?)').run(SUPPLIER.id, SUPPLIER.name)
-  sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (101, 'Serum', 1), (102, 'Toner', 1)`).run()
+  seedFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (101, 'Serum', 1), (102, 'Toner', 1)`).run())
   return sqlite
 }
 let lotId = 0
 function seedLot(sqlite, { receivedAt, supplierId = SUPPLIER.id, supplierName = null, qty = 2, cost = 10, productId = 101 }) {
   lotId += 1
-  sqlite.prepare(`
+  seedFixture(sqlite, () => sqlite.prepare(`
     INSERT INTO product_batches (id, variant_product_id, batch_key, received_at, supplier_id, supplier_name,
       received_quantity, unit_cost_usd, received_cost_usd, payment_status)
     VALUES (@id, @productId, @key, @receivedAt, @supplierId, @supplierName, @qty, @unit, @cost, 'paid')
-  `).run({ id: lotId, productId, key: `k-${lotId}`, receivedAt, supplierId, supplierName, qty, unit: cost / qty, cost })
+  `).run({ id: lotId, productId, key: `k-${lotId}`, receivedAt, supplierId, supplierName, qty, unit: cost / qty, cost }))
   return lotId
 }
 

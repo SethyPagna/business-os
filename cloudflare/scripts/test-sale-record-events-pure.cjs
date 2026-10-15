@@ -1,3 +1,15 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
+function seedMarker(raw, key, seed) {
+  const value = seedFixture(raw, seed)
+  assert.ok(raw.prepare('SELECT value FROM system_flags WHERE key=?').get(key))
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -65,17 +77,17 @@ const immutableId = valid()
 insert.run(immutableId)
 assert.throws(() => db.prepare('UPDATE sale_record_events SET subject=? WHERE id=?').run('rewrite', immutableId.id), /immutable/i)
 assert.throws(() => db.prepare('DELETE FROM sale_record_events WHERE id=?').run(immutableId.id), /immutable/i)
-db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{" + '"mode":"backup"' + "}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+seedMarker(db, "maintenance", () => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{" + '"mode":"backup"' + "}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run())
 assert.throws(() => db.prepare('DELETE FROM sale_record_events WHERE id=?').run(immutableId.id), /immutable/i)
-db.prepare("UPDATE system_flags SET value='{" + '"mode":"restore"' + "}' WHERE key='maintenance'").run()
+seedMarker(db, "maintenance", () => db.prepare("UPDATE system_flags SET value='{" + '"mode":"restore"' + "}' WHERE key='maintenance'").run())
 db.prepare('DELETE FROM sale_record_events WHERE id=?').run(immutableId.id)
 
 const resetId = valid()
 insert.run(resetId)
 db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
-db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{" + '"mode":"reset","token":""' + "}')").run()
+seedMarker(db, "sale_record_events_reset_guard", () => db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{" + '"mode":"reset","token":""' + "}')").run())
 assert.throws(() => db.prepare('DELETE FROM sale_record_events WHERE id=?').run(resetId.id), /immutable/i)
-db.prepare("UPDATE system_flags SET value='{" + '"mode":"reset","token":"test-reset"' + "}' WHERE key='sale_record_events_reset_guard'").run()
+seedMarker(db, "sale_record_events_reset_guard", () => db.prepare("UPDATE system_flags SET value='{" + '"mode":"reset","token":"test-reset"' + "}' WHERE key='sale_record_events_reset_guard'").run())
 db.prepare('DELETE FROM sale_record_events WHERE id=?').run(resetId.id)
 db.prepare("DELETE FROM system_flags WHERE key='sale_record_events_reset_guard'").run()
 
@@ -129,17 +141,17 @@ receiptInsert.run(validReceipt({ actor_id: 2, request_id: sharedReceiptRequest }
 assert.throws(() => db.prepare('UPDATE return_mutation_receipts SET occurred_at=? WHERE id=?')
   .run('2026-09-09T00:00:00.000Z', receipt.id), /immutable/i)
 assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id), /immutable/i)
-db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"backup\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+seedMarker(db, "maintenance", () => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"backup\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run())
 assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id), /immutable/i)
-db.prepare("UPDATE system_flags SET value='{\"mode\":\"restore\"}' WHERE key='maintenance'").run()
+seedMarker(db, "maintenance", () => db.prepare("UPDATE system_flags SET value='{\"mode\":\"restore\"}' WHERE key='maintenance'").run())
 db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id)
 
 const resetReceipt = validReceipt()
 receiptInsert.run(resetReceipt)
 db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
-db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{\"mode\":\"reset\",\"token\":\"\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+seedMarker(db, "sale_record_events_reset_guard", () => db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{\"mode\":\"reset\",\"token\":\"\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run())
 assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(resetReceipt.id), /immutable/i)
-db.prepare("UPDATE system_flags SET value='{\"mode\":\"reset\",\"token\":\"receipt-reset\"}' WHERE key='sale_record_events_reset_guard'").run()
+seedMarker(db, "sale_record_events_reset_guard", () => db.prepare("UPDATE system_flags SET value='{\"mode\":\"reset\",\"token\":\"receipt-reset\"}' WHERE key='sale_record_events_reset_guard'").run())
 db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(resetReceipt.id)
 db.prepare("DELETE FROM system_flags WHERE key='sale_record_events_reset_guard'").run()
 assert.throws(() => db.prepare('DELETE FROM returns WHERE id=1').run(), /foreign key/i)
@@ -157,7 +169,7 @@ assert.match(systemSource, /tablesToClear\.unshift\('sale_record_events'\)[\s\S]
 assert.match(systemSource, /const statements:[\s\S]*?'DELETE FROM sale_record_events'[\s\S]*?'DELETE FROM return_mutation_receipts'[\s\S]*?'DELETE FROM returns'[\s\S]*?'DELETE FROM sales'/)
 // The factory list passes through presentResetTables (a migration-gated table
 // such as 0193's is skipped only while absent) and stays inside the guard.
-assert.match(systemSource, /guardSaleRecordReset\(resetDeleteStatements\(await presentResetTables\(db, FACTORY_RESET_TABLES\)\)\)/)
+assert.match(systemSource, /executeStockTransaction\(db, guardSaleRecordReset\(resetDeleteStatements\(await presentResetTables\(db, FACTORY_RESET_TABLES\)\), Number\(user\.id\)\), 'retry'\)/)
 
 db.close()
 console.log('PASS 0140 event/return receipt schema, byte bounds, identity, immutability, restore/reset guards, FK order, and lifecycle coverage')

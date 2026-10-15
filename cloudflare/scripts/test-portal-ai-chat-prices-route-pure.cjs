@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // G21 wiring lock: the hidden-prices rule must survive the whole path
 //   settings row -> buildPortalConfig -> POST /ai/chat -> generatePortalAiResponse -> served JSON.
 // The unit test (test-portal-ai-card-compliance-pure.cjs) calls generatePortalAiResponse directly, so
@@ -101,8 +107,8 @@ function clearSetting(key) { rawDb.prepare('DELETE FROM settings WHERE key = ?')
 
 rawDb.prepare(`INSERT INTO ai_provider_configs (name, provider, provider_type, api_key_encrypted, default_model, enabled, priority)
   VALUES ('Test provider', 'groq', 'chat', 'x', 'm', 1, 1)`).run({})
-rawDb.prepare(`INSERT INTO products (name, brand, category, unit, description, selling_price_usd, selling_price_khr, stock_quantity, is_active)
-  VALUES ('Daily Sunscreen', 'Acme', 'Sun care', '50ml', 'A light daily sunscreen', @usd, @khr, 40, 1)`).run({ usd: PRICE_USD, khr: PRICE_KHR })
+seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (name, brand, category, unit, description, selling_price_usd, selling_price_khr, stock_quantity, is_active)
+  VALUES ('Daily Sunscreen', 'Acme', 'Sun care', '50ml', 'A light daily sunscreen', @usd, @khr, 40, 1)`).run({ usd: PRICE_USD, khr: PRICE_KHR }))
 const productId = Number(rawDb.prepare('SELECT id FROM products').get().id)
 
 async function ask(reply) {

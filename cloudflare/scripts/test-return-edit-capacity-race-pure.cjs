@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -89,7 +95,7 @@ function fixture({ sold = 3, sibling = null } = {}) {
     sql.prepare('INSERT INTO user_sessions(user_id,token_hash,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)')
       .run(id, createHash('sha256').update(`cpb2-token-${id}`).digest('hex'), now, now, '2099-01-01T00:00:00.000Z')
   }
-  sql.exec(`INSERT INTO branches(id,name) VALUES(901,'Shop');
+  seedFixture(sql, () => sql.exec(`INSERT INTO branches(id,name) VALUES(901,'Shop');
     INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(901,'A',21,2,8000);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(901,901,21);
     INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(901,901,'original-lot','2026-10-01',1);
@@ -103,7 +109,7 @@ function fixture({ sold = 3, sibling = null } = {}) {
       VALUES(901,'CPB2-RETURN',901,901,'Shop','Original',5,20000,'completed','customer',0,'return-before');
     INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,branch_id,batch_id,applied_price_usd,applied_price_khr,cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action)
       VALUES(901,901,901,901,'A',1,901,901,5,20000,2,8000,5,20000,1,'restock');
-    INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity) VALUES(901,901,901,901,1);`)
+    INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity) VALUES(901,901,901,901,1);`))
   if (sibling) {
     sql.prepare(`INSERT INTO returns(id,return_number,sale_id,branch_id,status,return_scope,updated_at)
       VALUES(902,'CPB2-SIBLING',901,901,?,?,?)`).run(sibling.status || 'completed', sibling.scope || 'customer', 'sibling-before')

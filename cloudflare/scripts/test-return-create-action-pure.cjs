@@ -1,3 +1,15 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
+function seedMarker(raw, key, seed) {
+  const value = seedFixture(raw, seed)
+  assert.ok(raw.prepare('SELECT value FROM system_flags WHERE key=?').get(key))
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -169,7 +181,7 @@ assert.throws(() => db.prepare("INSERT INTO return_create_guards(operation_id,ph
 const operation = crypto.randomUUID()
 db.prepare("INSERT INTO return_create_guards(operation_id,phase,guard_value) VALUES(?,?,1)").run(operation, 'precondition')
 assert.throws(() => db.prepare("INSERT INTO return_create_guards(operation_id,phase,guard_value) VALUES(?,?,1)").run(operation, 'precondition'), /unique/i)
-db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{\"mode\":\"reset\",\"token\":\"test\"}')").run()
+seedMarker(db, "sale_record_events_reset_guard", () => db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{\"mode\":\"reset\",\"token\":\"test\"}')").run())
 db.prepare('DELETE FROM return_create_receipts WHERE id=?').run(row.id)
 db.close()
 

@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // applyReturnBulkActionOutcome's `wrote` flag (R-telegram E1, 27 Sep 2026):
 // the route announces a grouped Returns status change to Telegram only when
@@ -81,7 +87,7 @@ function fixture() {
       return results
     },
   } }
-  sql.exec(`
+  seedFixture(sql, () => sql.exec(`
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO products(id,name,stock_quantity) VALUES(1,'Customer product',12);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,12);
@@ -89,7 +95,7 @@ function fixture() {
       VALUES(1,'RET-1',NULL,'customer','completed','refund','none',1,'v1');
     INSERT INTO return_items(id,return_id,product_id,product_name,quantity,cost_price_usd,return_to_stock,stock_action,branch_id,batch_id)
       VALUES(1,1,1,'Customer product',1,4,0,'none',1,NULL);
-  `)
+  `))
   return { sql, env, commits: () => commits, beforeBatch: (hook) => { beforeBatch = hook }, throwAfterCommit: () => { throwAfterCommit = true } }
 }
 

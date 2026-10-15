@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // P10-5 writer 5 (Sep 16 2026 owner ruling): "batches.ts identity check
 // aligned to the same fold rule (read it first; if it only validates and
@@ -72,12 +78,12 @@ function fixture() {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.pragma('foreign_keys = ON')
-  sql.exec(`
+  seedFixture(sql, () => sql.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Rose Lip Oil', '3614274226546', 5, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
+  `))
   const wrap = (text, params = []) => ({
     text, params,
     async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },

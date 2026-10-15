@@ -12,6 +12,12 @@
 //
 // Run (from cloudflare/): node scripts/test-wire-images-audit-pure.cjs
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 
@@ -32,8 +38,8 @@ async function check(name, fn) {
 }
 
 function reset() {
-  raw.exec(`DELETE FROM audit_logs; DELETE FROM product_images; DELETE FROM products; DELETE FROM file_assets;
-    DELETE FROM user_sessions; DELETE FROM users;`)
+  seedFixture(raw.db, () => raw.exec(`DELETE FROM audit_logs; DELETE FROM product_images; DELETE FROM products; DELETE FROM file_assets;
+    DELETE FROM user_sessions; DELETE FROM users;`))
   raw.exec("INSERT INTO users (id, username, name, password, permissions, is_active) VALUES (1, 'tester', 'Test User', 'x', '{}', 1)")
 }
 
@@ -66,10 +72,10 @@ async function wireAll() {
 
 function seedReplaceAndFresh() {
   reset()
-  raw.exec(`INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES
+  seedFixture(raw.db, () => raw.exec(`INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES
     (1, 'Rose Serum', 1, 0, '/uploads/old-rose.jpg'),
     (2, 'Chanel No 5', 1, 0, NULL),
-    (3, 'Lip Balm', 1, 0, '/uploads/lip.jpg')`)
+    (3, 'Lip Balm', 1, 0, '/uploads/lip.jpg')`))
   raw.exec(`INSERT INTO product_images (product_id, image_path, sort_order) VALUES
     (1, '/uploads/old-rose.jpg', 0), (1, '/uploads/old-rose-b.jpg', 1),
     (3, '/uploads/lip.jpg', 0)`)
@@ -128,8 +134,8 @@ async function main() {
     reset()
     const TOTAL = 250
     for (let n = 1; n <= TOTAL; n += 1) {
-      raw.prepare('INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES (@id, @name, 1, 0, @old)')
-        .run({ id: n, name: `Bulk Product ${n}`, old: `/uploads/old-${n}.jpg` })
+      seedFixture(raw.db, () => raw.prepare('INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES (@id, @name, 1, 0, @old)')
+        .run({ id: n, name: `Bulk Product ${n}`, old: `/uploads/old-${n}.jpg` }))
       insertAsset(1000 + n, `Bulk Product ${n}.jpg`, `/uploads/bulk-${n}.jpg`)
     }
     const { applied } = await wireAll()

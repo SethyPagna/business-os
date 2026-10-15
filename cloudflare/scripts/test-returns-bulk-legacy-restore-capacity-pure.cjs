@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Restoring a cancelled return on a LEGACY (money_precision_version 0) sale
 // must respect the same quantity cap POST /api/returns enforces.
@@ -77,14 +83,14 @@ function fixture() {
 // ops legacy-sale:% import migration 0235 does not mark), so RET-B E1 does
 // not refuse the restore before the cap is read.
 function seed(f, returns, { importedReturned = 0 } = {}) {
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO products(id,name,stock_quantity) VALUES(1,'Serum',10);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10);
     INSERT INTO sales(id,receipt_number,sale_status,status_before_return,money_precision_version,updated_at)
       VALUES(1,'SALE-1','returned','completed',0,'sale-v0');
     INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,returned_quantity) VALUES(1,1,1,'Serum',2,1,${Number(importedReturned)});
-  `)
+  `))
   for (const r of returns) {
     f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,
       money_precision_version,total_refund_usd,total_refund_khr) VALUES(?,?,1,'customer',?,'refund',1,?,0,?,0)`)

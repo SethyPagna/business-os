@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Regression test for two reported search gaps, merged from update_code.zip
 // (Part 267): (1) a brand punctuated down to single-letter tokens --
 // "e.l.f." is the reported case -- can never be found via FTS5 prefix
@@ -84,11 +90,11 @@ const insert = db.prepare(`INSERT INTO products
   (id, name, sku, barcode, brand, category, supplier, description, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active)
   VALUES (@id, @name, @sku, @barcode, @brand, @category, @supplier, @description, @unit, 50, 10, 0, 1)`)
 
-insert.run({ id: 1, name: 'Poreless Putty Primer', sku: 'ELF001', barcode: '6900000000101', brand: 'e.l.f.', category: 'Primer', supplier: 'Acme', description: '', unit: 'pcs' })
-insert.run({ id: 2, name: 'Halo Glow Liquid Filter', sku: 'ELF002', barcode: '6900000000102', brand: 'e.l.f.', category: 'Highlighter', supplier: 'Acme', description: '', unit: 'pcs' })
-insert.run({ id: 3, name: 'Bookshelf Organizer Decor', sku: 'DEC001', barcode: '6900000000103', brand: 'Generic', category: 'Decor', supplier: 'Acme', description: '', unit: 'pcs' })
-insert.run({ id: 4, name: 'Self Tanning Water Mousse', sku: 'TAN001', barcode: '6900000000104', brand: 'Isle of Paradise', category: 'Tanning', supplier: 'Acme', description: '', unit: 'pcs' })
-insert.run({
+seedFixture(db, () => insert.run({ id: 1, name: 'Poreless Putty Primer', sku: 'ELF001', barcode: '6900000000101', brand: 'e.l.f.', category: 'Primer', supplier: 'Acme', description: '', unit: 'pcs' }))
+seedFixture(db, () => insert.run({ id: 2, name: 'Halo Glow Liquid Filter', sku: 'ELF002', barcode: '6900000000102', brand: 'e.l.f.', category: 'Highlighter', supplier: 'Acme', description: '', unit: 'pcs' }))
+seedFixture(db, () => insert.run({ id: 3, name: 'Bookshelf Organizer Decor', sku: 'DEC001', barcode: '6900000000103', brand: 'Generic', category: 'Decor', supplier: 'Acme', description: '', unit: 'pcs' }))
+seedFixture(db, () => insert.run({ id: 4, name: 'Self Tanning Water Mousse', sku: 'TAN001', barcode: '6900000000104', brand: 'Isle of Paradise', category: 'Tanning', supplier: 'Acme', description: '', unit: 'pcs' }))
+seedFixture(db, () => insert.run({
   id: 5,
   name: 'Advanced Night Repair Synchronized Multi-Recovery Complex Serum',
   sku: 'EST001',
@@ -98,7 +104,7 @@ insert.run({
   supplier: 'Acme',
   description: '',
   unit: 'pcs',
-})
+}))
 
 function runProductsSearch(rawQuery, mode = 'AND', titleOnly = false) {
   const groups = tokenizeSearchTermGroups(rawQuery, 6, 8)
