@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // REVERT-FIX F4: a Revert is its own record. The ledger row says which row it
 // reverts (a link, from the immutable reference_id, not the editable reason),
 // the original says by which row it was reverted and whether it is reverted
@@ -18,10 +24,10 @@ const actor = { userId: user.id, userName: user.name }
 async function main() {
   const f = fixture()
   try {
-    f.sql.exec(`UPDATE products SET stock_quantity=10 WHERE id=1; UPDATE branch_stock SET quantity=10 WHERE product_id=1 AND branch_id=1;
+    seedFixture(f.sql, () => f.sql.exec(`UPDATE products SET stock_quantity=10 WHERE id=1; UPDATE branch_stock SET quantity=10 WHERE product_id=1 AND branch_id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,payment_status,received_quantity,received_branch_id,received_cost_usd,supplier_name)
         VALUES(9001,1,'20260915-p','09152026','2026-09-15',1,1,2,'paid',10,1,20,'Probe Supplier');
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9001,1,10);`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9001,1,10);`))
     const receipt = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,reference_id,batch_id,created_at)
       VALUES(1,1,'add',10,2,20,'Probe receipt','777',9001,'2026-09-15 03:00:00')`).run().lastInsertRowid)
     const db = getDb(f.env)

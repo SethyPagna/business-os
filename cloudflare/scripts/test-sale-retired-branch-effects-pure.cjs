@@ -1,11 +1,11 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // CUTOVER-LC: stock effects of the SALE writers against a sale made at a branch that has since been retired
 // (Shop -> "Old Shop", inactive, successor "LC Store"): single status change, bulk status change (with its
-// undo and redo), amendments and add-items. The REAL routes/sales.ts, routes/actionHistory.ts and every kernel
-// they use run against an in-memory SQLite with every migration applied; sales come from the real checkout.
+// undo and redo), amendments and add-items. Current routes use the full schema; archived controls pin
+// source, dependencies and schema together. Each world uses its own real checkout.
 //
-// An ORACLE is the same set of routes exactly as they were before this change (git 2651672da: LB + LD, files
-// routes/sales.ts, lib/saleBulkStatus.ts, lib/saleTransitions.ts, lib/saleAmendments.ts). It proves two things:
-//   * while both branches are active the new code writes equal business statements apart from verified admission (inert), and
+// Archived source, dependencies and schema prove the original branch change:
+//   * the immediate before/after redirect-confirmation routes write equal statements while both branches are active, and
 //   * on the post-consolidation world the old code strands the units at the retired branch (the defect), so
 //     the fixture discriminates the fix from the bug.
 //
@@ -42,16 +42,30 @@ const Database = require('better-sqlite3')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-// Two oracles. OLD = the writers before ANY retired-branch handling (b2b57f90b): the controls, and the inertness of the stock
-// redirect. BEFORE_FEES = the merge of LC + LD (5e7a011a4: redirect in, expenses still booked at the sale's branch): the
-// inertness of booking the cancellation expense to the successor, which can only differ once the sale's branch is retired.
+// OLD and BEFORE_FEES retain the original stock and expense defects; PRE_LR/POST_LR isolate inert statement parity.
 const ORACLE_OLD = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
-const ORACLE_BEFORE_FEES = '5e7a011a4'
-// CUTOVER-LR adds lib/saleLineAddition.ts (the per-line effect branch of an addition) so its inertness is proved too.
-const ORACLE_FILES = new Set(['routes/sales.ts', 'lib/saleBulkStatus.ts', 'lib/saleTransitions.ts', 'lib/saleAmendments.ts', 'lib/saleLineAddition.ts'])
+const ORACLE_BEFORE_FEES = '5e7a011a4ad7b7f8cd8a9581ab705283eedc92ec'
+const PRE_LR = '2ace6458d24383969ec10c403f7dd4e7c5075f29'
+const POST_LR = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
 const USER = { id: 71, username: 'owner', name: 'Owner', permissions: JSON.stringify({ all: true }) }
 const executionCtx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 
+const historicalSourceTrees = new Map()
+const historicalSourceBlobs = new Map()
+const transpiledSources = new Map()
+function historicalSource(ref, rel) {
+  if (!historicalSourceTrees.has(ref)) {
+    const tree = execFileSync('git', ['ls-tree', '-r', ref, 'cloudflare/src'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8' })
+    historicalSourceTrees.set(ref, new Map(tree.trim().split('\n').map(line => {
+      const [metadata, file] = line.split('\t')
+      return [file.slice('cloudflare/src/'.length), metadata.split(' ')[2]]
+    })))
+  }
+  const object = historicalSourceTrees.get(ref).get(rel)
+  assert.ok(object, `${ref}:cloudflare/src/${rel}`)
+  if (!historicalSourceBlobs.has(object)) historicalSourceBlobs.set(object, execFileSync('git', ['cat-file', 'blob', object], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
+  return historicalSourceBlobs.get(object)
+}
 function makeWorld(oracleSha) {
   const cache = new Map()
   const overrides = {
@@ -70,10 +84,12 @@ function makeWorld(oracleSha) {
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', 'src', rel)
-    const text = oracleSha && ORACLE_FILES.has(rel)
-      ? execFileSync('git', ['show', `${oracleSha}:cloudflare/src/${rel}`], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const text = oracleSha
+      ? historicalSource(oracleSha, rel)
       : fs.readFileSync(sourcePath, 'utf8')
-    const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText
+    const compiledKey = sourcePath + '\0' + text
+    if (!transpiledSources.has(compiledKey)) transpiledSources.set(compiledKey, ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText)
+    const output = transpiledSources.get(compiledKey)
     const mod = { exports: {} }
     cache.set(rel, mod)
     const localRequire = (request) => {
@@ -85,14 +101,17 @@ function makeWorld(oracleSha) {
     new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
     return mod.exports
   }
-  return { sales: load('routes/sales.ts').default, history: load('routes/actionHistory.ts').default }
+  return { ref: oracleSha, sales: load('routes/sales.ts').default, history: load('routes/actionHistory.ts').default }
 }
 const fresh = makeWorld(null)
 const old = makeWorld(ORACLE_OLD)
 const beforeFees = makeWorld(ORACLE_BEFORE_FEES)
+const historicalBefore = makeWorld(PRE_LR)
+const historicalCurrent = makeWorld(POST_LR)
 
 // The D1 binding the real lib/db.ts D1Compat wraps: prepare().bind().first()/all()/run() and batch() of bound
 // statements, over a real SQLite. Native D1 counts the revision-trigger row of an INSERT INTO sales too.
+let rawAdmissionError = null
 function routeDb(sql, capture) {
   const bump = (text, changes) => (/INSERT\s+INTO\s+sales\s*\(/i.test(text) && changes > 0 ? changes + 1 : changes)
   return {
@@ -108,12 +127,16 @@ function routeDb(sql, capture) {
         },
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       if (capture) capture.push(statements.map((statement) => ({ sql: statement.text, params: statement.params })))
-      return sql.transaction(() => statements.map((statement) => {
+      try { return sql.transaction(() => statements.map((statement) => {
         const r = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: bump(statement.text, Number(r.changes)), last_row_id: Number(r.lastInsertRowid) } }
-      }))()
+      }))() } catch (error) {
+        if (error.message === 'stock_transaction_required') rawAdmissionError = error
+        throw error
+      }
     },
   }
 }
@@ -141,46 +164,72 @@ function checkoutBody(id) {
 // state (LC Store role shop key warehouse, Old Shop retired with successor LC Store), 'orphan' = retired, no successor.
 // Production ids here: 1 = Shop, 2 = Warehouse. The Shop sale drew lot 500 (8 left at Shop after the sale); the
 // Warehouse holds 5 in lot 600, received the same day, so the consolidation folded 500 into 600.
-let migratedTemplate = null
-function migratedDb() {
-  if (!migratedTemplate) {
+const migratedTemplates = new Map()
+const historicalDbs = new WeakSet()
+function archivedMigrations(ref) {
+  const files = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, 'cloudflare/migrations'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8' }).trim().split('\n').filter(file => file.endsWith('.sql')).sort()
+  assert.equal(files.length, ref === ORACLE_OLD ? 195 : 196)
+  assert.equal(files.at(-1), ref === ORACLE_OLD ? 'cloudflare/migrations/0236_branch_history_label_columns.sql' : 'cloudflare/migrations/0240_stock_revision_ignores_batch_label.sql')
+  assert.ok(files.every(file => !/\/(?:0185|0186|0188|0190|0191)_/.test(file)))
+  assert.ok(files.every(file => !/\/(?:0243|0258)_/.test(file)))
+  const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: path.join(__dirname, '..', '..'), input: files.map(file => `${ref}:${file}`).join('\n') + '\n', maxBuffer: 64 * 1024 * 1024 })
+  let offset = 0
+  return files.map(file => {
+    const end = bytes.indexOf(10, offset)
+    const header = bytes.subarray(offset, end).toString('utf8').split(' ')
+    assert.equal(header[1], 'blob', file)
+    const size = Number(header[2])
+    const sql = bytes.subarray(end + 1, end + 1 + size).toString('utf8')
+    offset = end + size + 2
+    return sql
+  })
+}
+function migratedDb(ref = null) {
+  const key = ref || 'current'
+  if (!migratedTemplates.has(key)) {
     const seed = new Database(':memory:')
     seed.pragma('foreign_keys = OFF')
-    for (const migration of loadAll()) seed.exec(migration)
-    migratedTemplate = seed.serialize()
+    for (const migration of ref ? archivedMigrations(ref) : loadAll()) seed.exec(migration)
+    if (ref) assert.equal(seed.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+    else assert.throws(() => seed.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+    migratedTemplates.set(key, seed.serialize())
     seed.close()
   }
-  const db = new Database(migratedTemplate)
+  const db = new Database(migratedTemplates.get(key))
   db.pragma('foreign_keys = OFF')
+  if (ref) historicalDbs.add(db)
   return db
 }
+function fixtureStock(db, seed) {
+  return historicalDbs.has(db) ? seed() : seedStockFixture(db, seed)
+}
 
-async function build(state, capture) {
-  const db = migratedDb()
+async function build(state, capture, world = fresh) {
+  const db = migratedDb(world.ref)
   db.exec('DELETE FROM branches')
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)").run()
-  db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
-              VALUES(10,'Powder','POWDER',15,9.5,38000,4,16000,1)`).run()
-  db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)').run()
-  db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,2,5)').run()
-  db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
-              VALUES(500,10,'powder-shop','POWDER-S','2027-06-01','2026-09-01',1,1)`).run()
-  db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
-              VALUES(600,10,'powder-wh','POWDER-W','2027-06-01','2026-09-01',1,2)`).run()
-  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run()
-  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,2,5)').run()
-  const created = await call(fresh.sales, routeDb(db, null), 'POST', '/', checkoutBody(`checkout-${state}`))
+  fixtureStock(db, () => db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
+              VALUES(10,'Powder','POWDER',15,9.5,38000,4,16000,1)`).run())
+  fixtureStock(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)').run())
+  fixtureStock(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,2,5)').run())
+  fixtureStock(db, () => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+              VALUES(500,10,'powder-shop','POWDER-S','2027-06-01','2026-09-01',1,1)`).run())
+  fixtureStock(db, () => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+              VALUES(600,10,'powder-wh','POWDER-W','2027-06-01','2026-09-01',1,2)`).run())
+  fixtureStock(db, () => db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run())
+  fixtureStock(db, () => db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,2,5)').run())
+  const created = await call(world.sales, routeDb(db, null), 'POST', '/', checkoutBody(`checkout-${state}`))
   assert.equal(created.status, 200, JSON.stringify(created.body))
   const saleId = created.body.sale.id
   const lineId = created.body.sale.items[0].id
   assert.equal(stockOf(db).shop, 8, 'the checkout took 2 of the 10 at Shop')
   if (state !== 'before') {
-    db.exec(`UPDATE branch_batch_stock SET quantity = quantity + 8 WHERE batch_id = 600 AND branch_id = 2;
+    fixtureStock(db, () => db.exec(`UPDATE branch_batch_stock SET quantity = quantity + 8 WHERE batch_id = 600 AND branch_id = 2;
              UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 500 AND branch_id = 1;
              UPDATE branch_stock SET quantity = quantity + 8 WHERE product_id = 10 AND branch_id = 2;
              UPDATE branch_stock SET quantity = 0 WHERE product_id = 10 AND branch_id = 1;
-             DELETE FROM branches;`)
+             DELETE FROM branches;`))
     db.prepare("INSERT INTO branches(id,name,role,canonical_key,is_default,is_active) VALUES(2,'LC Store','shop','warehouse',1,1)").run()
     db.prepare("INSERT INTO branches(id,name,role,canonical_key,is_default,is_active,successor_branch_id) VALUES(1,'Old Shop','shop','shop',0,0,?)").run([state === 'orphan' ? null : 2])
     db.prepare("INSERT INTO audit_logs(user_name,action,entity,entity_id,details) VALUES('op','branch_cutover_lot_fold','product_batch','600',?)")
@@ -200,8 +249,25 @@ function stockOf(db) {
     product: q('SELECT stock_quantity AS quantity FROM products WHERE id=10'),
   }
 }
-const ledgerSnapshot = (db) => JSON.stringify(['branch_stock', 'branch_batch_stock', 'products', 'inventory_movements', 'sales', 'sale_items', 'sale_item_batch_allocations', 'fees']
-  .map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+const LEDGER_TABLES = ['branch_stock', 'branch_batch_stock', 'products', 'inventory_movements', 'sales', 'sale_items', 'sale_item_batch_allocations', 'fees']
+function ledgerSnapshot(db, schemaDb = db) {
+  return JSON.stringify(LEDGER_TABLES.map(table => {
+    const columns = schemaDb.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(table).map(row => row.name)
+    if (schemaDb !== db) {
+      const extras = db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(table).map(row => row.name).filter(column => !columns.includes(column))
+      assert.deepEqual(extras, table === 'products' ? ['cost_review_key'] : [], `${table}: only declared current metadata is outside the historical projection`)
+      if (table === 'products') assert.equal(db.prepare('SELECT COUNT(*) AS n FROM products WHERE cost_review_key IS NOT NULL').get().n, 0)
+    }
+    return [table, db.prepare(`SELECT ${columns.map(column => '"' + column + '"').join(',')} FROM ${table} ORDER BY rowid`).all()]
+  }))
+}
+function fullFixtureSnapshot(db) {
+  return JSON.stringify(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+    .map(row => {
+      const columns = db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(row.name).map(column => '"' + column.name + '"')
+      return [row.name, db.prepare(`SELECT * FROM "${row.name}" ORDER BY ${columns.join(',')}`).all()]
+    }))
+}
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const movementsOf = (db, type) => plain(db.prepare('SELECT branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements WHERE movement_type=? ORDER BY id').all([type]))
 
@@ -261,6 +327,18 @@ async function amend(world, w, body, redirect = null) {
 ;(async () => {
   // ---------------------------------------------------------------- single status: cancel, un-cancel, replay
   {
+    {
+    const guardWorld = await build('after')
+    const before = fullFixtureSnapshot(guardWorld.db)
+    rawAdmissionError = null
+    const rawOld = makeWorld(ORACLE_OLD)
+    const refused = await setStatus(rawOld.sales, guardWorld, cancelBody('old-worker-raw-refusal'))
+    assert.ok(refused.status >= 400)
+    assert.match(rawAdmissionError?.message || '', /stock_transaction_required/)
+    assert.equal(fullFixtureSnapshot(guardWorld.db), before)
+    assert.equal(guardWorld.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    console.log('PASS archived OLD route is refused on the current schema without writes or leaked admission')
+    }
     const w = await build('after')
     const before = stockOf(w.db)
     assert.deepEqual(before, { shop: 0, store: 13, lot500AtOld: 0, lot500AtStore: null, lot600AtStore: 13, product: 13 + 0 + 2 - 2 })
@@ -295,7 +373,7 @@ async function amend(world, w, body, redirect = null) {
     assert.deepEqual(stockOf(w.db), before, 'un-cancel puts every stock figure back exactly where it was')
     assert.deepEqual(movementsOf(w.db, 'sale').slice(-1), [{ branch_id: 2, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: -2, batch_id: 600 }])
     // Control: the oracle (old code) strands the units at the retired branch, in the folded lot.
-    const o = await build('after')
+    const o = await build('after', null, old)
     const strandedCancel = await setStatus(old.sales, o, cancelBody('cut-cancel-old'))
     assert.equal(strandedCancel.status, 200, JSON.stringify(strandedCancel.body))
     const stranded = stockOf(o.db)
@@ -341,7 +419,7 @@ async function amend(world, w, body, redirect = null) {
   {
     const held = async (branch) => {
       const w = await build('after')
-      w.db.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,reason) VALUES(7,10,'Powder',?,2,0,'damaged')").run([branch])
+      seedStockFixture(w.db, () => w.db.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,reason) VALUES(7,10,'Powder',?,2,0,'damaged')").run([branch]))
       w.db.prepare('UPDATE sale_items SET damaged_lot_id=7 WHERE id=?').run([w.lineId])
       return w
     }
@@ -378,7 +456,7 @@ async function amend(world, w, body, redirect = null) {
     assert.equal(withFee.status, 200, JSON.stringify(withFee.body))
     assert.deepEqual(plain(w.db.prepare("SELECT branch_id, branch_name, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all()), [{ branch_id: 2, branch_name: 'LC Store', sale_id: w.saleId, amount_usd: 1.5 }],
       'the lost-fee expense is booked to LC Store (Old Shop has no drawer) and stays linked to the old Shop sale')
-    const o = await build('after')
+    const o = await build('after', null, old)
     const oldFee = await setStatus(old.sales, o, cancelBody('cut-fee-old', { cancel_fee_usd: 1.5 }))
     assert.equal(oldFee.status, 400, 'CONTROL: the old code refuses the expense because the sale branch is inactive')
     const revived = await setStatus(fresh.sales, w, reviveBody('cut-fee-revive'), w.saleId, 2)
@@ -414,7 +492,7 @@ async function amend(world, w, body, redirect = null) {
     const redone = await call(fresh.history, w.route, 'POST', `/${applied.body.actionHistoryId}/redo`, { require_applied: true, expected_generation: 1 })
     assert.equal(redone.status, 200, JSON.stringify(redone.body))
     assert.deepEqual(stockOf(w.db), after, 'redo applies it again, once')
-    const o = await build('after')
+    const o = await build('after', null, old)
     const oldApplied = await call(old.sales, o.route, 'POST', '/bulk-status', bulkBody(o, 'cancelled', 'cut-bulk-old'))
     assert.equal(oldApplied.status, 200, JSON.stringify(oldApplied.body))
     assert.equal(stockOf(o.db).shop, 2, 'CONTROL: the old bulk path strands the units at Old Shop')
@@ -459,7 +537,7 @@ async function amend(world, w, body, redirect = null) {
     const replayed = await call(fresh.sales, w.route, 'POST', `/${w.saleId}/amendments`, w.sent, 2)
     assert.equal(replayed.status, 200, JSON.stringify(replayed.body))
     assert.equal(ledgerSnapshot(w.db), settled, 'a replayed amendment writes nothing')
-    const o = await build('after')
+    const o = await build('after', null, old)
     const oldDecreased = await amend(old.sales, o, decreaseBody(o, 'cut-amend-old'))
     assert.equal(oldDecreased.status, 400, 'CONTROL: the old code refuses every amendment of a sale at a retired branch')
 
@@ -535,22 +613,27 @@ async function amend(world, w, body, redirect = null) {
     ]
     for (const [name, run] of scenarios) {
       const newCapture = []; const oldCapture = []
-      const a = await build('before', newCapture); const b = await build('before', oldCapture)
-      const x = await run(fresh.sales, a); const y = await run(/expense/.test(name) ? beforeFees.sales : old.sales, b)
+      const oracle = historicalBefore
+      const a = await build('before', null); const b = await build('before', oldCapture, oracle)
+      const historical = await build('before', newCapture, historicalCurrent)
+      const x = await run(fresh.sales, a); const y = await run(oracle.sales, b)
+      const z = await run(historicalCurrent.sales, historical)
+      assert.equal(z.status, 200, `${name}: historical post-LR ${JSON.stringify(z.body)}`)
       assert.equal(x.status, y.status, `${name}: same status (${JSON.stringify(x.body)} vs ${JSON.stringify(y.body)})`)
       assert.equal(x.status, 200, `${name}: ${JSON.stringify(x.body)}`)
       const statementsA = normalised(withoutProductAdmission(newCapture)); const statementsB = normalised(withoutProductAdmission(oldCapture))
       let where = 0
       while (where < statementsA.length && statementsA[where] === statementsB[where]) where++
-      assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission while both branches are active; first difference near: ${statementsA.slice(Math.max(0, where - 150), where + 150)} <> ${statementsB.slice(Math.max(0, where - 150), where + 150)}`)
-      const ledgerA = legacyCostLedger(scrub(ledgerSnapshot(a.db))); const ledgerB = legacyCostLedger(scrub(ledgerSnapshot(b.db)))
+      assert.equal(statementsA === statementsB, true, `${name}: equal historical business statements while both branches are active; first difference near: ${statementsA.slice(Math.max(0, where - 150), where + 150)} <> ${statementsB.slice(Math.max(0, where - 150), where + 150)}`)
+      const ledgerA = legacyCostLedger(scrub(ledgerSnapshot(historical.db))); const ledgerB = legacyCostLedger(scrub(ledgerSnapshot(b.db)))
       let at = 0
       while (at < ledgerA.length && ledgerA[at] === ledgerB[at]) at++
-      assert.equal(ledgerA === ledgerB, true, `${name}: identical resulting ledgers; first difference near: ${ledgerA.slice(Math.max(0, at - 100), at + 100)} <> ${ledgerB.slice(Math.max(0, at - 100), at + 100)}`)
+      assert.equal(ledgerA === ledgerB, true, `${name}: identical historical resulting ledgers; first difference near: ${ledgerA.slice(Math.max(0, at - 100), at + 100)} <> ${ledgerB.slice(Math.max(0, at - 100), at + 100)}`)
+      assert.equal(legacyCostLedger(scrub(ledgerSnapshot(a.db, historical.db))), ledgerA, `${name}: current route preserves the historical business ledger`)
       assert.equal(a.db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL").get().n, 0, `${name}: no provenance column is written`)
     }
   }
-  console.log('PASS both branches active: cancel / bulk cancel / expense / amendment write equal business statements apart from verified admission and ledgers to the code before this change')
+  console.log('PASS current active-branch statuses and historical before/post-LR exact statement and ledger parity')
 
   // ---------------------------------------------------------------- roles set, names unchanged, both active: still inert
   {

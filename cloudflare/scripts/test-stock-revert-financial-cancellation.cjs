@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
 const losses = loadStockSession('lib/removalLosses.ts')
@@ -16,8 +22,8 @@ async function main() {
     try {
       const removes = type === 'remove' || type === 'out'
       const originalStock = removes ? 73 : 127
-      f.sql.prepare('UPDATE products SET stock_quantity=? WHERE id=1').run(originalStock)
-      f.sql.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=1').run(originalStock)
+      seedFixture(f.sql, () => f.sql.prepare('UPDATE products SET stock_quantity=? WHERE id=1').run(originalStock))
+      seedFixture(f.sql, () => f.sql.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=1').run(originalStock))
       f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,created_at)
         VALUES(1,1,?,27,2,54,'Synthetic stock action','2026-09-29 01:00:00')`).run(type)
       for (let generation = 0; generation <= 6; generation++) {

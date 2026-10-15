@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Sibling check for the return-edit guard (6.0.41, return_edit_empty): can a
 // SALE edit empty a sale the way PATCH /api/returns/:id emptied a return?
 //
@@ -30,9 +36,9 @@ const line = (key, quantity = 1) => ({ product_id: 10, quantity, branch_id: 1, b
 
 async function saleWith(requestId, items, stock) {
   const f = h.fixture()
-  f.raw.prepare('UPDATE branch_stock SET quantity=@q WHERE product_id=10').run({ q: stock })
-  f.raw.prepare('UPDATE branch_batch_stock SET quantity=@q WHERE batch_id=500').run({ q: stock })
-  f.raw.prepare('UPDATE products SET stock_quantity=@q WHERE id=10').run({ q: stock })
+  seedFixture(f.raw.db, () => f.raw.prepare('UPDATE branch_stock SET quantity=@q WHERE product_id=10').run({ q: stock }))
+  seedFixture(f.raw.db, () => f.raw.prepare('UPDATE branch_batch_stock SET quantity=@q WHERE batch_id=500').run({ q: stock }))
+  seedFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET stock_quantity=@q WHERE id=10').run({ q: stock }))
   const total = items.reduce((sum, item) => sum + item.pricing_quote.total_usd, 0)
   const created = await h.postSale(f.route, { ...h.request(requestId), money_precision_version: 1, items, amount_paid_usd: total })
   assert.equal(created.status, 200, JSON.stringify(created.body))

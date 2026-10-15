@@ -1,3 +1,10 @@
+const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Reproduces the Part 90 live-app report against real SQLite (all
 // migrations applied verbatim, same engine D1 runs on) instead of guessing
 // from source alone: GET /api/products/bootstrap?query=matte&searchMode=
@@ -46,9 +53,9 @@ console.log(`Applied ${files.length} migrations cleanly.`)
 const insert = db.prepare(`INSERT INTO products
   (name, sku, barcode, brand, category, supplier, description, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active)
   VALUES (@name, @sku, @barcode, @brand, @category, @supplier, @description, @unit, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, 1)`)
-insert.run({ name: 'MAC Matte Lipstick 617 Rebel', sku: 'MAC617', barcode: '6923644012345', brand: 'MAC', category: 'Lipstick', supplier: 'Acme', description: 'Long-wear matte', unit: 'pcs', stock_quantity: 50, low_stock_threshold: 10, out_of_stock_threshold: 0 })
-insert.run({ name: 'Matte Foundation 24hr', sku: 'FND24', barcode: '6923644099999', brand: 'Maybelline', category: 'Foundation', supplier: 'Acme', description: 'Matte finish', unit: 'pcs', stock_quantity: 3, low_stock_threshold: 10, out_of_stock_threshold: 0 })
-insert.run({ name: 'Glossy Lip Tint', sku: 'GLT01', barcode: '6923644011111', brand: 'NYX', category: 'Lipstick', supplier: 'Acme', description: 'Non-matte gloss', unit: 'pcs', stock_quantity: 20, low_stock_threshold: 10, out_of_stock_threshold: 0 })
+seedFixture(db, () => insert.run({ name: 'MAC Matte Lipstick 617 Rebel', sku: 'MAC617', barcode: '6923644012345', brand: 'MAC', category: 'Lipstick', supplier: 'Acme', description: 'Long-wear matte', unit: 'pcs', stock_quantity: 50, low_stock_threshold: 10, out_of_stock_threshold: 0 }))
+seedFixture(db, () => insert.run({ name: 'Matte Foundation 24hr', sku: 'FND24', barcode: '6923644099999', brand: 'Maybelline', category: 'Foundation', supplier: 'Acme', description: 'Matte finish', unit: 'pcs', stock_quantity: 3, low_stock_threshold: 10, out_of_stock_threshold: 0 }))
+seedFixture(db, () => insert.run({ name: 'Glossy Lip Tint', sku: 'GLT01', barcode: '6923644011111', brand: 'NYX', category: 'Lipstick', supplier: 'Acme', description: 'Non-matte gloss', unit: 'pcs', stock_quantity: 20, low_stock_threshold: 10, out_of_stock_threshold: 0 }))
 
 // --- replicate buildSearchFilters (routes/products.ts) exactly ---------
 function buildSearchFilters(query) {

@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -16,7 +22,7 @@ async function main() {
   try {
     const api = loadStockSession()
     const route = loadStockSession('routes/actionHistory.ts').default
-    f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Fixture supplier'); INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(2,'Second product','SECOND',0,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)")
+    seedFixture(f.sql, () => f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Fixture supplier'); INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(2,'Second product','SECOND',0,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)"))
     const request = receiveRequest('history-route-contract', 5)
     Object.assign(request.items[0], { supplier_id: 1, supplier_name: 'Fixture supplier', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-10-15' })
     request.items.push({ ...request.items[0], line_id: 'second', product_id: 2, quantity: 3 })

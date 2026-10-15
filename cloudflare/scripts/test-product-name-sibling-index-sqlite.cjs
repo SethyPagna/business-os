@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -42,7 +48,7 @@ const fixtures = [
   { name: 'Rename Me', sku: 'RENAME-A', barcode: '600', is_active: 1 },
   { name: 'Updated Twin', sku: 'RENAME-B', barcode: '601', is_active: 1 },
 ]
-db.transaction((rows) => rows.forEach((row) => insert.run(row)))(fixtures)
+seedFixture(db, () => fixtures.forEach((row) => insert.run(row)))
 db.prepare("UPDATE products SET name = '  UPDATED TWIN  ' WHERE sku = 'RENAME-A'").run()
 
 const normalizedKey = (name) => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -94,7 +100,7 @@ assert.match(indexedPlan, /idx_products_name_key_pg/, `expected name_key index, 
 assert.doesNotMatch(expressionPlan, /idx_products_name_key_pg/, 'wrapped name expression must not be mistaken for an indexed name_key lookup')
 
 const catalogRows = 5_000
-db.transaction(() => {
+seedFixture(db, () => {
   for (let index = 0; index < catalogRows; index += 1) {
     insert.run({
       name: `Benchmark Product ${String(index).padStart(5, '0')}`,
@@ -103,7 +109,7 @@ db.transaction(() => {
       is_active: index % 29 === 0 ? 0 : 1,
     })
   }
-})()
+})
 
 const benchmarkKeys = Array.from({ length: 40 }, (_, index) => `benchmark product ${String(index * 431).padStart(5, '0')}`)
 const benchmarkPlaceholders = benchmarkKeys.map(() => '?').join(', ')

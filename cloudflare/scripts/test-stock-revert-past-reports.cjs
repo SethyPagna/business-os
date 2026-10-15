@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Owner, 1 Oct 2026: "revert is the same logic as cancelling a sale or changing
 // its status: everything returns with no loss, through the official process;
 // just that the report and so on removes." A Revert is a new record, dated now
@@ -21,12 +27,12 @@ const contacts = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'co
 const STOCK_IN_REPORT_SOURCE = contacts.match(/const STOCK_IN_REPORT_SOURCE = `([\s\S]*?)`/)[1]
 
 function seedPurchases(f) {
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     UPDATE products SET stock_quantity=17 WHERE id=1; UPDATE branch_stock SET quantity=17 WHERE product_id=1 AND branch_id=1;
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,payment_status,received_quantity,received_branch_id,received_cost_usd,supplier_name)
       VALUES(9001,1,'20260915-p','09152026','2026-09-15',1,1,2,'credit',10,1,20,'Probe Supplier'),
             (9002,1,'20260901-o','09012026','2026-09-01',1,2,3,'paid',10,1,30,'Other Supplier');
-    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9001,1,10),(9002,1,7);`)
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9001,1,10),(9002,1,7);`))
   const receipt = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id,created_at)
     VALUES(1,1,'add',10,2,20,'Probe receipt',9001,'2026-09-15 03:00:00')`).run().lastInsertRowid)
   const removal = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id,created_at)
@@ -88,7 +94,7 @@ async function paidReceiptRevertLowersPaidSpend() {
   const f = fixture()
   try {
     seedPurchases(f)
-    f.sql.exec('UPDATE product_batches SET received_quantity=17, received_cost_usd=51 WHERE id=9002; UPDATE branch_batch_stock SET quantity=14 WHERE batch_id=9002; UPDATE branch_stock SET quantity=24 WHERE product_id=1; UPDATE products SET stock_quantity=24 WHERE id=1')
+    seedFixture(f.sql, () => f.sql.exec('UPDATE product_batches SET received_quantity=17, received_cost_usd=51 WHERE id=9002; UPDATE branch_batch_stock SET quantity=14 WHERE batch_id=9002; UPDATE branch_stock SET quantity=24 WHERE product_id=1; UPDATE products SET stock_quantity=24 WHERE id=1'))
     const paid = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id,created_at)
       VALUES(1,1,'add',7,3,21,'Paid receipt',9002,'2026-09-01 03:00:00')`).run().lastInsertRowid)
     assert.deepEqual(supplierTotal(f, 'name:other supplier'), { units: 17, usd: 51 })
@@ -105,11 +111,11 @@ async function paidReceiptRevertLowersPaidSpend() {
 async function legacyReceiptWithoutLot() {
   // Lot A (Sup X, 1 Sep, 10 on hand) plus 5 units held under no received date.
   const seed = (f, untracked) => {
-    f.sql.exec(`
+    seedFixture(f.sql, () => f.sql.exec(`
       UPDATE products SET stock_quantity=${10 + untracked} WHERE id=1; UPDATE branch_stock SET quantity=${10 + untracked} WHERE product_id=1 AND branch_id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,payment_status,received_quantity,received_branch_id,received_cost_usd,supplier_name)
         VALUES(9101,1,'20260901-a','09012026','2026-09-01',1,1,2,'paid',10,1,20,'Sup X');
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9101,1,10);`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9101,1,10);`))
     return Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,created_at)
       VALUES(1,1,'add',5,4,20,'Legacy receipt from Sup Y','2025-01-10 03:00:00')`).run().lastInsertRowid)
   }
@@ -141,7 +147,7 @@ async function legacyReceiptWithoutLot() {
   try {
     const legacy = seed(f, 5)
     // A sale takes 3 of the undated units after the revert read the stock.
-    f.beforeCommit((sql) => sql.exec('UPDATE branch_stock SET quantity=quantity-3 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity-3 WHERE id=1'))
+    f.beforeCommit((sql) => seedFixture(sql, () => sql.exec('UPDATE branch_stock SET quantity=quantity-3 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity-3 WHERE id=1')))
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.code, 'stock_changed', JSON.stringify(result))
     assert.deepEqual(stock(f), { branch: 12, product: 12, lots: { 9101: 10 }, lotTotal: 10 }, 'branch_stock never drops below its dated lots')
@@ -159,11 +165,11 @@ async function countIncreaseRevertUnreceives() {
     const f = fixture()
     try {
       const twoLots = shape === 'two lots'
-      f.sql.exec(`
+      seedFixture(f.sql, () => f.sql.exec(`
         UPDATE products SET stock_quantity=${twoLots ? 9 : 4} WHERE id=1; UPDATE branch_stock SET quantity=${twoLots ? 9 : 4} WHERE product_id=1 AND branch_id=1;
         INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,received_quantity,received_branch_id)
           VALUES(9201,1,'09102026','09102026','2026-09-10',1,1,4,1)${twoLots ? ",(9202,1,'09122026','09122026','2026-09-12',1,2,5,1)" : ''};
-        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9201,1,4)${twoLots ? ',(9202,1,5)' : ''};`)
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9201,1,4)${twoLots ? ',(9202,1,5)' : ''};`))
       const count = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,batch_id,created_at)
         VALUES(1,1,'add',${twoLots ? 9 : 4},'Dated stock count import',${twoLots ? 'NULL' : 9201},'2026-09-12 00:00:00')`).run().lastInsertRowid)
       f.sql.exec(`INSERT INTO dated_stock_count_batch_actions(movement_id,batch_id,quantity) VALUES(${count},9201,4)${twoLots ? `,(${count},9202,5)` : ''}`)

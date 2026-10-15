@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Regression coverage for Sentry BUSINESS-OS-1F: a sale_item reparented by
 // migrations 0165/0168 (which moved sale_items.product_id via raw SQL
 // without writing the product.merge undo_snapshots evidence
@@ -27,7 +33,7 @@ const h = harness.exports
   // product_id to a new product with a plain UPDATE, exactly like those
   // migrations, and deliberately write NO undo_snapshots evidence (unlike
   // routes/products.ts foldDuplicateProductInto, which always does).
-  f.raw.prepare("INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(20,'Powder Keeper','POWDERK',0,9.5,38000,4,16000,1)").run()
+  seedFixture(f.raw.db, () => f.raw.prepare("INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(20,'Powder Keeper','POWDERK',0,9.5,38000,4,16000,1)").run())
   f.raw.prepare('UPDATE sale_items SET product_id=20 WHERE sale_id=?').run([saleId])
 
   const line = f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=?').get([saleId])

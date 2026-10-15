@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Regression test for the live production incident: a bare 1-character
 // search (a real user typed just "m") tripped "D1_ERROR: D1 DB exceeded
 // its CPU time limit and was reset" -- confirmed from real `wrangler tail`
@@ -75,7 +81,7 @@ const nouns = ['Lipstick', 'Foundation', 'Mascara', 'Blush', 'Primer', 'Conceale
 const insert = db.prepare(`INSERT INTO products
   (name, sku, barcode, brand, category, supplier, description, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active)
   VALUES (@name, @sku, @barcode, @brand, @category, @supplier, @description, @unit, 50, 10, 0, 1)`)
-const insertMany = db.transaction((rows) => { for (const row of rows) insert.run(row) })
+const insertMany = rows => seedFixture(db, () => { for (const row of rows) insert.run(row) })
 const rows = []
 for (let i = 0; i < 5000; i += 1) {
   const brand = brands[i % brands.length]

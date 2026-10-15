@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { legacyCostSql } = require('./harness/legacy_cost_sql.cjs')
 // CUTOVER-LC item 4: returns of a sale made at a branch that has since been
@@ -21,9 +23,11 @@ const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const rawDb = openDb(loadAll())
+const currentRawDb = openDb(loadAll())
+let rawDb = currentRawDb
+assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 function deactivatePre0154LegacyLot(batchId) {
-  const deactivate = () => rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId])
+  const deactivate = () => fixtureStock(rawDb, () => rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId]))
   assert.throws(deactivate, /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
   // Legacy-corruption fixture only: preserve route refusal/race coverage even
   // though 0154 now prevents another writer from creating this state.
@@ -32,6 +36,7 @@ function deactivatePre0154LegacyLot(batchId) {
   try { deactivate() } finally { rawDb.exec(guard) }
 }
 let captured = null
+let rawAdmissionError = null
 let beforeBatchHook = null
 let beforeOrdinaryWrite = null
 let corruptNextReturnReceipt = false
@@ -105,7 +110,10 @@ const db = {
         receipt.params.requestDigest = 'G'.repeat(64)
       }
     }
-    const results = await rawDb.batch(items)
+    const results = await rawDb.batch(items).catch(error => {
+      if (error.message === 'stock_transaction_required') rawAdmissionError = error
+      throw error
+    })
     if (failReturnCreatePostcommitRead && items.some((item) => /INSERT INTO return_create_receipts/i.test(item.sql))) {
       failReturnCreatePostcommitRead = false
       failNextReturnCreateReceiptRead = true
@@ -134,6 +142,7 @@ function loadReal(relPath, requireOverrides = {}, sourceText = null) {
   }
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request === './loyaltyEligibility' || request === '../lib/loyaltyEligibility') return loadReal('lib/loyaltyEligibility.ts')
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
@@ -277,12 +286,82 @@ const returnsRouteOverrides = {
 }
 const loadReturnsRoute = (sourceText = null) => loadReal('routes/returns.ts', returnsRouteOverrides, sourceText)
 const returnsRoute = loadReturnsRoute()
-// The route as it was before this lane.
-const oracleRoute = loadReturnsRoute(require('child_process').execFileSync('git', ['show', '93057c781:cloudflare/src/routes/returns.ts'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
-
-// The route as it stood before the residual-gap lane (edit / supplier redirect): the oracle for those writers.
-const oracleBeforeResidualRoute = loadReturnsRoute(require('child_process').execFileSync('git', ['show', 'b2b57f90b:cloudflare/src/routes/returns.ts'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
-
+const { execFileSync } = require('node:child_process')
+const ORACLE_REF = '93057c7812e5180f8edcd552f6d8cea91905df52'
+const RESIDUAL_REF = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
+const PRE_LR_REF = '2ace6458d24383969ec10c403f7dd4e7c5075f29'
+const POST_LR_REF = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
+const historicalRouteRefs = new WeakMap()
+const historicalDatabases = new Map()
+const historicalDbs = new WeakSet()
+let forcedRawDb = null
+function archivedMigrations(ref) {
+  const files = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, 'cloudflare/migrations'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8' }).trim().split('\n').filter(file => file.endsWith('.sql')).sort()
+  assert.strictEqual(files.length, [PRE_LR_REF, POST_LR_REF].includes(ref) ? 196 : 195)
+  assert.strictEqual(files.at(-1), [PRE_LR_REF, POST_LR_REF].includes(ref) ? 'cloudflare/migrations/0240_stock_revision_ignores_batch_label.sql' : 'cloudflare/migrations/0236_branch_history_label_columns.sql')
+  assert.ok(files.every(file => !/\/(?:0185|0186|0188|0190|0191)_/.test(file)))
+  assert.ok(files.every(file => !/\/(?:0243|0258)_/.test(file)))
+  const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: path.join(__dirname, '..', '..'), input: files.map(file => `${ref}:${file}`).join('\n') + '\n', maxBuffer: 64 * 1024 * 1024 })
+  let offset = 0
+  return files.map(file => {
+    const end = bytes.indexOf(10, offset)
+    const header = bytes.subarray(offset, end).toString('utf8').split(' ')
+    assert.strictEqual(header[1], 'blob', file)
+    const size = Number(header[2])
+    const sql = bytes.subarray(end + 1, end + 1 + size).toString('utf8')
+    offset = end + size + 2
+    return sql
+  })
+}
+function selectDatabase(route) {
+  if (forcedRawDb) { rawDb = forcedRawDb; return }
+  const ref = historicalRouteRefs.get(route)
+  if (!ref) { rawDb = currentRawDb; return }
+  if (!historicalDatabases.has(ref)) {
+    const archived = openDb(archivedMigrations(ref))
+    assert.strictEqual(archived.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+    historicalDatabases.set(ref, archived)
+    historicalDbs.add(archived)
+  }
+  rawDb = historicalDatabases.get(ref)
+}
+function fixtureStock(raw, seed) {
+  return historicalDbs.has(raw) ? seed() : seedStockFixture(raw, seed)
+}
+function loadHistoricalReturns(ref) {
+  const cache = new Map()
+  const seams = new Map([
+    ['lib/auth.ts', returnsRouteOverrides['../lib/auth']],
+    ['lib/audit.ts', returnsRouteOverrides['../lib/audit']],
+    ['lib/cache.ts', returnsRouteOverrides['../lib/cache']],
+    ['lib/telegram.ts', returnsRouteOverrides['../lib/telegram']],
+    ['lib/receiptNumber.ts', returnsRouteOverrides['../lib/receiptNumber']],
+    ['durable-objects/broadcastHub.ts', returnsRouteOverrides['../durable-objects/broadcastHub']],
+    ['index.ts', {}],
+  ])
+  function load(rel) {
+    if (seams.has(rel)) return seams.get(rel)
+    if (cache.has(rel)) return cache.get(rel).exports
+    const source = execFileSync('git', ['show', `${ref}:cloudflare/src/${rel}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const mod = { exports: {} }
+    cache.set(rel, mod)
+    const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: rel }).outputText
+    new Function('require', 'module', 'exports', output)(request => {
+      if (!request.startsWith('.')) return require(request)
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
+      return load(resolved.endsWith('.ts') ? resolved : resolved + '.ts')
+    }, mod, mod.exports)
+    if (rel === 'lib/db.ts') mod.exports.getDb = () => db
+    return mod.exports
+  }
+  const route = load('routes/returns.ts')
+  historicalRouteRefs.set(route.default, ref)
+  return route
+}
+const oracleRoute = loadHistoricalReturns(ORACLE_REF)
+const oracleBeforeResidualRoute = loadHistoricalReturns(RESIDUAL_REF)
+const historicalBeforeRoute = loadHistoricalReturns(PRE_LR_REF)
+const historicalCurrentRoute = loadHistoricalReturns(POST_LR_REF)
 let app = returnsRoute.default
 
 let passed = 0
@@ -294,25 +373,25 @@ async function check(name, fn) {
 
 function seed() {
   auditCalls = []
-  rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
+  fixtureStock(rawDb, () => rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
     DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts; DELETE FROM return_create_receipts; DELETE FROM return_create_guards;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
+    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`))
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run()
+  fixtureStock(rawDb, () => rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run())
+  fixtureStock(rawDb, () => rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run())
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
 }
 
 function seedReplacementStock() {
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-  rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
-  rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run()
+  fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run())
+  fixtureStock(rawDb, () => rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run())
+  fixtureStock(rawDb, () => rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run())
   const batchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
-  rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([batchId])
+  fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([batchId]))
   return batchId
 }
 
@@ -327,6 +406,7 @@ function seedReplacementStock() {
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
 async function req(method, url, body) {
+  selectDatabase(app)
   let requestBody = body
   if (method === 'POST' && url === '/' && body && typeof body === 'object') {
     requestBody = { client_request_id: body.client_request_id || `return-create-${crypto.randomUUID()}`, ...body }
@@ -347,6 +427,7 @@ async function req(method, url, body) {
 // to a retired branch). LC Store is id 1 here; null sends none.
 let redirectTo = 1
 async function reqExact(method, url, body) {
+  selectDatabase(app)
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json', ...(redirectTo == null ? {} : { 'X-Branch-Redirect': String(redirectTo) }) },
@@ -375,7 +456,8 @@ async function reqAs(user, method, url, body) {
 //   after   LC Store (role shop, key warehouse, active), Old Shop (role shop,
 //           key shop, inactive, successor 1) -- the consolidation's end state
 // ---------------------------------------------------------------------------
-function seedWorld(state) {
+function seedWorld(state, route = app) {
+  selectDatabase(route)
   seed()
   rawDb.exec('DELETE FROM branches; DELETE FROM audit_logs;')
   if (state === 'before') {
@@ -393,21 +475,21 @@ function seedWorld(state) {
 // same day at Shop only, folded into lot 1 by the consolidation (audit row).
 // The old Shop sale drew `fromLot` (5 units out of it).
 function seedLots(state, fromLot) {
-  const lot = (id, key, receivedAt) => rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (?, 1, ?, ?, ?, 1, ?)").run([id, key, key, receivedAt, id])
+  const lot = (id, key, receivedAt) => fixtureStock(rawDb, () => rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (?, 1, ?, ?, ?, 1, ?)").run([id, key, key, receivedAt, id]))
   lot(1, 'lot-a', '2026-01-01')
   lot(3, 'lot-c', '2026-01-01')
   const home = state === 'before' ? 2 : 1
-  const stock = (batch, branch, qty) => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run([batch, branch, qty])
+  const stock = (batch, branch, qty) => fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run([batch, branch, qty]))
   stock(1, home, 10)
   stock(3, home, state === 'before' ? 4 : 0)
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, ?, ?)').run([home, state === 'before' ? 14 : 10])
+  fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, ?, ?)').run([home, state === 'before' ? 14 : 10]))
   if (state !== 'before') {
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, 0)').run()
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, 0)').run())
     stock(1, 2, 0); stock(3, 2, 0)
     rawDb.prepare("INSERT INTO audit_logs (user_name, action, entity, entity_id, details) VALUES ('op', 'branch_cutover_lot_fold', 'product_batch', '1', ?)")
       .run([JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 1, foldedBatchIds: [3], branchId: 1 })])
   }
-  rawDb.prepare('UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=1) WHERE id=1').run()
+  fixtureStock(rawDb, () => rawDb.prepare('UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=1) WHERE id=1').run())
   rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, branch_id, batch_id) VALUES (1, 1, 1, 5, 2, ?)').run([fromLot])
   rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, ?, 2, 5, 0)').run([fromLot])
 }
@@ -453,29 +535,55 @@ function normalisedBase(batches) {
 }
 
 async function runWith(appToUse, body, state, fromLot) {
-  seedWorld(state)
+  seedWorld(state, appToUse)
   seedLots(state, fromLot)
   const previous = app
   app = appToUse
   captured = []
   try {
     const response = await req('POST', '/', { client_request_id: 'fixed-request-1', ...body })
-    return { response, captured }
+    return { response, captured, stock: JSON.stringify([lotsSnapshot(), movementRows()]) }
   } finally {
     app = previous
     captured = null
   }
 }
 
+function fullFixtureSnapshot() {
+  return JSON.stringify(rawDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+    .map(row => {
+      const columns = rawDb.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all([row.name]).map(column => '"' + column.name + '"')
+      return [row.name, rawDb.prepare(`SELECT * FROM "${row.name}" ORDER BY ${columns.join(',')}`).all()]
+    }))
+}
 async function successorChecks() {
-  await check('INERT while both branches are active: the new route writes the exact statements the old one wrote', async () => {
+  await check('archived OLD return route is refused on current schema without writes or leaked admission', async () => {
+    seedWorld('before'); seedLots('before', 1)
+    const before = fullFixtureSnapshot()
+    const previous = app
+    forcedRawDb = currentRawDb
+    app = loadHistoricalReturns(ORACLE_REF).default
+    rawAdmissionError = null
+    try {
+      const refused = await reqExact('POST', '/', { client_request_id: 'old-runtime-raw-refusal', ...returnBody() })
+      assert.ok(refused.status >= 400)
+      assert.match(rawAdmissionError?.message || '', /stock_transaction_required/)
+      assert.strictEqual(fullFixtureSnapshot(), before)
+      assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    } finally { app = previous; forcedRawDb = null; rawDb = currentRawDb }
+  })
+  await check('HISTORICAL INERT: pinned before/post-LR routes write exact statements; current route preserves stock', async () => {
     const fresh = await runWith(returnsRoute.default, returnBody(), 'before', 1)
-    const old = await runWith(oracleRoute.default, returnBody(), 'before', 1)
+    const historical = await runWith(historicalCurrentRoute.default, returnBody(), 'before', 1)
+    const old = await runWith(historicalBeforeRoute.default, returnBody(), 'before', 1)
+    assert.strictEqual(historical.response.status, 200, JSON.stringify(historical.response.json))
+    assert.strictEqual(fresh.stock, historical.stock, 'current route preserves the historical business stock ledger')
+    assert.strictEqual(historical.stock, old.stock)
     assert.strictEqual(fresh.response.status, 200, JSON.stringify(fresh.response.json))
     assert.strictEqual(old.response.status, 200, JSON.stringify(old.response.json))
     assert.strictEqual(fresh.response.status, 200, JSON.stringify(fresh.response.json))
     assert.strictEqual(old.response.status, 200, JSON.stringify(old.response.json))
-    const freshText = normalised(fresh.captured)
+    const freshText = normalised(historical.captured)
     const oldText = normalised(old.captured)
     let at = 0
     while (at < freshText.length && freshText[at] === oldText[at]) at += 1
@@ -618,10 +726,10 @@ async function successorChecks() {
 
   await check('a replacement hand-out for an old Shop sale is sold from LC Store (header branch = the landing branch)', async () => {
     seedWorld('after'); seedLots('after', 1)
-    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (9, 2, 'rep', 'REP', '2026-02-01', 1, 1)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (9, 1, 6)').run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 6)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 6 WHERE id = 2').run()
+    fixtureStock(rawDb, () => rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (9, 2, 'rep', 'REP', '2026-02-01', 1, 1)").run())
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (9, 1, 6)').run())
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 6)').run())
+    fixtureStock(rawDb, () => rawDb.prepare('UPDATE products SET stock_quantity = 6 WHERE id = 2').run())
     const { status, json } = await req('POST', '/', returnBody({
       client_request_id: 'replacement-1',
       items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'restock', applied_price_usd: 10 }],
@@ -720,11 +828,11 @@ function consolidate() {
   for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
   try {
     const lot1 = stockOf(1, 2) ?? 0; const lot3 = stockOf(3, 2) ?? 0
-    rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM branch_stock; DELETE FROM branches')
+    fixtureStock(rawDb, () => rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM branch_stock; DELETE FROM branches'))
     rawDb.prepare("INSERT INTO branches (id, name, role, canonical_key, is_active, is_default) VALUES (1, 'LC Store', 'shop', 'warehouse', 1, 1)").run()
     rawDb.prepare("INSERT INTO branches (id, name, role, canonical_key, is_active, is_default, successor_branch_id) VALUES (2, 'Old Shop', 'shop', 'shop', 0, 0, 1)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, ?), (3, 1, 0), (1, 2, 0), (3, 2, 0)').run([lot1 + lot3])
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, ?), (1, 2, 0)').run([lot1 + lot3])
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, ?), (3, 1, 0), (1, 2, 0), (3, 2, 0)').run([lot1 + lot3]))
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, ?), (1, 2, 0)').run([lot1 + lot3]))
     rawDb.prepare("INSERT INTO audit_logs (user_name, action, entity, entity_id, details) VALUES ('op', 'branch_cutover_lot_fold', 'product_batch', '1', ?)")
       .run([JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 1, foldedBatchIds: [3], branchId: 1 })])
   } finally { for (const trigger of triggers) rawDb.exec(trigger.sql) }
@@ -732,7 +840,7 @@ function consolidate() {
 
 // A customer return made at Shop (3 units back into lot 3) BEFORE the consolidation.
 async function preConsolidationReturn(appToUse) {
-  seedWorld('before'); seedLots('before', 3)
+  seedWorld('before', appToUse); seedLots('before', 3)
   const previous = app
   app = appToUse
   try {
@@ -752,14 +860,14 @@ const editBody = (id, extra = {}) => ({
 const normalisedRun = (batches) => normalised(batches).replace(/\b(id|revision|return_id|reference_id|returnId)(\\*)":\d+/g, '$1$2":<n>').replace(/[0-9a-f]{64}/g, '<digest>').replace(/"(\d{1,6})"/g, '"<n>"')
 const lotsSnapshot = () => ({ lot1AtStore: stockOf(1, 1), lot3AtStore: stockOf(3, 1), lot1AtOld: stockOf(1, 2), lot3AtOld: stockOf(3, 2), store: branchStockOf(1), old: branchStockOf(2) })
 const movementRows = () => rawDb.prepare('SELECT movement_type, branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements ORDER BY id').all().map((row) => ({ ...row }))
-async function withRoute(appToUse, fn) { const previous = app; app = appToUse; try { return await fn() } finally { app = previous } }
+async function withRoute(appToUse, fn) { const previous = app; app = appToUse; selectDatabase(app); try { return await fn() } finally { app = previous } }
 
 async function residualChecks() {
   // E7: a lot fully sold at Shop before the cutover was never folded (nothing to move). A return of that sale lands in the
   // lot of the same product, day, expiry and supplier that holds stock at LC Store, never in a second same-date lot.
   await check('RETURN into a lot sold out at Shop before the cutover lands in the same-day lot at LC Store (no same-date split)', async () => {
     const soldOutLot = (extra = '') => {
-      rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number${extra ? ', ' + extra.split('=')[0] : ''}) VALUES (4, 1, 'lot-d', 'lot-d', '2026-01-01', 1, 4${extra ? ', ' + extra.split('=')[1] : ''})`).run()
+      fixtureStock(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number${extra ? ', ' + extra.split('=')[0] : ''}) VALUES (4, 1, 'lot-d', 'lot-d', '2026-01-01', 1, 4${extra ? ', ' + extra.split('=')[1] : ''})`).run())
       rawDb.prepare('UPDATE sale_items SET batch_id = 4 WHERE id = 1').run()
       rawDb.prepare('UPDATE sale_item_batch_allocations SET batch_id = 4 WHERE sale_item_id = 1').run()
     }
@@ -773,7 +881,7 @@ async function residualChecks() {
     for (const extra of ["expiry_date='2027-01-01'", "supplier_name='Acme'", "received_at='2026-01-02'"]) {
       seedWorld('after'); seedLots('after', 1)
       const [column, value] = extra.split('=')
-      if (column === 'received_at') { soldOutLot(); rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([value.replace(/'/g, '')]) } else soldOutLot(extra)
+      if (column === 'received_at') { soldOutLot(); fixtureStock(rawDb, () => rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([value.replace(/'/g, '')])) } else soldOutLot(extra)
       const apart = await req('POST', '/', returnBody({ client_request_id: 'sold-out-apart-' + column }))
       assert.strictEqual(apart.status, 200, JSON.stringify(apart.json))
       assert.strictEqual(stockOf(4, 1), 3, `${column} differs: the lot keeps its own identity at LC Store`)
@@ -782,15 +890,15 @@ async function residualChecks() {
     // The business day is Cambodia's (UTC+7): 18:00Z on 31 Dec is already 1 Jan, 16:00Z is still 31 Dec.
     for (const [stamp, merges] of [['2025-12-31T18:00:00Z', true], ['2025-12-31T16:00:00Z', false], ['1/1/2026', true]]) {
       seedWorld('after'); seedLots('after', 1); soldOutLot()
-      rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([stamp])
+      fixtureStock(rawDb, () => rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([stamp]))
       const day = await req('POST', '/', returnBody({ client_request_id: 'sold-out-day-' + stamp }))
       assert.strictEqual(day.status, 200, JSON.stringify(day.json))
       assert.strictEqual(stockOf(4, 1), merges ? null : 3, `${stamp}: ${merges ? 'same business day merges' : 'another business day stays apart'}`)
     }
     // A lot that HOLDS stock at the landing branch is never remapped.
     seedWorld('after'); seedLots('after', 1); soldOutLot()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 2)').run()
-    rawDb.prepare('UPDATE branch_stock SET quantity = 12 WHERE product_id = 1 AND branch_id = 1').run()
+    fixtureStock(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 2)').run())
+    fixtureStock(rawDb, () => rawDb.prepare('UPDATE branch_stock SET quantity = 12 WHERE product_id = 1 AND branch_id = 1').run())
     const held = await req('POST', '/', returnBody({ client_request_id: 'held-lot-1' }))
     assert.strictEqual(held.status, 200, JSON.stringify(held.json))
     assert.strictEqual(stockOf(4, 1), 5, 'a lot with stock at LC Store takes its own units back')
@@ -859,8 +967,8 @@ async function residualChecks() {
       rawDb.prepare("UPDATE returns SET branch_id = 1, branch_name = 'LC Store' WHERE id = ?").run([id])
       rawDb.prepare('UPDATE return_items SET branch_id = 1 WHERE return_id = ?').run([id])
       // Its restocked units sit in their own lot at LC Store, as a return made there would have left them.
-      rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity + 3 WHERE batch_id = 3 AND branch_id = 1').run()
-      rawDb.prepare('UPDATE branch_stock SET quantity = quantity + 3 WHERE product_id = 1 AND branch_id = 1').run()
+      fixtureStock(rawDb, () => rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity + 3 WHERE batch_id = 3 AND branch_id = 1').run())
+      fixtureStock(rawDb, () => rawDb.prepare('UPDATE branch_stock SET quantity = quantity + 3 WHERE product_id = 1 AND branch_id = 1').run())
       return id
     }
     const id = await relabel(returnsRoute.default)
@@ -884,7 +992,7 @@ async function residualChecks() {
     assert.strictEqual(rawDb.prepare('SELECT branch_id FROM returns WHERE id = ?').get([oldId]).branch_id, 2, 'CONTROL: the old edit wrote the disabled branch as the new header')
   })
 
-  await check('INERT while both branches are active: an edit writes the exact statements the code before this lane wrote', async () => {
+  await check('HISTORICAL INERT: pinned edits write exact statements; current edit preserves stock', async () => {
     const run = async (appToUse) => {
       const id = await preConsolidationReturn(appToUse)
       captured = []
@@ -894,8 +1002,10 @@ async function residualChecks() {
         return { text: normalisedRun(captured), stock: JSON.stringify([lotsSnapshot(), movementRows()]) }
       } finally { captured = null }
     }
-    const fresh = await run(returnsRoute.default)
-    const old = await run(oracleBeforeResidualRoute.default)
+    const current = await run(returnsRoute.default)
+    const fresh = await run(historicalCurrentRoute.default)
+    const old = await run(historicalBeforeRoute.default)
+    assert.strictEqual(current.stock, fresh.stock, 'current edit preserves the historical business stock ledger')
     let at = 0
     while (at < fresh.text.length && fresh.text[at] === old.text[at]) at += 1
     assert.strictEqual(fresh.text, old.text, `edit statements differ while both branches are active, first difference at ${at}: ${JSON.stringify(fresh.text.slice(Math.max(0, at - 120), at + 160))} / ${JSON.stringify(old.text.slice(Math.max(0, at - 120), at + 160))}`)
@@ -929,13 +1039,13 @@ async function residualChecks() {
     assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), settled, 'the same request id moves the stock once')
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM returns WHERE return_type = 'supplier_return'").get().n, 1)
     // CONTROL: the code before this lane refuses the empty retired branch.
-    seedWorld('before'); seedLots('before', 3)
+    seedWorld('before', oracleBeforeResidualRoute.default); seedLots('before', 3)
     consolidate()
     const stranded = await withRoute(oracleBeforeResidualRoute.default, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-old' })))
     assert.notStrictEqual(stranded.status, 200, 'CONTROL: the old supplier path cannot take stock out of the emptied retired branch')
   })
 
-  await check('SUPPLIER return to a retired branch with no successor refuses 409; both branches active is byte-identical to the old route', async () => {
+  await check('SUPPLIER no-successor refusal and historical byte parity retain current stock controls', async () => {
     seedWorld('before'); seedLots('before', 3)
     consolidate()
     const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
@@ -948,17 +1058,20 @@ async function residualChecks() {
     assert.strictEqual(refused.json.code, 'branch_retired_no_successor')
     assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), before)
     const run = async (appToUse) => {
-      seedWorld('before'); seedLots('before', 3)
+      seedWorld('before', appToUse); seedLots('before', 3)
       captured = []
       try {
         const made = await withRoute(appToUse, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-inert', items: [{ product_id: 1, quantity: 4, branch_id: 2, cost_price_usd: 2, cost_price_khr: 0 }] })))
         assert.strictEqual(made.status, 200, JSON.stringify(made.json))
-        return normalisedRun(captured)
+        return { text: normalisedRun(captured), stock: JSON.stringify([lotsSnapshot(), movementRows()]) }
       } finally { captured = null }
     }
-    const fresh = await run(returnsRoute.default)
-    const old = await run(oracleBeforeResidualRoute.default)
-    assert.strictEqual(fresh, old, 'both branches active: the supplier return writes the same statements as before')
+    const current = await run(returnsRoute.default)
+    const fresh = await run(historicalCurrentRoute.default)
+    const old = await run(historicalBeforeRoute.default)
+    assert.strictEqual(current.stock, fresh.stock, 'current supplier return preserves the historical business stock ledger')
+    assert.strictEqual(fresh.stock, old.stock)
+    assert.strictEqual(fresh.text, old.text, 'historical active branches: the supplier return writes the same statements as before')
   })
 }
 

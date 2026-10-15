@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -38,11 +44,11 @@ function fixture(beforeLabelMigration = null, omitLabelMigration = false) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.exec('PRAGMA foreign_keys=ON')
-  if (!beforeLabelMigration) sql.exec(`
+  if (!beforeLabelMigration) seedFixture(sql, () => sql.exec(`
     INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1),(2,'Warehouse',0,1);
     INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0);
-  `)
+  `))
   let beforeBatch = null, failSql = null
   const statement = (text, values = []) => {
     const prepared = sql.prepare(text)
@@ -74,6 +80,7 @@ function fixture(beforeLabelMigration = null, omitLabelMigration = false) {
 }
 const session = load('lib/stockSession.ts')
 const transfer = load('lib/transferOperation.ts')
+const { executeStockTransaction } = load('lib/stockTransaction.ts')
 const { getDb } = load('lib/db.ts')
 const query = load('lib/stockInSessionsQuery.ts')
 function receive(key = 'history-receive-001') {
@@ -89,8 +96,12 @@ async function move(f, key = 'history-transfer-001') {
   const db = getDb(f.env)
   const plan = await transfer.planTransferOperation(db, { user: actor, requestId: key, requestJson: '{}', digest: key,
     scope: 'branches', fromBranchId: 1, toBranchId: 2, reason: 'Restock', lines: [{ productId: 1, destProductId: 1, quantity: 2.5 }], response: { success: true } })
-  await db.batchOnce(plan.statements)
-  return plan
+  try {
+    await executeStockTransaction(db, plan.statements, 'once')
+    return plan
+  } finally {
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  }
 }
 function compat() {
   return load('routes/compat.ts', {
@@ -204,6 +215,26 @@ async function main() {
     }
     f.sql.close()
   })
+  await check('valid transfer plan requires admission and raw refusal leaves every table unchanged', async () => {
+    const f = fixture()
+    try {
+      await session.commitStockSession(f.env, actor, receive())
+      const db = getDb(f.env)
+      const key = 'history-raw-refusal'
+      const plan = await transfer.planTransferOperation(db, { user: actor, requestId: key, requestJson: '{}', digest: key,
+        scope: 'branches', fromBranchId: 1, toBranchId: 2, reason: 'Restock', lines: [{ productId: 1, destProductId: 1, quantity: 2.5 }], response: { success: true } })
+      const tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+      const snapshot = () => JSON.stringify(tables.map(({ name }) => [name, f.sql.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()]))
+      const before = snapshot()
+      await assert.rejects(() => db.batchOnce(plan.statements), /stock_transaction_required/)
+      assert.equal(snapshot(), before)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      await executeStockTransaction(db, plan.statements, 'once')
+      assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_transfers').get().n, 1)
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 2.5)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    } finally { f.sql.close() }
+  })
   await check('transfer forward and inverses append actual effect labels without changing older rows', async () => {
     const f = fixture()
     await session.commitStockSession(f.env, actor, receive())
@@ -268,7 +299,7 @@ async function main() {
     f.sql.close()
   })
   if (failures.length) throw new Error(`${failures.length} history-label groups failed: ${failures.join('; ')}`)
-  console.log('PASS branch history labels: 10 groups, SQLite expression depth 100 / binds 100')
+  console.log('PASS branch history labels: 11 groups, SQLite expression depth 100 / binds 100')
 }
 module.exports = { fixture, load, actor, receive }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
