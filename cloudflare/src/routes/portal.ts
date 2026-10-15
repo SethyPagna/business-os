@@ -1,3 +1,4 @@
+import { loyaltyAccrualSql, loyaltyPointsEnabled, LOYALTY_DISABLED_CODE } from '../lib/loyaltyEligibility'
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
@@ -632,7 +633,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // Defaults to ON. A shop that has never touched this setting must accrue
     // exactly as it did before the switch existed; only an explicit off
     // changes anything.
-    loyaltyPointsEnabled: normalizeBoolean(settings.loyalty_points_enabled, true),
+    loyaltyPointsEnabled: loyaltyPointsEnabled(settings.loyalty_points_enabled),
     pointsBasis,
     pointsPerUsd,
     pointsPerKhr: toNumber(settings.customer_portal_points_per_khr, derivedPointsPerKhr),
@@ -2086,10 +2087,10 @@ app.post('/submissions', async (c) => {
     result = await db.prepare(`
       INSERT INTO customer_share_submissions (
         customer_id, membership_number, customer_name, platform, note, screenshots_json, status,
-        rights_consent_version, privacy_consent_version, consent_at, consent_locale
+        rights_consent_version, privacy_consent_version, consent_at, consent_locale, loyalty_eligible
       ) VALUES (
         @customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending',
-        @consentVersion, @consentVersion, CURRENT_TIMESTAMP, @consentLocale
+        @consentVersion, @consentVersion, CURRENT_TIMESTAMP, @consentLocale, ${loyaltyAccrualSql()}
       )
     `).run({
       customerId: customer.id,
@@ -2179,6 +2180,7 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
   const existing = await db.prepare('SELECT id FROM customer_share_submissions WHERE id = @id').get({ id })
   if (!existing) return c.json({ error: 'Submission not found' }, 404)
 
+  try {
   await db.prepare(`
     UPDATE customer_share_submissions
     SET status = @status, reward_points = @rewardPoints, review_note = @reviewNote,
@@ -2192,6 +2194,12 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
     reviewedById: user?.id ?? null,
     reviewedByName: actorSnapshot(user),
   })
+  } catch (error) {
+    if (String(error).includes(LOYALTY_DISABLED_CODE)) {
+      return c.json({ error: 'This submission cannot receive new loyalty points. Loyalty must be on when it is created and rewarded.', code: LOYALTY_DISABLED_CODE }, 400)
+    }
+    throw error
+  }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))

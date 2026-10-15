@@ -1,3 +1,4 @@
+import { loyaltyPointsEnabled } from './loyaltyEligibility'
 import type { D1Compat } from './db'
 import { LOYALTY_POINTS_RESET_KEY, loyaltyAfterResetSql, customerPointsReturnSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from './customerPointsReturn'
 import { SaleBulkError } from './saleBulkStatus'
@@ -42,7 +43,7 @@ async function pointsConfig(db: D1Compat): Promise<PointsConfig> {
   return {
     basis: String(values.customer_portal_points_basis || '').toLowerCase() === 'khr' ? 'khr' : 'usd',
     usd: Math.max(0, usd), khr: Math.max(0, khr),
-    enabled: values.loyalty_points_enabled == null || ['1', 'true', 'yes', 'on'].includes(String(values.loyalty_points_enabled).trim().toLowerCase()),
+    enabled: loyaltyPointsEnabled(values.loyalty_points_enabled),
     snapshot: JSON.stringify(rows.map(row => [row.key, row.value])),
   }
 }

@@ -30,7 +30,7 @@ ledger AS (
     AND COALESCE(rt.return_scope, 'customer') <> 'supplier' AND COALESCE(rs.loyalty_accrual, 1) <> 0
   UNION ALL
   SELECT cs.customer_id, COALESCE(cs.reward_points, 0),
-    CASE WHEN cs.id > COALESCE(json_extract(r.since, '$.submissions'), 0) THEN 1 ELSE 0 END
+    CASE WHEN cs.id > COALESCE(json_extract(r.since, '$.submissions'), 0) AND cs.loyalty_eligible = 1 THEN 1 ELSE 0 END
   FROM customer_share_submissions cs CROSS JOIN rate r
   WHERE cs.customer_id IS NOT NULL AND cs.status = 'approved' AND cs.reward_points_voided_at IS NULL
   UNION ALL

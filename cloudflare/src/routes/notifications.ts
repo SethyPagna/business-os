@@ -1,3 +1,4 @@
+import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
@@ -161,7 +162,7 @@ async function loadPreferences(env: Env) {
     realertMinutes: Math.max(1, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
     driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
-    loyaltyPointsEnabled: normalizeBoolean(map.loyalty_points_enabled, true),
+    loyaltyPointsEnabled: loyaltyPointsEnabled(map.loyalty_points_enabled),
   }
 }
 

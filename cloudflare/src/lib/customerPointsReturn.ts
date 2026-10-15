@@ -8,7 +8,7 @@ export function loyaltyAfterResetSql(ledger: LoyaltyLedger, idSql = 'id'): strin
 }
 
 export const loyaltySaleSinceSql = loyaltyAfterResetSql('sales')
-export const loyaltySubmissionSinceSql = loyaltyAfterResetSql('submissions')
+export const loyaltySubmissionSinceSql = `(${loyaltyAfterResetSql('submissions')} AND loyalty_eligible = 1)`
 export const loyaltyAdjustmentSinceSql = loyaltyAfterResetSql('adjustments')
 
 // Refunding a sale whose earnings were cleared must not deduct newly earned points.

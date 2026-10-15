@@ -1,3 +1,4 @@
+import { loyaltyAccrualSql, loyaltyPointsEnabled as isLoyaltyEnabled } from '../lib/loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
@@ -946,7 +947,7 @@ app.post('/', async (c) => {
   const loyaltyEnabledRow = await db.prepare(
     `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
   ).get<{ value: string }>()
-  const loyaltyPointsEnabled = !['0', 'false', 'no', 'off'].includes(String(loyaltyEnabledRow?.value ?? '').trim().toLowerCase())
+  const loyaltyPointsEnabled = isLoyaltyEnabled(loyaltyEnabledRow?.value)
   let redemptionGuard: Awaited<ReturnType<typeof preparePointsRedemption>> | null = null
 
   if (membershipPointsRedeemed > 0) {
@@ -1308,7 +1309,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1385,7 +1386,7 @@ app.post('/', async (c) => {
       // An explicit per-sale boolean wins in either direction. Missing or
       // non-boolean values inherit the current setting. Persist that choice
       // so a later default change cannot retroactively change this sale.
-      loyalty_accrual: (typeof body.loyalty_accrual === 'boolean' ? body.loyalty_accrual : loyaltyPointsEnabled) ? 1 : 0,
+      loyalty_accrual: body.loyalty_accrual === false ? 0 : 1,
       subtotal_usd: subtotalUsd,
       subtotal_khr: multiplyMoney4(subtotalUsd,exchangeRate),
       discount_usd: discountUsd,
