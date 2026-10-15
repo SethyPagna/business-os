@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -88,14 +89,15 @@ async function successfulMerges() {
 
   run("INSERT INTO suppliers(id,name,phone) VALUES(11,'Same Supplier',NULL),(12,'Same Supplier','012 333 333')")
   run("INSERT INTO returns(id,supplier_id,supplier_name,return_scope) VALUES(2,12,'Same Supplier','supplier')")
-  run("INSERT INTO products(id,name,supplier) VALUES(100,'Stock','Same Supplier')")
-  run("INSERT INTO product_batches(id,variant_product_id,batch_key,supplier_id,supplier_name) VALUES(100,100,'lot',12,'Same Supplier')")
+  seedStockFixture(db.db, () => run("INSERT INTO products(id,name,supplier) VALUES(100,'Stock','Same Supplier')"))
+  seedStockFixture(db.db, () => run("INSERT INTO product_batches(id,variant_product_id,batch_key,supplier_id,supplier_name) VALUES(100,100,'lot',12,'Same Supplier')"))
   run("INSERT INTO supplier_invoices(id,source_branch,legacy_id,supplier_id,supplier_name,invoice_date,status,source_file,source_row) VALUES(1,'Shop',1,12,'Same Supplier','2026-01-01','outstanding','ap.csv',1)")
 
   run("INSERT INTO delivery_contacts(id,name,phone) VALUES(21,'Same Driver',NULL),(22,'Same Driver','012 444 444')")
   run("INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES(2,22,'Same Driver')")
   run("INSERT INTO fees(id,fee_type,amount_usd,amount_khr,fee_date,delivery_contact_id) VALUES(9001,'delivery',2,8200,'2026-09-07',22)")
 
+assert.throws(() => db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
   for (const [table, keepId, mergeId, operationId] of [
     ['customers', 1, 2, 'contact-merge-customer'],
     ['suppliers', 11, 12, 'contact-merge-supplier'],

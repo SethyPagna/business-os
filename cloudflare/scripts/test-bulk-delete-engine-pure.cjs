@@ -53,6 +53,7 @@ function loadRealLib(relName) {
 // output (Env/D1Compat/BroadcastChannel are type-only imports, elided by
 // the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
+  if (id === './stockTransaction') return loadRealLib('stockTransaction')
   if (id === './productStockGuard') return loadRealLib('productStockGuard')
   // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
   // enqueues through now; a {} stub makes dispatchImportWork undefined.

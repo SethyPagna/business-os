@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Real SQLite + real D1 named-binding adapter. The frozen serial oracle is
 // deliberately independent of the projection, including its early returns.
 const assert = require('node:assert/strict')
@@ -51,6 +52,7 @@ function loadCore(legacy = false) {
   const text = legacy ? source.replace(/async function tryFastPath\([\s\S]*?(?=export async function ensureCoreDataInvariants)/,
     legacyFastPath.toString().replace('legacyFastPath', 'tryFastPath') + '\n\n') : source
   return load('lib/coreDataInvariants.ts', {
+    './stockTransaction': load('lib/stockTransaction.ts'),
     './db': dbModule,
     './productStockGuard': load('lib/productStockGuard.ts'),
     './sqlBinding': load('lib/sqlBinding.ts'),
@@ -67,7 +69,15 @@ function fixture() {
   const raw = new DatabaseSync(':memory:')
   for (const sql of migrations) raw.exec(sql)
   const stats = { reads: 0, writes: 0, delayMs: 0, fail: false, gate: null }
-  const DB = { prepare(sql) {
+  const DB = { async batch(statements) {
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      const results = []
+      for (const statement of statements) results.push(await statement.run())
+      raw.exec('COMMIT')
+      return results
+    } catch (error) { raw.exec('ROLLBACK'); throw error }
+  }, prepare(sql) {
     return { bind(...values) {
       const read = async () => {
         stats.reads++
@@ -88,10 +98,11 @@ function fixture() {
 async function healthy() {
   const fx = fixture()
   await core.ensureCoreDataInvariants(fx.env)
-  fx.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Active',1,7),(101,'Inactive',0,0);
+  seedStockFixture(fx.raw, () => fx.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Active',1,7),(101,'Inactive',0,0);
     INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 100,id,7 FROM branches WHERE is_default=1;
     UPDATE roles SET permissions='{"products":"view"}' WHERE code='manager';
-    UPDATE roles SET permissions='{"pos":false}' WHERE code='employee';`)
+    UPDATE roles SET permissions='{"pos":false}' WHERE code='employee';`))
+  assert.throws(() => fx.raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=100'), /stock_transaction_required/)
   fx.stats.reads = fx.stats.writes = 0
   return fx
 }
@@ -150,7 +161,7 @@ async function main() {
   for (const [name, mutation, isHealthy = false] of cases) await check(name, async () => {
     const before = await healthy(), after = await healthy()
     try {
-      if (mutation) { before.raw.exec(mutation); after.raw.exec(mutation) }
+      if (mutation) { seedStockFixture(before.raw, () => before.raw.exec(mutation)); seedStockFixture(after.raw, () => after.raw.exec(mutation)) }
       const oldFast = await legacy.tryFastPath(before.db, ...args)
       const newFast = await core.tryFastPath(after.db, ...args)
       assert.equal(Boolean(oldFast), isHealthy, 'fixture must discriminate its invariant')
