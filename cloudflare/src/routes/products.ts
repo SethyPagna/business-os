@@ -674,7 +674,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
              -- numbers. Shipping a dead all-zero column to every client just
              -- invites something to read it back as a real price.
              p.wholesale_price_usd, p.wholesale_price_khr,
-             p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
+             p.cost_price_usd, p.cost_price_khr, (COALESCE(p.cost_review_key,'')<>'') AS cost_needs_review, p.stock_quantity, p.low_stock_threshold,
              p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
              p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
              p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
@@ -733,21 +733,31 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
   return merged
 }
 
-// The plain products columns every /search row carries. Shared by the page
-// query below and by refreshCachedProductRows, so a cached row is refreshed
-// with exactly the columns it was built from.
 const PRODUCT_SEARCH_ROW_COLUMNS = [
   'id', 'name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description',
   'selling_price_usd', 'selling_price_khr',
   'wholesale_price_usd', 'wholesale_price_khr',
-  'cost_price_usd', 'cost_price_khr', 'stock_quantity', 'low_stock_threshold',
+  'cost_price_usd', 'cost_price_khr', 'cost_needs_review', 'stock_quantity', 'low_stock_threshold',
   'out_of_stock_threshold', 'image_path', 'is_active', 'supplier', 'parent_id',
   'is_group', 'discount_enabled', 'discount_type', 'discount_percent',
   'discount_amount_usd', 'discount_amount_khr', 'discount_label',
   'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
   'expiry_date', 'expiry_alert_days', 'created_at', 'updated_at',
 ] as const
-const PRODUCT_SEARCH_SELECT_SQL = PRODUCT_SEARCH_ROW_COLUMNS.map((column) => `p.${column}`).join(', ')
+const PRODUCT_SEARCH_SELECT_SQL = PRODUCT_SEARCH_ROW_COLUMNS.map((column) => column === 'cost_needs_review'
+  ? `(COALESCE(p.cost_review_key,'')<>'') AS cost_needs_review` : `p.${column}`).join(', ')
+
+function normalProductRow(row: Record<string, unknown>): Record<string, unknown> {
+  const { cost_review_key, ...product } = row
+  return { ...product, cost_needs_review: Object.hasOwn(row, 'cost_review_key') ? Boolean(cost_review_key) : Boolean(row.cost_needs_review) }
+}
+
+function normalProductWriteResponse(body: Record<string, unknown>): Record<string, unknown> {
+  const shape = (row: unknown) => row && typeof row === 'object' && !Array.isArray(row) ? normalProductRow(row as Record<string, unknown>) : row
+  const item = shape(body.item)
+  return { ...body, ...(Object.hasOwn(body, 'item') ? { item } : {}),
+    ...(Object.hasOwn(body, 'product') ? { product: body.product === body.item ? item : shape(body.product) } : {}) }
+}
 
 // I2-1 -- product read cache contract.
 //
@@ -787,8 +797,7 @@ async function productSearchCacheVersion(env: Env, query: Record<string, string>
 // Brings rows served from the page cache up to the database's current state
 // without re-running the page query. In place, so every key keeps its
 // position and a refreshed row serialises byte-for-byte like a freshly
-// computed one. Only keys the row already has are overwritten (name-sibling
-// rows carry the same columns; pagination extras are left alone).
+// computed one; pagination extras are left alone.
 async function refreshCachedProductRows(env: Env, items: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
   const ids = Array.from(new Set(items.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return items
@@ -804,11 +813,11 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
   const liveById = new Map(liveRows.map((row) => [Number(row.id), row]))
   items.forEach((item, index) => {
     const live = liveById.get(Number(item.id))
-    if (live) for (const column of PRODUCT_SEARCH_ROW_COLUMNS) if (column in item) item[column] = live[column]
+    if (live) for (const column of PRODUCT_SEARCH_ROW_COLUMNS) if (column in item || column === 'cost_needs_review') item[column] = live[column]
     item.stock_quantity = withBranchStock[index].stock_quantity
     item.branch_stock = withBranchStock[index].branch_stock
   })
-  return items.filter(item => liveById.has(Number(item.id)))
+  return items.filter(item => liveById.has(Number(item.id))).map(normalProductRow)
 }
 
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
@@ -980,7 +989,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   }))
 
   return {
-    items: mergedItems,
+    items: mergedItems.map(normalProductRow),
     total,
     page,
     pageSize,
@@ -2126,9 +2135,9 @@ app.post('/', async (c) => {
         waitUntil: (promise) => c.executionCtx.waitUntil(promise),
         invocation: metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation } : undefined,
       })
-      return c.json(folded.body, folded.status as 200 | 400 | 403 | 409 | 503)
+      return c.json(normalProductWriteResponse(folded.body), folded.status as 200 | 400 | 403 | 409 | 503)
     }
-    return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
+    return c.json(normalProductWriteResponse(await foldCreateIntoExisting(c.env, user, duplicate, name, body)))
   }
 
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body)
@@ -2192,7 +2201,7 @@ app.post('/', async (c) => {
   const { item, id } = created
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
-  return c.json({ item, id, success: true })
+  return c.json(normalProductWriteResponse({ item, id, success: true }))
 })
 
 // D6: before -> after preview numbers for a rename, before anything
@@ -2615,7 +2624,7 @@ app.put('/:id', async (c) => {
         announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
         c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
         c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
-        return c.json({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } })
+        return c.json(normalProductWriteResponse({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } }))
       }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
@@ -2761,7 +2770,7 @@ app.put('/:id', async (c) => {
   }
   await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
-  return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item, success: true })
+  return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : normalProductRow(item as Record<string, unknown>), success: true })
 })
 
 app.delete('/:id', async (c) => {
@@ -3002,7 +3011,7 @@ app.post('/variant', async (c) => {
   const { item, id } = created
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
-  return c.json({ item, id, success: true })
+  return c.json(normalProductWriteResponse({ item, id, success: true }))
 })
 
 // POST /api/products/merge-duplicates -- retroactive cleanup for products

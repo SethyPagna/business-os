@@ -2,7 +2,9 @@ const assert = require('node:assert/strict')
 const { startWorker, recorder, budgetLine, historyStep } = require('./harness/al_money_native.cjs')
 
 async function main() {
-  const h = await startWorker(), proof = recorder('current merge authority')
+  const h = await startWorker({patches:[{name:'synthetic legacy cache entry omits new review boolean',file:'src/lib/cache.ts',
+    from:'const response = new Response(JSON.stringify(value), {',
+    to:"const response = new Response(JSON.stringify(value, (key, entry) => key === 'cost_needs_review' ? undefined : entry), {"}]}), proof = recorder('current merge authority')
   let nextId = 71000
   const pair = async (kind, value, { echo = false, manual = null, lot = null } = {}) => {
     const keepId = nextId++, mergeId = nextId++, name = `Authority ${keepId}`, barcode = `84500${keepId}`
@@ -33,6 +35,7 @@ async function main() {
       proof.check(`identity echo ${value} preserves keeper and selling intent`,()=>{
         assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(stored.cost_price_usd,value)
         assert.equal(stored.cost_price_khr,value===null?null:value*4000);assert.ok(stored.cost_review_key);assert.equal(stored.selling_price_usd,15)
+        assert.equal(result.body.item.cost_needs_review,true);assert.ok(!Object.hasOwn(result.body.item,'cost_review_key'));assert.deepEqual(result.body.product,result.body.item)
       })
     }
     for (const [value,manual,lot,expected] of [[null,null,null,null],[0,null,null,0],[5,7,null,7],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]]) {
@@ -80,6 +83,40 @@ async function main() {
       proof.check(`selected PCE ${mutation} invalidates review without merge`,()=>{assert.equal(result.status,409,JSON.stringify(result.body));assert.deepEqual(after,before)})
     }
     const hidden=await h.addEmployee(950,'hidden_merge',{products:true,'products:merge_duplicates':true,'products:edit':true,'products:image':true,product_cost_view:false,product_cost_edit:false})
+    const normalRow=(row,tag)=>{assert.ok(row);assert.equal(typeof row.cost_needs_review,'boolean');assert.equal(row.cost_needs_review,tag);assert.ok(!Object.hasOwn(row,'cost_review_key'))}
+    for(const [label,path,shape] of [
+      ['search fresh','/api/products/search?ids=71006',body=>body.items],
+      ['search legacy cached','/api/products/search?ids=71006',body=>body.items],
+      ['bare list','/api/products',body=>body],
+      ['bootstrap','/api/products/bootstrap?ids=71006&metadata=0',body=>body.items],
+    ]) {
+      const response=await h.call('GET',path,undefined,`normal ${label}`)
+      proof.check(`normal ${label} boolean and no internal key`,()=>{assert.equal(response.status,200,JSON.stringify(response.body));normalRow(shape(response.body).find(row=>row.id===71006),true)})
+    }
+    const create=await h.call('POST','/api/products',{name:'Normal response new',barcode:'845009900001'},'normal create')
+    proof.check('normal create shapes unknown review state',()=>{assert.equal(create.status,200,JSON.stringify(create.body));normalRow(create.body.item,false)})
+    const variant=await h.call('POST','/api/products/variant',{name:'Normal response variant',barcode:'845009900002'},'normal variant')
+    proof.check('normal variant shapes review state',()=>{assert.equal(variant.status,200,JSON.stringify(variant.body));normalRow(variant.body.item,false)})
+    nextId=Math.max(nextId,Number(create.body.id||0)+1,Number(variant.body.id||0)+1)
+    const current=await h.one('SELECT name,barcode,updated_at FROM products WHERE id=71006')
+    const updated=await h.call('PUT','/api/products/71006',{description:'Normal response update',expected_updated_at:current.updated_at},'normal update')
+    proof.check('normal update retains tag and omits key',()=>{assert.equal(updated.status,200,JSON.stringify(updated.body));normalRow(updated.body.item,true)})
+    const folded=await h.call('POST','/api/products',{name:current.name,barcode:current.barcode},'normal create fold')
+    proof.check('normal create fold shapes both row aliases',()=>{assert.equal(folded.status,200,JSON.stringify(folded.body));normalRow(folded.body.item,true);normalRow(folded.body.product,true)})
+    const hiddenRows=await h.call('GET','/api/products/search?ids=71006',undefined,'normal hidden search',{cookie:hidden})
+    proof.check('normal hidden search discloses neither review flag nor key',()=>{assert.equal(hiddenRows.status,200);assert.ok(hiddenRows.body.items.length);assert.ok(!JSON.stringify(hiddenRows.body).includes('cost_needs_review'));assert.ok(!JSON.stringify(hiddenRows.body).includes('cost_review_key'))})
+    const hiddenCurrent=await h.one('SELECT updated_at FROM products WHERE id=71006')
+    const hiddenUpdate=await h.call('PUT','/api/products/71006',{description:'Hidden response edit',expected_updated_at:hiddenCurrent.updated_at},'normal hidden update',{cookie:hidden})
+    proof.check('normal hidden write response omits flag and internal key',()=>{assert.equal(hiddenUpdate.status,200,JSON.stringify(hiddenUpdate.body));assert.ok(!JSON.stringify(hiddenUpdate.body).includes('cost_needs_review'));assert.ok(!JSON.stringify(hiddenUpdate.body).includes('cost_review_key'))})
+    const warm=await h.call('GET','/api/products/search?ids=71008',undefined,'normal cache stale warm')
+    assert.equal(warm.status,200);normalRow(warm.body.items[0],true)
+    await h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(250001,71008,'normal-live-lot',1,8,'2026-10-15')").run()
+    const live=await h.one('SELECT cost_review_key FROM products WHERE id=71008')
+    assert.equal(live.cost_review_key,null,'real received-lot trigger clears the current marker without a cache-version bump')
+    const refreshed=await h.call('GET','/api/products/search?ids=71008',undefined,'normal stale cached refresh')
+    proof.check('normal cached row missing field refreshes live cleared review',()=>{assert.equal(refreshed.status,200);normalRow(refreshed.body.items[0],false);assert.ok(h.metrics.findLast(row=>row.label==='normal stale cached refresh').statements<h.metrics.findLast(row=>row.label==='normal cache stale warm').statements)})
+    const receiptFold=await h.call('POST','/api/products',{name:current.name,barcode:current.barcode,stock_quantity:1,branch_id:1,cost_price_usd:8,client_request_id:'normal-fold-receipt-71006',received_date:'2026-10-15'},'normal receipt fold')
+    proof.check('normal receipt fold shapes both aliases after actual received-cost clear',()=>{assert.equal(receiptFold.status,200,JSON.stringify(receiptFold.body));normalRow(receiptFold.body.item,false);normalRow(receiptFold.body.product,false)})
     const denied=await h.addEmployee(951,'denied_merge',{products:true,'products:merge_duplicates':false,product_cost_view:false})
     const p=await pair('selected',null)
     const body={cases:[{case_key:`barcode:${p.barcode}`,cluster_type:'barcode',cluster_value:p.barcode,product_ids:[p.keepId,p.mergeId]}]}
