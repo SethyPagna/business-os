@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // UI-STOCK 5.2 / 11.2: a stock receipt may carry the product's new selling price.
 //
 // Owner, 30 Sep 2026: "we add can be different selling price or cost price, of
@@ -33,6 +34,7 @@ function loadReal(relPath, overrides = {}) {
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
     if (request in overrides) return overrides[request]
+    if (request === '../lib/stockTransaction' || request === './stockTransaction') return loadReal('lib/stockTransaction.ts')
     if (request.startsWith('.')) return autoStub()
     Module._load = originalLoad
     try { return originalLoad.call(this, request, parent, isMain) } finally { Module._load = patchedLoad }
@@ -57,6 +59,7 @@ function wrapFlat(rawDb) {
         run: (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
+    batchOnce(items) { return this.batch(items) },
     async batch(items) { batchLog.push(items.map((item) => item.sql)); return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
@@ -115,12 +118,13 @@ const batchesMod = loadReal('routes/batches.ts', shared)
 function freshDb(migrations = loadAll()) {
   schemaProbeMod.__resetSchemaProbeCacheForTests()
   const rawDb = openDb(migrations)
-  rawDb.exec(`
+  assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(rawDb, () => rawDb.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active)
       VALUES(1, 'SK-II Gentle Cleanser 20g', 'SK-1', 3.5, 0, 5, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
+  `))
   return wrapFlat(rawDb)
 }
 const ADMIN = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }

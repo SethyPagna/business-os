@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const fs = require('fs')
 const path = require('path')
@@ -54,6 +55,7 @@ function compileSubject() {
       anonymousCustomer ||= compileLib('anonymousCustomer', localRequire)
       return anonymousCustomer
     }
+    if (request === './stockTransaction') return require('../src/lib/stockTransaction.ts')
     return require(request)
   }
   return compileLib('salesImportCommit', localRequire)
@@ -71,12 +73,13 @@ function filterParams(sql, params = {}) {
 function setup() {
   const sqlite = new Database(':memory:')
   for (const migration of loadAll()) sqlite.exec(migration)
+  assert.throws(() => sqlite.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
   sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Warehouse', 1)`).run()
-  sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
-  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
-  sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
-  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run()
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run())
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run())
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run())
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run())
 
   let beforeBatch = null
   const db = {
@@ -85,6 +88,7 @@ function setup() {
         get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) },
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch(statements) {
       if (beforeBatch) {
         const hook = beforeBatch
@@ -305,19 +309,19 @@ function customerMatch(overrides = {}) {
   // inactive, renamed, or not allocated at the sale's Shop.
   for (const [index, mutate, data = saleData()] of [
     [0, (sqlite) => {
-      sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity) VALUES (11, 'Other', 'SKU-2', 0)`).run()
+      seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity) VALUES (11, 'Other', 'SKU-2', 0)`).run())
     }, saleData({ items: [{ ...saleData().items[0], product_id: 11, product_name: 'Other', sku: 'SKU-2' }] })],
     [1, (sqlite) => {
       // 0154 permits deactivation only after the lot is empty. This remains an
       // invalid selected lot without manufacturing inactive-positive state.
-      sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
-      sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+      seedStockFixture(sqlite, () => sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run())
+      seedStockFixture(sqlite, () => sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run())
     }],
-    [2, (sqlite) => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run()],
-    [3, (sqlite) => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run()],
+    [2, (sqlite) => seedStockFixture(sqlite, () => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run())],
+    [3, (sqlite) => seedStockFixture(sqlite, () => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run())],
     [4, (sqlite) => {
-      sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
-      sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+      seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run())
+      seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run())
     }],
   ]) {
     const invalidBatch = setup()
@@ -338,8 +342,8 @@ function customerMatch(overrides = {}) {
   racedBatch.setBeforeBatch(() => {
     // Model a valid current-schema race: another writer empties the lot, then
     // deactivates it between the authoritative pre-read and atomic commit.
-    racedBatch.sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
-    racedBatch.sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+    seedStockFixture(racedBatch.sqlite, () => racedBatch.sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run())
+    seedStockFixture(racedBatch.sqlite, () => racedBatch.sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run())
   })
   const racedReturn = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
   await assert.rejects(
@@ -355,8 +359,8 @@ function customerMatch(overrides = {}) {
 
   const racedDuplicateBatch = setup()
   racedDuplicateBatch.setBeforeBatch(() => {
-    racedDuplicateBatch.sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
-    racedDuplicateBatch.sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+    seedStockFixture(racedDuplicateBatch.sqlite, () => racedDuplicateBatch.sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run())
+    seedStockFixture(racedDuplicateBatch.sqlite, () => racedDuplicateBatch.sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run())
   })
   await assert.rejects(
     () => subject.applyHistoricalSaleImport(racedDuplicateBatch.db, { jobId: 'job-raced-batch-duplicate', rowNumber: 5, data: saleData(), nowIso: input.nowIso, actor }),

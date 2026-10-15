@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // The fast stock-in commit must fit D1's per-invocation query ceiling on BOTH
 // plans (lib/planTier.ts d1QueriesPerInvocation: Free 50, Paid 1000).
 //
@@ -149,11 +150,14 @@ async function fixture(tier, productCount) {
   resetStockMutationReceiptSchemaProbe()
   const core = await ensureCoreDataInvariants(env)
   const branchId = core.branchId
+  assert.throws(() => raw.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(raw, () => {
   for (let i = 1; i <= productCount; i += 1) {
     raw.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(${1000 + i}, 'Budget P${i}', 'BUDGET-${i}', 1, 0, 0, 1)`)
     raw.exec(`INSERT OR IGNORE INTO branch_stock(product_id, branch_id, quantity) VALUES(${1000 + i}, ${branchId}, 0)`)
   }
+  })
   const tokenHash = await sha256Hex(TOKEN)
   raw.prepare(`INSERT INTO user_sessions(user_id, token_hash, created_at, expires_at) VALUES(?, ?, ?, ?)`)
     .run(core.adminUserId, tokenHash, new Date(Date.now() - 29 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString())
