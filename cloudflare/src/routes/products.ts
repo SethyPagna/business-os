@@ -33,7 +33,7 @@ import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGr
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
+import { prepareAtomicMergeGraphReceipt, buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
@@ -4468,11 +4468,12 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
   // audit trio. D1 returns one result per statement in input order.
+  const preparedGraph = costOutcome && atomicHistory && !atomicHistory.groupCompletionStatements ? await prepareAtomicMergeGraphReceipt(db, reversal) : undefined
   let atomicHistoryStatementIndexes: { snapshot: number; actionHistory: number } | null = null
   if (atomicHistory?.groupCompletionStatements) statements.push(...atomicHistory.groupCompletionStatements(reversal))
   else if (atomicHistory) {
     atomicHistoryStatementIndexes = { snapshot: statements.length, actionHistory: statements.length + 1 }
-    statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+    statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails, preparedGraph))
   }
 
   // Keep each atomic write batch within the same conservative 100-statement
@@ -4522,8 +4523,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   }
   const atomicRecord = atomicHistory && !atomicHistory.groupCompletionStatements
     ? (knownAtomicHistoryIds
-      ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db, knownAtomicHistoryIds)
-      : await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db))
+      ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db, knownAtomicHistoryIds, preparedGraph)
+      : await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db, undefined, preparedGraph))
     : null
 
   return {

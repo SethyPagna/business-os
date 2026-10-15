@@ -2,8 +2,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const file=path.join(__dirname,'test-product-resolve-keep-merge-native.cjs'),source=fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),boundary=source.indexOf('\nasync function main() {')
 assert.ok(boundary>0)
 const runner=new Module(file,module);runner.filename=file;runner.paths=module.paths
-runner._compile(source.slice(0,boundary)+'\nmodule.exports={fresh,one,rows,state,merge,preview,adapter,load,ADMIN,catalogCost}',file)
-const {fresh,one,rows,state,merge,preview,adapter,load,ADMIN,catalogCost}=runner.exports
+runner._compile(source.slice(0,boundary)+'\nmodule.exports={fresh,one,rows,state,merge,preview,adapter,load,ADMIN,catalogCost,undoAppliers}',file)
+const {fresh,one,rows,state,merge,preview,adapter,load,ADMIN,catalogCost,undoAppliers}=runner.exports
 const ts=require('typescript'),cache=new Map()
 function real(name){
  if(name==='db')return {getDb:()=>adapter}
@@ -175,6 +175,47 @@ async function mergeCases(){
   console.log('PASS actual Free merge refuses before business writes; measured route statements='+done.queries+' plus reserved20 auth overhead')
  }finally{state.native.db.close()}
 }
+async function forwardRetryCases(){
+ for(const race of [false,true]){
+  fresh()
+  const originalBatch=adapter.batch
+  let changed=false
+  try{
+   adapter.batch=async statements=>{
+    const result=await originalBatch(statements)
+    if(race&&!changed&&statements.some(statement=>statement.sql.includes('INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)'))){
+     changed=true
+     state.native.db.exec('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10')
+    }
+    return result
+   }
+   const done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
+   assert.equal(done.status,200,JSON.stringify(done.body))
+   const saved=one("SELECT * FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1"),reversal=JSON.parse(saved.payload_json)
+   assert.equal(reversal.costReviewState.generation,0);assert.equal(reversal.costReviewState.direction,'apply')
+   const stock=rows('SELECT * FROM branch_stock ORDER BY id'),events=rows("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id")
+   const retried=await undoAppliers.finalizeAtomicMergeHistory({DB:{}},reversal.operationId,reversal,adapter)
+   assert.equal(retried.fingerprintReady,!race)
+   assert.equal(one('SELECT payload_json FROM undo_snapshots WHERE id=?',saved.id).payload_json,saved.payload_json)
+   assert.deepEqual(rows('SELECT * FROM branch_stock ORDER BY id'),stock);assert.deepEqual(rows("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"),events)
+   assert.equal(one("SELECT status FROM action_history WHERE entity_id='11' ORDER BY id DESC LIMIT 1").status,race?'recorded':'undoable')
+   if(!race){
+    for(const invalid of ['missing','version']){
+     const altered=JSON.parse(saved.payload_json)
+     if(invalid==='missing')delete altered.costReviewState
+     else altered.costReviewState.graph_version=1
+     const invalidJson=JSON.stringify(altered)
+     state.native.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(invalidJson,saved.id)
+     const refused=await undoAppliers.finalizeAtomicMergeHistory({DB:{}},reversal.operationId,altered,adapter)
+     assert.equal(refused.fingerprintReady,false);assert.equal(one('SELECT payload_json FROM undo_snapshots WHERE id=?',saved.id).payload_json,invalidJson)
+     assert.deepEqual(rows("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"),events)
+    }
+    state.native.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(saved.payload_json,saved.id)
+   }
+   console.log('PASS actual shared initial finalizer retry '+(race?'preserves original receipt and concurrent stock edit':'recognizes intact committed ready receipt')+' without a replacement baseline')
+  }finally{adapter.batch=originalBatch;state.native.db.close()}
+ }
+}
 async function backupCases(){
  fresh()
  try{
@@ -214,5 +255,5 @@ async function backupCases(){
   console.log('PASS actual full small unflagged restore on pre0255 live schema does not reference the absent review column')
  }finally{state.native.db.close()}
 }
-async function main(){if(process.argv.includes('--storage'))await storageCases();else if(process.argv.includes('--backup'))await backupCases();else {await storageCases();await mergeCases();await backupCases()}}
+async function main(){if(process.argv.includes('--forward-retry'))await forwardRetryCases();else if(process.argv.includes('--storage'))await storageCases();else if(process.argv.includes('--backup'))await backupCases();else {await storageCases();await mergeCases();await forwardRetryCases();await backupCases()}}
 main().catch(error=>{console.error(error);process.exitCode=1})

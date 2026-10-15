@@ -93,6 +93,7 @@ function loadUndoAppliers(db) {
   stubs['./saleItemPricing'] = loadDependency(path.join(libDir, 'saleItemPricing.ts'))
   // U-cost: merge undo re-derives catalog cost with the real formula.
   stubs['./catalogCostRecompute'] = loadDependency(path.join(libDir, 'catalogCostRecompute.ts'))
+  stubs['./productCostReview'] = loadDependency(path.join(libDir, 'productCostReview.ts'))
   const source = fs.readFileSync(path.join(libDir, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },

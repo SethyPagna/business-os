@@ -589,8 +589,8 @@ async function run() {
     assert.match(productsSrc, /registerMergeFold\(\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, reviewReplay\) => \(\s*foldDuplicateProductInto\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride,/)
     assert.match(productsSrc, /reviewReplay \? \{ operationId: reviewReplay\.operationId, costAuthorityVersion: 3, costFallback: reviewReplay\.outcome\.original,/)
     assert.match(productsSrc, /groupCompletionStatements: reviewReplay\.complete \} : undefined, keeperChoice\)/)
-    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
-    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails, preparedGraph\)/)
+    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db, undefined, preparedGraph\)/)
     assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)
     assert.match(appliersSrc, /UPDATE action_history SET reversible=1,status='undoable'/)
   })
@@ -900,7 +900,7 @@ async function runBulk() {
     assert.match(productsSrc, /const result = await foldDuplicateProductInto\(/)
     assert.match(productsSrc, /bulkClusterPlan: clusterPlan/)
     assert.match(productsSrc, /readAppliedBulkClusterPlan/)
-    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails, preparedGraph\)/)
   })
 }
 
