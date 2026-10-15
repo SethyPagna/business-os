@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
+  return value
+}
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Scoped "Set quantity" (owner, 17 Sep; confirmed 24 Sep: "Set Quantity:
 // offer selected received-date lot or branch total; selected lot is the
@@ -79,14 +86,14 @@ function resetProbes() {
 function seeded() {
   resetProbes()
   const f = fixture()
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(2, 'Warehouse', 0, 1);
     INSERT INTO product_batches(id, variant_product_id, batch_key, lot_code, received_at, batch_number, unit_cost_usd, is_active)
       VALUES(10, 1, 'OLD', 'OLD', '2026-09-02', 1, 3, 1), (11, 1, 'NEW', 'NEW', '2026-09-09', 2, 5, 1);
     INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES(10, 1, 3), (11, 1, 7);
     UPDATE branch_stock SET quantity=10 WHERE product_id=1 AND branch_id=1;
     UPDATE products SET stock_quantity=10 WHERE id=1;
-  `)
+  `))
   return f
 }
 
@@ -211,10 +218,10 @@ async function main() {
   // later sale that left the Set's units alone no longer blocks it, and one
   // that used them refuses it whole with the numbers.
   await check('undo after an intervening sale takes back exactly the Set delta; a sale that used those units refuses it whole', async () => {
-    const sell = (f, lot, qty) => f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-${qty} WHERE batch_id=${lot} AND branch_id=1;
+    const sell = (f, lot, qty) => seedFixture(f.sql, () => f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-${qty} WHERE batch_id=${lot} AND branch_id=1;
       UPDATE branch_stock SET quantity=quantity-${qty} WHERE product_id=1 AND branch_id=1;
       UPDATE products SET stock_quantity=stock_quantity-${qty} WHERE id=1;
-      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id) VALUES(1,1,'sale',${qty},${lot});`)
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id) VALUES(1,1,'sale',${qty},${lot});`))
     const f = seeded()
     const set = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-undo-sale-01', 5))
     assert.deepEqual(stock(f), { lot10: 5, lot11: 7, branch: 12, product: 12, held: 0 })
@@ -246,7 +253,7 @@ async function main() {
   function screenshotSeeded() {
     resetProbes()
     const f = fixture()
-    f.sql.exec(`
+    seedFixture(f.sql, () => f.sql.exec(`
       INSERT INTO branches(id, name, is_default, is_active) VALUES(2, 'Warehouse', 0, 1);
       INSERT INTO suppliers(id, name) VALUES(19, 'Dane japan');
       INSERT INTO product_batches(id, variant_product_id, batch_key, lot_code, received_at, batch_number, unit_cost_usd, is_active, received_quantity, received_cost_usd, received_branch_id)
@@ -258,7 +265,7 @@ async function main() {
       UPDATE products SET stock_quantity=33 WHERE id=1;
       INSERT INTO inventory_movements(id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, reference_id, batch_id, created_at)
         VALUES(48026, 1, 'Serum', 1, 'Shop', 'add', 30, 7, 210, 'New arrival', 1790667050013, 21, '2026-09-29 07:33:05');
-    `)
+    `))
     return f
   }
   const lots = (f) => {
@@ -380,10 +387,10 @@ async function main() {
     const set = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-legacy-rev-1', 5))
     const forward = movements(f)[0]
     // What a ledger Revert of a Set row wrote before the ledger refused them.
-    f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-2 WHERE batch_id=10 AND branch_id=1;
+    seedFixture(f.sql, () => f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-2 WHERE batch_id=10 AND branch_id=1;
       UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1;
       UPDATE products SET stock_quantity=stock_quantity-2 WHERE id=1;
-      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id,reference_id) VALUES(1,1,'remove',2,10,'revert:${forward.id}');`)
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id,reference_id) VALUES(1,1,'remove',2,10,'revert:${forward.id}');`))
     const before = stock(f)
     const res = await undo(f, set.json.action_history_id, 0)
     assert.equal(res.status, 409, JSON.stringify(res.json))
@@ -395,8 +402,10 @@ async function main() {
   await check('refused during maintenance: Set and undo change nothing', async () => {
     const f = seeded()
     const set = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-maint-set-01', 5))
-    f.sql.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    seedFixture(f.sql, () => f.sql.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`))
     const before = stock(f)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     const blocked = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-maint-set-02', 0))
     assert.equal(blocked.status, 503, JSON.stringify(blocked.json))
     const blockedUndo = await undo(f, set.json.action_history_id, 0)
@@ -437,7 +446,7 @@ async function main() {
   await check('tagged undo is refused once the held row was disposed of', async () => {
     const f = seeded()
     const tagged = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-tag-dispose1', 1, { conditionTag: 'broken' }))
-    f.sql.exec('UPDATE damaged_stock_lots SET quantity_remaining=0')
+    seedFixture(f.sql, () => f.sql.exec('UPDATE damaged_stock_lots SET quantity_remaining=0'))
     const before = stock(f)
     assert.equal((await undo(f, tagged.json.action_history_id, 0)).status, 409)
     assert.deepEqual(stock(f), before)
@@ -465,7 +474,7 @@ async function main() {
     assert.equal((await undo(f, res.json.action_history_id, 0)).status, 200)
     assert.deepEqual(stock(f), { lot10: 3, lot11: 7, branch: 10, product: 10, held: 0 })
     // Part-77 floor kept: a drifted aggregate floors at zero, undo restores it exactly.
-    f.sql.exec('UPDATE branch_stock SET quantity=2 WHERE product_id=1 AND branch_id=1')
+    seedFixture(f.sql, () => f.sql.exec('UPDATE branch_stock SET quantity=2 WHERE product_id=1 AND branch_id=1'))
     const floored = await send(f, 'PATCH', '/api/batches/11/branches/1', { quantity: 0 })
     assert.equal(floored.status, 200)
     assert.equal(stock(f).branch, 0)
@@ -526,9 +535,23 @@ async function main() {
       if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== etag) return metadata
       return { ...metadata, body: new Blob([doc]).stream(), customMetadata: { format: 'business-os-cloudflare-backup' } }
     } } }
-    f.sql.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
-    await backup.restoreCloudflareBackup(env, 'fixture.json')
-    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    const maintenance = load('lib/maintenance.ts')
+    const ownership = await maintenance.beginMaintenance(env, { backupKey: 'fixture.json', startedBy: 'lot restore fixture' })
+    const restoreState = () => JSON.stringify(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all().map(({ name }) => [name, f.sql.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()]))
+    const beforeUnauthorized = restoreState()
+    let unauthorizedProgress = 0
+    for (const token of [undefined, 'different-restore-owner']) {
+      await assert.rejects(backup.restoreCloudflareBackup(env, 'fixture.json', async () => { unauthorizedProgress++ }, token),
+        error => error.name === 'MaintenanceAdmissionConflictError')
+      assert.equal(restoreState(), beforeUnauthorized)
+      assert.equal(unauthorizedProgress, 0)
+    }
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    await backup.restoreCloudflareBackup(env, 'fixture.json', undefined, ownership.token)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.equal(await maintenance.endMaintenance(env, ownership.token), true)
     assert.deepEqual(f.sql.prepare('SELECT * FROM stock_lot_adjustment_operations').all(), saved)
     assert.deepEqual(stock(f), { lot10: 5, lot11: 7, branch: 12, product: 12, held: 0 })
     assert.equal((await undo(f, set.json.action_history_id, 0)).status, 200)
