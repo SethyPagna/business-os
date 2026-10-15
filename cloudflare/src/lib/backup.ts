@@ -1211,9 +1211,15 @@ function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   return requested
 }
 
-type RestoreSchemaRow = { table_name: string; parent_table: string | null; fk_id: number | null; fk_seq: number | null }
-type RestoreSchema = { tables: ReadonlySet<string>; references: readonly RestoreSchemaRow[] }
+type RestoreSchemaRow = { table_name: string; parent_table: string | null; fk_id: number | null; fk_seq: number | null; has_cost_review?: number }
+type RestoreSchema = { tables: ReadonlySet<string>; references: readonly RestoreSchemaRow[]; hasCostReview: boolean }
 const MAX_RESTORE_SCHEMA_ROWS = 10000
+const MERGE_COST_RESTORE_UNSUPPORTED = 'Cannot restore this backup: merge cost review metadata needs validated restore support. Keep this backup and use a deployment with merge-cost review restore support. No database rows have been changed.'
+
+function hasMergeCostReviewEvent(row: Record<string, unknown>): boolean {
+  if (row.action !== 'cost_override' || row.entity !== 'product' || typeof row.details !== 'string') return false
+  try { return JSON.parse(row.details)?.cost_review?.version === 1 } catch { return false }
+}
 
 // One statement captures all relevant live tables and every FK component from
 // the same schema snapshot. LEFT JOIN retains tables with no foreign keys.
@@ -1221,7 +1227,8 @@ const MAX_RESTORE_SCHEMA_ROWS = 10000
 // AND children. Internal D1/custom-data tables are not restore targets.
 async function discoverRestoreSchema(env: Env): Promise<RestoreSchema> {
   const result = await env.DB.prepare(`
-    SELECT m.name AS table_name, f."table" AS parent_table, f.id AS fk_id, f.seq AS fk_seq
+    SELECT m.name AS table_name, f."table" AS parent_table, f.id AS fk_id, f.seq AS fk_seq,
+      EXISTS(SELECT 1 FROM pragma_table_info('products') WHERE name='cost_review_key') AS has_cost_review
     FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name) AS f ON 1 = 1
     WHERE m.type = 'table' AND m.name IN (SELECT value FROM json_each(?))
     ORDER BY m.name, f.id, f.seq
@@ -1229,7 +1236,7 @@ async function discoverRestoreSchema(env: Env): Promise<RestoreSchema> {
   `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations'])).all<RestoreSchemaRow>()
   const references = result.results || []
   if (references.length > MAX_RESTORE_SCHEMA_ROWS) throw new Error('Restore schema exceeds the safe discovery limit; no database rows have been changed.')
-  return { tables: new Set(references.map(row => row.table_name)), references }
+  return { tables: new Set(references.map(row => row.table_name)), references, hasCostReview: references.some(row => row.has_cost_review === 1) }
 }
 
 function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlySet<string>): string | null {
@@ -1461,6 +1468,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
         }
       }
       if (ev.type === 'row') admitStockRow(ev.table, ev.row)
+      if (ev.type === 'row' && ((ev.table === 'products' && ev.row.cost_review_key != null)
+        || (ev.table === 'audit_logs' && hasMergeCostReviewEvent(ev.row)))) throw new Error(MERGE_COST_RESTORE_UNSUPPORTED)
       // Custom metadata is backed up, but cannot authorize dropping an
       // arbitrary system table during a later factory reset. Check ALL rows
       // in pass 1, before even the first restore DELETE or progress write.
@@ -1483,6 +1492,17 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // pre-destructive table/dependency/migration decision uses this live graph.
   const liveSchema = await discoverRestoreSchema(env)
   const presentTables = [...documentTables].filter(table => (BACKUP_TABLES as readonly string[]).includes(table) && liveSchema.tables.has(table))
+  if (presentTables.includes('products') || presentTables.includes('audit_logs')) {
+    const predicates = [
+      liveSchema.hasCostReview ? 'EXISTS(SELECT 1 FROM products WHERE cost_review_key IS NOT NULL)' : '',
+      liveSchema.tables.has('audit_logs') ? `EXISTS(SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product'
+        AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.version')=1)` : '',
+    ].filter(Boolean)
+    if (predicates.length) {
+      const blocked = await env.DB.prepare(`SELECT ${predicates.join(' OR ')} AS blocked`).first<{ blocked: number }>()
+      if (blocked?.blocked) throw new Error(MERGE_COST_RESTORE_UNSUPPORTED)
+    }
+  }
 
   // Schema guard (Part-77): the insert below writes only the intersection of
   // the backup's columns and the live table's columns, so restoring a backup

@@ -65,6 +65,7 @@ const LATEST_MANUAL_BASELINE_SQL = '(SELECT baseline_batch_id FROM product_cost_
 const ELIGIBLE_LOT_SQL = `pb.variant_product_id = products.id AND pb.is_active = 1
         AND pb.unit_cost_usd IS NOT NULL AND pb.unit_cost_usd > 0
         AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
+export const CATALOG_COST_HAS_RECORDED_LOT_SQL = `EXISTS(SELECT 1 FROM product_batches pb WHERE ${ELIGIBLE_LOT_SQL})`
 const LOT_ON_HAND_QTY_SQL = '(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)'
 const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs
             JOIN product_batches ob ON ob.id = bbs.batch_id
@@ -151,14 +152,14 @@ const RESTORE_MODE_OFF_SQL = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key =
  * triggers.
  * test-migration-0195-on-hand-cost-pure.cjs pins the migration text to this.
  */
-export function catalogCostOnHandTriggerSql(): string {
+export function catalogCostOnHandTriggerSql({ reviewMarker = false }: { reviewMarker?: boolean } = {}): string {
   const lotProducts = (ids: string) => `is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (${ids}))`
   const trigger = (name: string, event: string, when: string, idPredicate: string) => `CREATE TRIGGER ${name}
 ${event}
 WHEN ${when}
  AND ${RESTORE_MODE_OFF_SQL}
 BEGIN
-  ${catalogCostRecomputeIfChangedSql(idPredicate, { stampUpdatedAt: false })};
+  ${catalogCostRecomputeIfChangedSql(idPredicate, { stampUpdatedAt: false })};${reviewMarker ? `\n  ${catalogCostReviewClearSql(idPredicate)};` : ''}
 END;
 `
   return [
@@ -174,6 +175,23 @@ END;
     trigger('catalog_cost_on_hand_lot_delete_0195', 'AFTER DELETE ON product_batches',
       'OLD.variant_product_id IS NOT NULL', 'is_active = 1 AND id = OLD.variant_product_id'),
   ].join('\n')
+}
+
+export function catalogCostReviewClearSql(idPredicateSql: string): string {
+  return `UPDATE products SET cost_review_key=NULL WHERE ${idPredicateSql} AND cost_review_key IS NOT NULL
+    AND ${CATALOG_COST_HAS_RECORDED_LOT_SQL} AND cost_price_usd IS (${CATALOG_COST_DERIVE_SQL})`
+}
+
+export function catalogCostReviewTriggersSql(): string {
+  return catalogCostOnHandTriggerSql({ reviewMarker: true }) + `
+CREATE TRIGGER catalog_cost_review_lot_update_0255
+AFTER UPDATE OF unit_cost_usd,is_active,variant_product_id,received_at ON product_batches
+WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+BEGIN
+  ${catalogCostRecomputeIfChangedSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', { stampUpdatedAt: false })};
+  ${catalogCostReviewClearSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)')};
+END;
+`
 }
 
 /** The 0195 one-time repair: every ACTIVE product whose stored figure the formula moves. */
