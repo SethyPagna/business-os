@@ -128,6 +128,17 @@ assert.match(localeCopy.km.behavior3, /មុនការកំណត់ពិ�
 assert.match(localeCopy.en.behavior3, /First paying an unpaid sale while loyalty is off permanently skips earning/)
 assert.match(localeCopy.km.behavior3, /ការបង់ប្រាក់លើកដំបូង.*ពិន្ទុសមាជិកបិទ.*ជាអចិន្ត្រៃយ៍/)
 const guidanceKeys = new Set(['membershipPointsEnabledHint', 'membershipPointsOff', 'behavior1', 'behavior2', 'behavior3', 'behavior4', 'attachHint'])
+const app = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const appAst = ts.createSourceFile('AppContext.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const flatten = appAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'flattenTranslationTree')
+assert.ok(flatten)
+const flattenPack = evaluate('export ' + flatten.getText(appAst)).flattenTranslationTree
+for (const language of ['en', 'km'] as const) {
+  const pack = flattenPack(JSON.parse(fs.readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')))
+  for (const key of guidanceKeys) {
+    if (pack[key]) assert.equal(pack[key], localeCopy[language][key], `${language} rendered pack must not override ${key} with stale policy`)
+  }
+}
 const renderedGuidance = new Set<string>()
 function verifyFallbacks(node: ts.Node): void {
   if (ts.isCallExpression(node) && node.expression.getText(pageAst) === 'copy') {
