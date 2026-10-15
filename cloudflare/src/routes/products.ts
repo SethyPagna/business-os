@@ -1,6 +1,8 @@
+import { mergeCostContinuationGuard } from '../lib/undoAppliers'
+import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
-import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
@@ -8849,6 +8851,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
 type ResolveProductStep = { mergeId: number; stock?: MergeStockDisposition }
 type ResolveProductRequest = { requestId: string; reviewedDigest: string; steps: ResolveProductStep[] }
 type ResolveProductPlan = ResolveProductRequest & {
+  costDependencyVersion?: 1
   keepId: number
   cost: ProductMergeKeeperChoice['cost'] | null
   choices?: ProductResolveChoices
@@ -8861,17 +8864,17 @@ async function resolveProductDigest(value: unknown): Promise<string> {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function resolveProductFingerprint(db: ReturnType<typeof getDb>, ids: number[], guards?: AtomicMergeStatement[]) {
+async function resolveProductFingerprint(db: ReturnType<typeof getDb>, ids: number[], guards?: AtomicMergeStatement[], currentCostEntries = false) {
   // The existing graph fingerprint also supplies transaction guards for stock,
   // lots, images and links. Never expose its unredacted JSON to the browser.
-  return resolveProductDigest(await mergeStateFingerprint(db, ids.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), guards))
+  return resolveProductDigest(await mergeStateFingerprint(db, ids.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), guards, { currentCostEntries }))
 }
 
 async function readResolveProductGroup(db: ReturnType<typeof getDb>, ids: number[], keeperId: number) {
   const sorted = [...new Set(ids)].sort((a, b) => a - b)
   // One consistent seven-query read for the whole group. Derive every pending
   // suffix in memory rather than rereading the graph once per future fold.
-  const serialized = await mergeStateFingerprint(db, sorted.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)))
+  const serialized = await mergeStateFingerprint(db, sorted.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), undefined, { currentCostEntries: true })
   const graph = JSON.parse(serialized) as Record<string, Array<Record<string, unknown>>>
   const rows = graph.products
   const subset = (ids: number[]) => {
@@ -8880,6 +8883,7 @@ async function readResolveProductGroup(db: ReturnType<typeof getDb>, ids: number
     const batchIds = new Set(batches.map((row) => Number(row.id)))
     return {
       ...graph,
+      currentCostEntries: graph.currentCostEntries.filter((row) => members.has(Number(row.product_id))),
       products: graph.products.filter((row) => members.has(Number(row.id))),
       batches,
       batchStock: graph.batchStock.filter((row) => batchIds.has(Number(row.batch_id))),
@@ -8893,8 +8897,32 @@ async function readResolveProductGroup(db: ReturnType<typeof getDb>, ids: number
     const remaining = merged.slice(index)
     fingerprints[remaining.join(',')] = await resolveProductDigest(JSON.stringify(subset(remaining)))
   }
-  return { rows, fingerprints, reviewedDigest: await resolveProductDigest({ rows, fingerprints }) }
+  return { rows, fingerprints, graph: graph as unknown as MergeCostPreviewGraph, reviewedDigest: await resolveProductDigest({ rows, fingerprints }) }
 }
+
+app.post('/resolve/cost-preview', async (c) => {
+  const bodyRejection = await admitRequestBody(c, PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES)
+  if (bodyRejection) return bodyRejection
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') return c.json({ code: 'access_denied' }, 403)
+  if (!canViewAcquisitionCosts(user)) return c.json({ code: 'product_cost_view_required' }, 403)
+  const body = await c.req.json().catch(() => null) as { keepId?: number; reviewedDigest?: string; steps?: MergeCostStep[] } | null
+  if (!body || !Number.isSafeInteger(body.keepId) || Number(body.keepId) <= 0 || typeof body.reviewedDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.reviewedDigest)
+    || !Array.isArray(body.steps) || body.steps.length < 1 || body.steps.length > 11
+    || body.steps.some((step, index) => !step || !Number.isSafeInteger(step.mergeId) || step.mergeId <= 0 || step.mergeId === body.keepId || !['merge','write_off'].includes(step.stock)
+      || (index > 0 && step.mergeId <= body.steps![index - 1].mergeId))) return c.json({ code: 'invalid_resolve_plan' }, 400)
+  if (getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({ success: true, blocked: { code: 'resolve_plan_budget' } })
+  const keepId = body.keepId!, steps = body.steps, db = getDb(c.env)
+  const group = await readResolveProductGroup(db, [keepId, ...steps.map(step => step.mergeId)], keepId)
+  if (group.reviewedDigest !== body.reviewedDigest) return c.json({ code: 'merge_state_conflict' }, 409)
+  try {
+    const [costAuthority] = await previewMergeCosts(db, group.graph, [{ keepId, steps }])
+    return c.json({ success: true, reviewedDigest: group.reviewedDigest, keepId, steps, costAuthority })
+  } catch (error) {
+    if (error instanceof MergeCostPreviewUnavailableError) return c.json({ success: true, blocked: { code: error.code } })
+    throw error
+  }
+})
 
 app.get('/possible-duplicates/merge-preview', async (c) => {
   const user = c.get('user')
@@ -8912,7 +8940,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
     .filter((id) => Number.isSafeInteger(id) && id > 0)
   if (keepMode && groupIds.length > 12) return c.json({ code: 'resolve_group_too_large', error: 'Resolve at most 12 products at a time.' }, 400)
-  const beforeReview = keepMode ? await readResolveProductGroup(db, groupIds, keepId) : null
+  const beforeReview = await readResolveProductGroup(db, keepMode ? groupIds : [keepId, mergeId], keepId)
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
   const [stockImpact, pricing, identity, closingSessions] = await Promise.all([
@@ -8952,8 +8980,19 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
       return c.json({ code: 'merge_state_conflict', error: 'These products changed while the preview was loading. Reload and review again.' }, 409)
     }
   }
+  const reviewed = resolveGroup ?? await readResolveProductGroup(db, [keepId, mergeId], keepId)
+  if (reviewed.reviewedDigest !== beforeReview.reviewedDigest) return c.json({ code: 'merge_state_conflict' }, 409)
+  const previewSteps: MergeCostStep[] = (keepMode ? groupIds : [keepId, mergeId]).filter(id => id !== keepId).sort((a,b) => a-b)
+    .map(mergeId => ({ mergeId, stock: c.req.query('stock') === 'write_off' ? 'write_off' : 'merge' }))
+  let costAuthority
+  if (canViewAcquisitionCosts(user)) {
+    try { [costAuthority] = await previewMergeCosts(db, reviewed.graph, [{ keepId, steps: previewSteps }]) }
+    catch (error) { if (!(error instanceof MergeCostPreviewUnavailableError)) throw error }
+  }
   return c.json({
     success: true,
+    ...(costAuthority ? { costAuthority } : {}),
+    reviewedDigest: reviewed.reviewedDigest,
     keepId,
     mergeId,
     stockImpact,
@@ -8984,7 +9023,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest; choices?: unknown }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest; choices?: unknown; cost_review?: unknown }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
   // The operator's answer for the discarded row's stock. Anything other than
@@ -9039,6 +9078,14 @@ app.post('/possible-duplicates/merge', async (c) => {
   const resolveGuards: AtomicMergeStatement[] = []
   let resolvePlan: ResolveProductPlan | undefined
   let resolveReplay = false
+  if (Object.hasOwn(body, 'cost_review')) {
+    const review = body.cost_review as { version?: unknown; reviewed_digest?: unknown } | null
+    if (!review || typeof review !== 'object' || Array.isArray(review) || review.version !== 1 || typeof review.reviewed_digest !== 'string'
+      || !/^[a-f0-9]{64}$/.test(review.reviewed_digest)) return c.json({ code: 'invalid_resolve_plan' }, 400)
+    const current = await readResolveProductGroup(db, [keepId, mergeId], keepId)
+    if (current.reviewedDigest !== review.reviewed_digest) return c.json({ code: 'merge_state_conflict' }, 409)
+    await resolveProductFingerprint(db, [keepId, mergeId], resolveGuards, true)
+  }
   if (resolve !== undefined) {
     if (!keepMode || !resolve || typeof resolve.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(resolve.requestId)
       || typeof resolve.reviewedDigest !== 'string' || !/^[a-f0-9]{64}$/.test(resolve.reviewedDigest)
@@ -9067,10 +9114,14 @@ app.post('/possible-duplicates/merge', async (c) => {
       if (!resolveReplay) {
         if (resolve.steps[previous.length]?.mergeId !== mergeId) return c.json({ code: 'resolve_request_conflict', error: 'Resolve steps must be applied in order.' }, 409)
         const latest = previous[previous.length - 1]
-        const saved = await db.prepare(`SELECT status,payload_json FROM undo_snapshots WHERE kind='product.merge' AND created_by_id=@actor
+        const saved = await db.prepare(`SELECT id,status,payload_json FROM undo_snapshots WHERE kind='product.merge' AND created_by_id=@actor
           AND json_extract(payload_json,'$.operationId')=@operationId ORDER BY id DESC LIMIT 1`)
-          .get<{ status: string; payload_json: string }>({ actor: user?.id ?? null, operationId: latest.operationId })
+          .get<{ id: number; status: string; payload_json: string }>({ actor: user?.id ?? null, operationId: latest.operationId })
         const reversal = saved ? JSON.parse(saved.payload_json) as MergeReversal & { fingerprintPending?: boolean } : null
+        if (resolvePlan.costDependencyVersion === 1 && saved && reversal) {
+          try { resolveGuards.push(await mergeCostContinuationGuard(db, reversal, saved.id, saved.payload_json)) }
+          catch { return c.json({ code: 'merge_state_conflict', error: 'The previous merge changed. Refresh before continuing.' }, 409) }
+        }
         if (!reversal || saved?.status !== 'applied' || reversal.fingerprintPending
           || await mergeStateFingerprint(db, [reversal], resolveGuards) !== reversal.mergedStateFingerprint) {
           return c.json({ code: 'merge_state_conflict', error: 'The previous merge changed. Refresh before continuing.' }, 409)
@@ -9088,12 +9139,12 @@ app.post('/possible-duplicates/merge', async (c) => {
       const current = await readResolveProductGroup(db, ids, keepId)
       if (current.reviewedDigest !== resolve.reviewedDigest) return c.json({ code: 'merge_state_conflict', error: 'These products changed after review.' }, 409)
       if (!productIdsInOneCluster(await findPossiblySameProductClusters(db), ids)) return c.json({ code: 'product_merge_not_duplicates', error: 'These products are not a current duplicate group.' }, 409)
-      resolvePlan = { ...resolve, ...requested, rows: current.rows, fingerprints: current.fingerprints }
+      resolvePlan = { ...resolve, ...requested, costDependencyVersion: 1, rows: current.rows, fingerprints: current.fingerprints }
     }
     if (!resolveReplay) {
       const remaining = resolve.steps.slice(previous.length).map((step) => step.mergeId)
       const checked = (previous.length ? remaining : [keepId, ...remaining]).sort((a, b) => a - b)
-      if (await resolveProductFingerprint(db, checked, resolveGuards) !== resolvePlan.fingerprints[checked.join(',')]) {
+      if (await resolveProductFingerprint(db, checked, resolveGuards, resolvePlan.costDependencyVersion === 1) !== resolvePlan.fingerprints[checked.join(',')]) {
         return c.json({ code: 'merge_state_conflict', error: 'These products changed after review.' }, 409)
       }
     }

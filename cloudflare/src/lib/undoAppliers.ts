@@ -752,7 +752,7 @@ async function runMergeFingerprintReadBatch(
 
 type MergeFingerprintRead = { key: string; sql: string; params?: unknown[] }
 
-function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata = false): MergeFingerprintRead[] {
+function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata = false, currentCostEntries = false): MergeFingerprintRead[] {
   const productIds = [...new Set(reversals.flatMap(r => [Number(r.keeperId),Number(r.dupId)]).filter(id => Number.isInteger(id) && id>0))].sort((a,b)=>a-b)
   const fullBatchMetadata = reversals.some(reversal => reversal.fullBatchMetadataFingerprint)
   const reads: MergeFingerprintRead[] = []
@@ -775,6 +775,8 @@ function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata 
         params: ids,
       },
     )
+    if (currentCostEntries) reads.push({ key: `currentCostEntries:${index}`,
+      sql: `SELECT id,product_id,cost_usd,baseline_batch_id FROM product_cost_entries WHERE product_id IN (${placeholders})`, params: ids })
     // Old fingerprints intentionally project only lot identity/activation.
     // Preserve that serialized contract, but lock the entire current lot row
     // (received date, cost, supplier, etc.) against races during group undo.
@@ -833,7 +835,7 @@ function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata 
 }
 
 export async function mergeStateFingerprint(
-  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[],
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[], options: { currentCostEntries?: boolean } = {},
 ): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
@@ -850,7 +852,8 @@ export async function mergeStateFingerprint(
   const childProducts: Array<Record<string, unknown>> = []
   const saleAllocations: Array<Record<string, unknown>> = []
   const returnAllocations: Array<Record<string, unknown>> = []
-  const reads = mergeFingerprintReads(reversals, Boolean(transactionGuards))
+  const currentCostEntries: Array<Record<string, unknown>> = []
+  const reads = mergeFingerprintReads(reversals, Boolean(transactionGuards), options.currentCostEntries)
   const resultSets = await runMergeFingerprintReadBatch(db, reads)
   if (transactionGuards) {
     // Re-run the exact fingerprint projections inside the write transaction.
@@ -880,6 +883,7 @@ export async function mergeStateFingerprint(
   }
   for (const [key, rows] of resultSets) {
     if (key.startsWith('products:')) products.push(...rows)
+    else if (key.startsWith('currentCostEntries:')) currentCostEntries.push(...rows)
     else if (key.startsWith('branchStock:')) branchStock.push(...rows)
     else if (key.startsWith('batches:')) batches.push(...rows)
     else if (key.startsWith('movementHeads:')) movementHeads.push(...rows)
@@ -922,7 +926,8 @@ export async function mergeStateFingerprint(
   saleAllocations.sort(byNumbers(['id']))
   returnAllocations.sort(byNumbers(['id']))
   for (const rows of Object.values(linkedRows)) rows.sort(byNumbers(['id']))
-  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
+  currentCostEntries.sort(byNumbers(['id']))
+  return JSON.stringify({ ...(options.currentCostEntries ? { costDependencyVersion: 1, currentCostEntries } : {}), products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
 }
 
 async function assertMergeStateUnchanged(
@@ -3133,6 +3138,17 @@ function mergeReplayGraphPredicate(reversal: MergeReversal, state: MergeCostRepl
     AND ${mergeReplayGallerySql()} IS @galleryState AND ${graph.sql} IS @graphState`,
   params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision,
     duplicateRevision: state.duplicate_revision, galleryState: state.gallery_state, graphState: state.graph_state, ...graph.params } }
+}
+
+export async function mergeCostContinuationGuard(db: ReturnType<typeof getDb>, reversal: MergeReversal, snapshotId: number, payload: string): Promise<AtomicMergeStatement> {
+  const state = reversal.costReviewState
+  if (!state || !mergeReplayStateValid(state, state.generation)) throw new UndoConflictError('The previous merge has no current cost dependency receipt.')
+  const { graph } = await prepareAtomicMergeGraphReceipt(db, reversal)
+  const predicate = mergeReplayGraphPredicate(reversal, state, graph)
+  const condition = `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`
+  const params = { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload }
+  if (!await db.prepare(`SELECT 1 AS valid WHERE ${condition}`).get(params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+  return { sql: `SELECT CASE WHEN ${condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params }
 }
 
 async function finalizeMergeCostGraph(
