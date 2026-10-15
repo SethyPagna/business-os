@@ -62,6 +62,21 @@ function reviewMoneyJsonSql(value: string): string {
   return `json(CASE WHEN (${value}) IS NULL THEN 'null' ELSE printf('%!.17g',(${value})) END)`
 }
 
+export function explicitCostReviewConfirmationStatements(productId: number, usd: number, actor: { id: number | null; name: string | null }): Statement[] {
+  const params = { explicitProductId: productId, explicitUsd: usd, confirmationNonce: crypto.randomUUID(), confirmationActorId: actor.id, confirmationActorName: actor.name }
+  return [{ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
+    SELECT @confirmationActorId,@confirmationActorName,'cost_override','product',CAST(id AS TEXT),
+      json_object('kind','product.cost-review-confirm','version',1,'source','explicit-cost-edit','claim_nonce',@confirmationNonce,
+        'cost_review',json_object('version',1,'kind','confirm','before_key',cost_review_key,'after_key',NULL,
+          'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
+          'after_usd',${reviewMoneyJsonSql('cost_price_usd')},'after_khr',${reviewMoneyJsonSql('cost_price_khr')}))
+    FROM products WHERE id=@explicitProductId AND is_active=1 AND cost_review_key IS NOT NULL
+      AND typeof(cost_price_usd) IN ('integer','real') AND cost_price_usd>=0 AND cost_price_usd IS @explicitUsd`, params },
+  { sql: `UPDATE products SET cost_review_key=NULL WHERE id=@explicitProductId
+    AND EXISTS(SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=CAST(products.id AS TEXT)
+      AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.claim_nonce')=@confirmationNonce)`, params }]
+}
+
 export const MERGE_COST_LATEST_MANUAL_SQL = `(SELECT CASE WHEN typeof(cost_usd) IN ('integer','real') AND cost_usd>=0 AND cost_usd<=1.7976931348623157e308 THEN cost_usd END
     FROM product_cost_entries WHERE product_id=products.id ORDER BY id DESC LIMIT 1)`
 

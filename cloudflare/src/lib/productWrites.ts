@@ -28,6 +28,7 @@ import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPend
 import { buildAuditStatement } from './audit'
 import { completedStockMutationReceiptStatement } from './stockMutationReceipt'
 import { canonicalProductDiscountColumns } from './productDiscountGate'
+import { explicitCostReviewConfirmationStatements } from './productCostReview'
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
@@ -492,6 +493,8 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       throw error
     }
   } else if (costChange && costOverrideActor && costBefore) {
+    const confirmsKnownUsd = Object.hasOwn(body, 'cost_price_usd') && typeof body.cost_price_usd === 'number'
+      && Number.isFinite(body.cost_price_usd) && body.cost_price_usd >= 0 && body.cost_price_usd !== costBefore.cost_price_usd
     const auditParams = { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
       oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) }
     // A cleared cost has no product_cost_entries row (cost_usd is NOT NULL: the table records costs, not their absence),
@@ -516,6 +519,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
         ...(costChange.entry ? [costChange.entry] : []),
         overrideAudit,
         catalogCostRecomputeStatement(Number(id)),
+        ...(confirmsKnownUsd ? explicitCostReviewConfirmationStatements(Number(id), body.cost_price_usd as number, costOverrideActor) : []),
       ], 'retry')
       result = results[stockGuard ? 1 : 0]
     } catch (error) {

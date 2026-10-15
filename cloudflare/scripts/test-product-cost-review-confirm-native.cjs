@@ -135,5 +135,41 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
   assert.equal(JSON.stringify(auditRows).includes('7.123456789012345'),true)
   console.log('PASS actual courier then acquisition audit projectors redact financial receipt for denied actor')
 
+  const writes=load(path.join(root,'lib/productWrites.ts'))
+  async function edit(productId, body) {
+    await writes.prepareProductMoneyWrite({DB},body,productId)
+    return writes.updateRow({DB},'products',productId,body,{id:admin.id,name:admin.name})
+  }
+  for(const [beforeUsd,nextUsd] of [[7,9],[7,0],[null,0]]) {
+    const editId=seed(beforeUsd)
+    const oldEntries=raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(editId).n
+    await edit(editId,{cost_price_usd:nextUsd})
+    const changed=raw.prepare('SELECT * FROM products WHERE id=?').get(editId)
+    assert.equal(changed.cost_price_usd,nextUsd)
+    assert.equal(changed.cost_review_key,null)
+    assert.equal(changed.cost_price_khr,5.124456789)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(editId).n,oldEntries+1)
+    const proof=raw.prepare("SELECT details FROM audit_logs WHERE entity_id=? AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.source')='explicit-cost-edit'").all(String(editId))
+    assert.equal(proof.length,1)
+    assert.equal(JSON.parse(proof[0].details).cost_review.after_usd,nextUsd)
+  }
+  console.log('PASS changed known USD including genuine zero clears with current audit in the same write')
+  for(const body of [{cost_price_usd:7,selling_price_usd:9},{cost_price_khr:9},{cost_price_usd:null}]) {
+    const editId=seed(7)
+    await edit(editId,body)
+    assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(editId).cost_review_key,'a'.repeat(32))
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity_id=? AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.source')='explicit-cost-edit'").get(String(editId)).n,0)
+  }
+  console.log('PASS whole-form USD echo, KHR-only change and cleared USD do not confirm the fallback')
+  const rollbackId=seed(7), rollbackBefore=snapshot()
+  raw.exec(`CREATE TRIGGER fixture_fail_cost_confirmation BEFORE INSERT ON audit_logs
+    WHEN json_extract(CASE WHEN json_valid(NEW.details) THEN NEW.details ELSE '{}' END,'$.source')='explicit-cost-edit'
+    BEGIN SELECT RAISE(ABORT,'fixture confirmation failure'); END;`)
+  await assert.rejects(edit(rollbackId,{cost_price_usd:9}),/fixture confirmation failure/)
+  raw.exec('DROP TRIGGER fixture_fail_cost_confirmation')
+  assert.equal(snapshot(),rollbackBefore)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+  console.log('PASS confirmation failure rolls back amount, manual entry, audit and marker together')
+
 
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => raw.close())
