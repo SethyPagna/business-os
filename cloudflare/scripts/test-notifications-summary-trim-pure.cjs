@@ -1,3 +1,4 @@
+'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // GET /api/notifications/summary: counts + a 50-item inventory preview, with the three expensive
 // sections (inventory, expiry, loyalty) answered from the Cache API between writes.
@@ -18,7 +19,6 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // (and the "not before the bump" half fails if nothing is cached at all).
 //
 // Run: node scripts/test-notifications-summary-trim-pure.cjs
-'use strict'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')

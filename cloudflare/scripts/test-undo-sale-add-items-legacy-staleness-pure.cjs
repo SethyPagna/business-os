@@ -1,3 +1,4 @@
+'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // FX-undo2 item 2 (R-undo C10): the LEGACY sale.add_items replay must not
 // overwrite a later sale edit.
@@ -20,7 +21,6 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // lib/saleAmendments.ts (harness/load_undo_appliers.cjs realSaleModules).
 //
 // Run: node scripts/test-undo-sale-add-items-legacy-staleness-pure.cjs
-'use strict'
 const assert = require('node:assert/strict')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')

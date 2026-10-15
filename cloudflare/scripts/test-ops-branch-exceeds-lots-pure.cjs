@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Fixture proof for ops/queries/branch-exceeds-lots.sql: the read-only sizing query for the
 // multi-lot Revert split (MULTILOT-REVERT, R2 review F1). It runs -- after the ops guard
@@ -36,7 +37,6 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 //   --wrong=refused-own-time-only a back-dated row is judged by its own business date, not its write-time bound (part 2)
 //   --wrong=refused-strict-time  a removal written in the same second as its lot does not count as refused (part 2)
 // No network, no wrangler.
-'use strict'
 
 const assert = require('assert')
 const path = require('path')

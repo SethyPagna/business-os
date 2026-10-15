@@ -1,3 +1,4 @@
+'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // FX-undo2 item 1 (R-undo C5/C12): an undo/redo the Worker refuses in order
@@ -22,7 +23,6 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // permissions and the notify side channels of other appliers are stubbed.
 //
 // Run: node scripts/test-undo-conflict-code-pure.cjs
-'use strict'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -59,9 +59,11 @@ function loadLibrary(name, dependencies = {}) {
 }
 
 const acquisitionCostAccess = loadLibrary('acquisitionCostAccess', { './permissions': loadLibrary('permissions') })
+const stockTransaction = loadLibrary('stockTransaction')
 
 function loadHistoryRoute(db, undoAppliers) {
   const stubs = {
+    '../lib/stockTransaction': stockTransaction,
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/productCostReview': loadLibrary('productCostReview', { './catalogCostRecompute': loadLibrary('catalogCostRecompute', { './moneyPrecision': loadLibrary('moneyPrecision') }) }),
     '../lib/db': { getDb: () => db },
@@ -394,6 +396,32 @@ async function main() {
     const h = recordedHistory(world, RETURN_BULK_PAYLOAD)
     assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), GENERIC_REFUSAL, /constraint failed/)
   })
+
+  for (const boundary of ['applier', 'transition']) {
+    for (const [ErrorType, code, action] of [
+      [stockTransaction.StockTransactionUnavailableError, 'stock_schema_unavailable', 'reload_required'],
+      [stockTransaction.StockTransactionOutcomeUnknownError, 'stock_transaction_outcome_unknown', 'retry_same_request'],
+    ]) {
+      await check(`${boundary} preserves typed ${code} recovery without changing history`, async () => {
+        const world = branchWorld()
+        const h = await branchEdit(world, 2, { phone: '099 999' })
+        const before = world.d1.db.prepare('SELECT * FROM action_history WHERE id = ?').get(h)
+        const beforeBranch = branch(world, 2)
+        const resolve = world.undoAppliers.resolveUndoApplier
+        world.undoAppliers.resolveUndoApplier = (payload) => {
+          if (boundary === 'transition') throw new ErrorType()
+          const applier = resolve(payload)
+          return applier && { ...applier, run: async () => { throw new ErrorType() } }
+        }
+        const result = await replay(world, h, 'undo')
+        assert.equal(result.status, 503, JSON.stringify(result.body))
+        assert.equal(result.body.code, code)
+        assert.equal(result.body.action, action)
+        assert.deepEqual(world.d1.db.prepare('SELECT * FROM action_history WHERE id = ?').get(h), before)
+        assert.deepEqual(branch(world, 2), beforeBranch)
+      })
+    }
+  }
 
   await check('control: a failure that is not a refusal to protect newer data keeps its old shape (no code)', async () => {
     const world = branchWorld()

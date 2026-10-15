@@ -1,3 +1,4 @@
+'use strict'
 const { executeStockTransaction } = require('../src/lib/stockTransaction.ts')
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // FX-undo applier audit: supplier.backfill had the same gap as branch.update.
@@ -14,7 +15,6 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // through the real recordSupplierBackfillSnapshot.
 //
 // Run: node scripts/test-undo-supplier-backfill-staleness-pure.cjs
-'use strict'
 const assert = require('node:assert/strict')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
