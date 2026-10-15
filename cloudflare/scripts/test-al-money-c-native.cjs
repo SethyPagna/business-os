@@ -294,14 +294,7 @@ function budgetLine(metrics) {
   return worst
 }
 
-async function seedProduct(h, id, name, priceUsd, stock, costUsd = 1) {
-  await h.db.prepare('INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(?,?,?,?,?,?,?,?,?,1)')
-    .bind(id, name, `88500${id}`, `AL-${id}`, stock, priceUsd, priceUsd * 4000, costUsd, costUsd * 4000).run()
-  await h.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').bind(id, stock).run()
-  await h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(?,?,?,?,'2026-09-01',1,1)")
-    .bind(id + 5000, id, `al-batch-${id}`, `AL-${id}`).run()
-  await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').bind(id + 5000, stock).run()
-}
+const { seedProduct } = require('./harness/al_money_native.cjs')
 
 // A legacy (money v0) sale written by the REAL sales-import writer
 // (lib/salesImportCommit.ts applyHistoricalSaleImport) -- the only producer of
