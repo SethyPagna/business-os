@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Real Hono transfer + action-history routes and applier, production migrations.
 const assert = require('node:assert/strict')
 const h = require('./test-transfer-operation-receipt-pure.cjs')
@@ -16,8 +22,8 @@ function snapshot() {
 async function forward({ merge = false, explicit = false, untracked = false } = {}) {
   h.fresh(2)
   // Destination already has unrelated older stock; a reverse FIFO would take it.
-  sql().exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(99,1,'older','older','2020-01-01',1); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99,2,8); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,8); UPDATE products SET stock_quantity=18 WHERE id=1")
-  if (untracked) sql().exec('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=1')
+  seedFixture(sql(), () => sql().exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(99,1,'older','older','2020-01-01',1); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99,2,8); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,8); UPDATE products SET stock_quantity=18 WHERE id=1"))
+  if (untracked) seedFixture(sql(), () => sql().exec('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=1'))
   if (merge) h.setMerge({ id: 2, name: 'Product 2' })
   const result = await h.request('branches', '/transfer', { ...h.intent(1, 1, 'provenance_forward_001', false), ...(explicit ? { batchId: 1 } : {}) })
   assert.equal(result.status, 200, JSON.stringify(result))
@@ -54,7 +60,7 @@ async function main() {
     assert.equal((await reverse(result.action_history_id,'undo',0)).status,200)
     assert.equal(qty(1,1),1); assert.equal(qty(99,2),8)
     assert.equal((await reverse(result.action_history_id,'redo',1)).status,200)
-    sql().exec('UPDATE branch_stock SET quantity=quantity-1.5 WHERE product_id=1 AND branch_id=2')
+    seedFixture(sql(), () => sql().exec('UPDATE branch_stock SET quantity=quantity-1.5 WHERE product_id=1 AND branch_id=2'))
     const before=snapshot()
     assert.equal((await reverse(result.action_history_id,'undo',2)).status,409)
     assert.deepEqual(snapshot(),before)
@@ -75,7 +81,7 @@ async function main() {
   })
   await check('consumed required destination lot conflicts without substituting older lot', async () => {
     const result=await forward()
-    sql().exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=2')
+    seedFixture(sql(), () => sql().exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=2'))
     const before=snapshot()
     assert.equal((await reverse(result.action_history_id,'undo',0)).status,409)
     assert.deepEqual(snapshot(),before); assert.equal(qty(99,2),8)
@@ -117,7 +123,10 @@ async function main() {
       ['DELETE FROM transfer_operation_members', /provenance|immutable|exact member retirement required/],
     ]
     for(const [mutation, expectedError] of mutations) {
-      assert.throws(()=>sql().exec(mutation),expectedError)
+      const db=h.wrapDb()
+      const {executeStockTransaction}=h.load('lib/stockTransaction.ts')
+      await assert.rejects(()=>executeStockTransaction({batchOnce: statements=>db.batch(statements)},[{sql:mutation}],'once'),expectedError)
+      assert.equal(sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
       assert.deepEqual(snapshot(),before,`${mutation} must leave every replay table unchanged`)
     }
   })
