@@ -1,3 +1,4 @@
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useEffect, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -84,6 +85,7 @@ interface ReturnDetailModalProps {
 }
 
 const useApp = useAppHook as () => {
+  user?: Parameters<typeof canViewAcquisitionCosts>[0]
   t?: (key: string) => string | undefined
 }
 
@@ -100,11 +102,14 @@ function isPositiveMoney(value: number | string | null | undefined): boolean {
 }
 
 export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, onOpenRecords, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
-  const { t } = useApp()
+  const { t, user } = useApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
+
+  const supplierMoney = (value: unknown, currency: 'usd' | 'khr'): string => value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) ? tr('unknown', 'Unknown') : currency === 'usd' ? `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })}` : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })}៛`
 
   // The Returns list read deliberately does not carry items -- one row per
   // return, no per-line fan-out (see routes/returns.ts GET /'s includeItems
@@ -263,7 +268,7 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                 <tr>
                   <th className="px-1.5 py-1.5 text-left sm:px-2">{tr('product', 'Product')}</th>
                   <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('qty_short', 'Qty')}</th>
-                  <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th>
+                  {!isSupplier || canViewCosts ? <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th> : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -305,32 +310,32 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                       })() : null}
                     </td>
                     <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{item.quantity || 0}</td>
-                    <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
-                      {fmtUSD(coerceMoney(item.total_usd))}
-                      {isPositiveMoney(item.total_khr) ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(coerceMoney(item.total_khr))}</div> : null}
-                    </td>
+                    {!isSupplier || canViewCosts ? <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
+                      {isSupplier ? supplierMoney(item.total_usd, 'usd') : fmtUSD(coerceMoney(item.total_usd))}
+                      {isSupplier ? <div className="text-[11px] font-normal text-gray-400">{supplierMoney(item.total_khr, 'khr')}</div> : isPositiveMoney(item.total_khr) ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(coerceMoney(item.total_khr))}</div> : null}
+                    </td> : null}
                   </tr>
                 ))}
               </tbody>
               <tfoot className="border-t border-gray-200 dark:border-gray-700">
-                {isSupplier ? (
+                {isSupplier ? (canViewCosts ? (
                   <>
                     <MoneyRow
                       labelSpan={2}
                       tone="credit"
                       label={tr('supplier_compensation', 'Supplier compensation')}
-                      amount={fmtUSD(coerceMoney(ret.supplier_compensation_usd))}
-                      sub={isPositiveMoney(ret.supplier_compensation_khr) ? fmtKHR(coerceMoney(ret.supplier_compensation_khr)) : null}
+                      amount={supplierMoney(ret.supplier_compensation_usd, 'usd')}
+                      sub={supplierMoney(ret.supplier_compensation_khr, 'khr')}
                     />
                     <MoneyRow
                       labelSpan={2}
                       tone="discount"
                       label={tr('business_loss', 'Business loss')}
-                      amount={fmtUSD(coerceMoney(ret.supplier_loss_usd))}
-                      sub={isPositiveMoney(ret.supplier_loss_khr) ? fmtKHR(coerceMoney(ret.supplier_loss_khr)) : null}
+                      amount={supplierMoney(ret.supplier_loss_usd, 'usd')}
+                      sub={supplierMoney(ret.supplier_loss_khr, 'khr')}
                     />
                   </>
-                ) : (
+                ) : null) : (
                   <MoneyRow
                     labelSpan={2}
                     strong
@@ -362,7 +367,7 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                   <tr>
                     <th className="px-1.5 py-1.5 text-left sm:px-2">{tr('product', 'Product')}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('qty_short', 'Qty')}</th>
-                    <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th>
+                    {!isSupplier || canViewCosts ? <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-emerald-100 dark:divide-emerald-800/60">

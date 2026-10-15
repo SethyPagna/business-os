@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { partialCostNote } from '../../utils/costDisplay.ts'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -145,6 +146,8 @@ interface ReturnRow extends Record<string, unknown> {
   total_refund_khr?: number | string | null
   supplier_compensation_usd?: number | string | null
   supplier_loss_usd?: number | string | null
+  supplier_compensation_khr?: number | string | null
+  supplier_loss_khr?: number | string | null
   status?: string | null
   branch_id?: number | string | null
   items?: ReturnItem[] | null
@@ -302,10 +305,10 @@ function countActiveFlags(flags: boolean[] = []): number {
 // keys, so chooser and file can never disagree.
 export const RETURN_EXPORT_KEYS = [
   'Return_Number', 'Scope', 'Date', 'Receipt', 'Customer', 'Supplier', 'Reason',
-  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Business_Loss_USD', 'Status',
+  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
 ] as const
 
-function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record<string, unknown>> {
+function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts = false): Array<Record<string, unknown>> {
   return rows.map((ret) => ({
     Return_Number: ret.return_number || '',
     Scope: normalizeScope(ret.return_scope),
@@ -317,8 +320,7 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
     Type: getReturnTypeLabel(ret, tr),
     Settlement: ret.supplier_settlement || '',
     Refund_USD: ret.total_refund_usd || 0,
-    Compensation_USD: ret.supplier_compensation_usd || 0,
-    Business_Loss_USD: ret.supplier_loss_usd || 0,
+    ...(canViewCosts ? { Compensation_USD: ret.supplier_compensation_usd ?? '', Business_Loss_USD: ret.supplier_loss_usd ?? '', Compensation_KHR: ret.supplier_compensation_khr ?? '', Business_Loss_KHR: ret.supplier_loss_khr ?? '' } : {}),
     Status: ret.status || 'completed',
   }))
 }
@@ -360,6 +362,7 @@ function ReturnPlusIcon({ className = '' }: { className?: string }) {
 export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
   const canPriceSupplierReturn = canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)
+  const canViewCosts = canViewAcquisitionCosts(user)
   // Editing a return reverses and re-applies batch restocking against live
   // stock, so routes/returns.ts blocks it outright for the Review Required
   // tier (PATCH /:id) rather than queueing it -- see utils/permissionActions.ts.
@@ -380,6 +383,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
+  const supplierMoney = useCallback((value: unknown, currency: 'usd' | 'khr', unknown = 0): string => {
+    if (value == null || String(value).trim() === '' || !Number.isFinite(Number(value))) return tr('unknown', 'Unknown')
+    const amount = Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
+    const note = partialCostNote(unknown, key => t(key))
+    return `${currency === 'usd' ? `$${amount}` : `${amount}៛`}${note ? ` · ${note}` : ''}`
+  }, [t, tr])
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const confirmDiscardRetry = (message: string) => askToConfirm({
     title: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
@@ -652,7 +661,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // refunds + type mix, supplier cases show compensation vs business loss.
   // Fold breakdowns come from GET /api/returns/report (same kernel the
   // Reports hub reads, so figures always agree).
-  type ReturnsStripRow = { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }
+  type ReturnsStripRow = { count?: number; refund_usd?: number } & Partial<Record<'compensation_usd' | 'compensation_khr' | 'loss_usd' | 'loss_khr' | 'compensation_usd_unknown_count' | 'compensation_khr_unknown_count' | 'loss_usd_unknown_count' | 'loss_khr_unknown_count', number | null>>
   type ReturnsStripPayload = {
     totals?: ReturnsStripRow
     by_reason?: Array<ReturnsStripRow & { reason?: string }>
@@ -687,6 +696,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
 
   const stripCards = useMemo<StatCardDef[]>(() => {
+    const supplierValue = (row: ReturnsStripRow, field: 'compensation' | 'loss', detail = false) => (
+      <span style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'right', ...(detail ? { width: 'min(55vw, 16rem)' } : { maxWidth: '100%' }) }}>
+        <span style={{ display: 'block' }}>{supplierMoney(row[`${field}_usd`], 'usd', Number(row[`${field}_usd_unknown_count`]) || 0)}</span>
+        <span style={{ display: 'block' }}>{supplierMoney(row[`${field}_khr`], 'khr', Number(row[`${field}_khr_unknown_count`]) || 0)}</span>
+      </span>
+    )
     const totals = stripData?.totals || {}
     const byType = stripData?.by_type || []
     const byReason = (stripData?.by_reason || []).slice(0, 8)
@@ -710,20 +725,20 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         {
           key: 'compensation',
           label: tr('supplier_compensation', 'Compensation'),
-          value: fmtUSD(Number(totals.compensation_usd) || 0),
-          tone: 'ok',
+          value: supplierValue(totals, 'compensation'),
+          tone: 'ok' as const,
           hint: tr('stats_supplier_compensation_hint', 'Money or credit the supplier gave back for goods you returned, broken down by reason.'),
-          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: fmtUSD(Number(row.compensation_usd) || 0) })),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierValue(row, 'compensation', true) })),
         },
         {
           key: 'loss',
           label: tr('business_loss', 'Business loss'),
-          value: fmtUSD(Number(totals.loss_usd) || 0),
-          tone: (Number(totals.loss_usd) || 0) > 0 ? 'crit' : undefined,
+          value: supplierValue(totals, 'loss'),
+          tone: (Number(totals.loss_usd) || 0) > 0 ? ('crit' as const) : undefined,
           hint: tr('stats_business_loss_hint', 'What the returned goods cost you that the supplier did NOT cover — money the shop absorbs, broken down by reason.'),
-          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: fmtUSD(Number(row.loss_usd) || 0), tone: (Number(row.loss_usd) || 0) > 0 ? ('crit' as const) : undefined })),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierValue(row, 'loss', true), tone: (Number(row.loss_usd) || 0) > 0 ? ('crit' as const) : undefined })),
         },
-      ]
+      ].filter(card => canViewCosts || card.key === 'cases')
     }
     return [
       {
@@ -748,7 +763,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         })),
       },
     ]
-  }, [fmtUSD, scope, stripData, tr])
+  }, [fmtUSD, scope, stripData, tr, canViewCosts, supplierMoney])
 
   // Opening a return showed "No item details available" for EVERY record,
   // whatever it actually held: the list these rows come from is fetched
@@ -1383,8 +1398,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       notify(tr('no_data_to_export', 'No data to export'), 'error')
       return
     }
-    setExportDialog({ rows: exportReturnRows(rowsToExport, tr), baseName: prefix })
-  }, [canExportReturns, notify, tr, visibleReturns])
+    setExportDialog({ rows: exportReturnRows(rowsToExport, tr, canViewCosts), baseName: prefix })
+  }, [canExportReturns, notify, tr, visibleReturns, canViewCosts])
 
   const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
@@ -1476,10 +1491,11 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const renderAmount = (ret: ReturnRow): ReactNode => {
     const retScope = normalizeScope(ret.return_scope)
     if (retScope === SUPPLIER_SCOPE) {
+      if (!canViewCosts) return null
       return (
         <div className="text-right">
-          <div className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtUSD(ret.supplier_compensation_usd || 0)}</div>
-          <div className="text-xs text-rose-500">{tr('business_loss', 'Business loss')}: {fmtUSD(ret.supplier_loss_usd || 0)}</div>
+          <div className="font-semibold text-emerald-600 dark:text-emerald-400">{supplierMoney(ret.supplier_compensation_usd, 'usd')} · {supplierMoney(ret.supplier_compensation_khr, 'khr')}</div>
+          <div className="text-xs text-rose-500">{tr('business_loss', 'Business loss')}: {supplierMoney(ret.supplier_loss_usd, 'usd')} · {supplierMoney(ret.supplier_loss_khr, 'khr')}</div>
         </div>
       )
     }
@@ -1696,7 +1712,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
             fileBaseName={exportDialog.baseName}
-            columns={RETURN_EXPORT_KEYS.map((key) => ({ key, label: exportColumnLabel(key) }))}
+            columns={RETURN_EXPORT_KEYS.filter(key => canViewCosts || !/^(Compensation|Business_Loss)_/.test(key)).map((key) => ({ key, label: exportColumnLabel(key) }))}
             rows={exportDialog.rows}
             rememberKey="returns"
             t={t}
