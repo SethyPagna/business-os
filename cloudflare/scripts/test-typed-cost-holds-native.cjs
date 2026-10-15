@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // U-cost follow-up (refuter finding, 2026-09-26): the 0195 triggers re-derive
 // products.cost_price_usd at every stock movement, and the derivation honours
 // a typed cost only when it has a product_cost_entries row. The product form
@@ -68,6 +74,7 @@ const DB = {
 const env = { DB }
 
 const real = new Set([
+  'stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups',
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'reviewApprovalPermission', 'productDiscountGate',
   'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
@@ -139,20 +146,20 @@ let seq = 0
 // sale of one 3.00 unit moves the rule's figure to (3 + 10) / 3 = 4.3333, so
 // a typed 9 that is not honoured is visibly overwritten.
 function seed(name = `P${++seq}`, active = 1) {
-  const id = Number(raw.prepare('INSERT INTO products(name, cost_price_usd, cost_price_khr, purchase_price_usd, selling_price_usd, is_active, updated_at) VALUES (?, 4, 0, 4, 20, ?, NULL)')
-    .run(name, active).lastInsertRowid)
+  const id = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name, cost_price_usd, cost_price_khr, purchase_price_usd, selling_price_usd, is_active, updated_at) VALUES (?, 4, 0, 4, 20, ?, NULL)')
+    .run(name, active)).lastInsertRowid)
   const lot = (unit, day) => {
-    const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, received_at, received_quantity, received_branch_id)
-      VALUES (?, ?, 1, ?, ?, 2, 1)`).run(id, `k${++seq}`, unit, `2026-09-${day}`).lastInsertRowid)
-    raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 2)').run(lotId)
+    const lotId = Number(seedFixture(raw, () => raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, received_at, received_quantity, received_branch_id)
+      VALUES (?, ?, 1, ?, ?, 2, 1)`).run(id, `k${++seq}`, unit, `2026-09-${day}`)).lastInsertRowid)
+    seedFixture(raw, () => raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 2)').run(lotId))
     return lotId
   }
   const cheap = lot(3, 10); lot(5, 11)
-  raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 1, 4)').run(id)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 1, 4)').run(id))
   return { id, cheap }
 }
 function sell(product) {
-  raw.prepare('UPDATE branch_batch_stock SET quantity = quantity - 1 WHERE batch_id = ? AND branch_id = 1').run(product.cheap)
+  seedFixture(raw, () => raw.prepare('UPDATE branch_batch_stock SET quantity = quantity - 1 WHERE batch_id = ? AND branch_id = 1').run(product.cheap))
 }
 
 let checks = 0
@@ -182,6 +189,7 @@ const composerMod = { exports: {} }
 new Function('require', 'module', 'exports', transpile(`
   import { planReconcileBranchSnapshot, resolveReceiptLotTarget } from './productBatches'
   import * as catalog from './catalogCostRecompute'
+  import { explicitCostReviewWritePlan } from './productCostReview'
   import { multiplyMoney4 } from './moneyPrecision'
   import { normalizeSearchText, compactSearchText } from './searchMatch'
   import { productStockGuardStatement, assertProductStatusInput } from './productStockGuard'
@@ -236,14 +244,14 @@ function receiptRow(productId, unitCost, quantity, rowNumber, plannedMode = 'mer
 }
 // runD1BatchGroupsInChunks packs a chunk's small row groups into ONE
 // db.batch: a guard failure anywhere aborts the whole pack.
-async function runChunk(groups) { await database.batch(groups.flat()) }
-async function runGroups(groups) { for (const group of groups) await database.batch(group) }
+async function runChunk(groups) { await load('lib/stockTransaction.ts').executeStockTransaction(database, groups.flat(), 'retry') }
+async function runGroups(groups) { for (const group of groups) await load('lib/stockTransaction.ts').executeStockTransaction(database, group, 'retry') }
 
 async function main() {
   await check('control: a bare UPDATE of the cost IS reverted by the next sale (the fixture discriminates)', async () => {
     const p = seed()
     assert.equal(cost(p.id), 4, 'seeded lots: (2 x 3 + 2 x 5) / 4')
-    raw.prepare('UPDATE products SET cost_price_usd = 9 WHERE id = ?').run(p.id)
+    seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = 9 WHERE id = ?').run(p.id))
     sell(p)
     assert.equal(cost(p.id), 4.3333, 'no cost entry: the rule re-derives (1 x 3 + 2 x 5) / 3')
   })
@@ -285,13 +293,13 @@ async function main() {
   await check('catalog-wide bulk price adjust: +5 on cost records the form\'s entry per moved row; the cost holds past a sale', async () => {
     const p = seed()
     const zero = seed()
-    raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(zero.id)
+    seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(zero.id))
     // Isolate from earlier checks' rows: only these two are active.
-    raw.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id NOT IN (?, ?))').run(p.id, zero.id)
-    raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE products SET stock_quantity=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE products SET is_active=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
+    seedFixture(raw, () => raw.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id))
+    seedFixture(raw, () => raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id NOT IN (?, ?))').run(p.id, zero.id))
+    seedFixture(raw, () => raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id))
+    seedFixture(raw, () => raw.prepare('UPDATE products SET stock_quantity=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id))
+    seedFixture(raw, () => raw.prepare('UPDATE products SET is_active=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id))
     const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 5, fields: ['cost_price_usd'], skip_zero: true, client_request_id: 'typed_cost_price_adjust_0001' })
     assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
     assert.equal(adjusted.body.changed, 2, 'changed still counts the products UPDATE, not the entry insert; a recorded $0 cost is a real cost, skip_zero does not hide it')
@@ -305,7 +313,7 @@ async function main() {
     assert.deepEqual(entries(zero.id).map((e) => [e.cost_usd, e.previous_cost_usd]), [[5, 0]], 'the moved $0 row has its entry')
     sell(p)
     assert.equal(cost(p.id), 9, 'typed cost holds past the sale')
-    raw.prepare('UPDATE products SET is_active = 1').run()
+    seedFixture(raw, () => raw.prepare('UPDATE products SET is_active = 1').run())
   })
 
   await check('per-selection bulk adjust: buildProductBulkUpdatePayload -> PUT /:id records the entry; the cost holds', async () => {
@@ -363,7 +371,7 @@ async function main() {
 
   await check('product import, fill_blank: a blank cost filled from the file holds past a sale', async () => {
     const p = seed()
-    raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(p.id)
+    seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(p.id))
     await runGroups(composeProducts(importCtx([importRow(p.id, { cost_price_usd: 9 })], { productImportMode: 'fill_blank' })))
     assert.equal(cost(p.id), 9)
     sell(p)

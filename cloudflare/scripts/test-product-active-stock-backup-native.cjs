@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -20,10 +26,10 @@ function load(name) {
 const backup = load('backup')
 function fixture() {
   const raw = openDb(loadAll()).db
-  raw.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(991,'Probe',1,1);
+  seedFixture(raw, () => raw.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(991,'Probe',1,1);
     INSERT INTO products(id,name,is_active,stock_quantity) VALUES(11,'Probe',1,5);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,991,5);
-    INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}');`)
+    INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore","token":"fixture-restore","backupKey":"fixture.json","startedAt":"2026-10-01T00:00:00Z","updatedAt":"2026-10-01T00:00:00Z","startedBy":"fixture","phase":"deleting"}');`))
   let deletes = 0
   let writes = 0
   const DB = {
@@ -59,8 +65,8 @@ function fixture() {
 async function main() {
   {
     const f = fixture(); const doc = f.document()
-    f.raw.exec('UPDATE branch_stock SET quantity=7; UPDATE products SET stock_quantity=7')
-    await backup.restoreCloudflareBackup(f.env(doc), 'fixture.json')
+    seedFixture(f.raw, () => f.raw.exec('UPDATE branch_stock SET quantity=7; UPDATE products SET stock_quantity=7'))
+    await backup.restoreCloudflareBackup(f.env(doc), 'fixture.json', undefined, 'fixture-restore')
     assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=11').get().stock_quantity, 5)
     assert.equal(f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=11').get().quantity, 5)
     console.log('PASS valid stocked backup replaces live stock without bypassing invariant')
@@ -75,7 +81,7 @@ async function main() {
     }
     if (ledger === 'damaged') doc.tables.damaged_stock_lots.rows.push({ id: 90, product_id: 11, quantity_remaining: 5 })
     const before = f.snapshot()
-    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json'), /product_has_stock/)
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json', undefined, 'fixture-restore'), /product_has_stock/)
     assert.equal(f.snapshot(), before); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
     console.log(`PASS invalid ${ledger}-only inactive backup refuses before every write`)
   }
@@ -90,7 +96,7 @@ async function main() {
     const child = ledger === 'branch' ? 'branch_stock' : 'branch_batch_stock'
     doc.tables = { [child]: doc.tables[child], ...Object.fromEntries(Object.entries(doc.tables).filter(([name]) => name !== child)) }
     const before = f.snapshot()
-    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json'), /dependency order/)
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json', undefined, 'fixture-restore'), /dependency order/)
     assert.equal(f.snapshot(), before); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
     console.log(`PASS ${child} before inactive product/batch refuses before writes through source-order validation`)
   }
@@ -106,7 +112,7 @@ async function main() {
     doc.tables[duplicate].rows = []
     const text = JSON.stringify(doc).replace('},"r2":', `,"${duplicate}":${laterRows}},"r2":`)
     const before = f.snapshot()
-    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(text), 'fixture.json'), /dependency order/)
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(text), 'fixture.json', undefined, 'fixture-restore'), /dependency order/)
     assert.ok(f.snapshot() === before, 'reordered duplicate stock header must preserve complete live snapshot'); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
     console.log(`PASS duplicate late ${duplicate} block cannot bypass prewrite admission`)
   }
@@ -114,7 +120,7 @@ async function main() {
     const f = fixture(); const doc = f.document()
     const emptyProducts = JSON.stringify({ ...doc.tables.products, rows: [] })
     const text = JSON.stringify(doc).replace('"products":', `"products":${emptyProducts},"products":`)
-    await backup.restoreCloudflareBackup(f.env(text), 'fixture.json')
+    await backup.restoreCloudflareBackup(f.env(text), 'fixture.json', undefined, 'fixture-restore')
     assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=11').get().stock_quantity, 5)
     assert.equal(f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=11').get().quantity, 5)
     console.log('PASS valid adjacent duplicate stock blocks preserve supported streaming restore')
@@ -122,7 +128,7 @@ async function main() {
   {
     const f = fixture(); const doc = f.document(); const before = f.snapshot()
     f.raw.exec("CREATE TRIGGER restore_delete_probe BEFORE DELETE ON products BEGIN SELECT RAISE(ABORT,'restore_delete_probe'); END")
-    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json'), /restore_delete_probe/)
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json', undefined, 'fixture-restore'), /restore_delete_probe/)
     assert.equal(f.snapshot(), before, 'failed product deletion rolls back earlier ledger/history deletes')
     console.log('PASS refusal inside deletion phase rolls back its complete target-table batch')
   }
@@ -130,7 +136,7 @@ async function main() {
     const f = fixture(); const doc = f.document()
     doc.tables.products.rows[0].is_active = 0; doc.tables.products.rows[0].stock_quantity = 0
     doc.tables.branch_stock.rows[0].quantity = 0
-    await backup.restoreCloudflareBackup(f.env(doc), 'fixture.json')
+    await backup.restoreCloudflareBackup(f.env(doc), 'fixture.json', undefined, 'fixture-restore')
     assert.equal(f.raw.prepare('SELECT is_active FROM products WHERE id=11').get().is_active, 0)
     assert.equal(f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=11').get().quantity, 0)
     console.log('PASS inactive empty backup negative control restores')

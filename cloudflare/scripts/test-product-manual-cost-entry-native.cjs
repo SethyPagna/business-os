@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // P10-10 (owner ruling, 2026-09-17, verbatim): "the cost price should also
 // add the changed if i manually change the cost price, the cost price
 // should be updated in record." Real Hono routes/products.ts PUT /:id, real
@@ -46,6 +52,7 @@ const DB = {
 const env = { DB }
 
 const real = new Set([
+  'stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups',
   'acquisitionCostAccess',
   'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
@@ -98,7 +105,7 @@ const row = (id) => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 const costEntries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(id)
 
 function seedProduct(name) {
-  return Number(raw.prepare(`INSERT INTO products(name, cost_price_usd, cost_price_khr, is_active, updated_at) VALUES (?, 7, 0, 1, NULL)`).run(name).lastInsertRowid)
+  return Number(seedFixture(raw, () => raw.prepare(`INSERT INTO products(name, cost_price_usd, cost_price_khr, is_active, updated_at) VALUES (?, 7, 0, 1, NULL)`).run(name)).lastInsertRowid)
 }
 // U-cost (2026-09-25): only lots still on hand average, so a seeded receipt
 // also carries the unit it received (branch 1).
@@ -107,10 +114,10 @@ function seedLot(productId, unitCostUsd) {
   // stock. These fixtures model a stored figure that predates its lots (legacy
   // or manual), so the seeded cost is put back exactly as it was.
   const stored = raw.prepare('SELECT cost_price_usd, purchase_price_usd FROM products WHERE id = ?').get(productId)
-  const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
-    .run(productId, `k${Math.random()}`, unitCostUsd).lastInsertRowid)
-  raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId)
-  if (stored) raw.prepare('UPDATE products SET cost_price_usd = ?, purchase_price_usd = ? WHERE id = ?').run(stored.cost_price_usd, stored.purchase_price_usd, productId)
+  const lotId = Number(seedFixture(raw, () => raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
+    .run(productId, `k${Math.random()}`, unitCostUsd)).lastInsertRowid)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId))
+  if (stored) seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = ?, purchase_price_usd = ? WHERE id = ?').run(stored.cost_price_usd, stored.purchase_price_usd, productId))
   return lotId
 }
 // A D1Compat-shaped wrapper (get/all/run, named @params) for lib functions
@@ -118,6 +125,7 @@ function seedLot(productId, unitCostUsd) {
 // getCatalogCostBreakdown) rather than through the Hono route.
 function makeDb() {
   return {
+    batch: statements => database.batch(statements),
     prepare(sql) {
       return {
         async get(params) { const { translated, values } = bindNamed(sql, params); return raw.prepare(translated).get(...values) },
@@ -130,6 +138,15 @@ function makeDb() {
       }
     },
   }
+}
+
+async function recomputeThroughStockTransaction(db, productId) {
+  const catalog = load('lib/catalogCostRecompute.ts')
+  const expected = catalog.catalogCostRecomputeIfChangedStatement(productId)
+  return catalog.recomputeCatalogCost({ ...db, prepare(sql) {
+    if (sql !== expected.sql) return db.prepare(sql)
+    return { run: params => load('lib/stockTransaction.ts').executeStockTransaction(db, [{ sql, params }], 'retry') }
+  } }, productId)
 }
 
 let checks = 0
@@ -170,7 +187,7 @@ async function main() {
     const db = makeDb()
     seedLot(id, 12)
     const { recomputeCatalogCost } = load('lib/catalogCostRecompute.ts')
-    await recomputeCatalogCost(db, id)
+    await recomputeThroughStockTransaction(db, id)
     // U-cost (owner, 2026-09-25): quantity-weighted -- the override prices the
     // two units it re-priced, the new lot its own one.
     assert.equal(row(id).cost_price_usd, 10.6667, '(2 x 10 + 1 x 12) / 3')
@@ -181,7 +198,7 @@ async function main() {
     assert.equal(costEntries(id).length, 2, 'both overrides are kept for the record')
 
     seedLot(id, 6)
-    await recomputeCatalogCost(db, id)
+    await recomputeThroughStockTransaction(db, id)
     assert.equal(row(id).cost_price_usd, 4.5, '(3 x 4 + 1 x 6) / 4 -- the lots before the SECOND override count at 4')
   })
 
@@ -206,9 +223,9 @@ async function main() {
   await check('the breakdown lists lots before an override as excluded: overridden, and the override row as included', async () => {
     const id = seedProduct('Breakdown')
     for (const [key, cost, code, date] of [['lotA', 3, 'LOTA', '2026-01-01'], ['lotB', 5, 'LOTB', '2026-01-02']]) {
-      const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, ?, 1, ?, ?, ?)`).run(id, key, cost, code, date).lastInsertRowid)
+      const lotId = Number(seedFixture(raw, () => raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, ?, 1, ?, ?, ?)`).run(id, key, cost, code, date)).lastInsertRowid)
       // On hand, so the override has stock to re-price (U-cost weighting).
-      raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId)
+      seedFixture(raw, () => raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId))
     }
     const edit = await request('PUT', `/${id}`, { cost_price_usd: 10 })
     assert.equal(edit.status, 200, JSON.stringify(edit))
@@ -232,8 +249,7 @@ async function main() {
     const { catalogCostRecomputeStatement } = load('lib/catalogCostRecompute.ts')
     const applyTwin = async () => {
       const { sql, params } = catalogCostRecomputeStatement(id)
-      const { translated, values } = bindNamed(sql, params)
-      raw.prepare(translated).run(...values)
+      await load('lib/stockTransaction.ts').executeStockTransaction(db, [{ sql, params }], 'retry')
     }
 
     seedLot(id, 3)
@@ -320,10 +336,10 @@ async function main() {
     assert.equal(costEntries(id)[0].baseline_batch_id,concurrentId)
     assert.equal(row(id).cost_price_usd,10)
     seedLot(id,12)
-    await load('lib/catalogCostRecompute.ts').recomputeCatalogCost(makeDb(),id)
+    await recomputeThroughStockTransaction(makeDb(),id)
     assert.equal(row(id).cost_price_usd,10.6667,'(2 x 10 + 1 x 12) / 3: the concurrent receipt is re-priced by the override')
     const entriesBefore = costEntries(id)
-    beforeBatch = () => { seedLot(id,20); raw.prepare('UPDATE products SET cost_price_usd=14 WHERE id=?').run(id) }
+    beforeBatch = () => { seedLot(id,20); seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=14 WHERE id=?').run(id)) }
     assert.equal((await request('PUT',`/${id}`,{cost_price_usd:6})).status,409,'changed money rejects stale override entirely')
     assert.deepEqual(costEntries(id),entriesBefore)
     assert.equal(row(id).cost_price_usd,14)
@@ -331,7 +347,7 @@ async function main() {
   await check('previous cost preserves unknown NULL and exact historical precision, without inferred backfill', async () => {
     for (const previous of [null,3.123456]) {
       const id = seedProduct(`Previous-${previous}`)
-      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id))
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:8})).status,200)
       assert.equal(costEntries(id)[0].previous_cost_usd,previous)
     }
@@ -339,7 +355,7 @@ async function main() {
   await check('actual NULL-to-zero and legacy precision changes record override; exact resaves do not', async () => {
     for (const [previous,next] of [[null,0],[3.123456,3.1235]]) {
       const id = seedProduct(`ExactTransition-${previous}`)
-      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id))
       const baseline = seedLot(id,7)
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
       assert.equal(row(id).cost_price_usd,next)
@@ -356,7 +372,7 @@ async function main() {
     }
     for (const same of [null,0,3.123456]) {
       const id = seedProduct(`ExactNoOp-${same}`)
-      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(same,id)
+      seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(same,id))
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:same})).status,200)
       assert.equal(row(id).cost_price_usd,same)
       assert.equal(costEntries(id).length,0)

@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // RET-B F2 sibling writer (5 Oct 2026): a product EDIT never writes stock.
 //
 // ProductForm sends the stock figure it loaded (read-only in edit mode) with
@@ -161,11 +167,11 @@ const app = productsRoute.default
 assert.ok(app && typeof app.request === 'function', 'routes/products.ts must export the Hono app as default')
 
 function seedBranch() {
-  rawDb.exec(`UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0;
+  seedFixture(rawDb.db, () => rawDb.exec(`UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0;
     UPDATE damaged_stock_lots SET quantity_remaining=0; UPDATE products SET stock_quantity=0;
     DELETE FROM damaged_stock_lots;DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; DELETE FROM inventory_movements; DELETE FROM product_images;
-    DELETE FROM products; DELETE FROM branches;`)
+    DELETE FROM products; DELETE FROM branches;`))
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
 }
 
@@ -200,14 +206,14 @@ async function request(method, body, id = 1) {
 }
 function seed(kind) {
   seedBranch()
-  rawDb.prepare("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(1,'Guard fixture',1,0)").run()
-  if(kind==='cache') rawDb.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
-  if(kind==='branch') rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,3)').run()
+  seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(1,'Guard fixture',1,0)").run())
+  if(kind==='cache') seedFixture(rawDb.db, () => rawDb.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run())
+  if(kind==='branch') seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,3)').run())
   if(kind==='batch') {
-    rawDb.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(10,1,'guard','GUARD','2026-10-08',1)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(10,1,3)').run()
+    seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(10,1,'guard','GUARD','2026-10-08',1)").run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(10,1,3)').run())
   }
-  if(kind==='damaged') rawDb.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Guard fixture',1,3,3,'test','damaged','return')").run()
+  if(kind==='damaged') seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Guard fixture',1,3,3,'test','damaged','return')").run())
 }
 const graph = () => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','inventory_movements','audit_logs','product_remove_operations','pending_actions'].map(table=>rawDb.prepare('SELECT * FROM '+table).all()))
 async function main() {
@@ -247,21 +253,21 @@ async function main() {
   const stockMapper=loadReal('lib/productStockGuard.ts').productStockGuardError
   await check('saved positive removal plan refuses before receipt/audit writes',async()=>{
     seed('zero');const plan=await deletion.prepareProductRemovePlan(db,1,'saved plan')
-    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=1').run();const before=graph()
+    seedFixture(rawDb.db, () => rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=1').run());const before=graph()
     await assert.rejects(()=>db.batch(deletion.productRemoveApplyStatements({plan,operationId:'saved-remove',source:'direct',requestId:'saved-remove',user:FAKE_USER,transitionStamp:'2026-10-08T00:00:00Z',planDigest:'saved-digest'})),err=>stockMapper(err)?.code==='product_has_stock')
     assert.equal(graph(),before)
     await assert.rejects(()=>db.batch(deletion.productRemoveReplayStatements({snapshot:{plan,transition_stamp:'2026-10-08T00:00:00Z'},operation:{operation_id:'legacy-removal'},direction:'redo',historyId:1,expectedGeneration:1,user:FAKE_USER,transitionStamp:'2026-10-08T00:00:01Z',transitionRequestId:'redo'})),err=>stockMapper(err)?.code==='product_has_stock')
     assert.equal(graph(),before)
   })
   await check('negative row and cancelling branch rows still refuse',async()=>{
-    seed('zero');rawDb.exec('PRAGMA ignore_check_constraints=ON');rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,-3)').run();rawDb.exec('PRAGMA ignore_check_constraints=OFF')
+    seed('zero');rawDb.exec('PRAGMA ignore_check_constraints=ON');seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,-3)').run());rawDb.exec('PRAGMA ignore_check_constraints=OFF')
     const first=await request('DELETE',{reason:'negative',client_request_id:'negative-row'});assert.equal(first.json.code,'product_has_stock')
-    rawDb.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Offset',1)").run();rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,3)').run()
+    rawDb.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Offset',1)").run();seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,3)').run())
     const before=graph();const second=await request('DELETE',{reason:'offset',client_request_id:'offset-rows'});assert.equal(second.status,409);assert.equal(second.json.code,'product_has_stock');assert.equal(graph(),before)
   })
   for(const method of ['PUT','DELETE']) await check(method+' rejects stock racing after admission before effects',async()=>{
     seed('zero')
-    beforeNextWriteBatch=()=>rawDb.prepare(method==='PUT'?'UPDATE products SET is_active=0 WHERE id=1':'UPDATE products SET stock_quantity=3 WHERE id=1').run()
+    beforeNextWriteBatch=()=>seedFixture(rawDb.db, () => rawDb.prepare(method==='PUT'?'UPDATE products SET is_active=0 WHERE id=1':'UPDATE products SET stock_quantity=3 WHERE id=1').run())
     const res=await request(method,method==='PUT'?{is_active:1,description:'race must not land'}:{reason:'Race',client_request_id:'race-'+method})
     assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_has_stock')
     assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get().is_active,method==='PUT'?0:1)
@@ -275,12 +281,12 @@ async function main() {
     seed('damaged');const damageBefore=graph();const damaged=await post('/zero-quantity-delete',{ids:[1]});assert.equal(damaged.json.deletedCount,0);assert.equal(graph(),damageBefore)
   })
   await check('deactivate identity fold refuses stocked keeper before source effects',async()=>{
-    seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,3)").run()
+    seed('zero');seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,3)").run())
     const before=graph();const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:0})
     assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_status_unsupported');assert.equal(graph(),before)
   })
   await check('identity fold removes only the discarded product',async()=>{
-    seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run()
+    seed('zero');seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run())
     const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:1})
     assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.json.merged_into,2)
     assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=2').get().is_active,1)

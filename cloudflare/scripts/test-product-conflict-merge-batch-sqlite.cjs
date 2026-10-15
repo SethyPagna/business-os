@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -21,6 +27,8 @@ function loadTs(rel, stubs = {}) {
   const original = Module._load
   Module._load = (request, parent, main) => {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    const helper = request.split('/').pop()
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, main)
   }
@@ -59,6 +67,7 @@ function adapter(d1, controls) {
         run: (params) => { controls.statementCount += 1; return statement.run(params || {}) },
       }
     },
+    async batchOnce(statements) { return this.batch(statements) },
     batch: async (statements) => {
       statements.forEach(({ sql }) => enforceCompoundSelectLimit(sql))
       if (controls.beforeBatch) await controls.beforeBatch(statements)
@@ -127,7 +136,7 @@ function loadRoute(d1) {
 
 function seed() {
   const d1 = openDb(loadAll())
-  d1.db.exec(`
+  seedFixture(d1.db, () => d1.db.exec(`
     INSERT INTO branches(id,name,is_active) VALUES(901,'Shop',1),(902,'Warehouse',1);
     INSERT INTO products(id,name,name_key,barcode,is_active,is_group,stock_quantity,image_path,cost_price_usd,cost_price_khr,
       selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,updated_at)
@@ -140,7 +149,7 @@ function seed() {
     INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,is_active)
       VALUES(9301,9101,'keeper-lot',1,'K1',1),(9302,9102,'discard-lot',1,'D1',1);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9301,901,5),(9302,901,2);
-  `)
+  `))
   return d1
 }
 
@@ -154,18 +163,18 @@ function seedManyPairs(count = 12, lotsPerProduct = 10) {
     const name = `Budget Pair ${index + 1}`
     const nameKey = name.toLowerCase()
     const barcode = String(5000 + index)
-    d1.db.prepare(`INSERT INTO products
+    seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO products
       (id,name,name_key,barcode,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
       VALUES(@left,@name,@nameKey,@barcode,1,0,0,5,20000,8,32000,7,28000),
-            (@right,@name,@nameKey,@barcode,1,0,0,5,20000,8,32000,7,28000)`).run({ left, right, name, nameKey, barcode })
+            (@right,@name,@nameKey,@barcode,1,0,0,5,20000,8,32000,7,28000)`).run({ left, right, name, nameKey, barcode }))
     for (let lot = 0; lot < lotsPerProduct; lot += 1) {
       const keeperBatchId = 200000 + index * 100 + lot * 2
       const mergedBatchId = keeperBatchId + 1
-      d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,is_active)
+      seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,is_active)
         VALUES(@keeperBatchId,@left,@batchKey,@batchNumber,@lotCode,1),
               (@mergedBatchId,@right,@batchKey,@batchNumber,@lotCode,1)`).run({
         keeperBatchId, mergedBatchId, left, right, batchKey: `lot-${lot}`, batchNumber: lot + 1, lotCode: `L${lot + 1}`,
-      })
+      }))
     }
     cases.push({ case_key: `barcode:${barcode}`, cluster_type: 'barcode', cluster_value: barcode, product_ids: [left, right] })
   }
@@ -199,18 +208,18 @@ function seedProductionPreviewFixture() {
     const keeperWarehouse = pair === 11 ? 0 : 2
     const duplicateShop = pair === 11 ? 0 : 2
     const duplicateWarehouse = pair === 11 ? 0 : 1
-    product.run({ id: keeperId, name, sku: `F46-K-${suffix}`, barcode, sell: 10 + pair, sellKhr: (10 + pair) * 4100,
-      cost: 4, costKhr: 16400, stock: keeperShop + keeperWarehouse, nameKey, wholesale: 8 + pair, wholesaleKhr: (8 + pair) * 4100 })
-    product.run({ id: duplicateId, name, sku: `F46-D-${suffix}`, barcode, sell: 12 + pair, sellKhr: (12 + pair) * 4100,
-      cost: 4, costKhr: 16400, stock: duplicateShop + duplicateWarehouse, nameKey, wholesale: 9 + pair, wholesaleKhr: (9 + pair) * 4100 })
-    for (const [branchId, quantity] of [[1, keeperWarehouse], [2, keeperShop]]) branchStock.run(keeperId, branchId, quantity)
-    for (const [branchId, quantity] of [[1, duplicateWarehouse], [2, duplicateShop]]) branchStock.run(duplicateId, branchId, quantity)
+    seedFixture(d1.db, () => product.run({ id: keeperId, name, sku: `F46-K-${suffix}`, barcode, sell: 10 + pair, sellKhr: (10 + pair) * 4100,
+      cost: 4, costKhr: 16400, stock: keeperShop + keeperWarehouse, nameKey, wholesale: 8 + pair, wholesaleKhr: (8 + pair) * 4100 }))
+    seedFixture(d1.db, () => product.run({ id: duplicateId, name, sku: `F46-D-${suffix}`, barcode, sell: 12 + pair, sellKhr: (12 + pair) * 4100,
+      cost: 4, costKhr: 16400, stock: duplicateShop + duplicateWarehouse, nameKey, wholesale: 9 + pair, wholesaleKhr: (9 + pair) * 4100 }))
+    for (const [branchId, quantity] of [[1, keeperWarehouse], [2, keeperShop]]) seedFixture(d1.db, () => branchStock.run(keeperId, branchId, quantity))
+    for (const [branchId, quantity] of [[1, duplicateWarehouse], [2, duplicateShop]]) seedFixture(d1.db, () => branchStock.run(duplicateId, branchId, quantity))
     if (pair !== 11) {
       const batchId = 5000 + pair
-      batch.run({ id: batchId, productId: duplicateId, key: `f46-${suffix}-duplicate-lot`, lot: `F46-LOT-${suffix}`,
-        number: pair, quantity: duplicateShop + duplicateWarehouse })
-      batchStock.run(batchId, 1, duplicateWarehouse)
-      batchStock.run(batchId, 2, duplicateShop)
+      seedFixture(d1.db, () => batch.run({ id: batchId, productId: duplicateId, key: `f46-${suffix}-duplicate-lot`, lot: `F46-LOT-${suffix}`,
+        number: pair, quantity: duplicateShop + duplicateWarehouse }))
+      seedFixture(d1.db, () => batchStock.run(batchId, 1, duplicateWarehouse))
+      seedFixture(d1.db, () => batchStock.run(batchId, 2, duplicateShop))
     }
     cases.push({ case_key: `barcode:${barcode}`, cluster_type: 'barcode', cluster_value: barcode, product_ids: [keeperId, duplicateId] })
   }
@@ -218,10 +227,10 @@ function seedProductionPreviewFixture() {
   const blockedNameKey = blockedName.toLowerCase()
   for (let index = 0; index < 3; index += 1) {
     const id = 2101 + index
-    product.run({ id, name: blockedName, sku: `F46-B-${index + 1}`, barcode: '846009999999', sell: 20, sellKhr: 82000,
-      cost: 4, costKhr: 16400, stock: 0, nameKey: blockedNameKey, wholesale: 18, wholesaleKhr: 73800 })
-    branchStock.run(id, 1, 0)
-    branchStock.run(id, 2, 0)
+    seedFixture(d1.db, () => product.run({ id, name: blockedName, sku: `F46-B-${index + 1}`, barcode: '846009999999', sell: 20, sellKhr: 82000,
+      cost: 4, costKhr: 16400, stock: 0, nameKey: blockedNameKey, wholesale: 18, wholesaleKhr: 73800 }))
+    seedFixture(d1.db, () => branchStock.run(id, 1, 0))
+    seedFixture(d1.db, () => branchStock.run(id, 2, 0))
   }
   return { d1, cases }
 }
@@ -240,15 +249,21 @@ async function call(app, path, body, user = { id: 900, username: 'reviewer' }) {
 const tableCounts = (d1) => Object.fromEntries(d1.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all()
   .map(({ name }) => [name, d1.db.prepare(`SELECT COUNT(*) n FROM "${name}"`).get().n]))
 
-function seedPre0154LegacyLots(d1, setup) {
-  assert.throws(() => d1.db.exec('UPDATE product_batches SET is_active=0 WHERE id=9301'),
+async function seedPre0154LegacyLots(d1, setup) {
+  await assert.rejects(loadTs('lib/stockTransaction.ts').executeStockTransaction(d1, [{ sql: 'UPDATE product_batches SET is_active=0 WHERE id=9301' }], 'retry'),
     /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
   // Reproduce pre-0154 corruption for merge recovery coverage. All current
   // guards are restored before the route runs, including rollback scenarios.
   const guards = d1.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN ('positive_lot_require_active_insert_0154','positive_lot_require_active_update_0154','positive_lot_reject_inactive_insert_0154','positive_lot_reject_inactive_update_0154')").all()
   assert.equal(guards.length, 4)
   for (const guard of guards) d1.db.exec('DROP TRIGGER ' + guard.name)
-  try { setup() } finally { for (const guard of guards) d1.db.exec(guard.sql) }
+  try { setup() } finally {
+    for (const guard of guards) d1.db.exec(guard.sql)
+    const restored = d1.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN ('positive_lot_require_active_insert_0154','positive_lot_require_active_update_0154','positive_lot_reject_inactive_insert_0154','positive_lot_reject_inactive_update_0154') ORDER BY name").all()
+    assert.deepEqual(restored, [...guards].sort((a, b) => a.name.localeCompare(b.name)))
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.throws(() => d1.db.exec("INSERT INTO products(name) VALUES('unadmitted legacy probe')"), /stock_transaction_required/)
+  }
 }
 
 async function main() {
@@ -258,7 +273,7 @@ async function main() {
   // alone. Before, this apply answered stock_session_reversible for 9102.
   {
     const sessions = seed()
-    sessions.db.exec(`
+    seedFixture(sessions.db, () => sessions.db.exec(`
       INSERT INTO products(id,name,name_key,barcode,is_active,is_group,stock_quantity) VALUES(9901,'Other','other','9999',1,0,0);
       INSERT INTO action_history(id,scope,entity,entity_id,label,status) VALUES(8001,'inventory','product','9102','Stock in','undoable'),
         (8002,'inventory','product','9101','Stock in','redoable'),(8003,'inventory','product','9901','Stock in','undoable');
@@ -266,7 +281,7 @@ async function main() {
         VALUES('op-a',1,'ra','stock_in','{}','{}',8001),('op-b',1,'rb','stock_in','{}','{}',8002),('op-c',1,'rc','stock_in','{}','{}',8003);
       INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,branch_id,quantity)
         VALUES('op-a','l1','receive',9102,901,2),('op-b','l1','receive',9101,901,5),('op-c','l1','receive',9901,901,1);
-    `)
+    `))
     const { app: sessionApp } = loadRoute(sessions)
     const preview = await call(sessionApp, '/possible-duplicates/merge-batch/preview', { cases: [{ case_key: 'barcode:1111', cluster_type: 'barcode', cluster_value: '1111', product_ids: [9101, 9102] }] })
     assert.equal(preview.status, 200, JSON.stringify(preview.body))
@@ -289,8 +304,8 @@ async function main() {
   for (const collision of [true, false]) {
     for (const rollback of [false, true]) {
       const lots = seed()
-      seedPre0154LegacyLots(lots, () => {
-        lots.db.exec(`
+      await seedPre0154LegacyLots(lots, () => {
+        seedFixture(lots.db, () => lots.db.exec(`
         UPDATE product_batches SET received_at='2026-08-21',expiry_date='2028-01-01',
           unit_cost_usd=4,received_quantity=9,received_cost_usd=36 WHERE id=9301;
         UPDATE product_batches SET received_at='2026-08-22',expiry_date='2029-01-01',
@@ -307,8 +322,8 @@ async function main() {
           VALUES(9705,9702,9302,901,1,'D1','2029-01-01');
         INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
           VALUES(9706,9704,9702,9302,901,1,'D1','2029-01-01');
-      `)
-      if (collision) lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301")
+      `))
+      if (collision) seedFixture(lots.db, () => lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301"))
       })
       // Proves activation occurs before the stock write, not just eventually.
       lots.db.exec(`CREATE TRIGGER require_active_merge_destination BEFORE INSERT ON branch_batch_stock
@@ -350,14 +365,14 @@ async function main() {
   }
   for(const keeperQuantity of [0,5]) {
     const lots=seed()
-    seedPre0154LegacyLots(lots, () => lots.db.exec(`UPDATE product_batches SET is_active=0;
+    await seedPre0154LegacyLots(lots, () => seedFixture(lots.db, () => lots.db.exec(`UPDATE product_batches SET is_active=0;
       UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302;
       UPDATE branch_stock SET quantity=0 WHERE product_id=9102;
       UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=9302;
       UPDATE products SET stock_quantity=0 WHERE id=9102;
       UPDATE branch_stock SET quantity=${keeperQuantity} WHERE product_id=9101;
       UPDATE branch_batch_stock SET quantity=${keeperQuantity} WHERE batch_id=9301;
-      UPDATE products SET stock_quantity=${keeperQuantity} WHERE id=9101;`))
+      UPDATE products SET stock_quantity=${keeperQuantity} WHERE id=9101;`)))
     const {app:lotApp}=loadRoute(lots)
     const preview=await call(lotApp,'/possible-duplicates/merge-batch/preview',{cases:[{case_key:'barcode:1111',cluster_type:'barcode',cluster_value:'1111',product_ids:[9101,9102]}]})
     const applied=await call(lotApp,'/possible-duplicates/merge-batch',{
@@ -430,7 +445,7 @@ async function main() {
   // manifest before a receipt or business write.
   {
     const imageDb = seed()
-    imageDb.db.prepare("UPDATE products SET image_path='/media/discarded.jpg' WHERE id=9102").run()
+    seedFixture(imageDb.db, () => imageDb.db.prepare("UPDATE products SET image_path='/media/discarded.jpg' WHERE id=9102").run())
     const { app: imageApp } = loadRoute(imageDb)
     const imagePreview = await call(imageApp, '/possible-duplicates/merge-batch/preview', { cases: [previewBody.cases[0]] }, { id: 902, username: 'merge-only', noImages: true })
     assert.equal(imagePreview.status, 200)
@@ -450,11 +465,11 @@ async function main() {
 
   {
     const mixedDb = seed()
-    mixedDb.db.prepare("UPDATE products SET image_path='/media/discarded.jpg' WHERE id=9102").run()
-    mixedDb.db.exec(`INSERT INTO products
+    seedFixture(mixedDb.db, () => mixedDb.db.prepare("UPDATE products SET image_path='/media/discarded.jpg' WHERE id=9102").run())
+    seedFixture(mixedDb.db, () => mixedDb.db.exec(`INSERT INTO products
       (id,name,name_key,barcode,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
       VALUES(9501,'Body Lotion','body lotion','3333',1,0,0,5,20000,8,32000,7,28000),
-            (9502,'Body Lotion','body lotion','3333',1,0,0,5,20000,8,32000,7,28000);`)
+            (9502,'Body Lotion','body lotion','3333',1,0,0,5,20000,8,32000,7,28000);`))
     const { app: mixedApp } = loadRoute(mixedDb)
     const mixedCases = [...previewBody.cases, {
       case_key: 'barcode:3333', cluster_type: 'barcode', cluster_value: '3333', product_ids: [9501, 9502],
@@ -506,7 +521,7 @@ async function main() {
     const stale = seed()
     const { app: staleApp } = loadRoute(stale)
     const stalePreview = await call(staleApp, '/possible-duplicates/merge-batch/preview', { cases: [previewBody.cases[0]] })
-    stale.db.prepare('UPDATE products SET selling_price_usd=8.5 WHERE id=9101').run()
+    seedFixture(stale.db, () => stale.db.prepare('UPDATE products SET selling_price_usd=8.5 WHERE id=9101').run())
     const countsAfterExternalEdit = tableCounts(stale)
     const staleApply = await call(staleApp, '/possible-duplicates/merge-batch', {
       client_request_id: 'selected_merge_stale_001', manifest_version: 1, manifest_digest: stalePreview.body.manifest_digest,
@@ -531,7 +546,7 @@ async function main() {
     controls.beforeBatch = async (statements) => {
       if (injected || !statements.some(({ sql }) => /SELECT branch_id, quantity FROM branch_batch_stock/.test(sql))) return
       injected = true
-      torn.db.prepare('UPDATE products SET selling_price_usd=99 WHERE id=9102').run()
+      seedFixture(torn.db, () => torn.db.prepare('UPDATE products SET selling_price_usd=99 WHERE id=9102').run())
     }
     const tornPreview = await call(tornApp, '/possible-duplicates/merge-batch/preview', { cases: [previewBody.cases[0]] })
     assert.equal(tornPreview.status, 200)
@@ -597,7 +612,7 @@ async function main() {
     controls.beforeBatch = async (statements) => {
       if (injected || !statements.some(({ sql }) => /selected_conflict_receipt_guard/.test(sql))) return
       injected = true
-      raced.db.prepare('UPDATE products SET cost_price_usd=5 WHERE id=9102').run()
+      seedFixture(raced.db, () => raced.db.prepare('UPDATE products SET cost_price_usd=5 WHERE id=9102').run())
     }
     const result = await call(raceApp, '/possible-duplicates/merge-batch', raceApply)
     assert.equal(result.status, 200)
@@ -623,9 +638,9 @@ async function main() {
     controls.beforeBatch = async (statements) => {
       if (injected || !statements.some(({ sql }) => /selected_conflict_receipt_guard/.test(sql))) return
       injected = true
-      membership.db.prepare(`INSERT INTO products
+      seedFixture(membership.db, () => membership.db.prepare(`INSERT INTO products
         (id,name,name_key,barcode,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
-        VALUES(9401,'Tea Cream','tea cream','1111',1,0,0,5,20000,8,32000,7,28000)`).run()
+        VALUES(9401,'Tea Cream','tea cream','1111',1,0,0,5,20000,8,32000,7,28000)`).run())
     }
     const result = await call(membershipApp, '/possible-duplicates/merge-batch', {
       client_request_id: 'selected_merge_membership_001', manifest_version: 1, manifest_digest: membershipPreview.body.manifest_digest,

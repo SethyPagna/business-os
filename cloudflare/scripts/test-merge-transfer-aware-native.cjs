@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Native route regression for the transfer-aware merge (owner ruling
 // 2026-09-15: "transfer aware merge"). Mounts the real products route over
 // the full D1 migration chain (same harness as test-merge-duplicates-
@@ -40,6 +46,8 @@ function loadTs(relPath, stubs = {}) {
   Module._load = (request, parent, isMain) => {
     if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return original.call(Module, path.join(SRC, 'lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    const helper = request.split('/').pop()
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
   }
@@ -81,6 +89,7 @@ function adapter(d1) {
         },
       }
     },
+    async batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       return d1.batch(statements)
     },
@@ -122,10 +131,10 @@ function loadRoute(db) {
 }
 
 function addProduct(raw, id, name, barcode, stock = 0, cost = 4) {
-  raw.prepare(`INSERT INTO products(
+  seedFixture(raw, () => raw.prepare(`INSERT INTO products(
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
     wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`).run(id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock)
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`).run(id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock))
 }
 
 // Seeds ONE leading-zero pair (dupId = padded/loser, keeperId = clean
@@ -138,8 +147,8 @@ function seedTransferPair({ dupId, keeperId, receiptId, replayState }) {
   raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1),(2,'Second',0,1)")
   addProduct(raw, dupId, 'Dior Addict Lip Glow New 075', `0${8339000 + dupId}`, 0, 33)
   addProduct(raw, keeperId, 'Dior Addict Lip Glow New 075', `${8339000 + dupId}`, 1, 33)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(dupId, 1, 0)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(keeperId, 2, 1)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(dupId, 1, 0))
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(keeperId, 2, 1))
   raw.prepare(`INSERT INTO transfer_operation_receipts
       (id, actor_id, request_id, request_digest, request_json, status, provenance_version, replay_state, generation)
     VALUES (?, 1, ?, ?, '{}', 'pending', 1, 'applied', 0)`).run(receiptId, `req-${receiptId}`, `digest-${receiptId}`)
