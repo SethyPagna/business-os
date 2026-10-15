@@ -1,3 +1,5 @@
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Focused regression for the allowlisted Sep 2-3 legacy subtotal repair.
 // It exercises the real Hono route and runtime helper against the repository's
 // full migration set in an in-memory SQLite database. No network or remote D1
@@ -33,6 +35,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const outputText = transpileFile(sourcePath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -49,6 +52,7 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const rawDbHandle = openDb(loadAll())
+assert.throws(() => rawDbHandle.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const db = rawDbHandle
 const nativeBatch = db.batch.bind(db)
 const cache = new Map()
@@ -224,7 +228,7 @@ async function request(body, access = 'restore') {
 }
 
 function resetHarness() {
-  exec(`
+  seedStockFixture(rawDbHandle, () => exec(`
     DELETE FROM sale_bulk_guards;
     DELETE FROM sale_items;
     DELETE FROM sales;
@@ -235,7 +239,7 @@ function resetHarness() {
     DELETE FROM branch_batch_stock;
     DELETE FROM product_batches WHERE id=9001;
     DELETE FROM system_flags WHERE key='maintenance';
-  `)
+  `))
   const insertSale = rawDbHandle.prepare(`
     INSERT INTO sales(
       id,receipt_number,payment_method,exchange_rate,subtotal_usd,subtotal_khr,
@@ -261,13 +265,13 @@ function resetHarness() {
   }
   // The historical rows predate revision tracking. Seeding through the current
   // schema fires revision triggers, so remove those synthetic test revisions.
-  exec('DELETE FROM sale_write_revisions;')
-  exec('INSERT INTO branch_stock(id,product_id,branch_id,quantity) VALUES(9001,9001,9001,17);')
+  seedStockFixture(rawDbHandle, () => exec('DELETE FROM sale_write_revisions;'))
+  seedStockFixture(rawDbHandle, () => exec('INSERT INTO branch_stock(id,product_id,branch_id,quantity) VALUES(9001,9001,9001,17);'))
   // This sentinel stock proves the repair leaves unrelated inventory intact.
   // Migration 0154 correctly requires every positive lot row to reference an
   // active received lot, so model that valid parent before seeding the stock.
-  exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(9001,9001,'legacy-subtotal-sentinel','LEGACY-SUBTOTAL-SENTINEL','2026-09-02 00:00:00',1);")
-  exec('INSERT INTO branch_batch_stock(id,batch_id,branch_id,quantity) VALUES(9001,9001,9001,9);')
+  seedStockFixture(rawDbHandle, () => exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(9001,9001,'legacy-subtotal-sentinel','LEGACY-SUBTOTAL-SENTINEL','2026-09-02 00:00:00',1);"))
+  seedStockFixture(rawDbHandle, () => exec('INSERT INTO branch_batch_stock(id,batch_id,branch_id,quantity) VALUES(9001,9001,9001,9);'))
   cache.clear()
   backupShouldFail = false
   injectLateBatchFailure = false
@@ -358,7 +362,7 @@ async function main() {
       `INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`,
     ]) {
       resetHarness()
-      exec(change)
+      seedStockFixture(rawDbHandle, () => exec(change))
       const before = protectedSnapshot()
       const response = await app.request('/legacy-subtotal-repair/preview', {}, fakeEnv, fakeExecutionCtx)
       assert.strictEqual(response.status, 409, change)
@@ -477,7 +481,7 @@ async function main() {
 
   await check('stale or mixed cohort state rejects atomically without completing any other sale', async () => {
     resetHarness()
-    exec('UPDATE sales SET subtotal_usd=1454 WHERE id=16842;')
+    seedStockFixture(rawDbHandle, () => exec('UPDATE sales SET subtotal_usd=1454 WHERE id=16842;'))
     const before = all('SELECT id,subtotal_usd FROM sales ORDER BY id')
     const result = await request(requestFor())
     assert.strictEqual(result.status, 409, JSON.stringify(result.json))

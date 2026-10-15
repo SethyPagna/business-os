@@ -13,7 +13,9 @@ const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0176_sale_
 function fresh() {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = OFF')
-  for (const migration of loadAll()) db.exec(migration)
+  for (const migration of loadAll({ through: 176 })) db.exec(migration)
+assert.equal(loadAll({ through: 176 }).at(-1), sql)
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
   return db
 }
 

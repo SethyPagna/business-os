@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // S4-29: the shop owner's four merge rulings (Sep 4 2026), pinned as tests.
 //
 //   1. Same name, BOTH rows with no barcode -> merge (costs average as usual).
@@ -168,6 +169,7 @@ check('a same-name row WITH a barcode is still a separate child row -- the owner
 async function run() {
   // --- the grouping, against a real migrated DB --------------------------
   const db = openDb(loadAll())
+  require('node:assert/strict').throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const products = [
     // Ruling 1: both unbarcoded, same name -> auto-mergeable.
     { id: 10, name: 'No Barcode Twin', barcode: null },
@@ -210,10 +212,10 @@ async function run() {
     { id: 71, name: 'Two Digit Twin', barcode: '12' },
   ]
   for (const p of products) {
-    await db.prepare('INSERT INTO products (id, name, barcode, is_active, is_group) VALUES (@id, @name, @barcode, 1, 0)')
-      .run({ id: p.id, name: p.name, barcode: p.barcode })
+    await seedStockFixture(db, () => db.prepare('INSERT INTO products (id, name, barcode, is_active, is_group) VALUES (@id, @name, @barcode, 1, 0)')
+      .run({ id: p.id, name: p.name, barcode: p.barcode }))
   }
-  await db.prepare("INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)").run({})
+  await seedStockFixture(db, () => db.prepare("INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)").run({}))
 
   const groups = await findDuplicateProductGroups(db)
   const idsIn = (g) => [g.canonical.id, ...g.duplicates.map((d) => d.id)].sort((a, b) => a - b).join(',')
@@ -266,9 +268,10 @@ async function run() {
     const raw = new DatabaseSync(':memory:')
     raw.exec('PRAGMA foreign_keys = OFF;')
     for (const f of files) {
-      if (f === target) continue
+      if (f === target) break
       raw.exec(fs.readFileSync(path.join(migrationsDir, f), 'utf8'))
     }
+    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
     return raw
   }
   function seedPlaceholder(raw, overrides = {}) {

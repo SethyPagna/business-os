@@ -16,7 +16,9 @@ const sql0173 = fs.readFileSync(path.join(migrationsDir, '0173_not_paid_stock_ho
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
-for (const migration of loadAll()) db.exec(migration)
+for (const migration of loadAll({ through: 173 })) db.exec(migration)
+assert.equal(loadAll({ through: 173 }).at(-1), sql0173)
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
 
 // [sale_item_id, sale_id, product_id, qty, allocation_id, alloc_lot, deduct_lot, lot_qty_before, cost]
 const LINES = [
@@ -160,7 +162,9 @@ assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action='s
 // -- Guard: a fixture with a partial set (not 21) must abort before writing.
 const db2 = new Database(':memory:')
 db2.pragma('foreign_keys = OFF')
-for (const migration of loadAll()) db2.exec(migration)
+for (const migration of loadAll({ through: 173 })) db2.exec(migration)
+assert.equal(loadAll({ through: 173 }).at(-1), sql0173)
+assert.equal(db2.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
 db2.prepare("INSERT INTO branches (id, name) VALUES (2, 'Shop')").run()
 db2.prepare("INSERT INTO products (id, name, stock_quantity) VALUES (4276, 'P', 11)").run()
 db2.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (51291, 4276, 'k', 1, 8)").run()

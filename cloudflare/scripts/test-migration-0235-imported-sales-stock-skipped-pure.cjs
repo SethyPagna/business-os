@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Migration 0235 (RET-B F4 / LH-2, 5 Oct 2026): marks every sale carrying the
 // sales import's own key ('sales-import:<job>:<row>') as stock_skipped, once.
 // The import ledger (import_sales_commits) is NOT needed: retention deletes it
@@ -24,9 +25,15 @@ const M = 'migration:0235_imported_sales_stock_skipped'
 function setup(migrations = loadAll({ through: 234 })) {
   const sqlite = new Database(':memory:')
   for (const migration of migrations) sqlite.exec(migration)
+  const epoch = sqlite.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+  if (epoch) assert.throws(() => sqlite.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  const seed = () => {
   sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
   sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
   sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
+  }
+  if (epoch) seedStockFixture(sqlite, seed)
+  else seed()
   const insertSale = sqlite.prepare(`INSERT INTO sales (id, receipt_number, client_request_id, sale_status, stock_skipped,
     stock_skipped_by_name, branch_id, updated_at, creation_snapshot_json) VALUES (?, ?, ?, ?, ?, ?, 1, '2026-08-28 01:00:00', ?)`)
   const sale = (id, key, status = 'completed', skipped = 0, by = null, snapshot = null) => insertSale.run(id, `S${id}`, key, status, skipped, by, snapshot)

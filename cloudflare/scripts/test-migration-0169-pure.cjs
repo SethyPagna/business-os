@@ -16,7 +16,9 @@ const sql0169 = fs.readFileSync(path.join(migrationsDir, '0169_merged_product_na
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
-for (const migration of loadAll()) db.exec(migration)
+for (const migration of loadAll({ through: 169 })) db.exec(migration)
+assert.equal(loadAll({ through: 169 }).at(-1), sql0169)
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
 
 function insertProduct(p) {
   db.prepare(`INSERT INTO products (id, name, barcode, brand, category, supplier, image_path, description,

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Pins the HELD migration ops/scripts/migration/held/legacy_sep2_3_
 // import_stock_deduction.sql (legacy Sep 2-3 sales imported without stock
 // deduction) on a SYNTHETIC fixture over the REAL migration chain. The file
@@ -35,10 +36,11 @@ const ITEMS = {
   40189: [16863, 7231, 3, 44.910134],
 }
 
-function fresh() {
+function fresh(current = false) {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = OFF')
-  for (const migration of loadAll()) db.exec(migration)
+  for (const migration of loadAll(current ? {} : { through: 242 })) db.exec(migration)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, current ? 1 : 0)
   db.prepare("INSERT INTO branches (id, name) VALUES (1, 'Warehouse'), (2, 'Shop')").run()
   return db
 }
@@ -127,3 +129,16 @@ db3.exec(sql)
 assert.strictEqual(db3.prepare('SELECT COUNT(*) c FROM legacy_import_stock_repair_held').get().c, 0)
 
 console.log('test-migration-held-legacy-sep2-3-pure: ok (38 lines / 107 units, allocations, lot-cost fallback, shared lots, neighbours untouched, abort on shortfall, idempotent)')
+
+const currentDb = fresh(true)
+seedStockFixture(currentDb, () => seed(currentDb))
+assert.equal(currentDb.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+const currentBusinessState = () => Object.fromEntries([
+  'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'sales', 'sale_items',
+  'sale_item_batch_allocations', 'inventory_movements', 'audit_logs', 'action_history', 'undo_snapshots',
+].map(table => [table, currentDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+const currentBefore = currentBusinessState()
+assert.throws(() => currentDb.transaction(() => currentDb.exec(sql))(), /stock_transaction_required/)
+assert.deepStrictEqual(currentBusinessState(), currentBefore)
+assert.equal(currentDb.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+console.log('PASS full-current schema refuses held SQL after complete 38-line seed; business state unchanged')
