@@ -661,7 +661,7 @@ export type MergeFoldFn = (
   stockDisposition?: MergeStockDisposition,
   economicsOverride?: ProductMergeEconomics,
   keeperChoice?: ProductMergeKeeperChoice,
-  reviewReplay?: { outcome: MergeCostOutcome; operationId: string; guards: AtomicMergeStatement[]; complete: (reversal: MergeReversal) => AtomicMergeStatement[] },
+  reviewReplay?: { outcome: MergeCostOutcome; operationId: string; generation: number; guards: AtomicMergeStatement[]; complete: (reversal: MergeReversal) => AtomicMergeStatement[] },
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -3030,7 +3030,68 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     || pointer.snapshot_id !== snapshot.id || pointer.operation_id !== reversal.operationId || !Number.isSafeInteger(pointer.generation)
     || payload.snapshot_id !== snapshot.id || payload.operation_id !== reversal.operationId || payload.cost_authority_version !== 3) throw refuse()
   const state = reversal.costReviewState
+  if (pointer.generation === 0 ? state !== undefined : !state || state.generation !== pointer.generation
+    || state.from_generation !== Number(pointer.generation) - 1 || !['undo','redo'].includes(state.direction)
+    || !Number.isSafeInteger(state.keeper_revision) || !Number.isSafeInteger(state.duplicate_revision)) throw refuse()
+  const eventJson = (alias: string) => `CASE WHEN json_valid(${alias}.details) THEN ${alias}.details ELSE '{}' END`
+  const root = await db.prepare(`SELECT a.id,a.details FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=@keeper
+    AND json_extract(${eventJson('a')},'$.cost_review.version')=1 AND json_extract(${eventJson('a')},'$.cost_review.kind')='merge'
+    AND json_extract(${eventJson('a')},'$.cost_review.operation_key')=@rootKey AND json_extract(${eventJson('a')},'$.cost_review.root_key')=@rootKey
+    AND json_extract(${eventJson('a')},'$.cost_review.merge_operation_id')=@mergeOperation
+    AND json_extract(${eventJson('a')},'$.cost_review.generation')=0
+    AND json_extract(${eventJson('a')},'$.cost_review.before_key') IS @beforeKey
+    AND json_extract(${eventJson('a')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('a')},'$.cost_review.fallback_khr') IS @khr
+    AND EXISTS(SELECT 1 FROM audit_logs b WHERE b.action='cost_override' AND b.entity='product' AND b.entity_id=@keeper
+      AND json_extract(${eventJson('b')},'$.cost_review.version')=1 AND json_extract(${eventJson('b')},'$.cost_review.kind') IN ('merge','merge_redo')
+      AND json_extract(${eventJson('b')},'$.cost_review.operation_key')=@currentKey AND json_extract(${eventJson('b')},'$.cost_review.root_key')=@rootKey
+      AND json_extract(${eventJson('b')},'$.cost_review.merge_operation_id')=@mergeOperation
+      AND json_extract(${eventJson('b')},'$.cost_review.generation')=@eventGeneration
+      AND json_extract(${eventJson('b')},'$.cost_review.before_key') IS @beforeKey
+      AND json_extract(${eventJson('b')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('b')},'$.cost_review.fallback_khr') IS @khr)`)
+    .get<{ id: number; details: string }>({ keeper: String(reversal.keeperId), rootKey: outcome.rootKey, currentKey: outcome.reviewKey,
+      beforeKey: outcome.beforeKey, usd: outcome.original.usd, khr: outcome.original.khr, mergeOperation: reversal.operationId,
+      eventGeneration: state?.direction === 'undo' ? Number(pointer.generation) - 1 : Number(pointer.generation) })
+  if (!root) throw refuse()
+  const committed = async (): Promise<MergeReversal | null> => {
+    const row = await db.prepare(`SELECT s.payload_json,h.undo_payload,h.redo_payload FROM undo_snapshots s JOIN action_history h ON h.id=@history
+      WHERE s.id=@snapshot AND json_extract(h.undo_payload,'$.snapshot_id')=s.id AND json_extract(h.undo_payload,'$.operation_id')=@operation
+        AND json_extract(h.undo_payload,'$.cost_authority_version')=3 AND json_extract(h.undo_payload,'$.generation')=@nextGeneration`)
+      .get<{ payload_json: string; undo_payload: string; redo_payload: string }>({ history: historyId, snapshot: snapshot.id, operation: reversal.operationId, nextGeneration: generation + 1 })
+    if (!row || row.undo_payload !== row.redo_payload) return null
+    try {
+      const saved = JSON.parse(row.payload_json) as MergeReversal, receipt = saved.costReviewState, proof = parseMergeCostOutcome(saved.costReviewOutcome)
+      return receipt?.generation === generation + 1 && receipt.from_generation === generation && receipt.direction === ctx.direction
+        && saved.operationId === reversal.operationId && proof?.rootKey === outcome.rootKey ? saved : null
+    } catch { return null }
+  }
+  const reconcile = async (): Promise<void> => {
+    if (ctx.direction !== 'redo') return
+    const saved = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get<{ payload_json: string }>([snapshot.id])
+    if (!saved) return
+    let fresh: MergeReversal
+    try { fresh = JSON.parse(saved.payload_json) as MergeReversal } catch { return }
+    const receipt = fresh.costReviewState
+    if (!fresh.fingerprintPending || receipt?.generation !== generation + 1 || receipt.direction !== 'redo') return
+    const graphGuards: AtomicMergeStatement[] = []
+    const fingerprint = await mergeStateFingerprint(db, [fresh], graphGuards)
+    try {
+      await db.batch([{
+        sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status='applied' AND payload_json=@before)
+          AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status='recorded' AND reversible=0
+            AND json_extract(undo_payload,'$.generation')=@nextGeneration AND json_extract(undo_payload,'$.snapshot_id')=@snapshot)
+          AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0)=@keeperRevision
+          AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0)=@duplicateRevision
+          THEN 1 ELSE json_extract('', '$') END AS merge_cost_fingerprint_guard`,
+        params: { snapshot: snapshot.id, before: saved.payload_json, history: historyId, nextGeneration: generation + 1,
+          keeper: String(fresh.keeperId), discarded: String(fresh.dupId), keeperRevision: receipt.keeper_revision, duplicateRevision: receipt.duplicate_revision },
+      }, ...graphGuards,
+      { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.fingerprintPending',json('false'),'$.mergedStateFingerprint',@fingerprint) WHERE id=@snapshot`,
+        params: { fingerprint, snapshot: snapshot.id } },
+      { sql: "UPDATE action_history SET status='undoable',reversible=1 WHERE id=@history", params: { history: historyId } }])
+    } catch { /* The committed receipt remains recorded until its exact graph can be reconciled. */ }
+  }
   if (pointer.generation === generation + 1 && state?.generation === generation + 1 && state.from_generation === generation && state.direction === ctx.direction) {
+    await reconcile().catch(() => {})
     return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
   }
   const fromStatus = ctx.direction === 'undo' ? 'undoable' : 'redoable'
@@ -3040,8 +3101,10 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status=@fromStatus AND reversible=1
       AND undo_payload=@pointer AND redo_payload=@pointer)
       AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status=@snapshotStatus AND payload_json=@snapshotPayload)
+      AND EXISTS(SELECT 1 FROM audit_logs WHERE id=@root AND details=@rootDetails)
       THEN 1 ELSE json_extract('', '$') END AS merge_cost_replay_guard`,
-    params: { history: historyId, fromStatus, pointer: history.undo_payload, snapshot: snapshot.id, snapshotStatus: snapshot.status, snapshotPayload: snapshot.payload_json },
+    params: { history: historyId, fromStatus, pointer: history.undo_payload, snapshot: snapshot.id, snapshotStatus: snapshot.status, snapshotPayload: snapshot.payload_json,
+      root: root.id, rootDetails: root.details },
   }]
   const complete = (fresh: MergeReversal): AtomicMergeStatement[] => [{
     sql: `UPDATE undo_snapshots SET status=@status,payload_json=json_set(@payload,'$.costReviewState',json_object(
@@ -3049,7 +3112,7 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       'keeper_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0),
       'duplicate_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0))),updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,
     params: { status: ctx.direction === 'undo' ? 'reversed' : 'applied', payload: JSON.stringify(fresh), nextGeneration: generation + 1,
-      direction: ctx.direction, generation, keeper: reversal.keeperId, discarded: reversal.dupId, snapshot: snapshot.id },
+      direction: ctx.direction, generation, keeper: String(reversal.keeperId), discarded: String(reversal.dupId), snapshot: snapshot.id },
   }, {
     sql: `UPDATE action_history SET status=@status,reversible=@reversible,last_error=NULL,
       undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),redo_payload=json_set(redo_payload,'$.generation',@nextGeneration),
@@ -3070,26 +3133,24 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
         COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0)=@keeperRevision
         AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0)=@duplicateRevision
         THEN 1 ELSE json_extract('', '$') END AS merge_cost_revision_guard`,
-      params: { keeper: reversal.keeperId, discarded: reversal.dupId, keeperRevision: state.keeper_revision, duplicateRevision: state.duplicate_revision } })
+      params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision, duplicateRevision: state.duplicate_revision } })
       const keeper = await db.prepare('SELECT id,name,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; is_active: number }>([reversal.keeperId])
       const discarded = await db.prepare('SELECT id,name,image_path,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; image_path: string | null; is_active: number }>([reversal.dupId])
       if (!keeper?.is_active || !discarded?.is_active) throw refuse()
       const branches = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
       await mergeFoldFn(ctx.env, db, ctx.user, keeper, discarded, new Map(branches.map(row => [row.id, row.name])),
         reversal.mergeContext || 'redo merge', reversal.stockDisposition || 'merge', savedBulkClusterEconomics(reversal), reversal.keeperChoice,
-        { outcome, operationId: String(reversal.operationId), guards, complete: fresh => complete({ ...fresh, fingerprintPending: true }) })
-      const saved = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get<{ payload_json: string }>([snapshot.id])
-      if (!saved) throw refuse()
-      const fresh = JSON.parse(saved.payload_json) as MergeReversal
-      const fingerprint = await mergeStateFingerprint(db, [fresh])
-      await db.batch([{
-        sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status='applied' AND payload_json=@before)
-          THEN 1 ELSE json_extract('', '$') END AS merge_cost_fingerprint_guard`, params: { snapshot: snapshot.id, before: saved.payload_json },
-      }, { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.fingerprintPending',json('false'),'$.mergedStateFingerprint',@fingerprint) WHERE id=@snapshot`,
-        params: { fingerprint, snapshot: snapshot.id } },
-      { sql: "UPDATE action_history SET status='undoable',reversible=1 WHERE id=@history", params: { history: historyId } }])
+        { outcome, operationId: String(reversal.operationId), generation: generation + 1, guards, complete: fresh => {
+          preserveBulkClusterPlan(reversal, fresh)
+          return complete({ ...fresh, fingerprintPending: true })
+        } })
+      await reconcile()
     }
   } catch (error) {
+    if (await committed().catch(() => null)) {
+      await reconcile().catch(() => {})
+      return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
+    }
     if (/malformed JSON|merge_cost_.*guard/i.test(String(error))) throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
     throw error
   }

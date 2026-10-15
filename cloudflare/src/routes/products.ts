@@ -3692,6 +3692,7 @@ export async function foldDuplicateProductInto(
     costAuthorityVersion?: 3
     costFallback?: MergeCostFallback
     costReviewRoot?: string
+    costReviewGeneration?: number
     bulkClusterPlan?: ProductMergeClusterPlan
     resumedCluster?: boolean
     preStatements?: Array<{ sql: string; params?: Record<string, unknown> }>
@@ -4459,7 +4460,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     // the next stock movement. No-op when nothing is derivable.
     { sql: catalogCostRecomputeIfChangedSql('id = @id', { stampUpdatedAt: false }), params: { id: canonicalId } },
   )
-  if (costOutcome) statements.push(...mergeCostReviewStatements(costOutcome, { id: user?.id ?? null, name: actorSnapshot(user) }))
+  if (costOutcome) statements.push(...mergeCostReviewStatements(costOutcome, { id: user?.id ?? null, name: actorSnapshot(user) }, atomicHistory?.operationId ?? null, atomicHistory?.costReviewGeneration ?? 0))
   // A merge makes every stock-in session that touches either product unreplayable,
   // so its Undo is closed here, in the same batch, with the reason on record.
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
@@ -4556,7 +4557,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
 registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, reviewReplay) => (
   foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride,
     reviewReplay ? { operationId: reviewReplay.operationId, costAuthorityVersion: 3, costFallback: reviewReplay.outcome.original,
-      costReviewRoot: reviewReplay.outcome.rootKey, preStatements: reviewReplay.guards, groupCompletionStatements: reviewReplay.complete } : undefined, keeperChoice)
+      costReviewRoot: reviewReplay.outcome.rootKey, costReviewGeneration: reviewReplay.generation,
+      preStatements: reviewReplay.guards, groupCompletionStatements: reviewReplay.complete } : undefined, keeperChoice)
 ))
 
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }

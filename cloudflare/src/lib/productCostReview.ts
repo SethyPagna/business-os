@@ -34,16 +34,18 @@ export function parseMergeCostOutcome(value: unknown): MergeCostOutcome | null {
   return candidate
 }
 
-export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id: number | null; name: string | null }): Statement[] {
+export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id: number | null; name: string | null }, operationId: string | null = null, generation = 0): Statement[] {
+  if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid merge cost generation')
   const afterKey = `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN NULL ELSE @reviewKey END`
   const usd = `COALESCE(${CATALOG_COST_DERIVE_SQL},@fallbackUsd)`
   const params = { productId: outcome.keeperId, reviewKey: outcome.reviewKey, fallbackUsd: outcome.original.usd,
-    fallbackKhr: outcome.original.khr, actorId: actor.id, actorName: actor.name, beforeKey: outcome.beforeKey, rootKey: outcome.rootKey }
+    fallbackKhr: outcome.original.khr, actorId: actor.id, actorName: actor.name, beforeKey: outcome.beforeKey, rootKey: outcome.rootKey,
+    operationId, costGeneration: generation, eventKind: outcome.rootKey === outcome.reviewKey ? 'merge' : 'merge_redo' }
   return [{ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND cost_review_key IS @beforeKey)
     THEN 1 ELSE json_extract('', '$') END AS merge_review_guard`, params },
   { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
     SELECT @actorId,@actorName,'cost_override','product',CAST(products.id AS TEXT),json_object('cost_review',json_object(
-      'version',1,'kind','merge','operation_key',@reviewKey,'root_key',@rootKey,'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
+      'version',1,'kind',@eventKind,'operation_key',@reviewKey,'root_key',@rootKey,'merge_operation_id',@operationId,'generation',@costGeneration,'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
       'before_key',cost_review_key,'after_key',${afterKey},'fallback_usd',@fallbackUsd,'fallback_khr',@fallbackKhr,
       'after_usd',${usd},'after_khr',@fallbackKhr,'recorded_lot',${CATALOG_COST_HAS_RECORDED_LOT_SQL}))
     FROM products WHERE id=@productId`, params },
@@ -74,7 +76,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
   AND NOT (NEW.cost_review_key IS NULL AND EXISTS(SELECT 1 FROM products WHERE id=OLD.id AND ${CATALOG_COST_HAS_RECORDED_LOT_SQL}
     AND NEW.cost_price_usd IS (${CATALOG_COST_DERIVE_SQL})))
   AND NOT EXISTS(SELECT 1 FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(OLD.id AS TEXT)
-    AND json_extract(${event},'$.cost_review.version')=1 AND json_extract(${event},'$.cost_review.kind') IN ('merge','merge_undo')
+    AND json_extract(${event},'$.cost_review.version')=1 AND json_extract(${event},'$.cost_review.kind') IN ('merge','merge_undo','merge_redo')
     AND json_extract(${event},'$.cost_review.before_key') IS OLD.cost_review_key
     AND json_extract(${event},'$.cost_review.after_key') IS NEW.cost_review_key
     AND json_extract(${event},'$.cost_review.revision_before')=COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(OLD.id AS TEXT)),0)
@@ -85,7 +87,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
         AND json_extract(h.undo_payload,'$.snapshot_id')=json_extract(${event},'$.cost_review.snapshot_id')
         AND json_extract(h.undo_payload,'$.operation_id')=json_extract(${event},'$.cost_review.merge_operation_id')
         AND json_extract(h.undo_payload,'$.generation')=json_extract(${event},'$.cost_review.generation'))
-      OR json_extract(${event},'$.cost_review.kind')='merge' AND (NEW.cost_review_key IS NULL OR json_extract(${event},'$.cost_review.operation_key')=NEW.cost_review_key)))
+      OR json_extract(${event},'$.cost_review.kind') IN ('merge','merge_redo') AND (NEW.cost_review_key IS NULL OR json_extract(${event},'$.cost_review.operation_key')=NEW.cost_review_key)))
 BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
 `
 }

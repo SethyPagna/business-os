@@ -432,7 +432,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
     const branchClosure = branchCutoverClosureRefusal(existing)
     if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
-    if (!Number(existing.reversible || 0)) {
+    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.cost_authority_version === 3
+    if (!Number(existing.reversible || 0) && !(mergeCostReplay && existing.status === 'recorded')) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }
     const currentStatus = String(existing.status || '').toLowerCase()
@@ -445,7 +446,6 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
-    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.cost_authority_version === 3
     if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }

@@ -5,6 +5,9 @@ CREATE INDEX audit_product_cost_review_0255 ON audit_logs(entity_id,
   json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.after_key'),
   json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.revision_before'))
   WHERE action='cost_override' AND entity='product' AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.version')=1;
+CREATE UNIQUE INDEX audit_product_cost_review_operation_0255 ON audit_logs(entity_id,
+  json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.operation_key'))
+  WHERE action='cost_override' AND entity='product' AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.version')=1;
 CREATE TRIGGER product_cost_review_insert_guard_0255 BEFORE INSERT ON products
 WHEN NEW.cost_review_key IS NOT NULL
 BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
@@ -32,7 +35,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)))))
   AND NOT EXISTS(SELECT 1 FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(OLD.id AS TEXT)
-    AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.version')=1 AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.kind') IN ('merge','merge_undo')
+    AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.version')=1 AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.kind') IN ('merge','merge_undo','merge_redo')
     AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.before_key') IS OLD.cost_review_key
     AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.after_key') IS NEW.cost_review_key
     AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.revision_before')=COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(OLD.id AS TEXT)),0)
@@ -43,7 +46,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
         AND json_extract(h.undo_payload,'$.snapshot_id')=json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.snapshot_id')
         AND json_extract(h.undo_payload,'$.operation_id')=json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.merge_operation_id')
         AND json_extract(h.undo_payload,'$.generation')=json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.generation'))
-      OR json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.kind')='merge' AND (NEW.cost_review_key IS NULL OR json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.operation_key')=NEW.cost_review_key)))
+      OR json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.kind') IN ('merge','merge_redo') AND (NEW.cost_review_key IS NULL OR json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.cost_review.operation_key')=NEW.cost_review_key)))
 BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
 DROP TRIGGER catalog_cost_on_hand_stock_insert_0195;
 DROP TRIGGER catalog_cost_on_hand_stock_update_0195;
