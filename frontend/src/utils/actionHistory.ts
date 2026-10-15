@@ -467,7 +467,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         setUndoStack(current => current.filter(item => item.id !== entry.id))
         setRedoStack(current => current.filter(item => item.id !== entry.id))
         if (committed && (entry.redoPayload?.generation == null || committed.expected_generation === entry.redoPayload.generation)) {
-          setServerItems(current => [{ id: committed.history_id, label: entry.label, status: 'recorded', pending_redo: committed },
+          setServerItems(current => [{ id: committed.history_id, label: entry.label, status: 'recorded', reversible: false, pending_redo: committed },
             ...current.filter(item => String(item.id) !== String(committed.history_id))])
         }
         setServerItemsRequested(true)
@@ -520,7 +520,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (navigator.onLine === false && !(await api.confirmServerReachable())) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const pending = pendingGroupRedo(item?.pending_redo, serverId)
-      if (receiptOnly && (!pending || direction !== 'redo')) return false
+      if (receiptOnly && (!pending || direction !== 'redo' || item?.status !== 'recorded' || item.reversible !== false)) return false
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)
       if (receiptOnly && pending) replayRequest.expected_generation = pending.expected_generation

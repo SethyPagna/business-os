@@ -79,9 +79,12 @@ if (!ssr) {
       new Function('require','module','exports',code)(shim,mod,mod.exports)
       for(const language of ['en','km']) {
         const pack=JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`,import.meta.url),'utf8'))
-        const render=(pending:unknown)=>renderToStaticMarkup(React.createElement(mod.exports.default,{t:(key:string)=>pack[key],history:{undo:()=>{},redo:()=>{},checkReceipt:()=>{},serverItems:[{id:91,label:'Saved',status:'recorded',server_replayable:false,pending_redo:pending}]}}))
+        const render=(pending:unknown,status='recorded',reversible=false)=>renderToStaticMarkup(React.createElement(mod.exports.default,{t:(key:string)=>pack[key],history:{undo:()=>{},redo:()=>{},checkReceipt:()=>{},serverItems:[{id:91,label:'Saved',status,reversible,server_replayable:false,pending_redo:pending}]}}))
         assert.ok(render(descriptor).includes(pack.history_check_saved_redo))
         assert.ok(!render({...descriptor,history_id:92}).includes(pack.history_check_saved_redo))
+        assert.ok(!render({...descriptor,extra:true}).includes(pack.history_check_saved_redo))
+        assert.ok(!render(descriptor,'undoable').includes(pack.history_check_saved_redo))
+        assert.ok(!render(descriptor,'recorded',true).includes(pack.history_check_saved_redo))
       }
     })
   } finally {await harness.close()}

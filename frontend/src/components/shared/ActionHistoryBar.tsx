@@ -32,6 +32,7 @@ type HistoryItem = {
   // Server-computed (K1 slice 2): this row's next transition can be replayed
   // by the Worker itself, so it is actionable even with no live closure here.
   server_replayable?: boolean
+  reversible?: boolean
   pending_redo?: { version: number; history_id: number; group_operation_id: string; expected_generation: number }
   // A stock-in session whose products were merged keeps this marker: the row is
   // recorded only, and History says why instead of leaving a dead Undo.
@@ -364,7 +365,9 @@ export default function ActionHistoryBar({
               const grouped = isGroupedHistory(item)
               const displayLabel = bulkHistoryLabel(item, T)
               const pending = item.pending_redo
-              if (pending?.version === 1 && String(pending.history_id) === String(item.id)
+              if (item.status === 'recorded' && item.reversible === false && pending?.version === 1
+                && Object.keys(pending).sort().join(',') === 'expected_generation,group_operation_id,history_id,version'
+                && Number.isSafeInteger(pending.history_id) && pending.history_id > 0 && String(pending.history_id) === String(item.id)
                 && Number.isSafeInteger(pending.expected_generation) && pending.expected_generation >= 0
                 && /^product-merge-group-[a-f0-9]{64}$/.test(pending.group_operation_id) && history.checkReceipt) {
                 return <button key={`receipt-${item.id}`} type="button" disabled={!!history.busy}

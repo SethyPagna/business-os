@@ -50,4 +50,3 @@ async function main() {
   console.log(`PASS ${checks} receipt projection groups; synthetic pending metadata, actual SQLite/query/Hono, not actual authenticated Worker fold`)
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(()=>sql.close())
-
