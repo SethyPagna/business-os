@@ -1,3 +1,4 @@
+import CostValue from '../shared/CostValue.tsx'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useState } from 'react'
@@ -61,7 +62,9 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const totalInvoices = Number(data?.total_invoices) || 0
   const branchNameById = new Map(branches.map((branch) => [String(branch.id), String(branch.name || '')]))
 
-  const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
+  const money = (value: number): string => `$${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}`
+  const cost = (value: unknown, unknown = 0, lines = 0) => <CostValue value={lines > 0 && unknown >= lines ? null : value} unknownCount={unknown} fmt={money} t={t} />
+  const groupCost = (group: InvoiceGroup) => cost(group.cost_usd, group.lines_without_cost, group.line_count)
   const qty = (value: unknown): string => (value == null ? '--' : String(Number(value) || 0))
   const anyFilter = branchId !== 'all' || supplierKey !== 'all' || supplierQuery !== '' || fromDate !== '' || toDate !== ''
 
@@ -182,7 +185,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
               { key: 'units', label: tr('units_received', 'Units received'), value: qty(totals.units_received) },
               { key: 'credit', label: tr('credit_open', 'Not Yet Paid'), value: String(totals.credit_lines ?? 0) },
             ]}
-            total={canViewCosts ? { key: 'total', label: tr('purchase_cost', 'Purchase cost'), value: money(totals.cost_usd) } : undefined}
+            total={canViewCosts ? { key: 'total', label: tr('purchase_cost', 'Purchase cost'), value: cost(totals.cost_usd, Number(totals.lines_without_cost) || 0, Number(totals.lines) || 0) } : undefined}
           />
           {canViewCosts && Number(totals.lines_without_cost) > 0 ? (
             <div className="text-[11px] text-gray-400">
@@ -237,7 +240,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                         <td className="px-3 py-2 text-gray-500">{branchNames || tr('not_recorded', 'Not recorded')}</td>
                         <td className="px-3 py-2 text-right text-gray-500">{group.line_count}</td>
                         <td className="px-3 py-2 text-right text-gray-500">{qty(group.units_received)}</td>
-                        {canViewCosts ? <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{money(group.cost_usd)}</td> : null}
+                        {canViewCosts ? <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{groupCost(group)}</td> : null}
                         <td className="px-3 py-2">
                           {group.credit_lines > 0 ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{group.credit_lines}</span>
@@ -275,7 +278,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       ) : null}
                       <span className="text-xs text-gray-500">{group.line_count} {tr('invoice_lines', 'Lines').toLowerCase()}</span>
                       <span className="text-xs text-gray-500">{qty(group.units_received)} {tr('units', 'Units').toLowerCase()}</span>
-                      {canViewCosts ? <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{money(group.cost_usd)}</span> : null}
+                      {canViewCosts ? <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{groupCost(group)}</span> : null}
                     </button>
                   </div>
                 )
@@ -316,7 +319,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                   { key: 'branches', label: tr('received_branch', 'Received into'), value: groupBranchNames(detailGroup) || tr('not_recorded', 'Not recorded') },
                   { key: 'lines', label: tr('invoice_lines', 'Lines'), value: String(detailGroup.line_count) },
                   { key: 'units', label: tr('units_received', 'Units received'), value: qty(detailGroup.units_received) },
-                  ...(canViewCosts ? [{ key: 'cost', label: tr('purchase_cost', 'Purchase cost'), value: money(detailGroup.cost_usd) }] : []),
+                  ...(canViewCosts ? [{ key: 'cost', label: tr('purchase_cost', 'Purchase cost'), value: groupCost(detailGroup) }] : []),
                 ],
               },
               {
@@ -359,8 +362,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                               <td className="px-3 py-2 leading-6 text-gray-500">{batchDisplayLabel({ id: line.id, lot_code: line.lot_code, received_at: line.received_at, batch_number: line.batch_number }, tr('batch', 'Received date'))}</td>
                               <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{qty(line.received_quantity)}</td>
                               <td className="px-3 py-2 leading-6 text-gray-500">{line.unit || '--'}</td>
-                              {canViewCosts ? <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{line.unit_cost_usd == null ? '--' : money(line.unit_cost_usd)}</td> : null}
-                              {canViewCosts ? <td className="px-3 py-2 text-right font-medium leading-6 text-gray-800 dark:text-gray-100">{line.line_total_usd == null ? '--' : money(line.line_total_usd)}</td> : null}
+                              {canViewCosts ? <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{cost(line.unit_cost_usd)}</td> : null}
+                              {canViewCosts ? <td className="px-3 py-2 text-right font-medium leading-6 text-gray-800 dark:text-gray-100">{cost(line.line_total_usd)}</td> : null}
                               <td className="px-3 py-2">{paymentChip(line)}</td>
                               <td className="px-3 py-2 leading-6 text-gray-500">{line.received_branch_name || tr('not_recorded', 'Not recorded')}</td>
                               <td className="px-3 py-2 text-right leading-6 text-gray-500">{qty(line.remaining_quantity)}</td>

@@ -1072,26 +1072,28 @@ app.get('/report', async (c) => {
   // Sum BOTH currencies (Part 553): refunds/compensation/loss can be recorded
   // in KHR, and a USD-only sum showed "$0.00" for real KHR returns (same class
   // of bug the fees report had). No conversion -- the UI shows "$X · Y៛".
+  const supplierFields = { compensation_usd: 'supplier_compensation_usd', compensation_khr: 'supplier_compensation_khr', loss_usd: 'supplier_loss_usd', loss_khr: 'supplier_loss_khr' }
+  const supplierSums = Object.entries(supplierFields).map(([key, column]) =>
+    `CASE WHEN COUNT(*) = 0 THEN 0 ELSE ROUND(SUM(${column}), 4) END AS ${key}, COUNT(${column}) AS ${key}_known_count, COUNT(*) - COUNT(${column}) AS ${key}_unknown_count`).join(', ')
   const moneySums = `ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd,
-    ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr,
-    ROUND(COALESCE(SUM(supplier_compensation_usd), 0), 2) AS compensation_usd,
-    ROUND(COALESCE(SUM(supplier_compensation_khr), 0), 0) AS compensation_khr,
-    ROUND(COALESCE(SUM(supplier_loss_usd), 0), 2) AS loss_usd,
-    ROUND(COALESCE(SUM(supplier_loss_khr), 0), 0) AS loss_khr`
+    ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr, ${supplierSums}`
   const [totals, days, byReason, byType] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT ${localDateExpr('created_at')} AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY ${localDateExpr('created_at')} ORDER BY ${localDateExpr('created_at')} DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '—') ORDER BY refund_usd DESC, count DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(return_type), ''), 'restock') ORDER BY count DESC`).all<Record<string, unknown>>(params),
   ])
-  const money = (row: Record<string, unknown> | null | undefined) => ({
-    refund_usd: Number(row?.refund_usd || 0),
-    refund_khr: Number(row?.refund_khr || 0),
-    compensation_usd: Number(row?.compensation_usd || 0),
-    compensation_khr: Number(row?.compensation_khr || 0),
-    loss_usd: Number(row?.loss_usd || 0),
-    loss_khr: Number(row?.loss_khr || 0),
-  })
+  const money = (row: Record<string, unknown> | null | undefined) => {
+    const supplier: Record<string, number | null> = {}
+    if (canViewAcquisitionCosts(c.get('user'))) {
+      for (const key of Object.keys(supplierFields)) {
+        supplier[key] = row?.[key] == null ? null : Number(row[key])
+        supplier[`${key}_known_count`] = Number(row?.[`${key}_known_count`] || 0)
+        supplier[`${key}_unknown_count`] = Number(row?.[`${key}_unknown_count`] || 0)
+      }
+    }
+    return { refund_usd: Number(row?.refund_usd || 0), refund_khr: Number(row?.refund_khr || 0), ...supplier }
+  }
   return c.json({
     startDate,
     endDate,

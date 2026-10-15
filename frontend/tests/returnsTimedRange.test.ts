@@ -80,7 +80,7 @@ for (const time of ['22:00', '23:00']) {
   assert.deepEqual(rows, suppliedRows); assert.equal(stats.count, 1)
   evaluate(resetEffect.arguments[0].getText(ast), { setReturnPage: (value: number) => { pageNumber = value } })()
   assert.equal(pageNumber, 1)
-  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, canExportReturns: true, visibleReturns: rows,
+  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, canExportReturns: true, canViewCosts: true, visibleReturns: rows,
     notify: () => { throw Error('unexpected export rejection') }, tr: (key: string) => key,
     exportReturnRows: (value: unknown) => value, setExportDialog: (value: unknown) => { exportDialog = value } })
   const items = evaluate(variable('exportItems'), { ...hooks, tr: (key: string) => key, exportVisible,
@@ -100,4 +100,13 @@ try {
 assert.ok(error); assert.equal(stats, null)
 assert.deepEqual(firstRange, range)
 assert.match(page, /range=\{stripRange\}[\s\S]{0,100}showTime\s+continuous/)
+const exporterNode = nodes(node => ts.isFunctionDeclaration(node) && node.name?.text === 'exportReturnRows')[0]
+const exporter = evaluate(exporterNode.getText(ast), { normalizeScope: (value: unknown) => value, SUPPLIER_SCOPE: 'supplier', customerDisplayName: () => 'General', getReturnTypeLabel: () => 'refund' })
+const exportSamples = [{ return_scope: 'supplier', supplier_compensation_usd: null, supplier_compensation_khr: 0, supplier_loss_usd: -1.1234 }, { return_scope: 'supplier', supplier_compensation_usd: 0 }]
+const permitted = exporter(exportSamples, (key: string) => key, true)
+assert.equal(permitted[0].Compensation_USD, '')
+assert.equal(permitted[0].Compensation_KHR, 0)
+assert.equal(permitted[0].Business_Loss_USD, -1.1234)
+assert.equal(permitted[1].Compensation_USD, 0)
+assert.ok(exporter(exportSamples, (key: string) => key, false).every((row: object) => !Object.hasOwn(row, 'Compensation_USD') && !Object.hasOwn(row, 'Business_Loss_USD')))
 console.log('PASS Returns continuous times: Reports parity, cache identity, actual page request/reset/export flow, safe invalid drafts')
