@@ -38,8 +38,18 @@ check('move-row pre-checks the landing branch is active and maps the refusal to 
 })
 
 check('the same assertion rides FIRST in the write batch, so a branch retired after the pre-read aborts every write', () => {
-  const batch = moveRow.slice(moveRow.indexOf('await db.batch(addressedStatements(landing, ['))
-  assert.match(batch, /await db\.batch\(addressedStatements\(landing, \[\s*receivingBranchAssertion\(branchId\),\s*\.\.\.removal\.statements/)
+  const verify = text => {
+    const start = text.indexOf('await executeStockTransaction(db, addressedStatements(landing, [')
+    assert.ok(start >= 0)
+    const batch = text.slice(start)
+    assert.match(batch, /await executeStockTransaction\(db, addressedStatements\(landing, \[\s*receivingBranchAssertion\(branchId\),\s*\.\.\.removal\.statements/)
+    assert.match(batch, /\]\), 'retry'\)/)
+    assert.strictEqual((text.match(/await executeStockTransaction\(/g) || []).length, 1)
+  }
+  verify(moveRow)
+  assert.throws(() => verify(moveRow.replace('executeStockTransaction(db, ', 'db.batch(')), assert.AssertionError)
+  assert.throws(() => verify(moveRow.replace('receivingBranchAssertion(branchId),', '')), assert.AssertionError)
+  assert.throws(() => verify(moveRow.replace('addressedStatements(landing, [', '[')), assert.AssertionError)
   assert.match(moveRow, /if \(isReceivingBranchError\(err\)\) return c\.json\(RECEIVING_BRANCH_INACTIVE, 409\)/)
 })
 

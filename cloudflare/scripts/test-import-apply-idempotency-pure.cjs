@@ -58,7 +58,9 @@ module.exports = { runD1BatchGroupsInChunks }
 `
 const compiled = ts.transpileModule(helpers, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
 const sandbox = { exports: {} }
-new Function('exports', 'require', 'module', compiled)(sandbox.exports, require, sandbox)
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const { executeStockTransaction, stockTransactionStatementCount } = withProductStockGuard(require)('./stockTransaction')
+new Function('exports', 'require', 'module', 'executeStockTransaction', 'stockTransactionStatementCount', compiled)(sandbox.exports, require, sandbox, executeStockTransaction, stockTransactionStatementCount)
 const { runD1BatchGroupsInChunks } = sandbox.exports
 
 function spyDb(failTimes = new Map()) {
@@ -73,6 +75,7 @@ function spyDb(failTimes = new Map()) {
         throw new Error('D1_ERROR: CPU time limit exceeded')
       }
       batches.push(statements.map((s) => s.sql))
+      return statements.map(() => ({ success: true, results: [] }))
     },
   }
 }
@@ -87,6 +90,29 @@ async function check(name, fn) {
 }
 
 async function main() {
+
+await check('stock groups reserve admission overhead and never split an atomic row', async () => {
+  const db = spyDb()
+  await runD1BatchGroupsInChunks(db, [g('a', 3), g('b', 3)], 7, true)
+  assert.deepStrictEqual(db.batches.map(batch => batch.length), [5, 5])
+  assert.deepStrictEqual(db.batches.map(batch => batch.slice(1, -1)), [['a:0', 'a:1', 'a:2'], ['b:0', 'b:1', 'b:2']])
+  for (const batch of db.batches) {
+    assert.match(batch[0], /INSERT INTO system_flags/)
+    assert.match(batch.at(-1), /DELETE FROM system_flags/)
+  }
+  const oversized = spyDb()
+  await assert.rejects(runD1BatchGroupsInChunks(oversized, [g('oversized', 6)], 7, true), /import_stock_group_statement_budget_exceeded/)
+  assert.strictEqual(oversized.batches.length, 0)
+  const combined = [db.batches[0][0], ...g('a', 2).map(s => s.sql), ...g('b', 2).map(s => s.sql), db.batches[0].at(-1)].join('|')
+  const retry = spyDb(new Map([[combined, 1]]))
+  await runD1BatchGroupsInChunks(retry, [g('a', 2), g('b', 2)], 6, true)
+  assert.deepStrictEqual(retry.batches.map(batch => batch.slice(1, -1)), [['a:0', 'a:1'], ['b:0', 'b:1']])
+  for (const batch of retry.batches) {
+    assert.strictEqual(batch.length, 4)
+    assert.match(batch[0], /INSERT INTO system_flags/)
+    assert.match(batch.at(-1), /DELETE FROM system_flags/)
+  }
+})
 
 await check('groups pack whole -- a group is never split across db.batch() calls', async () => {
   const db = spyDb()
@@ -132,11 +158,11 @@ await check('source lock: the apply composes guarded groups for both additive br
     'the planned inventory stock groups must run with the other guarded groups',
   )
   assert.ok(
-    /if \(productStatementGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(engineSrc),
+    /if \(productStatementGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups, D1_IMPORT_BATCH_CHUNK_SIZE, true\)/.test(engineSrc),
     'product row groups must run through the canonical-branch-guarded group-atomic runner',
   )
   assert.ok(
-    /if \(guardedGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, guardedGroups\)/.test(engineSrc),
+    /if \(guardedGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job\.type === 'inventory' \|\| job\.type === 'products'\)/.test(engineSrc),
     'inventory guarded groups must run through the canonical-branch-guarded group-atomic runner',
   )
 })

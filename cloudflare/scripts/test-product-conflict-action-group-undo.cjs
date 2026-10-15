@@ -1,10 +1,18 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 
 const root = path.join(__dirname, '..')
 const undo = fs.readFileSync(path.join(root, 'src', 'lib', 'undoAppliers.ts'), 'utf8')
 const history = fs.readFileSync(path.join(root, 'src', 'routes', 'actionHistory.ts'), 'utf8')
+function loadParser(name) {
+  const ast = ts.createSourceFile('undoAppliers.ts', undo, ts.ScriptTarget.Latest, true)
+  const declaration = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
+  assert.ok(declaration)
+  const compiled = ts.transpileModule(declaration.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  return new Function('PRODUCT_MERGE_GROUP_ACTION_KIND', `${compiled}; return ${name}`)('product.merge.group')
+}
 
 let passed = 0
 function check(name, fn) {
@@ -22,10 +30,20 @@ check('one server-managed visible group action uses child snapshots without chil
 })
 
 check('group and pointer payloads are strict, bounded, ordered, and reject duplicate children', () => {
-  assert.match(undo, /const expected = \['child_snapshot_ids', 'generation', 'group_key', 'prefix_fingerprint', 'review_id', 'version'\]/)
+  const parseSnapshot = loadParser('strictProductMergeGroupSnapshot')
+  const legacy = { version: 1, child_snapshot_ids: [1, 2], generation: 0, group_key: 'group', prefix_fingerprint: 'sha256-' + 'a'.repeat(64), review_id: 'review' }
+  assert.deepEqual(parseSnapshot(legacy), legacy)
+  const current = { ...legacy, graph_receipt: { version: 1, applied_prefix: 2, generation: 0, graph_state: '{}', operation_id: 'product-merge-group-' + 'b'.repeat(64) } }
+  assert.deepEqual(parseSnapshot(current), current)
+  for (const invalid of [{ ...legacy, extra: true }, { ...legacy, child_snapshot_ids: [1, 1] }, { ...current, graph_receipt: { ...current.graph_receipt, extra: true } }, { ...current, graph_receipt: { ...current.graph_receipt, generation: 1 } }]) assert.equal(parseSnapshot(invalid), null)
   assert.match(undo, /ids\.length > 3999/)
   assert.match(undo, /new Set\(ids\)\.size !== ids\.length/)
-  assert.match(undo, /const expected = \['applier', 'generation', 'group_key', 'review_id', 'snapshot_id'\]/)
+  const parsePointer = loadParser('strictProductMergeGroupPointer')
+  const pointer = { applier: 'product.merge.group', generation: 0, group_key: 'group', review_id: 'review', snapshot_id: 1 }
+  assert.deepEqual(parsePointer(pointer), { snapshotId: 1, reviewId: 'review', groupKey: 'group', generation: 0 })
+  const modern = { ...pointer, merge_version: 3, operation_id: current.graph_receipt.operation_id }
+  assert.deepEqual(parsePointer(modern), { snapshotId: 1, reviewId: 'review', groupKey: 'group', generation: 0, mergeVersion: 3, operationId: modern.operation_id })
+  for (const invalid of [{ ...pointer, extra: true }, { ...modern, operation_id: 'invalid' }, { ...modern, merge_version: 2 }, { ...pointer, applier: 'sale.settlement' }]) assert.equal(parsePointer(invalid), null)
   assert.match(undo, /memberIds\.some\(\(id, index\) => id !== groupSnapshot!\.child_snapshot_ids\[index\]\)/)
   assert.match(undo, /productMergeGroupPrefixFingerprint[\s\S]*version: 1,[\s\S]*review_id: reviewId,[\s\S]*group_key: groupKey,[\s\S]*generation,[\s\S]*child_snapshot_ids: childSnapshotIds/)
   assert.match(undo, /groupSnapshot\.prefix_fingerprint !== expectedPrefixFingerprint/)
@@ -42,8 +60,8 @@ check('foreign actor, child kind, and member identity fail closed', () => {
 
 check('undo peels children in reverse and redo advances them forward through one atomic CAS contract', () => {
   assert.match(undo, /targetIndex = ctx\.direction === 'undo' \? appliedCount - 1 : appliedCount/)
-  assert.match(undo, /const completion = productMergeGroupCompletionStatements[\s\S]*statements\.unshift\(completion\[0\], \.\.\.currentGraphGuards, \.\.\.timestamps.before\)/)
-  assert.match(undo, /completionStatements: \(freshReversal\) => productMergeGroupCompletionStatements/)
+  assert.match(undo, /const completion = productMergeGroupCompletionStatements[\s\S]*statements\.unshift\(completion\[0\], \.\.\.\(groupGraphGuard\?\[groupGraphGuard\]:\[\]\), \.\.\.currentGraphGuards, \.\.\.timestamps.before\)/)
+  assert.match(undo, /completionStatements: \(freshReversal, graph\) => productMergeGroupCompletionStatements/)
   assert.match(undo, /product_merge_group_guard/)
   assert.match(undo, /undo_snapshot_id=@child AND status=@fromMember/)
   assert.match(undo, /UPDATE undo_snapshots SET status=@status,payload_json=@payload/)
