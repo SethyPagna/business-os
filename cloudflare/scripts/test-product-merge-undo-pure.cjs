@@ -1,3 +1,5 @@
+const { executeStockTransaction } = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Part 578 item 2b: reload-durable UNDO/REDO of a duplicate-product merge.
 //
@@ -93,6 +95,7 @@ function loadUndoAppliers(d1) {
         },
       }
     },
+    batchOnce(stmts) { return this.batch(stmts) },
     batch: (stmts) => {
       const readOnly = stmts.every((stmt) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(stmt.sql))
       if (!readOnly) return d1.batch(stmts)
@@ -173,6 +176,7 @@ function loadUndoAppliers(d1) {
   stubs['./saleItemPricing'] = loadActualDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   // U-cost: merge undo re-derives catalog cost with the real formula.
   stubs['./catalogCostRecompute'] = loadActualDependency(path.join(LIB_DIR, 'catalogCostRecompute.ts'))
+  stubs['./stockTransaction'] = loadActualDependency(path.join(LIB_DIR, 'stockTransaction.ts'))
   stubs['./productCostReview'] = loadActualDependency(path.join(LIB_DIR, 'productCostReview.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
@@ -274,7 +278,7 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
   // Complete the physical fold before retiring the source catalog membership.
   stmts.push({ sql: 'UPDATE products SET stock_quantity=0 WHERE id=@id', params: { id: dup.id } })
   stmts.push({ sql: 'UPDATE products SET is_active=0, updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } })
-  await d1.batch(stmts)
+  await executeStockTransaction(d1, stmts, 'retry')
 
   const adjustmentMovementIds = d1.db.prepare(`SELECT id FROM inventory_movements WHERE product_id = ? AND movement_type = 'adjustment' AND reason LIKE ?`).all(canonicalId, `%(#${dup.id}) into this product%`).map((r) => Number(r.id))
 
@@ -437,6 +441,7 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`  ✓ ${n
 
 async function run() {
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const undo = loadUndoAppliers(d1)
   undo.registerMergeFold((env, _db, _user, keeper, dup, branchNameById, ctx) => foldForward(d1, keeper, dup, branchNameById, ctx))
 
@@ -448,11 +453,11 @@ async function run() {
 
   // ---- Seed a scenario exercising every reversal branch ----
   run1(`INSERT INTO branches (id, name) VALUES (1,'B1'),(2,'B2'),(3,'B3')`)
-  run1(`INSERT INTO products (id, name, is_active, image_path, stock_quantity) VALUES (100,'Keeper',1,'',8),(200,'Dup',1,'dhero.jpg',11)`)
-  run1(`INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES (100,1,5,2),(100,2,3,0),(200,1,4,1),(200,3,7,0)`)
+  seedStockFixture(d1.db, () => run1(`INSERT INTO products (id, name, is_active, image_path, stock_quantity) VALUES (100,'Keeper',1,'',8),(200,'Dup',1,'dhero.jpg',11)`))
+  seedStockFixture(d1.db, () => run1(`INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES (100,1,5,2),(100,2,3,0),(200,1,4,1),(200,3,7,0)`))
   run1(`INSERT INTO product_images (product_id, image_path, sort_order) VALUES (100,'k1.jpg',0),(200,'k1.jpg',0),(200,'d1.jpg',1),(200,'d2.jpg',2)`)
-  run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active) VALUES (5000,100,'2026',1,1),(5001,200,'2026',1,1),(5002,200,'2027',1,1)`)
-  run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (5000,1,5),(5001,1,4),(5001,2,2),(5002,3,7)`)
+  seedStockFixture(d1.db, () => run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active) VALUES (5000,100,'2026',1,1),(5001,200,'2026',1,1),(5002,200,'2027',1,1)`))
+  seedStockFixture(d1.db, () => run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (5000,1,5),(5001,1,4),(5001,2,2),(5002,3,7)`))
   run1(`INSERT INTO sales (id) VALUES (900),(901)`)
   run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (700,900,200,'Dup',1),(701,900,200,'Dup',2),(702,901,200,'Dup',1)`)
   run1(`INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (750,700,5001,1,1,0)`)
@@ -466,7 +471,7 @@ async function run() {
   await check('forward merge folds the dup into the keeper (sales + movements re-parented)', async () => {
     const res = await foldForward(d1, { id: KEEPER, name: 'Keeper' }, { id: DUP, name: 'Dup', image_path: 'dhero.jpg' }, branchNameById, 'possible-duplicates review merge')
     reversal = res.reversal
-    run1('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', { id: KEEPER })
+    await executeStockTransaction(d1, [{ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', params: { id: KEEPER } }], 'retry')
     // dup is soft-deleted; its sales + movements now belong to the keeper
     assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=200').get().is_active, 0)
     assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM sale_items WHERE product_id=100').get().n, 3)
@@ -525,7 +530,7 @@ async function run() {
 
   await check('REDO (real orchestration re-runs the fold) reproduces the exact merged state', async () => {
     await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
-    run1('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', { id: KEEPER })
+    await executeStockTransaction(d1, [{ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', params: { id: KEEPER } }], 'retry')
     assert.deepEqual(fingerprint(d1, KEEPER, DUP, BATCH_IDS), F1)
     assert.equal(d1.db.prepare('SELECT status FROM undo_snapshots WHERE id=?').get(snapshotId).status, 'applied')
   })
@@ -615,7 +620,7 @@ async function run() {
     }, false)
     assert.doesNotMatch(statement.sql, /image_path/)
     assert.equal(Object.prototype.hasOwnProperty.call(statement.params, 'path'), false)
-    d1.db.prepare("UPDATE products SET image_path='/uploads/concurrent.png' WHERE id=?").run(KEEPER)
+    seedStockFixture(d1.db, () => d1.db.prepare("UPDATE products SET image_path='/uploads/concurrent.png' WHERE id=?").run(KEEPER))
     d1.db.prepare(statement.sql).run(statement.params)
     assert.equal(d1.db.prepare('SELECT image_path FROM products WHERE id=?').get(KEEPER).image_path, '/uploads/concurrent.png')
   })
@@ -643,7 +648,7 @@ async function run() {
 
   await check('undo refuses a merge after later stock activity', async () => {
     await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
-    run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })
+    seedStockFixture(d1.db, () => run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 }))
     await assert.rejects(
       applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' }),
       /later stock or received-date activity/,
@@ -660,18 +665,19 @@ async function run() {
 async function runSavedClusterEconomics() {
   console.log('\n-- saved bulk-cluster economics across undo/redo --')
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const undo = loadUndoAppliers(d1)
   const productMerge = loadRealProductMerge()
   const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
 
-  run1(`INSERT INTO products (
+  seedStockFixture(d1.db, () => run1(`INSERT INTO products (
     id, name, barcode, is_active,
     selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
     cost_price_usd, cost_price_khr, stock_quantity
   ) VALUES
     (1,'Planned Item','PLAN-1',1,10,41000,9,36900,4,4000,0),
     (2,'Planned Item','PLAN-1',1,10,41000,9,36900,5,5000,0),
-    (3,'Planned Item','PLAN-1',1,10,41000,9,36900,6,6000,0)`)
+    (3,'Planned Item','PLAN-1',1,10,41000,9,36900,6,6000,0)`))
 
   const planRows = d1.db.prepare(`
     SELECT id, updated_at,
@@ -706,7 +712,7 @@ async function runSavedClusterEconomics() {
       `).get(dup.id),
     ])
     if (economicsOverride) observedRedoCosts.push(economics.merged.cost_price_usd)
-    run1(`UPDATE products
+    seedStockFixture(d1.db, () => run1(`UPDATE products
              SET selling_price_usd=@sellingUsd,
                  selling_price_khr=@sellingKhr,
                  wholesale_price_usd=@wholesaleUsd,
@@ -722,7 +728,7 @@ async function runSavedClusterEconomics() {
       wholesaleKhr: economics.merged.wholesale_price_khr ?? before.wholesale_price_khr,
       costUsd: economics.merged.cost_price_usd ?? before.cost_price_usd,
       costKhr: economics.merged.cost_price_khr ?? before.cost_price_khr,
-    })
+    }))
     result.reversal.keeperPricingBefore = {
       selling_price_usd: Number(before.selling_price_usd),
       selling_price_khr: Number(before.selling_price_khr),
@@ -784,6 +790,7 @@ async function runSavedClusterEconomics() {
 async function runBulk() {
   console.log('\n-- bulk composite merge (whole-catalog cleanup) --')
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const undo = loadUndoAppliers(d1)
   undo.registerMergeFold((env, _db, _user, keeper, dup, branchNameById, ctx) => foldForward(d1, keeper, dup, branchNameById, ctx))
   const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
@@ -792,22 +799,22 @@ async function runBulk() {
   const PIDS = [100, 201, 202, 300, 301]
   const BIDS = [6000, 6001, 6002, 6003, 6100, 6101, 6102]
   run1(`INSERT INTO branches (id, name) VALUES (1,'B1'),(2,'B2'),(3,'B3')`)
-  run1(`INSERT INTO products (id, name, is_active, image_path, stock_quantity) VALUES
+  seedStockFixture(d1.db, () => run1(`INSERT INTO products (id, name, is_active, image_path, stock_quantity) VALUES
     (100,'KeeperA',1,'ka.jpg',8),(201,'DupA1',1,'d1.jpg',11),(202,'DupA2',1,'d2.jpg',3),
-    (300,'KeeperB',1,'kb.jpg',6),(301,'DupB1',1,'d3.jpg',10)`)
-  run1(`INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES
+    (300,'KeeperB',1,'kb.jpg',6),(301,'DupB1',1,'d3.jpg',10)`))
+  seedStockFixture(d1.db, () => run1(`INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES
     (100,1,5,2),(100,2,3,0),(201,1,4,1),(201,3,7,0),(202,2,2,0),(202,3,1,0),
-    (300,1,6,3),(301,2,8,0),(301,3,2,1)`)
+    (300,1,6,3),(301,2,8,0),(301,3,2,1)`))
   run1(`INSERT INTO product_images (product_id, image_path, sort_order) VALUES
     (100,'ka.jpg',0),(201,'g1.jpg',0),(202,'g2.jpg',0),(300,'kb.jpg',0),(301,'g3.jpg',0)`)
   // 6001 (201/'2027') repoints onto 100; 6002 (202/'2027') then folds into 6001; 6003 (202/'2028') repoints.
   // 6101 (301/'2030') folds into keeper batch 6100; 6102 (301/'2031') repoints.
-  run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active) VALUES
+  seedStockFixture(d1.db, () => run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active) VALUES
     (6000,100,'2026',1,1),(6001,201,'2027',1,1),(6002,202,'2027',1,1),(6003,202,'2028',1,1),
-    (6100,300,'2030',1,1),(6101,301,'2030',1,1),(6102,301,'2031',1,1)`)
-  run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES
+    (6100,300,'2030',1,1),(6101,301,'2030',1,1),(6102,301,'2031',1,1)`))
+  seedStockFixture(d1.db, () => run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES
     (6000,1,5),(6001,1,4),(6001,2,2),(6002,1,1),(6002,3,1),(6003,3,1),
-    (6100,1,6),(6101,1,6),(6102,2,8)`)
+    (6100,1,6),(6101,1,6),(6102,2,8)`))
   run1(`INSERT INTO sales (id) VALUES (910),(911)`)
   run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES
     (720,910,201,'DupA1',1),(721,910,202,'DupA2',2),(722,911,301,'DupB1',1)`)
@@ -829,7 +836,7 @@ async function runBulk() {
     const res = await foldForward(d1, step.keeper, step.dup, branchNameById, 'branch-only duplicate cleanup')
     reversals.push(res.reversal)
   }
-  for (const kid of [100, 300]) run1('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', { id: kid })
+  for (const kid of [100, 300]) seedStockFixture(d1.db, () => run1('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', { id: kid }))
   const F1 = fingerprintMany(d1, PIDS, BIDS)
 
   let snapshotId, actionHistoryId
@@ -912,6 +919,7 @@ async function runBulk() {
 async function runResolveChoiceUndo() {
   console.log('\n-- Resolve choices across undo --')
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const undo = loadUndoAppliers(d1)
   const choices = loadActualDependency(path.join(LIB_DIR, 'productResolveChoices.ts'))
   const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
@@ -922,11 +930,11 @@ async function runResolveChoiceUndo() {
 
   function seed() {
     run1(`INSERT INTO branches (id, name) VALUES (1,'B1')`)
-    run1(`INSERT INTO products (id, name, name_normalized, barcode, brand, brands, brand_compact, category, categories, unit, unit_normalized,
+    seedStockFixture(d1.db, () => run1(`INSERT INTO products (id, name, name_normalized, barcode, brand, brands, brand_compact, category, categories, unit, unit_normalized,
       selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, image_path, is_active) VALUES
       (110,'Glow Serum 30ml','glow serum 30ml (legacy)','8850000000070','Glowy','Glowy','glowy-legacy','Serum','Serum','pcs','pcs',12,49200,10,41000,5,20500,'products/glow-70.jpg',1),
       (111,'Glow-Serum 30ml','glow serum 30ml','8850000000071','Glowy Lab','Glowy Lab||Glowy','glowylab','Skin Care','Skin Care','bottle','bottle',9.5,38950,8,32800,6,24600,NULL,1),
-      (999,'Unrelated',NULL,'1',NULL,NULL,NULL,NULL,NULL,'pcs','pcs',1,0,0,0,0,0,NULL,1)`)
+      (999,'Unrelated',NULL,'1',NULL,NULL,NULL,NULL,NULL,'pcs','pcs',1,0,0,0,0,0,NULL,1)`))
     run1(`INSERT INTO sales (id) VALUES (960)`)
     run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (760,960,110,'Glow Serum 30ml',1),(761,960,111,'Glow-Serum 30ml',1)`)
   }
@@ -997,8 +1005,8 @@ async function runResolveChoiceUndo() {
   // dupBarcodeBefore and must leave the merged record's barcode as it is.
   async function mergeWithBarcodes(keeperAfter, dupAfter, extra) {
     const merged = await foldForward(d1, { id: KEEPER, name: 'Glow Serum 30ml' }, { id: DUP, name: 'Glow-Serum 30ml', image_path: null }, new Map([[1, 'B1']]), 'resolve grid keep merge')
-    run1('UPDATE products SET barcode = @k WHERE id = @id', { k: keeperAfter, id: KEEPER })
-    run1('UPDATE products SET barcode = @d WHERE id = @id', { d: dupAfter, id: DUP })
+    seedStockFixture(d1.db, () => run1('UPDATE products SET barcode = @k WHERE id = @id', { k: keeperAfter, id: KEEPER }))
+    seedStockFixture(d1.db, () => run1('UPDATE products SET barcode = @d WHERE id = @id', { d: dupAfter, id: DUP }))
     const recorded = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, { ...merged.reversal, keeperBarcodeBefore: '8850000000070', ...extra })
     const undoer = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: recorded.snapshotId })
     await undoer.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
@@ -1014,7 +1022,7 @@ async function runResolveChoiceUndo() {
   await check('a snapshot without dupBarcodeBefore leaves the merged record\'s barcode alone', async () => {
     await mergeWithBarcodes('8850000000070', 'MERGED-ROW-BARCODE', {})
     assert.deepEqual(barcodes(), ['8850000000070', 'MERGED-ROW-BARCODE'])
-    run1("UPDATE products SET barcode = '8850000000071' WHERE id = ?", DUP)
+    seedStockFixture(d1.db, () => run1("UPDATE products SET barcode = '8850000000071' WHERE id = ?", DUP))
   })
 
   await check('the name-snapshot list matches the rename/merge path in products.ts', async () => {

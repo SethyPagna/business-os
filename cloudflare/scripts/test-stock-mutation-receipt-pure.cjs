@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Per-line stock idempotency: the companion for
 // cloudflare/migrations/0192_stock_mutation_receipts.sql and the guard that
 // uses it, cloudflare/src/lib/stockMutationReceipt.ts.
@@ -50,6 +51,7 @@ function loadReal(relPath, overrides = {}) {
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
     if (request in overrides) return overrides[request]
+    if (request === '../lib/stockTransaction' || request === './stockTransaction') return loadReal('lib/stockTransaction.ts')
     if (request.startsWith('.')) return autoStub()
     Module._load = originalLoad
     try {
@@ -84,6 +86,7 @@ function wrapFlat(rawDb) {
         },
       }
     },
+    batchOnce(items) { return this.batch(items) },
     async batch(items) { return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
     raw: rawDb,
@@ -182,12 +185,13 @@ assert.equal(typeof receiptMod.resetStockMutationReceiptSchemaProbe, 'function',
 
 function freshDb() {
   const rawDb = openDb(loadAll())
-  rawDb.exec(`
+assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(rawDb, () => rawDb.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
+  `))
   receiptMod.resetStockMutationReceiptSchemaProbe()
   return wrapFlat(rawDb)
 }
@@ -238,6 +242,7 @@ function faultyDb(db, match) {
       }
       return db.prepare(sql)
     },
+    batchOnce: (items) => db.batchOnce(items),
     batch: (items) => db.batch(items),
     transaction: (fn) => db.transaction(fn),
     raw: db.raw,
@@ -255,6 +260,7 @@ function noReleaseDb(db) {
       }
       return db.prepare(sql)
     },
+    batchOnce: (items) => db.batchOnce(items),
     batch: (items) => db.batch(items),
     transaction: (fn) => db.transaction(fn),
     raw: db.raw,

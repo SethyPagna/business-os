@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // FX-undo2 item 1 (R-undo C5/C12): an undo/redo the Worker refuses in order
 // to protect newer data must say so with a stable machine code in its 409
@@ -62,6 +63,7 @@ const acquisitionCostAccess = loadLibrary('acquisitionCostAccess', { './permissi
 function loadHistoryRoute(db, undoAppliers) {
   const stubs = {
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
+    '../lib/productCostReview': loadLibrary('productCostReview', { './catalogCostRecompute': loadLibrary('catalogCostRecompute', { './moneyPrecision': loadLibrary('moneyPrecision') }) }),
     '../lib/db': { getDb: () => db },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
     '../lib/audit': { audit: async () => {} },
@@ -104,6 +106,7 @@ function loadHistoryRoute(db, undoAppliers) {
 
 function freshWorld(options = {}) {
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const { undoAppliers, branchWrites, db } = loadUndoAppliers(d1, options)
   const run = (sql, params) => d1.db.prepare(sql).run(params == null ? {} : params)
   return { d1, undoAppliers, branchWrites, db, run, app: loadHistoryRoute(db, undoAppliers) }
@@ -197,10 +200,10 @@ async function branchEdit(world, id, changes) {
 function supplierWorld() {
   const world = freshWorld()
   world.run(`INSERT INTO suppliers (id, name) VALUES (7, 'Acme Co'), (9, 'Gamma Ltd')`)
-  world.run(`INSERT INTO products (id, name, is_active) VALUES (100, 'ProdA', 1)`)
-  world.run(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active, supplier_id, supplier_name) VALUES
+  seedStockFixture(world.d1.db, () => world.run(`INSERT INTO products (id, name, is_active) VALUES (100, 'ProdA', 1)`))
+  seedStockFixture(world.d1.db, () => world.run(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active, supplier_id, supplier_name) VALUES
     (5000, 100, 'A1', 1, 1, NULL, NULL),
-    (5001, 100, 'A2', 2, 1, NULL, 'Acme Co')`)
+    (5001, 100, 'A2', 2, 1, NULL, 'Acme Co')`))
   return world
 }
 
@@ -210,7 +213,7 @@ async function supplierBackfill(world) {
   const targets = world.d1.db.prepare(
     'SELECT id, supplier_id, supplier_name FROM product_batches WHERE variant_product_id = 100 AND supplier_id IS NULL ORDER BY id',
   ).all()
-  world.run(`UPDATE product_batches SET supplier_id = 7, supplier_name = 'Acme Co' WHERE id IN (${targets.map((t) => Number(t.id)).join(',')})`)
+  seedStockFixture(world.d1.db, () => world.run(`UPDATE product_batches SET supplier_id = 7, supplier_name = 'Acme Co' WHERE id IN (${targets.map((t) => Number(t.id)).join(',')})`))
   const recorded = await world.undoAppliers.recordSupplierBackfillSnapshot({}, USER, {
     productId: 100, supplierId: 7, supplierName: 'Acme Co',
     lots: targets.map((t) => ({ id: Number(t.id), prevSupplierId: null, prevSupplierName: t.supplier_name ?? null })),
@@ -300,7 +303,7 @@ async function main() {
   await check('supplier.backfill undo after a re-attribution: 409 with the record-changed code', async () => {
     const world = supplierWorld()
     const h = await supplierBackfill(world)
-    world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001"))
     assertCoded(await replay(world, h, 'undo'), RECORD_CHANGED, /re-attributed after this change/)
     assert.equal(world.d1.db.prepare('SELECT supplier_id FROM product_batches WHERE id = 5000').get().supplier_id, 7)
     assert.equal(historyRow(world, h).status, 'undoable')
@@ -310,7 +313,7 @@ async function main() {
     const world = supplierWorld()
     const h = await supplierBackfill(world)
     assert.equal((await replay(world, h, 'undo')).status, 200)
-    world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5000")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5000"))
     assertCoded(await replay(world, h, 'redo'), RECORD_CHANGED, /re-attributed after this change/)
   })
 
@@ -320,7 +323,7 @@ async function main() {
     const batch = world.d1.batch.bind(world.d1)
     world.d1.batch = async (statements) => {
       world.d1.batch = batch
-      world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001")
+      seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001"))
       return batch(statements)
     }
     assertCoded(await replay(world, h, 'undo'), RECORD_CHANGED, /re-attributed while this change was being undone/)

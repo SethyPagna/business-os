@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // FX-undo2 item 2 (R-undo C10): the LEGACY sale.add_items replay must not
 // overwrite a later sale edit.
 //
@@ -33,11 +34,12 @@ const money = (usd) => ({ subtotal_usd: usd, subtotal_khr: usd * RATE, total_usd
 
 function freshWorld() {
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const { undoAppliers } = loadUndoAppliers(d1, { realSaleModules: true })
   const run = (sql, params) => d1.db.prepare(sql).run(params == null ? {} : params)
   const get = (sql, params) => d1.db.prepare(sql).get(params == null ? {} : params)
   run("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)")
-  run("INSERT INTO products (id, name, is_active) VALUES (100, 'Serum', 1), (101, 'Toner', 1)")
+  seedStockFixture(d1.db, () => run("INSERT INTO products (id, name, is_active) VALUES (100, 'Serum', 1), (101, 'Toner', 1)"))
   return { d1, undoAppliers, run, get }
 }
 

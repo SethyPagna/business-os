@@ -35,6 +35,8 @@ const { pathToFileURL } = require('url')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const { D1Compat } = require('./harness/d1compat.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href)
@@ -53,6 +55,7 @@ function loadRealLib(fileName, loaded = new Map()) {
   return mod.exports
 }
 const { planReconcileBranchSnapshot } = loadRealLib('productBatches.ts')
+const { executeStockTransaction } = loadRealLib('stockTransaction.ts')
 
 let passed = 0
 let failed = 0
@@ -70,6 +73,7 @@ async function check(name, fn) {
 const db = new DatabaseSync(':memory:')
 db.exec('PRAGMA foreign_keys = OFF;')
 for (const sql of loadAll()) db.exec(sql)
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
 // ---- fixture ---------------------------------------------------------------------
 db.exec(`INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1), (2, 'Store', 1, 0)`)
@@ -77,20 +81,20 @@ let nextProduct = 0
 let nextLot = 100
 function product(name) {
   nextProduct += 1
-  db.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
-    VALUES (?, ?, ?, 1, 0, 3, 12000)`).run(nextProduct, name, `B${1000 + nextProduct}`)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+    VALUES (?, ?, ?, 1, 0, 3, 12000)`).run(nextProduct, name, `B${1000 + nextProduct}`))
   return nextProduct
 }
 // A lot of `qty` units at `branchId`, plus `unlotted` legacy units in
 // branch_stock beside it.
 function lot(productId, branchId, qty, unlotted = 0) {
   nextLot += 1
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
-    VALUES (?, ?, ?, ?, '2026-09-05', 1, 2, ?)`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, qty)
-  db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(nextLot, branchId, qty)
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)
-    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`).run(productId, branchId, qty + unlotted)
-  db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?').run(qty + unlotted, productId)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
+    VALUES (?, ?, ?, ?, '2026-09-05', 1, 2, ?)`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, qty))
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(nextLot, branchId, qty))
+  seedStockFixture(db, () => db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)
+    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`).run(productId, branchId, qty + unlotted))
+  seedStockFixture(db, () => db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?').run(qty + unlotted, productId))
   return nextLot
 }
 // The pre-fix removeStockAcrossBatches drain, statement for statement (base
@@ -98,12 +102,12 @@ function lot(productId, branchId, qty, unlotted = 0) {
 // updated_at, then the clamped aggregate decrements for the drained units.
 // The remainder's UPSERT failed after this had committed, so no movement.
 function oldDrain(productId, branchId, batchId, drained) {
-  db.prepare(`UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
-          WHERE batch_id = @batchId AND branch_id = @branchId`).run({ batchId, branchId, quantity: drained })
-  db.prepare('UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId')
-    .run({ productId, branchId, quantity: drained })
-  db.prepare('UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId')
-    .run({ productId, quantity: drained })
+  seedStockFixture(db, () => db.prepare(`UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
+          WHERE batch_id = @batchId AND branch_id = @branchId`).run({ batchId, branchId, quantity: drained }))
+  seedStockFixture(db, () => db.prepare('UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId')
+    .run({ productId, branchId, quantity: drained }))
+  seedStockFixture(db, () => db.prepare('UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId')
+    .run({ productId, quantity: drained }))
 }
 function movement(productId, branchId, createdAtSql, type = 'adjustment', qty = -1) {
   db.prepare(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, created_at)
@@ -112,17 +116,11 @@ function movement(productId, branchId, createdAtSql, type = 'adjustment', qty = 
 // A lot at 0 whose last write is the literal timestamp given.
 function zeroLotAt(productId, branchId, updatedAt) {
   const id = lot(productId, branchId, 5)
-  db.prepare('UPDATE branch_batch_stock SET quantity = 0, updated_at = ? WHERE batch_id = ?').run(updatedAt, id)
+  seedStockFixture(db, () => db.prepare('UPDATE branch_batch_stock SET quantity = 0, updated_at = ? WHERE batch_id = ?').run(updatedAt, id))
   return id
 }
-function productsImportSnapshot(productId, branchId, quantity) {
-  db.exec('BEGIN')
-  for (const statement of planReconcileBranchSnapshot({ productId, branchId, quantity, receivedDate: '2026-09-28' })) {
-    const prepared = db.prepare(statement.sql)
-    prepared.setAllowUnknownNamedParameters(true)
-    prepared.run(statement.params)
-  }
-  db.exec('COMMIT')
+async function productsImportSnapshot(productId, branchId, quantity) {
+  await executeStockTransaction(new D1Compat(db), planReconcileBranchSnapshot({ productId, branchId, quantity, receivedDate: '2026-09-28' }), 'retry')
 }
 let nextReceipt = 0
 function receipt({ written, status, response, createdAtSql = 'CURRENT_TIMESTAMP', completed = true, productId = 1, branchId = 1, quantity = 4 }) {
@@ -157,7 +155,7 @@ movement(pRestocked, 1, 'CURRENT_TIMESTAMP', 'purchase', 4)
 const pOtherBranchKept = product('drained while the other branch kept stock at that instant')
 const lotOtherBranchKeptDrain = zeroLotAt(pOtherBranchKept, 1, '2026-09-24 10:00:00')
 const lotOtherBranchKept = lot(pOtherBranchKept, 2, 4)
-db.prepare("UPDATE branch_batch_stock SET updated_at = '2026-09-24 10:00:00' WHERE batch_id = ?").run(lotOtherBranchKept)
+seedStockFixture(db, () => db.prepare("UPDATE branch_batch_stock SET updated_at = '2026-09-24 10:00:00' WHERE batch_id = ?").run(lotOtherBranchKept))
 const rCheck = receipt({ written: 1, status: 400, response: { error: 'CHECK constraint failed: quantity >= 0' }, productId: pMixed, quantity: 4 })
 const rStale = receipt({ written: 1, status: null, completed: false, createdAtSql: "datetime('now', '-10 minutes')", productId: pLate })
 
@@ -181,15 +179,15 @@ const rInFlight = receipt({ written: 1, status: null, completed: false, productI
 const pImportTrim = product('import says 3 of 5: the newer lot is trimmed to 0')
 const lotImportKept = lot(pImportTrim, 1, 3)
 const lotImportTrimmed = lot(pImportTrim, 1, 2)
-productsImportSnapshot(pImportTrim, 1, 3)
 const pImportRestamp = product('import restamps a lot sold to 0 months ago')
 const lotImportRestampKept = lot(pImportRestamp, 1, 3)
 const lotImportRestamped = zeroLotAt(pImportRestamp, 1, '2026-06-01 10:00:00')
 movement(pImportRestamp, 1, "'2026-06-01 10:00:00'", 'sale', -5)
-productsImportSnapshot(pImportRestamp, 1, 3)
 
 // ---- run -----------------------------------------------------------------------
 ;(async () => {
+  await productsImportSnapshot(pImportTrim, 1, 3)
+  await productsImportSnapshot(pImportRestamp, 1, 3)
   const guard = await load('ops/scripts/ops-sql-guard.mjs')
   const q = guard.loadQuery('stk-c-lot-drain-without-movement')
   const rows = db.prepare(q.sql).all()
