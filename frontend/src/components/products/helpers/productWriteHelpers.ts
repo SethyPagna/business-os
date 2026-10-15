@@ -326,14 +326,13 @@ export function recordedTransferReplay(transfers: readonly RecordedStockTransfer
       : { ...entry })
 }
 
-function clearStockUnitCost(purchase: unknown, cost: unknown): number | null {
-  const mirror = knownCost(purchase)
-  return mirror !== null && mirror > 0 ? mirror : knownCost(cost)
+function clearStockUnitCost(cost: unknown, purchase: unknown): number | null {
+  return knownCost(cost !== undefined ? cost : purchase)
 }
 
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {
-  const unitCostUsd = clearStockUnitCost(product?.purchase_price_usd, product?.cost_price_usd)
-  const unitCostKhr = clearStockUnitCost(product?.purchase_price_khr, product?.cost_price_khr)
+  const unitCostUsd = clearStockUnitCost(product?.cost_price_usd, product?.purchase_price_usd)
+  const unitCostKhr = clearStockUnitCost(product?.cost_price_khr, product?.purchase_price_khr)
   return (product?.branch_stock || [])
     .map((entry): ClearStockAdjustment | null => {
       const branchId = Number(entry?.branch_id || 0)

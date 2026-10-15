@@ -305,6 +305,19 @@ await runTest('actual Products bulk callbacks show catalog before/after and pin 
   }
 })
 
+await runTest('clear-stock hints keep canonical NULL/zero ahead of a stale mirror and fall back only when absent', () => {
+  for (const cost of [null, 0, 4]) {
+    const [hint] = helpers.buildProductClearStockAdjustments({ cost_price_usd: cost, cost_price_khr: cost, purchase_price_usd: 9, purchase_price_khr: 99, branch_stock: [{ branch_id: 1, quantity: 2 }] })
+    assert.equal(hint.unitCostUsd, cost)
+    assert.equal(hint.unitCostKhr, cost)
+    assert.equal(hint.quantity, 2)
+    const payload = writeHelpers.buildProductStockAdjustmentPayload({}, { type: 'remove', quantity: hint.quantity, branchId: hint.branchId, unitCostUsd: hint.unitCostUsd, unitCostKhr: hint.unitCostKhr })
+    assert.equal(payload.unitCostUsd, cost, 'the raw stock payload retains the selected hint')
+  }
+  const [legacy] = helpers.buildProductClearStockAdjustments({ purchase_price_usd: 9, purchase_price_khr: 99, branch_stock: [{ branch_id: 1, quantity: 2 }] })
+  assert.deepEqual([legacy.unitCostUsd, legacy.unitCostKhr], [9, 99], 'mirror-only legacy input still falls back')
+})
+
 await runTest('bulk cost uses the catalog value when the purchase mirror is absent or stale', () => {
   for (const [field, own] of [['purchase_price_usd', 'cost_price_usd'], ['purchase_price_khr', 'cost_price_khr']]) {
     for (const mirror of [undefined, 0, 99]) {

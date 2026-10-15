@@ -93,11 +93,11 @@ assert.deepEqual(
     {
       branchId: 1,
       quantity: 5,
-      unitCostUsd: 3,
+      unitCostUsd: 4,
       unitCostKhr: 12000,
     },
   ],
-  'clear-stock planning returns valid positive branch stock rows with unit costs',
+  'clear-stock planning keeps canonical cost ahead of a purchase mirror and filters invalid stock rows',
 )
 
 assert.deepEqual(
