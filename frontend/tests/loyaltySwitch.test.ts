@@ -82,4 +82,37 @@ assert.throws(() => assert.equal(oldResolve(undefined, undefined), false), 'old 
 assert.throws(() => assert.equal(oldResolve(true, 'false'), false), 'old explicit-true bypass must fail')
 assert.throws(() => assert.equal(expression("!['0', 'false', 'no', 'off'].includes(String(settings.loyalty_points_enabled ?? 'true').trim().toLowerCase())", { settings: {} }), false), 'old settings hydration must fail')
 
-console.log('PASS loyalty switch defaults, settings save, global gate, draft opt-out and disabled POS control; three old-behavior controls fail')
+const copyDeclaration = pageAst.statements.filter(ts.isVariableStatement).flatMap(statement => statement.declarationList.declarations).find(declaration => declaration.name.getText(pageAst) === 'COPY')
+assert.ok(copyDeclaration?.initializer)
+const localeCopy = expression(copyDeclaration.initializer.getText(pageAst))
+function verifySwitchHint(hint: string, locale: 'en' | 'km'): void {
+  if (locale === 'en') {
+    assert.match(hint, /cannot turn it on while this switch is off/)
+    assert.doesNotMatch(hint, /overrides/)
+  } else {
+    assert.match(hint, /មិនអាចបើកបានទេ.*កុងតាក់នេះបិទ/)
+  }
+}
+verifySwitchHint(localeCopy.en.membershipPointsEnabledHint, 'en')
+verifySwitchHint(localeCopy.km.membershipPointsEnabledHint, 'km')
+assert.throws(() => verifySwitchHint('Default points earning for each new order; the POS switch overrides it for that order only.', 'en'), 'old hint must not promise an override of global OFF')
+assert.throws(() => verifySwitchHint('អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។', 'km'), 'old Khmer hint must fail the same contract')
+assert.match(localeCopy.en.behavior3, /before the reset or while loyalty was off/)
+assert.match(localeCopy.km.behavior3, /មុនការកំណត់ពិន្ទុឡើងវិញ.*ពិន្ទុសមាជិកបិទ/)
+const guidanceKeys = new Set(['membershipPointsEnabledHint', 'membershipPointsOff', 'behavior1', 'behavior2', 'behavior3', 'behavior4', 'attachHint'])
+const renderedGuidance = new Set<string>()
+function verifyFallbacks(node: ts.Node): void {
+  if (ts.isCallExpression(node) && node.expression.getText(pageAst) === 'copy') {
+    const [key, fallback] = node.arguments
+    if (key && ts.isStringLiteral(key) && guidanceKeys.has(key.text)) {
+      assert.ok(fallback && ts.isStringLiteral(fallback))
+      assert.equal(fallback.text, localeCopy.en[key.text], `fallback must preserve ${key.text} policy`)
+      renderedGuidance.add(key.text)
+    }
+  }
+  ts.forEachChild(node, verifyFallbacks)
+}
+verifyFallbacks(pageAst)
+assert.deepEqual(renderedGuidance, guidanceKeys)
+
+console.log('PASS loyalty defaults, settings save, global gate, draft opt-out, POS control and EN/KM guidance; five old-behavior controls fail')
