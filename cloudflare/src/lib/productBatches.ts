@@ -36,6 +36,7 @@ import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
+import { executeStockTransaction } from './stockTransaction'
 
 export type ProductBatchRow = {
   id: number
@@ -719,7 +720,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   ]
   if (input.atomicMark?.execute) {
     await input.atomicMark.execute(db, statements)
-  } else await db.batch(statements)
+  } else await executeStockTransaction(db, statements, 'retry')
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
       WHERE variant_product_id = @productId AND
@@ -929,7 +930,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
   const available = Number(batch.available) || 0
   if (input.quantity > available) throw new InsufficientBatchStockError(available)
 
-  await db.batch([
+  await executeStockTransaction(db, [
     {
       sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
             WHERE batch_id = @batchId AND branch_id = @branchId`,
@@ -943,7 +944,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
       sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
       params: { productId: input.productId, quantity: input.quantity },
     },
-  ])
+  ], 'retry')
 
   return { productName: batch.productName, lotCode: batch.lotCode, batchNumber: batch.batchNumber }
 }
@@ -1006,14 +1007,13 @@ export async function resolveDestinationBatch(
       batchNumber,
     },
   }
-  if (options?.writeGuard) {
-    const results = await db.batch([options.writeGuard, insertStatement])
-    const insertedId = Number(results[1]?.meta?.last_row_id ?? 0)
-    if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
-    return insertedId
-  }
-  const inserted = await db.prepare(insertStatement.sql).run(insertStatement.params)
-  return Number(inserted.lastInsertRowid)
+  const results = await executeStockTransaction(db, [
+    ...(options?.writeGuard ? [options.writeGuard] : []),
+    insertStatement,
+  ], 'retry')
+  const insertedId = Number(results[results.length - 1]?.meta?.last_row_id ?? 0)
+  if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
+  return insertedId
 }
 
 
