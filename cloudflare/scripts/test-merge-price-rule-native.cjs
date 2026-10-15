@@ -34,7 +34,6 @@ async function main() {
     '../lib/undoAppliers': undoAppliers,
     '../lib/audit': noAudit,
     '../lib/actorSnapshot': actorSnapshot,
-    '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: [] },
   }).default
   app.route('/api/action-history', historyRoutes)
   const NEEDS = 'product_edit_permission_required'
@@ -173,7 +172,7 @@ async function main() {
     const payload = JSON.parse(history.undo_payload)
     state.user = demoted
     const before = dump()
-    const refused = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true })
+    const refused = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true, expected_generation: payload.generation })
     assert.equal(refused.status, 403, JSON.stringify(refused.body))
     assert.equal(refused.body.code, NEEDS)
     assert.equal(dump(), before)
@@ -181,7 +180,7 @@ async function main() {
     const reversal = JSON.parse(saved.payload_json)
     delete reversal.priceOverridden
     state.native.db.prepare('UPDATE undo_snapshots SET payload_json = ? WHERE id = ?').run(JSON.stringify(reversal), payload.snapshot_id)
-    const allowed = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true })
+    const allowed = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true, expected_generation: payload.generation })
     assert.equal(allowed.status, 200, JSON.stringify(allowed.body))
     assert.equal(priceColumns().selling_price_usd, 12)
   })

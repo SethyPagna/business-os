@@ -20,7 +20,6 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const Module = require('node:module')
 const { Hono } = require('hono')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -28,23 +27,23 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const SRC = path.join(__dirname, '../src')
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'product-resolve-choices-parity.json'), 'utf8'))
 
-let inertKeys = 0
-function inert() {
-  const key = `inert-${inertKeys += 1}`
-  return new Proxy(function () {}, {
-    get: (_t, prop) => (prop === 'then' ? undefined : prop === Symbol.toPrimitive ? () => key : inert()),
-    apply: () => inert(),
-    construct: () => inert(),
-  })
-}
 function load(file, overrides = {}) {
-  const full = path.join(SRC, file)
-  const code = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-  const original = Module._load
-  Module._load = (request, parent, isMain) => Object.hasOwn(overrides, request) ? overrides[request] : request.startsWith('.') ? inert() : original(request, parent, isMain)
-  const mod = { exports: {} }
-  try { new Function('require', 'module', 'exports', '__filename', '__dirname', code)(require, mod, mod.exports, full, path.dirname(full)) } finally { Module._load = original }
-  return mod.exports
+  const root = path.join(SRC, file)
+  const resolvedOverrides = new Map(Object.entries(overrides).map(([request, value]) => [request.startsWith('.') ? path.resolve(path.dirname(root), request.replace(/\.ts$/, '') + '.ts') : request, value]))
+  const cache = new Map()
+  function compile(full) {
+    if (resolvedOverrides.has(full)) return resolvedOverrides.get(full)
+    if (cache.has(full)) return cache.get(full).exports
+    const code = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const mod = { exports: {} }
+    cache.set(full, mod)
+    const localRequire = (request) => request.startsWith('.')
+      ? compile(path.resolve(path.dirname(full), request.replace(/\.ts$/, '') + '.ts'))
+      : resolvedOverrides.has(request) ? resolvedOverrides.get(request) : require(request)
+    new Function('require', 'module', 'exports', '__filename', '__dirname', code)(localRequire, mod, mod.exports, full, path.dirname(full))
+    return mod.exports
+  }
+  return compile(root)
 }
 
 const state = { native: null, user: null, tier: 'paid', queries: 0 }
@@ -131,18 +130,30 @@ const CHOICE_COLUMNS = ['name', 'name_normalized', 'barcode', 'brand', 'brands',
   'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'image_path']
 
 function sqlValue(value) { return value == null ? 'NULL' : typeof value === 'number' ? String(value) : `'${String(value).replace(/'/g, "''")}'` }
+function seedStock(run) {
+  const db = state.native.db
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    run()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch (error) { db.exec('ROLLBACK'); throw error }
+}
 function fresh() {
   state.native = openDb(loadAll())
   const db = state.native.db
-  db.exec("INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')")
-  for (const row of FIXTURE.rows) {
-    const columns = ['id', 'name', 'barcode', 'brand', 'brands', 'category', 'categories', 'unit', 'selling_price_usd', 'selling_price_khr',
-      'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr', 'image_path']
-    db.exec(`INSERT INTO products (${columns.join(', ')}, is_active) VALUES (${columns.map((column) => sqlValue(row[column])).join(', ')}, 1)`)
-  }
-  // The survivor's own sale keeps its name in step with the product.
-  db.exec(`INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (900, 'R-900', 1, 12, 'completed')`)
-  db.exec(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (700, 900, ${KEEP}, 'Glow Serum 30ml', 1, 12, 12, 1)`)
+  seedStock(() => {
+    db.exec("INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')")
+    for (const row of FIXTURE.rows) {
+      const columns = ['id', 'name', 'barcode', 'brand', 'brands', 'category', 'categories', 'unit', 'selling_price_usd', 'selling_price_khr',
+        'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr', 'image_path']
+      db.exec(`INSERT INTO products (${columns.join(', ')}, is_active) VALUES (${columns.map((column) => sqlValue(row[column])).join(', ')}, 1)`)
+    }
+    // The survivor's own sale keeps its name in step with the product.
+    db.exec(`INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (900, 'R-900', 1, 12, 'completed')`)
+    db.exec(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (700, 900, ${KEEP}, 'Glow Serum 30ml', 1, 12, 12, 1)`)
+  })
   state.user = ADMIN
   state.tier = 'paid'
 }
@@ -152,6 +163,7 @@ const dump = () => JSON.stringify(['products', 'branch_stock', 'product_batches'
 const keeperColumns = () => one(`SELECT ${CHOICE_COLUMNS.join(', ')} FROM products WHERE id = ?`, KEEP)
 
 async function request(method, url, body) {
+  assert.equal(one("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
   state.queries = 0
   planTier.__resetPlanTierCacheForTests()
   const init = { method, headers: { 'Content-Type': 'application/json' } }
@@ -178,7 +190,7 @@ async function reviewGroup(requestId, choices) {
 async function main() {
   await check('ROUTE: real stock guard preserves coded refusal and the untouched fixture', async () => {
     fresh()
-    state.native.db.exec(`UPDATE products SET name='Guard fixture',barcode=NULL WHERE id IN (${KEEP},${M1}); UPDATE products SET stock_quantity=3 WHERE id=${M1}`)
+    seedStock(() => state.native.db.exec(`UPDATE products SET name='Guard fixture',barcode=NULL WHERE id IN (${KEEP},${M1}); UPDATE products SET stock_quantity=3 WHERE id=${M1}`))
     const before = dump()
     const refused = await merge({ keepId: KEEP, mergeId: M1 })
     assert.equal(refused.status, 409, JSON.stringify(refused.body))
@@ -369,8 +381,9 @@ async function main() {
   })
 
   const replay = (history, direction) => {
-    const payload = JSON.parse(direction === 'undo' ? history.undo_payload : history.redo_payload)
-    return undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction, historyId: history.id })
+    const current = one('SELECT undo_payload,redo_payload FROM action_history WHERE id=?', history.id)
+    const payload = JSON.parse(direction === 'undo' ? current.undo_payload : current.redo_payload)
+    return undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction, historyId: history.id, generation: payload.generation })
   }
   const undoableHistories = () => rows("SELECT id, undo_payload, redo_payload FROM action_history WHERE status = 'undoable' AND entity = 'product' ORDER BY id DESC")
 

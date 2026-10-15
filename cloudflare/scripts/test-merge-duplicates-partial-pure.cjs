@@ -4,40 +4,30 @@ const path = require('node:path')
 const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
-const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const SRC = path.join(__dirname, '..', 'src')
 const FULL_USER = { id: 91, username: 'merge_operator', permissions: JSON.stringify({ products: true }) }
 
-function permissive() {
-  return new Proxy(function () {}, {
-    get: (_target, prop) => (prop === 'default' ? permissive() : permissive()),
-    apply: () => undefined,
-    construct: () => ({}),
-  })
-}
-
 function loadTs(relPath, stubs = {}) {
-  const abs = path.join(SRC, relPath)
-  const output = ts.transpileModule(fs.readFileSync(abs, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: abs,
-  }).outputText
-  const original = Module._load
-  Module._load = (request, parent, isMain) => {
-    if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
-    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
-    if (request.startsWith('.') || request === 'hono') return permissive()
-    return original.call(Module, request, parent, isMain)
+  const root = path.join(SRC, relPath)
+  const resolvedStubs = new Map(Object.entries(stubs).map(([request, value]) => [request.startsWith('.') ? path.resolve(path.dirname(root), request.replace(/\.ts$/, '') + '.ts') : request, value]))
+  resolvedStubs.set(path.join(SRC, 'lib', 'moneyPrecision.ts'), moneyPrecision)
+  const cache = new Map()
+  function compile(full) {
+    if (resolvedStubs.has(full)) return resolvedStubs.get(full)
+    if (cache.has(full)) return cache.get(full).exports
+    const code = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const mod = { exports: {} }
+    cache.set(full, mod)
+    const localRequire = (request) => request.startsWith('.')
+      ? compile(path.resolve(path.dirname(full), request.replace(/\.ts$/, '') + '.ts'))
+      : resolvedStubs.has(request) ? resolvedStubs.get(request) : require(request)
+    new Function('require', 'module', 'exports', '__filename', '__dirname', code)(localRequire, mod, mod.exports, full, path.dirname(full))
+    return mod.exports
   }
-  const mod = { exports: {} }
-  try {
-    new Function('exports', 'require', 'module', '__filename', '__dirname', output)(mod.exports, require, mod, abs, path.dirname(abs))
-  } finally {
-    Module._load = original
-  }
-  return mod.exports
+  return compile(root)
 }
 
 class CapturingHono {
@@ -154,14 +144,17 @@ function loadMergeHandler(adapter) {
     '../lib/productMergeSnapshot': snapshots,
     '../lib/undoAppliers': undo, '../lib/sqlBinding': sqlBinding, '../lib/actorSnapshot': actor, '../lib/permissions': permissions,
     '../lib/catalogCostRecompute': catalogCost,
+    '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
   }).default
   const route = app.routes.find((entry) => entry.method === 'POST' && entry.path === '/merge-duplicates')
   assert.ok(route, 'real merge route must be registered')
   return route.handler
 }
 
-function seedGroups(groupSizes) {
+function seedGroups(groupSizes, extra = () => {}) {
   const d1 = openDb(loadAll())
+  d1.db.exec("BEGIN IMMEDIATE; INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
   d1.db.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)")
   const insert = d1.db.prepare(`INSERT INTO products(
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
@@ -175,6 +168,10 @@ function seedGroups(groupSizes) {
       insert.run(id++, name, barcode, 4 + member, 4000 + member * 1000, 10 + member, 40000, 8 + member, 32000)
     }
   }
+  extra(d1)
+  d1.db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT")
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => d1.db.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1'), /stock_transaction_required/)
   return d1
 }
 
@@ -182,30 +179,30 @@ async function invoke(handler) {
   return handler({
     get: (key) => key === 'user' ? FULL_USER : undefined,
     req: { json: async () => ({ client_request_id: 'partial-test' }) },
-    env: {},
+    env: { PLAN_TIER: 'paid' },
     executionCtx: { waitUntil: () => {} },
     json: (body, status = 200) => ({ body, status }),
   })
 }
 
-async function overloadAfterEight() {
+async function overloadAfterTwo() {
   const d1 = seedGroups(Array(9).fill(1))
-  const adapter = makeAdapter(d1, { failAfterFinalized: 8 })
+  const adapter = makeAdapter(d1, { failAfterFinalized: 2 })
   const result = await invoke(loadMergeHandler(adapter))
   assert.equal(result.status, 200)
   assert.equal(result.body.success, true)
   assert.equal(result.body.complete, false)
   assert.equal(result.body.interrupted, true)
   assert.equal(result.body.interruptionCode, 'merge_infrastructure_interrupted')
-  assert.equal(result.body.mergedProducts, 8)
-  assert.equal(result.body.mergedGroups, 8)
-  assert.equal(result.body.processedCaseKeys.length, 8)
-  assert.equal(result.body.actionHistoryIds.length, 8)
+  assert.equal(result.body.mergedProducts, 2)
+  assert.equal(result.body.mergedGroups, 2)
+  assert.equal(result.body.processedCaseKeys.length, 2)
+  assert.equal(result.body.actionHistoryIds.length, 2)
   assert.equal(result.body.remainingProducts, null, 'failed reconciliation must not invent an exact remaining count')
   assert.equal(result.body.maxAdditionalRequests, null, 'infrastructure interruption must not trigger an automatic retry')
-  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 8)
-  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' AND reversible=1").get().n, 8)
-  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 8)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 2)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' AND reversible=1").get().n, 2)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 2)
 }
 
 async function budgetStopsBetweenWholeGroups() {
@@ -227,8 +224,11 @@ async function budgetStopsBetweenWholeGroups() {
     assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 2)
     assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=1").get().n, 3)
     const mergedCost = d1.db.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=1').get()
-    assert.equal(mergedCost.cost_price_usd, 5, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster USD mean')
-    assert.equal(mergedCost.cost_price_khr, 5000, 'the accepted plain 4/5/6 cluster keeps its one whole-cluster KHR mean')
+    assert.equal(mergedCost.cost_price_usd, 4, 'without recorded lot cost or a manual override, the current cluster keeps keeper USD authority')
+    assert.equal(mergedCost.cost_price_khr, 4000, 'without recorded lot cost or a manual override, the current cluster keeps keeper KHR authority')
+    const snapshot = JSON.parse(d1.db.prepare('SELECT payload_json FROM undo_snapshots ORDER BY id LIMIT 1').get().payload_json)
+    assert.equal(snapshot.bulkClusterPlan.version, 3)
+    assert.deepEqual(snapshot.bulkClusterPlan.keeperCost, { usd: 4, khr: 4000 })
     assert.ok(adapter.state.statements <= 700, `the accepted first cluster used ${adapter.state.statements} counted D1 statements`)
   } finally {
     Date.now = realNow
@@ -327,10 +327,11 @@ async function wrongBatchMetadataFailsClosed() {
 }
 
 async function oversizedWritePlanRefusesBeforeMutation() {
-  const d1 = seedGroups([1])
-  const insertStock = d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,1)')
-  for (let branchId = 1; branchId <= 101; branchId += 1) insertStock.run(1, branchId)
-  for (let branchId = 1; branchId <= 100; branchId += 1) insertStock.run(2, branchId)
+  const d1 = seedGroups([1], d1 => {
+    const insertStock = d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,1)')
+    for (let branchId = 1; branchId <= 101; branchId += 1) insertStock.run(1, branchId)
+    for (let branchId = 1; branchId <= 100; branchId += 1) insertStock.run(2, branchId)
+  })
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
   assert.equal(result.body.complete, false)
@@ -343,12 +344,13 @@ async function oversizedWritePlanRefusesBeforeMutation() {
 }
 
 async function oversizedDependentReadRefusesBeforeMutation() {
-  const d1 = seedGroups([1])
-  const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)')
-  for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
-    insertBatch.run(1000 + ordinal, 1, `shared-${ordinal}`, ordinal)
-    insertBatch.run(2000 + ordinal, 2, `shared-${ordinal}`, ordinal)
-  }
+  const d1 = seedGroups([1], d1 => {
+    const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)')
+    for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
+      insertBatch.run(1000 + ordinal, 1, `shared-${ordinal}`, ordinal)
+      insertBatch.run(2000 + ordinal, 2, `shared-${ordinal}`, ordinal)
+    }
+  })
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
   assert.equal(result.body.complete, false)
@@ -360,9 +362,10 @@ async function oversizedDependentReadRefusesBeforeMutation() {
 }
 
 async function complexLaterMemberBlocksWholeThreeRowCluster() {
-  const d1 = seedGroups([2])
-  d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(3001,3,?,1,1)')
-    .run('later-member-lot')
+  const d1 = seedGroups([2], d1 => {
+    d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(3001,3,?,1,1)')
+      .run('later-member-lot')
+  })
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
   assert.equal(result.body.complete, false)
@@ -405,6 +408,28 @@ function currentPairClusterPlan(d1) {
       money: Object.fromEntries(fields.map((field) => [field, row[field]])),
     })),
   }
+}
+
+function legacyClusterWireEconomicsStayFrozen() {
+  const merge = loadTs('lib/productMerge.ts')
+  const wire = {
+    identityKey: 'legacy-4-5-6', keeperId: 1, memberIds: [1, 2, 3],
+    members: [4, 5, 6].map((cost, index) => ({ id: index + 1, updated_at: null,
+      money: { cost_price_usd: cost, cost_price_khr: cost * 1000, selling_price_usd: 10 + index,
+        selling_price_khr: 40000, wholesale_price_usd: 8 + index, wholesale_price_khr: 32000 } })),
+  }
+  for (const version of [1, 2]) {
+    const plan = merge.parseProductMergeClusterPlan(JSON.parse(JSON.stringify({ ...wire, version })))
+    assert.ok(plan)
+    assert.equal(plan.version, version)
+    assert.equal(Object.hasOwn(plan, 'keeperCost'), false)
+    const result = merge.resolveProductMergeClusterPlanEconomics(plan).merged
+    assert.equal(result.cost_price_usd, 5)
+    assert.equal(result.cost_price_khr, 5000)
+    assert.equal(result.selling_price_usd, 12)
+    assert.equal(result.wholesale_price_usd, 10)
+  }
+  assert.equal(merge.parseProductMergeClusterPlan({ ...wire, version: 3 }), null, 'current plans require their explicit keeper authority')
 }
 
 async function saturatedPlanHistoryRefusesBeforeMutation() {
@@ -450,7 +475,8 @@ async function oversizedPlanHistoryRefusesBeforeMutation() {
 }
 
 ;(async () => {
-  await overloadAfterEight()
+  legacyClusterWireEconomicsStayFrozen()
+  await overloadAfterTwo()
   await budgetStopsBetweenWholeGroups()
   await oversizedFirstClusterIsRefusedWhole()
   await batchMetadataFastPathSkipsDiscoveryReads()
