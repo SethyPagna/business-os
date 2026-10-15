@@ -4140,9 +4140,11 @@ export default function POS() {
                       aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
                       disabled={!resolveOrderLoyaltyAccrual(undefined, settings.loyalty_points_enabled)}
                       onClick={() => patchActive({ loyaltyAccrual: !loyaltyAccrual })}
-                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      className="relative h-11 w-11 flex-shrink-0 rounded-full"
                     >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span aria-hidden="true" className={`pointer-events-none absolute left-1 top-3 h-5 w-9 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
                     </button>
                   </div>
                 ) : null}

@@ -57,11 +57,13 @@ for (const choice of [false, true]) {
 }
 
 let disabledExpression = ''
+let switchElement: ts.Node | undefined
 function collectSwitch(node: ts.Node): void {
   if (ts.isJsxOpeningElement(node) && node.tagName.getText(posAst) === 'button') {
     const attributes = node.attributes.properties.filter(ts.isJsxAttribute)
     const checked = attributes.find(attribute => attribute.name.getText(posAst) === 'aria-checked')
     if (checked?.initializer?.getText(posAst) === '{loyaltyAccrual}') {
+      switchElement = node.parent
       const disabled = attributes.find(attribute => attribute.name.getText(posAst) === 'disabled')
       assert.ok(disabled?.initializer && ts.isJsxExpression(disabled.initializer) && disabled.initializer.expression)
       disabledExpression = disabled.initializer.expression.getText(posAst)
@@ -71,9 +73,33 @@ function collectSwitch(node: ts.Node): void {
 }
 collectSwitch(posAst)
 assert.ok(disabledExpression)
+assert.ok(switchElement)
 for (const setting of [...offSettings, ...onSettings]) {
   assert.equal(expression(disabledExpression, { resolveOrderLoyaltyAccrual: resolve, settings: { loyalty_points_enabled: setting } }), !onSettings.some(value => value === setting))
 }
+
+function switchStyles(enabled: boolean): string[] {
+  const result: string[] = []
+  function visit(node: ts.Node): void {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const attribute = node.attributes.properties.filter(ts.isJsxAttribute).find(item => item.name.getText(posAst) === 'className')
+      const value = attribute?.initializer
+      if (value && ts.isStringLiteral(value)) result.push(value.text)
+      else if (value && ts.isJsxExpression(value) && value.expression) result.push(expression(value.expression.getText(posAst), { loyaltyAccrual: enabled }))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(switchElement!)
+  return result
+}
+for (const enabled of [false, true]) {
+  const [button, track, thumb] = switchStyles(enabled)
+  assert.match(button, /\bh-11 w-11\b/, 'compact visual track retains a 44px touch target')
+  assert.match(track, /\bleft-1 top-3 h-5 w-9\b/, 'track is centered in its touch target')
+  assert.match(thumb, /\bleft-0\.5 top-0\.5\b/, 'thumb needs an explicit anchor before translation')
+  assert.ok(thumb.split(' ').includes(enabled ? 'translate-x-4' : 'translate-x-0'))
+}
+assert.throws(() => assert.match('absolute top-0.5 h-4 w-4 translate-x-4', /\bleft-0\.5 top-0\.5\b/), 'old unanchored thumb must fail')
 
 const oldResolve = evaluate(`export function resolve(override: unknown, setting: unknown) {
   return typeof override === 'boolean' ? override : !['0', 'false', 'no', 'off'].includes(String(setting ?? 'true').trim().toLowerCase())
