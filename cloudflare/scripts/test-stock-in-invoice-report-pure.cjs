@@ -52,6 +52,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
 })
 const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const stockActionCommit = compile('stockActionCommit.ts', {
+  './loyaltyEligibility': compile('loyaltyEligibility.ts'),
   './productBatches': productBatches,
   './db': {},
   './batchCode': batchCode,

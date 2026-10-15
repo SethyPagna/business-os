@@ -142,6 +142,7 @@ async function main() {
   const SAME_ORIGIN = { headers: { 'sec-fetch-site': 'same-origin' } }
   const portalImagePrivacy = load('lib/portalImagePrivacy.ts')
   const portal = load('routes/portal.ts', {
+    '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
     '../lib/portalAbuseKey': { portalAbuseKey: async () => 'unit-portal-abuse-key' },
     '../lib/portalImagePrivacy': portalImagePrivacy,
@@ -187,6 +188,7 @@ async function main() {
   })
   const routes = Object.fromEntries([...indexSource.matchAll(/import \w+ from '(\.\/routes\/[^']+)'/g)].map(([, name]) => [name, { __esModule: true, default: new Hono() }]))
   const worker = load('index.ts', {
+    './lib/productStockGuard': load('lib/productStockGuard.ts'),
     ...routes,
     './routes/portal': { __esModule: true, default: portal },
     './routes/backups': backups,

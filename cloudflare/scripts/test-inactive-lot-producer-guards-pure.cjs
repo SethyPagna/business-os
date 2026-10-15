@@ -22,6 +22,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './loyaltyEligibility' || request === '../lib/loyaltyEligibility') return loadReal('lib/loyaltyEligibility.ts')
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(requireOverrides, request)) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
