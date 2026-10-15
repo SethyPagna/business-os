@@ -167,7 +167,7 @@ export default function ProductDetailModal({
   const branchStockLines = branchStockLinesWorthShowing(p.branch_stock || [])
   // The catalog cost column decides known vs unknown; the purchase column is a default-0 mirror and only stands in when the record carries no cost key.
   const costUsdValue = knownCost(p.cost_price_usd !== undefined ? p.cost_price_usd : p.purchase_price_usd)
-  const purchaseKhr = Number(p.cost_price_khr !== undefined ? p.cost_price_khr || 0 : p.purchase_price_khr || 0)
+  const purchaseKhr = knownCost(p.cost_price_khr !== undefined ? p.cost_price_khr : p.purchase_price_khr)
   const sellingUsd = Number(p.selling_price_usd || 0)
   const wholesaleUsd = Number(p.wholesale_price_usd || 0)
   const wholesaleKhr = Number(p.wholesale_price_khr || 0)
@@ -363,7 +363,8 @@ export default function ProductDetailModal({
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
                     <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
-                    {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+                    {purchaseKhr !== null ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+                    {p.cost_needs_review === true ? <span className="mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400">{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}
                   </PriceCell> : null}
                   <PriceCell label={T('wholesale_price', 'Wholesale price')}>
                     {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (

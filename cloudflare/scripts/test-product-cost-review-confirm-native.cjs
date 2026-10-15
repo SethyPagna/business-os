@@ -7,16 +7,16 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
-let beforeBatch = null
+let beforeBatch = null, beforeRead = null, afterBatch = null
 let lastBatchError = null
 const DB = { prepare(sql) {
   let values = []
   const statement = { sql, bind(...args) { values = args; return statement },
-    async all() { return { results: raw.prepare(sql).all(...values) } },
+    async all() { if(beforeRead)beforeRead(sql); return { results: raw.prepare(sql).all(...values) } },
     async first() { return raw.prepare(sql).get(...values) ?? null },
     async run() { const prepared = raw.prepare(sql); if (prepared.columns().length) return { success: true, results: prepared.all(...values), meta: { changes: 0 } }; const result = prepared.run(...values); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } }
   }; return statement
-}, async batch(statements) { if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }; raw.exec('BEGIN IMMEDIATE'); try { const results = []; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results } catch (error) { lastBatchError = error; raw.exec('ROLLBACK'); throw error } } }
+}, async batch(statements) { if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }; let results=[]; raw.exec('BEGIN IMMEDIATE'); try { for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT') } catch (error) { lastBatchError = error; raw.exec('ROLLBACK'); throw error }; if(afterBatch){const hook=afterBatch;afterBatch=null;hook()};return results } }
 const root = path.resolve(__dirname, '../src'), cache = new Map()
 const services = { auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } }, cache: { bumpVersion: async () => {} }, broadcastHub: { broadcast: async () => {} } }
 function load(filename) {
@@ -93,5 +93,35 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
   const noOpId=seed(0)
   assert.throws(()=>raw.prepare('UPDATE products SET cost_review_key=NULL WHERE id=?').run(noOpId),/product_cost_review_write_refused/)
   console.log('PASS unaudited marker clear refused')
+
+  const splitId=seed(7);let stateReads=0
+  beforeRead=sql=>{if(sql.startsWith('SELECT id,cost_review_key')&&++stateReads===2){beforeRead=null;raw.prepare('UPDATE products SET cost_price_usd=9,purchase_price_usd=9 WHERE id=?').run(splitId)}}
+  const split=await request('GET',`/${splitId}/cost-breakdown`)
+  beforeRead=null
+  assert.equal(split.status,409,JSON.stringify(split))
+  assert.equal(split.body.costConfirmation,undefined)
+  assert.equal(split.body.result_usd,undefined)
+  console.log('PASS split read refuses inconsistent displayed amount and confirmation quote')
+  const legacyId=seed(7)
+  raw.prepare("INSERT INTO audit_logs(user_id,action,entity,entity_id,details) VALUES(1,'cost_override','product',?,'not-json')").run(String(legacyId))
+  const legacy=await request('GET',`/${legacyId}/cost-breakdown`)
+  const legacyBody={client_request_id:'confirm-legacy-abcdefgh',reviewed_digest:legacy.body.costConfirmation.reviewed_digest,value:7}
+  afterBatch=()=>{throw Error('synthetic lost acknowledgement after actual commit')}
+  const acknowledged=await request('POST',`/${legacyId}/cost-review/confirm`,legacyBody)
+  assert.equal(acknowledged.status,200,JSON.stringify(acknowledged))
+  assert.equal(acknowledged.body.replayed,true)
+  const settled=snapshot()
+  assert.equal((await request('POST',`/${legacyId}/cost-review/confirm`,legacyBody)).status,200)
+  assert.equal(snapshot(),settled)
+  console.log('PASS malformed historical details safe and lost acknowledgement resolved by immutable receipt')
+  const auditRows=raw.prepare('SELECT * FROM audit_logs WHERE id=1').all()
+  const redacted=load(path.join(root,'lib/acquisitionCostAccess.ts')).projectAcquisitionCosts(load(path.join(root,'lib/courierCostAccess.ts')).redactAuditRows(auditRows,{id:2,role_code:'employee',permissions:{audit_log:true}}),{id:2,role_code:'employee',permissions:{audit_log:true}})
+  const deniedJson=JSON.stringify(redacted)
+  assert.equal(deniedJson.includes('7.123456789012345'),false)
+  assert.equal(deniedJson.includes('cost_request'),false)
+  assert.equal(deniedJson.includes('cost_review'),false)
+  assert.equal(JSON.stringify(auditRows).includes('7.123456789012345'),true)
+  console.log('PASS actual courier then acquisition audit projectors redact financial receipt for denied actor')
+
 
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => raw.close())

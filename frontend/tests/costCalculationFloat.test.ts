@@ -195,12 +195,13 @@ function renderBreakdown(payload: unknown, canViewCosts = true): string {
   const source = fs.readFileSync(path.join(srcRoot, 'components/shared/CostCalculationFloat.tsx'), 'utf8')
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
   const module = { exports: {} as any }
-  const states = [normalizeCostBreakdown(payload), '', false, false, false]
+  const user = canViewCosts ? { role_code: 'admin' } : { role_code: 'employee' }
+  const states = [{ breakdown: normalizeCostBreakdown(payload), productId: 42, user }, '', false, false, false]
   let stateIndex = 0
   const mockedRequire = (id: string): any => {
     if (id === 'react') return { ...React, useState: () => [states[stateIndex++], () => {}], useEffect: () => {}, useRef: () => ({ current: true }) }
     if (id === 'react/jsx-runtime') return require(id)
-    if (id.includes('AppContext')) return { useApp: () => ({ user: canViewCosts ? { role_code: 'admin' } : { role_code: 'employee' } }) }
+    if (id.includes('AppContext')) return { useApp: () => ({ user }) }
     if (id.includes('acquisitionCostAccess')) return acquisitionCostAccess
     if (id.includes('permissions')) return permissions
     if (id.includes('productWriteTransport')) return { confirmProductCostReview: () => { throw new Error('render must not write') } }

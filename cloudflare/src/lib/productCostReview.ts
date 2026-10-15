@@ -26,12 +26,12 @@ export function costReviewConfirmationStatements(state: CostReviewState, receipt
   for (const field of COST_REVIEW_MONEY_FIELDS) params[field] = state[field]
   const prior = `SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.client_request_id')=@requestId`
   const current = `SELECT 1 FROM products WHERE id=@productId AND is_active=1 AND cost_review_key IS @reviewKey AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0)=@revision AND ${COST_REVIEW_MONEY_FIELDS.map(field => `${field} IS @${field}`).join(' AND ')}`
-  const details = JSON.stringify({ kind: 'product.cost-review-confirm', version: 1, client_request_id: receipt.requestId, request: receipt.request, claim_nonce: receipt.nonce,
+  const details = JSON.stringify({ kind: 'product.cost-review-confirm', version: 1, client_request_id: receipt.requestId, cost_request: receipt.request, claim_nonce: receipt.nonce,
     cost_review: { version: 1, kind: 'confirm', before_key: state.cost_review_key, after_key: null, revision_before: state.revision, after_usd: state.cost_price_usd, after_khr: state.cost_price_khr } })
   return [
     { sql: `SELECT CASE WHEN EXISTS(${prior}) OR EXISTS(${current}) THEN 1 ELSE json('product_cost_review_state_conflict') END`, params },
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) SELECT @actorId,@actorName,'cost_override','product',@entityId,@details WHERE NOT EXISTS(${prior})`, params: { ...params, details } },
-    { sql: `UPDATE products SET cost_review_key=NULL WHERE id=@productId AND EXISTS(SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(details,'$.claim_nonce')=@nonce)`, params },
+    { sql: `UPDATE products SET cost_review_key=NULL WHERE id=@productId AND EXISTS(SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.claim_nonce')=@nonce)`, params },
   ]
 }
 

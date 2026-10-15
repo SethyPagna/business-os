@@ -42,7 +42,8 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key, fallback) || fallback
   const unknownLabel = tr('cost_unknown', 'Unknown cost')
-  const [breakdown, setBreakdown] = useState<CostBreakdown | null>(null)
+  const [loaded, setLoaded] = useState<{ breakdown: CostBreakdown; productId: number | string; user: PermissionUser } | null>(null)
+  const breakdown = loaded?.productId === productId && loaded.user === user ? loaded.breakdown : null
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [confirming, setConfirming] = useState(false)
@@ -55,7 +56,9 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
     let cancelled = false
     aliveRef.current = true
     setLoading(true)
+    setLoaded(null)
     setConfirmed(false)
+    setConfirming(false)
     confirmationRef.current = null
     const scope = captureActorReadScope()
     setError('')
@@ -65,7 +68,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
         assertActorReadScope(scope)
         const normalized = normalizeCostBreakdown(result)
         if (!normalized) throw new Error('empty')
-        setBreakdown(normalized)
+        setLoaded({ breakdown: normalized, productId, user })
         if (normalized.costConfirmation) confirmationRef.current = { scope, body: { client_request_id: createClientRequestId('cost_confirm'), reviewed_digest: normalized.costConfirmation.reviewed_digest, value: normalized.costConfirmation.usd } }
       })
       .catch(() => {
@@ -89,12 +92,13 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
     try {
       assertActorReadScope(submission.scope)
       const result = await confirmProductCostReview(productId, submission.body) as { success?: unknown; cost_needs_review?: unknown }
+      if (!aliveRef.current || confirmationRef.current !== submission) return
       assertActorReadScope(submission.scope)
       if (result.success !== true || result.cost_needs_review !== false) throw new Error(tr('cost_review_changed', 'The product needs a new cost review. Close and reopen its calculation.'))
       if (aliveRef.current) setConfirmed(true)
     } catch (failure) {
-      if (aliveRef.current) setError(failure instanceof Error ? failure.message : tr('cost_review_confirm_failed', 'Could not confirm the cost. Retry the original confirmation.'))
-    } finally { if (aliveRef.current) setConfirming(false) }
+      if (aliveRef.current && confirmationRef.current === submission) setError(failure instanceof Error ? failure.message : tr('cost_review_confirm_failed', 'Could not confirm the cost. Retry the original confirmation.'))
+    } finally { if (aliveRef.current && confirmationRef.current === submission) setConfirming(false) }
   }
   if (!canViewCosts) return null
 
@@ -183,7 +187,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                 </div>
               ) : null}
             </div>
-            {breakdown.cost_needs_review && !confirmed ? <div className="space-y-2" role="status"><p>{tr('merge_cost_needs_review', 'Cost needs review')}</p>{canConfirm && breakdown.costConfirmation ? <button type="button" className="btn-primary w-full" disabled={confirming} onClick={() => void confirm()}>{confirming ? tr('saving', 'Saving…') : tr('cost_review_confirm_usd', 'Confirm this known USD cost')}</button> : null}</div> : null}
+            {breakdown.cost_needs_review && !confirmed ? <div className="space-y-2" role="status"><p>{tr('merge_cost_needs_review', 'Cost needs review')}</p>{canConfirm && breakdown.costConfirmation ? <button type="button" className="btn-primary w-full" disabled={confirming || !confirmationRef.current} onClick={() => void confirm()}>{confirming ? tr('saving', 'Saving…') : tr('cost_review_confirm_usd', 'Confirm this known USD cost')}</button> : null}</div> : null}
             {confirmed ? <p role="status">{tr('cost_review_confirmed', 'Cost confirmed')}</p> : null}
             {error ? <p role="alert" className="text-red-600">{error}</p> : null}
           </>

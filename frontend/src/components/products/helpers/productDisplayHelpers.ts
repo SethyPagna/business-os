@@ -2,7 +2,7 @@ import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../../utils/promotionRules.ts'
 import { DEFAULT_LOW_STOCK_CONFIG, resolveStockTier, type LowStockConfig } from '../../../utils/lowStockSettings.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
-import { isKnownCost } from '../../../utils/costDisplay.ts'
+import { knownCost } from '../../../utils/costDisplay.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 
@@ -218,12 +218,12 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   promotionRules = [],
   lowStock = DEFAULT_LOW_STOCK_CONFIG,
 }: BuildProductRowDisplayStateOptions = {}) {
-  const costUsd = toNumber(product?.cost_price_usd)
-  const costKhr = toNumber(product?.cost_price_khr)
+  const costUsd = knownCost(product?.cost_price_usd !== undefined ? product.cost_price_usd : product?.purchase_price_usd)
+  const costKhr = knownCost(product?.cost_price_khr !== undefined ? product.cost_price_khr : product?.purchase_price_khr)
   const sellingUsd = toNumber(product?.selling_price_usd)
-  const costKnown = isKnownCost(product?.cost_price_usd)
-  const marginUsd = sellingUsd - costUsd
-  const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd * 100) : 0
+  const costKnown = costUsd !== null
+  const marginUsd = costUsd === null ? null : sellingUsd - costUsd
+  const marginPct = sellingUsd > 0 && marginUsd !== null ? (marginUsd / sellingUsd * 100) : null
   const marginKnown = costKnown && sellingUsd > 0
   const qty = branchFilter !== 'all' ? getBranchQty(product, branchFilter) : product?.stock_quantity
   const stockStatus = getProductStockStatus(product, { branchFilter, getBranchQty, lowStock })

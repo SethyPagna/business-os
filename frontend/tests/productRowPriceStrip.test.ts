@@ -172,7 +172,7 @@ runTest('the desktop qty cell keeps its deliberate wrap, and the premise for tha
   // (The cost is a <span className="block"> since 25 Sep 2026: it sits inside
   // the button that opens the cost calculation, and a button holds phrasing
   // content only. Same line, same column.)
-  for (const priceCell of ['<span className="block font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</span>', '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
+  for (const priceCell of [`<span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>`, '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
     assert.ok(products.includes(priceCell), `the desktop prices must stay in their own column: ${priceCell}`)
   }
   // And the MOBILE strip -- the row where the four values really do share one

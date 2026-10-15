@@ -46,7 +46,7 @@ app.post('/:id/cost-review/confirm', async (c) => {
   const receipt = () => db.prepare(`SELECT details FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.client_request_id')=@requestId ORDER BY id LIMIT 1`).get<{ details: string }>({ entityId: String(id), actorId: user.id, requestId: body.client_request_id })
   const respond = async (details: string, replayed: boolean) => {
     const saved = JSON.parse(details)
-    if (saved.kind !== 'product.cost-review-confirm' || saved.request !== request) return c.json({ error: 'This request was already used for a different confirmation.', code: 'idempotency_conflict' }, 409)
+    if (saved.kind !== 'product.cost-review-confirm' || saved.cost_request !== request) return c.json({ error: 'This request was already used for a different confirmation.', code: 'idempotency_conflict' }, 409)
     const current = await readReviewState(db, id)
     return c.json({ success: true, replayed, product_id: id, cost_needs_review: Boolean(current?.cost_review_key) })
   }
@@ -98,11 +98,13 @@ app.get('/:id/cost-breakdown', async (c) => {
   if (!productId) return c.json({ error: 'Product not found' }, 404)
 
   const db = getDb(c.env)
+  const before = await readReviewState(db, productId)
   const breakdown = await getCatalogCostBreakdown(db, productId)
   if (!breakdown) return c.json({ error: 'Product not found' }, 404)
 
-  const state = canEditAcquisitionCosts(user) && getActionTier(user, 'products', 'edit') === 'full' ? await readReviewState(db, productId) : undefined
-  const confirmation = state ? await costReviewConfirmationQuote(state) : null
+  const state = await readReviewState(db, productId)
+  if (!before || !state || state.revision !== before.revision || state.cost_review_key !== before.cost_review_key || COST_REVIEW_MONEY_FIELDS.some(field => state[field] !== before[field])) return c.json({ error: 'The product changed. Review its cost again.', code: 'product_cost_review_state_conflict' }, 409)
+  const confirmation = canEditAcquisitionCosts(user) && getActionTier(user, 'products', 'edit') === 'full' && breakdown.result_usd === state.cost_price_usd ? await costReviewConfirmationQuote(state) : null
   c.header('Cache-Control', 'no-store')
   return c.json({ ...breakdown, ...(state?.cost_review_key ? { cost_needs_review: true } : {}), ...(confirmation ? { costConfirmation: confirmation } : {}) })
 })

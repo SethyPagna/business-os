@@ -1048,8 +1048,9 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
               onTouchEnd={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
             >
-              <span className="block font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</span>
-              {costKhr > 0 && <span className="block text-xs text-gray-400">{fmtKHR(costKhr)}</span>}
+              <span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>
+              {costKhr !== null && <span className="block text-xs text-gray-400">{fmtKHR(costKhr)}</span>}
+              {p.cost_needs_review === true ? <span className="block text-xs text-amber-700 dark:text-amber-400">{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}
             </button>
           ) : <span>—</span>}
         </td>
@@ -1069,7 +1070,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           ) : null}
         </td>
         <td className="px-3 py-2 text-right">
-          {canViewCosts && costUsd > 0 && sellingUsd > 0
+          {canViewCosts && costUsd !== null && marginUsd !== null && marginPct !== null && sellingUsd > 0
             ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
         </td>
@@ -1390,7 +1391,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                   onTouchEnd={(event) => event.stopPropagation()}
                   onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
                 >
-                  {fmtUSD(costUsd)}
+                  {costUsd === null ? '—' : fmtUSD(costUsd)}
                 </button>
               ) : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
@@ -1399,6 +1400,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                   in its header line -- see stockStatusTextClass above. */}
               <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
+            {canViewCosts && p.cost_needs_review === true ? <div className="mt-1 break-words text-xs text-amber-700 dark:text-amber-400">{tr('merge_cost_needs_review', 'Cost needs review')}</div> : null}
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
             {/* Description is intentionally NOT shown on the small-screen list
                 card (user, Sep 1 2026: "only hide in the default view, keep it
