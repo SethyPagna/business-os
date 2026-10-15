@@ -16,6 +16,7 @@ import { isRealBarcode, normalizeLeadingZeroBarcodeForCleanup } from './productI
 import { ProductCreateError } from './productWrites'
 import { executeStockMutationBatch, withStockMutationReceipt, type StockMutationAtomicMark, type StockMutationOutcome } from './stockMutationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { executeStockTransaction } from './stockTransaction'
 
 // The Sep 16 2026 create-fold: a create request that identifies as the SAME
 // product as an existing active row (findSameIdentityProduct) never mints a
@@ -129,7 +130,7 @@ export async function foldCreateIntoExisting(
       ...(updates.cost_price_usd !== undefined ? { usd: updates.cost_price_usd as number } : {}),
       ...(updates.cost_price_khr !== undefined ? { khr: updates.cost_price_khr as number } : {}),
     }, { id: actorId(costActor), name: actorSnapshot(costActor) })
-    if (costEntry) await db.batch([costEntry, write])
+    if (costEntry) await executeStockTransaction(db, [costEntry, write], 'retry')
     else await db.prepare(write.sql).run(write.params)
   }
   await audit(env, actorId(user), actorSnapshot(user), 'fold', 'product', duplicate.id, {
@@ -210,7 +211,7 @@ export async function foldCreateWithStockInWrite(
     ? { ...baseMark, execute: (executeDb, statements) => executeStockMutationBatch(executeDb, statements, baseMark, outcome) }
     // Approval path: the request is marked approved by the same batch; a request decided meanwhile rolls it all back.
     : { statement: () => null, committed: () => {}, execute: async (executeDb, statements) => {
-      await (executeDb.batchOnce ? executeDb.batchOnce([...statements, ...approvalStatements]) : executeDb.batch([...statements, ...approvalStatements]))
+      await executeStockTransaction(executeDb, [...statements, ...approvalStatements], 'once')
     } }
   try {
     const received = await receiveBatchStock(db, {

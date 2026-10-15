@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import { assertProductStatusInput, assertProductsActive, assertProductsHaveNoStock, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Step (2)'s other half: once a reviewer approves a pending_actions row
 // (routes/reviewQueue.ts's POST /:id/approve), the underlying write it
@@ -405,9 +406,9 @@ registerApplier('products', 'delete', 'product', async (env, row, reviewer, wait
   const existing = await getDb(env).prepare('SELECT name FROM products WHERE id = @id').get<{ name?: string }>({ id })
   const db = getDb(env)
   await assertProductsHaveNoStock(db, [Number(id)])
-  const results = await db.batch([productStockGuardStatement([Number(id)]), {
+  const results = await executeStockTransaction(db, [productStockGuardStatement([Number(id)]), {
     sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id },
-  }])
+  }], 'retry')
   if (!results[1]?.meta?.changes) return
   await audit(env, reviewer.id, reviewer.name, 'delete', 'product', id, { name: existing?.name ?? null, reason })
   await bumpVersion(env, 'products')
@@ -543,8 +544,8 @@ async function applyApprovedProductRemove(
   }
   const transitionStamp = new Date().toISOString()
   try {
-    await db.batch(productRemoveApprovalStatements({ operation, plan, pendingActionId: row.id,
-      reviewer: reviewerUser, transitionStamp }))
+    await executeStockTransaction(db, productRemoveApprovalStatements({ operation, plan, pendingActionId: row.id,
+      reviewer: reviewerUser, transitionStamp }), 'retry')
   } catch (error) {
     const stockError = productStockGuardError(error)
     if (stockError) throw stockError

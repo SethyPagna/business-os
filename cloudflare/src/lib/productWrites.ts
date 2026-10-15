@@ -1,3 +1,4 @@
+import { executeStockTransaction, executeRawStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { assertProductStatusInput, assertProductsActive, productStockGuardError, productStockGuardStatement } from './productStockGuard'
 // Shared product row-write helpers -- extracted from routes/products.ts
 // (part 152) so lib/reviewApply.ts's Products appliers can replay an
@@ -23,7 +24,6 @@ import {
   BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
   requestBranchEffect, type RedirectTarget,
 } from './branchRedirectWrite'
-import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
 import { buildAuditStatement } from './audit'
 import { completedStockMutationReceiptStatement } from './stockMutationReceipt'
@@ -320,9 +320,11 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
   const placeholders = keys.map(() => '?').join(', ')
-  const result = await env.DB.prepare(`INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${placeholders})`)
+  const statement = env.DB.prepare(`INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${placeholders})`)
     .bind(...keys.map((key) => payload[key]))
-    .run()
+  const result = ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots'].includes(table)
+    ? (await executeRawStockTransaction(env.DB, [statement]))[0]
+    : await statement.run()
   return result.meta?.last_row_id
 }
 
@@ -404,9 +406,10 @@ export async function createProductWithInitialStock(
       params: { ...audit.params, createdProductKey: key } })
   }
   if (branchId != null) statements.push(receivingBranchAssertion(branchId))
-  statements.push(ordinaryBusinessMaintenanceGuard, { sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
+  statements.push({ sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
   let results
-  try { results = await db.batchOnce(addressedStatements(landing, statements)) } catch (error) {
+  try { results = await executeStockTransaction(db, addressedStatements(landing, statements), 'once') } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) throw stockError
     if (isReceivingBranchError(error)) throw new ReceivingBranchError()
@@ -646,7 +649,7 @@ export async function seedBranchStockForNewProduct(
   const branchIds = (branchRows || []).map((row) => row.id)
   if (chosenBranchId != null && !branchIds.includes(chosenBranchId)) branchIds.push(chosenBranchId)
   if (branchIds.length === 0) return
-  await db.batch(branchIds.map((branchId) => ({
+  await executeStockTransaction(db, branchIds.map((branchId) => ({
     sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
     params: {
@@ -656,7 +659,7 @@ export async function seedBranchStockForNewProduct(
       // other active branch starts at 0 (tracked, not just absent).
       qty: branchId === chosenBranchId ? Math.max(0, Number(chosenBranchQty) || 0) : 0,
     },
-  })))
+  })), 'retry')
 }
 
 // Every product has one stable, zero-or-more-quantity "day added" batch
@@ -712,7 +715,7 @@ export async function seedInitialBatchForNewProduct(
       params,
     })
   }
-  await db.batch(statements)
+  await executeStockTransaction(db, statements, 'retry')
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError, assertProductsActive } from './productStockGuard'
 // Applies a StockCountPlan (lib/datedStockCountImport.ts's pure
 // computation) as real DB writes. Kept in its own file, separate from
@@ -378,7 +379,7 @@ export async function applyDatedStockCountPlan(
     statements.unshift(productStockGuardStatement([...activeProducts], 'active'))
   }
   try {
-    await guardedDb.batch(statements)
+    if (statements.length) await executeStockTransaction(guardedDb, statements, 'retry')
   } catch (error) {
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard

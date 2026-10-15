@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 // Ported from backend/src/helpers.ts's verifyAndRepairStockQuantities /
 // verifyAndRepairSaleStatuses / verifyAndRepairCostPrices / runDataIntegrityCheck
 // (the cost-price half is report-only now, see checkCostPrices).
@@ -70,11 +71,12 @@ async function checkStockQuantities(env: Env, repair: boolean): Promise<Integrit
 
     if (repair && statements.length) {
       await assertProductsActive(db, receivingProductIds)
-      await db.batch(receivingProductIds.length
+      await executeStockTransaction(db, receivingProductIds.length
         ? [productStockGuardStatement(receivingProductIds, 'active'), ...statements]
-        : statements)
+        : statements, 'retry')
     }
   } catch (e) {
+    if (repair) throw productStockGuardError(e) || e
     const refusal = productStockGuardError(e)
     if (refusal) throw refusal
     errors.push(`Stock verification error: ${(e as Error).message}`)
@@ -123,6 +125,7 @@ async function checkSaleStatuses(env: Env, repair: boolean): Promise<IntegrityRe
 
     if (repair && statements.length) await db.batch(statements)
   } catch (e) {
+    if (repair) throw productStockGuardError(e) || e
     errors.push(`Sale status verification error: ${(e as Error).message}`)
   }
 

@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
@@ -565,7 +566,7 @@ export async function applyHistoricalSaleImport(
   // rethrown unchanged.
   for (let attempt = 0; ; attempt++) {
     try {
-      await db.batch(statements)
+      await executeStockTransaction(db, statements, 'retry')
       break
     } catch (batchError) {
       const activeGuard = productStockGuardError(batchError)

@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 // Executes a human's per-row decisions against Part 288/289/290's
 // analysis-only resolve output (lib/datedStockCountResolve.ts). That
 // layer never writes a product or a price -- it only reports what it
@@ -219,10 +220,11 @@ export async function applyDatedStockCountDecisions(
       const name = String(row.raw.productName ?? '').trim()
       if (!name) { errors.push({ rowNumber: row.rowNumber, error: 'create_new requires a product name; this row had none.' }); continue }
       const price = pickPrice(row.raw)
-      const inserted = await guardedDb
-        .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`)
-        .run({ name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
-      const productId = Number(inserted.lastInsertRowid)
+      const [inserted] = await executeStockTransaction(guardedDb, [{
+        sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`,
+        params: { name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr },
+      }], 'retry')
+      const productId = Number(inserted.meta?.last_row_id)
       productsCreated.push({ rowNumber: row.rowNumber, productId, name, action: 'create_new' })
       newlyResolved.push({ rowNumber: row.rowNumber, date: row.raw.date, productId, branchId, count: row.raw.count })
       continue
@@ -269,10 +271,11 @@ export async function applyDatedStockCountDecisions(
     const nameUnlocked = nameDiffers && !!decision.nameOverrideConfirmed
     const finalName = nameUnlocked ? (requestedName as string) : parent.name
     const price = pickPrice(row.raw)
-    const inserted = await guardedDb
-      .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`)
-      .run({ name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
-    const productId = Number(inserted.lastInsertRowid)
+    const [inserted] = await executeStockTransaction(guardedDb, [{
+      sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`,
+      params: { name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr },
+    }], 'retry')
+    const productId = Number(inserted.meta?.last_row_id)
     productsCreated.push({ rowNumber: row.rowNumber, productId, name: finalName, action: 'create_child', ...(nameUnlocked ? { nameUnlocked: true } : {}) })
     newlyResolved.push({ rowNumber: row.rowNumber, date: row.raw.date, productId, branchId, count: row.raw.count })
   }

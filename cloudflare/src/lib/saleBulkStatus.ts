@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
@@ -208,7 +209,7 @@ async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => st
 function scalar(row: Row): Row { return Object.fromEntries(fields.map(k => [k, row[k] ?? null])); }
 function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes = 0) {
     try {
-        assertSaleRecordBatchBounds(statements.length, snapshot, eventsBytes);
+        assertSaleRecordBatchBounds(snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, snapshot, eventsBytes);
     }
     catch (_) {
         throw new SaleBulkError('Selection is too large for one atomic action. Select fewer sales.', 400);
@@ -557,7 +558,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
-        const results = await db.batch(statements);
+        const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements));
         return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
     }
     catch (error) {
@@ -617,7 +618,7 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     statements.push(auditStatement(user, String(op.id), `action_${direction}`, moved.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
-        await db.batch(statements);
+        await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements));
     }
     catch (error) {
         const activeGuard = productStockGuardError(error)

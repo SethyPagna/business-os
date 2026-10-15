@@ -19,6 +19,7 @@
 // A missing table means "maintenance cannot be on", which is true there.
 
 import type { Env } from '../index'
+import { executeRawStockTransaction, executeRawRestoreStockTransaction, type RestoreStockAuthority } from './stockTransaction'
 
 export const MAINTENANCE_FLAG_KEY = 'maintenance'
 
@@ -156,11 +157,12 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     phase: 'deleting',
     updatedAt: new Date().toISOString(),
   }
+  if (!parseState(JSON.stringify(state))) throw new MaintenanceAdmissionConflictError()
   // Admission is decided by this one main-D1 write transaction, not by the
   // route's earlier advisory COUNT. A queued import/bulk job or an unexpired
   // import lease must win over restore even when its status is stale/failed.
   // Conversely, once this INSERT wins, every fenced business batch refuses.
-  const result = await env.DB.prepare(`INSERT INTO system_flags (key, value, updated_at)
+  const statement = env.DB.prepare(`INSERT INTO system_flags (key, value, updated_at)
     SELECT ?, ?, CURRENT_TIMESTAMP
     WHERE NOT EXISTS (
       SELECT 1 FROM import_jobs
@@ -171,13 +173,20 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
       SELECT 1 FROM bulk_delete_jobs WHERE status IN ('pending','processing')
     )
     ON CONFLICT(key) DO NOTHING`)
-    .bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
+    .bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state))
+  let result: D1Result
+  try { [result] = await executeRawStockTransaction(env.DB, [statement]) } catch (error) {
+    if (error instanceof Error && ('code' in error && error.code === 'stock_schema_unavailable')) throw new MaintenanceAdmissionConflictError()
+    throw error
+  }
   if (result.meta.changes !== 1) throw new MaintenanceAdmissionConflictError()
   return state
 }
 
 export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<RestoreMaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
   if (!token.trim()) return
+  const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+  hook?.rawD1Start?.(1)
   const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
     .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
   if (!row) return
@@ -185,10 +194,11 @@ export async function updateMaintenance(env: Env, token: string, patch: Partial<
   if (state?.mode !== 'restore' || state.token !== token) return
   // The exact validated snapshot is the CAS fence: malformed state is never
   // repaired by an old progress callback, and UPDATE cannot resurrect a clear.
-  await env.DB.prepare(`UPDATE system_flags SET value = json_patch(value, ?), updated_at = CURRENT_TIMESTAMP
+  const statement = env.DB.prepare(`UPDATE system_flags SET value = json_patch(value, ?), updated_at = CURRENT_TIMESTAMP
     WHERE key = ? AND value = ?`)
     .bind(JSON.stringify({ phase: patch.phase, table: patch.table, rowsDone: patch.rowsDone,
-      error: patch.error, updatedAt: new Date().toISOString() }), MAINTENANCE_FLAG_KEY, row.value).run()
+      error: patch.error, updatedAt: new Date().toISOString() }), MAINTENANCE_FLAG_KEY, row.value)
+  await executeRawRestoreStockTransaction(env.DB, [statement], { token, backupKey: state.backupKey, snapshot: row.value })
 }
 
 // Ends maintenance. Token-guarded so only the restore that began it (or a
@@ -196,6 +206,8 @@ export async function updateMaintenance(env: Env, token: string, patch: Partial<
 // attempt can never clear someone else's hold.
 export async function endMaintenance(env: Env, token: string | null, options: { force?: boolean; expectedRevision?: string } = {}): Promise<boolean> {
   try {
+    const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+    hook?.rawD1Start?.(1)
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
     if (!row) return true
@@ -204,12 +216,22 @@ export async function endMaintenance(env: Env, token: string | null, options: { 
     if (!options.force && (!token || parseState(row.value)?.token !== token)) return false
     // Even force clear is scoped to the exact observed row. A newer holder or
     // concurrent progress change requires a fresh operator decision/retry.
+    hook?.rawD1Start?.(1)
     const result = await env.DB.prepare('DELETE FROM system_flags WHERE key = ? AND value = ?')
       .bind(MAINTENANCE_FLAG_KEY, row.value).run()
     return result.meta.changes === 1
   } catch {
     return false
   }
+}
+
+export async function restoreStockAuthority(env: Env, token: string, backupKey: string): Promise<RestoreStockAuthority> {
+  const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+  hook?.rawD1Start?.(1)
+  const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?').bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
+  const state = parseState(row?.value)
+  if (!row || state?.mode !== 'restore' || !token.trim() || state.token !== token || state.backupKey !== backupKey) throw new MaintenanceAdmissionConflictError()
+  return { token, backupKey, snapshot: row.value }
 }
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

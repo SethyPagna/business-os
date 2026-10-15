@@ -1,3 +1,5 @@
+import { executeRawRestoreStockTransaction, stockTransactionStatementCount } from './stockTransaction'
+import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
@@ -1432,7 +1434,7 @@ function restoreStockAdmission() {
   }
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
+export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>, restoreToken?: string) {
   const key = resolveBackupKey(source)
 
   // Streaming restore (10.1). The old path called object.json() -- the ENTIRE
@@ -1549,10 +1551,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   if (presentTables.some((table, index) => table !== orderedTables[index])) {
     throw new Error('Cannot restore this backup: tables are not in dependency order. No database rows have been changed.')
   }
-  if (orderedTables.includes('products') || orderedTables.some(table => table.startsWith('stock_session_'))) {
-    const maintenance = await env.DB.prepare("SELECT 1 ok FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").first<{ ok: number }>()
-    if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
-  }
+  await restoreStockAuthority(env, restoreToken || '', source)
 
   // Acquire and verify the second response BEFORE any destructive callback or
   // DELETE. A later overwrite cannot substitute bytes into this held response.
@@ -1574,10 +1573,12 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
       deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     }
-    if (deletes.length > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
+    if (stockTransactionStatementCount(deletes.length) > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
     await onProgress?.({ phase: 'deleting' })
-    if (deletes.length) await env.DB.batch(deletes)
-    statementCount += deletes.length
+    if (deletes.length) {
+      await executeRawRestoreStockTransaction(env.DB, deletes, await restoreStockAuthority(env, restoreToken || '', source))
+      statementCount += stockTransactionStatementCount(deletes.length)
+    }
 
     // Pass 2: stream rows and insert in bounded batches, per table.
     const CHUNK = 80
@@ -1598,8 +1599,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 
     const flush = async () => {
       if (!batch.length) return
-      await env.DB.batch(batch)
-      statementCount += batch.length
+      await executeRawRestoreStockTransaction(env.DB, batch, await restoreStockAuthority(env, restoreToken || '', source))
+      statementCount += stockTransactionStatementCount(batch.length)
       tableRowsDone += batch.length
       batch = []
       flushesSinceProgress += 1

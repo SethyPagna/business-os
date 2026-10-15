@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { assertProductStatusInput, productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
@@ -475,9 +476,9 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   }
   return { db: counted, begin() { admission = true }, check,
     async commit(statements: StockWriteStatement[]) {
-      check(statements.length)
-      local += statements.length
-      return db.batchOnce(statements)
+      check(stockTransactionStatementCount(statements.length))
+      local += stockTransactionStatementCount(statements.length)
+      return executeStockTransaction(db, statements, 'once')
     },
     finishReads() { admission = false; tailReads = true },
   }
@@ -668,7 +669,7 @@ function bindCount(statement: StockWriteStatement): number {
 }
 
 function checkBounds(statements: StockWriteStatement[], snapshot: Row) {
-  if (statements.length > STOCK_SESSION_MAX_STATEMENTS) fail('Stock session exceeds the single-commit statement bound.', 400, 'statement_limit')
+  if (stockTransactionStatementCount(statements.length) > STOCK_SESSION_MAX_STATEMENTS) fail('Stock session exceeds the single-commit statement bound.', 400, 'statement_limit')
   if (statements.some((statement) => bindCount(statement) > D1_MAX_BOUND_PARAMS)) fail('Stock session exceeds the per-statement bind bound.', 400, 'bind_limit')
   if (new TextEncoder().encode(JSON.stringify(snapshot)).length > STOCK_SESSION_MAX_SNAPSHOT_BYTES) fail('Stock session snapshot is too large.', 400, 'request_too_large')
 }
@@ -1249,6 +1250,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       if (retry.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
       return parseStoredReceipt(retry, true)
     }
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
 
     if (activeGuard) throw activeGuard
@@ -1692,6 +1694,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
 
     if (activeGuard) throw activeGuard

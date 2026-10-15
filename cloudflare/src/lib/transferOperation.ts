@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError } from './stockTransaction'
 import { productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
@@ -245,7 +246,7 @@ export async function planTransferOperation(db: D1Compat, args: {
       '$.destBatchId',CASE WHEN @explicit=1 THEN (SELECT json_extract(allocations_json,'$[0].destination_batch_id') FROM transfer_operation_members WHERE receipt_id=transfer_operation_receipts.id AND ordinal=0) ELSE NULL END),updated_at=CURRENT_TIMESTAMP WHERE operation_id=@operation`,
     params: { operation: operationId, response: JSON.stringify(args.response), explicit: args.lines.length === 1 && args.lines[0].batchId != null ? 1 : 0 } })
   // D1 bound/query limits are explicit; no partial chunk commits of a transfer.
-  if (statements.length > 5000) throw refuse('transfer_too_many_lots')
+  if (stockTransactionStatementCount(statements.length) > 5000) throw refuse('transfer_too_many_lots')
   return { statements, operationId, allocationSummaries: Object.freeze(allocationSummaries) }
 }
 
@@ -258,6 +259,7 @@ export type TransferRefusal = { status: 409 | 503; body: { error: string; code: 
  * checks) and the ordinary maintenance guard. Callers check for a committed
  * receipt first: a same-key request that won the race is a replay. */
 export function transferRefusal(error: unknown): TransferRefusal | null {
+  if (error instanceof StockTransactionUnavailableError) return { status: 503, body: { error: error.message, code: error.code } }
   if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
   const activeGuard = productStockGuardError(error)
   if (activeGuard) return { status: 409, body: { error: activeGuard.message, code: activeGuard.code } }
@@ -372,7 +374,7 @@ export async function replayTransferOperation(env: Env, user: SessionUser, direc
     { sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,undo_payload=json_set(undo_payload,'$.generation',@next),redo_payload=json_set(redo_payload,'$.generation',@next) WHERE id=@history`, params },
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(@actor,@name,@action,'stock_transfer',@operation,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `action_${direction}`, operation: payload.operation_id, details: JSON.stringify({ operation_id: payload.operation_id, history_id: historyId, generation: generation+1 }) } },
   ]
-  try { await db.batch(statements) } catch (error) {
+  try { await executeStockTransaction(db, statements, 'retry') } catch (error) {
     const current = await db.prepare(`SELECT generation,replay_state FROM transfer_operation_receipts WHERE operation_id=@operation`).get<{ generation: number; replay_state: string }>({ operation: payload.operation_id })
     if (current?.generation === generation+1 && current.replay_state === target) return
     const activeGuard = productStockGuardError(error)

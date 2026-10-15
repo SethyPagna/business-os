@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 // Product jobs remove only zero-stock products, committing one tier-sized
 // chunk with its progress and audits per queue delivery. Cache invalidation
 // follows each commit and can be repeated without replaying business writes.
@@ -206,7 +207,7 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
   try {
     // One attempt: acknowledgement loss is recovered from the atomic cursor,
     // never by repeating a stale audit/delete plan in this invocation.
-    await db.batchOnce(statements)
+    await executeStockTransaction(db, statements, 'once')
   } catch (error) {
     if (String(error).includes('bulk_delete_progress_changed')) {
       const current = await getBulkDeleteJob(env, job.id)

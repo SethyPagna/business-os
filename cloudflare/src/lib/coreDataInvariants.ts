@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 // D1 port of backend/src/postgresDatabase.ts's ensureDefaultSeedData /
 // ensurePrimaryAdminRoleAndUser. The Node backend runs this on every boot;
 // the Worker doesn't have a boot hook, so ensureCoreDataInvariantsOnce()
@@ -468,10 +469,13 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   // the NOT IN subquery on every future call, so this is a no-op after the
   // first successful run for a given product.
   const activeDefaultBranch = await db.prepare(`
-    SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1
+    SELECT id FROM branches WHERE is_active = 1
+      AND EXISTS (SELECT 1 FROM products p WHERE p.is_active = 1
+        AND p.id NOT IN (SELECT product_id FROM branch_stock))
+      ORDER BY is_default DESC, id ASC LIMIT 1
   `).get<{ id: number }>()
   if (activeDefaultBranch?.id) {
-    await db.prepare(`
+    await executeStockTransaction(db, [{ sql: `
       INSERT INTO branch_stock (product_id, branch_id, quantity)
       SELECT p.id, @branchId, COALESCE(p.stock_quantity, 0)
       FROM products p
@@ -481,7 +485,7 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
         AND @branchId = (
           SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1
         )
-    `).run({ branchId: activeDefaultBranch.id })
+    `, params: { branchId: activeDefaultBranch.id } }], 'retry')
   }
 
   return {

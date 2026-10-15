@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 // Import job analyze/apply engine.
 //
 // WHAT THIS PORTS FAITHFULLY from backend/src/services/importJobs.ts:
@@ -5104,7 +5105,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     `).run({ id: jobId, total, errored: byAction.error, warned, summary: JSON.stringify(summary) })
     console.log('[import-timing] analyze done', jobId, summary.timings.analyze)
   } catch (error) {
-    if (isImportMaintenanceFenceError(error)) throw error
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     await markJobFailed(db, jobId, (error as Error).message || 'Analyze failed')
     throw error
   } finally {
@@ -5483,7 +5484,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     productId: Number(group.product_id), branchId: Number(group.branch_id),
     quantity: Number(group.expected_quantity), receivedDate: group.received_date,
   }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })),
-  ]))
+  ]), D1_IMPORT_BATCH_CHUNK_SIZE, true)
   return groups.length
 }
 
@@ -6199,7 +6200,7 @@ async function applyStockActionsContinuation(
         touched.push(...unitRows)
         delete stock.deferredRow
       } catch (error) {
-        if (isImportMaintenanceFenceError(error) || (typeof isRetryableD1Error === 'function' && isRetryableD1Error(error))) throw error
+        if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error) || (typeof isRetryableD1Error === 'function' && isRetryableD1Error(error))) throw error
         if (error instanceof StockQueryBudgetDeferred) {
           if (budget.physicalBatches !== beforePhysical || stock.deferredRow !== record.row_number) {
             if (budget.physicalBatches === beforePhysical) stock.deferredRow = record.row_number
@@ -6336,13 +6337,16 @@ export async function runD1BatchGroupsInChunks(
   db: D1Compat,
   groups: Array<Array<{ sql: string; params: Record<string, unknown> }>>,
   chunkSize: number = D1_IMPORT_BATCH_CHUNK_SIZE,
+  stockWrites: boolean = false,
 ): Promise<void> {
+  const statementLimit = stockWrites ? chunkSize - stockTransactionStatementCount(0) : chunkSize
   const packs: Array<typeof groups> = []
   let pack: typeof groups = []
   let packSize = 0
   for (const group of groups) {
     if (!group.length) continue
-    if (packSize + group.length > chunkSize && pack.length) {
+    if (stockWrites && stockTransactionStatementCount(group.length) > chunkSize) throw new Error('import_stock_group_statement_budget_exceeded')
+    if (packSize + group.length > statementLimit && pack.length) {
       packs.push(pack)
       pack = []
       packSize = 0
@@ -6353,12 +6357,13 @@ export async function runD1BatchGroupsInChunks(
   if (pack.length) packs.push(pack)
   for (const packedGroups of packs) {
     try {
-      await db.batch(packedGroups.flat())
+      if (stockWrites) await executeStockTransaction(db, packedGroups.flat(), 'retry')
+      else await db.batch(packedGroups.flat())
     } catch (error) {
       if (!isD1CpuLimitError(error) || packedGroups.length <= 1) throw error
       const mid = Math.ceil(packedGroups.length / 2)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize, stockWrites)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize, stockWrites)
     }
   }
 }
@@ -6412,7 +6417,7 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
   const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff) AND p.id NOT IN (SELECT value FROM json_each(@keepIds))`
   const params = { cutoff, keepIds, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
-    const result = await db.batch([
+    const result = await executeStockTransaction(db, [
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff, keepIds } },
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -6422,7 +6427,7 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
           FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
           WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff) AND id NOT IN (SELECT value FROM json_each(@keepIds))`, params: { cutoff, keepIds } },
-    ])
+    ], 'retry')
     return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
 }
@@ -7423,14 +7428,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         ...productSeedBranchIds,
       ], branchRedirects)
     }
-    if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
+    if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups, D1_IMPORT_BATCH_CHUNK_SIZE, true)
     if (statements.length) await runD1BatchInChunks(importWriteDb, statements)
     // The guarded additive groups run AFTER the plain statements (their
     // UPDATEs may reference products the create statements above insert)
     // and through the group-atomic runner, so each row's guard commits in
     // the same db.batch() as its stock writes -- see guardedGroups'
     // declaration comment.
-    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups)
+    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job.type === 'inventory' || job.type === 'products')
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,
@@ -7586,7 +7591,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   } catch (error) {
     const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
     if (budget) budget.reserve = 2
-    if (isImportMaintenanceFenceError(error)) throw error
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required'].includes(refusalCode)

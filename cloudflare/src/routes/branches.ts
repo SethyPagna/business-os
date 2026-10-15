@@ -1,3 +1,4 @@
+import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 import { Hono } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -291,7 +292,7 @@ app.post('/stock-integrity/repair', async (c) => {
       params: ids.params,
     })
   }
-  await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+  await executeStockTransaction(db, [...statements, ordinaryBusinessMaintenanceGuard], 'retry')
 
   const remaining = await readStockIntegrityIssues(db)
   const repairedRows = Math.max(0, issues.length - remaining.length)
@@ -478,7 +479,7 @@ app.post('/transfer', async (c) => {
       fromBranchId, toBranchId, reason,
       lines: [{ productId, destProductId, quantity, batchId }], response: responsePayload,
     })
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    await executeStockTransaction(db, [...statements, ordinaryBusinessMaintenanceGuard], 'retry')
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -487,6 +488,7 @@ app.post('/transfer', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const refusal = transferRefusal(error)
     if (refusal) return c.json(refusal.body, refusal.status)
     throw error
@@ -748,7 +750,7 @@ app.post('/transfer-bulk', async (c) => {
       lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
       response: responsePayload,
     })
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    await executeStockTransaction(db, [...statements, ordinaryBusinessMaintenanceGuard], 'retry')
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -757,6 +759,7 @@ app.post('/transfer-bulk', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const refusal = transferRefusal(error)
     if (refusal) return c.json(refusal.body, refusal.status)
     throw error

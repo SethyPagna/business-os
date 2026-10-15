@@ -1,3 +1,4 @@
+import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Part 553: reverting a Stock Change ledger row. A revert is a COMPENSATING
 // counter-movement -- it posts the opposite stock effect and records a new
@@ -645,17 +646,18 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     },
   })
   try {
-    await db.batch(addressedStatements(landing, [
+    await executeStockTransaction(db, addressedStatements(landing, [
       ...(revertType === 'add' ? [productStockGuardStatement([productId], 'active')] : []),
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ]))
+    ]), 'retry')
   } catch (err) {
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
+    if (err instanceof StockTransactionUnavailableError || err instanceof StockTransactionOutcomeUnknownError) throw err
     const message = err instanceof Error ? err.message : String(err)
     const activeGuard = productStockGuardError(err)
 

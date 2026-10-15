@@ -558,7 +558,7 @@ app.patch('/:id', async (c) => {
     { sql: updateSql, params },
     ...(affectsCatalogCost ? [{ ...recompute, sql: `${recompute.sql} AND changes() > 0` }] : []),
   ]
-  const results = body.is_active !== undefined
+  const results = affectsCatalogCost || body.received_at !== undefined
     ? await executeStockTransaction(db, updateStatements, 'retry')
     : await db.batch(updateStatements)
   if (deactivating && Number(results[0]?.meta?.changes ?? 0) === 0) {

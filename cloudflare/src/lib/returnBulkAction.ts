@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
@@ -332,7 +333,7 @@ function auditStatement(user: SessionUser, operationId: string, action: string, 
 
 function assertBounded(statements: Statement[], snapshot: Snapshot, eventsBytes = 0): void {
   try {
-    assertSaleRecordBatchBounds(statements.length, snapshot, eventsBytes)
+    assertSaleRecordBatchBounds(snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, snapshot, eventsBytes)
   } catch (_) {
     fail('Selection is too large for one atomic action. Select fewer returns.', 400)
   }
@@ -783,7 +784,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
-    const results = await db.batch(statements)
+    const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
     return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
@@ -838,7 +839,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
-    await db.batch(statements)
+    await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
   } catch (error) {
     const activeGuard = productStockGuardError(error)
 
