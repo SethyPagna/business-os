@@ -89,6 +89,7 @@ const adapter = {
   },
 }
 
+const stockTransaction = load('lib/stockTransaction.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const permissions = load('lib/permissions.ts')
 const planTier = load('lib/planTier.ts')
@@ -109,6 +110,7 @@ const costPreview = load('lib/productMergeCostPreview.ts', { './catalogCostRecom
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
+  './stockTransaction': stockTransaction,
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
   './audit': noAudit,
@@ -126,6 +128,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './productCostReview': costReview,
 })
 const productModule = load('routes/products.ts', {
+  '../lib/stockTransaction': stockTransaction,
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
   '../lib/productCostReview': costReview,
@@ -181,9 +184,21 @@ const SEED = `
     (50, 'Unrelated Lipstick', '8809999999999', 3, 0, 8, 0, 1);
   INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 3), (11, 1, 1), (11, 2, 1);
 `
+function fixtureWrite(write) {
+  const db=state.native.db
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec("INSERT INTO system_flags(key,value,updated_at) VALUES('stock_transaction_permit','legacy-separate-pool-v1',CURRENT_TIMESTAMP)")
+    const value=write()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+    return value
+  } catch(error) {db.exec('ROLLBACK');throw error}
+}
 function fresh() {
   state.native = openDb(loadAll())
-  state.native.db.exec(SEED)
+  fixtureWrite(() => state.native.db.exec(SEED))
   // D1's SQLite parses with expression depth 100; node's default is 1000.
   state.native.db.limits.exprDepth = 100
   state.user = ADMIN
@@ -290,16 +305,16 @@ async function main() {
     assert.equal(handPicked.status, 409, JSON.stringify(handPicked.body))
     assert.equal(handPicked.body.code, 'product_merge_not_duplicates')
     assert.equal((await preview(10, 50)).body.blocked.code, 'product_merge_not_duplicates')
-    state.native.db.prepare("INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('name', 'rose toner 100ml')").run()
+    fixtureWrite(() => state.native.db.prepare("INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('name', 'rose toner 100ml')").run())
     const dismissed = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
     assert.equal(dismissed.status, 409, JSON.stringify(dismissed.body))
     assert.equal(dismissed.body.code, 'product_merge_not_duplicates')
-    state.native.db.prepare('DELETE FROM product_duplicate_dismissals').run()
-    state.native.db.prepare("UPDATE products SET name = 'Rose Toner 200ml' WHERE id = 11").run()
+    fixtureWrite(() => state.native.db.prepare('DELETE FROM product_duplicate_dismissals').run())
+    fixtureWrite(() => state.native.db.prepare("UPDATE products SET name = 'Rose Toner 200ml' WHERE id = 11").run())
     const changed = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
     assert.equal(changed.status, 409, JSON.stringify(changed.body))
     assert.equal(changed.body.code, 'product_merge_not_duplicates')
-    state.native.db.prepare("UPDATE products SET name = 'Rose Toner 100ml' WHERE id = 11").run()
+    fixtureWrite(() => state.native.db.prepare("UPDATE products SET name = 'Rose Toner 100ml' WHERE id = 11").run())
     assert.equal(dump(), before)
   })
 
@@ -374,7 +389,7 @@ async function main() {
       [{ cost_price_usd: null }, { cost_price_usd: null, cost_price_khr: 24600 }],
     ]) {
       fresh()
-      if (choice.cost_price_usd === 4.1234) state.native.db.exec('UPDATE products SET cost_price_usd=5.123456 WHERE id=10')
+      if (choice.cost_price_usd === 4.1234) fixtureWrite(() => state.native.db.exec('UPDATE products SET cost_price_usd=5.123456 WHERE id=10'))
       const before = one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10')
       const seen = await preview(10, 11)
       const resolve = { requestId: 'nullable-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
@@ -418,7 +433,7 @@ async function main() {
 
   await check('three-product continuation and exact retry retain original keeper unknown', async () => {
     fresh()
-    state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',9,1); UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10")
+    fixtureWrite(() => state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',9,1); UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10"))
     const seen = await preview(10, 11, '&groupIds=10,11,12')
     const resolve = { requestId: 'unknown-three', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
     for (const mergeId of [11, 12]) {
@@ -434,7 +449,7 @@ async function main() {
   await check('selected unknown cannot bypass the frozen review revision', async () => {
     fresh()
     const seen = await preview(10, 11)
-    state.native.db.exec("UPDATE products SET cost_price_usd=8.1234,updated_at='changed-after-review' WHERE id=11")
+    fixtureWrite(() => state.native.db.exec("UPDATE products SET cost_price_usd=8.1234,updated_at='changed-after-review' WHERE id=11"))
     const before = dump(), refused = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: null,
       resolve: { requestId: 'stale-unknown', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] } })
     assert.equal(refused.status, 409); assert.equal(refused.body.code, 'merge_state_conflict'); assert.equal(dump(), before)
@@ -453,8 +468,8 @@ async function main() {
 
   await check('a legacy v2 three-product plan preserves its frozen mean and undo/redo for a non-editor', async () => {
     fresh()
-    state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)
-      VALUES (60, 'Lip Oil', '600001', 2, 10, 1), (61, 'Lip Oil', '600002', 4, 10, 1), (62, 'Lip Oil', '600003', 6, 10, 1)`)
+    fixtureWrite(() => state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)
+      VALUES (60, 'Lip Oil', '600001', 2, 10, 1), (61, 'Lip Oil', '600002', 4, 10, 1), (62, 'Lip Oil', '600003', 6, 10, 1)`))
     state.user = { ...MANAGER, permissions: JSON.stringify({ products: true, inventory: true, product_cost_view: true }) }
     const seen = await preview(60, 61, '&groupIds=60,61,62')
     assert.equal(seen.body.groupCost.cost_price_usd, 4)
@@ -475,7 +490,7 @@ async function main() {
 
   await check('lost-success retry is receipted once and the same request continues; changed choices refuse', async () => {
     fresh()
-    state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
+    fixtureWrite(() => state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)"))
     const seen = await preview(10, 11, '&groupIds=10,11,12')
     const resolve = { requestId: 'lost-success', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
     const body = { keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve }
@@ -496,11 +511,11 @@ async function main() {
   await check('reviewed and continuation snapshots refuse unrelated edits before any next fold', async () => {
     for (const target of ['before', 'keeper', 'remaining']) {
       fresh()
-      state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
+      fixtureWrite(() => state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)"))
       const seen = await preview(10, 11, '&groupIds=10,11,12')
       const resolve = { requestId: 'stale-' + target, reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
       if (target !== 'before') assert.equal((await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })).status, 200)
-      state.native.db.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(target === 'remaining' ? 12 : 10)
+      fixtureWrite(() => state.native.db.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(target === 'remaining' ? 12 : 10))
       const before = dump()
       const rejected = await merge({ keepId: 10, mergeId: target === 'before' ? 11 : 12, ...(target === 'before' ? { stock: 'merge' } : {}), keep: true, resolve })
       assert.equal(rejected.body.code, 'merge_state_conflict', JSON.stringify(rejected))
@@ -519,7 +534,7 @@ async function main() {
     fresh()
     const seen = await preview(10, 11)
     const resolve = { requestId: 'stock-race', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
-    state.beforeFold = () => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1')
+    state.beforeFold = () => fixtureWrite(() => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1'))
     const rejected = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
     assert.equal(rejected.status, 409, JSON.stringify(rejected.body))
     assert.equal(rejected.body.code, 'merge_state_conflict')
@@ -545,12 +560,12 @@ async function main() {
   await check('received metadata changes invalidate review, including changes to the keeper after a prior fold', async () => {
     for (const afterFirst of [false, true]) {
       fresh()
-      state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
-      state.native.db.exec("INSERT INTO product_batches (id,variant_product_id,batch_key,received_at,received_cost_usd) VALUES (500,10,'2026-01-01','2026-01-01',3)")
+      fixtureWrite(() => state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)"))
+      fixtureWrite(() => state.native.db.exec("INSERT INTO product_batches (id,variant_product_id,batch_key,received_at,received_cost_usd) VALUES (500,10,'2026-01-01','2026-01-01',3)"))
       const seen = await preview(10, 11, '&groupIds=10,11,12')
       const resolve = { requestId: 'metadata-' + afterFirst, reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
       if (afterFirst) assert.equal((await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })).status, 200)
-      state.native.db.exec('UPDATE product_batches SET received_cost_usd=8 WHERE id=500')
+      fixtureWrite(() => state.native.db.exec('UPDATE product_batches SET received_cost_usd=8 WHERE id=500'))
       const result = await merge({ keepId: 10, mergeId: afterFirst ? 12 : 11, ...(afterFirst ? {} : { stock: 'merge' }), keep: true, resolve })
       assert.equal(result.body.code, 'merge_state_conflict', JSON.stringify(result.body))
     }
@@ -560,8 +575,8 @@ async function main() {
     fresh()
     const seen = await preview(10, 11)
     const resolve = { requestId: 'concurrent-id', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
-    state.beforeFold = () => state.native.db.prepare("INSERT INTO audit_logs(user_id,action,entity,entity_id,details) VALUES (1,'merge_duplicate','product','99',?)")
-      .run(JSON.stringify({ resolvePlan: { requestId: resolve.requestId } }))
+    state.beforeFold = () => fixtureWrite(() => state.native.db.prepare("INSERT INTO audit_logs(user_id,action,entity,entity_id,details) VALUES (1,'merge_duplicate','product','99',?)")
+      .run(JSON.stringify({ resolvePlan: { requestId: resolve.requestId } })))
     const rejected = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
     assert.equal(rejected.status, 409, JSON.stringify(rejected.body))
     assert.equal(one('SELECT is_active FROM products WHERE id=11').is_active, 1)
@@ -570,7 +585,7 @@ async function main() {
 
   await check('maximum group stays within Paid invocation budget; Free preview and apply refuse before writing', async () => {
     fresh()
-    for (let id = 100; id < 112; id += 1) state.native.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES (?,'Twelve Lip Oil',?,?,1)").run(id, String(id + 100000), id - 99)
+    for (let id = 100; id < 112; id += 1) fixtureWrite(() => state.native.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES (?,'Twelve Lip Oil',?,?,1)").run(id, String(id + 100000), id - 99))
     const groupIds = Array.from({ length: 12 }, (_, index) => 100 + index)
     const seen = await preview(100, 101, '&groupIds=' + groupIds.join(','))
     assert.ok(seen.queries + 20 <= 50, 'preview has constant query count and reserves auth/middleware overhead')
@@ -597,7 +612,7 @@ async function main() {
 
   await check('a stock change between preview reads cannot issue a new digest for old displayed values', async () => {
     fresh()
-    state.afterStockRead = () => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1')
+    state.afterStockRead = () => fixtureWrite(() => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1'))
     const mixed = await preview(10, 11)
     assert.equal(mixed.status, 409, JSON.stringify(mixed.body))
     assert.equal(mixed.body.code, 'merge_state_conflict')
@@ -652,9 +667,9 @@ async function main() {
 
   await check('B3: a fold whose batch throws is 409 merge_failed / not_applied with an errorId, logged, and writes nothing', async () => {
     fresh()
-    state.native.db.exec(`INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (950, 'R-950', 1, 15, 'completed');
+    fixtureWrite(() => state.native.db.exec(`INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (950, 'R-950', 1, 15, 'completed');
       INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (951, 950, 11, 'Rose Toner 100ml', 1, 15, 15, 1);
-      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`)
+      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`))
     const before = dump()
     const logged = []
     const consoleError = console.error
@@ -677,10 +692,10 @@ async function main() {
 
   await check('B3: a malformed undo_payload elsewhere in the history does not turn merge_failed back into a 500', async () => {
     fresh()
-    state.native.db.exec(`${MALFORMED_HISTORY_ROW};
+    fixtureWrite(() => state.native.db.exec(`${MALFORMED_HISTORY_ROW};
       INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (950, 'R-950', 1, 15, 'completed');
       INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (951, 950, 11, 'Rose Toner 100ml', 1, 15, 15, 1);
-      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`)
+      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`))
     const before = dump()
     const consoleError = console.error
     console.error = () => {}
@@ -693,7 +708,7 @@ async function main() {
 
   await check('B3: the applied-probe still finds a committed merge among malformed rows, and not an unknown operation', async () => {
     fresh()
-    state.native.db.exec(MALFORMED_HISTORY_ROW)
+    fixtureWrite(() => state.native.db.exec(MALFORMED_HISTORY_ROW))
     const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
     assert.equal(done.status, 200, JSON.stringify(done.body))
     const probe = (operationId) => state.native.db.prepare(resolveChoices.MERGE_APPLIED_PROBE_SQL).get({ operationId })

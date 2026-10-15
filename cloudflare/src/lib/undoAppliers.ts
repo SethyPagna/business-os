@@ -1,4 +1,5 @@
 import { productStockGuardError } from './productStockGuard'
+import { executeStockTransaction } from './stockTransaction'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 // Type-only on purpose: dozens of test loaders stub this module's relative
@@ -1681,7 +1682,7 @@ async function replayAtomicSaleAddItems(
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
   )
   try {
-    await db.batch(statements)
+    await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     const activeGuard = productStockGuardError(error)
 
@@ -2226,12 +2227,12 @@ async function applyMergeReversal(
   const db = getDb(env)
   const statements = await buildMergeReversalStatements(env, r, canChangeProductImages)
   if (!legacyGuard) {
-    await db.batch(statements)
+    await executeStockTransaction(db, statements, 'retry')
     return
   }
   // assertLegacyMergeUnchanged's in-batch twin runs first, inside the batch.
   try {
-    await db.batch([legacyGuard, ...statements])
+    await executeStockTransaction(db, [legacyGuard, ...statements], 'retry')
   } catch (error) {
     if (/JSON path error|product_merge_changed/i.test(String((error as Error)?.message ?? error))) {
       throw new UndoConflictError('These products changed while the merge was being undone, so the undo stopped before overwriting that change.', UNDO_RECORD_CHANGED_CODE)
@@ -2297,7 +2298,7 @@ async function redoBulkMergeFolds(
     keeperIds.add(keeperId)
   }
   for (const keeperId of keeperIds) {
-    await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
+    await executeStockTransaction(db, [{ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: keeperId } }], 'retry')
   }
   return fresh
 }
@@ -3079,7 +3080,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
         operationId: pointer.operationId, generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }))
     }
     statements.push(...timestamps.after, ...completion.slice(1))
-    try { await db.batch(statements) } catch (error) {
+    try { await executeStockTransaction(db, statements, 'retry') } catch (error) {
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {
         throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
       }
@@ -3149,8 +3150,8 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
   const transitionStamp = new Date().toISOString()
   const transitionRequestId = `${ctx.historyId}:${ctx.direction}:${expectedGeneration}`
   try {
-    await db.batch(productRemoveReplayStatements({ snapshot, operation, direction: ctx.direction,
-      historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }))
+    await executeStockTransaction(db, productRemoveReplayStatements({ snapshot, operation, direction: ctx.direction,
+      historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }), 'retry')
   } catch (error) {
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
@@ -3447,9 +3448,9 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     if (ctx.direction === 'undo') {
       await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint, guards)
       const statements = await buildMergeReversalStatements(ctx.env, reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
-      await db.batch([...guards, ...statements,
+      await executeStockTransaction(db, [...guards, ...statements,
         ...mergeCostUndoStatements(outcome, { historyId, snapshotId: snapshot.id, operationId: String(reversal.operationId), generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }),
-        ...complete(reversal)])
+        ...complete(reversal)], 'retry')
     } else {
       if (!state || state.generation !== generation || state.direction !== 'undo'
         || !Number.isSafeInteger(state.keeper_revision) || !Number.isSafeInteger(state.duplicate_revision) || !mergeFoldFn) throw refuse()
@@ -3642,7 +3643,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // "we added it, then we took it back off" is a true statement about
         // the afternoon.
         const undoGroupId = crypto.randomUUID()
-        await db.batch([
+        await executeStockTransaction(db, [
           saleGuard,
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
@@ -3668,7 +3669,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userId: ctx.user?.id ?? null,
             userName: actorSnapshot(ctx.user),
           })),
-        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
+        ], 'retry').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new UndoConflictError('These items are already on the sale; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
@@ -3700,7 +3701,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
           ...residualGuards,
         ]
-        const results = await db.batch([
+        const results = await executeStockTransaction(db, [
           ...leading,
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
@@ -3726,7 +3727,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userName: actorSnapshot(ctx.user),
           })),
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
+        ], 'retry').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
           const statementIndex = leading.length + plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
@@ -3895,7 +3896,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           reversal.keeperChoice,
         )
         preserveBulkClusterPlan(reversal, fresh)
-        await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
+        await executeStockTransaction(db, [{ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: keeperId } }], 'retry')
         fresh.mergedStateFingerprint = await mergeStateFingerprint(db, [fresh])
         await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify(fresh), id: snapshotId })
       }
