@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -44,6 +45,7 @@ function fixture() {
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(file => file.endsWith('.sql')).sort()) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
+  assert.throws(() => sql.prepare("INSERT INTO products(name) VALUES('unadmitted fixture control')").run(), /stock_transaction_required/)
   let batches = 0
   let beforeBatch = null
   const env = { DB: {
@@ -68,7 +70,7 @@ function fixture() {
       }))()
     },
   } }
-  sql.exec(`
+  seedStockFixture(sql, () => sql.exec(`
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',11),(2,'B',10);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,11),(2,1,10);
@@ -79,7 +81,7 @@ function fixture() {
       VALUES(1,'SALE-AB','partial_return','completed',1,30,0,30,'sale-AB');
     INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,total_usd)
       VALUES(101,1,1,'A',1,1,10,10),(102,1,2,'B',1,1,20,20);
-  `)
+  `))
   insertReturn(sql, 10, 101, 1, 'completed')
   return { sql, env, batches: () => batches, beforeBatch: hook => { beforeBatch = hook } }
 }

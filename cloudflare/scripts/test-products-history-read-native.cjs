@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 'use strict'
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
@@ -21,11 +22,12 @@ let failed = 0
 function fixture(user) {
   if (!h) {
     h = createProductsRouteHarness({ user })
+    assert.throws(() => h.raw.db.prepare("INSERT INTO products(name) VALUES('unadmitted fixture control')").run(), /stock_transaction_required/)
     const real = h.load('lib/permissions.ts')
     h.setActionTier((...args) => real.getActionTier(...args))
-    h.raw.db.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1);
+    seedStockFixture(h.raw.db, () => h.raw.db.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1);
       INSERT INTO products(id,name,barcode,selling_price_usd,stock_quantity,is_active) VALUES(1,'Gloss','8850000000011',5,0,1);
-      INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,created_at) VALUES(1,1,'Gloss',1,'Shop','adjustment',3,'2026-10-13 09:00:00');`)
+      INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,created_at) VALUES(1,1,'Gloss',1,'Shop','adjustment',3,'2026-10-13 09:00:00');`))
   }
   h.setUser(user)
   return h
