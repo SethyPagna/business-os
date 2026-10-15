@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Real Hono routes + real permission helpers; forbidden reads must not open D1.
 // Positive payload assertions execute against the complete production SQLite schema.
 const assert = require('node:assert/strict')
@@ -137,7 +143,7 @@ async function main() {
   const sqlite = new Database(':memory:')
   try {
     for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(f => f.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
-    sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,sku,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd) VALUES(1,'Example','SKU1','BAR1',5,12,12,20); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)")
+    seedFixture(sqlite, () => sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,sku,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd) VALUES(1,'Example','SKU1','BAR1',5,12,12,20); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)"))
     const fixture = {
       prepare(sql) {
         reads++
