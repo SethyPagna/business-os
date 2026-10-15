@@ -48,7 +48,19 @@ const setCost = (id, usd, khr) => raw.prepare('UPDATE products SET cost_price_us
 
 let failed = 0
 async function check(name, fn) {
-  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.log(`FAIL ${name}\n  ${String(error && error.stack || error).split('\n').slice(0, 8).join('\n  ')}`) }
+  raw.exec('BEGIN IMMEDIATE')
+  try {
+    raw.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    await fn()
+    raw.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    raw.exec('COMMIT')
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    if (raw.inTransaction) raw.exec('ROLLBACK')
+    failed += 1
+    console.log(`FAIL ${name}\n  ${String(error && error.stack || error).split('\n').slice(0, 8).join('\n  ')}`)
+  }
 }
 
 async function main() {

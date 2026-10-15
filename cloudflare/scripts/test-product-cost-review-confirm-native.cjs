@@ -172,4 +172,36 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
   console.log('PASS confirmation failure rolls back amount, manual entry, audit and marker together')
 
 
+  function legacyEdit(productId, body, before) {
+    before ??= raw.prepare('SELECT cost_price_usd,cost_price_khr,updated_at FROM products WHERE id=?').get(productId)
+    return writes.updateRow({DB},'products',productId,body,undefined,{before,actor:{id:admin.id,name:admin.name}})
+  }
+  for(const [beforeUsd,usd] of [[7,9.123456789],[7,0],[null,0]]) {
+    const productId=seed(beforeUsd)
+    await legacyEdit(productId,{cost_price_usd:usd})
+    const row=raw.prepare('SELECT cost_price_usd,cost_review_key FROM products WHERE id=?').get(productId)
+    assert.equal(row.cost_price_usd,usd)
+    assert.equal(row.cost_review_key,null)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(productId).n,1)
+  }
+  console.log('PASS legacy queued known-cost edits retain precision and atomically confirm including zero')
+  for(const body of [{cost_price_usd:7,selling_price_usd:4},{cost_price_khr:9},{cost_price_usd:null}]) {
+    const productId=seed(7)
+    await legacyEdit(productId,body)
+    assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(productId).cost_review_key,'a'.repeat(32))
+  }
+  const staleId=seed(7)
+  const staleBefore=raw.prepare('SELECT cost_price_usd,cost_price_khr,updated_at FROM products WHERE id=?').get(staleId)
+  setup(()=>raw.prepare('UPDATE products SET cost_price_usd=11 WHERE id=?').run(staleId))
+  const staleSnapshot=snapshot()
+  await assert.rejects(legacyEdit(staleId,{cost_price_usd:9},staleBefore),/product changed/)
+  assert.equal(snapshot(),staleSnapshot)
+  console.log('PASS legacy echoes, KHR-only and NULL retain review; stale preimage refuses unchanged')
+  const legacyRollbackId=seed(7),legacyRollbackSnapshot=snapshot()
+  raw.exec(`CREATE TRIGGER fixture_fail_legacy_cost BEFORE INSERT ON product_cost_entries BEGIN SELECT RAISE(ABORT,'fixture legacy evidence failure'); END;`)
+  await assert.rejects(legacyEdit(legacyRollbackId,{cost_price_usd:9}),/fixture legacy evidence failure/)
+  raw.exec('DROP TRIGGER fixture_fail_legacy_cost')
+  assert.equal(snapshot(),legacyRollbackSnapshot)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+  console.log('PASS legacy evidence failure rolls back original money update and leaves no permit')
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => raw.close())

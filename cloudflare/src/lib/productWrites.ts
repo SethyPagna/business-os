@@ -18,7 +18,7 @@ import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
-import { planManualCostChange, catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { planManualCostChange, catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement } from './catalogCostRecompute'
 import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import {
   BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
@@ -427,7 +427,7 @@ export async function createProductWithInitialStock(
   return { item, id: Number(item.id) }
 }
 
-export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
+export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }, legacyCostWrite?: { before: { cost_price_usd: number | null; cost_price_khr: number | null; updated_at: string | null }; actor: { id: number | null; name: string | null } }) {
   if (table === 'products') {
     assertProductStatusInput(body)
     await assertProductsActive(getDb(env), [Number(id)])
@@ -447,9 +447,12 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   if (!keys.length) return 0
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
   const beforeKeys = moneyPlan ? [...moneyFields(moneyPlan.version), 'updated_at', 'name'] as const : []
+  if (legacyCostWrite && (table !== 'products' || moneyPlan || costOverrideActor)) invalidMoneyPlan()
+  const legacyGuardKeys = ['cost_price_usd', 'cost_price_khr', 'updated_at'] as const
+  const legacyGuard = legacyCostWrite ? legacyGuardKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
   const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
-  const updateSql = `UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`
-  const updateParams = [...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : [])]
+  const updateSql = `UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}${legacyGuard}`
+  const updateParams = [...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []), ...(legacyCostWrite ? legacyGuardKeys.map(field => legacyCostWrite.before[field]) : [])]
   const statement = env.DB.prepare(updateSql).bind(...updateParams)
   const writesAcquisitionCost = table === 'products' && keys.some(key => ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].includes(key))
   const dispatch = (statements: D1PreparedStatement[]) => writesAcquisitionCost
@@ -490,6 +493,26 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       const stockError = productStockGuardError(error)
       if (stockError) throw stockError
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
+      throw error
+    }
+  } else if (legacyCostWrite) {
+    const written = { usd: Object.hasOwn(body, 'cost_price_usd'), khr: Object.hasOwn(body, 'cost_price_khr') }
+    const entry = typedCostEntryAfterWriteStatement(Number(id), legacyCostWrite.before, written, legacyCostWrite.actor)
+    const confirmsKnownUsd = written.usd && typeof payload.cost_price_usd === 'number' && Number.isFinite(payload.cost_price_usd)
+      && payload.cost_price_usd >= 0 && payload.cost_price_usd !== legacyCostWrite.before.cost_price_usd
+    try {
+      const results = await executeStockTransaction(getDb(env), [
+        ...(stockGuard ? [stockGuard] : []),
+        { sql: updateSql, params: updateParams },
+        { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
+        ...(entry ? [entry, catalogCostRecomputeStatement(Number(id))] : []),
+        ...(confirmsKnownUsd ? explicitCostReviewConfirmationStatements(Number(id), payload.cost_price_usd as number, legacyCostWrite.actor) : []),
+      ], 'retry')
+      result = results[stockGuard ? 1 : 0]
+    } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) throw stockError
+      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the approved cost edit. Refresh and submit a new edit.')
       throw error
     }
   } else if (costChange && costOverrideActor && costBefore) {
