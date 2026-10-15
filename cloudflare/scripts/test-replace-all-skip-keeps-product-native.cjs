@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Owner ruling 17 (13 Oct 2026): "Replace-all import 'skip' keeps the product. A
 // skipped row is never deactivated."
 //
@@ -147,9 +153,9 @@ function fixture(world, { stockedOmitted = false, stockedKeeper = false } = {}) 
   const catalog = [...CATALOG, ...(stockedKeeper ? [[4, 'Keeper Stocked', 'KEEP-S']] : [])]
   for (const [id, name, barcode] of catalog) {
     const held = (id === 99 && stockedOmitted ? 3 : 0) + (id === 4 ? 5 : 0)
-    raw.prepare('INSERT INTO products(id,name,barcode,stock_quantity,is_active,updated_at) VALUES(@id,@name,@barcode,@stock,1,@old)')
-      .run({ id, name, barcode, stock: held, old: OLD })
-    if (held) raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@id,@branch,@stock)').run({ id, branch: SHOP, stock: held })
+    seedFixture(raw, () => raw.prepare('INSERT INTO products(id,name,barcode,stock_quantity,is_active,updated_at) VALUES(@id,@name,@barcode,@stock,1,@old)')
+      .run({ id, name, barcode, stock: held, old: OLD }))
+    if (held) seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@id,@branch,@stock)').run({ id, branch: SHOP, stock: held }))
   }
   const pending = []
   const env = {

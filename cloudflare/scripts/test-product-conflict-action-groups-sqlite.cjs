@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -161,17 +167,17 @@ function seed(groupCount = 801) {
       const right = left + 1
       const barcode = String(700000 + index)
       const name = `Reviewed ${index}`
-      insertProduct.run({ id: left, name, nameKey: name.toLowerCase(), barcode: `0${barcode}`, category: 'A', brand: 'One', unit: 'pcs', quantity: 2, cost: 4, retail: 8, wholesale: 7, updatedAt: '2026-09-08 01:00:00' })
-      insertProduct.run({ id: right, name: `Alternate ${index}`, nameKey: `alternate ${index}`, barcode, category: 'B', brand: 'Two', unit: 'box', quantity: 3, cost: 6, retail: 9, wholesale: 8, updatedAt: '2026-09-08 01:00:00' })
-      insertStock.run(left, 1, 2); insertStock.run(right, 1, 3)
+      seedFixture(d1.db, () => insertProduct.run({ id: left, name, nameKey: name.toLowerCase(), barcode: `0${barcode}`, category: 'A', brand: 'One', unit: 'pcs', quantity: 2, cost: 4, retail: 8, wholesale: 7, updatedAt: '2026-09-08 01:00:00' }))
+      seedFixture(d1.db, () => insertProduct.run({ id: right, name: `Alternate ${index}`, nameKey: `alternate ${index}`, barcode, category: 'B', brand: 'Two', unit: 'box', quantity: 3, cost: 6, retail: 9, wholesale: 8, updatedAt: '2026-09-08 01:00:00' }))
+      seedFixture(d1.db, () => insertStock.run(left, 1, 2)); seedFixture(d1.db, () => insertStock.run(right, 1, 3))
       groups.push({ group_key: `barcode:${barcode}`, member_ids: [right, left] })
   }
-  d1.db.prepare(`INSERT INTO product_batches
+  seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches
       (id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,notes,batch_number,supplier_id,supplier_name,
        unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_cost_usd)
       VALUES(99001,10000,'receipt-a','LOT-A','2027-01-01','2026-09-01',1,'first receipt',1,41,'Supplier A',4,'paid',NULL,2,1,8),
-            (99002,10001,'receipt-b','LOT-B','2027-02-01','2026-09-02',1,'second receipt',1,42,'Supplier B',6,'credit','2026-10-01',3,1,18)`).run()
-  d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99001,1,2),(99002,1,3)').run()
+            (99002,10001,'receipt-b','LOT-B','2027-02-01','2026-09-02',1,'second receipt',1,42,'Supplier B',6,'credit','2026-10-01',3,1,18)`).run())
+  seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99001,1,2),(99002,1,3)').run())
   return { d1, groups }
 }
 
@@ -283,11 +289,11 @@ async function main() {
   assert.ok(controls.maxBatchStatements < 100, `atomic receipt batch stayed compact: ${controls.maxBatchStatements}`)
   {
     const { d1: fanoutDb, groups: fanoutGroups } = seed(1)
-    fanoutDb.db.exec(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
+    seedFixture(fanoutDb.db, () => fanoutDb.db.exec(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
       INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active)
       SELECT 200000+x,10000,printf('fanout-%05d',x),x,1 FROM n;
       WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT 200000+x,1,1 FROM n;`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT 200000+x,1,1 FROM n;`))
     const { app: fanoutApp, controls: fanoutControls } = loadRoute(fanoutDb)
     const fanout = await post(fanoutApp, { manifest_version: 1, resolution_version: 2, client_request_id: 'fanout_review_10000', merge_groups: fanoutGroups, remove_rows: [] })
     assert.equal(fanout.status, 200)

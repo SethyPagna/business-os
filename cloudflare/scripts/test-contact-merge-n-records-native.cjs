@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // R11 (Resolve grid): the real POST {path}/merge route, the real merge
 // planner and duplicate finder, the full migration chain in SQLite and the
 // transactional d1compat.batch. All data is synthetic.
@@ -74,7 +80,7 @@ app.route('/api', contacts)
 function fresh(seed) {
   const native = openDb(loadAll())
   native.db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
-  try { native.db.exec(seed) } finally {
+  try { seedFixture(native.db, () => native.db.exec(seed)) } finally {
     native.db.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
   }
   Object.assign(state, { batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN })

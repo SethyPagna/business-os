@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Actual SQL over migrated local SQLite; compare the former serial orchestration
 // with the current scoped helper and its unchanged canonical digest projection.
 const assert = require('node:assert/strict')
@@ -75,9 +81,9 @@ function fixture(count, lots = false) {
   for (let i = 0; i < count; i++) {
     const keeper = 100 + i * 2, duplicate = keeper + 1, lot = 1000 + i * 3
     for (const id of [keeper, duplicate]) {
-      d1.db.prepare(`INSERT INTO products(id,name,barcode,is_active,cost_price_usd,cost_price_khr,updated_at)
-        VALUES(?,?,?,1,?,?,?)`).run(id, `Fixture ${i}`, String(id), id === keeper ? 0 : null, id * 4, '2026-09-12')
-      d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(?,1,?,1)').run(id, id % 7)
+      seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO products(id,name,barcode,is_active,cost_price_usd,cost_price_khr,updated_at)
+        VALUES(?,?,?,1,?,?,?)`).run(id, `Fixture ${i}`, String(id), id === keeper ? 0 : null, id * 4, '2026-09-12'))
+      seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(?,1,?,1)').run(id, id % 7))
       d1.db.prepare('INSERT INTO product_images(product_id,image_path,sort_order) VALUES(?,?,?)').run(id, `/${id}.png`, id % 2)
     }
     d1.db.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity)
@@ -85,20 +91,20 @@ function fixture(count, lots = false) {
     d1.db.prepare('INSERT INTO sale_items(sale_id,product_id) VALUES(1,?)').run(duplicate)
     d1.db.prepare('INSERT INTO return_items(return_id,product_id) VALUES(1,?)').run(duplicate)
     d1.db.prepare('INSERT INTO return_replacement_items(return_id,product_id) VALUES(1,?)').run(duplicate)
-    d1.db.prepare('INSERT INTO damaged_stock_lots(product_id) VALUES(?)').run(duplicate)
+    seedFixture(d1.db, () => d1.db.prepare('INSERT INTO damaged_stock_lots(product_id) VALUES(?)').run(duplicate))
     d1.db.prepare('INSERT INTO stock_transfers(product_id) VALUES(?)').run(duplicate)
     d1.db.prepare('INSERT INTO rfid_tags(epc_id,product_id,branch_id) VALUES(?,?,1)').run(`E${i}`, duplicate)
     d1.db.prepare("INSERT INTO rfid_events(session_id,epc_id,event_type,product_id) VALUES(1,?,'scan',?)").run(`E${i}`, duplicate)
     d1.db.prepare("INSERT INTO rfid_session_items(session_id,epc_id,status,product_id) VALUES(1,?,'confirmed',?)").run(`E${i}`, duplicate)
     d1.db.prepare("INSERT INTO promotions(title,link_product_id) VALUES('Fixture',?)").run(duplicate)
-    d1.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source) VALUES(?,9,'manual')").run(duplicate)
+    seedFixture(d1.db, () => d1.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source) VALUES(?,9,'manual')").run(duplicate))
     d1.db.prepare("INSERT INTO promotion_rules(title,product_ids) VALUES('Both',?)").run(JSON.stringify([keeper, duplicate]))
-    d1.db.prepare("INSERT INTO products(id,name,barcode,parent_id) VALUES(?,'Child',?,?)").run(10000 + i, `child${i}`, duplicate)
+    seedFixture(d1.db, () => d1.db.prepare("INSERT INTO products(id,name,barcode,parent_id) VALUES(?,'Child',?,?)").run(10000 + i, `child${i}`, duplicate))
     if (lots) {
       for (let n = 0; n < 3; n++) {
-        d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active)
-          VALUES(?,?,?,?,?,'2026-01-01','2030-12-31',?,?)`).run(lot + n, n === 0 ? keeper : duplicate, n === 2 ? 'repoint' : 'overlap', n + 1, `L${lot+n}`, n === 1 ? null : 0, n === 2 ? 0 : 1)
-        d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(lot + n, n === 2 ? 2 : 1, n === 2 ? 0 : n + 1)
+        seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active)
+          VALUES(?,?,?,?,?,'2026-01-01','2030-12-31',?,?)`).run(lot + n, n === 0 ? keeper : duplicate, n === 2 ? 'repoint' : 'overlap', n + 1, `L${lot+n}`, n === 1 ? null : 0, n === 2 ? 0 : 1))
+        seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(lot + n, n === 2 ? 2 : 1, n === 2 ? 0 : n + 1))
       }
       for (const batch of [lot + 1, lot + 2]) {
         d1.db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity) VALUES(1,?,1)').run(batch)

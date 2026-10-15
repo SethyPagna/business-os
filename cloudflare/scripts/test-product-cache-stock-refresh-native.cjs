@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // I2-1: a sale no longer discards every cached catalog page, and another till
 // still sees the new stock at once.
 //
@@ -96,11 +102,11 @@ raw.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',
 const insertProduct = raw.prepare(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,updated_at)
   VALUES(?,?,?,?,?,9.5,38000,4,16000,1,'2026-09-01 00:00:00')`)
 const stockProduct = (id, name, qty) => {
-  insertProduct.run([id, name, name.toUpperCase().replace(/\W/g, ''), `88500000${id}`, qty])
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run([id, qty])
-  raw.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
-    VALUES(?,?,?,?,'2027-06-01','2026-09-01',1,1)`).run([500 + id, id, `lot-${id}`, `LOT-${id}`])
-  raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').run([500 + id, qty])
+  seedFixture(raw.db, () => insertProduct.run([id, name, name.toUpperCase().replace(/\W/g, ''), `88500000${id}`, qty]))
+  seedFixture(raw.db, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run([id, qty]))
+  seedFixture(raw.db, () => raw.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+    VALUES(?,?,?,?,'2027-06-01','2026-09-01',1,1)`).run([500 + id, id, `lot-${id}`, `LOT-${id}`]))
+  seedFixture(raw.db, () => raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').run([500 + id, qty]))
 }
 stockProduct(10, 'Powder Foundation', 10)
 stockProduct(11, 'Powder Brush', 1)

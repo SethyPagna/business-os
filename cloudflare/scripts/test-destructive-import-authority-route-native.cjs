@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // A destructive products import (import_mode replace_all / replace_columns) is
 // authorised at four boundaries, and all four must apply ONE definition of
 // "destructive": the actual Hono routes (POST /, /:id/approve, /:id/retry) and
@@ -154,8 +160,8 @@ function fixture(world) {
       .run({ id: actor.id, name, role: actor.role ?? null, permissions: JSON.stringify(actor.grants) })
   }
   for (const [id, name, barcode] of [[1, 'Serum', 'SER-1'], [99, 'Omitted', 'OMITTED']]) {
-    raw.prepare('INSERT INTO products(id,name,barcode,stock_quantity,is_active,updated_at) VALUES(@id,@name,@barcode,0,1,@old)')
-      .run({ id, name, barcode, old: OLD })
+    seedFixture(raw, () => raw.prepare('INSERT INTO products(id,name,barcode,stock_quantity,is_active,updated_at) VALUES(@id,@name,@barcode,0,1,@old)')
+      .run({ id, name, barcode, old: OLD }))
   }
   const pending = []
   const env = {

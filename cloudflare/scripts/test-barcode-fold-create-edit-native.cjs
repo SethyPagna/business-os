@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // P10-5 (owner ruling, 2026-09-16, verbatim): "some places did not apply the
 // rules regarding the merge prompt etc... like barcodes leading zero (when
 // add products if product is same but existing barcode has 0, remove the
@@ -159,9 +165,9 @@ const app = productsRoute.default
 assert.ok(app && typeof app.request === 'function', 'routes/products.ts must export the Hono app as default')
 
 function seedBranch() {
-  rawDb.exec(`DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
+  seedFixture(rawDb.db, () => rawDb.exec(`DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; DELETE FROM inventory_movements; DELETE FROM product_images;
-    DELETE FROM products; DELETE FROM branches;`)
+    DELETE FROM products; DELETE FROM branches;`))
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
 }
 
@@ -204,8 +210,8 @@ async function main() {
   })
   await check('create-fold: existing padded barcode "0123456" + incoming "123456" same name -> ONE product, stored barcode cleaned, no 409', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, cost_price_khr, selling_price_usd)
-      VALUES (1, 'Zero Fold Serum', '0123456', 1, 5, 0, 20)`).run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, cost_price_khr, selling_price_usd)
+      VALUES (1, 'Zero Fold Serum', '0123456', 1, 5, 0, 20)`).run())
     const res = await post('/', { name: 'Zero Fold Serum', barcode: '123456', cost_price_usd: 7, branch_id: 1 })
     assert.equal(res.status, 200, `create must return 200, not a 409 refusal -- got ${res.status}: ${JSON.stringify(res.json)}`)
     assert.equal(res.json.folded_into, 1, 'the fold reports which row it folded into')
@@ -218,8 +224,8 @@ async function main() {
 
   await check('create-fold: a DIFFERENT real barcode stays a legitimate child row (negative control)', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
-      VALUES (1, 'Two Real Codes', '1112223334445', 1, 5)`).run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
+      VALUES (1, 'Two Real Codes', '1112223334445', 1, 5)`).run())
     const res = await post('/', { name: 'Two Real Codes', barcode: '9998887776665', cost_price_usd: 5, branch_id: 1 })
     assert.equal(res.status, 200, 'a genuine sibling still creates fine')
     assert.ok(res.json.id !== 1 && !res.json.folded_into, 'two different REAL barcodes must NOT fold together')
@@ -229,8 +235,8 @@ async function main() {
 
   await check('create-fold: broken/wildcard existing barcode adopts the incoming REAL one', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
-      VALUES (1, 'Wildcard Row', 'NoBox', 1, 0)`).run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
+      VALUES (1, 'Wildcard Row', 'NoBox', 1, 0)`).run())
     const res = await post('/', { name: 'Wildcard Row', barcode: '3614274226546', cost_price_usd: 9, branch_id: 1 })
     assert.equal(res.status, 200)
     assert.equal(res.json.folded_into, 1)
@@ -241,8 +247,8 @@ async function main() {
 
   await check('create-fold is IDEMPOTENT: folding twice never mints a third row nor re-double-counts cost', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
-      VALUES (1, 'Repeat Fold', '00123456', 1, 6)`).run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd)
+      VALUES (1, 'Repeat Fold', '00123456', 1, 6)`).run())
     const first = await post('/', { name: 'Repeat Fold', barcode: '123456', cost_price_usd: 9, branch_id: 1 })
     assert.equal(first.status, 200)
     const afterFirst = rawDb.prepare('SELECT barcode, cost_price_usd FROM products WHERE id = 1').get()
@@ -257,10 +263,10 @@ async function main() {
 
   await check('edit-fold: re-barcoding row 2 onto row 1\'s zero-stripped identity merges 2 INTO 1, never 409', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (1, 'Edit Fold Cream', '3348901', 1, 5, 0)`).run()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (2, 'Edit Fold Cream Two', '9998887', 1, 4, 0)`).run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (1, 'Edit Fold Cream', '3348901', 1, 5, 0)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (2, 'Edit Fold Cream Two', '9998887', 1, 4, 0)`).run())
     const res = await put('/2', { name: 'Edit Fold Cream', barcode: '03348901' })
     assert.equal(res.status, 200, `edit must fold, not 409 -- got ${res.status}: ${JSON.stringify(res.json)}`)
     assert.equal(res.json.merged_into, 1, 'row 2 folded into row 1')
@@ -272,12 +278,12 @@ async function main() {
 
   await check('edit-fold moves the discarded row\'s STOCK onto the survivor (arithmetic must balance)', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (1, 'Stocked Keeper', '555000', 1, 5, 2)`).run()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (2, 'Stocked Dup', '00555000', 1, 5, 3)`).run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 2)').run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 3)').run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (1, 'Stocked Keeper', '555000', 1, 5, 2)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (2, 'Stocked Dup', '00555000', 1, 5, 3)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 2)').run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 3)').run())
     const res = await put('/2', { name: 'Stocked Keeper', barcode: '555000' })
     assert.equal(res.status, 200, `edit-fold with stock present must still fold (default merge disposition) -- got ${res.status}: ${JSON.stringify(res.json)}`)
     const keeperStock = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get()
