@@ -299,6 +299,10 @@ async function main() {
     assert.equal(denied.status, 403, JSON.stringify(denied.body))
     assert.equal(denied.body.code, 'cost_permission_required')
     assert.equal(dump(), before)
+    for (const cost of [null, 0]) {
+      const refusal = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: cost })
+      assert.equal(refusal.status, 403); assert.equal(refusal.body.code, 'cost_permission_required'); assert.equal(dump(), before)
+    }
     const noCost = await preview(10, 11, '&groupIds=10,11')
     assert.equal(noCost.status, 200)
     assert.equal('groupCost' in noCost.body && noCost.body.groupCost && 'cost_price_usd' in noCost.body.groupCost, false, 'cost is projected away without cost view')
@@ -346,6 +350,7 @@ async function main() {
       [{ cost_price_usd: null }, { cost_price_usd: null, cost_price_khr: 24600 }],
     ]) {
       fresh()
+      if (choice.cost_price_usd === 4.1234) state.native.db.exec('UPDATE products SET cost_price_usd=5.123456 WHERE id=10')
       const before = one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10')
       const seen = await preview(10, 11)
       const resolve = { requestId: 'nullable-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
@@ -371,6 +376,55 @@ async function main() {
       assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), expected)
       assert.deepEqual(one('SELECT undo_payload,redo_payload FROM action_history WHERE id=?', history.id), { undo_payload: history.undo_payload, redo_payload: history.redo_payload })
     }
+  })
+
+  await check('retry identity distinguishes omitted cost, chosen NULL, zero and omitted KHR without writes', async () => {
+    for (const [cost, altered] of [[{}, { cost_price_usd: null }], [{ cost_price_usd: null }, {}],
+      [{ cost_price_usd: null }, { cost_price_usd: 0 }], [{ cost_price_usd: 0 }, { cost_price_usd: null }],
+      [{ cost_price_usd: 4.1234 }, { cost_price_usd: 4.1234, cost_price_khr: null }],
+      [{ cost_price_usd: 4.1234, cost_price_khr: null }, { cost_price_usd: 4.1234 }]]) {
+      fresh()
+      const seen = await preview(10, 11)
+      const base = { keepId: 10, mergeId: 11, keep: true, stock: 'merge', resolve: { requestId: 'presence-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] } }
+      const done = await merge({ ...base, ...cost }); assert.equal(done.status, 200, JSON.stringify(done.body))
+      const before = dump(), refused = await merge({ ...base, ...altered })
+      assert.equal(refused.status, 409, JSON.stringify(refused.body)); assert.equal(refused.body.code, 'resolve_request_conflict'); assert.equal(dump(), before)
+    }
+  })
+
+  await check('three-product continuation and exact retry retain selected unknown instead of re-averaging the survivor', async () => {
+    fresh()
+    state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',9,1); UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=11")
+    const seen = await preview(10, 11, '&groupIds=10,11,12')
+    const resolve = { requestId: 'unknown-three', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
+    for (const mergeId of [11, 12]) {
+      const body = { keepId: 10, mergeId, keep: true, ...(mergeId === 11 ? { stock: 'merge' } : {}), cost_price_usd: null, cost_price_khr: null, resolve }
+      const done = await merge(body); assert.equal(done.status, 200, JSON.stringify(done.body))
+      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), { cost_price_usd: null, cost_price_khr: null })
+      const count = one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n
+      const retry = await merge(body); assert.equal(retry.status, 200, JSON.stringify(retry.body)); assert.equal(retry.body.replayed, true)
+      assert.equal(one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n, count)
+    }
+  })
+
+  await check('selected unknown cannot bypass the frozen review revision', async () => {
+    fresh()
+    const seen = await preview(10, 11)
+    state.native.db.exec("UPDATE products SET cost_price_usd=8.1234,updated_at='changed-after-review' WHERE id=11")
+    const before = dump(), refused = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: null,
+      resolve: { requestId: 'stale-unknown', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] } })
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'merge_state_conflict'); assert.equal(dump(), before)
+  })
+
+  await check('malformed, negative, overflow and non-Resolve chosen costs refuse without writes', async () => {
+    fresh()
+    for (const cost of [{ cost_price_usd: '' }, { cost_price_usd: ' ' }, { cost_price_usd: '.' }, { cost_price_usd: true }, { cost_price_usd: {} },
+      { cost_price_usd: '-0.00004' }, { cost_price_usd: 100000000001 }, { cost_price_usd: 'NaN' }, { cost_price_usd: null, cost_price_khr: -1 }, { cost_price_khr: null }]) {
+      const before = dump(), result = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', ...cost })
+      assert.equal(result.status, 400, JSON.stringify(result.body)); assert.equal(result.body.code, 'invalid_merge_cost'); assert.equal(dump(), before)
+    }
+    const before = dump(), unscoped = await merge({ keepId: 10, mergeId: 11, stock: 'merge', cost_price_usd: null })
+    assert.equal(unscoped.status, 400); assert.equal(unscoped.body.code, 'invalid_merge_cost'); assert.equal(dump(), before)
   })
 
   await check('a non-editor resolving three products stores the same whole-group cost the preview showed', async () => {
