@@ -13,6 +13,7 @@
 //
 // Run (from cloudflare/): node scripts/test-reset-password-step-up-native.cjs
 const { randomBytes } = require('node:crypto')
+const assert = require('node:assert/strict')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
 
 const COUNTED_TABLES = ['sales', 'products', 'customers', 'suppliers']
@@ -35,10 +36,19 @@ async function main() {
     const clearRequestLimits = async () => {
       for (const key of (await cache.list({ prefix: 'ratelimit:' })).keys) await cache.delete(key.name)
     }
+    const seedNativeStock = async statements => {
+      assert.equal((await world.first("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'")).n, 0)
+      await world.db.batch([
+        world.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+        ...statements,
+        world.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+      ])
+      assert.equal((await world.first("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'")).n, 0)
+    }
     const seed = async () => {
       await clearRequestLimits()
       await world.run("INSERT INTO sales (receipt_number, total_usd) VALUES ('STEP-UP', 5)")
-      await world.run("INSERT INTO products (name) VALUES ('Step-up product')")
+      await seedNativeStock([world.db.prepare("INSERT INTO products (name) VALUES ('Step-up product')")])
       await world.run("INSERT INTO customers (name) VALUES ('Step-up customer')")
       await world.run("INSERT INTO suppliers (name) VALUES ('Step-up supplier')")
       await world.run("INSERT INTO audit_logs (action, entity) VALUES ('probe', 'step_up_marker')")
@@ -181,18 +191,20 @@ async function main() {
     const ORPHANS = '/api/system/import-retention/orphans'
     const seedFinalize = async () => {
       await clearRequestLimits()
-      await world.run("DELETE FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST')")
-      await world.run("DELETE FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST'")
-      await world.run("UPDATE products SET stock_quantity = 0 WHERE name = 'Finalize product'")
-      await world.run("DELETE FROM branch_stock WHERE product_id IN (SELECT id FROM products WHERE name = 'Finalize product')")
-      await world.run("DELETE FROM products WHERE name = 'Finalize product'")
       const branch = await world.first('SELECT id FROM branches ORDER BY id LIMIT 1')
-      await world.run("INSERT INTO products (name, stock_quantity) VALUES ('Finalize product', 9)")
-      const product = await world.first("SELECT id FROM products WHERE name = 'Finalize product'")
-      await world.run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 9)', product.id, branch.id)
-      await world.run("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, notes, is_active) VALUES (?, 'BK-STEPUP-HIST', 'LOT-STEPUP', 'Unified stock import job-1, row 1', 1)", product.id)
-      const batch = await world.first("SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST'")
-      await world.run('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, 8)', batch.id, branch.id)
+      await seedNativeStock([
+        world.db.prepare("DELETE FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST')"),
+        world.db.prepare("DELETE FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST'"),
+        world.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Finalize product'"),
+        world.db.prepare("DELETE FROM branch_stock WHERE product_id IN (SELECT id FROM products WHERE name = 'Finalize product')"),
+        world.db.prepare("DELETE FROM products WHERE name = 'Finalize product'"),
+        world.db.prepare("INSERT INTO products (name, stock_quantity) VALUES ('Finalize product', 9)"),
+        world.db.prepare("INSERT INTO branch_stock (product_id, branch_id, quantity) SELECT id, ?, 9 FROM products WHERE name='Finalize product'").bind(branch.id),
+        world.db.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, notes, is_active) SELECT id, 'BK-STEPUP-HIST', 'LOT-STEPUP', 'Unified stock import job-1, row 1', 1 FROM products WHERE name='Finalize product'"),
+        world.db.prepare("INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) SELECT id, ?, 8 FROM product_batches WHERE batch_key='BK-STEPUP-HIST'").bind(branch.id),
+      ])
+      await assert.rejects(() => world.run("UPDATE products SET stock_quantity=stock_quantity WHERE name='Finalize product'"), /stock_transaction_required/)
+
     }
     const stockSnapshot = async () => ({
       branchStock: (await world.first('SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock')).n,
@@ -231,25 +243,30 @@ async function main() {
       t.eq('status', response.status, 400)
     })
 
-    await check('finalize-migration park_lots: the right password still parks the historical lot', async (t) => {
-      await seedFinalize()
-      const before = await stockSnapshot()
-      const response = await world.api('POST', FINALIZE, { step: 'park_lots', currentPassword: adminPassword }, { as: 'restorer' })
-      t.eq('status', response.status, 200)
-      t.eq('success', response.json && response.json.success, true)
-      t.eq('lot parked', (await stockSnapshot()).lot, 0)
-      t.eq('live stock untouched', { branchStock: (await stockSnapshot()).branchStock, productStock: (await stockSnapshot()).productStock }, { branchStock: before.branchStock, productStock: before.productStock })
-    })
-
-    await check('finalize-migration zero_stock: the right password still zeroes the live counts', async (t) => {
-      await seedFinalize()
-      const response = await world.api('POST', FINALIZE, { step: 'zero_stock', currentPassword: adminPassword }, { as: 'restorer' })
-      t.eq('status', response.status, 200)
-      t.eq('success', response.json && response.json.success, true)
-      const after = await stockSnapshot()
-      t.eq('branch stock zeroed', after.branchStock, 0)
-      t.eq('product stock zeroed', after.productStock, 0)
-    })
+    const finalizeState = async () => {
+      const tables = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'inventory_movements', 'audit_logs', 'action_history', 'undo_snapshots', 'system_flags']
+      const rows = await world.db.batch(tables.map(table => world.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`)))
+      const assets = await world.mf.getR2Bucket('ASSETS')
+      return { rows: rows.map(result => result.results), objects: await assets.list() }
+    }
+    for (const step of ['park_lots', 'zero_stock']) {
+      await check(`finalize-migration ${step}: a correct password refuses without stock, history or backup writes`, async t => {
+        await seedFinalize()
+        const before = await finalizeState()
+        const response = await world.api('POST', FINALIZE, { step, currentPassword: adminPassword }, { as: 'restorer' })
+        t.eq('status', response.status, 409)
+        t.eq('code', response.json && response.json.code, 'migration_stock_finalize_unavailable')
+        t.eq('success', response.json && response.json.success, false)
+        t.eq('all captured rows and backup objects unchanged', await finalizeState(), before)
+      })
+      await check(`finalize-migration ${step}: restore permission and authentication still precede refusal`, async t => {
+        await clearRequestLimits()
+        const before = await finalizeState()
+        t.eq('permission denied', (await world.api('POST', FINALIZE, { step, currentPassword: adminPassword }, { as: 'nobody' })).status, 403)
+        t.eq('unauthenticated', (await world.mf.dispatchFetch(`http://localhost${FINALIZE}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step,currentPassword:adminPassword}) })).status, 401)
+        t.eq('no business/history or backup effect', await finalizeState(), before)
+      })
+    }
 
     const seedOrphan = async () => {
       await clearRequestLimits()

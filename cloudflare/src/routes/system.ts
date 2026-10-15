@@ -1172,6 +1172,14 @@ app.post('/finalize-migration', async (c) => {
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
 
+  if (step === 'zero_stock' || step === 'park_lots') {
+    return c.json({
+      success: false,
+      code: 'migration_stock_finalize_unavailable',
+      error: 'This migration action is unavailable because stock changes must preserve their history. No data was changed. Use a recorded stock adjustment.',
+    }, 409)
+  }
+
   // Same hard prerequisite as every reset: a fresh, scoped backup must
   // succeed before any write runs, so the operation is always undoable.
   const backupTables = step === 'zero_stock' ? ['branch_stock', 'products'] : ['branch_batch_stock']
