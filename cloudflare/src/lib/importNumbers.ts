@@ -3,7 +3,7 @@
 // stripping) plus backend/src/money.ts's normalizePriceValue. Exact
 // behavioral port -- no native/Node dependencies in the original either.
 
-import { roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
+import { MAX_MONEY_ABS, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 
 const KHMER_ZERO = 0x17e0
 const ARABIC_INDIC_ZERO = 0x0660
@@ -108,4 +108,18 @@ export function normalizeImportCost4(value: unknown, fallbackValue: number | nul
 /** Catalog selling/wholesale defaults only; round original input directly. */
 export function normalizeImportSellingPrice(value: unknown, fallbackValue = 0): number {
   return sellingPriceCeilCent(parseImportNumericValue(value, fallbackValue))
+}
+
+export function parseImportCost(value: unknown): number | null | 'invalid' {
+  if (value == null || String(value).trim() === '' || /^null$/i.test(String(value).trim())) return null
+  const text = normalizeNumericText(value).replace(/[\u17DB$€£¥₩฿]|(?:usd|khr|riel|reil|dollars?)/gi, '').trim()
+  if (!/^[+\-]?[\d.,\s]+$/.test(text) || !/\d/.test(text)) return 'invalid'
+  const number = parseImportNumericValue(value, NaN)
+  if (!Number.isFinite(number) || number < 0 || number > MAX_MONEY_ABS || !Number.isSafeInteger(Math.round(number * 10000))) return 'invalid'
+  try { return roundMoney4(number) } catch { return 'invalid' }
+}
+
+export function importCostSource(row: Record<string, unknown>, fields: readonly string[]): unknown {
+  const field = fields.find(key => Object.hasOwn(row, key))
+  return field === undefined ? undefined : row[field]
 }

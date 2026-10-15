@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { decodeTextBuffer, getBlankCsvHeaderColumns, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.ts'
+import { parseCsvCost, decodeTextBuffer, getBlankCsvHeaderColumns, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.ts'
 
 let failed = 0
 
@@ -16,6 +16,14 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
     console.error(error)
   }
 }
+
+await runTest('cost parser keeps unknown and known zero while rejecting malformed costs', () => {
+  for (const value of [undefined, null, '', 'NULL']) assert.equal(parseCsvCost(value), null)
+  for (const value of ['0', 0, '$0.00']) assert.equal(parseCsvCost(value), 0)
+  assert.equal(parseCsvCost('5.1234'), 5.1234)
+  for (const value of ['12oops', '-1', '(2)', '.', '1e309', '100000000001', '0.0000000000000000000000001', '9'.repeat(400)]) assert.equal(parseCsvCost(value), 'invalid', value)
+  assert.equal(parseCsvNumber('12oops', 0), 12)
+})
 
 await runTest('parseCsvRows handles quoted values and trims headers', () => {
   const rows = parseCsvRows(' "Name" , "Quantity" , "Note"\n"Alpha, Beta",2," hello " ')

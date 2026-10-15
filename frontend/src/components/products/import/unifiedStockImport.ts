@@ -1,3 +1,4 @@
+import { parseCsvCost } from '../../../utils/csvImport.ts'
 // Canonical file contract for progress.md §12. This is the only frontend
 // definition of the ten-column Add / Sale / Reconciliation sheet; the
 // upload screen, review screen and template download all consume it.
@@ -180,7 +181,7 @@ export function parseUnifiedStockRows(
     const date = normalizeUnifiedStockDate(read('date'))
     const sellingPrice = parseOptionalNumber(read('selling_price'))
     const wholesalePrice = parseOptionalNumber(read('wholesale_price'))
-    const costPrice = parseOptionalNumber(read('cost_price'))
+    const costPrice = parseCsvCost(read('cost_price'))
 
     if (!name && !barcode) issues.push({ rowNumber, code: 'missing_identity', message: 'Name or barcode is required.' })
     if (shop === null && warehouse === null && store === null) issues.push({ rowNumber, code: 'missing_quantity', message: 'Enter a shop, warehouse or store quantity.' })
@@ -203,11 +204,7 @@ export function parseUnifiedStockRows(
     // and decides, and this screen has no catalog to read it from. The one
     // row this screen CAN settle deterministically is an explicit CREATE/NEW
     // action (below): a new product has no lot yet, so nothing can be
-    // inherited and a blank supplier is certain to be refused. Nor can it
-    // settle the cost for an EXISTING product, whose blank cost column
-    // resolves to the product's catalog cost server-side; what it can say is
-    // that the sheet itself states no cost, which is why the note asks for
-    // the column rather than promising a refusal.
+    // inherited and a blank supplier is certain to be refused.
     // An unreadable price is already reported above; re-reporting it as a gate
     // refusal would count one bad cell as two rows needing attention.
     const action = clean(read('action'))

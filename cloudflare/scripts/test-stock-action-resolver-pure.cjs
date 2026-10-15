@@ -25,7 +25,7 @@ function loadTs(relPath) {
     fileName: path.basename(relPath),
   })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', outputText)(mod.exports, (name) => name.startsWith('.') ? loadTs(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), name)) + '.ts') : require(name), mod)
   return mod.exports
 }
 
@@ -232,6 +232,20 @@ check('resolveStockActions produces exactly one plan per row and sets needsRevie
   assert.strictEqual(needsReview, true, 'the cost/batch conflict must gate the import')
   assert.ok(plans[0].conflicts.length > 0 && plans[1].conflicts.length > 0, 'both conflicting rows are flagged')
   assert.strictEqual(plans[2].conflicts.length, 0, 'the unrelated sale row is clean')
+})
+
+const { resolveUnifiedStockImportRows } = loadTs('src/lib/stockActionImport.ts')
+check('actual unified resolver rejects malformed and overflowing cost in direct and reconcile modes', () => {
+  const branches = [{ id: SHOP, name: 'Shop', role: 'shop', canonical_key: 'shop', is_default: 1, is_active: 1 }]
+  for (const mode of ['direct', 'reconcile']) {
+    const resolve = cost => resolveUnifiedStockImportRows([{ _rowNumber: 2, name: 'Synthetic', shop: '1', date: '10/15/2026', action: 'create', supplier: 'Synthetic supplier', cost_price: cost }], mode, [], branches, [])[0]
+    for (const value of ['12oops', '-1', '100000000001', '100000000000.0001', '0.0000000000000000000000001']) assert.ok(resolve(value).errors.some(error => /cost/i.test(error)), `${mode}:${value}`)
+    const pricing = resolveUnifiedStockImportRows([{ _rowNumber: 2, name: 'Precision', shop: '12oops', date: '10/15/2026', action: 'create', supplier: 'Synthetic supplier', cost_price: '5.1234', selling_price: '1.2345', wholesale_price: '1.2345' }], mode, [], branches, [])[0]
+    assert.equal(pricing.costPriceUsd, 5.1234)
+    assert.equal(pricing.sellingPriceUsd, 1.24)
+    assert.equal(pricing.wholesalePriceUsd, 1.24)
+    for (const [value, expected] of [['NULL', null], ['0', 0], ['៥.១២៣៤', 5.1234]]) assert.equal(resolve(value).costPriceUsd, expected)
+  }
 })
 
 console.log(failed ? `\n${failed} FAILED, ${passed} passed.` : `\nAll ${passed} stock-action-resolver checks passed.`)

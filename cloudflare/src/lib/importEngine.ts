@@ -80,7 +80,7 @@ import {
   findBlankHeaderIndexes,
   type ParsedCsvRow,
 } from './importCsv'
-import { parseImportNumericValue, normalizeImportMoney, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+import { parseImportCost, importCostSource, parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
@@ -1640,10 +1640,15 @@ export async function classifyProducts(
         identifier: sku || barcode || name || null, existingId: null, message: `${refusal.code}: ${refusal.message}`, changes: {}, data: row })
       continue
     }
-    const costWasBlank = [
-      row.cost_price_usd, row.purchase_price_usd, row.cost_usd,
-      row.cost_price_khr, row.purchase_price_khr, row.cost_khr,
-    ].every((value) => str(value) === '')
+    const costFields = ['cost_price_usd', 'purchase_price_usd', 'cost_usd', 'cost_price_khr', 'purchase_price_khr', 'cost_khr']
+    const invalidCost = costFields.some(field => Object.hasOwn(row, field) && parseImportCost(row[field]) === 'invalid')
+    const rawCostUsd = importCostSource(row, ['cost_price_usd', 'purchase_price_usd', 'cost_usd'])
+    const rawCostKhr = importCostSource(row, ['cost_price_khr', 'purchase_price_khr', 'cost_khr'])
+    const parsedCostUsd = parseImportCost(rawCostUsd)
+    const parsedCostKhr = parseImportCost(rawCostKhr)
+    const costUsd = parsedCostUsd === 'invalid' ? null : parsedCostUsd
+    const costKhr = parsedCostKhr === 'invalid' ? null : parsedCostKhr
+    const costWasBlank = costUsd === null && costKhr === null
     if (!name) {
       results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || null, existingId: null, message: 'Missing required field: name', changes: {}, data: row })
       continue
@@ -1674,8 +1679,6 @@ export async function classifyProducts(
       }
       return out.join('||')
     }
-    const rawCostUsd = row.cost_price_usd ?? row.purchase_price_usd ?? row.cost_usd
-    const rawCostKhr = row.cost_price_khr ?? row.purchase_price_khr ?? row.cost_khr
     const data: Record<string, unknown> = {
       name,
       sku: sku || null,
@@ -1706,13 +1709,13 @@ export async function classifyProducts(
       // migration 0016) -- an old export must still re-import cleanly.
       // A blank cell, or a file with no cost column, is an UNKNOWN cost (null), never 0: a typed 0 is a recorded
       // free cost and stays 0.
-      cost_price_usd: normalizeImportCost4(rawCostUsd, null),
-      cost_price_khr: normalizeImportCost4(rawCostKhr, null),
+      cost_price_usd: costUsd,
+      cost_price_khr: costKhr,
       // Internal receipt-evidence flags: batch/movement history distinguishes
       // "no recorded receipt cost" from an actual zero-cost receipt.
-      __costPriceUsdProvided: str(rawCostUsd) !== '' ? 1 : 0,
-      __receiptCostUsd: str(rawCostUsd) !== '' ? normalizeImportCost4(rawCostUsd, null) : null,
-      __costPriceKhrProvided: str(rawCostKhr) !== '' ? 1 : 0,
+      __costPriceUsdProvided: costUsd !== null ? 1 : 0,
+      __receiptCostUsd: costUsd,
+      __costPriceKhrProvided: costKhr !== null ? 1 : 0,
       stock_quantity: parseImportNumericValue(row.stock_quantity ?? row.quantity, 0, { allowNegative: false, field: 'stock_quantity' }),
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
       is_active: 1,
@@ -2124,6 +2127,12 @@ export async function classifyProducts(
     // are inherently about reconciling with something that already
     // exists) and always takes the ordinary create path below.
     const requestedRowMode = lower(str(row._action))
+    if (invalidCost) {
+      results.push({ rowNumber: row._rowNumber, action: 'error', code: 'invalid_cost', identifier: sku || barcode || name || null,
+        existingId: match?.id ?? null, message: 'invalid_cost: Cost must be a valid non-negative number within the monetary limit.', changes: {}, data: row })
+      continue
+    }
+
 
     // Blank money cells on a matched merge row keep the existing values --
     // see preserveExistingMoneyOnBlankCells' own comment for the measured
@@ -3362,16 +3371,20 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     if (matchedBranchResolution?.addressedName) data.branch_addressed_name = matchedBranchResolution.addressedName
     markImportBranchRedirect(data, matchedBranchResolution)
     const normalizedExplicitCost = (value: unknown): number => {
-      const parsed = normalizeImportCost4(parseImportNumericValue(value, 0, { strict: true, field: 'unit cost' }))
-      return Object.is(parsed, -0) ? 0 : parsed
+      const parsed = parseImportCost(value)
+      if (parsed === 'invalid') {
+        if (parseImportNumericValue(value, NaN, { allowNegative: true }) < 0) throw new Error('Unit cost cannot be negative')
+        throw new Error('Invalid unit cost')
+      }
+      return parsed as number
     }
     let explicitCostUsd: number | undefined
     let explicitCostKhr: number | undefined
     const freeGoods = ['true', '1', 'yes'].includes(lower(row.free_goods))
     if (inventoryAction === 'add') {
       try {
-        explicitCostUsd = row.unit_cost_usd != null && str(row.unit_cost_usd) !== '' ? normalizedExplicitCost(row.unit_cost_usd) : undefined
-        explicitCostKhr = row.unit_cost_khr != null && str(row.unit_cost_khr) !== '' ? normalizedExplicitCost(row.unit_cost_khr) : undefined
+        explicitCostUsd = parseImportCost(row.unit_cost_usd) === null ? undefined : normalizedExplicitCost(row.unit_cost_usd)
+        explicitCostKhr = parseImportCost(row.unit_cost_khr) === null ? undefined : normalizedExplicitCost(row.unit_cost_khr)
         if (explicitCostKhr !== undefined && explicitCostKhr < 0) throw new Error('Unit cost cannot be negative')
         const refusal = inventoryReceiptCostRefusal(explicitCostUsd, freeGoods)
         if (refusal) throw new Error(refusal)
@@ -4294,9 +4307,7 @@ export function preserveExistingMoneyOnBlankCells(
 ): void {
   if (!match) return
   for (const [field, sources] of PRODUCT_MONEY_FIELD_SOURCES) {
-    // The cell counts as provided if ANY accepted header alias carried a
-    // non-blank value -- same alias order the normalizer itself reads.
-    const provided = sources.some((key) => !isBlankFieldValue(row[key]))
+    const provided = field.startsWith('cost_price_') ? parseImportCost(importCostSource(row, sources)) !== null : sources.some((key) => !isBlankFieldValue(row[key]))
     if (provided) continue
     const existing = match[field]
     if (existing === null || existing === undefined) {

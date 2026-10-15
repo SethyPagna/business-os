@@ -3,7 +3,7 @@
 // targeted catalog/branch/stock rows needed for one bounded window.
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+import { parseImportNumericValue, parseImportCost, normalizeImportSellingPrice } from './importNumbers'
 import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow, type ImportBranchRequestOptions } from './importBranchAuthority'
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
@@ -121,9 +121,13 @@ function optionalNumber(value: unknown, field: string): { value: number | null; 
 }
 
 function optionalMoney(value: unknown, field: string, selling = false): { value: number | null; error: string | null } {
+  if (!selling) {
+    const cost = parseImportCost(value)
+    return cost === 'invalid' ? { value: null, error: `Invalid ${field}` } : { value: cost, error: null }
+  }
   if (!text(value)) return { value: null, error: null }
   const parsed = optionalNumber(value, field)
-  return parsed.error ? parsed : { value: selling ? normalizeImportSellingPrice(parsed.value) : normalizeImportCost4(parsed.value), error: null }
+  return parsed.error ? parsed : { value: normalizeImportSellingPrice(parsed.value), error: null }
 }
 
 export function getUnifiedStockMode(policyJson: string | null | undefined): StockActionMode {

@@ -854,7 +854,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 
   assert.ok(/FROM product_batches WHERE variant_product_id IN/.test(source), 'receipt candidates load by bounded product IDs including inactive lots')
   assert.ok(/chunkForBinding\(receiptProductIds\)/.test(source), 'candidate reads stay inside the D1 bind budget')
-  assert.ok(/__receiptCostUsd: str\(rawCostUsd\)/.test(source), 'sheet receipt evidence is captured before catalog identity pricing merges')
+  assert.ok(/__receiptCostUsd: costUsd/.test(source), 'sheet receipt evidence is captured before catalog identity pricing merges')
 
   assert.ok(/resolveReceiptLotTarget\(plannedLots, String\(d\.received_date\), receiptUnitCostUsd, receiptBaselines\.get\(productId\)/.test(block), 'restocks use the shared date/price/override identity, not a display-label-only match')
   assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
@@ -3029,6 +3029,15 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const data = { cost_price_usd: 0 }
     preserveExistingMoneyOnBlankCells(data, null, {})
     assert.strictEqual(data.cost_price_usd, 0, 'no match (create path) is a no-op')
+  }
+
+  for (const currency of ['usd', 'khr']) {
+    const field = `cost_price_${currency}`
+    for (const unknown of [null, '', 'NULL']) {
+      const data = { [field]: null }
+      preserveExistingMoneyOnBlankCells(data, { [field]: 38 }, { [field]: unknown, [`purchase_price_${currency}`]: '9', [`cost_${currency}`]: '8' })
+      assert.strictEqual(data[field], 38, 'blank canonical keeps existing despite stale lower alias')
+    }
   }
 
   // End-to-end through the real classify: matched row, blank cost cell.

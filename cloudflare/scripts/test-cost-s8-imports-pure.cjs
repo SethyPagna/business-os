@@ -87,6 +87,62 @@ const UNKNOWN = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null
   const numbers = load('lib/importNumbers.ts')
   const engine = load('lib/importEngine.ts')
 
+  await section('authoritative product classifier refuses malformed costs across all accepted aliases', async () => {
+    const db = { prepare: (sql) => ({ all: async () => /FROM branches/.test(sql) ? [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }] : [] }) }
+    for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'cost_usd', 'cost_khr']) {
+      for (const value of ['abc', '12oops', '-1', '100000000001', '100000000000.0001', '0.0000000000000000000000001']) {
+        const [row] = await engine.classifyProducts(db, [{ _rowNumber: 2, name: 'Invalid cost', [field]: value }], 'strict-cost', null, new Map())
+        assert.equal(row.action, 'error', `${field}=${value}`)
+        assert.equal(row.code, 'invalid_cost')
+      }
+      for (const [value, expected] of [['', null], ['NULL', null], ['0', 0], ['0.0001', 0.0001], ['៥.១២៣៤', 5.1234]]) {
+        const [row] = await engine.classifyProducts(db, [{ _rowNumber: 2, name: 'Valid cost', [field]: value }], 'strict-cost', null, new Map())
+        assert.notEqual(row.action, 'error', row.message)
+        assert.equal(row.data[field.endsWith('_usd') ? 'cost_price_usd' : 'cost_price_khr'], expected)
+      }
+    }
+    for (const currency of ['usd', 'khr']) {
+      const canonical = `cost_price_${currency}`, purchase = `purchase_price_${currency}`, alias = `cost_${currency}`
+      for (const value of [null, '', 'NULL', '0']) {
+        const [row] = await engine.classifyProducts(db, [{ _rowNumber: 2, name: 'Precedence', [canonical]: value, [purchase]: '9', [alias]: '8' }], 'strict-cost', null, new Map())
+        assert.equal(row.data[canonical], value === '0' ? 0 : null)
+      }
+      const [bad] = await engine.classifyProducts(db, [{ _rowNumber: 2, name: 'Shadowed', [canonical]: '5', [alias]: '12oops' }], 'strict-cost', null, new Map())
+      assert.equal(bad.action, 'error')
+    }
+  })
+
+  await section('malformed cost keeps the actual matched identity for explicit skip', async () => {
+    const existing = { id: 77, name: 'Skip keeper', sku: 'KEEP', barcode: '123', cost_price_usd: 7, is_active: 1 }
+    const db = { prepare: (sql) => ({ all: async () => /FROM products/.test(sql) ? [existing] : /FROM branches/.test(sql) ? [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }] : [] }) }
+    const [row] = await engine.classifyProducts(db, [{ _rowNumber: 2, name: 'Skip keeper', sku: 'KEEP', barcode: '123', cost_usd: '12oops' }], 'skip-cost', null, new Map())
+    assert.equal(row.action, 'error')
+    assert.equal(row.existingId, 77)
+  })
+
+  await section('cost validation and blank preservation survive import modes and override choices', async () => {
+    const existing = { id: 77, name: 'Mode keeper', sku: 'MODE', barcode: '123', cost_price_usd: 7, cost_price_khr: 28000, stock_quantity: 0, is_active: 1 }
+    const db = { prepare: (sql) => ({ all: async () => /FROM products/.test(sql) ? [existing] : /FROM branches/.test(sql) ? [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }] : [] }) }
+    for (const mode of ['merge', 'fill_blank', 'replace_columns', 'replace_all']) for (const action of ['', 'merge_stock', 'override_add', 'override_replace']) {
+      const policy = JSON.stringify({ import_mode: mode, replace_columns: ['cost_price_usd', 'cost_price_khr'] })
+      const base = { _rowNumber: 2, name: 'Mode keeper', sku: 'MODE', barcode: '123', _action: action }
+      const [bad] = await engine.classifyProducts(db, [{ ...base, cost_usd: '12oops' }], 'mode-cost', policy, new Map())
+      assert.equal(bad.action, 'error', `${mode}:${action}`)
+      assert.equal(bad.existingId, 77)
+      const [unknown] = await engine.classifyProducts(db, [{ ...base, cost_price_usd: 'NULL', purchase_price_usd: '9' }], 'mode-cost', policy, new Map())
+      assert.notEqual(unknown.action, 'error', unknown.message)
+      if ((mode === 'merge' && action !== 'override_replace') || mode === 'fill_blank') assert.equal(unknown.data.cost_price_usd, 7, `${mode}:${action}:preserve`)
+    }
+  })
+
+  await section('strict cost bound and generic quantity/sale rounding controls', () => {
+    for (const [value, expected] of [['100000000000', 100000000000], ['99999999999.9999', 99999999999.9999], ['100000000000.0001', 'invalid'], ['100000000001', 'invalid'], ['0.0000000000000000000000001', 'invalid']]) assert.equal(numbers.parseImportCost(value), expected)
+    assert.equal(numbers.parseImportNumericValue('12oops', 0), 12)
+    assert.equal(numbers.parseImportNumericValue('-2', 0, { allowNegative: true }), -2)
+    assert.equal(numbers.normalizeImportMoney('1.2345'), 1.24)
+    assert.equal(numbers.normalizeImportSellingPrice('1.2345'), 1.24)
+  })
+
   await section('normalizeImportCost4: a null fallback keeps blank / unreadable unknown, a typed 0 stays 0', () => {
     for (const blank of ['', '   ', undefined, null, 'abc', '-3']) {
       assert.equal(numbers.normalizeImportCost4(blank, null), null, `${JSON.stringify(blank)} is unknown`)
@@ -208,6 +264,12 @@ const UNKNOWN = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null
     assert.deepEqual([receipt.data.unit_cost_usd, receipt.data.total_cost_usd], [3.5, 7], 'control: a receipt keeps the sheet cost')
     const freeReceipt = await classify('add', { unit_cost_usd: '0', free_goods: 'true' })
     assert.deepEqual([freeReceipt.data.unit_cost_usd, freeReceipt.data.total_cost_usd], [0, 0], 'control: a declared free receipt is a recorded $0')
+    for (const field of ['unit_cost_usd', 'unit_cost_khr']) for (const value of ['12oops', '-1', '100000000001', '100000000000.0001', '0.0000000000000000000000001']) {
+      const refused = await classify('add', { unit_cost_usd: '2', [field]: value })
+      assert.equal(refused.action, 'error', `${field}=${value}`)
+      assert.match(refused.message, /cost/i)
+    }
+
   })
 
   await section('sales CSV: a line with no cost is NULL (not the catalog\'s); a typed 0 and a typed cost are kept', async () => {

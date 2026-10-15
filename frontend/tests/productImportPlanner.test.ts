@@ -23,6 +23,46 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
   }
 }
 
+await runTest('every accepted cost alias is validated with canonical then purchase precedence', () => {
+  for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'cost_usd', 'cost_khr']) {
+    const canonical = field.endsWith('_usd') ? 'cost_price_usd' : 'cost_price_khr'
+    for (const [value, expected] of [['', null], ['NULL', null], ['0', 0], ['5.1234', 5.1234]] as const) {
+      const row = analyzeProductImportRows([{ name: 'Alias', [field]: value }], []).rows[0]
+      assert.equal(row[canonical], expected, field)
+      assert.equal(row._price_columns_blank, expected === null, field)
+    }
+    for (const value of ['12oops', '-1', '100000000001']) assert.ok(analyzeProductImportRows([{ name: 'Bad alias', [field]: value }], []).errors.length, field)
+  }
+  for (const currency of ['usd', 'khr']) {
+    const canonical = `cost_price_${currency}`, purchase = `purchase_price_${currency}`, alias = `cost_${currency}`
+    assert.equal(analyzeProductImportRows([{ name: 'Canonical', [canonical]: '', [purchase]: '9', [alias]: '8' }], []).rows[0][canonical], null)
+    assert.equal(analyzeProductImportRows([{ name: 'Canonical', [canonical]: '0', [purchase]: '9', [alias]: '8' }], []).rows[0][canonical], 0)
+    assert.equal(analyzeProductImportRows([{ name: 'Purchase', [purchase]: '0', [alias]: '8' }], []).rows[0][canonical], 0)
+  }
+})
+
+await runTest('import costs preserve omitted unknown zero and canonical precedence', () => {
+  const rows = analyzeProductImportRows([
+    { name: 'Absent' }, { name: 'Blank', cost_price_usd: '', purchase_price_usd: '9' },
+    { name: 'Null', cost_price_usd: null, purchase_price_usd: '9' },
+    { name: 'Zero', cost_price_usd: '0', purchase_price_usd: '9' },
+    { name: 'Mirror', purchase_price_usd: '5.1234' },
+  ], []).rows
+  assert.equal(Object.hasOwn(rows[0], 'cost_price_usd'), false)
+  assert.equal(Object.hasOwn(rows[0], 'cost_price_khr'), false)
+  assert.equal(rows[1].cost_price_usd, null)
+  assert.equal(rows[2].cost_price_usd, null)
+  assert.equal(rows[3].cost_price_usd, 0)
+  assert.equal(rows[4].cost_price_usd, 5.1234)
+})
+await runTest('invalid import costs block instead of becoming zero', () => {
+  for (const value of ['abc', '12oops', '-1', '(2)', '.', '1e309', '100000000001', '9'.repeat(400)]) {
+    const result = analyzeProductImportRows([{ name: 'Bad', cost_price_usd: value }], [])
+    assert.ok(result.errors.length, value)
+    assert.ok(result.conflicts[0].issueTypes.includes('invalid_cost'), value)
+  }
+})
+
 await runTest('same product name and same non-stock details plans stock merge', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '12.345', stock_quantity: '3' },
@@ -288,7 +328,7 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
   assert.doesNotMatch(source, /value:\s*'identifier',\s*label:\s*'SKU\/barcode'/)
   assert.match(source, /value:\s*'barcode',\s*label:\s*'Barcode'/)
   assert.match(source, /value:\s*'sku',\s*label:\s*'SKU'/)
-  assert.match(source, /title=\{item\.hint\}/)
+  assert.match(source, /title=\{item\.value === 'pricing' \? T\('csv_pricing_review_hint', item\.hint\) : item\.hint\}/)
   assert.match(source, /reviewGroups/)
   assert.match(source, /collapsedFamilyKeys/)
   assert.match(source, /visibleConflictSections/)

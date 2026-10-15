@@ -5,9 +5,12 @@ import {
   normalizeCsvMoney,
   normalizeCsvPercent,
   parseCsvNumber,
+  parseCsvCost,
   parseCsvRows,
 } from '../../../utils/csvImport.ts'
 import { barcodeSearchKeys } from '../../../utils/searchMatch.ts'
+
+export const PRODUCT_COST_FIELDS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'cost_usd', 'cost_khr']
 
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',
@@ -25,10 +28,7 @@ export const PRODUCT_MONEY_FIELDS = [
   'special_price_khr',
   'discount_amount_usd',
   'discount_amount_khr',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
+  ...PRODUCT_COST_FIELDS,
   'unit_price_usd',
   'unit_price_khr',
   'total_usd',
@@ -215,6 +215,7 @@ function normalizeComparableBarcodeSignature(value: unknown): string {
 }
 
 export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
+  'invalid_cost',
   'invalid_barcode',
   'barcode_scientific_notation',
   'barcode_too_long',
@@ -251,6 +252,7 @@ function getCorruptedTextFields(row: ImportRow = {}): string[] {
 
 function getBlockingIssueMessage(issueType: ImportIssueType, rowNumber: unknown, barcode: unknown, fields: string[] = []): string {
   const prefix = `Row ${rowNumber}:`
+  if (issueType === 'invalid_cost') return `${prefix} cost must be a valid non-negative number.`
   if (issueType === 'barcode_scientific_notation') return `${prefix} barcode "${barcode}" looks like scientific notation. Re-export it as text, edit it, or clear it before importing.`
   if (issueType === 'barcode_too_long') return `${prefix} barcode is too long. Shorten or clear it before importing.`
   if (issueType === 'invalid_barcode') return `${prefix} barcode contains invalid control characters. Edit or clear it before importing.`
@@ -277,8 +279,12 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
     normalized[normalizedKey] = typeof value === 'string' ? value.normalize('NFC').trim() : value
   })
 
+  normalized._price_columns_blank = [...PRODUCT_COST_FIELDS, 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'vip_price_usd', 'vip_price_khr', 'special_price_usd', 'special_price_khr'].every((field) => normalized[field] == null || String(normalized[field]).trim() === '' || /^null$/i.test(String(normalized[field]).trim()))
+
   PRODUCT_MONEY_FIELDS.forEach((field) => {
-    if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
+    if (PRODUCT_COST_FIELDS.includes(field)) {
+      if (Object.hasOwn(normalized, field)) normalized[field] = parseCsvCost(normalized[field])
+    } else if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
   })
   PRODUCT_PERCENT_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvPercent(normalized[field], 0)
@@ -312,8 +318,14 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
   // 0 as "no wholesale price, use selling".
   normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
   normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
-  normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
-  normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
+  if (!Object.hasOwn(normalized, 'cost_price_usd')) {
+    if (Object.hasOwn(normalized, 'purchase_price_usd')) normalized.cost_price_usd = normalized.purchase_price_usd
+    else if (Object.hasOwn(normalized, 'cost_usd')) normalized.cost_price_usd = normalized.cost_usd
+  }
+  if (!Object.hasOwn(normalized, 'cost_price_khr')) {
+    if (Object.hasOwn(normalized, 'purchase_price_khr')) normalized.cost_price_khr = normalized.purchase_price_khr
+    else if (Object.hasOwn(normalized, 'cost_khr')) normalized.cost_price_khr = normalized.cost_khr
+  }
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
   normalized.discount_enabled = normalized.discount_enabled ?? normalized.promotion_enabled ?? normalized.on_promotion ?? 0
   normalized.discount_type = normalized.discount_type || (normalized.discount_amount_usd || normalized.discount_amount_khr ? 'fixed' : 'percent')
@@ -339,7 +351,9 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
 function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   const normalized: ImportRow = { ...product }
   PRODUCT_MONEY_FIELDS.forEach((field) => {
-    if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
+    if (PRODUCT_COST_FIELDS.includes(field)) {
+      if (Object.hasOwn(normalized, field)) normalized[field] = parseCsvCost(normalized[field])
+    } else if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
   })
   PRODUCT_PERCENT_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvPercent(normalized[field], 0)
@@ -367,8 +381,14 @@ function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   // 0 as "no wholesale price, use selling".
   normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
   normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
-  normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
-  normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
+  if (!Object.hasOwn(normalized, 'cost_price_usd')) {
+    if (Object.hasOwn(normalized, 'purchase_price_usd')) normalized.cost_price_usd = normalized.purchase_price_usd
+    else if (Object.hasOwn(normalized, 'cost_usd')) normalized.cost_price_usd = normalized.cost_usd
+  }
+  if (!Object.hasOwn(normalized, 'cost_price_khr')) {
+    if (Object.hasOwn(normalized, 'purchase_price_khr')) normalized.cost_price_khr = normalized.purchase_price_khr
+    else if (Object.hasOwn(normalized, 'cost_khr')) normalized.cost_price_khr = normalized.cost_khr
+  }
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
   normalized.discount_type = normalized.discount_type || (normalized.discount_amount_usd || normalized.discount_amount_khr ? 'fixed' : 'percent')
   normalized.discount_percent = normalized.discount_percent ?? 0
@@ -586,6 +606,7 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
     const barcodeIssue = getProductImportBarcodeIssue(row.barcode)
     const corruptedFields = getCorruptedTextFields(row)
     const issueTypes: string[] = [
+      ...(PRODUCT_COST_FIELDS.some((field) => row[field] === 'invalid') ? ['invalid_cost'] : []),
       ...(corruptedFields.length ? ['possible_encoding_corruption'] : []),
       ...(barcodeIssue ? [barcodeIssue] : []),
     ]

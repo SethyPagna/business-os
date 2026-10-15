@@ -181,3 +181,10 @@ assert.deepEqual(
 )
 
 console.log('PASS unified §12 stock contract: headers, optional supplier, strict parsing, conflict gating, receipt gate mirrored')
+
+for (const cost of ['', 'NULL', '0', '5.1234', '12oops', '-1', '1e309']) {
+  const parsed = parseUnifiedStockRows([{ name: 'Cost control', shop: '1', date: '10/15/2026', action: 'create', supplier: 'Synthetic', cost_price: cost }])
+  if (['12oops', '-1', '1e309'].includes(cost)) assert.ok(parsed.issues.some((issue) => issue.code === 'invalid_price'))
+  else if (cost === '' || cost === 'NULL') assert.ok(parsed.issues.some((issue) => issue.gateCode === 'cost_required'))
+  else assert.ok(!parsed.issues.some((issue) => issue.code === 'invalid_price'))
+}

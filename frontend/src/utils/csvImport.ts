@@ -1,4 +1,5 @@
-import { normalizeDiscountPercent, normalizePriceValue } from './pricing.ts'
+import { MAX_MONEY_ABS } from './moneyPrecision.ts'
+import { normalizeDiscountPercent, normalizePriceValue, normalizeInternalMoney } from './pricing.ts'
 
 const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660
@@ -362,4 +363,13 @@ export function normalizeCsvMoney(value: unknown, fallback = 0): number {
 
 export function normalizeCsvPercent(value: unknown, fallback = 0): number {
   return normalizeDiscountPercent(parseCsvNumber(value, fallback))
+}
+
+export function parseCsvCost(value: unknown): number | null | 'invalid' {
+  if (value == null || String(value).trim() === '' || /^null$/i.test(String(value).trim())) return null
+  const text = normalizeNumericText(value).replace(/[\u17DB$€£¥₩฿]|(?:usd|khr|riel|reil|dollars?)/gi, '').trim()
+  if (!/^[+\-]?[\d.,\s]+$/.test(text) || !/\d/.test(text)) return 'invalid'
+  const number = parseCsvNumber(value, NaN)
+  if (!Number.isFinite(number) || number < 0 || number > MAX_MONEY_ABS || !Number.isSafeInteger(Math.round(number * 10000))) return 'invalid'
+  try { return normalizeInternalMoney(number) } catch { return 'invalid' }
 }

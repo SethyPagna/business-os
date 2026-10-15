@@ -26,6 +26,9 @@
 //
 // Run: node tests/productImportReviewSurfaces.test.ts
 import assert from 'node:assert/strict'
+import { stripTypeScriptTypes } from 'node:module'
+import { analyzeProductImportRows } from '../src/components/products/import/productImportPlanner.ts'
+import { parseCsvRows } from '../src/utils/csvImport.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -240,6 +243,36 @@ runTest('both packs carry every dated-count reason and action label, really tran
     assert.notEqual(km[key], en[key], `km.json ${key} is still the English string`)
     assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
   }
+})
+
+runTest('actual upload CSV preserves missing cost columns and blank versus zero values', () => {
+  const source = read('components/products/import/BulkImportModal.tsx')
+  const start = source.indexOf('  const buildCsvForServerReview =')
+  const end = source.indexOf('  const handleCancelCurrentJob', start)
+  const body = stripTypeScriptTypes(source.slice(start, end).replace('const buildCsvForServerReview =', 'const build ='))
+  const build = (rows: Record<string, unknown>[]) => new Function('importRows', 'getIncomingImageFilenames', 'findImageReferenceForRow', 'imageFiles', 'fieldRules', 'csvEscape', body + '; return build()')(
+    rows, () => [], () => '', {}, {}, (value: unknown) => String(value ?? ''),
+  ) as string
+  const predicateStart = source.indexOf('function isBlankImportValue')
+  const predicateEnd = source.indexOf('function getProductImportIssueLabel', predicateStart)
+  const predicate = new Function('IMPORT_PRICE_FIELDS', stripTypeScriptTypes(source.slice(predicateStart, predicateEnd)) + '; return hasPriceReviewIssue')(['cost_price_usd', 'selling_price_usd', 'wholesale_price_usd'])
+  assert.equal(predicate(analyzeProductImportRows([{ name: 'Blank' }], []).rows[0]), true)
+  assert.equal(predicate(analyzeProductImportRows([{ name: 'Zero', cost_price_usd: '0' }], []).rows[0]), false)
+  const absent = build(analyzeProductImportRows([{ name: 'Absent' }], []).rows)
+  assert.ok(!absent.split('\n')[0].includes('cost_price'))
+  assert.ok(!absent.split('\n')[0].includes('purchase_price'))
+  const csv = build(analyzeProductImportRows([{ name: 'Unknown', cost_price_usd: '' }, { name: 'Free', cost_price_usd: '0' }], []).rows)
+  const rows = parseCsvRows(csv)
+  assert.equal(rows[0].cost_price_usd, '')
+  assert.equal(rows[1].cost_price_usd, '0')
+  for (const currency of ['usd', 'khr']) {
+    const aliasCsv = build(analyzeProductImportRows([{ name: 'Alias zero', [`cost_${currency}`]: '0' }, { name: 'Canonical unknown', [`cost_price_${currency}`]: '', [`cost_${currency}`]: '8' }], []).rows)
+    const aliasRows = parseCsvRows(aliasCsv)
+    assert.equal(aliasRows[0][`cost_price_${currency}`], '0')
+    assert.equal(aliasRows[1][`cost_price_${currency}`], '')
+  }
+  assert.match(source, /analyzeProductImportText\(csvData.content, \[\]\).conflicts.some/)
+  assert.ok(!source.includes('blank or zero'))
 })
 
 if (failed > 0) {

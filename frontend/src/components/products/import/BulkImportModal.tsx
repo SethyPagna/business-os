@@ -99,7 +99,7 @@ const CONFLICT_FILTER_OPTIONS: ConflictFilterOption[] = [
   { value: 'barcode', label: 'Barcode', group: 'field', countKey: 'barcode', hint: 'Rows with duplicate, unsafe, or review-worthy barcode values. Scientific notation blocks import until edited or cleared.' },
   { value: 'no_barcode', label: 'No barcode', group: 'field', countKey: 'noBarcode', hint: 'Rows with no barcode at all. These always create a new row (in the same family if the name matches, standalone if it doesn\u2019t) rather than auto-merging stock, since a barcode-less row can\u2019t be confidently matched to an existing item.' },
   { value: 'sku', label: 'SKU', group: 'field', countKey: 'sku', hint: 'Rows with duplicate or matched SKU values.' },
-  { value: 'pricing', label: 'Pricing', group: 'field', countKey: 'pricing', hint: 'Rows where price/cost values differ from a match, or all price columns are blank or zero.' },
+  { value: 'pricing', label: 'Pricing', group: 'field', countKey: 'pricing', hint: 'Rows where price/cost values differ from a match, or all price columns are blank.' },
   { value: 'existing', label: 'Matched', group: 'status', countKey: 'existing', hint: 'Rows already matched to an existing product candidate.' },
   { value: 'variant', label: 'Variants', group: 'status', countKey: 'variant', hint: 'Rows planned as variants or links under a family parent.' },
   { value: 'merge', label: 'Add stock', group: 'status', countKey: 'merge', hint: 'Rows planned to add incoming stock to an existing or same-family target.' },
@@ -511,7 +511,7 @@ const IMPORT_REVIEW_EDIT_FIELDS: Array<[string, string, string]> = [
   ['description', 'description', 'Description'],
 ]
 
-const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
+const IMPORT_PRICE_FIELDS = ['cost_usd', 'cost_khr', 'cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
 
 function compactImportValue(value: unknown): string {
   const text = String(value ?? '').trim()
@@ -537,7 +537,7 @@ function isBlankImportValue(value: unknown): boolean {
 
 function hasPriceReviewIssue(row: ProductImportRow = {}, existing: ExistingProduct | null = null, samePricing = true): boolean {
   if (existing && samePricing === false) return true
-  return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
+  return typeof row._price_columns_blank === 'boolean' ? row._price_columns_blank : IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]))
 }
 
 function getProductImportIssueLabel(issueType: unknown): string {
@@ -557,7 +557,7 @@ function getProductImportIssueHint(issueType: unknown): string {
   return 'Review this row before importing.'
 }
 
-function getProductImportRowIssueDetails(entry: ProductImportConflict = { index: 0 }, editedRow: ProductImportRow = {}) {
+function getProductImportRowIssueDetails(entry: ProductImportConflict = { index: 0 }, editedRow: ProductImportRow = {}, translate: (key: string, fallback: string) => string = (_key, fallback) => fallback) {
   const details: Array<{ title: string; detail: string; blocking?: boolean }> = []
   const conflictFields = Array.isArray(entry.conflictFields) ? entry.conflictFields : []
   const duplicateRows = entry.importDuplicateRows || {}
@@ -596,7 +596,7 @@ function getProductImportRowIssueDetails(entry: ProductImportConflict = { index:
       title: 'Price/cost needs review',
       detail: entry.existing && entry.samePricing === false
         ? 'Imported price or cost differs from the matched product. Choose whether to keep existing details, fill blanks only, or use imported values.'
-        : 'All price/cost columns are blank or zero. Confirm that is intentional before applying this row.',
+        : translate('csv_blank_prices_review', 'All price/cost columns are blank. Confirm that is intentional before applying this row.'),
     })
   }
 
@@ -1906,6 +1906,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const handleImport = async () => {
     if (!csvData?.content) return
+    if (mode === 'products' && analyzeProductImportText(csvData.content, []).conflicts.some((entry) => entry.issueTypes.includes('invalid_cost'))) {
+      notify(T('csv_invalid_cost', 'Enter a valid non-negative cost, or leave it blank for unknown cost.'), 'error')
+      return
+    }
     // Last-chance gate for the destructive mode, right at the point of no
     // return (job creation kicks off the actual apply chunk-by-chunk).
     // The picker's inline warning covers the "why", this covers "are you
@@ -2042,7 +2046,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? entry.row?.sku ?? '',
       barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? entry.row?.barcode ?? '',
     }
-    const issue = getProductImportBarcodeIssue(editedRow.barcode)
+    const issue = (entry.issueTypes || []).includes('invalid_cost') ? 'invalid_cost' : getProductImportBarcodeIssue(editedRow.barcode)
     return {
       index,
       rowNumber: editedRow._rowNumber || index + 2,
@@ -2059,7 +2063,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? entry.row?.sku ?? '',
       barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? entry.row?.barcode ?? '',
     }
-    const details = getProductImportRowIssueDetails(entry, editedRow)
+    const details = getProductImportRowIssueDetails(entry, editedRow, T)
     return {
       index,
       rowNumber: editedRow._rowNumber || index + 2,
@@ -2297,8 +2301,8 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       key={item.value}
       type="button"
       className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 font-semibold ${conflictFilter === item.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-      title={item.hint}
-      aria-label={`${item.label}: ${item.hint}`}
+      title={item.value === 'pricing' ? T('csv_pricing_review_hint', item.hint) : item.hint}
+      aria-label={`${item.label}: ${item.value === 'pricing' ? T('csv_pricing_review_hint', item.hint) : item.hint}`}
       onClick={() => setConflictFilter(item.value)}
     >
       {/* Part 207: icon moved before the label, matching the reordering
@@ -2956,8 +2960,8 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           {blockingIssueCount ? (
             <div className="order-6 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
               <div className="font-semibold">{T('file_validation_blocked', 'Fix the file before uploading')}</div>
-              <div className="mt-1">{T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}</div>
-              <div className="mt-1">{blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${getProductImportIssueLabel(entry.issue)}`).join('; ')}</div>
+              <div className="mt-1">{blockingIssueEntries.some((entry) => entry.issue === 'invalid_cost') ? T('csv_invalid_cost', 'Enter a valid non-negative cost, or leave it blank for unknown cost.') : T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}</div>
+              <div className="mt-1">{blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${entry.issue === 'invalid_cost' ? T('csv_invalid_cost_label', 'Invalid cost') : getProductImportIssueLabel(entry.issue)}`).join('; ')}</div>
             </div>
           ) : null}
 
