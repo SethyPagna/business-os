@@ -810,7 +810,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       for (let index = state.index; index < total; index += 1) {
         const step = token.steps[index]
         const keep: MergeKeep = {
-          ...(token.cost ? { cost_price_usd: token.cost.cost_price_usd, cost_price_khr: token.cost.cost_price_khr ?? null } : {}),
+          ...(token.cost ? { cost_price_usd: token.cost.cost_price_usd, ...(token.cost.cost_price_khr !== undefined ? { cost_price_khr: token.cost.cost_price_khr } : {}) } : {}),
           resolve: { requestId: token.requestId, reviewedDigest: token.reviewedDigest, steps: token.steps.map(({ mergeId, stock }) => ({ mergeId, ...(stock ? { stock } : {}) })) },
           ...(token.choices ? { choices: token.choices } : {}),
         }

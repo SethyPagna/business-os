@@ -338,6 +338,41 @@ async function main() {
     assert.equal(one('SELECT is_active FROM products WHERE id = 11').is_active, 0)
   })
 
+  await check('chosen NULL, zero, four-decimal cost and omitted KHR survive apply, exact retry, undo and redo', async () => {
+    for (const [choice, expected] of [
+      [{ cost_price_usd: null, cost_price_khr: null }, { cost_price_usd: null, cost_price_khr: null }],
+      [{ cost_price_usd: 0, cost_price_khr: 0 }, { cost_price_usd: 0, cost_price_khr: 0 }],
+      [{ cost_price_usd: 4.1234, cost_price_khr: null }, { cost_price_usd: 4.1234, cost_price_khr: null }],
+      [{ cost_price_usd: null }, { cost_price_usd: null, cost_price_khr: 24600 }],
+    ]) {
+      fresh()
+      const before = one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10')
+      const seen = await preview(10, 11)
+      const resolve = { requestId: 'nullable-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
+      const body = { keepId: 10, mergeId: 11, keep: true, stock: 'merge', resolve, ...choice }
+      const result = await merge(body)
+      assert.equal(result.status, 200, JSON.stringify(result.body))
+      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), expected)
+      const count = one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n
+      const historyCount = one('SELECT COUNT(*) AS n FROM action_history').n
+      const history = one("SELECT id,undo_payload,redo_payload FROM action_history WHERE status='undoable' ORDER BY id DESC LIMIT 1")
+      const snapshot = one("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1")
+      assert.deepEqual(JSON.parse(snapshot.payload_json).keeperChoice.cost, choice)
+      const retry = await merge(body)
+      assert.equal(retry.status, 200, JSON.stringify(retry.body)); assert.equal(retry.body.replayed, true)
+      assert.equal(one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n, count)
+      assert.equal(one('SELECT COUNT(*) AS n FROM action_history').n, historyCount)
+      const changed = await merge({ ...body, cost_price_usd: choice.cost_price_usd === null ? 0 : null })
+      assert.equal(changed.status, 409, JSON.stringify(changed.body)); assert.equal(changed.body.code, 'resolve_request_conflict')
+      const applier = undoAppliers.resolveUndoApplier(JSON.parse(history.undo_payload))
+      await applier.run(JSON.parse(history.undo_payload), { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
+      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), before)
+      await applier.run(JSON.parse(history.redo_payload), { env: { DB: {} }, user: ADMIN, direction: 'redo', historyId: history.id })
+      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), expected)
+      assert.deepEqual(one('SELECT undo_payload,redo_payload FROM action_history WHERE id=?', history.id), { undo_payload: history.undo_payload, redo_payload: history.redo_payload })
+    }
+  })
+
   await check('a non-editor resolving three products stores the same whole-group cost the preview showed', async () => {
     fresh()
     state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)

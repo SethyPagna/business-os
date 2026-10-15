@@ -440,7 +440,7 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 export type ProductMergeKeeperChoice = {
   follows: true
   requiresProductEdit?: boolean
-  cost?: { cost_price_usd: number; cost_price_khr?: number | null }
+  cost?: { cost_price_usd: number | null; cost_price_khr?: number | null }
   /** Server-frozen group economics; carried through each pair's undo/redo. */
   economics?: ProductMergeEconomics
   /**

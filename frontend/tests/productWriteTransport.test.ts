@@ -12,6 +12,7 @@ import {
   finalizeSelectedConflictGroupReview,
   getSelectedConflictGroupReviewPage,
   makeSelectedConflictGroupApplyBody,
+  mergePossiblySameProducts,
 } from '../src/api/productWriteTransport.ts'
 
 assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
@@ -127,3 +128,17 @@ try {
   setSyncServerUrl('')
 }
 console.log('PASS v2 group review transport preserves mixed preview, finalize, stable apply, and approval-pending receipts')
+
+const mergeCalls: Record<string, unknown>[] = []
+setSyncServerUrl('http://nullable-merge-fixture')
+globalThis.fetch = (async (_input, init) => {
+  mergeCalls.push(JSON.parse(String(init?.body)))
+  return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}) as typeof fetch
+try {
+  for (const cost of [{}, { cost_price_usd: null, cost_price_khr: null }, { cost_price_usd: 0, cost_price_khr: 0 }, { cost_price_usd: 4.1234 }, { cost_price_usd: 4.1234, cost_price_khr: null }]) {
+    await mergePossiblySameProducts(10, 11, 'merge', cost)
+    assert.deepEqual(mergeCalls.at(-1), { keepId: 10, mergeId: 11, stock: 'merge', keep: true, ...cost })
+  }
+} finally { globalThis.fetch = originalFetch; setSyncServerUrl('') }
+console.log('PASS chosen-cost JSON preserves NULL, zero and absent currencies')

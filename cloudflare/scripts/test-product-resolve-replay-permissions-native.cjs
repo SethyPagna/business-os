@@ -22,7 +22,7 @@ async function main() {
     state.user = sameOwner
     const seen = await preview(KEEP, M1, '&groupIds=' + KEEP + ',' + M1)
     const resolve = { requestId: 'permission-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: M1 }] }
-    assert.equal((await merge({ keepId: KEEP, mergeId: M1, keep: true, resolve, choices, ...(cost ? { cost_price_usd: 4.1234 } : {}) })).status, 200)
+    assert.equal((await merge({ keepId: KEEP, mergeId: M1, keep: true, resolve, choices, ...(cost ? { cost_price_usd: cost === 'null' ? null : cost === 'zero' ? 0 : 4.1234 } : {}) })).status, 200)
     return one("SELECT * FROM action_history WHERE entity='product' AND status='undoable' ORDER BY id DESC LIMIT 1")
   }
   const replay = (history, direction, user) => {
@@ -32,6 +32,8 @@ async function main() {
   for (const [label, choices, cost, code] of [
     ['custom', { category: { custom: 'Face Care' } }, false, 'product_edit_permission_required'],
     ['cost', { name: { source_id: M1 } }, true, 'cost_permission_required'],
+    ['unknown cost', { name: { source_id: M1 } }, 'null', 'cost_permission_required'],
+    ['zero cost', { name: { source_id: M1 } }, 'zero', 'cost_permission_required'],
   ]) {
     await check(label + ': same owner demoted undo refuses before any writes', async () => {
       const history = await merged(choices, cost)

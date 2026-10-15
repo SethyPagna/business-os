@@ -511,5 +511,25 @@ await test('picking an unknown source preserves NULL while a recorded zero remai
   assert.deepEqual((await adapter.review(data, pick({ cost: { source: '82' } }), signal)).token.cost, { cost_price_usd: 0, cost_price_khr: 0 })
 })
 
+await test('apply preserves selected NULL and zero and omits an absent KHR custom override', async () => {
+  const cluster: Cluster = { type: 'name', value: 'Nullable apply', severity: 'same_name', products: [
+    product(80, 'Nullable apply', '80', 5, 10),
+    product(81, 'Nullable apply', '81', 0, 10, 0, { cost_price_usd: null, cost_price_khr: null }),
+    product(82, 'Nullable apply', '82', 0, 10),
+  ] }
+  for (const [selection, expected] of [
+    [{ cost: { source: '81' } }, { cost_price_usd: null, cost_price_khr: null }],
+    [{ cost: { source: '82' } }, { cost_price_usd: 0, cost_price_khr: 0 }],
+    [{ cost: { custom: '4.1234' } }, { cost_price_usd: 4.1234 }],
+    [{}, {}],
+  ] as Array<[Draft['selection'], Record<string, unknown>]>) {
+    const { adapter, data, calls } = await open(cluster, { view: true, edit: true }, { choices: true })
+    const { token } = await adapter.review(data, pick(selection), signal)
+    await adapter.apply(token, signal, () => {})
+    const keep = calls.find(call => call.kind === 'merge')!.args[3] as Record<string, unknown>
+    assert.deepEqual(Object.fromEntries(Object.entries(keep).filter(([key]) => key.startsWith('cost_price_'))), expected)
+  }
+})
+
 console.log(failed ? `\n${failed} test(s) failed` : '\nall product resolve adapter tests passed')
 process.exitCode = failed ? 1 : 0

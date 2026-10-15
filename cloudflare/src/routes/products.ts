@@ -3870,7 +3870,7 @@ export async function foldDuplicateProductInto(
       merged: {
         ...foldEconomics.merged,
         cost_price_usd: chosenCost.cost_price_usd,
-        ...(chosenCost.cost_price_khr != null ? { cost_price_khr: chosenCost.cost_price_khr } : {}),
+        ...(chosenCost.cost_price_khr !== undefined ? { cost_price_khr: chosenCost.cost_price_khr } : {}),
       },
     }
     : foldEconomics
@@ -4086,8 +4086,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
       wholesaleUsd: mergedPricing.wholesale_price_usd ?? canonicalBefore?.wholesale_price_usd ?? 0,
       wholesaleKhr: mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0,
-      costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? null,
-      costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? null,
+      costUsd: chosenCost?.cost_price_usd !== undefined ? chosenCost.cost_price_usd : mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? null,
+      costKhr: chosenCost?.cost_price_khr !== undefined ? chosenCost.cost_price_khr : mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? null,
       barcode: canonicalBarcode,
       reviewed: reviewedAuthorityValid ? 1 : 0,
       category: reviewedAuthorityValid ? reviewedPlan.selected.category.value : null,
@@ -9004,12 +9004,17 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (!canEditAcquisitionCosts(user)) {
       return c.json({ success: false, code: 'cost_permission_required', error: 'Changing the cost needs the cost edit permission.' }, 403)
     }
-    const usd = Number(body.cost_price_usd)
-    const khr = body.cost_price_khr == null ? null : Number(body.cost_price_khr)
-    if (body.cost_price_usd === null || body.cost_price_usd === '' || !Number.isFinite(usd) || usd < 0 || (khr !== null && (!Number.isFinite(khr) || khr < 0))) {
-      return c.json({ success: false, code: 'invalid_merge_cost', error: 'The cost must be a number of zero or more.' }, 400)
+    const chosenMoney = (value: unknown): number | null => {
+      if (value === null) return null
+      if ((typeof value !== 'number' && typeof value !== 'string') || Number(value) < 0) throw new Error('invalid_merge_cost')
+      return roundMoney4(value)
     }
-    chosenCost = { cost_price_usd: roundMoney4(usd), ...(khr !== null ? { cost_price_khr: roundMoney4(khr) } : {}) }
+    try {
+      chosenCost = { cost_price_usd: chosenMoney(body.cost_price_usd),
+        ...(body.cost_price_khr !== undefined ? { cost_price_khr: chosenMoney(body.cost_price_khr) } : {}) }
+    } catch {
+      return c.json({ success: false, code: 'invalid_merge_cost', error: 'The cost must be a number of zero or more, or unknown.' }, 400)
+    }
   }
   // A typed Final value is a product edit; the Edit product switch decides it, as on PUT.
   if (resolveChoicesTypeValues(body) && getActionTier(user, 'products', 'edit') !== 'full') {

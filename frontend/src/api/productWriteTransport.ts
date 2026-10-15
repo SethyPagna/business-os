@@ -473,7 +473,7 @@ export function mergePossiblySameProducts(
     body.keep = true
     if (keep.resolve) body.resolve = keep.resolve
     if (keep.cost_price_usd !== undefined) body.cost_price_usd = keep.cost_price_usd
-    if (keep.cost_price_khr != null) body.cost_price_khr = keep.cost_price_khr
+    if (keep.cost_price_khr !== undefined) body.cost_price_khr = keep.cost_price_khr
     // The Worker refuses choices without a reviewed plan (400 invalid_resolve_choices).
     if (keep.resolve && keep.choices && Object.keys(keep.choices).length) body.choices = keep.choices
   }
