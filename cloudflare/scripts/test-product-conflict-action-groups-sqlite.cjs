@@ -15,6 +15,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const root = path.join(__dirname, '..', 'src')
+const productionDependencies = new Map()
 function loadTs(rel, stubs = {}) {
   const file = path.join(root, rel)
   const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
@@ -27,6 +28,8 @@ function loadTs(rel, stubs = {}) {
   Module._load = (request, parent, main) => {
     if (['./productStockGuard', '../lib/productStockGuard'].includes(request)) return productStockGuard
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
+    const dependency = request.split('/').at(-1)
+    if (request.startsWith('.') && productionDependencies.has(dependency)) return productionDependencies.get(dependency)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, main)
@@ -38,6 +41,9 @@ function loadTs(rel, stubs = {}) {
 }
 
 const productStockGuard = loadTs('lib/productStockGuard.ts')
+for (const name of ['stockTransaction', 'catalogCostRecompute', 'productCostReview']) {
+  productionDependencies.set(name, loadTs(`lib/${name}.ts`))
+}
 
 class FakeHono {
   constructor() { this.posts = new Map(); this.gets = new Map(); this.deletes = new Map(); FakeHono.instance = this }
@@ -110,6 +116,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     './productIdentity': identity, './productDetailRule': detail, './productMerge': merge,
     './productConflictMergeBatch': selected,
   })
+  const mergeCostPreview = loadTs('lib/productMergeCostPreview.ts', { './productConflictActionGroups': actionGroups })
   const permissions = {
     getActionTier: (user, section, action) => action === 'delete' && user.noDelete ? 'none'
       : action === 'delete' && user.reviewDelete ? 'review'
@@ -142,7 +149,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     hono: { Hono: FakeHono }, '../index': {}, '../lib/db': { getDb: () => db }, '../lib/auth': { requireAuth: async () => {} },
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
-    '../lib/searchMatch': searchMatch,
+    '../lib/searchMatch': searchMatch, '../lib/productMergeCostPreview': mergeCostPreview,
     // U-cost: the post-fold keeper check reads the on-hand cost derivation.
     '../lib/catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './db': {} }),
     '../lib/productDelete': productDelete,

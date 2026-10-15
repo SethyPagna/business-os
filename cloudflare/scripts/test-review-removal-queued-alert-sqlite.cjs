@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // A product removal queued by the conflict-review flow announces itself once ("Review requested"), and only when a
 // pending row was written by this request. The real routes/products.ts runs against a real SQLite schema (the same
 // harness as test-product-conflict-action-apply-sqlite.cjs); the alert hook is replaced by a recorder, so nothing is sent.
@@ -13,10 +19,10 @@ const fullTier = { id: 901, username: 'owner', noMerge: true }
 
 function emptyStock(d1, ids) {
   const selected = JSON.stringify(ids)
-  d1.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
-  d1.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (SELECT value FROM json_each(?)))').run(selected)
-  d1.db.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
-  d1.db.prepare('UPDATE products SET stock_quantity=0 WHERE id IN (SELECT value FROM json_each(?))').run(selected)
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (SELECT value FROM json_each(?)))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE products SET stock_quantity=0 WHERE id IN (SELECT value FROM json_each(?))').run(selected))
 }
 
 async function review(app, id, productIds, actor) {
