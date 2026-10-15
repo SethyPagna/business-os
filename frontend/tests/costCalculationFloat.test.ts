@@ -62,7 +62,7 @@ await runTest('cost formulas preserve four decimal places and keep exact cents f
     assert.equal(formatCostFormula([cost], cost), `(${text}) / 1 = ${text}`)
     assert.equal(costBreakdownFormat.formatWeightedCostFormula([{ cost_usd: cost, quantity: 3 }], 3, cost), `(3 × ${text}) / 3 = ${text}`)
   }
-  assert.equal(formatCostFormula([1.2345, 5.1234], 3.1789), '(1.2345 + 5.1234) / 2 = 3.1789')
+  assert.equal(formatCostFormula([1.2345, 5.1234], 3.179), '(1.2345 + 5.1234) / 2 = 3.179')
   assert.equal(formatCostFormula([5], null), '')
   assert.equal(costBreakdownFormat.formatWeightedCostFormula([{ cost_usd: 5.1234, quantity: 0 }], 0, 5.1234), '')
 })
