@@ -38,6 +38,7 @@ interface MarginCardLabels {
   margin: string
   selling: string
   belowCost: string
+  unknown: string
 }
 
 const MARGIN_CARD_ENGLISH: MarginCardLabels = {
@@ -46,10 +47,11 @@ const MARGIN_CARD_ENGLISH: MarginCardLabels = {
   margin: 'Margin',
   selling: 'Selling',
   belowCost: 'Selling price is below cost price',
+  unknown: 'Unknown cost',
 }
 
 interface MarginCardProps {
-  costUsd: number
+  costUsd: number | null
   sellingUsd: number
   usdSymbol: string
   labels?: Partial<MarginCardLabels>
@@ -60,6 +62,7 @@ interface DualPriceInputProps {
   labelKhr: string
   valueUsd?: string | number | null
   valueKhr?: string | number | null
+  placeholderUsd?: string
   onUsdChange: (value: string) => void
   onKhrChange: (value: string) => void
   usdSymbol: string
@@ -210,21 +213,22 @@ function ProductImagePlaceholder({ className = '', compact = false }: ProductIma
 
 function MarginCard({ costUsd, sellingUsd, usdSymbol, labels }: MarginCardProps) {
   const text = { ...MARGIN_CARD_ENGLISH, ...labels }
-  const margin = sellingUsd - costUsd
-  const pct = sellingUsd > 0 ? (margin / sellingUsd * 100) : 0
-  const isProfit = margin >= 0
+  const costKnown = costUsd !== null && Number.isFinite(costUsd)
+  const margin = costKnown ? sellingUsd - costUsd : 0
+  const pct = costKnown && sellingUsd > 0 ? (margin / sellingUsd * 100) : 0
+  const isProfit = !costKnown || margin >= 0
 
   return (
     <div className={`rounded-xl border p-4 ${isProfit ? 'border-blue-100 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20' : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'}`}>
       <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{text.title}</p>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
-          <div className="text-lg font-bold text-red-600">{usdSymbol}{costUsd.toFixed(2)}</div>
+          <div className="text-lg font-bold text-red-600">{costKnown ? `${usdSymbol}${costUsd.toFixed(2)}` : text.unknown}</div>
           <div className="text-xs text-gray-500">{text.cost}</div>
         </div>
         <div>
-          <div className={`text-lg font-bold ${isProfit ? 'text-blue-600' : 'text-yellow-600'}`}>{usdSymbol}{margin.toFixed(2)}</div>
-          <div className="text-xs text-gray-500">{text.margin} ({pct.toFixed(1)}%)</div>
+          <div className={`text-lg font-bold ${isProfit ? 'text-blue-600' : 'text-yellow-600'}`}>{costKnown ? `${usdSymbol}${margin.toFixed(2)}` : '—'}</div>
+          <div className="text-xs text-gray-500">{costKnown ? `${text.margin} (${pct.toFixed(1)}%)` : text.margin}</div>
         </div>
         <div>
           <div className="text-lg font-bold text-green-600">{usdSymbol}{sellingUsd.toFixed(2)}</div>
@@ -241,7 +245,7 @@ function MarginCard({ costUsd, sellingUsd, usdSymbol, labels }: MarginCardProps)
   )
 }
 
-function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, onKhrChange, usdSymbol, khrSymbol }: DualPriceInputProps) {
+function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, placeholderUsd, onUsdChange, onKhrChange, usdSymbol, khrSymbol }: DualPriceInputProps) {
   const handleUsdChange = (val: string) => onUsdChange(sanitizeNumericInput(val))
   const handleKhrChange = (val: string) => onKhrChange(sanitizeNumericInput(val))
 
@@ -258,7 +262,7 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
             autoComplete="off"
             value={valueUsd ?? ''}
             onChange={(event) => handleUsdChange(event.target.value)}
-            placeholder="0.00"
+            placeholder={placeholderUsd || '0.00'}
           />
         </div>
       </div>

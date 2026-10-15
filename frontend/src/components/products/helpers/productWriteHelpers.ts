@@ -1,5 +1,6 @@
-import { normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
+import { editableMoneyValue, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import { addMoney4 } from '../../../utils/moneyPrecision.ts'
+import { knownCost } from '../../../utils/costDisplay.ts'
 import { normalizeProductGallery } from './productGalleryHelpers.ts'
 
 type StockAdjustmentType = 'add' | 'remove'
@@ -145,6 +146,27 @@ function stringOrEmpty(value: unknown): string {
   return value ? String(value) : ''
 }
 
+/** What a cost input shows for a stored cost: empty when unknown (never "0"), the exact figure otherwise (a recorded $0 is "0"). */
+export function editableCostText(value: unknown): string {
+  return knownCost(value) === null ? '' : editableMoneyValue(value)
+}
+
+/** What a cost input saves: an empty field is unknown (null), never 0; a typed 0 stays 0. */
+export function costInputToPayload(raw: unknown): number | null {
+  const cost = knownCost(typeof raw === 'string' ? raw.replace(/,/g, '') : raw)
+  return cost === null ? null : normalizeInternalMoney(cost)
+}
+
+/** A restored cost keeps its own state: NULL stays NULL, a recorded $0 stays $0. The purchase mirror only stands in for a snapshot that carries no cost key at all. */
+function snapshotCost(own: unknown, mirror: unknown): number | null {
+  if (own !== undefined) {
+    const cost = knownCost(own)
+    return cost === null ? null : normalizePriceValue(cost)
+  }
+  const fallback = knownCost(mirror)
+  return fallback !== null && fallback > 0 ? normalizePriceValue(fallback) : null
+}
+
 export function buildProductWritePayload(snapshot: ProductRecord = {}, user: UserRecord = {}) {
   const gallery = normalizeProductGallery(snapshot.image_gallery, snapshot.image_path || null)
   return {
@@ -170,8 +192,8 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     wholesale_price_khr: normalizePriceValue(snapshot.wholesale_price_khr ?? 0),
     purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
     purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
-    cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
-    cost_price_khr: normalizePriceValue(snapshot.cost_price_khr || snapshot.purchase_price_khr || 0),
+    cost_price_usd: snapshotCost(snapshot.cost_price_usd, snapshot.purchase_price_usd),
+    cost_price_khr: snapshotCost(snapshot.cost_price_khr, snapshot.purchase_price_khr),
     low_stock_threshold: Number(snapshot.low_stock_threshold || 0),
     out_of_stock_threshold: Number(snapshot.out_of_stock_threshold || 0),
     supplier: stringOrEmpty(snapshot.supplier),
@@ -285,9 +307,14 @@ export function recordedTransferReplay(transfers: readonly RecordedStockTransfer
       : { ...entry })
 }
 
+function clearStockUnitCost(purchase: unknown, cost: unknown): number | null {
+  const mirror = knownCost(purchase)
+  return mirror !== null && mirror > 0 ? mirror : knownCost(cost)
+}
+
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {
-  const unitCostUsd = product?.purchase_price_usd || product?.cost_price_usd || 0
-  const unitCostKhr = product?.purchase_price_khr || product?.cost_price_khr || 0
+  const unitCostUsd = clearStockUnitCost(product?.purchase_price_usd, product?.cost_price_usd)
+  const unitCostKhr = clearStockUnitCost(product?.purchase_price_khr, product?.cost_price_khr)
   return (product?.branch_stock || [])
     .map((entry): ClearStockAdjustment | null => {
       const branchId = Number(entry?.branch_id || 0)
@@ -391,6 +418,19 @@ export function buildDefinedProductUpdates(updates: ProductUpdates = {}): Produc
   )
 }
 
+export function canonicalProductBulkUpdates(updates: ProductUpdates = {}): ProductUpdates {
+  const result = buildDefinedProductUpdates(updates)
+  for (const currency of ['usd', 'khr']) {
+    const alias = `purchase_price_${currency}`
+    const cost = `cost_price_${currency}`
+    if (Object.prototype.hasOwnProperty.call(result, alias)) {
+      if (!Object.prototype.hasOwnProperty.call(result, cost)) result[cost] = result[alias]
+      delete result[alias]
+    }
+  }
+  return result
+}
+
 export function buildProductBulkUpdatePayload(
   updates: ProductUpdates = {},
   currentProduct: ProductRecord = {},
@@ -399,7 +439,7 @@ export function buildProductBulkUpdatePayload(
 ) {
   const expectedUpdatedAt = currentProduct?.updated_at || fallbackUpdatedAt || undefined
   return {
-    ...buildDefinedProductUpdates(updates),
+    ...canonicalProductBulkUpdates(updates),
     updated_at: expectedUpdatedAt,
     expectedUpdatedAt,
     userId: user.id,
@@ -436,9 +476,8 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
       // authoritative before-image. Pre-quantizing here turns an unchanged
       // historical value such as 2.345678 into a destructive 2.3457 update,
       // and can turn a small raw negative into zero before server validation.
-      // Retain the legacy explicit-null => 0 behavior; normal inputs are the
-      // number/string supplied by the form and remain server-authoritative.
-      ? (form[field] === null ? 0 : form[field])
+      // Preserve nullable input and raw decimal text for server validation.
+      ? form[field]
       : normalizePriceValue(form[field])
   }
   return updates
@@ -503,6 +542,12 @@ function roundCatalogPrice(value: number, field: BulkPriceField): number {
   return Math.round(value * 100) / 100
 }
 
+/** The catalog cost behind a purchase column: the cost column when the record carries it (the purchase column is a DEFAULT-0 mirror), else the purchase value itself. */
+function catalogCostOf(product: ProductRecord, field: 'purchase_price_usd' | 'purchase_price_khr'): unknown {
+  const own = field === 'purchase_price_usd' ? product?.cost_price_usd : product?.cost_price_khr
+  return own !== undefined ? own : product?.[field]
+}
+
 function isPurchasePriceField(field: BulkPriceField): field is 'purchase_price_usd' | 'purchase_price_khr' {
   return field.startsWith('purchase_price_')
 }
@@ -524,12 +569,13 @@ export function buildProductBulkPriceAdjustments(
 
     const updates: ProductUpdates = {}
     for (const field of fields) {
-      const rawCurrent = toFiniteNumber(product?.[field], 0)
+      if (isPurchasePriceField(field) && knownCost(catalogCostOf(product, field)) === null) continue
+      const rawCurrent = toFiniteNumber(isPurchasePriceField(field) ? catalogCostOf(product, field) : product?.[field], 0)
       const current = isPurchasePriceField(field) ? normalizeInternalMoney(rawCurrent) : normalizePriceValue(rawCurrent)
       // "Unpriced" means the stored value is actually zero. A positive
       // historical value below one four-decimal tick is still priced and must
       // not disappear merely because its canonical comparison rounds to 0.
-      if (adjustment.skipZeroPriced && rawCurrent === 0) continue
+      if (adjustment.skipZeroPriced && rawCurrent === 0 && !isPurchasePriceField(field)) continue
       let next: number
       if (isPurchasePriceField(field)) {
         try {

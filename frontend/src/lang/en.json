@@ -6534,7 +6534,7 @@
   "rpt_hint_pending": "Included in sales, revenue, and profit, but excluded from collected cash.",
   "rpt_hint_revenue": "Revenue = recognized net sales − customer refunds. Tax and delivery fees are excluded.",
   "rpt_hint_collected": "Sales counted as collected, plus their tax and delivery fees, less paid refunds. Not Paid sales are excluded — this is the one figure they stay out of. This is not a payment-event cash-flow ledger.",
-  "rpt_hint_cogs": "Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.",
+  "rpt_hint_cogs": "Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a cost snapshot are unknown and left out; the total is marked partial.",
   "rpt_hint_gross_profit": "Revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales; operating expenses are separate.",
   "rpt_hint_profit_excl_delivery": "Revenue − cost of goods sold. Delivery fees and actual delivery cost are not included. Includes Not Paid sales; operating expenses are separate.",
   "rpt_hint_expenses_line": "Recorded expenses in the date range (all types). KHR amounts are converted at the main rate for the net result.",

@@ -1,4 +1,5 @@
 import { formatPriceNumber } from '../../../utils/pricing.ts'
+import { knownCost } from '../../../utils/costDisplay.ts'
 
 interface BranchStockRecord {
   branch_id?: unknown
@@ -108,6 +109,10 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
   const toImageName = (value: unknown) => String(value || '').split(/[\\/]/).pop() || ''
   const toImageUrl = (value: unknown) => String(value || '').trim()
   const priceCsv = (value: unknown) => formatPriceNumber(value || 0)
+  const costCsv = (value: unknown) => {
+    const cost = knownCost(value)
+    return cost === null ? '' : formatPriceNumber(cost)
+  }
   const branchId = options.branchId != null && String(options.branchId) !== 'all' ? options.branchId : null
   const allowedColumns = options.groups
     ? new Set([
@@ -143,8 +148,8 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Discount_Badge_Color: String(product.discount_badge_color || ''),
       Discount_Starts_At: String(product.discount_starts_at || ''),
       Discount_Ends_At: String(product.discount_ends_at || ''),
-      Cost_Price_USD: priceCsv(product.cost_price_usd || 0),
-      Cost_Price_KHR: priceCsv(product.cost_price_khr || 0),
+      Cost_Price_USD: costCsv(product.cost_price_usd),
+      Cost_Price_KHR: costCsv(product.cost_price_khr),
       Stock_Quantity: branchId != null
         ? toNumber((product.branch_stock || []).find((stock) => String(stock.branch_id) === String(branchId))?.quantity)
         : toNumber(product.stock_quantity),
@@ -187,8 +192,8 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Parent_ID: String(product.parent_id || ''),
       Is_Group: product.is_group ? 'Yes' : 'No',
     }
-    if (options.canViewCosts === false || product.cost_price_usd == null) delete row.Cost_Price_USD
-    if (options.canViewCosts === false || product.cost_price_khr == null) delete row.Cost_Price_KHR
+    if (options.canViewCosts === false || product.cost_price_usd === undefined) delete row.Cost_Price_USD
+    if (options.canViewCosts === false || product.cost_price_khr === undefined) delete row.Cost_Price_KHR
     if (!allowedColumns) return row
     const filtered: ProductExportRow = {}
     for (const key of Object.keys(row)) {

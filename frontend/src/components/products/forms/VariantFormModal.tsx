@@ -3,7 +3,9 @@ import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
+import { costInputToPayload, editableCostText } from '../helpers/productWriteHelpers.ts'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
+import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
@@ -47,6 +49,10 @@ interface BranchOption {
 interface VariantUser {
   id?: EntityId
   name?: string
+  username?: unknown
+  role_code?: unknown
+  role_permissions?: unknown
+  permissions?: unknown
 }
 
 interface VariantFormState {
@@ -124,6 +130,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   const [form, setForm] = useState<VariantFormState>({
     // Previously defaulted to `${parent.name} (Variant)` -- but every
     // family/variant grouping check in the app (buildProductGroups here,
@@ -143,8 +151,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     barcode: '',
     description: '',
     supplier: parent.supplier || '',
-    cost_price_usd: editableMoneyValue(parent.cost_price_usd || 0),
-    cost_price_khr: editableMoneyValue(parent.cost_price_khr || 0),
+    cost_price_usd: canViewCosts ? editableCostText(parent.cost_price_usd) : '',
+    cost_price_khr: canViewCosts ? editableCostText(parent.cost_price_khr) : '',
     selling_price_usd: formatPriceNumber(parent.selling_price_usd || 0),
     selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
     // No `?? parent.selling_price` fallback. A parent with no wholesale price
@@ -234,7 +242,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     setErr('')
     try {
       const clientRequestId = `variant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      const response = await runVariantMutation(() => getProductVariantApi().createProductVariant({
+      const response = await runVariantMutation(() => getProductVariantApi().createProductVariant(omitUnauthorizedCatalogCosts({
         client_request_id: clientRequestId,
         ...form,
         // Name is the only grouping key. Every created row stays ordinary;
@@ -244,11 +252,11 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
         wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
         stock_quantity: parseNumericInput(form.stock_quantity),
-        cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
-        cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
+        cost_price_usd: costInputToPayload(form.cost_price_usd),
+        cost_price_khr: costInputToPayload(form.cost_price_khr),
         userId: user?.id,
         userName: user?.name,
-      }), 'Create product variant')
+      }, user)), 'Create product variant')
 
       if (response?.success === false) {
         setErr(response.error || tr('failed', 'Failed', 'បរាជ័យ'))
@@ -264,7 +272,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       onDone?.({
         createdProductId: extractHistoryResultId(response),
         clientRequestId,
-        snapshot: {
+        snapshot: omitUnauthorizedCatalogCosts({
           ...form,
           // Name is the only grouping key. Every created row stays ordinary;
           // matching names are wrapped by the virtual group title in the UI.
@@ -273,9 +281,9 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
           wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
           wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
-          cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
-          cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
-        },
+          cost_price_usd: costInputToPayload(form.cost_price_usd),
+          cost_price_khr: costInputToPayload(form.cost_price_khr),
+        }, user),
       })
     } catch (error) {
       setErr(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
@@ -362,7 +370,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div className="min-w-0">
+          {canViewCosts || canEditCosts ? <div className="min-w-0">
             <label htmlFor="variant-form-cost-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('cost_price_usd') || `Cost Price (${usdSymbol})`}
             </label>
@@ -373,10 +381,12 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
               type="text"
               inputMode="decimal"
               autoComplete="off"
+              disabled={!canEditCosts}
+              placeholder={tr('cost_input_unknown_placeholder', 'Unknown — enter cost', 'មិនស្គាល់ — បញ្ចូលថ្លៃដើម')}
               value={form.cost_price_usd ?? ''}
               onChange={(event) => setNumeric('cost_price_usd', event.target.value)}
             />
-          </div>
+          </div> : null}
 
           <div className="min-w-0">
             <label htmlFor="variant-form-selling-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

@@ -439,7 +439,7 @@ assert.deepEqual(
     selling_price_usd: 10.12,
     wholesale_price_khr: 4000.01,
     purchase_price_usd: '3',
-    purchase_price_khr: 0,
+    purchase_price_khr: null,
   },
   'bulk pricing updates normalize provided price fields and preserve existing null behavior',
 )

@@ -61,12 +61,12 @@ export type CostBreakdown = {
   weighted_quantity: number
   distinct_usd: number[]
   distinct_khr: number[]
-  mean_usd: number
-  mean_khr: number
+  mean_usd: number | null
+  mean_khr: number | null
   /** Legacy wire metadata, retained for compatibility; not a catalog calculation rule. */
   outlier_guard: { fired: boolean; kept: number | null }
-  result_usd: number
-  result_khr: number
+  result_usd: number | null
+  result_khr: number | null
 }
 
 /** Fixed 2dp, matching the owner's own example ("3.00 + 5.00) / 2 = 4.00") -- the stored figure keeps 4dp precision, only the reading is trimmed. */
@@ -78,8 +78,8 @@ function fixed2(value: number): string {
  * "(3.00 + 5.00) / 2 = 4.00" -- the owner's own ask, verbatim (n_i + ... +
  * n_{i+k}) / i. Empty when there is nothing to divide (no distinct cost yet).
  */
-export function formatCostFormula(distinctUsd: number[], meanUsd: number): string {
-  if (!distinctUsd.length) return ''
+export function formatCostFormula(distinctUsd: number[], meanUsd: number | null): string {
+  if (!distinctUsd.length || meanUsd == null) return ''
   const sum = distinctUsd.map(fixed2).join(' + ')
   return `(${sum}) / ${distinctUsd.length} = ${fixed2(meanUsd)}`
 }
@@ -93,8 +93,8 @@ function quantityText(value: number): string {
  * The weighted reading: "(2 × 12.00 + 8 × 12.50) / 10 = 12.40". Empty when
  * nothing is on hand (the float then names the fallback lot instead).
  */
-export function formatWeightedCostFormula(terms: Array<{ cost_usd: number; quantity: number }>, totalQuantity: number, resultUsd: number): string {
-  if (!terms.length || !(totalQuantity > 0)) return ''
+export function formatWeightedCostFormula(terms: Array<{ cost_usd: number; quantity: number }>, totalQuantity: number, resultUsd: number | null): string {
+  if (!terms.length || !(totalQuantity > 0) || resultUsd == null) return ''
   const sum = terms.map((term) => `${quantityText(term.quantity)} × ${fixed2(term.cost_usd)}`).join(' + ')
   return `(${sum}) / ${quantityText(totalQuantity)} = ${fixed2(resultUsd)}`
 }
@@ -119,7 +119,8 @@ export function formatCostWeight(input: Pick<CostBreakdownInput, 'weight_quantit
 }
 
 /** i18n key for a lot's exclusion reason -- callers translate with their own `t`. */
-export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason): string | null {
+export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason, costUsd?: number | null): string | null {
+  if (excluded === 'zero' && costUsd === null) return 'cost_breakdown_excluded_unknown'
   if (excluded === 'zero') return 'cost_breakdown_excluded_zero'
   if (excluded === 'duplicate') return 'cost_breakdown_excluded_duplicate'
   if (excluded === 'inactive') return 'cost_breakdown_excluded_inactive'
@@ -164,6 +165,12 @@ export function costRowMeta(input: CostBreakdownInput, formattedDate: string | n
   return parts.join(' · ')
 }
 
+function nullableCost(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
 export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
@@ -198,13 +205,13 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     weighted_quantity: Number(raw.weighted_quantity) > 0 ? Number(raw.weighted_quantity) : 0,
     distinct_usd: Array.isArray(raw.distinct_usd) ? raw.distinct_usd.map(Number) : [],
     distinct_khr: Array.isArray(raw.distinct_khr) ? raw.distinct_khr.map(Number) : [],
-    mean_usd: Number(raw.mean_usd) || 0,
-    mean_khr: Number(raw.mean_khr) || 0,
+    mean_usd: nullableCost(raw.mean_usd),
+    mean_khr: nullableCost(raw.mean_khr),
     outlier_guard: {
       fired: !!(raw.outlier_guard as { fired?: unknown } | undefined)?.fired,
       kept: (raw.outlier_guard as { kept?: unknown } | undefined)?.kept != null ? Number((raw.outlier_guard as { kept?: unknown }).kept) : null,
     },
-    result_usd: Number(raw.result_usd) || 0,
-    result_khr: Number(raw.result_khr) || 0,
+    result_usd: nullableCost(raw.result_usd),
+    result_khr: nullableCost(raw.result_khr),
   }
 }

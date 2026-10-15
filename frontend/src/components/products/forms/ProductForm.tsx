@@ -21,6 +21,8 @@ import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
 import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
+import { costInputToPayload, editableCostText } from '../helpers/productWriteHelpers.ts'
+import { knownCost } from '../../../utils/costDisplay.ts'
 import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
@@ -165,8 +167,8 @@ interface ProductSavePayload extends ProductFormState {
   discount_badge_color: string
   discount_starts_at: string | null
   discount_ends_at: string | null
-  cost_price_usd?: number
-  cost_price_khr?: number
+  cost_price_usd?: number | null
+  cost_price_khr?: number | null
   stock_quantity: number
   received_date?: string | null
   low_stock_threshold: number
@@ -444,8 +446,8 @@ function editableInitialForm(initialForm: ProductFormState): ProductFormState {
     discount_ends_at: initialForm.discount_ends_at || '',
     expiry_date: initialForm.expiry_date || '',
     expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
-    cost_price_usd: editablePrice(initialForm.cost_price_usd),
-    cost_price_khr: editablePrice(initialForm.cost_price_khr),
+    cost_price_usd: editableCostText(initialForm.cost_price_usd),
+    cost_price_khr: editableCostText(initialForm.cost_price_khr),
   }
 }
 
@@ -526,8 +528,8 @@ function ProductFormContent({
       discount_badge_color: '#e11d48',
       discount_starts_at: '',
       discount_ends_at: '',
-      cost_price_usd: 0,
-      cost_price_khr: 0,
+      cost_price_usd: null,
+      cost_price_khr: null,
       stock_quantity: 0,
       ...(showReceivedDate ? { received_date: '' } : {}),
       low_stock_threshold: 10,
@@ -920,7 +922,7 @@ function ProductFormContent({
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
       { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
-      ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` }] : []),
+      ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: knownCost(costInputToPayload(form.cost_price_usd)) === null ? tr('cost_unknown', 'Unknown cost') : `${usdSymbol}${Number(costInputToPayload(form.cost_price_usd)).toFixed(2)}` }] : []),
     ]
     const barcode = String(form.barcode || '').trim()
     if (barcode) items.push({ label: tr('barcode', 'Barcode'), value: barcode })
@@ -1355,8 +1357,8 @@ function ProductFormContent({
       discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
-      cost_price_usd: normalizeInternalMoney(parseNumericInput(canViewCosts ? form.cost_price_usd : blindCostInputs.usd)),
-      cost_price_khr: normalizeInternalMoney(parseNumericInput(canViewCosts ? form.cost_price_khr : blindCostInputs.khr)),
+      cost_price_usd: costInputToPayload(canViewCosts ? form.cost_price_usd : blindCostInputs.usd),
+      cost_price_khr: costInputToPayload(canViewCosts ? form.cost_price_khr : blindCostInputs.khr),
       stock_quantity: parseNumericInput(form.stock_quantity),
       ...(showReceivedDate ? { received_date: form.received_date || null } : {}),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
@@ -1980,6 +1982,7 @@ function ProductFormContent({
               labelKhr={t('cost_in_khr_label')}
               valueUsd={canViewCosts ? form.cost_price_usd : blindCostInputs.usd}
               valueKhr={canViewCosts ? form.cost_price_khr : blindCostInputs.khr}
+              placeholderUsd={tr('cost_input_unknown_placeholder', 'Unknown — enter cost', 'មិនស្គាល់ — បញ្ចូលថ្លៃដើម')}
                 onUsdChange={(value) => {
                   if (!canViewCosts) { formDirtyRef.current = true; setBlindCostInputs(current => ({ ...current, usd: value, khr: current.khr || (value === '' ? '' : editableMoneyValue(parseNumericInput(value) * exchangeRate)) })); return }
                   setField('cost_price_usd', value)
@@ -2066,9 +2069,9 @@ function ProductFormContent({
           <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/20 dark:text-rose-200">
             {tr('discounts_moved_note', 'Discounts are managed on the Promotions page now (Promotions › Per-product discounts).', 'ការបញ្ចុះតម្លៃត្រូវបានគ្រប់គ្រងនៅទំព័រប្រូម៉ូសិនឥឡូវនេះ (ប្រូម៉ូសិន › បញ្ចុះតម្លៃតាមផលិតផល)។')}
           </div>
-          {canViewCosts && activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 && Number(form.cost_price_usd || 0) > 0 ? (
+          {canViewCosts && activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 ? (
             <MarginCard
-              costUsd={Number(form.cost_price_usd || 0)}
+              costUsd={costInputToPayload(form.cost_price_usd)}
               sellingUsd={Number(form.selling_price_usd || 0)}
               usdSymbol={usdSymbol}
               labels={{
@@ -2077,6 +2080,7 @@ function ProductFormContent({
                 margin: tr('margin', 'Margin', 'អត្រាចំណេញ'),
                 selling: tr('selling', 'Selling', 'តម្លៃលក់'),
                 belowCost: tr('margin_selling_below_cost', 'Selling price is below cost price', 'តម្លៃលក់ទាបជាងថ្លៃដើម'),
+                unknown: tr('cost_unknown', 'Unknown cost', 'មិនស្គាល់ថ្លៃដើម'),
               }}
             />
           ) : null}

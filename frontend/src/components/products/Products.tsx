@@ -4342,10 +4342,10 @@ function ProductsFullEditor() {
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     const {
-      buildDefinedProductUpdates,
+      canonicalProductBulkUpdates,
       buildProductBulkUpdatePayload,
     } = await loadProductWriteHelpers()
-    const nextUpdates = buildDefinedProductUpdates(omitUnauthorizedCatalogCosts(updates, user))
+    const nextUpdates = canonicalProductBulkUpdates(omitUnauthorizedCatalogCosts(updates, user))
     if (!Object.keys(nextUpdates).length) {
       notify('No changes specified', 'warning')
       return
@@ -4521,6 +4521,7 @@ function ProductsFullEditor() {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     const {
       buildProductBulkPriceAdjustments,
+      canonicalProductBulkUpdates,
       buildProductBulkUpdatePayload,
     } = await loadProductWriteHelpers()
 
@@ -4546,7 +4547,7 @@ function ProductsFullEditor() {
       amount: bulkEditForm.adjust_amount,
       fields: fields as never,
       skipZeroPriced: !!bulkEditForm.adjust_skip_zero,
-    })
+    }).map(entry => ({ ...entry, updates: canonicalProductBulkUpdates(entry.updates) }))
 
     if (!adjustments.length) {
       notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')

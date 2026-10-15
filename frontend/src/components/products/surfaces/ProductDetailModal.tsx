@@ -21,6 +21,8 @@ import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
+import CostValue from '../../shared/CostValue.tsx'
+import { knownCost } from '../../../utils/costDisplay.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
@@ -163,8 +165,9 @@ export default function ProductDetailModal({
   const productName = String(p.name || '')
   // One active branch: its chip would only repeat the quantity above.
   const branchStockLines = branchStockLinesWorthShowing(p.branch_stock || [])
-  const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
-  const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
+  // The catalog cost column decides known vs unknown; the purchase column is a default-0 mirror and only stands in when the record carries no cost key.
+  const costUsdValue = knownCost(p.cost_price_usd !== undefined ? p.cost_price_usd : p.purchase_price_usd)
+  const purchaseKhr = Number(p.cost_price_khr !== undefined ? p.cost_price_khr || 0 : p.purchase_price_khr || 0)
   const sellingUsd = Number(p.selling_price_usd || 0)
   const wholesaleUsd = Number(p.wholesale_price_usd || 0)
   const wholesaleKhr = Number(p.wholesale_price_khr || 0)
@@ -175,7 +178,7 @@ export default function ProductDetailModal({
   // coloured by, so opening a product cannot change its verdict.
   const lowStockThreshold = effectiveLowStockThreshold(useLowStockConfig(), p.low_stock_threshold)
   const promotion = calculateProductDiscount(p)
-  const marginUsd = sellingUsd - purchaseUsd
+  const marginUsd = costUsdValue === null ? 0 : sellingUsd - costUsdValue
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
     ? p.image_gallery.filter((imagePath): imagePath is string => Boolean(imagePath)).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
@@ -359,7 +362,7 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
-                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}>{fmtUSD(purchaseUsd)}</button>
+                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
                     {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                   </PriceCell> : null}
                   <PriceCell label={T('wholesale_price', 'Wholesale price')}>
@@ -377,7 +380,7 @@ export default function ProductDetailModal({
                     {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
                   </PriceCell>
                   {canViewCosts ? <PriceCell label={T('label_margin', 'Margin')}>
-                    {purchaseUsd > 0 && sellingUsd > 0 ? (
+                    {costUsdValue !== null && sellingUsd > 0 ? (
                       <>
                         <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>{fmtUSD(marginUsd)}</span>
                         <span className="ml-2 text-xs font-normal text-gray-400">{marginPct.toFixed(1)}%</span>

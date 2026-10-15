@@ -38,6 +38,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   const { user } = useApp() as { user: PermissionUser }
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key, fallback) || fallback
+  const unknownLabel = tr('cost_unknown', 'Unknown cost')
   const [breakdown, setBreakdown] = useState<CostBreakdown | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -86,7 +87,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
           <>
             <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
               {breakdown.inputs.length ? breakdown.inputs.map((input, index) => {
-                const excludedKey = costExclusionLabelKey(input.excluded)
+                const excludedKey = costExclusionLabelKey(input.excluded, input.cost_usd)
                 const excludedLabel = excludedKey ? tr(excludedKey, excludedKey) : ''
                 const isManual = input.source === 'manual'
                 const formattedDate = isManual
@@ -94,7 +95,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                   : (input.received_at ? fmtDate(input.received_at) : null)
                 const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
                 const meta = costRowMeta(input, formattedDate)
-                const currentCostText = input.cost_usd == null ? '—' : fmtUSD(input.cost_usd)
+                const currentCostText = input.cost_usd == null ? unknownLabel : fmtUSD(input.cost_usd)
                 const costText = isManual
                   ? `${input.previous_cost_usd == null ? '—' : fmtUSD(input.previous_cost_usd)} → ${currentCostText}`
                   : currentCostText
@@ -146,8 +147,8 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
 
             <div className="rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
               <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{tr('cost_breakdown_result_label', 'Catalog cost price')}</div>
-              <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(breakdown.result_usd)}</div>
-              {breakdown.result_khr > 0 ? (
+              <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{breakdown.result_usd == null ? unknownLabel : fmtUSD(breakdown.result_usd)}</div>
+              {breakdown.result_khr != null && breakdown.result_khr > 0 ? (
                 <div className="text-xs text-gray-400">
                   {fmtKHR(breakdown.result_khr)}
                   <span className="ml-1">({tr('cost_breakdown_khr_note', 'recorded KHR cost, not averaged from lots')})</span>

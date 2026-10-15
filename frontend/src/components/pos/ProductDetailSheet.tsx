@@ -21,6 +21,7 @@ import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import CostValue from '../shared/CostValue.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { branchStepMatters } from '../../utils/branchScope.ts'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
@@ -850,7 +851,7 @@ export default function ProductDetailSheet({
                   onClick={() => setCostFloatTarget({ id: product.id as number | string, name: String(displayName) })}
                 >
                   <span className="text-xs text-gray-400 mr-1">{t('cost_price') || 'Cost price'}</span>
-                  <span className="font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400">{fmtUSD(asNumber(product.cost_price_usd || 0))}</span>
+                  <span className="font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400"><CostValue value={product.cost_price_usd} fmt={fmtUSD} t={t} /></span>
                   {asNumber(product.cost_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.cost_price_khr || 0))}</span> : null}
                 </button>
               ) : null}
@@ -980,7 +981,7 @@ export default function ProductDetailSheet({
                       onClick={() => setCostFloatTarget({ id: effectiveVariant.id as number | string, name: String(effectiveVariant.__displayName || effectiveVariant.name || '') })}
                     >
                       <span className="text-xs text-gray-400 mr-1">{t('cost_price') || 'Cost price'}</span>
-                      <span className="text-xs font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400">{fmtUSD(asNumber(effectiveVariant.cost_price_usd || 0))}</span>
+                      <span className="text-xs font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400"><CostValue value={effectiveVariant.cost_price_usd} fmt={fmtUSD} t={t} /></span>
                       {asNumber(effectiveVariant.cost_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(effectiveVariant.cost_price_khr || 0))}</span> : null}
                     </button>
                   ) : null}

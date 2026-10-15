@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { editableMoneyValue, normalizeInternalMoney, normalizeSellingPrice } from '../src/utils/pricing.ts'
 import { multiplyMoney4, sumMoney4 } from '../src/utils/moneyPrecision.ts'
 import { omitUnauthorizedCatalogCosts } from '../src/utils/acquisitionCostAccess.ts'
+import { costInputToPayload } from '../src/components/products/helpers/productWriteHelpers.ts'
 
 for (const value of [0, 0.0001, 1.2345, 10.075, -1.2345]) {
   assert.equal(normalizeInternalMoney(Number(editableMoneyValue(value))), value, 'editable cost roundtrip preserves four decimals')
@@ -23,7 +24,7 @@ for (const filename of ['ProductForm.tsx', 'VariantFormModal.tsx']) {
   const expressions: Array<[string, string]> = []
   function visit(node: ts.Node) {
     if (ts.isPropertyAssignment(node) && ['cost_price_usd', 'cost_price_khr'].includes(node.name.getText(source))
-      && node.initializer.getText(source).startsWith('normalizeInternalMoney(parseNumericInput(')) {
+      && node.initializer.getText(source).startsWith('costInputToPayload(')) {
       expressions.push([node.name.getText(source), node.initializer.getText(source)])
     }
     ts.forEachChild(node, visit)
@@ -31,12 +32,12 @@ for (const filename of ['ProductForm.tsx', 'VariantFormModal.tsx']) {
   visit(source)
   assert.ok(expressions.length >= 2)
   for (const [field, expression] of expressions) {
-    const submit = new Function('form', 'parseNumericInput', 'normalizeInternalMoney', 'canViewCosts', 'blindCostInputs', `return ${expression}`)
+    const submit = new Function('form', 'parseNumericInput', 'normalizeInternalMoney', 'canViewCosts', 'blindCostInputs', 'costInputToPayload', `return ${expression}`)
     for (const value of [0, 0.0001, 1.2345]) {
-      assert.equal(submit({ [field]: editableMoneyValue(value) }, Number, normalizeInternalMoney, true, {}), value, `${filename} ${field} no-op save`)
+      assert.equal(submit({ [field]: editableMoneyValue(value) }, Number, normalizeInternalMoney, true, {}, costInputToPayload), value, `${filename} ${field} no-op save`)
       if (filename === 'ProductForm.tsx') {
         const currency = field === 'cost_price_usd' ? 'usd' : 'khr'
-        assert.equal(submit({ [field]: '999.9999' }, Number, normalizeInternalMoney, false, { [currency]: editableMoneyValue(value) }), value,
+        assert.equal(submit({ [field]: '999.9999' }, Number, normalizeInternalMoney, false, { [currency]: editableMoneyValue(value) }, costInputToPayload), value,
           `${filename} ${field} blind edit preserves precision and never submits the hidden saved value`)
       }
     }

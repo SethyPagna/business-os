@@ -2,6 +2,7 @@ import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../../utils/promotionRules.ts'
 import { DEFAULT_LOW_STOCK_CONFIG, resolveStockTier, type LowStockConfig } from '../../../utils/lowStockSettings.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
+import { isKnownCost } from '../../../utils/costDisplay.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 
@@ -220,8 +221,10 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   const costUsd = toNumber(product?.cost_price_usd)
   const costKhr = toNumber(product?.cost_price_khr)
   const sellingUsd = toNumber(product?.selling_price_usd)
+  const costKnown = isKnownCost(product?.cost_price_usd)
   const marginUsd = sellingUsd - costUsd
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd * 100) : 0
+  const marginKnown = costKnown && sellingUsd > 0
   const qty = branchFilter !== 'all' ? getBranchQty(product, branchFilter) : product?.stock_quantity
   const stockStatus = getProductStockStatus(product, { branchFilter, getBranchQty, lowStock })
   const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
@@ -265,7 +268,9 @@ export function buildProductRowDisplayState(product: ProductRecord, {
     // chips. With no rules passed this is exactly the old computation.
     promotion: buildRowPromotion(product, exchangeRate, promotionRules),
     costKhr,
+    costKnown,
     costUsd,
+    marginKnown,
     qty,
     selectedBranchName,
     stockStatus,
