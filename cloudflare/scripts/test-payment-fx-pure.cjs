@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
@@ -92,7 +99,7 @@ function fixture() {
 }
 
 function seed(f) {
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     INSERT INTO settings(key,value,updated_at) VALUES
       ('exchange_rate','4200','s1'),('change_exchange_rate','4000','s1'),
       ('pos_payment_methods','["ABA Bank"]','s1');
@@ -111,7 +118,7 @@ function seed(f) {
       id,sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr,
       product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,manual_discount_usd,manual_discount_khr,branch_id
     ) VALUES(1,1,1,'Serum',1,5,20500,5,20500,0,NULL,5,NULL,0,NULL,1);
-  `)
+  `))
 }
 
 function request(key = 'settle-request-1') {
@@ -536,9 +543,9 @@ async function run() {
 
   const addition = fixture(); seed(addition)
   addition.sql.prepare('UPDATE sales SET change_usd=1,change_khr=0,change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
-  addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
-    VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run()
-  addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run()
+  seedFixture(addition.sql, () => addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
+    VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run())
+  seedFixture(addition.sql, () => addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run())
   const additionDraft = {
     money_precision_version: 1,
     items: [manualLine(1, { applied_price_usd: 2 })],
@@ -580,7 +587,7 @@ async function run() {
 
   function unlottedFixture() {
     const f = fixture(); seed(f)
-    f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(501,1,'dated',1,'2026-01-01'); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,5)")
+    seedFixture(f.sql, () => f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(501,1,'dated',1,'2026-01-01'); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,5)"))
     return f
   }
   const unlottedDraft = { ...additionDraft, client_request_id: 'explicit-unlotted', items: [manualLine(2, { unlotted_stock: true })] }
@@ -607,7 +614,7 @@ async function run() {
   assert.equal(duplicateResidual.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
   const residualRace = unlottedFixture()
   const residualRequest = await reviewed(residualRace, '/1/items', unlottedDraft)
-  residualRace.barrier(() => residualRace.sql.prepare('UPDATE branch_stock SET quantity=6 WHERE product_id=1 AND branch_id=1').run())
+  residualRace.barrier(() => seedFixture(residualRace.sql, () => residualRace.sql.prepare('UPDATE branch_stock SET quantity=6 WHERE product_id=1 AND branch_id=1').run()))
   assert.equal((await residualRace.call('/1/items', residualRequest, 'POST')).status, 409)
   assert.equal(residualRace.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
   assert.equal(residualRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)

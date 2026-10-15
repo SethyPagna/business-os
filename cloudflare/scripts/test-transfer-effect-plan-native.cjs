@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // CUTOVER-LC item 3 (and E8, item 2): the transfer effect statements the
 // cutover child runs 3,408 times.
 //
@@ -78,31 +85,35 @@ function schema() {
 }
 
 // names/roles: [[name, role], [name, role]] for branch ids 1 and 2.
+const { executeStockTransaction } = load('lib/stockTransaction')
+
 function world(branches = [['Shop', null], ['Warehouse', null]], { noise = 0 } = {}) {
   const raw = schema()
   const insert = raw.prepare('INSERT INTO branches(id,name,role,is_active,is_default) VALUES(?,?,?,1,?)')
   branches.forEach(([name, role], i) => insert.run(i + 1, name, role, i === 0 ? 1 : 0))
-  raw.exec(`INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true}',1);
-    INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(1,'Mixed','P1',1,2.5,10000),(2,'Untracked','P2',1,1,4000),(3,'Fractional','P3',1,1,4000),(4,'Other','P4',1,1,4000);`)
-  const lot = raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,NULL,'n',?,?,1)")
-  const bbs = raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)')
-  const bs = raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)')
-  // P1: lot 1 shared (source 4, target 6), lot 2 only at the source (3); source stock 7 + 2 untracked.
-  lot.run(1, 1, 'k1', 'k1', '2026-01-01', 1, 1.5); lot.run(2, 1, 'k2', 'k2', '2026-02-01', 2, 2)
-  bbs.run(1, 1, 4); bbs.run(1, 2, 6); bbs.run(2, 1, 3)
-  bs.run(1, 1, 9); bs.run(1, 2, 6)
-  // P2: no lots at all, 5 untracked at the source.
-  bs.run(2, 1, 5); bs.run(2, 2, 0)
-  // P3: fractional lot.
-  lot.run(3, 3, 'k3', 'k3', '2026-03-01', 1, 1); bbs.run(3, 1, 0.5); bs.run(3, 1, 0.75); bs.run(3, 2, 0)
-  for (let i = 0; i < noise; i += 1) { // noise lots of other products at both branches
-    const id = 100 + i, product = 1000 + i
-    raw.prepare('INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(?,?,?,1,1,4000)').run(product, 'N' + i, 'N' + i)
-    lot.run(id, product, 'n' + i, 'n' + i, '2026-01-01', 1, 1)
-    bbs.run(id, 1, 2); bbs.run(id, 2, 2); bs.run(product, 1, 2); bs.run(product, 2, 2)
-  }
-  raw.exec("UPDATE products SET created_at='2026-01-01 00:00:00'") // snapshots embed created_at; two worlds must agree
-  raw.exec('UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=products.id)')
+  seedFixture(raw, () => {
+    raw.exec(`INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true}',1);
+      INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(1,'Mixed','P1',1,2.5,10000),(2,'Untracked','P2',1,1,4000),(3,'Fractional','P3',1,1,4000),(4,'Other','P4',1,1,4000);`)
+    const lot = raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,NULL,'n',?,?,1)")
+    const bbs = raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)')
+    const bs = raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)')
+    // P1: lot 1 shared (source 4, target 6), lot 2 only at the source (3); source stock 7 + 2 untracked.
+    lot.run(1, 1, 'k1', 'k1', '2026-01-01', 1, 1.5); lot.run(2, 1, 'k2', 'k2', '2026-02-01', 2, 2)
+    bbs.run(1, 1, 4); bbs.run(1, 2, 6); bbs.run(2, 1, 3)
+    bs.run(1, 1, 9); bs.run(1, 2, 6)
+    // P2: no lots at all, 5 untracked at the source.
+    bs.run(2, 1, 5); bs.run(2, 2, 0)
+    // P3: fractional lot.
+    lot.run(3, 3, 'k3', 'k3', '2026-03-01', 1, 1); bbs.run(3, 1, 0.5); bs.run(3, 1, 0.75); bs.run(3, 2, 0)
+    for (let i = 0; i < noise; i += 1) { // noise lots of other products at both branches
+      const id = 100 + i, product = 1000 + i
+      raw.prepare('INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(?,?,?,1,1,4000)').run(product, 'N' + i, 'N' + i)
+      lot.run(id, product, 'n' + i, 'n' + i, '2026-01-01', 1, 1)
+      bbs.run(id, 1, 2); bbs.run(id, 2, 2); bs.run(product, 1, 2); bs.run(product, 2, 2)
+    }
+    raw.exec("UPDATE products SET created_at='2026-01-01 00:00:00'") // snapshots embed created_at; two worlds must agree
+    raw.exec('UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=products.id)')
+  })
   const log = { executed: [], explain: [] }
   function prepared(sql, values = []) {
     const args = () => /\?\d/.test(sql) ? [Object.fromEntries(values.map((value, index) => [String(index + 1), value]))] : values
@@ -187,8 +198,13 @@ async function main() {
     // only the two rewritten statements differ.
     const oracle = planned.statements.map(toOld)
     assert.equal(oracle.filter((statement, i) => statement !== planned.statements[i]).length, 2, 'exactly the two rewritten statements differ')
-    await fresh.db.batchOnce(planned.statements)
-    await old.db.batchOnce(oracle)
+    const beforeUnadmitted = stockState(fresh)
+    await assert.rejects(() => fresh.db.batchOnce(planned.statements), /stock_transaction_required/)
+    assert.equal(stockState(fresh), beforeUnadmitted)
+    assert.equal(fresh.raw.prepare("SELECT COUNT(*) n FROM transfer_operation_receipts").get().n, 0)
+    await executeStockTransaction(fresh.db, planned.statements, 'once')
+    assert.equal(fresh.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    await executeStockTransaction(old.db, oracle, 'once')
     assert.equal(stockState(fresh), stockState(old))
     // And the transfer did what it says: everything left the source.
     assert.deepEqual(fresh.raw.prepare('SELECT product_id,quantity FROM branch_stock WHERE branch_id=1 AND product_id IN (1,2,3) ORDER BY product_id').all().map(row => ({ ...row })),
@@ -205,9 +221,9 @@ async function main() {
       const planned = await plan(w, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])
       const before = stockState(w)
       // Lots now claim all of the source stock: the 2 untracked units are gone.
-      w.beforeBatch(raw => raw.exec('UPDATE branch_batch_stock SET quantity=9 WHERE batch_id=2 AND branch_id=1'))
-      await assert.rejects(() => w.db.batchOnce(planned.statements.map(converter)), /NOT NULL constraint failed: branches\.name/)
-      w.raw.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=2 AND branch_id=1')
+      w.beforeBatch(raw => seedFixture(raw, () => raw.exec('UPDATE branch_batch_stock SET quantity=9 WHERE batch_id=2 AND branch_id=1')))
+      await assert.rejects(() => executeStockTransaction(w.db, planned.statements.map(converter), 'once'), /NOT NULL constraint failed: branches\.name/)
+      seedFixture(w.raw, () => w.raw.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=2 AND branch_id=1'))
       assert.equal(stockState(w), before)
     }
   })
@@ -215,7 +231,7 @@ async function main() {
   await check('E8: the transfer commits for renamed branches whose roles say shop and warehouse (names are labels)', async () => {
     const w = world([['Old Shop', 'shop'], ['LC Store', 'warehouse']])
     const planned = await plan(w, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])
-    await w.db.batchOnce(planned.statements)
+    await executeStockTransaction(w.db, planned.statements, 'once')
     assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity, 15)
     assert.deepEqual(w.raw.prepare('SELECT from_branch_name,to_branch_name FROM stock_transfers').all().map(row => ({ ...row })), [{ from_branch_name: 'Old Shop', to_branch_name: 'LC Store' }])
   })
@@ -223,19 +239,19 @@ async function main() {
   await check('E8: roles outrank names -- a branch NAMED Shop whose role is warehouse is a warehouse; two shops or no warehouse refuse', async () => {
     // Names say Shop/Warehouse but the roles are swapped: the roles decide, so source = warehouse role, target = shop role is still a pair.
     const swapped = world([['Shop', 'warehouse'], ['Warehouse', 'shop']])
-    await swapped.db.batchOnce((await plan(swapped, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])).statements)
+    await executeStockTransaction(swapped.db, (await plan(swapped, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])).statements, 'once')
     assert.equal(swapped.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity, 15)
     // Two active shops (the post-finalize shape with Old Shop wrongly active): no pair, refused in the batch, nothing written.
     const twoShops = world([['Old Shop', 'shop'], ['LC Store', 'shop']])
     const planned = await plan(twoShops, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])
     const before = stockState(twoShops)
-    await assert.rejects(() => twoShops.db.batchOnce(planned.statements), /NOT NULL constraint failed: branches\.name/)
+    await assert.rejects(() => executeStockTransaction(twoShops.db, planned.statements, 'once'), /NOT NULL constraint failed: branches\.name/)
     assert.equal(stockState(twoShops), before)
     // One active branch left (the real post-cutover state): Old Shop inactive.
     const oneActive = world([['Old Shop', 'shop'], ['LC Store', 'shop']])
     oneActive.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const plannedOne = await plan(oneActive, [{ productId: 1, destProductId: 1, quantity: 9, batchId: null }])
-    await assert.rejects(() => oneActive.db.batchOnce(plannedOne.statements), /NOT NULL constraint failed: branches\.name/)
+    await assert.rejects(() => executeStockTransaction(oneActive.db, plannedOne.statements, 'once'), /NOT NULL constraint failed: branches\.name/)
   })
 
   console.log(`${checks} transfer effect plan native checks passed`)
