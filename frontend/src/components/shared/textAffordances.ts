@@ -668,7 +668,17 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      if (state) apply({ type: 'dismiss' })
+      if (state) {
+        const target = event.target as Element | null
+        const active = target && typeof target.closest === 'function' ? target : document.activeElement
+        const ownerDialog = state.element.closest('[role="dialog"][aria-modal="true"]')
+        const activeDialog = active?.closest?.('[role="dialog"][aria-modal="true"]') ?? null
+        const visible = host && !host.hidden && document.body.contains(host) && document.body.contains(state.element)
+        const pickerOwnsEscape = active?.closest?.('[data-app-select-button="true"][aria-expanded="true"], [data-app-select-menu="true"]')
+        const ownsEscape = visible && !pickerOwnsEscape && (insideFloat(active) || ownerDialog === activeDialog)
+        apply({ type: 'dismiss' })
+        if (ownsEscape) { event.preventDefault(); event.stopPropagation() }
+      }
       return
     }
     if (event.key !== 'Enter' && event.key !== ' ') return

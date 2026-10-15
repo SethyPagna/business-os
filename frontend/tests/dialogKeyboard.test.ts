@@ -14,13 +14,15 @@ type Listener = (event: Record<string, unknown>) => void
 const listeners: Listener[] = []
 let selectMenuOpen = false
 const focusLog: string[] = []
-const makeButton = (name: string) => ({ name, focus() { focusLog.push(name); doc.activeElement = this } })
+const makeButton = (name: string, attributes: Record<string, string> = {}) => ({ name, getAttribute: (key: string) => attributes[key] ?? null, getClientRects: () => [{}], closest: () => null, focus() { focusLog.push(name); doc.activeElement = this } })
+const portals = new Map<string, unknown>()
 const doc: Record<string, unknown> & { activeElement: unknown } = {
   activeElement: makeButton('opener'),
   addEventListener: (_type: string, fn: Listener) => { listeners.push(fn) },
   removeEventListener: (_type: string, fn: Listener) => { const at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1) },
   querySelector: (selector: string) => (selector.includes('data-app-select-menu') && selectMenuOpen ? {} : null),
   querySelectorAll: () => [],
+  getElementById: (id: string) => portals.get(id) ?? null,
 }
 ;(globalThis as Record<string, unknown>).document = doc
 ;(globalThis as Record<string, unknown>).window = { requestAnimationFrame: (fn: () => void) => fn() }
@@ -90,5 +92,62 @@ cleanups.pop()!()
 cleanups.pop()!()
 assert.equal(listeners.length, 0, 'closing removes the listener')
 assert.equal(focusLog.at(-1), 'opener', 'closing hands focus back to what opened the dialog')
+
+const content = makeButton('named detail region', { 'aria-label': 'Read-only detail' })
+const hint = makeButton('owned hint trigger', { 'aria-controls': 'owned-hint', 'aria-expanded': 'true' })
+const tooltipFocus = { name: 'portaled tooltip' }
+let contentVisible = true
+let contentInert = false
+let hintOpen = true
+let hintVisible = true
+const popup = { getAttribute: (key: string) => key === 'role' ? 'tooltip' : null, getClientRects: () => hintVisible ? [{}] : [], contains: (element: unknown) => element === tooltipFocus, hidden: false }
+portals.set('owned-hint', popup)
+const hintedPanel = {
+  querySelector: (selector: string) => selector.includes('role="region"') ? { ...content, getClientRects: () => contentVisible ? [{}] : [], closest: () => contentInert ? {} : null } : hint,
+  querySelectorAll: (selector: string) => selector.includes('aria-controls') ? (hintOpen ? [hint] : []) : [hint, first, content],
+  closest: () => null,
+}
+let hintDialogEscapes = 0
+const mountHinted = () => useDialogKeyboard({ current: hintedPanel }, { enabled: true, promptOpen: false, onEscape: () => { hintDialogEscapes += 1 }, onPromptEscape: () => {} })
+mountHinted()
+assert.equal(focusLog.at(-1), 'named detail region', 'an explicit visible named content region receives initial focus without opening header help')
+assert.equal(press('Escape').defaultPrevented, false, 'the owned visible hint keeps Escape for its real close listener')
+assert.equal(hintDialogEscapes, 0)
+doc.activeElement = tooltipFocus
+assert.equal(press('Tab').defaultPrevented, true)
+assert.equal(doc.activeElement, hint, 'Tab from the owned portal returns to its trigger inside the dialog')
+doc.activeElement = tooltipFocus
+assert.equal(press('Tab', { shiftKey: true }).defaultPrevented, true)
+assert.equal(doc.activeElement, hint, 'Shift+Tab also returns from the portal into the dialog')
+hintVisible = false
+press('Escape')
+assert.equal(hintDialogEscapes, 1, 'a hidden help panel cannot intercept dialog Escape')
+hintVisible = true
+hintOpen = false
+press('Escape')
+assert.equal(hintDialogEscapes, 2, 'an unrelated body-level tooltip cannot intercept this dialog')
+hintOpen = true
+let newestEscapes = 0
+useDialogKeyboard({ current: panel }, { enabled: true, promptOpen: false, onEscape: () => { newestEscapes += 1 }, onPromptEscape: () => {} })
+press('Escape')
+assert.equal(newestEscapes, 1, 'the newer dialog still owns Escape above a parent help panel')
+assert.equal(hintDialogEscapes, 2)
+cleanups.pop()!()
+cleanups.pop()!()
+let promptHintEscapes = 0
+useDialogKeyboard({ current: hintedPanel }, { enabled: true, promptOpen: true, onEscape: () => {}, onPromptEscape: () => { promptHintEscapes += 1 } })
+press('Escape')
+assert.equal(promptHintEscapes, 1, 'a dirty prompt above an owned help panel keeps its Escape priority')
+cleanups.pop()!()
+contentVisible = false
+mountHinted()
+assert.equal(doc.activeElement, hint, 'hidden content preserves the original first-control focus fallback')
+cleanups.pop()!()
+contentVisible = true
+contentInert = true
+mountHinted()
+assert.equal(doc.activeElement, hint, 'inert content cannot receive the preferred initial focus')
+cleanups.pop()!()
+assert.equal(listeners.length, 0)
 
 console.log('PASS dialogKeyboard: focus, Escape, listbox precedence, Tab wrap, stacking, restore')

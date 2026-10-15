@@ -217,10 +217,6 @@ export default function StatsStrip({
       ) : null}
 
       {statsOpen && openCard ? (
-        // The breakdown opens as a floating dialog (Modal, portalled to
-        // document.body) so it layers ABOVE the page instead of expanding
-        // inline and shoving the list down (user, Aug 31). Closing it or the
-        // ✕ clears the open card.
         <Modal
           title={(
             <span className="flex items-center gap-1.5">
@@ -231,14 +227,9 @@ export default function StatsStrip({
           onClose={() => setOpenKey(null)}
           size="sm"
           draggable
-        
+          keyboard
           unsavedChanges="read-only">
-          {/* ONE detail per row, full width (user, Aug 31: "each stats instead
-              of a two columns can do a one row"). The label takes the row's
-              spare width and truncates; a clipped label reveals its full text
-              on hover/click via TruncatedText, so the "…" is never a dead end.
-              The value stays whole on the right. */}
-          <div className="flex flex-col">
+          <div className="flex flex-col" tabIndex={0} role="region" aria-label={openCard.label}>
             {typeof openCard.trend === 'number' ? (
               <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
                 <strong>{openCard.trend > 0 ? '+' : ''}{openCard.trend.toFixed(1)}%</strong> {tr('trend_explanation', 'change compared with the immediately previous period of the same length. Formula: (current − previous) ÷ previous × 100.')}

@@ -26,22 +26,32 @@ export function useDialogKeyboard(
     const id = Symbol('dialog')
     openDialogs.push(id)
     const previousFocus = document.activeElement as HTMLElement | null
-    panelRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
+    const content = panelRef.current?.querySelector<HTMLElement>('[role="region"][tabindex="0"]')
+    const namedContent = content && (content.getAttribute('aria-label')?.trim() || content.getAttribute('aria-labelledby')?.trim())
+      && content.getClientRects().length > 0 && !content.closest('[hidden], [inert], [aria-hidden="true"]')
+    ;(namedContent ? content : panelRef.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (openDialogs[openDialogs.length - 1] !== id) return
       // A dialog that opened a confirm or picker of its own (ProductForm's save review, file picker, scanner) is made
       // inert while that surface is up. The surface on top owns the keyboard; this one answering Escape would close
       // the form underneath it and lose the work the confirm was about to save.
       if (panelRef.current?.closest('[inert]')) return
+      if (event.key !== 'Escape' && event.key !== 'Tab') return
       const { promptOpen: promptShowing, onEscape: close, onPromptEscape: dismissPrompt } = latest.current
+      const hints = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[aria-expanded="true"][aria-controls]') || []).flatMap(trigger => {
+        const popup = document.getElementById(trigger.getAttribute('aria-controls') || '')
+        return popup?.getAttribute('role') === 'tooltip' && !popup.hidden && popup.getClientRects().length > 0 ? [{ trigger, popup }] : []
+      })
       if (event.key === 'Escape') {
-        if (document.querySelector('[data-app-select-menu="true"]')) return
+        if (document.querySelector('[data-app-select-menu="true"]') || (!promptShowing && hints.length)) return
         event.preventDefault()
         if (promptShowing) dismissPrompt()
         else close()
         return
       }
       if (event.key !== 'Tab' || promptShowing) return
+      const activeHint = hints.find(({ popup }) => popup.contains(document.activeElement))
+      if (activeHint) { event.preventDefault(); activeHint.trigger.focus(); return }
       const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) || [])
       if (!focusable.length) return
       const first = focusable[0]
