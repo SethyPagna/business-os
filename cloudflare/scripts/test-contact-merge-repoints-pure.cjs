@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Proves that resolving a contact CONFLICT via the /merge endpoint MOVES
 // every historical reference from the merged-away record onto the survivor,
 // leaving nothing orphaned when the loser row is deleted. The contacts merge
@@ -65,7 +66,7 @@ function check(name, fn) {
 run(`INSERT INTO customers (id, name, phone, address) VALUES (1, 'Keeper Co', '012 111 111', 'Keeper address'), (2, 'Loser Co', '012 222 222', 'Loser address')`)
 run(`INSERT INTO suppliers (id, name) VALUES (11, 'KeepSup'), (22, 'LoseSup')`)
 run(`INSERT INTO delivery_contacts (id, name) VALUES (31, 'KeepDrv'), (32, 'LoseDrv')`)
-run(`INSERT INTO products (id, name, supplier) VALUES (101, 'P1', 'LoseSup')`)
+seedStockFixture(db.db, () => run(`INSERT INTO products (id, name, supplier) VALUES (101, 'P1', 'LoseSup')`))
 
 run("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'")
 // Customer-linked
@@ -81,8 +82,8 @@ run("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'")
 
 // Supplier-linked
 run(`INSERT INTO returns (supplier_id, supplier_name, return_scope) VALUES (22, 'LoseSup old', 'supplier')`)
-run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-id', 22, 'LoseSup old')`)
-run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-name', NULL, 'LoseSup')`)
+seedStockFixture(db.db, () => run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-id', 22, 'LoseSup old')`))
+seedStockFixture(db.db, () => run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-name', NULL, 'LoseSup')`))
 run(`INSERT INTO supplier_invoices (source_branch, legacy_id, supplier_id, supplier_name, invoice_date, status, source_file, source_row) VALUES ('B', 1, 22, 'LoseSup old', '2026-01-01', 'outstanding', 'ap.csv', 1)`)
 run(`INSERT INTO supplier_invoices (source_branch, legacy_id, supplier_id, supplier_name, invoice_date, status, source_file, source_row) VALUES ('B', 2, NULL, 'LoseSup', '2026-01-02', 'outstanding', 'ap.csv', 2)`)
 
@@ -97,6 +98,7 @@ run(`INSERT INTO fees (fee_type, amount_usd, amount_khr, fee_date, delivery_cont
 const custParams = { keepId: 1, mergeId: 2, keeperName: 'Keeper Co', keeperPhone: '012 111 111', keeperAddress: 'Keeper address', mergedName: 'Loser Co', mergedNameLower: 'loser co' }
 const supParams = { keepId: 11, mergeId: 22, keeperName: 'KeepSup', mergedName: 'LoseSup', mergedNameLower: 'losesup' }
 const delParams = { keepId: 31, mergeId: 32, keeperName: 'KeepDrv' }
+assert.throws(() => db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
 for (const sql of CUSTOMER_REPOINTS) run(sql, custParams)
 for (const sql of SUPPLIER_REPOINTS) run(sql, supParams)
 for (const sql of DELIVERY_REPOINTS) run(sql, delParams)

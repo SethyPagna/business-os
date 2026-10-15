@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Cost-unknown slice S2: stock value, product COGS and the integrity check.
 //
 // Owner, 14 Oct 2026: "if cost is 0$ then it is 0 for loss. if it is none, it
@@ -101,10 +102,11 @@ async function main() {
     const d1 = openDb(migrations)
     const insert = d1.prepare(`INSERT INTO products (id, name, stock_quantity, cost_price_usd, cost_price_khr, is_active, is_group)
       VALUES (@id, @name, @qty, @usd, @khr, @active, 0)`)
-    insert.run({ id: 1, name: 'Unknown cost', qty: 5, usd: null, khr: null, active: 1 })
-    insert.run({ id: 2, name: 'Free goods', qty: 5, usd: 0, khr: 0, active: 1 })
-    insert.run({ id: 3, name: 'Costed', qty: 5, usd: 2, khr: 8000, active: 1 })
-    insert.run({ id: 4, name: 'Unknown but empty shelf', qty: 0, usd: null, khr: null, active: 1 })
+    seedStockFixture(d1.db, () => insert.run({ id: 1, name: 'Unknown cost', qty: 5, usd: null, khr: null, active: 1 }))
+    seedStockFixture(d1.db, () => insert.run({ id: 2, name: 'Free goods', qty: 5, usd: 0, khr: 0, active: 1 }))
+    seedStockFixture(d1.db, () => insert.run({ id: 3, name: 'Costed', qty: 5, usd: 2, khr: 8000, active: 1 }))
+    seedStockFixture(d1.db, () => insert.run({ id: 4, name: 'Unknown but empty shelf', qty: 0, usd: null, khr: null, active: 1 }))
+    assert.throws(() => d1.db.exec('UPDATE products SET stock_quantity=stock_quantity+1'), /stock_transaction_required/)
     const cdb = adapter(d1)
     const pagination = load('lib/familyPagination.ts', { './db': { getDb: () => cdb } })
     const lowStock = load('lib/lowStockSettings.ts', { './db': { getDb: () => cdb } })
@@ -143,7 +145,7 @@ async function main() {
   await check('stock value: every product unknown -> $0 known and every product counted (never a clean $0)', async () => {
     const d1 = openDb(migrations)
     const insert = d1.prepare(`INSERT INTO products (id, name, stock_quantity, cost_price_usd, cost_price_khr, is_active, is_group) VALUES (@id, @name, @qty, NULL, NULL, 1, 0)`)
-    insert.run({ id: 1, name: 'A', qty: 2 }); insert.run({ id: 2, name: 'B', qty: 3 })
+    seedStockFixture(d1.db, () => insert.run({ id: 1, name: 'A', qty: 2 })); seedStockFixture(d1.db, () => insert.run({ id: 2, name: 'B', qty: 3 }))
     const cdb = adapter(d1)
     const stats = load('lib/familyStockStats.ts', {
       './familyPagination': load('lib/familyPagination.ts', { './db': { getDb: () => cdb } }),
@@ -246,6 +248,7 @@ async function main() {
     `)
     const cdb = adapter(d1)
     const integrity = load('lib/dataIntegrity.ts', {
+      './stockTransaction': load('lib/stockTransaction.ts'),
       './db': { getDb: () => cdb },
       './productStockGuard': { assertProductsActive: async () => {}, productStockGuardError: () => null, productStockGuardStatement: () => ({ sql: 'SELECT 1' }) },
     })
