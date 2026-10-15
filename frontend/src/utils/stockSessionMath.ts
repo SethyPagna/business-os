@@ -1,4 +1,5 @@
 import { addMoney4, divideMoney4, multiplyMoney4, roundMoney4, subtractMoney4, sumMoney4, weightedMeanMoney4 } from './moneyPrecision.ts'
+import { knownCost } from './costDisplay.ts'
 
 // Stock-session money rules shared by the browser and the Worker. The copy in
 // cloudflare/src/lib/stockSessionMath.ts must stay identical apart from its
@@ -68,21 +69,15 @@ export function matchCostsToPaid(lines: readonly StockSessionCostLine[], paid: n
 
 // ---- browser only below this line ----
 
-/**
- * The Review step's catalog cost after a receipt, before the server has
- * recomputed it: the quantity-weighted mean of what is on hand and what
- * arrives. A cost of 0 means not recorded and takes no part. The server's
- * catalogCostRecompute stays authoritative.
- */
-export function estimateCatalogCostAfter(onHand: number, currentCost: number, addedQty: number, addedCost: number): number {
+export function estimateCatalogCostAfter(onHand: number, currentCost: number | null, addedQty: number, addedCost: number): number | null {
   const held = units(onHand)
   const added = units(addedQty)
-  const current = Number(currentCost) > 0 ? Number(currentCost) : 0
-  const incoming = Number(addedCost) > 0 ? Number(addedCost) : 0
+  const current = knownCost(currentCost)
+  const incoming = knownCost(addedCost)
   const terms = [
     ...(held && current ? [{ amount: current, factor: held }] : []),
     ...(added && incoming ? [{ amount: incoming, factor: added }] : []),
   ]
-  if (!terms.length) return roundMoney4(current || incoming)
+  if (!terms.length) return current
   return weightedMeanMoney4(terms, terms.reduce((sum, term) => sum + term.factor, 0))
 }

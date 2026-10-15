@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { stockReceiptGateCode } from '../src/utils/stockReceiptFields.ts'
 import {
   buildStockLineRequest,
+  catalogCostOf,
   freeRowText,
   lineDeclaresFree,
   lineEntryRefusal,
@@ -72,6 +73,19 @@ const ctx: LineRequestContext = {
   canEditPrice: true,
   reasonFor: (entry) => entry.reason || 'Stock-in session',
 }
+
+runTest('receipt review preserves canonical unknown and recorded zero over a stale mirror', () => {
+  const product = { ...line().product, stock_quantity: 3, cost_price_usd: null, purchase_price_usd: 19.1234 }
+  assert.equal(catalogCostOf(product), null)
+  assert.equal(catalogCostOf({ ...product, cost_price_usd: 0 }), 0)
+  assert.equal(catalogCostOf({ ...product, cost_price_usd: undefined }), 19.1234)
+  const review = reviewStockLine(line({ product, quantity: 0, freeQuantity: 2, unitCost: '', freeGoods: true }), '1')
+  assert.equal(review.costBefore, null)
+  assert.equal(review.costAfter, null, 'free incoming units are excluded from the mean and cannot invent a catalog zero')
+  const knownZero = reviewStockLine(line({ product: { ...product, cost_price_usd: 0 }, quantity: 0, freeQuantity: 2, unitCost: '', freeGoods: true }), '1')
+  assert.equal(knownZero.costBefore, 0)
+  assert.equal(knownZero.costAfter, 0)
+})
 
 runTest('gate mirror: qty 0 + free n is the declared-free receipt; a $0 cost with paid units still needs the declaration', () => {
   assert.equal(stockReceiptGateCode({ isStockIn: true, supplierName: 'Bong Long', unitCostUsd: 0, quantity: 0, freeQuantity: 2 }), '')

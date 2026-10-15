@@ -703,7 +703,7 @@ export type StockLineReview = {
 }
 
 export function catalogCostOf(product: StockSessionProduct): number | null {
-  const raw = product.cost_price_usd ?? product.purchase_price_usd
+  const raw = product.cost_price_usd !== undefined ? product.cost_price_usd : product.purchase_price_usd
   if (raw == null || String(raw).trim() === '') return null
   const cost = Number(raw)
   return Number.isFinite(cost) && cost >= 0 ? cost : null
@@ -733,7 +733,7 @@ export function reviewStockLine(line: StockSessionLine, branchId: string): Stock
       lotBefore: null,
       lotAfter: null,
       costBefore: currentCost,
-      costAfter: addedCost == null ? currentCost : estimateCatalogCostAfter(toNumber(line.product.stock_quantity), currentCost ?? 0, added, addedCost),
+      costAfter: addedCost == null ? currentCost : estimateCatalogCostAfter(toNumber(line.product.stock_quantity), currentCost, added, addedCost),
       priceBefore: price == null ? null : (line.product.selling_price_usd == null ? null : toNumber(line.product.selling_price_usd)),
       priceAfter: price,
     }

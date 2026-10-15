@@ -84,4 +84,8 @@ assert.equal(browser.estimateCatalogCostAfter(0, 12, 5, 10), 10, 'nothing on han
 assert.equal(browser.estimateCatalogCostAfter(4, 12, 6, 0), 12, 'a $0 (free) lot is not a recorded cost and does not lower the average')
 assert.equal(browser.estimateCatalogCostAfter(10, 0, 5, 3), 3, 'an unrecorded current cost takes no part')
 assert.equal(browser.estimateCatalogCostAfter(3, 1.0001, 3, 1.0002), 1.0002, 'a tie rounds half up, like the server')
+assert.equal(browser.estimateCatalogCostAfter(3, null, 4, 0), null, 'an excluded free lot cannot turn an unknown catalog cost into zero')
+assert.equal(browser.estimateCatalogCostAfter(3, 0, 4, 0), 0, 'an existing recorded zero remains zero')
+assert.equal(browser.estimateCatalogCostAfter(3, null, 4, 2.1234), 2.1234, 'a positive incoming lot supplies the estimate without unknown weight')
+assert.equal(browser.estimateCatalogCostAfter(0, 5.1234, 4, 0), 5.1234, 'excluded incoming costs preserve the catalog fallback at four decimals')
 console.log('PASS the review estimate follows the catalog cost rule')
