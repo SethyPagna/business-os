@@ -1,4 +1,5 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
@@ -172,13 +173,13 @@ app.onError(() => new Response(JSON.stringify({ error: 'Internal error' }), {
 function reset() {
   sqlite = new Database(':memory:')
   for (const file of fs.readdirSync(path.join(__dirname,'../migrations')).filter(file => file.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync(path.join(__dirname,'../migrations',file),'utf8'))
-  sqlite.exec(`
+  seedStockFixture(sqlite, () => sqlite.exec(`
     INSERT INTO branches(id,name,location,is_default,is_active,updated_at) VALUES
       (1,'Shop','shop old',1,1,'2026-09-08 00:00:00'),
       (2,'Warehouse','warehouse old',0,1,'2026-09-08 00:00:00');
     INSERT INTO products(id,name,stock_quantity) VALUES (10,'Transfer product',5);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES (10,2,5);
-  `)
+  `))
   currentUser = { id: 7, name: 'Branch editor', tier: 'full' }
   beforeBatch = null
   batchCalls = 0

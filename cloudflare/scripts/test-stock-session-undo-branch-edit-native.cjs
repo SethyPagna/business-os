@@ -20,6 +20,7 @@
 //
 // Run (from cloudflare/): node scripts/test-stock-session-undo-branch-edit-native.cjs
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
@@ -35,10 +36,10 @@ async function check(name, run) {
 }
 
 function seed(f) {
-  f.sql.exec(`
+  seedStockFixture(f.sql, () => f.sql.exec(`
     INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1);
     INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(2,'Toner','TON-1',3,0,0,1);
-    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);`)
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);`))
 }
 const request = (id) => ({
   client_request_id: id, mode: 'stock_in',
@@ -141,9 +142,9 @@ async function main() {
     assert.equal(status(f, receipt), 'undoable')
   })
   await refuses('a real branch-stock change on a session product still refuses',
-    (f) => f.sql.prepare('UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1 AND branch_id=1').run())
+    (f) => seedStockFixture(f.sql, () => f.sql.prepare('UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1 AND branch_id=1').run()))
   await refuses('a real lot-ledger change on a session lot still refuses',
-    (f) => f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-1 WHERE branch_id=1 AND batch_id=(SELECT id FROM product_batches WHERE variant_product_id=2)').run())
+    (f) => seedStockFixture(f.sql, () => f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-1 WHERE branch_id=1 AND batch_id=(SELECT id FROM product_batches WHERE variant_product_id=2)').run()))
   // REVERT-SET (afe4fce07): the session's stock moves as its own delta, so a rename of a session product (no stock
   // effect) no longer closes Undo; it is carried and the stock still reverses exactly.
   await check('a product row edit no longer blocks Undo (stock moves by the session delta)', async () => {

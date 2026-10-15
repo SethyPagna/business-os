@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, seedDistinctProducts } = require('./test-stock-session-atomic.cjs')
@@ -249,7 +250,8 @@ async function main() {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, createRequest())
     const received = f.sql.prepare("SELECT SUM(quantity) q FROM stock_session_members WHERE product_id=1").get().q
-    f.sql.exec(mutation)
+    if (name === 'stock ABA') seedStockFixture(f.sql, () => f.sql.exec(mutation))
+    else f.sql.exec(mutation)
     const branchBefore = f.sql.prepare('SELECT SUM(quantity) q FROM branch_stock WHERE product_id=1').get().q
     await replay(f, r, 'undo', 0)
     assert.equal(f.sql.prepare('SELECT SUM(quantity) q FROM branch_stock WHERE product_id=1').get().q, branchBefore - received, `${name}: exactly the session's units come back off`)
@@ -270,7 +272,7 @@ async function main() {
     // units the Undo needs (2.5 left, 3.5 to take back) -- refused, coded.
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, createRequest())
-    f.sql.exec('UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1; UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1')
+    seedStockFixture(f.sql, () => f.sql.exec('UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1; UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1'))
     const before = state(f)
     await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409 && e.code === 'revert_insufficient_branch_stock'
       && JSON.stringify(e.params) === JSON.stringify({ available: 2.5, needed: 3.5, branch: 'Shop' }))
@@ -281,8 +283,12 @@ async function main() {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, receiveRequest())
     // Races in after the replay's reads: a sale that takes every unit the Undo needs.
-    f.beforeCommit(sql => sql.exec('UPDATE branch_batch_stock SET quantity=0; UPDATE branch_stock SET quantity=0; UPDATE products SET stock_quantity=0'))
+    f.beforeCommit(sql => seedStockFixture(sql, () => sql.exec('UPDATE branch_batch_stock SET quantity=0; UPDATE branch_stock SET quantity=0; UPDATE products SET stock_quantity=0')))
     await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409)
+    for (const [table, column] of [['branch_batch_stock', 'quantity'], ['branch_stock', 'quantity'], ['products', 'stock_quantity']]) {
+      assert.equal(f.sql.prepare(`SELECT COALESCE(SUM(${column}),0) n FROM ${table}`).get().n, 0)
+    }
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     assert.equal(f.sql.prepare('SELECT status FROM action_history').get().status, 'undoable')
     console.log('PASS race after replay reads (the units taken) fails the commit guard')
   }
@@ -339,7 +345,7 @@ async function main() {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, createRequest())
     await replay(f, r, 'undo', 0)
-    f.sql.exec("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,is_active) VALUES('New cream','CREAM',1.25,0,1)")
+    seedStockFixture(f.sql, () => f.sql.exec("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,is_active) VALUES('New cream','CREAM',1.25,0,1)"))
     const saved = state(f)
     await assert.rejects(replay(f, r, 'redo', 1), e => e.statusCode === 409)
     assert.deepEqual(state(f), saved)
@@ -347,7 +353,7 @@ async function main() {
   }
   {
     const f = fixture()
-    f.sql.exec("DELETE FROM branch_stock; INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)")
+    seedStockFixture(f.sql, () => f.sql.exec("DELETE FROM branch_stock; INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)"))
     const r = await api.commitStockSession(f.env, user, createRequest())
     const stocks = f.sql.prepare('SELECT * FROM branch_stock ORDER BY id').all()
     await replay(f, r, 'undo', 0)

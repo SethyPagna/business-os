@@ -11,6 +11,7 @@
 //
 // Run (from cloudflare/): node scripts/test-stock-session-fold-undo-native.cjs
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
 
 const failures = []
@@ -35,11 +36,11 @@ async function main() {
     // A real, padded barcode on the existing row -- product id 1 from the
     // shared fixture ("Serum", "SER-1") is not a real barcode at all, so use
     // a fresh row here for a clean, discriminating leading-zero fold.
-    f.sql.exec(`
+    seedStockFixture(f.sql, () => f.sql.exec(`
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'Rose Lip Oil','03614274226546',5,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,3);
-    `)
+    `))
     const before = f.sql.prepare('SELECT * FROM products WHERE id=2').get()
     const beforeStock = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity
 
@@ -87,11 +88,11 @@ async function main() {
 
   await check('undo of a quantity=0 fold (barcode-only, no lot) restores the barcode without touching stock', async () => {
     const f = fixture()
-    f.sql.exec(`
+    seedStockFixture(f.sql, () => f.sql.exec(`
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'Amber Balm','09001234567890',3,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
-    `)
+    `))
     const beforeBarcode = f.sql.prepare('SELECT barcode FROM products WHERE id=2').get().barcode
     const request = {
       client_request_id: 'fold-undo-request-zero-001', mode: 'stock_in',
