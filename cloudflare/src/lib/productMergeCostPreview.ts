@@ -1,7 +1,7 @@
 import type { D1Compat } from './db'
 import { CATALOG_COST_HAS_RECORDED_LOT_SQL } from './catalogCostRecompute'
 import { MERGE_COST_LATEST_MANUAL_SQL, mergeCostAuthorityUsdSql } from './productCostReview'
-import { PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
+import { PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
 
 type Row = Record<string, unknown>
 export type MergeCostStep = { mergeId: number; stock: 'merge' | 'write_off' }
@@ -31,12 +31,12 @@ function jsonRows(rows: Row[], fields: string[]): Row[] {
     return [field, value]
   })))
 }
-export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: MergeCostPreviewPlan[]): MergeCostPreviewGraph {
+export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: MergeCostPreviewPlan[], memberLimit: 12 | typeof PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP = 12): MergeCostPreviewGraph {
   const result: MergeCostPreviewGraph = { products: [], batches: [], batchStock: [], currentCostEntries: [] }
   const seen = new Set<number>()
   for (const plan of plans) {
     const ids = [plan.keepId, ...plan.steps.map(step => step.mergeId)]
-    if (ids.length < 2 || ids.length > 12 || new Set(ids).size !== ids.length || ids.some(id => !Number.isSafeInteger(id) || id <= 0 || seen.has(id))) throw new MergeCostPreviewUnavailableError()
+    if (ids.length < 2 || ids.length > memberLimit || new Set(ids).size !== ids.length || ids.some(id => !Number.isSafeInteger(id) || id <= 0 || seen.has(id))) throw new MergeCostPreviewUnavailableError()
     ids.forEach(id => seen.add(id))
     const members = new Set(ids), keeper = graph.products.find(row => Number(row.id) === plan.keepId)
     if (!keeper || graph.products.filter(row => members.has(Number(row.id))).length !== ids.length) throw new MergeCostPreviewUnavailableError()
@@ -97,8 +97,8 @@ SELECT products.id keeperId,${mergeCostAuthorityUsdSql('products.cost_price_usd'
   CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN 'received_lot' WHEN ${MERGE_COST_LATEST_MANUAL_SQL} IS NOT NULL THEN 'manual' ELSE 'keeper_fallback' END source
 FROM products ORDER BY products.id`
 
-export async function previewMergeCosts(db: D1Compat, graph: MergeCostPreviewGraph, plans: MergeCostPreviewPlan[]): Promise<MergeCostAuthority[]> {
-  const projected = projectMergeCostGraph(graph, plans)
+export async function previewMergeCosts(db: D1Compat, graph: MergeCostPreviewGraph, plans: MergeCostPreviewPlan[], memberLimit: 12 | typeof PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP = 12): Promise<MergeCostAuthority[]> {
+  const projected = projectMergeCostGraph(graph, plans, memberLimit)
   const rows = await db.prepare(PREVIEW_SQL).all<Omit<MergeCostAuthority, 'version' | 'needsReview'> & { needsReview: number }>({ graph: JSON.stringify(projected) })
   return rows.map(row => ({ ...row, version: 1, needsReview: Boolean(row.needsReview) }))
 }

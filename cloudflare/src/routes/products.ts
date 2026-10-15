@@ -1,5 +1,5 @@
 import { mergeCostContinuationGuard, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
-import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph } from '../lib/productMergeCostPreview'
+import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph, type MergeCostAuthority } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
@@ -41,7 +41,7 @@ import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
-import { mergeCostOutcome, mergeCostReviewStatements, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
+import { mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -64,6 +64,7 @@ import {
   PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS,
   PRODUCT_CONFLICT_ACTION_MAX_GROUPS,
   PRODUCT_CONFLICT_ACTION_MAX_MEMBERS,
+  PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP,
   PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES,
   PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES,
   PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP,
@@ -3847,7 +3848,7 @@ export async function foldDuplicateProductInto(
     // U-cost: a resumed cluster's earlier folds moved lots, so the 0195
     // triggers may have re-derived the keeper's USD cost from its on-hand lots.
     const keeperDerivedCost = atomicHistory.resumedCluster
-      ? (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId)
+      ? (await readDerivedCatalogCosts(db, [canonicalId], plan.version === 3 ? plan.keeperCost : undefined)).get(canonicalId)
       : null
     const keeperMatches = atomicHistory.reviewedRedo
       ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore, keeperDerivedCost) : reviewedRedoSourceMatches(canonicalBefore))
@@ -4800,13 +4801,13 @@ async function readDuplicatePreviewCatalog(
  * A merge keeper's cost is re-derived after every fold, so plan checks accept
  * this figure as well as the plan's merged one.
  */
-async function readDerivedCatalogCosts(db: ReturnType<typeof getDb>, ids: readonly number[]): Promise<Map<number, number | null>> {
+async function readDerivedCatalogCosts(db: ReturnType<typeof getDb>, ids: readonly number[], mergeFallback?: MergeCostFallback): Promise<Map<number, number | null>> {
   const out = new Map<number, number | null>()
   if (!ids.length) return out
   const rows = await selectInChunks([...new Set(ids)], 0, (chunk) => {
     const { sql, params } = buildInClause('id', chunk)
-    return db.prepare(`SELECT id, ${CATALOG_COST_DERIVE_SQL} AS derived FROM products WHERE id IN (${sql})`)
-      .all<{ id: number; derived: number | null }>(params)
+    return db.prepare(`SELECT id, ${mergeFallback ? mergeCostAuthorityUsdSql('@mergeFallbackUsd') : CATALOG_COST_DERIVE_SQL} AS derived FROM products WHERE id IN (${sql})`)
+      .all<{ id: number; derived: number | null }>({ ...params, ...(mergeFallback ? { mergeFallbackUsd: mergeFallback.usd } : {}) })
   })
   for (const row of rows) out.set(Number(row.id), row.derived == null ? null : Number(row.derived))
   return out
@@ -6882,7 +6883,8 @@ async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, rev
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) throw new Error('invalid detail')
       const resolution = row.resolution_json ? JSON.parse(row.resolution_json) : null
       const finalPlan = row.final_plan_json ? JSON.parse(row.final_plan_json) : null
-      return { ordinal: Number(row.ordinal), ...detail, status: row.status, resolution,
+      const { cost_dependency: _costDependency, ...publicDetail } = detail
+      return { ordinal: Number(row.ordinal), ...publicDetail, status: row.status, resolution,
         projected_result: finalPlan?.projected_result ?? null }
     } catch { throw new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409) }
   })
@@ -6920,6 +6922,60 @@ async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>,
   }
 }
 
+type ProductConflictCostDependency = { version: 1; entries: Array<{ product_id: number; entry: { id: number; cost_usd: unknown; baseline_batch_id: number } | null }> }
+type ProductConflictCostPlan = ProductConflictActionGroupPlan & { cost_dependency?: ProductConflictCostDependency }
+
+function productConflictLatestCostEntrySql(product: string): string {
+  return `(SELECT json_object('id',entry.id,'cost_usd',${selectedConflictExactScalarSql('entry.cost_usd')},'baseline_batch_id',entry.baseline_batch_id)
+    FROM product_cost_entries entry WHERE entry.product_id=${product} ORDER BY entry.id DESC LIMIT 1)`
+}
+
+function productConflictCostPredicateSql(): string {
+  return `NOT EXISTS(SELECT 1 FROM json_each(@costEntriesJson) expected
+    WHERE COALESCE(${productConflictLatestCostEntrySql("CAST(json_extract(expected.value,'$.product_id') AS INTEGER)")},'null')
+      IS NOT COALESCE(json_extract(expected.value,'$.entry'),'null'))`
+}
+
+function productConflictCostEntries(plan: ProductConflictCostPlan, keeperId?: number, completedIds: number[] = []): ProductConflictCostDependency['entries'] {
+  const dependency = plan.cost_dependency
+  if (!dependency) return []
+  const ids = plan.member_ids.map(Number)
+  if (dependency.version !== 1 || !Array.isArray(dependency.entries) || dependency.entries.length !== ids.length
+    || dependency.entries.some((row,index) => row.product_id !== ids[index]
+      || row.entry !== null && (!Number.isSafeInteger(row.entry.id) || row.entry.id <= 0
+        || !Number.isSafeInteger(row.entry.baseline_batch_id) || row.entry.baseline_batch_id < 0
+        || !Array.isArray(row.entry.cost_usd) || row.entry.cost_usd.length !== 2))) {
+    throw new ProductConflictMergeValidationError('The stored cost dependency is unreadable.', 'review_corrupt', 409)
+  }
+  const completed = new Set(completedIds)
+  const latest = dependency.entries.filter(row => row.product_id === keeperId || completed.has(row.product_id))
+    .map(row => row.entry).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((left,right) => right.id-left.id)[0] ?? null
+  return dependency.entries.map(row => ({ product_id: row.product_id,
+    entry: row.product_id === keeperId ? latest : completed.has(row.product_id) ? null : row.entry }))
+}
+
+function productConflictCostGraph(plans: ProductConflictCostPlan[]): MergeCostPreviewGraph {
+  const graph: MergeCostPreviewGraph = { products: [], batches: [], batchStock: [], currentCostEntries: [] }
+  for (const plan of plans) {
+    graph.products.push(...plan.members)
+    const batches = new Map<number, Record<string,unknown>>()
+    for (const row of plan.lots.rows) {
+      batches.set(row.batch_id, { ...row,id:row.batch_id,variant_product_id:row.product_id })
+      if (row.branch_id !== null) graph.batchStock.push({ batch_id:row.batch_id,branch_id:row.branch_id,quantity:row.quantity })
+    }
+    graph.batches.push(...batches.values())
+    for (const row of productConflictCostEntries(plan)) {
+      if (row.entry) {
+        const [type,value] = row.entry.cost_usd as [string,unknown]
+        graph.currentCostEntries.push({ ...row.entry,product_id:row.product_id,
+          cost_usd:type==='null'?null:type==='real'||type==='integer'?Number(value):value })
+      }
+    }
+  }
+  return graph
+}
+
 type ProductConflictActionFinalPlan = {
   version: 1
   authority: 'reviewed_product_conflict_v2'
@@ -6933,6 +6989,7 @@ type ProductConflictActionFinalPlan = {
   keeper_id: number
   fold_members: Array<{ member_id: number; operation_id: string }>
   cluster_plan: ProductMergeClusterPlan
+  cost_dependency?: ProductConflictCostDependency
   selected: {
     barcode: { mode: 'canonical' | 'member' | 'clear'; source_product_id: number | null; value: string }
     category: { source_product_id: number; value: unknown; categories: unknown }
@@ -6942,6 +6999,7 @@ type ProductConflictActionFinalPlan = {
   image_effect: boolean
   reviewed_images: Array<{ product_id: number; image_path: string; sort_order: number | null }>
   projected_result: {
+    costAuthority?: MergeCostAuthority
     economics: ProductMergeEconomics['merged']
     barcode: string
     category: unknown
@@ -6988,7 +7046,7 @@ function productConflictActionPlanMember(plan: ProductConflictActionGroupPlan, p
 
 async function buildProductConflictActionFinalPlan(
   review: ProductConflictActionReviewRow,
-  plan: ProductConflictActionGroupPlan & { state_digest: string },
+  plan: ProductConflictCostPlan & { state_digest: string },
   resolution: ProductConflictActionFinalizeResolution,
   imageEffect: boolean,
   imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
@@ -7052,6 +7110,7 @@ async function buildProductConflictActionFinalPlan(
     draft_digest: review.draft_digest, reviewed_state_digest: plan.state_digest, operation_id: groupOperationId,
     eligibility: { basis: plan.eligibility_basis, value: plan.eligibility_value }, member_ids: memberIds,
     keeper_id: resolution.keeper_id, fold_members: foldOperations, cluster_plan: clusterPlan,
+    ...(plan.cost_dependency ? { cost_dependency: plan.cost_dependency } : {}),
     selected: {
       barcode: { mode: resolution.barcode.mode, source_product_id: barcodeSourceId, value: barcodeValue },
       category: { source_product_id: resolution.category_source_id, value: category, categories },
@@ -7129,7 +7188,7 @@ function productConflictActionImageEffect(
 }
 
 function productConflictActionFinalizeStateGuard(
-  plans: Array<ProductConflictActionGroupPlan & { state_digest: string }>,
+  plans: Array<ProductConflictCostPlan & { state_digest: string }>,
   imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
 ) {
   const memberIds = [...new Set(plans.flatMap((plan) => plan.member_ids))].sort((a, b) => a - b)
@@ -7146,7 +7205,7 @@ function productConflictActionFinalizeStateGuard(
   const productMismatch = productFields.map((field) => `p.${field} IS NOT json_extract(expected.value,'$.${field}')`).join(' OR ')
   const lotMismatch = lotFields.map((field) => `${field === 'quantity' ? 'bbs' : 'pb'}.${field} IS NOT json_extract(expected.value,'$.${field}')`).join(' OR ')
   return {
-    sql: `SELECT CASE WHEN
+    sql: `SELECT CASE WHEN ${productConflictCostPredicateSql()} AND
       (SELECT COUNT(*) FROM products WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@memberIdsJson)))=json_array_length(@productsJson)
       AND NOT EXISTS(SELECT 1 FROM json_each(@productsJson) expected LEFT JOIN products p
         ON p.id=CAST(json_extract(expected.value,'$.id') AS INTEGER)
@@ -7179,6 +7238,7 @@ function productConflictActionFinalizeStateGuard(
     params: {
       memberIdsJson: JSON.stringify(memberIds), productsJson: JSON.stringify(products), stockJson: JSON.stringify(stock),
       lotsJson: JSON.stringify(lots), imagesJson: JSON.stringify(imageRows),
+      costEntriesJson: JSON.stringify(plans.flatMap(plan => productConflictCostEntries(plan))),
     },
   }
 }
@@ -7204,7 +7264,7 @@ function chunkProductConflictActionRows<T>(rows: T[], maxBytes: number): T[][] {
 }
 
 function productConflictActionFinalizeStateGuards(
-  plans: Array<ProductConflictActionGroupPlan & { state_digest: string }>,
+  plans: Array<ProductConflictCostPlan & { state_digest: string }>,
   imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
 ) {
   return chunkProductConflictActionRows(plans, PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES).map((chunk) => {
@@ -7224,6 +7284,7 @@ function productConflictActionFinalizeResponse(
   return {
     success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
     manifest_digest: manifestDigest, status: 'finalized',
+    costAuthorities: finalPlans.filter(plan => plan.projected_result.costAuthority).map(plan => ({ group_key:plan.group_key,costAuthority:plan.projected_result.costAuthority })),
     counts: {
       requested_groups: Number(review.requested_group_count), canonical_groups: storedGroups.length,
       ready_groups: finalPlans.length, blocked_groups: storedGroups.length - finalPlans.length,
@@ -7277,7 +7338,8 @@ async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>,
       length(CAST(COALESCE(updated_at,'') AS BLOB))+length(CAST(COALESCE(cost_price_usd,'') AS BLOB))+
       length(CAST(COALESCE(cost_price_khr,'') AS BLOB))+length(CAST(COALESCE(selling_price_usd,'') AS BLOB))+
       length(CAST(COALESCE(selling_price_khr,'') AS BLOB))+length(CAST(COALESCE(wholesale_price_usd,'') AS BLOB))+
-      length(CAST(COALESCE(wholesale_price_khr,'') AS BLOB)) AS detail_bytes
+      length(CAST(COALESCE(wholesale_price_khr,'') AS BLOB))+
+      length(CAST(COALESCE(${productConflictLatestCostEntrySql('products.id')},'') AS BLOB)) AS detail_bytes
       FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow & { detail_bytes: number }>(params)
     for (const row of productStats) {
       const id = Number(row.id)
@@ -7344,6 +7406,7 @@ async function readBoundedProductConflictActionDetails(db: ReturnType<typeof get
     const { sql, params } = buildInClause('reviewLotProduct', chunk)
     products.push(...await db.prepare(`SELECT id,name,barcode,category,categories,brand,brands,brand_compact,unit,unit_normalized,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
+      , ${productConflictLatestCostEntrySql('products.id')} AS latest_cost_entry_json
       FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
     stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity,bs.rfid_confirmed_qty
       FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
@@ -7404,9 +7467,13 @@ async function buildProductConflictActionReviewPlans(
   const productsById = new Map(inputStats.compactProducts.map((row) => [Number(row.id), row]))
   inputs.products.forEach((row) => productsById.set(Number(row.id), row))
   const builtPlans = buildProductConflictActionGroupPlans(mergeGroups, [...productsById.values()], inputs.stock, inputs.lots)
-  const rawPlans: ProductConflictActionGroupPlan[] = []
+  const rawPlans: ProductConflictCostPlan[] = []
   let persistedDetailBytes = 0
-  for (const plan of builtPlans) {
+  for (const sourcePlan of builtPlans) {
+    const plan: ProductConflictCostPlan = { ...sourcePlan, cost_dependency: { version: 1, entries: sourcePlan.member_ids.map(productId => {
+      const row = inputs.products.find(product => Number(product.id) === productId)
+      return { product_id: productId, entry: row?.latest_cost_entry_json ? JSON.parse(String(row.latest_cost_entry_json)) : null }
+    }) } }
     const refusal = detailRefusals.get(plan.group_key)
     let bounded = refusal ? refuseProductConflictActionGroupDetail(plan, refusal.lotRows, refusal.message, refusal.compact) : plan
     let bytes = new TextEncoder().encode(canonicalProductConflictJson(bounded)).length
@@ -7711,6 +7778,18 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
       const groupImages = imageRows.filter((image) => memberSet.has(image.product_id))
       finalPlans.push(await buildProductConflictActionFinalPlan(review, plan, resolution,
         productConflictActionImageEffect(plan, resolution.keeper_id, groupImages), groupImages))
+    }
+    if (finalPlans.length) {
+      const outcomes = await previewMergeCosts(db, productConflictCostGraph(actionableCurrentPlans), finalPlans.map(plan => ({
+        keepId: plan.keeper_id, steps: plan.fold_members.map(member => ({ mergeId: member.member_id, stock: 'merge' as const })),
+      })), PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP)
+      for (const plan of finalPlans) {
+        const authority = outcomes.find(row => row.keeperId === plan.keeper_id)
+        if (!authority) throw new Error('product_conflict_cost_projection_missing')
+        plan.projected_result.costAuthority = authority
+        plan.projected_result.economics = { ...plan.projected_result.economics,
+          cost_price_usd: authority.cost_price_usd, cost_price_khr: authority.cost_price_khr }
+      }
     }
     const currentRemovals = await prepareProductRemoveReviewPlans(db,
       storedRemovals.map((row) => ({ product_id: Number(row.product_id), reason: row.reason })))
@@ -8128,6 +8207,7 @@ function productConflictActionForwardStatements(args: {
 }): (reversal: MergeReversal) => AtomicMergeStatement[] {
   const { user, review, group, plan, member, firstFold } = args
   const byName = actorSnapshot(user)
+  const costPointer = plan.cost_dependency ? ",'merge_version',3,'operation_id',@groupOperation" : ''
   const storedReversal = (reversal: MergeReversal) => JSON.stringify({
     ...reversal, operationId: member.operation_id, fingerprintPending: true,
   })
@@ -8153,13 +8233,14 @@ function productConflictActionForwardStatements(args: {
         sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
                 undo_payload,redo_payload,created_by_id,created_by_name)
               VALUES('products','product_conflict_group',@entityId,@label,@undoLabel,@redoLabel,0,'recorded',
-                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0),
-                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0),
+                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0${costPointer}),
+                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0${costPointer}),
                 @actor,@byName)`,
         params: {
           entityId: `${review.id}:${group.group_key}`, label: `Merged reviewed product group "${group.group_key}"`,
           undoLabel: `Undo reviewed product group "${group.group_key}"`, redoLabel: `Redo reviewed product group "${group.group_key}"`,
           applier: PRODUCT_MERGE_GROUP_ACTION_KIND, review: review.id, groupKey: group.group_key, actor: user.id, byName,
+          ...(plan.cost_dependency ? { groupOperation: plan.operation_id } : {}),
         },
       }, {
         sql: `UPDATE product_conflict_action_groups SET action_history_id=last_insert_rowid(),status=@status,updated_at=CURRENT_TIMESTAMP
@@ -8439,7 +8520,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   }
   const firstFold = !group.action_history_id
   // U-cost: the prior fold's lot moves re-derived the keeper's USD cost.
-  const keeperDerivedCost = firstFold ? null : (await readDerivedCatalogCosts(db, [plan.keeper_id])).get(plan.keeper_id)
+  const keeperDerivedCost = firstFold ? null : (await readDerivedCatalogCosts(db, [plan.keeper_id], plan.cost_dependency ? plan.cluster_plan.keeperCost : undefined)).get(plan.keeper_id)
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
   if (!firstFold) {
     const prior = [...members].reverse().find((candidate) => candidate.role === 'merged'
@@ -8492,6 +8573,11 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   productConflictActionStockStateAssertion(plan.keeper_id, preparedSnapshot.canonicalStockBefore),
   productConflictActionStockStateAssertion(member.product_id, preparedSnapshot.duplicateStockRows),
   productConflictActionKeeperLotStateAssertion(plan.keeper_id, preparedSnapshot)]
+  if (plan.cost_dependency) preStatements.push({
+    sql: `SELECT CASE WHEN ${productConflictCostPredicateSql()} THEN 1 ELSE json_extract('', '$') END AS product_conflict_cost_state_guard`,
+    params: { costEntriesJson: JSON.stringify(productConflictCostEntries({ ...detail, cost_dependency: plan.cost_dependency }, plan.keeper_id,
+      members.filter(row => row.role === 'merged' && row.status === 'undo_ready').map(row => row.product_id))) },
+  })
   if (firstFold) preStatements.push(productConflictActionSourceStateAssertion(detail, plan.keeper_id))
   if (parentEffect) preStatements.push(parentEffect.assertion)
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>

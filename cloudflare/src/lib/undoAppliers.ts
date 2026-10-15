@@ -2564,6 +2564,7 @@ type ProductMergeGroupAssociation = {
   group_ordinal: number
   group_key: string
   group_status: string
+  group_operation_id: string | null
   reversal_generation: number
   action_history_id: number
   actor_id: number
@@ -2632,17 +2633,22 @@ function strictProductMergeGroupPointer(payload: Record<string, unknown>): {
   reviewId: string
   groupKey: string
   generation: number
+  operationId?: string
+  mergeVersion?: 3
 } | null {
   const keys = Object.keys(payload).sort()
-  const expected = ['applier', 'generation', 'group_key', 'review_id', 'snapshot_id']
+  const current = payload.merge_version === 3
+  const expected = current ? ['applier', 'generation', 'group_key', 'merge_version', 'operation_id', 'review_id', 'snapshot_id']
+    : ['applier', 'generation', 'group_key', 'review_id', 'snapshot_id']
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return null
   const snapshotId = Number(payload.snapshot_id)
   const generation = Number(payload.generation)
   const reviewId = String(payload.review_id || '')
   const groupKey = String(payload.group_key || '')
   if (payload.applier !== PRODUCT_MERGE_GROUP_ACTION_KIND || !Number.isSafeInteger(snapshotId) || snapshotId <= 0
-    || !Number.isSafeInteger(generation) || generation < 0 || !reviewId || !groupKey) return null
-  return { snapshotId, reviewId, groupKey, generation }
+    || !Number.isSafeInteger(generation) || generation < 0 || !reviewId || !groupKey
+    || current && (typeof payload.operation_id !== 'string' || !/^product-merge-group-[a-f0-9]{64}$/.test(payload.operation_id))) return null
+  return { snapshotId, reviewId, groupKey, generation, ...(current ? { mergeVersion: 3 as const, operationId: payload.operation_id as string } : {}) }
 }
 
 async function loadProductMergeGroupReplay(
@@ -2679,7 +2685,7 @@ async function loadProductMergeGroupReplay(
   }
   const association = await db.prepare(`
     SELECT g.review_id,g.ordinal AS group_ordinal,g.group_key,g.status AS group_status,
-           g.reversal_generation,g.action_history_id,r.actor_id,
+           g.reversal_generation,g.action_history_id,g.operation_id AS group_operation_id,r.actor_id,
            h.created_by_id AS history_actor_id,@snapshot_actor AS snapshot_actor_id
     FROM product_conflict_action_groups g
     JOIN product_conflict_action_reviews r ON r.id=g.review_id
@@ -2691,23 +2697,24 @@ async function loadProductMergeGroupReplay(
     history: historyId,
     snapshot_actor: groupRow.created_by_id,
   })
-  if (!association || Number(association.actor_id) <= 0
+  if (!association || pointer.mergeVersion === 3 && association.group_operation_id !== pointer.operationId
+    || Number(association.actor_id) <= 0
     || Number(association.history_actor_id) !== Number(association.actor_id)
     || Number(association.snapshot_actor_id) !== Number(association.actor_id)) {
     throw new UndoConflictError('This group merge is not associated with its authoritative actor and history row.')
   }
   const allMemberRows = await db.prepare(`
-    SELECT member_ordinal,product_id,role,status AS member_status,undo_snapshot_id
+    SELECT member_ordinal,product_id,role,status AS member_status,undo_snapshot_id,operation_id
     FROM product_conflict_action_group_members
     WHERE review_id=? AND group_ordinal=?
     ORDER BY member_ordinal
-  `).all<{ member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number | null }>([pointer.reviewId, Number(association.group_ordinal)])
+  `).all<{ member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number | null; operation_id: string | null }>([pointer.reviewId, Number(association.group_ordinal)])
   const keeperRows = allMemberRows.filter((row) => row.role === 'keeper')
   if (keeperRows.length !== 1 || keeperRows[0].undo_snapshot_id != null) {
     throw new UndoConflictError('This group merge has an invalid authoritative keeper member.')
   }
   const memberRows = allMemberRows.filter((row) => row.undo_snapshot_id != null) as Array<{
-    member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number
+    member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number; operation_id: string | null
   }>
   const memberIds = memberRows.map((row) => Number(row.undo_snapshot_id))
   if (memberIds.length !== groupSnapshot.child_snapshot_ids.length
@@ -2737,7 +2744,10 @@ async function loadProductMergeGroupReplay(
     try { reversal = JSON.parse(row.payload_json) as MergeReversal } catch { throw new UndoConflictError('A group merge child snapshot is unreadable.') }
     if (!reversal || Number(reversal.dupId) !== Number(member.product_id)
       || Number(reversal.keeperId) !== Number(keeperRows[0].product_id)
-      || member.role !== 'merged' || !String(reversal.operationId || '').trim()) {
+      || member.role !== 'merged' || !String(reversal.operationId || '').trim()
+      || pointer.mergeVersion === 3 && (reversal.operationId !== member.operation_id
+        || !parseMergeCostOutcome(reversal.costReviewOutcome)
+        || parseMergeCostOutcome(reversal.costReviewOutcome)?.keeperId !== Number(keeperRows[0].product_id))) {
       throw new UndoConflictError('A group merge child snapshot does not match its authoritative member.')
     }
     return { ...row, ...member, reversal }
@@ -2978,6 +2988,12 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
       groupSnapshot, association, child, generation, final, nextPrefixFingerprint,
     })
     statements.unshift(completion[0], ...currentGraphGuards, ...timestamps.before)
+    if (pointer.mergeVersion === 3) {
+      const outcome = parseMergeCostOutcome(child.reversal.costReviewOutcome)
+      if (!outcome || !pointer.operationId) throw new UndoConflictError('The grouped merge cost receipt is invalid.')
+      statements.push(...mergeCostUndoStatements(outcome, { historyId: Number(ctx.historyId), snapshotId: pointer.snapshotId,
+        operationId: pointer.operationId, generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }))
+    }
     statements.push(...timestamps.after, ...completion.slice(1))
     try { await db.batch(statements) } catch (error) {
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {

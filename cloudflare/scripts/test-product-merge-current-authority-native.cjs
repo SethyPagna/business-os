@@ -26,6 +26,7 @@ async function main() {
     return { keepId,mergeId,name,barcode,echo }
   }
   try {
+    if(!process.argv.includes('--held-only')) {
     for (const value of [null,0,5]) {
       const p = await pair('identity',value,{echo:true})
       const before = await h.one('SELECT updated_at FROM products WHERE id=?',p.mergeId)
@@ -124,6 +125,82 @@ async function main() {
     proof.check('cost-hidden selected preview omits cost authority and amounts',()=>{assert.equal(preview.status,200,JSON.stringify(preview.body));assert.ok(preview.body.cases.length);assert.ok(!JSON.stringify(preview.body).includes('costAuthority'));assert.ok(!JSON.stringify(preview.body).includes('cost_price_usd'))})
     const no=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',body,'denied selected preview',{cookie:denied})
     proof.check('selected permission denial remains enforced',()=>assert.equal(no.status,403,JSON.stringify(no.body)))
+    }
+    for(const [value,manual,lot,expected] of [[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]]) {
+      const p=await pair('selected',value,{manual,lot})
+      const third=nextId++
+      await h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode).run()
+      const preview=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{manifest_version:1,resolution_version:2,client_request_id:`held-${p.keepId}`,merge_groups:[{group_key:`barcode:${p.barcode}`,member_ids:[p.keepId,p.mergeId,third]}],remove_rows:[]},`held preview ${p.keepId}`)
+      assert.equal(preview.status,200,JSON.stringify(preview.body))
+      const group=preview.body.page.groups[0]
+      const final=await h.call('POST',`/api/products/possible-duplicates/merge-batch/reviews/${preview.body.review_id}/finalize`,{manifest_version:1,resolution_version:2,review_id:preview.body.review_id,draft_digest:preview.body.draft_digest,resolutions:[{group_key:group.group_key,keeper_id:p.keepId,barcode:{mode:'member',source_product_id:p.keepId},category_source_id:p.keepId,brand_source_id:p.keepId,unit_source_id:p.keepId}]},`held finalize ${p.keepId}`)
+      assert.equal(final.status,200,JSON.stringify(final.body))
+      const page=await h.call('GET',`/api/products/possible-duplicates/merge-batch/reviews/${preview.body.review_id}`,undefined,`held page ${p.keepId}`)
+      proof.check(`held ${value}/${manual}/${lot} finalized authority`,()=>{assert.equal(final.body.costAuthorities?.[0]?.costAuthority?.cost_price_usd,expected,JSON.stringify(final.body));assert.equal(page.body.page.groups[0].projected_result.costAuthority.cost_price_usd,expected);assert.ok(!JSON.stringify(page.body).includes('cost_dependency'))})
+      const body={review_id:preview.body.review_id,manifest_digest:final.body.manifest_digest,client_request_id:preview.body.review_id}
+      let result
+      for(let attempt=0;attempt<5;attempt++) {result=await h.call('POST','/api/products/possible-duplicates/merge-batch',body,`held apply ${p.keepId}/${attempt}`);if(result.status!==200||!result.body.continuation_required)break}
+      const stored=await h.one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=?',p.keepId)
+      proof.check(`held ${p.keepId} actual ordered apply parity`,()=>{assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.continuation_required,false);assert.equal(stored.cost_price_usd,expected);assert.equal(stored.cost_price_khr,value===null?null:value*4000);assert.equal(Boolean(stored.cost_review_key),lot===null)})
+      const history=await h.one('SELECT action_history_id,operation_id FROM product_conflict_action_groups WHERE review_id=?',preview.body.review_id)
+      const costChain=async()=> (await h.all('SELECT s.payload_json FROM undo_snapshots s JOIN product_conflict_action_group_members m ON m.undo_snapshot_id=s.id WHERE m.review_id=? ORDER BY m.member_ordinal',preview.body.review_id)).map(row=>JSON.parse(row.payload_json).costReviewOutcome)
+      const originalChain=await costChain()
+      const pointer=await h.one('SELECT undo_payload FROM action_history WHERE id=?',history.action_history_id)
+      const originalPointer=JSON.parse(pointer.undo_payload)
+      proof.check(`held ${p.keepId} truthful current group pointer`,()=>{assert.deepEqual(Object.keys(originalPointer).sort(),['applier','generation','group_key','merge_version','operation_id','review_id','snapshot_id']);assert.equal(originalPointer.operation_id,history.operation_id);assert.equal(originalPointer.merge_version,3)})
+      assert.ok(history.action_history_id)
+      if(value===null) {
+        const financial=()=>h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third)
+        const before=await financial(), auditBefore=await h.one('SELECT COUNT(*) count FROM audit_logs')
+        const wrong={...originalPointer,operation_id:'product-merge-group-'+'0'.repeat(64)}
+        await h.db.prepare('UPDATE action_history SET undo_payload=? WHERE id=?').bind(JSON.stringify(wrong),history.action_history_id).run()
+        try {
+          const refused=await historyStep(h,history.action_history_id,'undo',0,'held wrong group operation')
+          proof.check('held real history refuses mismatched group operation',()=>assert.equal(refused.status,409,JSON.stringify(refused.body)))
+          assert.deepEqual(await financial(),before);assert.deepEqual(await h.one('SELECT COUNT(*) count FROM audit_logs'),auditBefore)
+        } finally {await h.db.prepare('UPDATE action_history SET undo_payload=? WHERE id=?').bind(pointer.undo_payload,history.action_history_id).run()}
+        const child=await h.one('SELECT s.id,s.payload_json FROM undo_snapshots s JOIN product_conflict_action_group_members m ON m.undo_snapshot_id=s.id WHERE m.review_id=? ORDER BY m.member_ordinal DESC LIMIT 1',preview.body.review_id)
+        const missing=JSON.parse(child.payload_json);delete missing.costReviewOutcome
+        await h.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').bind(JSON.stringify(missing),child.id).run()
+        try {
+          const refused=await historyStep(h,history.action_history_id,'undo',0,'held missing child cost receipt')
+          proof.check('held current history refuses missing child cost receipt',()=>assert.equal(refused.status,409,JSON.stringify(refused.body)))
+          assert.deepEqual(await financial(),before);assert.deepEqual(await h.one('SELECT COUNT(*) count FROM audit_logs'),auditBefore)
+        } finally {await h.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').bind(child.payload_json,child.id).run()}
+      }
+      let undo,redo
+      for(let attempt=0;attempt<5;attempt++){undo=await historyStep(h,history.action_history_id,'undo',0,`held undo ${p.keepId}/${attempt}`);if(undo.status!==200||!undo.body.continuation_required)break}
+      if(undo.status!==200)console.log('HELD_UNDO_D1',p.keepId,JSON.stringify((await h.call('GET','/__fixture/d1-errors',undefined)).body))
+      if(undo.status===200&&!undo.body.continuation_required)for(let attempt=0;attempt<5;attempt++){redo=await historyStep(h,history.action_history_id,'redo',1,`held redo ${p.keepId}/${attempt}`);if(redo.status!==200||!redo.body.continuation_required)break}
+      proof.check(`held ${p.keepId} genuine history Undo Redo`,()=>{assert.equal(undo.status,200,JSON.stringify(undo.body));assert.equal(undo.body.continuation_required,false);assert.equal(redo?.status,200,JSON.stringify(redo?.body));assert.equal(redo.body.continuation_required,false)})
+      if(redo?.status===200&&!redo.body.continuation_required) {
+        const freshChain=await costChain()
+        if(lot===null)proof.check(`held ${p.keepId} redo creates fresh review key chain`,()=>{assert.notEqual(freshChain[0].rootKey,originalChain[0].rootKey);assert.equal(freshChain[1].beforeKey,freshChain[0].rootKey);assert.notEqual(freshChain[1].beforeKey,originalChain[0].rootKey)})
+        const beforeStale=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third)
+        const stale=await historyStep(h,history.action_history_id,'undo',0,`held stale generation ${p.keepId}`)
+        proof.check(`held ${p.keepId} stale group generation refuses`,()=>assert.equal(stale.status,409,JSON.stringify(stale.body)))
+        assert.deepEqual(await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third),beforeStale)
+        let secondUndo
+        for(let attempt=0;attempt<5;attempt++){secondUndo=await historyStep(h,history.action_history_id,'undo',2,`held second undo ${p.keepId}/${attempt}`);if(secondUndo.status!==200||!secondUndo.body.continuation_required)break}
+        const events=await h.all("SELECT details FROM audit_logs WHERE json_valid(details) AND json_extract(details,'$.cost_review.kind')='merge_undo' AND json_extract(details,'$.cost_review.history_id')=? ORDER BY id",history.action_history_id)
+        proof.check(`held ${p.keepId} second Undo and permanent group compensation`,()=>{assert.equal(secondUndo.status,200,JSON.stringify(secondUndo.body));assert.equal(secondUndo.body.continuation_required,false);assert.equal(events.length,4);for(const row of events){const e=JSON.parse(row.details).cost_review;assert.equal(e.snapshot_id,originalPointer.snapshot_id);assert.equal(e.merge_operation_id,history.operation_id);assert.ok([0,2].includes(e.generation))}})
+      }
+
+    }
+    for(const phase of ['draft','final']) {
+      const p=await pair('selected',5,{manual:7})
+      const review=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{manifest_version:1,resolution_version:2,client_request_id:`held-stale-${p.keepId}`,merge_groups:[{group_key:`barcode:${p.barcode}`,member_ids:[p.keepId,p.mergeId]}],remove_rows:[]},`held stale preview ${phase}`)
+      assert.equal(review.status,200,JSON.stringify(review.body))
+      const group=review.body.page.groups[0]
+      const finalize=()=>h.call('POST',`/api/products/possible-duplicates/merge-batch/reviews/${review.body.review_id}/finalize`,{manifest_version:1,resolution_version:2,review_id:review.body.review_id,draft_digest:review.body.draft_digest,resolutions:[{group_key:group.group_key,keeper_id:p.keepId,barcode:{mode:'member',source_product_id:p.keepId},category_source_id:p.keepId,brand_source_id:p.keepId,unit_source_id:p.keepId}]},`held stale finalize ${phase}`)
+      const final=phase==='final'?await finalize():null
+      if(final)assert.equal(final.status,200,JSON.stringify(final.body))
+      await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(p.mergeId).run()
+      const before=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)
+      const result=phase==='draft'?await finalize():await h.call('POST','/api/products/possible-duplicates/merge-batch',{review_id:review.body.review_id,manifest_digest:final.body.manifest_digest,client_request_id:review.body.review_id},'held stale apply')
+      const after=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)
+      proof.check(`held ${phase} PCE append invalidates without merge`,()=>{assert.equal(result.status,409,JSON.stringify(result.body));assert.deepEqual(after,before)})
+    }
     budgetLine(h.metrics)
     console.log(JSON.stringify({results:proof.results}))
     if (proof.results.some(row=>!row.ok)) process.exitCode=1
