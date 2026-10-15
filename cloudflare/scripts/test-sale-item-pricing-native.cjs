@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -244,12 +245,14 @@ async function actualRoute() {
   const originalBatch=f.route.batch
   f.route.batch=async statements=>{
     f.route.batch=originalBatch
-    f.raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=10').run()
+    seedStockFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=10').run())
     return originalBatch(statements)
   }
   const conflictingReplacement={...replaceBody,client_request_id:'replacement-cost-race',sale_item_id:replaced.sale.items[0].id,replacement:{...replaceBody.replacement,client_line_key:'replacement-race'}}
   const refused=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(conflictingReplacement)},{DB:f.route},h.executionCtx)
   assert.equal(refused.status,409,JSON.stringify(await refused.json()))
+  assert.equal(f.raw.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd,99)
+  assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
   assert.deepEqual(h.creationState(f.raw),replacementState,'cost race cannot partially remove the old line or change stock')
   for(const [kind,quantity,total] of [['line_updated',0.1,1],['line_quantity_increased',0.2,3]]) {
     const payload={kind,quantity,money_precision_version:1,client_request_id:'fractional-'+kind,expected_exchange_rate:4000,sale_item_id:replaced.sale.items[0].id,

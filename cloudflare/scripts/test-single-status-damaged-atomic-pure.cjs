@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Reuse the sibling's actual Hono/D1Compat/SQLite fixture without running its
 // suite. Only the dependency loader gains the real damaged-stock/money helpers;
 // the sibling's own inert notification adapter is reused. No production or
@@ -24,13 +25,13 @@ sales.onError((error, c) => c.json({ error: error.message }, 500))
 function damagedFixture(count = 2) {
   const f = fixture()
   seed(f, count)
-  f.sql.exec(`
+  seedStockFixture(f.sql, () => f.sql.exec(`
     INSERT OR IGNORE INTO users(id,username,password,name) VALUES(1,'test-admin','unused','Admin');
     INSERT INTO damaged_stock_lots(id,product_id,branch_id,quantity,quantity_remaining) VALUES(1,1,1,10,0);
     UPDATE sale_items SET damaged_lot_id=1;
     UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=2;
     UPDATE sale_items SET quantity=4 WHERE id=2;
-  `)
+  `))
   f.sql.pragma('foreign_keys = ON')
   assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
   return f
@@ -105,7 +106,7 @@ async function run() {
   // Two independently prepared draws from the same lot: one succeeds, and
   // the other rolls back its status and every preceding regular-stock write.
   f = damagedFixture()
-  f.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=1; UPDATE sale_items SET quantity=4 WHERE id=1; UPDATE damaged_stock_lots SET quantity_remaining=4")
+  seedStockFixture(f.sql, () => f.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=1; UPDATE sale_items SET quantity=4 WHERE id=1; UPDATE damaged_stock_lots SET quantity_remaining=4"))
   const drawBarrier = pause(f)
   const draw = single(f, 1, 'awaiting_delivery')
   await reachesBarrier(drawBarrier, draw, 'the paused draw')
@@ -122,14 +123,14 @@ async function run() {
 
   function mixedFixture(cancelled = false) {
     const mixed = damagedFixture(1)
-    mixed.sql.exec(`
+    seedStockFixture(mixed.sql, () => mixed.sql.exec(`
       INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,damaged_lot_id) VALUES(2,1,1,'A',1,1,1),(3,1,1,'A',2,1,NULL);
       INSERT INTO product_batches(id,variant_product_id,batch_key) VALUES(1,1,'fixture');
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,20);
       UPDATE sale_items SET batch_id=1 WHERE id=3;
       INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(1,3,1,1,2,0);
-    `)
-    if (cancelled) mixed.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=1; UPDATE damaged_stock_lots SET quantity_remaining=3; UPDATE sale_item_batch_allocations SET released_quantity=2")
+    `))
+    if (cancelled) seedStockFixture(mixed.sql, () => mixed.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=1; UPDATE damaged_stock_lots SET quantity_remaining=3; UPDATE sale_item_batch_allocations SET released_quantity=2"))
     return mixed
   }
   for (const cancelled of [false, true]) {
@@ -160,9 +161,10 @@ async function run() {
     f = damagedFixture(1)
     f.sql.pragma('foreign_keys = OFF') // Permit a corrupted/deleted legacy lot reference.
     let changed
-    f.barrier(() => { f.sql.exec(mutation); changed = snapshot(f) })
+    f.barrier(() => { seedStockFixture(f.sql, () => f.sql.exec(mutation)); changed = snapshot(f) })
     assert.equal((await single(f, 1, 'cancelled')).status, 409, mutation)
     assert.equal(snapshot(f), changed, mutation)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
     f.sql.close()
   }
   console.log('PASS commit-time identity, missing-lot and upper-bound conflicts refuse without partial writes')

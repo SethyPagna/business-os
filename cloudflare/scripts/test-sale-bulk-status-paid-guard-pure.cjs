@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // S4-41 on POST /api/sales/bulk-status, driven through the REAL Hono route
 // against the real migrated schema.
 //
@@ -171,9 +172,13 @@ const statuses = (f) => f.sql.prepare('SELECT id,sale_status FROM sales ORDER BY
     // snapshot over a sale that never had the money. The money is written
     // under the restore flag, so the sale's revision -- the replay's own
     // precondition -- does not move, exactly as if it had always been so.
+    seedStockFixture(f.sql, () => {
     f.sql.prepare(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`).run()
+    assert.equal(f.sql.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, '{"mode":"restore"}')
     setMoney(f, 1, { total: 10 })
     f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    })
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')").get().n, 0)
     const before = h.snapshot(f)
     const refused = await h.replay(f, history, 'redo', 1)
     // Without the replay guard this answered 200 and marked R1 Completed with $0 paid.
