@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
+  return value
+}
 // REVERT-FIX fix round (Opus refuter R-REVERT-FIX, 1 Oct 2026). Owner rule: a
 // Revert works like cancelling a sale -- everything returns with no loss, the
 // reverted effect leaves the reports, a Revert of a Revert restores. Each case
@@ -21,6 +28,7 @@ const { applyMovementRevert } = loadStockSession('lib/stockRevert.ts')
 const { applyStockInLineEdit } = loadStockSession('lib/stockInLineEdit.ts')
 const { getDb } = loadStockSession('lib/db.ts')
 const pb = loadStockSession('lib/productBatches.ts')
+const { executeStockTransaction } = loadStockSession('lib/stockTransaction.ts')
 const damagedLots = loadStockSession('lib/damagedLotActions.ts')
 
 const actor = { userId: user.id, userName: user.name }
@@ -135,10 +143,14 @@ async function main() {
     try {
       const db = getDb(f.env)
       const plan = pb.planReceiveBatchStock({ productId: 1, branchId: 1, quantity: 6, receivedDate: '2026-09-12', notes: 'import', unitCostUsd: 2.5, receiptCostPreimage: { batchExists: false, receivedCostUsd: null } })
-      await db.batch([...plan.statements, {
+      const beforeUnadmitted = state(f)
+      await assert.rejects(db.batch(plan.statements), /stock_transaction_required/)
+      assert.equal(state(f), beforeUnadmitted)
+      await executeStockTransaction(db, [...plan.statements, {
         sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,created_at,batch_id)
           VALUES(1,'Serum',1,'Shop','in',6,2.5,15,'import','2026-09-12T03:00:00.000Z',${plan.batchIdSql})`, params: plan.params,
-      }])
+      }], 'retry')
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       const purchased = [{ received_day: '2026-09-12', received_quantity: 6, received_cost_usd: 15 }]
       assert.deepEqual(invoiceLines(f), purchased)
       const receipt = f.sql.prepare("SELECT id FROM inventory_movements WHERE movement_type='in'").get().id
@@ -159,10 +171,10 @@ async function main() {
     try {
       const db = getDb(f.env)
       const plan = pb.planReceiveBatchStock({ productId: 1, branchId: 1, quantity: 12, receivedDate: '2026-09-12', notes: 'free units', unitCostUsd: 1.6667, receiptTotalUsd: 20, receiptCostPreimage: { batchExists: false, receivedCostUsd: null } })
-      await db.batch([...plan.statements, {
+      await executeStockTransaction(db, [...plan.statements, {
         sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,free_quantity,unit_cost_usd,total_cost_usd,reason,created_at,batch_id)
           VALUES(1,'Serum',1,'Shop','in',12,2,1.6667,20,'free units','2026-09-12T03:00:00.000Z',${plan.batchIdSql})`, params: plan.params,
-      }])
+      }], 'retry')
       const lot = () => ({ ...f.sql.prepare('SELECT received_quantity, received_cost_usd FROM product_batches ORDER BY id LIMIT 1').get() })
       assert.deepEqual(lot(), { received_quantity: 12, received_cost_usd: 20 }, 'control: the receipt itself records the supplier-paid total')
       let target = f.sql.prepare("SELECT id FROM inventory_movements WHERE movement_type='in'").get().id
@@ -180,9 +192,9 @@ async function main() {
   await check("RF3 controls: an 'in' row with no lot, or on a lot with no received figures, moves stock only", async () => {
     const f = fixture()
     try {
-      f.sql.exec(`UPDATE products SET stock_quantity=8 WHERE id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1;
+      seedFixture(f.sql, () => f.sql.exec(`UPDATE products SET stock_quantity=8 WHERE id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1;
         INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(9100,1,'legacy','09012026','2026-09-01',1,1);
-        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9100,1,4);`)
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9100,1,4);`))
       const bare = Number(f.sql.prepare("INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,created_at) VALUES(1,1,'in',2,'legacy','2026-09-01 03:00:00')").run().lastInsertRowid)
       const legacyLot = Number(f.sql.prepare("INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,created_at,batch_id) VALUES(1,1,'in',3,'legacy','2026-09-01 03:00:00',9100)").run().lastInsertRowid)
       assert.equal((await revertOf(f, bare)).ok, true)
@@ -197,18 +209,18 @@ async function main() {
     const receiveAndMaybeHold = async (f, { hold, unrelated }) => {
       const db = getDb(f.env)
       const plan = pb.planReceiveBatchStock({ productId: 1, branchId: 1, quantity: 4, receivedDate: '2026-09-05', notes: 'restock', unitCostUsd: 2, receiptCostPreimage: { batchExists: false, receivedCostUsd: null } })
-      await db.batch([...plan.statements, {
+      await executeStockTransaction(db, [...plan.statements, {
         sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,reference_id,created_at,batch_id)
           VALUES(1,'Serum',1,'Shop','add',4,2,8,'box crushed','55','2026-09-05 03:00:00',${plan.batchIdSql})`, params: plan.params,
-      }])
+      }], 'retry')
       const add = f.sql.prepare("SELECT * FROM inventory_movements WHERE movement_type='add'").get()
       const cost = { unitCostUsd: 2, unitCostKhr: null, totalCostUsd: 8, totalCostKhr: null }
       if (hold) {
-        await db.batch([
+        await executeStockTransaction(db, [
           ...pb.planRemoveStockFromBatch({ batchId: add.batch_id, productId: 1, branchId: 1, quantity: 4 }).statements,
           ...damagedLots.planHoldAsTagged({ productId: 1, productName: 'Serum', branchId: 1, branchName: 'Shop', batchId: add.batch_id, quantity: 4, tag: 'damaged',
             source: 'restock', reason: 'box crushed', cost, referenceId: 55, actor: { userId: 7, userName: 'Stock User' } }),
-        ])
+        ], 'retry')
       }
       if (unrelated) {
         f.sql.exec(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,reference_id,created_at,batch_id)

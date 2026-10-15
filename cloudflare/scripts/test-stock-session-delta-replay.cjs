@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
+  return value
+}
 // REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
 // stock effect behind"; lead: an Undo is refused only when later movements
 // took the units it needs, never by exact quantity). A stock-in session's
@@ -60,9 +67,9 @@ const branch = (f) => Number(q(f, 'SELECT quantity q FROM branch_stock WHERE pro
 const product = (f) => Number(q(f, 'SELECT stock_quantity q FROM products WHERE id=1').q)
 const lot = (f, batchId) => q(f, 'SELECT received_quantity, received_cost_usd, supplier_name, unit_cost_usd, is_active FROM product_batches WHERE id=?', batchId)
 function sell(f, batchId, quantity) {
-  f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-${quantity} WHERE batch_id=${batchId} AND branch_id=1;
+  seedFixture(f.sql, () => f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-${quantity} WHERE batch_id=${batchId} AND branch_id=1;
     UPDATE branch_stock SET quantity=quantity-${quantity} WHERE product_id=1 AND branch_id=1;
-    UPDATE products SET stock_quantity=stock_quantity-${quantity} WHERE id=1;`)
+    UPDATE products SET stock_quantity=stock_quantity-${quantity} WHERE id=1;`))
   return Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,batch_id)
     VALUES(1,'Serum',1,'Shop','sale',?,?)`).run(quantity, batchId).lastInsertRowid)
 }
@@ -146,10 +153,10 @@ async function main() {
     await replay(f, a, 'undo', 0)
     // What a later same-date unknown-cost receipt does to the released row
     // (stockSession.ts: it "can reuse the row and fill NULL fields").
-    f.sql.exec(`UPDATE product_batches SET is_active=1, supplier_name='Supplier B', payment_status='credit', received_quantity=4 WHERE id=${a.items[0].batchId};
+    seedFixture(f.sql, () => f.sql.exec(`UPDATE product_batches SET is_active=1, supplier_name='Supplier B', payment_status='credit', received_quantity=4 WHERE id=${a.items[0].batchId};
       UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=${a.items[0].batchId} AND branch_id=1;
       INSERT OR IGNORE INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(${a.items[0].batchId},1,4);
-      UPDATE branch_stock SET quantity=quantity+4 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity+4 WHERE id=1;`)
+      UPDATE branch_stock SET quantity=quantity+4 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity+4 WHERE id=1;`))
     const before = JSON.stringify([lotQty(f, a.items[0].batchId), lot(f, a.items[0].batchId)])
     await assert.rejects(replay(f, a, 'redo', 1), (e) => e.statusCode === 409)
     assert.equal(JSON.stringify([lotQty(f, a.items[0].batchId), lot(f, a.items[0].batchId)]), before, 'B keeps its lot and attribution')
