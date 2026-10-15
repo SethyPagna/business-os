@@ -1,21 +1,30 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const {seed,request,rawDb,fakeEnv,FAKE_USER,loadedModule}=require('./test-product-active-stock-products-route.cjs')
 async function main() {
   seed('zero')
-  rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run()
+  seedFixture(rawDb.db, () => rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run())
   const result=await request('PUT',{name:'Keeper',barcode:'777',is_active:1})
   assert.equal(result.status,200,JSON.stringify(result))
   const state=()=>rawDb.prepare('SELECT id,is_active,stock_quantity FROM products WHERE id IN (1,2) ORDER BY id').all().map(row=>({...row}))
   assert.deepEqual(state(),[{id:1,is_active:0,stock_quantity:0},{id:2,is_active:1,stock_quantity:0}])
   const history=rawDb.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge' ORDER BY id DESC LIMIT 1").get()
   const payload=JSON.parse(history.undo_payload)
+  assert.equal(payload.merge_version,3)
+  assert.equal(payload.generation,0)
   const undo=loadedModule('lib/undoAppliers.ts')
   assert.ok(undo,'real registered undo module must load')
   const applier=undo.resolveUndoApplier(payload)
-  await applier.run(payload,{env:fakeEnv,user:FAKE_USER,direction:'undo',historyId:history.id})
+  await applier.run(payload,{env:fakeEnv,user:FAKE_USER,direction:'undo',historyId:history.id,generation:payload.generation})
   assert.deepEqual(state(),[{id:1,is_active:1,stock_quantity:0},{id:2,is_active:1,stock_quantity:0}],'undo restores active state of both original products')
   const redoPayload=JSON.parse(rawDb.prepare('SELECT redo_payload FROM action_history WHERE id=?').get([history.id]).redo_payload)
-  await applier.run(redoPayload,{env:fakeEnv,user:FAKE_USER,direction:'redo',historyId:history.id})
+  assert.equal(redoPayload.generation,1)
+  await applier.run(redoPayload,{env:fakeEnv,user:FAKE_USER,direction:'redo',historyId:history.id,generation:redoPayload.generation})
   assert.deepEqual(state(),[{id:1,is_active:0,stock_quantity:0},{id:2,is_active:1,stock_quantity:0}],'redo repeats discarded removal while retaining the keeper')
   console.log('PASS identity fold undo/redo exact removal membership')
 }

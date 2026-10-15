@@ -21,6 +21,18 @@ function lots(sameKey=false,manual){
  if(manual!==undefined)fixtureWrite(() => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(21,?,'manual',901)").run(manual))
 }
 async function main(){
+ await check('integer lot inputs preserve fractional weighted preview and apply',async()=>{
+  lots()
+  fixtureWrite(()=>state.native.db.exec('UPDATE product_batches SET unit_cost_usd=6 WHERE id=902; UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=900; UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=902; UPDATE branch_stock SET quantity=2 WHERE product_id=20; UPDATE branch_stock SET quantity=3 WHERE product_id=21; UPDATE products SET stock_quantity=2 WHERE id=20; UPDATE products SET stock_quantity=3 WHERE id=21'))
+  const before=rows('SELECT * FROM products ORDER BY id'),{result}=await quote()
+  assert.equal(result.body.costAuthority.cost_price_usd,5.2)
+  assert.equal(result.body.costAuthority.source,'received_lot')
+  assert.equal(result.body.costAuthority.needsReview,false)
+  assert.deepEqual(rows('SELECT * FROM products ORDER BY id'),before)
+  const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge'})
+  assert.equal(done.status,200,JSON.stringify(done.body))
+  assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,5.2)
+ })
  for(const usd of [null,0,5.123456789012345])for(const khr of [null,0,20500.12345678901])await check('canonical nullable/raw precision '+usd+'/'+khr,async()=>{
   fixtureWrite(() => state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=? WHERE id=20').run(usd,khr))
   const {result}=await quote(),authority=result.body.costAuthority
