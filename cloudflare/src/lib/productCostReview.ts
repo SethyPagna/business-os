@@ -34,6 +34,10 @@ export function parseMergeCostOutcome(value: unknown): MergeCostOutcome | null {
   return candidate
 }
 
+function reviewMoneyJsonSql(value: string): string {
+  return `json(CASE WHEN (${value}) IS NULL THEN 'null' ELSE printf('%!.17g',(${value})) END)`
+}
+
 export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id: number | null; name: string | null }, operationId: string | null = null, generation = 0): Statement[] {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid merge cost generation')
   const afterKey = `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN NULL ELSE @reviewKey END`
@@ -48,8 +52,8 @@ export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id
   { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
     SELECT @actorId,@actorName,'cost_override','product',CAST(products.id AS TEXT),json_object('cost_review',json_object(
       'version',1,'kind',@eventKind,'operation_key',@reviewKey,'root_key',@rootKey,'merge_operation_id',@operationId,'generation',@costGeneration,'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
-      'before_key',cost_review_key,'after_key',${afterKey},'fallback_usd',@fallbackUsd,'fallback_khr',@fallbackKhr,
-      'after_usd',${usd},'after_khr',@fallbackKhr,'recorded_lot',${CATALOG_COST_HAS_RECORDED_LOT_SQL}))
+      'before_key',cost_review_key,'after_key',${afterKey},'fallback_usd',${reviewMoneyJsonSql('@fallbackUsd')},'fallback_khr',${reviewMoneyJsonSql('@fallbackKhr')},
+      'after_usd',${reviewMoneyJsonSql(usd)},'after_khr',${reviewMoneyJsonSql('@fallbackKhr')},'recorded_lot',${CATALOG_COST_HAS_RECORDED_LOT_SQL}))
     FROM products WHERE id=@productId`, params },
   { sql: `UPDATE products SET cost_price_usd=${usd},purchase_price_usd=${usd},cost_price_khr=@fallbackKhr,purchase_price_khr=@fallbackKhr,
       cost_review_key=${afterKey} WHERE id=@productId`, params }]
@@ -64,7 +68,7 @@ export function mergeCostUndoStatements(outcome: MergeCostOutcome, context: { hi
       'version',1,'kind','merge_undo','operation_key',@eventKey,'root_key',@rootKey,'history_id',@historyId,'snapshot_id',@snapshotId,
       'merge_operation_id',@operationId,'generation',@generation,'before_key',cost_review_key,'after_key',${afterKey},
       'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
-      'after_usd',cost_price_usd,'after_khr',cost_price_khr)) FROM products WHERE id=@productId`, params },
+      'after_usd',${reviewMoneyJsonSql('cost_price_usd')},'after_khr',${reviewMoneyJsonSql('cost_price_khr')})) FROM products WHERE id=@productId`, params },
   { sql: `UPDATE products SET cost_review_key=${afterKey} WHERE id=@productId`, params }]
 }
 

@@ -19,7 +19,7 @@ async function main(){
  const h=await startWorker({patches})
  try{
   await h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,is_active) VALUES(60000,'Review replay','6000001',5,20500,1),(60001,'Review replay','6000002',7,28700,1)").run()
-  if(process.argv.includes('--precision'))await h.db.prepare('UPDATE products SET cost_price_usd=?,cost_price_khr=? WHERE id=60000').bind(5.123456789012345,0).run()
+  if(process.argv.includes('--precision'))await h.db.prepare('UPDATE products SET cost_price_usd=?,cost_price_khr=? WHERE id=60000').bind(5.123456789012345,20500.12345678901).run()
   if(process.argv.includes('--null'))await h.db.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=60000').run()
   if(process.argv.includes('--zero'))await h.db.prepare('UPDATE products SET cost_price_usd=0,cost_price_khr=0 WHERE id=60000').run()
   if(fault==='gallery'||process.argv.includes('--gallery-control'))await h.db.prepare("INSERT INTO product_images(product_id,image_path,sort_order) VALUES(60001,'fixture-moved-gallery',2)").run()
@@ -30,6 +30,12 @@ async function main(){
   const history=await h.one("SELECT * FROM action_history WHERE entity='product' AND entity_id='60001' ORDER BY id DESC LIMIT 1")
   assert.ok(history)
   const merged=await read(),payload=JSON.parse(history.undo_payload)
+  if(process.argv.includes('--precision')){
+   assert.equal(before.cost_price_usd,5.123456789012345);assert.equal(before.cost_price_khr,20500.12345678901)
+   const costEvent=JSON.parse((await h.one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='60000' ORDER BY id DESC LIMIT 1")).details).cost_review
+   assert.equal(costEvent.fallback_usd,before.cost_price_usd);assert.equal(costEvent.fallback_khr,before.cost_price_khr)
+   assert.equal(costEvent.after_usd,merged.cost_price_usd);assert.equal(costEvent.after_khr,merged.cost_price_khr)
+  }
   const beforeEvents=await h.all('SELECT * FROM audit_logs ORDER BY id'),beforeSnapshot=await h.one('SELECT * FROM undo_snapshots WHERE id=?',payload.snapshot_id)
   const undone=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:payload.generation??0},'v3 history undo')
   if(fault==='rollback'){
