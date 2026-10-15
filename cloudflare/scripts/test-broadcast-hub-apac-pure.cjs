@@ -107,7 +107,7 @@ const THREADED = {
 const PENDING = {
   // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
   // UndoApplierContext carries no waitUntil yet.
-  'undoAppliers.ts': ['replayProductMergeGroup', 'replayProductRemove', 'APPLIERS'],
+  'undoAppliers.ts': ['replayProductMergeGroup', 'replayMergeCostReview', 'replayProductRemove', 'APPLIERS'],
   // The create-fold without a starting quantity (POST /api/products and an approved queued create) awaits its
   // cache bump and broadcast; it moved here from routes/products.ts unchanged. The fold WITH a quantity
   // (foldCreateWithStockInWrite) is threaded.

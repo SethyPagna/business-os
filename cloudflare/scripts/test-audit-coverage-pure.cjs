@@ -62,9 +62,22 @@ for (const file of files) {
 // POS has the same stronger same-batch contract for its sole mutation and is
 // likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
-  if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts') continue
+  if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts' || file === 'productCost.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
+
+const productCost = fs.readFileSync(path.join(routesDir, 'productCost.ts'), 'utf8')
+assert.deepEqual([...productCost.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [
+  ['post', '/:id/cost-review/confirm'], ['post', '/receiving-cost-preview'],
+])
+const confirmRoute = productCost.slice(productCost.indexOf("app.post('/:id/cost-review/confirm'"), productCost.indexOf("app.post('/receiving-cost-preview'"))
+ok(confirmRoute.includes('db.batchOnce(costReviewConfirmationStatements(state,'), 'cost confirmation submits its guarded audit and update together')
+const confirmationHelper = fs.readFileSync(path.join(routesDir, '../lib/productCostReview.ts'), 'utf8')
+  .split('export function costReviewConfirmationStatements(')[1].split('export function mergeCostOutcome(')[0]
+ok(/INSERT INTO audit_logs[\s\S]*WHERE NOT EXISTS\(\$\{prior\}\)/.test(confirmationHelper), 'cost confirmation has an immutable request-bound audit')
+ok(/UPDATE products SET cost_review_key=NULL[\s\S]*EXISTS\(SELECT 1 FROM audit_logs[\s\S]*=@nonce/.test(confirmationHelper), 'cost confirmation marker update requires its own audit nonce')
+const receivingPreview = productCost.slice(productCost.indexOf("app.post('/receiving-cost-preview'"), productCost.indexOf("app.get('/:id/cost-breakdown'"))
+ok(receivingPreview.includes('previewReceivingCosts(getDb(c.env), lines)') && !/\b(?:INSERT|UPDATE|DELETE|REPLACE)\b|\.batch(?:Once)?\(|\.run\(/.test(receivingPreview), 'receiving preview remains a read-only POST')
 
 // POS currently has exactly one mutation: the address-presets CAS. Its
 // guarded settings write and audit INSERT share one D1 batch, and the audit
