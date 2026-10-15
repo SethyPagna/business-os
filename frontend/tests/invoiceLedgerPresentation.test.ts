@@ -82,7 +82,8 @@ const stockIn = source('StockInInvoicesSection.tsx')
 assert.doesNotMatch(stockIn, /invoice_no/, 'Stock-In does not invent a historical invoice number')
 assert.match(stockIn, /<time dateTime=\{group\.received_day\}>\{fmtDateOnly\(group\.received_day\)\}<\/time>/)
 assert.match(stockIn, /supplierLabel\(group\)/)
-assert.match(stockIn, /label: tr\('purchase_cost'[\s\S]*value: money\(totals\.cost_usd\)/)
+assert.match(stockIn, /const cost = [\s\S]*<CostValue value=\{lines > 0 && unknown >= lines \? null : value\} unknownCount=\{unknown\} fmt=\{money\} t=\{t\}/)
+assert.match(stockIn, /label: tr\('purchase_cost'[\s\S]*value: cost\(totals\.cost_usd, Number\(totals\.lines_without_cost\) \|\| 0, Number\(totals\.lines\) \|\| 0\)/)
 // P3-2 replaced the inline expand with a float (user: "i meant float when
 // clicked on the invoice rows click to view details and sections etc..."), so
 // the row no longer owns an expanded region -- it announces the dialog it

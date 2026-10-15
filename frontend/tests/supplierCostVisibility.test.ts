@@ -8,6 +8,15 @@ import { canViewAcquisitionCosts } from '../src/utils/acquisitionCostAccess.ts'
 
 const require = createRequire(import.meta.url)
 let user: any = { id: 4, role: 'staff', permissions: { contacts_suppliers: true, product_cost_view: true } }
+function loadReal(file: URL): any {
+  const source = readFileSync(file, 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+  const module = { exports: {} as any }
+  const dependency = (id: string): any => id.startsWith('.') ? loadReal(new URL(id, file)) : require(id)
+  new Function('require', 'module', 'exports', compiled)(dependency, module, module.exports)
+  return module.exports
+}
+const CostValue = loadReal(new URL('../src/components/shared/CostValue.tsx', import.meta.url))
 const noop = () => {}
 const Pass = ({ children }: any) => React.createElement('div', null, children)
 const Detail = ({ sections }: any) => React.createElement('div', null, sections.map((section: any) =>
@@ -38,6 +47,7 @@ function load(name: string, state: Record<string, unknown> = {}): any {
   const mockedRequire = (id: string): any => {
     if (id === 'react') return { ...React, useState: (initial: any) => [typeof initial === 'function' ? initial() : initial, noop], useEffect: noop, useMemo: (fn: any) => fn(), useCallback: (fn: any) => fn, useRef: (current: any) => ({ current }) }
     if (id === 'react/jsx-runtime') return require(id)
+    if (id.includes('CostValue')) return CostValue
     if (id.includes('AppContext')) return { useApp: () => ({ user }) }
     if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts }
     if (id.includes('useStockInInvoiceReport')) {

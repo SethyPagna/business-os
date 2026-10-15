@@ -7542,7 +7542,7 @@
   "csv_blank_prices_review": "All price/cost columns are blank. Confirm that is intentional before applying this row.",
   "csv_invalid_cost_label": "Invalid cost",
   "stock_cost_estimate": "Cost estimate",
-  "stock_cost_estimate_advisory": "Estimate from current received lots. The saved cost may change before completion.",
+  "stock_cost_estimate_advisory": "Estimate from current received dates. The saved cost may change before completion.",
   "stock_cost_estimate_calculating": "Calculating…",
   "stock_cost_estimate_unavailable": "Estimate unavailable",
   "merge_cost_needs_review": "Cost needs review",

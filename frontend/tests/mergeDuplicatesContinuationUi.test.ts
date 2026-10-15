@@ -55,7 +55,7 @@ const handler = source.slice(start, end)
 
 assert.equal((handler.match(/const requestId =/g) || []).length, 1, 'one stable request id is created per confirmed run')
 assert.ok(handler.indexOf('const requestId =') < handler.indexOf('while (calls < callCeiling)'), 'request id is created outside the continuation loop')
-assert.match(handler, /productApi\.mergeDuplicates\(\{ requestId, signal: controller\.signal \}\)/,
+assert.match(handler, /productApi\.mergeDuplicates\(\{ requestId, signal: controller\.signal, \.\.\.\(costReview \? \{ costReview \} : \{\}\) \}\)/,
   'every continuation call carries the same id and abort signal')
 assert.match(handler, /calls \+= 1\s+const result = await productApi\.mergeDuplicates/,
   'a request is counted before awaiting so an unknown first-attempt outcome reloads authoritative state')
@@ -134,7 +134,7 @@ assert.match(modal, /previewRequestsRef\.current\?\.cancel\(\)[\s\S]*?setPreview
   'a new recovery notice cancels preview work, clears the old preview and acknowledgement, and requires a fresh scan')
 assert.match(modal, /if \(recoveryNotice\) \{[\s\S]*?setPreviewLoading\(false\)[\s\S]*?return[\s\S]*?\}\s+runPreview\(\)/,
   'reopening after an unknown outcome waits for an explicit fresh scan instead of loading a confirmable preview automatically')
-assert.match(modal, /const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError/,
+assert.match(modal, /const canMerge = costReady && !recoveryNeedsPreview && !previewLoading && !previewError/,
   'confirm remains disabled until the recovery scan succeeds')
 assert.match(modal, /setPreview\(result\)[\s\S]*?setAcknowledged\(false\)[\s\S]*?setRecoveryNeedsPreview\(false\)/,
   'a successful fresh scan supplies current rows but still resets acknowledgement')
