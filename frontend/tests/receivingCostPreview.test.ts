@@ -122,7 +122,7 @@ try {
     window.localStorage.setItem('businessos_read_session', 'synthetic-preview-session')
     const mixedProps = { ...props, initialLines: [{ ...props.initialLines[0], mode, quantity: 2 }, ...props.initialLines, { ...props.initialLines[0], product: { ...props.initialLines[0].product, id: 2, name: 'Synthetic peer' } }] }
     const mixed = await harness.mount({ component: 'components/inventory/FastStockInModal.tsx', props: mixedProps, app, doubles: { 'api/batchesTransport.ts': { getReceivingCostPreview: ((lines: any[], signal: AbortSignal) => new Promise(resolve => calls.push({ lines, signal, resolve }))) as any, getProductBatches: (async () => ({ batches: [] })) as any } } })
-    const before = calls.length
+    const before: number = calls.length
     await mixed.click(mixed.button(/^Next$/))
     await mixed.click(mixed.button(/^Next$/))
     assert.equal(calls.length, before + 1)
