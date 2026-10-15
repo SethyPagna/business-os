@@ -391,6 +391,46 @@ await runTest('confirmation accepts only server-issued known USD and retains zer
   assert.equal(normalizeCostBreakdown({ costConfirmation: { version: 1, reviewed_digest: 'not-a-quote', usd: 0 } })?.costConfirmation, undefined)
 })
 
+await runTest('lazy confirmation writer rejects actor/product/unmount changes and preserves retry identity', async () => {
+  const source = fs.readFileSync(path.join(srcRoot, 'components/shared/CostCalculationFloat.tsx'), 'utf8')
+  const ast = ts.createSourceFile('CostCalculationFloat.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let confirmSource = ''
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'confirm' && node.initializer) confirmSource = node.initializer.getText(ast)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.ok(confirmSource.includes("await import('../../api/productWriteTransport.ts')"))
+  assert.doesNotMatch(source, /import \{ confirmProductCostReview \} from/)
+  const body = ts.transpileModule(`const action = ${confirmSource.replace("import('../../api/productWriteTransport.ts')", 'loadWriter()')}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
+  for (const change of ['actor', 'product', 'unmount', 'retry'] as const) {
+    let release!: (writer: unknown) => void
+    const loaded = new Promise(resolve => { release = resolve })
+    const submission = { scope: { current: true }, body: { client_request_id: 'original-confirmation', reviewed_digest: 'a'.repeat(64), value: 0 } }
+    const ref: { current: unknown } = { current: submission }
+    const alive = { current: true }
+    const writes: unknown[] = []
+    let attempts = 0
+    let confirmed = false
+    const names = ['confirmationRef', 'canConfirm', 'confirming', 'confirmed', 'setConfirming', 'setError', 'aliveRef', 'assertActorReadScope', 'loadWriter', 'productId', 'tr', 'setConfirmed']
+    const action = new Function(...names, `${body}; return action`)(ref, true, false, false, () => {}, () => {}, alive, (scope: { current: boolean }) => { if (!scope.current) throw Error('actor changed') }, () => loaded, 42, (_key: string, fallback: string) => fallback, (value: boolean) => { confirmed = value })
+    const pending = action()
+    if (change === 'actor') submission.scope.current = false
+    if (change === 'product') ref.current = { ...submission }
+    if (change === 'unmount') alive.current = false
+    release({ confirmProductCostReview: async (id: number, request: unknown) => { writes.push({ id, request }); if (change === 'retry' && ++attempts === 1) throw Error('lost acknowledgement'); return { success: true, cost_needs_review: false } } })
+    await pending
+    if (change === 'retry') {
+      await action()
+      assert.deepEqual(writes, [{ id: 42, request: submission.body }, { id: 42, request: submission.body }])
+      assert.equal(confirmed, true)
+    } else {
+      assert.deepEqual(writes, [], `${change} while loading the writer cannot issue confirmation`)
+      assert.equal(confirmed, false)
+    }
+  }
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

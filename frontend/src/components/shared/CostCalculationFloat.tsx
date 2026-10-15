@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
-import { confirmProductCostReview } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { captureActorReadScope, assertActorReadScope } from '../../api/actorReadScope.ts'
 import Modal from './Modal'
@@ -90,6 +89,9 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
     setConfirming(true)
     setError('')
     try {
+      assertActorReadScope(submission.scope)
+      const { confirmProductCostReview } = await import('../../api/productWriteTransport.ts')
+      if (!aliveRef.current || confirmationRef.current !== submission) return
       assertActorReadScope(submission.scope)
       const result = await confirmProductCostReview(productId, submission.body) as { success?: unknown; cost_needs_review?: unknown }
       if (!aliveRef.current || confirmationRef.current !== submission) return
