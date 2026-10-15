@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Owner (Sep 17, P10-17): "remaining column are only showing 0".
 //
 // The Remaining column summed `branch_batch_stock` and coalesced the absence
@@ -64,14 +65,15 @@ check('the movement probe has its index (0084)',
 
 // --- 4. The behaviour, on a real migrated database -------------------------
 const db = openDb(loadAll())
+  assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const run = (sql, params = {}) => db.prepare(sql).run(params)
 
-run(`INSERT INTO suppliers (id, name) VALUES (7, 'Acme')`)
-const lot = (id, received) => run(
+seedStockFixture(db, () => run(`INSERT INTO suppliers (id, name) VALUES (7, 'Acme')`))
+const lot = (id, received) => seedStockFixture(db, () => run(
   `INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, supplier_id, supplier_name, received_at, received_quantity, received_cost_usd, payment_status)
    VALUES (@id, 200, 'BK' || @id, 1, 7, 'Acme', '2026-02-01', @received, 10.0, 'paid')`,
   { id, received },
-)
+))
 
 lot(1, 10) // imported history: received, but the lot ledger never held it
 lot(2, 10) // sold out through a recorded sale allocation
@@ -79,12 +81,12 @@ lot(3, 10) // sold out, traceable only through a stamped movement
 lot(4, 10) // still on the shelf
 lot(5, 0)  // a reverted receipt: nothing was ever received
 
-run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (2, 1, 0)`)
-run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (3, 1, 0)`)
-run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 5)`)
-run(`INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd) VALUES (1, 1, 200, 10, 2.0)`)
-run(`INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity) VALUES (1, 2, 1, 10)`)
-run(`INSERT INTO inventory_movements (product_id, branch_id, quantity, movement_type, batch_id) VALUES (200, 1, -10, 'sale', 3)`)
+seedStockFixture(db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (2, 1, 0)`))
+seedStockFixture(db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (3, 1, 0)`))
+seedStockFixture(db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 5)`))
+seedStockFixture(db, () => run(`INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd) VALUES (1, 1, 200, 10, 2.0)`))
+seedStockFixture(db, () => run(`INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity) VALUES (1, 2, 1, 10)`))
+seedStockFixture(db, () => run(`INSERT INTO inventory_movements (product_id, branch_id, quantity, movement_type, batch_id) VALUES (200, 1, -10, 'sale', 3)`))
 
 const rows = db.prepare(`
   SELECT pb.id, ${remainingSql('pb', 'bbs.qty')} AS remaining
@@ -108,7 +110,7 @@ check('a reverted receipt (nothing received) stays 0, not unknown',
 
 // The untracked lot is not permanently unknown: the moment it is touched at
 // lot level, the number becomes real again and the display follows.
-run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 4)`)
+seedStockFixture(db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 4)`))
 const after = db.prepare(`
   SELECT ${remainingSql('pb', 'bbs.qty')} AS remaining
   FROM product_batches pb

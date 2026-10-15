@@ -1,3 +1,5 @@
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Z0: sales that don't explicitly pick a lot are auto-allocated across the
 // product's active lots at the branch, OLDEST received first, so a later
 // return/cancel can restore stock to the SAME lots (see saleTransitions.ts
@@ -18,6 +20,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
+  assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
@@ -41,6 +44,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -96,7 +100,7 @@ check('skips empty lots, never emits a zero take', () => {
 
 // ---- readFifoLotAvailability (real SQL + migrations) ----------------------
 check('oldest received_at first, NULL received dates last, empty lots excluded', async () => {
-  rawDb.prepare(`INSERT INTO products (id, name, is_active, stock_quantity) VALUES (500, 'FIFO Serum', 1, 0)`).run()
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO products (id, name, is_active, stock_quantity) VALUES (500, 'FIFO Serum', 1, 0)`).run())
   // Three active lots + one empty + one undated, out of received order.
   const lots = [
     { id: 9001, lot: '08152026', received: '2026-08-15', qty: 4 },
@@ -106,8 +110,8 @@ check('oldest received_at first, NULL received dates last, empty lots excluded',
     { id: 9005, lot: 'NODATE',   received: null,         qty: 2 }, // last
   ]
   for (const l of lots) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (?, 500, ?, ?, ?, 1, ?)`).run([l.id, l.lot, l.lot, l.received, l.id])
-    rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, ?)`).run([l.id, l.qty])
+    seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (?, 500, ?, ?, ?, 1, ?)`).run([l.id, l.lot, l.lot, l.received, l.id]))
+    seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, ?)`).run([l.id, l.qty]))
   }
   const available = await readFifoLotAvailability(db, 500, 1)
   assert.deepStrictEqual(available.map((r) => r.batchId), [9002, 9001, 9003, 9005], 'oldest first, undated last, empty excluded')

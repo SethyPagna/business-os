@@ -1,3 +1,5 @@
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -50,7 +52,14 @@ function loadProductWrites(db) {
   }).outputText
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (dependencies.has(request)) return dependencies.get(request)
+    if (request === './productCostReview') {
+      const mod = { exports: {} }
+      const output = ts.transpileModule(fs.readFileSync(path.join(libRoot, 'productCostReview.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+      new Function('exports', 'require', 'module', output)(mod.exports, id => id === './catalogCostRecompute' ? catalogCostModule.exports : require(id), mod)
+      return mod.exports
+    }
     if (request === './catalogCostRecompute') return catalogCostModule.exports
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request === './db') return { getDb: () => db }
@@ -135,7 +144,8 @@ async function main() {
   assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 7.5, 90).existingBatchId, null, 'manual override excludes the old lot even at the same price')
 
   const db = openDb(loadAll())
-  db.exec(`
+  assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(db, () => db.exec(`
     INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1);
     INSERT INTO products(id,name,stock_quantity,is_active) VALUES(1,'Import item',0,1),(2,'Create item',3,1),(3,'Rollback item',2,1);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,unit_cost_usd,received_quantity,received_cost_usd,received_branch_id)
@@ -144,7 +154,7 @@ async function main() {
       (91,2,'initial:2','Original initial','2025-03-04',0,'Original initial receipt',7,6.5,3,19.5,1),
       (92,3,'initial:3','Rollback initial','2025-05-06',0,'Rollback receipt',8,4.5,2,9,1);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(90,1,0);
-  `)
+  `))
   installPositiveLotGuard(db)
 
   const [metadataSql, lotStockSql] = extractMatchedImportStatements(importSource)
@@ -152,7 +162,7 @@ async function main() {
     id: 90, receivedAt: '2025-01-02', updatedAt: '2026-09-11T07:00:00.000Z',
     unitCostUsd: 7.5, receiptTotalCostUsd: 15, qty: 2, branchId: 1, batchId: 90,
   }
-  await db.batch([{ sql: metadataSql, params: importParams }, { sql: lotStockSql, params: importParams }])
+  await stockTransaction.executeStockTransaction(db, [{ sql: metadataSql, params: importParams }, { sql: lotStockSql, params: importParams }], 'retry')
   const importedLot = { ...db.prepare(`SELECT lot_code,received_at,is_active,notes,batch_number,unit_cost_usd,received_quantity,received_cost_usd,received_branch_id FROM product_batches WHERE id=90`).get() }
   assert.deepEqual(importedLot, {
     lot_code: 'Original label', received_at: '2025-01-02', is_active: 1, notes: 'Original import receipt',

@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const fs = require('fs')
 const path = require('path')
@@ -22,6 +24,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request === './loyaltyEligibility' || request === '../lib/loyaltyEligibility') return loadReal('lib/loyaltyEligibility.ts')
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(requireOverrides, request)) return requireOverrides[request]
@@ -43,6 +46,7 @@ const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPreci
 
 function setup() {
   const rawDb = openDb(loadAll())
+  assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -61,17 +65,19 @@ function setup() {
     // Pass results through unmapped, like the real D1Compat.batch() (db.ts)
     // -- flattening to {changes,lastInsertRowid} dropped .meta and made a
     // batched insert's row id read back as 0. Found 2026-09-22.
+    batchOnce(items) { return this.batch(items) },
     async batch(items) {
       return rawDb.batch(items)
     },
   }
 
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1), (2, 'Warehouse', 1, 0)").run()
-  rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, 'Serum', 'SERUM-1', 1, 0)").run()
+  seedStockFixture(rawDb, () => rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, 'Serum', 'SERUM-1', 1, 0)").run())
   return { rawDb, db }
 }
 
 function seedLot(fixture, { active = 1, quantity = 0 } = {}) {
+  return seedStockFixture(fixture.rawDb, () => {
   fixture.rawDb.prepare(`
     INSERT INTO product_batches (
       id, variant_product_id, batch_key, lot_code, received_at, is_active,
@@ -81,6 +87,7 @@ function seedLot(fixture, { active = 1, quantity = 0 } = {}) {
   fixture.rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (100, 1, @quantity)').run({ quantity })
   fixture.rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @quantity)').run({ quantity })
   fixture.rawDb.prepare('UPDATE products SET stock_quantity = @quantity WHERE id = 1').run({ quantity })
+  })
 }
 
 let routeFixture

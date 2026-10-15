@@ -1,3 +1,5 @@
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // N15 merge correctness: what the reviewer is told, what the merge refuses,
 // and the guarantee that NOTHING linked to the discarded row is left behind.
 //
@@ -68,6 +70,7 @@ function loadTs(relPath, stubs) {
   })
   const original = Module._load
   Module._load = (request, parent, isMain) => {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
@@ -102,6 +105,7 @@ function dbAdapter(d1) {
         },
       }
     },
+    batchOnce(stmts) { return this.batch(stmts) },
     batch: (stmts) => {
       const readOnly = stmts.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) return d1.batch(stmts)
@@ -260,17 +264,18 @@ const DUP = 200
 
 function seed() {
   const d1 = openDb(loadAll())
+  assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const run = (sql) => d1.db.prepare(sql).run()
-  run(`INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')`))
   // The production shape: one name, one code written twice (one with a leading
   // zero), different recorded costs, and the discarded row carrying the only
   // wholesale price. Keeper cost is 0 = never recorded.
-  run(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr,
+  seedStockFixture(d1.db, () => run(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr,
         selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
         special_price_usd, special_price_khr, is_active, is_group)
        VALUES
         (${KEEPER}, 'Zero Twin', '3614274226546', 0, 0, 15, 0, 0, 0, 0, 0, 1, 0),
-        (${DUP},    'Zero Twin', '03614274226546', 6.45, 0, 15, 0, 9, 0, 0, 0, 1, 0)`)
+        (${DUP},    'Zero Twin', '03614274226546', 6.45, 0, 15, 0, 9, 0, 0, 0, 1, 0)`))
   return d1
 }
 
@@ -348,17 +353,17 @@ async function main() {
     const live = seed()
     const { mod: liveMod, adapter: liveAdapter, undoAppliers } = loadProductsRoute(live)
     const promo = loadPromotionRules()
-    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
-                     VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[200,777]', 1)`).run()
+    seedStockFixture(live.db, () => live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[200,777]', 1)`).run())
     // A rule already naming BOTH rows must end up naming the keeper ONCE.
-    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
-                     VALUES (11, 'Both', 'percent_off', 5, 'products', '[100,200]', 1)`).run()
+    seedStockFixture(live.db, () => live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (11, 'Both', 'percent_off', 5, 'products', '[100,200]', 1)`).run())
     // NEGATIVE CONTROL: a rule that never named the discarded row is untouched.
-    live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
-                     VALUES (12, 'Someone else', 'percent_off', 7, 'products', '[777]', 1)`).run()
+    seedStockFixture(live.db, () => live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+                     VALUES (12, 'Someone else', 'percent_off', 7, 'products', '[777]', 1)`).run())
     // A child variant pointing at the row about to be deactivated.
-    live.db.prepare(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
-                     VALUES (400, 'Zero Twin Small', '4444444444444', ${DUP}, 1, 0)`).run()
+    seedStockFixture(live.db, () => live.db.prepare(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
+                     VALUES (400, 'Zero Twin Small', '4444444444444', ${DUP}, 1, 0)`).run())
 
     const { reversal } = await liveMod.foldDuplicateProductInto(
       {}, liveAdapter, { id: 1, name: 'tester' },
@@ -402,7 +407,7 @@ async function main() {
   await check('a keeper that was itself a child of the discarded row does not become its own parent', async () => {
     const live = seed()
     const { mod: liveMod, adapter: liveAdapter } = loadProductsRoute(live)
-    live.db.prepare(`UPDATE products SET parent_id = ${DUP} WHERE id = ${KEEPER}`).run()
+    seedStockFixture(live.db, () => live.db.prepare(`UPDATE products SET parent_id = ${DUP} WHERE id = ${KEEPER}`).run())
     const { reversal } = await liveMod.foldDuplicateProductInto(
       {}, liveAdapter, { id: 1, name: 'tester' },
       { id: KEEPER, name: 'Zero Twin' },
@@ -447,8 +452,8 @@ async function main() {
   })
 
   await check('a genuinely different barcode IS reported as a difference', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
-                   VALUES (300, 'Zero Twin', '9999999999999', 6.45, 1, 0)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
+                   VALUES (300, 'Zero Twin', '9999999999999', 6.45, 1, 0)`).run())
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 300)
     assert.equal(identity.same, false)
     assert.deepEqual(identity.differs.map((d) => d.field), ['barcode'])
@@ -456,8 +461,8 @@ async function main() {
   })
 
   await check('a different NAME is reported too, and both differences at once', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
-                   VALUES (301, 'Something Else', '8888888888888', 1, 0)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
+                   VALUES (301, 'Something Else', '8888888888888', 1, 0)`).run())
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 301)
     assert.deepEqual(identity.differs.map((d) => d.field).sort(), ['barcode', 'name'])
   })
@@ -478,8 +483,8 @@ async function main() {
   // (foldDuplicateProductInto's canonicalProductBarcode) already resolves the
   // wildcard correctly and was never reached.
   await check('DISCRIMINATING (P6-9): an EMPTY barcode against the keeper\'s real one is a wildcard, not a block', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
-                   VALUES (304, 'Zero Twin', '', 1, 0)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
+                   VALUES (304, 'Zero Twin', '', 1, 0)`).run())
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 304)
     assert.equal(identity.same, true, 'an empty barcode must never block a same-name merge')
     // Still reported for the before/after preview -- informative, not blocking.
@@ -487,8 +492,8 @@ async function main() {
   })
 
   await check('DISCRIMINATING (P6-9): a WORD/broken barcode against the keeper\'s real one is also a wildcard', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
-                   VALUES (305, 'Zero Twin', 'NoBox188', 1, 0)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
+                   VALUES (305, 'Zero Twin', 'NoBox188', 1, 0)`).run())
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 305)
     assert.equal(identity.same, true, 'a word/broken barcode must never block a same-name merge')
   })
@@ -515,47 +520,47 @@ async function main() {
   })
 
   await check('two real costs preview as the MEAN of the distinct costs, per the ruling', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
-                   VALUES (302, 'Zero Twin', '03614274226546', 7.9, 1, 0)`).run()
-    d1.db.prepare('UPDATE products SET cost_price_usd = 5 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
+                   VALUES (302, 'Zero Twin', '03614274226546', 7.9, 1, 0)`).run())
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 5 WHERE id = @id').run({ id: KEEPER }))
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 302)
     assert.equal(identity.costAfter.cost_price_usd, 6.45, '(5 + 7.9) / 2')
     assert.equal(identity.costVerdict, 'differs')
     assert.deepEqual(identity.costFill, [], 'the keeper already had a cost, so nothing is being filled in')
     assert.deepEqual(identity.costOutliers, [])
-    d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER }))
   })
 
   // ---- 4. Every valid non-zero cost participates in the DISTINCT mean -----
   await check('DISCRIMINATING: wide valid costs still use the explicit DISTINCT mean rule', async () => {
-    d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
-                   VALUES (303, 'Zero Twin', '3614274226546', 200, 1, 0)`).run()
-    d1.db.prepare('UPDATE products SET cost_price_usd = 2 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group)
+                   VALUES (303, 'Zero Twin', '3614274226546', 200, 1, 0)`).run())
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 2 WHERE id = @id').run({ id: KEEPER }))
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 303)
     assert.equal(identity.costAfter.cost_price_usd, 101)
     assert.deepEqual(identity.costOutliers, [])
     assert.deepEqual(identity.numericIssues, [])
-    d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER }))
   })
 
   await check('NEGATIVE CONTROL: an ordinary restock price difference uses the same mean', async () => {
-    d1.db.prepare('UPDATE products SET cost_price_usd = 5 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 5 WHERE id = @id').run({ id: KEEPER }))
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 302)
     assert.equal(identity.costAfter.cost_price_usd, 6.45, '5 and 7.9 average to 6.45 -- exactly what the mean is for')
     assert.deepEqual(identity.numericIssues, [])
-    d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
+    seedStockFixture(d1.db, () => d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER }))
   })
 
   // ---- 5. A stock-in session no longer blocks a merge: the merge closes it --
   // Seeds: op-1 undoable on DUP, op-2 redoable on KEEPER, op-3 undoable on an
   // unrelated product. The real statements run against the real schema.
   const seedSession = (historyId, operationId, productId, status) => {
-    d1.db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, status)
-                   VALUES (${historyId}, 'inventory', 'product', ${productId}, 'Stock in', '${status}')`).run()
-    d1.db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, receipt_json, history_id)
-                   VALUES ('${operationId}', 1, 'req-${operationId}', 'stock_in', '{}', '{}', ${historyId})`).run()
-    d1.db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity)
-                   VALUES ('${operationId}', 'line-1', 'receive', ${productId}, 1, 3)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, status)
+                   VALUES (${historyId}, 'inventory', 'product', ${productId}, 'Stock in', '${status}')`).run())
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, receipt_json, history_id)
+                   VALUES ('${operationId}', 1, 'req-${operationId}', 'stock_in', '{}', '{}', ${historyId})`).run())
+    seedStockFixture(d1.db, () => d1.db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity)
+                   VALUES ('${operationId}', 'line-1', 'receive', ${productId}, 1, 3)`).run())
   }
   const historyOf = (id) => d1.db.prepare('SELECT status, reversible, last_error FROM action_history WHERE id = ?').get(id)
   const closeAudit = () => d1.db.prepare("SELECT entity_id, details FROM audit_logs WHERE action = 'stock_session_undo_closed' ORDER BY entity_id").all()

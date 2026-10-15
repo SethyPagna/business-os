@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 // S4-32 regression: the WHOLESALE tier must survive a duplicate-product
 // merge, and must survive undoing one.
 //
@@ -35,6 +37,7 @@ const SRC_DIR = path.join(__dirname, '..', 'src')
 
 const migrations = loadAll()
 const rawDb = openDb(migrations)
+  assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
 // The migration chain under test must genuinely include 0111 -- if a rename
 // ever drops it this test would otherwise keep passing against a schema where
@@ -68,10 +71,9 @@ const db = {
         results: db.prepare(sql).all(params || {}),
       }))
     }
-    const out = []
-    for (const item of items) out.push(db.prepare(item.sql).run(item.params || {}))
-    return out
+    return rawDb.batch(items)
   },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(db) },
 }
 const fakeEnv = { DB: db }
@@ -105,6 +107,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (Object.prototype.hasOwnProperty.call(requireOverrides, request)) return requireOverrides[request]
     if (request.startsWith('.')) {
       const sibling = resolveSiblingSource(request)
@@ -218,6 +221,7 @@ assert.equal(typeof foldDuplicateProductInto, 'function', 'routes/products.ts mu
 const NAME = 'MAC Matte Lipstick No Box 601'
 
 function seed({ keeperWholesaleUsd, keeperWholesaleKhr, dupWholesaleUsd, dupWholesaleKhr }) {
+  return seedStockFixture(rawDb, () => {
   rawDb.exec('DELETE FROM undo_snapshots; DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM inventory_movements; DELETE FROM product_images; DELETE FROM products; DELETE FROM branches;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   const insert = rawDb.prepare(`INSERT INTO products
@@ -229,6 +233,7 @@ function seed({ keeperWholesaleUsd, keeperWholesaleKhr, dupWholesaleUsd, dupWhol
   insert.run({ id: 2, name: NAME, barcode: '601', qty: 3, sellUsd: 17, sellKhr: 69700, wUsd: dupWholesaleUsd, wKhr: dupWholesaleKhr, costUsd: 10.5 })
   rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 2)').run()
   rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 3)').run()
+  })
 }
 
 function wholesaleOf(id) {

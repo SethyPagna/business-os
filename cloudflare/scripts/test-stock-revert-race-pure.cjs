@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // H-stock 2 (2026-09-27): a stock-ledger revert must apply exactly once even
 // when two requests race (double tap, two tabs, a retried POST).
 //
@@ -44,6 +45,7 @@ const { applyMovementRevert } = loadReal(path.join(SRC, 'lib', 'stockRevert.ts')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   let beforeBatch = null
   const db = {
     prepare(sql) {
@@ -56,6 +58,7 @@ function freshDb() {
         run: async (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
+    batchOnce(items) { return this.batch(items) },
     async batch(items) {
       await new Promise((r) => setImmediate(r))
       if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(rawDb) }
@@ -63,17 +66,17 @@ function freshDb() {
     },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+  seedStockFixture(rawDb, () => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
   return { rawDb, db, setBeforeBatch(fn) { beforeBatch = fn } }
 }
 
 function seed(rawDb, { stock, lot, lotStock = stock }) {
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, @stock)").run({ stock })
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
+  seedStockFixture(rawDb, () => rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, @stock)").run({ stock }))
+  seedStockFixture(rawDb, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock }))
   if (lot) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
-      VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, 10)`).run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @lotStock)').run({ lotStock })
+    seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
+      VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, 10)`).run())
+    seedStockFixture(rawDb, () => rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @lotStock)').run({ lotStock }))
   }
 }
 
@@ -108,8 +111,8 @@ async function main() {
     await test(`two concurrent reverts of a ${c.name}: exactly one applies`, async () => {
       const { rawDb, db } = freshDb()
       seed(rawDb, c)
-      rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
-        VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'miscount', @batchId)`).run({ type: c.type, batchId: c.batchId })
+      seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
+        VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'miscount', @batchId)`).run({ type: c.type, batchId: c.batchId }))
       const mv = rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get()
       const [a, b] = await Promise.all([applyMovementRevert(db, mv, actor), applyMovementRevert(db, mv, actor)])
       const s = state(rawDb, 50)
@@ -129,8 +132,8 @@ async function main() {
   await test('the revert of the revert still applies once (reversal of the reversal)', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb, { stock: 7, lot: false })
-    rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason)
-      VALUES (50, 1, 'Widget', 1, 'Shop', 'remove', 3, 'miscount')`).run()
+    seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason)
+      VALUES (50, 1, 'Widget', 1, 'Shop', 'remove', 3, 'miscount')`).run())
     assert.ok((await applyMovementRevert(db, rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get(), actor)).ok)
     const counter = rawDb.prepare("SELECT * FROM inventory_movements WHERE reference_id = 'revert:50'").get()
     const [a, b] = await Promise.all([applyMovementRevert(db, counter, actor), applyMovementRevert(db, counter, actor)])
@@ -141,12 +144,12 @@ async function main() {
   await test('a sale that takes the lot between check and write rolls the whole revert back (stock_changed)', async () => {
     const { rawDb, db, setBeforeBatch } = freshDb()
     seed(rawDb, { stock: 10, lot: true })
-    rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
-      VALUES (50, 1, 'Widget', 1, 'Shop', 'add', 3, 'miscount', 1)`).run()
+    seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
+      VALUES (50, 1, 'Widget', 1, 'Shop', 'add', 3, 'miscount', 1)`).run())
     setBeforeBatch((raw) => {
-      raw.prepare('UPDATE branch_batch_stock SET quantity = 1 WHERE batch_id = 1').run()
-      raw.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id = 1').run()
-      raw.prepare('UPDATE products SET stock_quantity = 1 WHERE id = 1').run()
+      seedStockFixture(raw, () => raw.prepare('UPDATE branch_batch_stock SET quantity = 1 WHERE batch_id = 1').run())
+      seedStockFixture(raw, () => raw.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id = 1').run())
+      seedStockFixture(raw, () => raw.prepare('UPDATE products SET stock_quantity = 1 WHERE id = 1').run())
     })
     const res = await applyMovementRevert(db, rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get(), actor)
     assert.strictEqual(res.ok, false)
@@ -167,16 +170,16 @@ async function main() {
     await test(`${c.name} superseded (deleted) between the revert's read and its write: refused, nothing written`, async () => {
       const { rawDb, db, setBeforeBatch } = freshDb()
       seed(rawDb, { stock: c.stock, lot: true })
-      rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
-        VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'Dated stock count import', 1)`).run({ type: c.type })
+      seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
+        VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'Dated stock count import', 1)`).run({ type: c.type }))
       const mv = rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get()
       setBeforeBatch((raw) => {
         // The re-apply's own batch: the row's effect reversed on both
         // ledgers, the row deleted (datedStockCountApply.ts).
-        raw.prepare('UPDATE branch_batch_stock SET quantity = quantity + @d WHERE batch_id = 1').run({ d: c.delta })
-        raw.prepare('UPDATE branch_stock SET quantity = quantity + @d WHERE product_id = 1').run({ d: c.delta })
-        raw.prepare('UPDATE products SET stock_quantity = quantity FROM branch_stock WHERE branch_stock.product_id = products.id').run()
-        raw.prepare('DELETE FROM inventory_movements WHERE id = 50').run()
+        seedStockFixture(raw, () => raw.prepare('UPDATE branch_batch_stock SET quantity = quantity + @d WHERE batch_id = 1').run({ d: c.delta }))
+        seedStockFixture(raw, () => raw.prepare('UPDATE branch_stock SET quantity = quantity + @d WHERE product_id = 1').run({ d: c.delta }))
+        seedStockFixture(raw, () => raw.prepare('UPDATE products SET stock_quantity = quantity FROM branch_stock WHERE branch_stock.product_id = products.id').run())
+        seedStockFixture(raw, () => raw.prepare('DELETE FROM inventory_movements WHERE id = 50').run())
       })
       const before = c.stock + c.delta
       const res = await applyMovementRevert(db, mv, actor)

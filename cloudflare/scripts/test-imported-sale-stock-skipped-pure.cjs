@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // RET-B F4 / LH-2 (5 Oct 2026): imported sales never move stock they never took.
 //
 // Transition table pinned here (per sale line, quantity q, imported returned r):
@@ -57,9 +58,10 @@ function filterParams(sql, params = {}) {
 function setup(migrations = loadAll()) {
   const sqlite = new Database(':memory:')
   for (const migration of migrations) sqlite.exec(migration)
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
-  sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
-  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
+  assert.throws(() => sqlite.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run())
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run())
+  seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run())
   const db = {
     prepare(sql) { return { get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) } } },
     batch(statements) {
@@ -133,7 +135,7 @@ function cancelPlan(sqlite, saleId, { oldStatus, newStatus = 'cancelled', countI
     assert.equal(uncancel.statements.length, 0)
     assert.equal(uncancel.deductedUnits, 0)
     // Positive control: the same sale without the flag is the LH-2 defect.
-    sqlite.prepare('UPDATE sales SET stock_skipped = 0 WHERE id = ?').run(id)
+    seedStockFixture(sqlite, () => sqlite.prepare('UPDATE sales SET stock_skipped = 0 WHERE id = ?').run(id))
     assert.equal(cancelPlan(sqlite, id, { oldStatus: 'completed' }).restoredUnits, 3)
   })
 
@@ -147,7 +149,7 @@ function cancelPlan(sqlite, saleId, { oldStatus, newStatus = 'cancelled', countI
     const id = sqlite.prepare("SELECT id FROM sales WHERE client_request_id = 'sales-import:job-2:5'").get().id
     assert.equal(cancelPlan(sqlite, id, { oldStatus: 'partial_return' }).restoredUnits, 0, 'flagged: nothing moves')
     // held() itself, for an import the backfill cannot link (flag absent):
-    sqlite.prepare('UPDATE sales SET stock_skipped = 0 WHERE id = ?').run(id)
+    seedStockFixture(sqlite, () => sqlite.prepare('UPDATE sales SET stock_skipped = 0 WHERE id = ?').run(id))
     const cancel = cancelPlan(sqlite, id, { oldStatus: 'partial_return' })
     const uncancel = cancelPlan(sqlite, id, { oldStatus: 'cancelled', newStatus: 'partial_return' })
     assert.equal(cancel.restoredUnits, 1, 'only q - r = 1 is still out with the sale')
