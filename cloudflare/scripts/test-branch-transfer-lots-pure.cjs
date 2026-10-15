@@ -48,7 +48,9 @@ function loadModule(relPath, requireShim) {
 const batchCode = loadModule('lib/batchCode.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
+const stockTransaction = loadModule('lib/stockTransaction.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
+  if (id === './stockTransaction') return stockTransaction
   if (id === './batchCode') return batchCode
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
@@ -93,6 +95,8 @@ function wrapDb(sqlite) {
         return Promise.resolve(tx(statements))
       } catch (error) {
         return Promise.reject(error)
+      } finally {
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       }
     },
   }
@@ -101,6 +105,7 @@ function wrapDb(sqlite) {
 function freshDb() {
   const db = new Database(':memory:')
   db.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
     CREATE TABLE product_batches (
       id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, batch_number INTEGER,
@@ -128,6 +133,7 @@ function freshDb() {
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101, 1, 6)`).run()
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
+  db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?)").run(stockTransaction.STOCK_SCHEMA_EPOCH)
   return db
 }
 
@@ -269,6 +275,10 @@ await check('a destination-lot clone is guarded against a concurrent ambiguous b
   const compat = wrapDb(db)
   const source = { lot_code: 'C', expiry_date: '2027-01-01', received_at: '2026-08-01', notes: 'guarded clone' }
   const guard = identity.canonicalTransferAuthorityGuardStatement(1, 2)
+  db.prepare("DELETE FROM system_flags WHERE key='stock_schema_epoch'").run()
+  await assert.rejects(productBatches.resolveDestinationBatch(compat, source, 2, { writeGuard: guard }), stockTransaction.StockTransactionUnavailableError)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=2').get().n, 0)
+  db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?)").run(stockTransaction.STOCK_SCHEMA_EPOCH)
 
   db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
   await assert.rejects(
@@ -294,7 +304,8 @@ await check('both transfer routes use the shared read-only provenance planner an
     // The statements ride in ONE batch whose final statement is the ordinary
     // maintenance guard, so a maintenance marker arriving after admission rolls
     // the whole transfer back (lib/businessMaintenanceGuard.ts).
-    assert.match(body, /await db.batch\(\[\.\.\.statements, ordinaryBusinessMaintenanceGuard\]\)/)
+    assert.match(body, /await executeStockTransaction\(db, \[\.\.\.statements, ordinaryBusinessMaintenanceGuard\], 'retry'\)/)
+    assert.doesNotMatch(body, /await db\.batch\(\[\.\.\.statements/)
     assert.doesNotMatch(body, /await resolveDestinationBatch\(/)
   }
 })

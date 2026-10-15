@@ -134,6 +134,7 @@ const exactStubs = {
     getImportFencedDb: async () => activeState.db,
     isImportMaintenanceFenceError: () => false,
   },
+  './stockTransaction': load('lib/stockTransaction.ts'),
   './permissions': permissions,
   './auth': {},
   './media': media,

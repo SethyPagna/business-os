@@ -15,11 +15,14 @@ function compile(name, dependencies = {}, allowUncalledStubs = false) {
   return module.exports
 }
 const money = compile('moneyPrecision')
+const stockTransaction = compile('stockTransaction')
 const sqlBinding = compile('sqlBinding')
-const batches = compile('productBatches', { './moneyPrecision': money, './sqlBinding': sqlBinding, './batchCode': compile('batchCode'), './receivingBranch': compile('receivingBranch') })
+const batches = compile('productBatches', { './stockTransaction': stockTransaction, './moneyPrecision': money, './sqlBinding': sqlBinding, './batchCode': compile('batchCode'), './receivingBranch': compile('receivingBranch') })
 const catalog = compile('catalogCostRecompute', { './moneyPrecision': money })
-const engine = compile('importEngine', { './productBatches': batches, './catalogCostRecompute': catalog,
+const engine = compile('importEngine', { './stockTransaction': stockTransaction, './productBatches': batches, './catalogCostRecompute': catalog,
   './moneyPrecision': money, './sqlBinding': sqlBinding, './stockReceiptGate': compile('stockReceiptGate') }, true)
+const runGroups = (db, groups) => engine.runD1BatchGroupsInChunks(db, groups, 300, true)
+assert.match(fs.readFileSync(path.join(__dirname, '../src/lib/importEngine.ts'), 'utf8'), /runD1BatchGroupsInChunks\(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job\.type === 'inventory' \|\| job\.type === 'products'\)/)
 const row = (rowNumber, cost, quantity = 1, branch = 1) => ({
   rowNumber, action: 'create', existingId: 1, identifier: 'P', changes: {}, message: null,
   data: { product_id: 1, product_name: 'P', branch_id: branch, branch_name: branch === 1 ? 'Shop' : 'Warehouse',
@@ -47,6 +50,15 @@ function setup() {
       quantity REAL,unit_cost_usd REAL,unit_cost_khr REAL,total_cost_usd REAL,total_cost_khr REAL,reason TEXT,created_at TEXT,batch_id INTEGER);
     CREATE TABLE row_guards(row_number INTEGER PRIMARY KEY);
   `)
+  sqlite.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    CREATE TABLE import_jobs(status TEXT,lease_expires_at TEXT);
+    CREATE TABLE bulk_delete_jobs(status TEXT);
+    CREATE TABLE stock_mutation_receipts(id INTEGER PRIMARY KEY);
+    CREATE TABLE damaged_stock_lots(id INTEGER PRIMARY KEY,quantity_remaining REAL);
+  `)
+  sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+  assert.throws(() => sqlite.exec('UPDATE products SET stock_quantity=1 WHERE id=1'), /stock_transaction_required/)
   const batchSizes = []
   let reads = 0
   const db = {
@@ -56,12 +68,16 @@ function setup() {
     } },
     async batch(statements) {
       batchSizes.push(statements.length)
-      sqlite.transaction(() => statements.forEach(({ sql, params }) => sqlite.prepare(sql).run(params || {})))()
+      try {
+        return sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))()
+      } finally {
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      }
     },
   }
   const guard = number => ({ sql: 'INSERT INTO row_guards VALUES(@number)', params: { number } })
   const plan = rows => engine.planInventoryImportReceiptGroups(db, rows, guard)
-  const apply = async rows => engine.runD1BatchGroupsInChunks(db, await plan(rows))
+  const apply = async rows => runGroups(db, await plan(rows))
   return { sqlite, db, plan, apply, batchSizes, reads: () => reads }
 }
 
@@ -73,7 +89,8 @@ function setup() {
   assert.equal(precise.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 3.1234)
   const fixture = setup()
   const groups = await fixture.plan([row(1, 3, 2, 1), row(2, 5, 1, 2), row(3, 3, 1, 2)])
-  await engine.runD1BatchGroupsInChunks(fixture.db, groups)
+  await assert.rejects(() => fixture.db.batch(groups[0]), /stock_transaction_required/)
+  await runGroups(fixture.db, groups)
   assert.deepEqual(fixture.sqlite.prepare('SELECT stock_quantity,cost_price_usd,cost_price_khr FROM products').get(), { stock_quantity: 4, cost_price_usd: 3.5, cost_price_khr: 400 },
     'U-cost weighted on-hand cost: 3 units @ 3 and 1 @ 5 -> (9 + 5) / 4 = 3.5 (the distinct mean said 4)')
   assert.deepEqual(fixture.sqlite.prepare('SELECT branch_id,quantity FROM branch_stock ORDER BY branch_id').all(), [{ branch_id: 1, quantity: 2 }, { branch_id: 2, quantity: 2 }])
@@ -81,7 +98,7 @@ function setup() {
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 2)
   assert.equal(fixture.sqlite.prepare('SELECT received_cost_usd FROM product_batches WHERE unit_cost_usd=3').get().received_cost_usd, 9)
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE batch_id IS NOT NULL').get().n, 3)
-  await assert.rejects(() => fixture.db.batch(groups[0]), /UNIQUE/)
+  await assert.rejects(() => runGroups(fixture.db, [groups[0]]), /UNIQUE/)
   assert.equal(fixture.sqlite.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 4)
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM stock_session_guards').get().n, 0)
   const baseline = fixture.sqlite.prepare('SELECT MAX(id) id FROM product_batches').get().id
@@ -108,7 +125,7 @@ function setup() {
   const stale = setup()
   const staleGroups = await stale.plan([row(1, 3)])
   stale.sqlite.exec('INSERT INTO product_cost_entries VALUES(1,1,9,5)')
-  await assert.rejects(() => engine.runD1BatchGroupsInChunks(stale.db, staleGroups), /CHECK/)
+  await assert.rejects(() => runGroups(stale.db, staleGroups), /CHECK/)
   assert.equal(stale.sqlite.prepare('SELECT COUNT(*) n FROM row_guards').get().n, 0)
   assert.equal(stale.sqlite.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 0)
 

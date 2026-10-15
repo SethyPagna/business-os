@@ -44,7 +44,7 @@ async function checkEnvelopeRoutes(api) {
   function pure(name) {
     if (modules.has(name)) return modules.get(name).exports
     if (['branchWrites', 'canonicalBranchIdentity', 'branchRoles'].includes(name)) assert.ok(name, 'selected real branch dependency')
-    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard'].includes(name), name)
+    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard', 'productCostReview', 'catalogCostRecompute', 'moneyPrecision', 'stockTransaction'].includes(name), name)
     const m = { exports: {} }; modules.set(name, m)
     const code = ts.transpileModule(fs.readFileSync(path.join(root, 'lib', name + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
@@ -62,6 +62,7 @@ async function checkEnvelopeRoutes(api) {
   const undoCode = ts.transpileModule(undoFunctions.map(node => node.getText(undoSource)).join('\n'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('APPLIERS', 'module', 'exports', undoCode)(new Proxy({}, { get: unused }), undoModule, undoModule.exports)
   const stubs = {
+    '../lib/productCostReview': pure('productCostReview'), '../lib/stockTransaction': pure('stockTransaction'),
     '../lib/acquisitionCostAccess': api, '../lib/permissions': pure('permissions'), '../lib/db': pure('db'),
     '../lib/actorSnapshot': pure('actorSnapshot'), '../lib/pendingActions': pure('pendingActions'),
     '../lib/branchWrites': pure('branchWrites'),
