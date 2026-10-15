@@ -3218,6 +3218,7 @@ function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: 
       (entity_type='product_image' AND entity_key IN (SELECT CAST(id AS TEXT) FROM product_images WHERE product_id IN (SELECT value FROM json_each(@mergeReceiptProducts))))`})
   } else reads.push({ key: 'currentCostEntries', sql: 'SELECT * FROM product_cost_entries WHERE product_id IN (?,?)', params: [reversal.keeperId, reversal.dupId] })
   const params: Record<string, unknown> = Array.isArray(reversal)?{mergeReceiptProducts:JSON.stringify([...new Set(list.flatMap(row=>[row.keeperId,row.dupId]))].sort((a,b)=>a-b))}:{}
+  const bindings: unknown[] = []
   let sql = "json('{}')"
   for (const [index, read] of reads.entries()) {
     const wildcard = read.sql.match(/^SELECT \* FROM (\w+)/)
@@ -3227,9 +3228,12 @@ function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: 
       throw new UndoConflictError('Missing merge graph schema.')
     }
     let binding = 0
-    const query = read.sql.replace(/\?/g, () => `@mergeGraph${index}_${binding++}`)
+    const query = read.sql.replace(/\?/g, () => {
+      const slot = bindings.length
+      bindings.push((read.params || [])[binding++] ?? null)
+      return `json_extract(@mergeGraphBindings,'$[${slot}]')`
+    })
     if (binding !== (read.params || []).length) throw new UndoConflictError('Invalid merge graph bindings.')
-    for (const [i, value] of (read.params || []).entries()) params[`mergeGraph${index}_${i}`] = value
     const values = columns.map(name => `live."${name}"`)
     const encoded = values.map(value => `json_array(typeof(${value}),CASE WHEN typeof(${value})='real' THEN printf('%!.17g',${value}) ELSE ${value} END)`)
     const groups = chunk(encoded, 15).map(group => `json_array(${group.join(',')})`)
@@ -3239,6 +3243,7 @@ function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: 
     params[`mergeColumns${index}`] = JSON.stringify(columns)
     sql = `json_set(${sql},'$."${key}"',json_array(json(@mergeColumns${index}),json(${rows})))`
   }
+  params.mergeGraphBindings = JSON.stringify(bindings)
   if (sql.length > 65536 || Object.keys(params).length > 85) throw new UndoConflictError('This merge graph is too large to replay safely.')
   return { sql, params }
 }
@@ -3471,7 +3476,9 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       await reconcile().catch(() => {})
       return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
     }
-    if (/malformed JSON|merge_cost_.*guard/i.test(String(error))) throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
+    if ((error instanceof Error && error.message === 'merge_state_conflict') || /malformed JSON|merge_cost_.*guard/i.test(String(error))) {
+      throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
+    }
     throw error
   }
   await broadcast(ctx.env, 'products', { action: 'update' })
