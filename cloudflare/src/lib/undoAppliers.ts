@@ -104,6 +104,7 @@ export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierCon
 // (frontend/src/api/actionHistoryTransport.ts). The English message stays for
 // action_history.last_error and API callers.
 export const UNDO_RECORD_CHANGED_CODE = 'undo_record_changed'
+export const UNDO_GROUP_REDO_COMMITTED_CODE = 'merge_group_redo_committed'
 export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
 // A merge closed this stock-in session's Undo for good (see
 // closeStockSessionsStatements); the row reads "Undo closed: products were merged".
@@ -1669,7 +1670,7 @@ async function replayAtomicSaleAddItems(
       params: { nextGeneration, saleId, stamp, operation: operationId },
     },
     {
-      sql: `UPDATE action_history SET status=@status,reversible=@reversible,last_error=NULL,updated_at=@stamp,
+      sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,
             undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
             redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
             WHERE id=@history`,
@@ -2570,6 +2571,8 @@ type ProductMergeGroupAssociation = {
   action_history_id: number
   actor_id: number
   history_actor_id: number | null
+  history_status: string
+  history_reversible: number | null
   snapshot_actor_id: number | null
 }
 
@@ -2693,7 +2696,7 @@ async function loadProductMergeGroupReplay(
   const association = await db.prepare(`
     SELECT g.review_id,g.ordinal AS group_ordinal,g.group_key,g.status AS group_status,
            g.reversal_generation,g.action_history_id,g.operation_id AS group_operation_id,r.actor_id,
-           h.created_by_id AS history_actor_id,@snapshot_actor AS snapshot_actor_id
+           h.created_by_id AS history_actor_id,h.status AS history_status,h.reversible AS history_reversible,@snapshot_actor AS snapshot_actor_id
     FROM product_conflict_action_groups g
     JOIN product_conflict_action_reviews r ON r.id=g.review_id
     JOIN action_history h ON h.id=g.action_history_id
@@ -2789,7 +2792,8 @@ function productMergeGroupCompletionStatements(args: {
   const finalGroupStatus = direction === 'undo' ? 'reversed' : 'completed'
   const finalHistoryStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const nextGeneration = final ? generation + 1 : generation
-  const payload = JSON.stringify(args.freshReversal || child.reversal)
+  const payload = JSON.stringify(args.freshReversal
+    ? { ...args.freshReversal, ...(args.graph ? { fingerprintPending:true } : {}) } : child.reversal)
   const stamp = new Date().toISOString()
   const guard = {
     sql: `SELECT CASE WHEN
@@ -2960,6 +2964,58 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
   return { before, after }
 }
 
+function productMergeGroupRedoCommitted(association:ProductMergeGroupAssociation,expectedGeneration:number):UndoConflictError {
+  return Object.assign(new UndoConflictError(
+    'Redo was saved, but its history receipt is not ready. Retry Redo to check the saved receipt; newer changes will be preserved.',
+    UNDO_GROUP_REDO_COMMITTED_CODE,
+  ),{params:{history_id:Number(association.action_history_id),group_operation_id:association.group_operation_id,expected_generation:expectedGeneration,committed:true}})
+}
+
+async function finalizeProductMergeGroupRedoReceipt(
+  loaded:Awaited<ReturnType<typeof loadProductMergeGroupReplay>>, child:ProductMergeGroupChild,
+  generation:number, schema?:Map<string,string[]>,
+):Promise<void> {
+  const {db,pointer,association,children}=loaded
+  const final=children.every(row=>row.id===child.id || row.status==='applied')
+  const currentReceipt = pointer.mergeVersion === 3
+  const refreshed = await db.prepare(`SELECT payload_json FROM undo_snapshots
+    WHERE id=@child AND kind=@kind AND status='applied'`).get<{ payload_json: string }>({ child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND })
+  if (!refreshed?.payload_json) throw new UndoConflictError('The redone group child receipt is unavailable.')
+  let refreshedReversal: MergeReversal
+  try { refreshedReversal = JSON.parse(refreshed.payload_json) as MergeReversal }
+  catch { throw new UndoConflictError('The redone group child receipt is invalid.') }
+  if (currentReceipt && (refreshedReversal.fingerprintPending !== true
+    || refreshedReversal.operationId !== child.reversal.operationId
+    || Number(refreshedReversal.keeperId) !== Number(child.reversal.keeperId) || Number(refreshedReversal.dupId) !== Number(child.reversal.dupId)
+    || !parseMergeCostOutcome(refreshedReversal.costReviewOutcome))) throw new UndoConflictError('The pending group child receipt does not match its operation.')
+  const readGuards: AtomicMergeStatement[] = []
+  const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,
+    mergedStateFingerprint: await mergeStateFingerprint(db, [refreshedReversal],readGuards) })
+  const finalizeGuards:AtomicMergeStatement[]=[]
+  if (currentReceipt) {
+    const row=await db.prepare(`SELECT s.payload_json,h.undo_payload,h.redo_payload,h.status,h.reversible FROM undo_snapshots s JOIN action_history h ON h.id=@history WHERE s.id=@snapshot AND s.kind=@kind`).get<{payload_json:string;undo_payload:string;redo_payload:string;status:string;reversible:number}>({history:association.action_history_id,snapshot:pointer.snapshotId,kind:PRODUCT_MERGE_GROUP_ACTION_KIND})
+    if(!row) throw new UndoConflictError('The committed group graph receipt is unavailable.')
+    let currentPointer:ReturnType<typeof strictProductMergeGroupPointer>=null
+    try { currentPointer=strictProductMergeGroupPointer(JSON.parse(row.undo_payload)) } catch { currentPointer=null }
+    if(!currentPointer || currentPointer.mergeVersion!==3 || currentPointer.snapshotId!==pointer.snapshotId || currentPointer.operationId!==association.group_operation_id
+      || currentPointer.generation!==generation || row.undo_payload!==row.redo_payload || (final ? row.status!=='recorded' || Number(row.reversible)!==0 : row.status!=='redoable' || Number(row.reversible)!==1)) throw new UndoConflictError('The pending group redo receipt is not current.')
+    finalizeGuards.push({sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM action_history WHERE id=@id AND undo_payload=@payload AND redo_payload=@payload AND status=@status AND reversible=@reversible)
+      THEN 1 ELSE json_extract('', '$') END AS product_merge_group_history_finalize_guard`,params:{id:association.action_history_id,payload:row.undo_payload,status:row.status,reversible:row.reversible}})
+    const freshGraph=mergeReplayGraphSql(children.map(row=>row.id===child.id?refreshedReversal:row.reversal),schema ?? await mergeReplayColumns(db))
+    finalizeGuards.push(productMergeGroupGraphGuard(freshGraph,pointer.snapshotId,row.payload_json,generation))
+  }
+  try { await db.batch([...finalizeGuards,...readGuards,{
+    sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@child AND kind=@kind AND status='applied' AND payload_json=@before)
+      THEN 1 ELSE json_extract('', '$') END AS product_merge_group_finalizer_guard`,
+    params:{child:child.id,kind:PRODUCT_MERGE_GROUP_CHILD_KIND,before:refreshed.payload_json},
+  },{
+    sql:`UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@child`,
+    params:{payload:fingerprinted,child:child.id},
+  },...(currentReceipt && final?[{sql:"UPDATE action_history SET status='undoable',reversible=1,last_error=NULL WHERE id=@history AND status='recorded' AND reversible=0",params:{history:Number(association.action_history_id)}}]:[])]) } catch {
+    throw productMergeGroupRedoCommitted(association,final?generation-1:generation)
+  }
+}
+
 async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: UndoApplierContext): Promise<UndoApplierOutcome> {
   if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative group history identity is required.')
   const expectedGeneration = Number(ctx.generation)
@@ -2974,6 +3030,23 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   }
   const appliedCount = children.filter((child) => child.status === 'applied').length
   const terminal = ctx.direction === 'undo' ? appliedCount === 0 : appliedCount === children.length
+  if (pointer.mergeVersion===3 && ctx.direction==='redo' && children.some(row=>row.status==='applied'
+    && row.reversal.fingerprintPending!==false && row.reversal.fingerprintPending!==true)) {
+    throw new UndoConflictError('A current group child is missing its finalization state.',UNDO_HISTORY_STALE_CODE)
+  }
+  const pendingReceipt=children.filter(row=>row.status==='applied' && row.reversal.fingerprintPending===true)
+  if (pointer.mergeVersion===3 && ctx.direction==='redo' && association.history_status==='recorded'
+    && (Number(association.history_reversible)!==0 || pendingReceipt.length!==1)) {
+    throw new UndoConflictError('The recorded group redo has no pending authoritative receipt.',UNDO_HISTORY_STALE_CODE)
+  }
+  if(pointer.mergeVersion===3 && ctx.direction==='redo' && pendingReceipt.length) {
+    if(pendingReceipt.length!==1 || pendingReceipt[0].id!==children[appliedCount-1]?.id
+      || (terminal ? generation!==expectedGeneration+1 : generation!==expectedGeneration)) {
+      throw new UndoConflictError('The pending group redo receipt has a stale generation or prefix.',UNDO_HISTORY_STALE_CODE)
+    }
+    await finalizeProductMergeGroupRedoReceipt(loaded,pendingReceipt[0],generation)
+    return {complete:terminal,continuation_required:!terminal,processed_children:0,pending_children:children.length-appliedCount,generation}
+  }
   if (generation === expectedGeneration + 1 && terminal) {
     return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation }
   }
@@ -3025,30 +3098,10 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
         groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal, graph,
       }),
     })
-    const refreshed = await db.prepare(`SELECT payload_json FROM undo_snapshots
-      WHERE id=@child AND kind=@kind AND status='applied'`).get<{ payload_json: string }>({ child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND })
-    if (!refreshed?.payload_json) throw new UndoConflictError('The redone group child receipt is unavailable.')
-    let refreshedReversal: MergeReversal
-    try { refreshedReversal = JSON.parse(refreshed.payload_json) as MergeReversal }
-    catch { throw new UndoConflictError('The redone group child receipt is invalid.') }
-    const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,
-      mergedStateFingerprint: await mergeStateFingerprint(db, [refreshedReversal]) })
-    const finalizeGuards:AtomicMergeStatement[]=[]
-    if(preparedGroupGraph) {
-      const row=await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=? AND kind=?').get<{payload_json:string}>([pointer.snapshotId,PRODUCT_MERGE_GROUP_ACTION_KIND])
-      if(!row) throw new UndoConflictError('The committed group graph receipt is unavailable.')
-      const freshGraph=mergeReplayGraphSql(children.map(row=>row.id===child.id?refreshedReversal:row.reversal),preparedGroupGraph.schema)
-      finalizeGuards.push(productMergeGroupGraphGuard(freshGraph,pointer.snapshotId,row.payload_json,final?generation+1:generation))
-    }
-    try { await db.batch([...finalizeGuards,{
-      sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@child AND kind=@kind AND status='applied' AND payload_json=@before)
-        THEN 1 ELSE json_extract('', '$') END AS product_merge_group_finalizer_guard`,
-      params:{child:child.id,kind:PRODUCT_MERGE_GROUP_CHILD_KIND,before:refreshed.payload_json},
-    },{
-      sql:`UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@child`,
-      params:{payload:fingerprinted,child:child.id},
-    },...(preparedGroupGraph && final?[{sql:"UPDATE action_history SET status='undoable',reversible=1,last_error=NULL WHERE id=@history AND status='recorded' AND reversible=0",params:{history:Number(ctx.historyId)}}]:[])]) } catch {
-      throw new UndoConflictError('This group redo committed, but its graph changed before the replay receipt was finalized. The committed changes were preserved.', UNDO_RECORD_CHANGED_CODE)
+    try { await finalizeProductMergeGroupRedoReceipt(loaded,child,final?generation+1:generation,preparedGroupGraph?.schema) }
+    catch(error) {
+      if(pointer.mergeVersion===3) throw productMergeGroupRedoCommitted(association,generation)
+      throw error
     }
   }
   const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1

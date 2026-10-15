@@ -1,12 +1,16 @@
 const assert = require('node:assert/strict')
-const { startWorker, recorder, budgetLine, historyStep } = require('./harness/al_money_native.cjs')
+const { startWorker, recorder, budgetLine, historyStep,seedProduct,createSale,addSaleItems } = require('./harness/al_money_native.cjs')
 
 async function main() {
-  const initialRace=process.argv.includes('--group-initial-race'), redoRace=process.argv.includes('--group-redo-race'), postPce=process.argv.includes('--group-post-pce')
+  const initialRace=process.argv.includes('--group-initial-race'), redoRace=process.argv.includes('--group-redo-race'), postPce=process.argv.includes('--group-post-pce'), recovery=process.argv.includes('--group-recovery'), recoveryChanged=process.argv.includes('--group-recovery-changed'), partialRecovery=process.argv.includes('--group-partial-recovery'), lostAck=process.argv.includes('--group-finalizer-lostack')
   const racePatches=initialRace?[{name:'group initial committed stock edit before first fingerprint',file:'src/routes/products.ts',from:'  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }',to:`  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }
-  if (!await db.prepare("SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND status='planned' AND role='merged'").get({review:review.id,ordinal:group.ordinal})) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([reversal.keeperId])`}]:redoRace?[{name:'group redo committed stock edit before first fingerprint',file:'src/lib/undoAppliers.ts',from:'    const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,',to:`    if (final) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([refreshedReversal.keeperId])
+  if (!await db.prepare("SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND status='planned' AND role='merged'").get({review:review.id,ordinal:group.ordinal})) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([reversal.keeperId])`}]:redoRace?[{name:'group redo committed stock edit before first fingerprint',file:'src/lib/undoAppliers.ts',from:'const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,',to:`    if (final) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([refreshedReversal.keeperId])
     const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,`}]:[]
-  const h = await startWorker({patches:[...racePatches,{name:'synthetic legacy cache entry omits new review boolean',file:'src/lib/cache.ts',
+  const interruptionPatches=lostAck?[{name:'lost acknowledgement after actual group finalizer batch',file:'src/lib/undoAppliers.ts',from:'params:{history:Number(association.action_history_id)}}]:[])]) } catch {',to:`params:{history:Number(association.action_history_id)}}]:[])])
+    if(final && !(globalThis as any).__groupFinalizerAckLost){(globalThis as any).__groupFinalizerAckLost=true;throw new Error('Synthetic lost acknowledgement AFTER committed group finalizer batch')}
+    } catch {`}]:recovery||recoveryChanged||partialRecovery?[{name:'one actual committed group redo finalizer interruption',file:'src/lib/undoAppliers.ts',from:'const finalizeGuards:AtomicMergeStatement[]=[]',to:`    if (${partialRecovery?'!final':'final'} && !(globalThis as any).__groupFinalizerInterrupted) { (globalThis as any).__groupFinalizerInterrupted=true; throw new Error('Synthetic acknowledgement interruption before group finalizer'); }
+    const finalizeGuards:AtomicMergeStatement[]=[]`}]:[]
+  const h = await startWorker({patches:[...racePatches,...interruptionPatches,{name:'synthetic legacy cache entry omits new review boolean',file:'src/lib/cache.ts',
     from:'const response = new Response(JSON.stringify(value), {',
     to:"const response = new Response(JSON.stringify(value, (key, entry) => key === 'cost_needs_review' ? undefined : entry), {"}]}), proof = recorder('current merge authority')
   let nextId = 71000
@@ -30,7 +34,22 @@ async function main() {
     return { keepId,mergeId,name,barcode,echo }
   }
   try {
-    if(!process.argv.includes('--held-only') && !initialRace && !redoRace && !postPce) {
+    if(process.argv.includes('--sale-add-sibling')) {
+      await seedProduct(h,805001,'Sibling sale item',10,20,1)
+      const sale=await createSale(h,{key:'group-sibling-sale',lines:[{productId:805001,quantity:1,quote:{gross_usd:10,product_discount_usd:0,manual_discount_usd:0,total_usd:10,total_khr:40000}}],paymentDetails:[{method:'Cash',amount_usd:10,amount_khr:0}]})
+      assert.equal(sale.status,200,JSON.stringify(sale.body))
+      const add=await addSaleItems(h,sale.body.id,'group-sibling-add',[{productId:805001,quantity:1}],'sale sibling actual add')
+      assert.equal(add.status,200,JSON.stringify(add.body))
+      const id=add.body.undoActionId||add.body.actionHistoryId;assert.ok(id)
+      for(const [direction,generation,total] of [['undo',0,10],['redo',1,20],['undo',2,10]]) {
+        const response=await historyStep(h,id,direction,generation,`sale sibling ${direction} ${generation}`)
+        const row=await h.one('SELECT reversible,status FROM action_history WHERE id=?',id)
+        const stored=await h.one('SELECT total_usd FROM sales WHERE id=?',sale.body.id)
+        proof.check(`sale add sibling ${direction} ${generation} remains reversible`,()=>{assert.equal(response.status,200,JSON.stringify(response.body));assert.equal(row.reversible,1,JSON.stringify(row));assert.equal(stored.total_usd,total)})
+      }
+      budgetLine(h.metrics);console.log(JSON.stringify({results:proof.results}));if(proof.results.some(row=>!row.ok))process.exitCode=1;return
+    }
+    if(!process.argv.includes('--held-only') && !initialRace && !redoRace && !postPce && !recovery && !recoveryChanged && !partialRecovery && !lostAck) {
     for (const value of [null,0,5]) {
       const p = await pair('identity',value,{echo:true})
       const before = await h.one('SELECT updated_at FROM products WHERE id=?',p.mergeId)
@@ -130,7 +149,7 @@ async function main() {
     const no=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',body,'denied selected preview',{cookie:denied})
     proof.check('selected permission denial remains enforced',()=>assert.equal(no.status,403,JSON.stringify(no.body)))
     }
-    for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]])) {
+    for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce||recovery||recoveryChanged||partialRecovery||lostAck?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]])) {
       const p=await pair('selected',value,{manual,lot})
       const third=nextId++
       await h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode).run()
@@ -197,11 +216,45 @@ async function main() {
       for(let attempt=0;attempt<5;attempt++){undo=await historyStep(h,history.action_history_id,'undo',0,`held undo ${p.keepId}/${attempt}`);if(undo.status!==200||!undo.body.continuation_required)break}
       if(undo.status!==200)console.log('HELD_UNDO_D1',p.keepId,JSON.stringify((await h.call('GET','/__fixture/d1-errors',undefined)).body))
       if(undo.status===200&&!undo.body.continuation_required)for(let attempt=0;attempt<5;attempt++){redo=await historyStep(h,history.action_history_id,'redo',1,`held redo ${p.keepId}/${attempt}`);if(redo.status!==200||!redo.body.continuation_required)break}
+      if(recovery||recoveryChanged||partialRecovery||lostAck) {
+        assert.equal(redo.status,409,JSON.stringify(redo.body));assert.equal(redo.body.code,'merge_group_redo_committed');assert.equal(redo.body.params?.expected_generation,1);assert.equal(redo.body.params?.history_id,history.action_history_id);assert.equal(redo.body.params?.committed,true)
+        const interruptedHistory=await h.one('SELECT reversible,status FROM action_history WHERE id=?',history.action_history_id)
+        const latestChild=await h.one("SELECT s.payload_json FROM undo_snapshots s JOIN product_conflict_action_group_members m ON m.undo_snapshot_id=s.id WHERE m.review_id=? AND s.status='applied' ORDER BY m.member_ordinal DESC LIMIT 1",preview.body.review_id)
+        proof.check('group interruption preserves actual committed finalization state',()=>{assert.equal(interruptedHistory.status,lostAck?'undoable':partialRecovery?'redoable':'recorded');assert.equal(interruptedHistory.reversible,lostAck||partialRecovery?1:0);assert.equal(JSON.parse(latestChild.payload_json).fingerprintPending,!lostAck)})
+
+        const snapshot=()=>h.all('SELECT * FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third)
+        if(recoveryChanged) await h.db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').bind(p.keepId).run()
+        const before=await snapshot(), audits=await h.one('SELECT COUNT(*) n FROM audit_logs')
+        const stock=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
+        if(recovery && !partialRecovery) {
+          const stale=await historyStep(h,history.action_history_id,'redo',2,'group pending receipt wrong expected generation')
+          proof.check('recorded receipt refuses wrong retry generation',()=>assert.equal(stale.status,409,JSON.stringify(stale.body)))
+
+          const storedPointer=await h.one('SELECT redo_payload FROM action_history WHERE id=?',history.action_history_id)
+          const old=JSON.parse(storedPointer.redo_payload);delete old.merge_version;delete old.operation_id
+          await h.db.prepare('UPDATE action_history SET redo_payload=? WHERE id=?').bind(JSON.stringify(old),history.action_history_id).run()
+          try {const refused=await historyStep(h,history.action_history_id,'redo',1,'legacy five-key pointer is not receipt retry');proof.check('recorded legacy five-key pointer stays refused',()=>assert.equal(refused.status,400,JSON.stringify(refused.body)))}
+          finally {await h.db.prepare('UPDATE action_history SET redo_payload=? WHERE id=?').bind(storedPointer.redo_payload,history.action_history_id).run()}
+        }
+        const retry=await historyStep(h,history.action_history_id,'redo',1,'group receipt-only committed redo retry')
+        proof.check('group committed redo receipt-only retry admission',()=>{assert.equal(retry.status,recoveryChanged?409:200,JSON.stringify(retry.body));if(!recoveryChanged){assert.equal(retry.body.processed_children,0);assert.equal(retry.body.continuation_required,partialRecovery)}})
+        assert.deepEqual(await snapshot(),before);assert.deepEqual(await h.one('SELECT COUNT(*) n FROM audit_logs'),audits)
+        assert.deepEqual(await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third),stock)
+        if(!recoveryChanged && retry.status===200) {
+          if(partialRecovery) {const continuation=await historyStep(h,history.action_history_id,'redo',1,'group after metadata retry next fold');assert.equal(continuation.status,200,JSON.stringify(continuation.body));assert.equal(continuation.body.continuation_required,false)}
+          const noOp=await historyStep(h,history.action_history_id,'redo',1,'group already finalized retry')
+          proof.check('group already finalized retry never repeats fold',()=>{assert.equal(noOp.status,200,JSON.stringify(noOp.body));assert.equal(noOp.body.processed_children,0)})
+          let back
+          for(let attempt=0;attempt<5;attempt++){back=await historyStep(h,history.action_history_id,'undo',2,'group recovered next undo');if(back.status!==200||!back.body.continuation_required)break}
+          proof.check('group recovered receipt retains genuine Undo',()=>{assert.equal(back.status,200,JSON.stringify(back.body));assert.equal(back.body.continuation_required,false)})
+        }
+        break
+      }
       if(redoRace) {
         const before=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
         const refused=await historyStep(h,history.action_history_id,'undo',2,'group redo race next undo')
         const admission=await h.one('SELECT status,reversible FROM action_history WHERE id=?',history.action_history_id)
-        proof.check('group redo committed edit remains intact and cannot be adopted',()=>{assert.equal(redo.status,409,JSON.stringify(redo.body));assert.match(redo.body.error,/redo committed/);assert.equal(admission.status,'recorded');assert.equal(admission.reversible,0);assert.equal(refused.status,400,JSON.stringify(refused.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
+        proof.check('group redo committed edit remains intact and cannot be adopted',()=>{assert.equal(redo.status,409,JSON.stringify(redo.body));assert.equal(redo.body.code,'merge_group_redo_committed');assert.match(redo.body.error,/Redo was saved/);assert.equal(admission.status,'recorded');assert.equal(admission.reversible,0);assert.equal(refused.status,400,JSON.stringify(refused.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
         assert.deepEqual(await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third),before)
         break
       }
@@ -220,7 +273,7 @@ async function main() {
       }
 
     }
-    for(const phase of (initialRace||redoRace||postPce?[]:['draft','final'])) {
+    for(const phase of (initialRace||redoRace||postPce||recovery||recoveryChanged||partialRecovery||lostAck?[]:['draft','final'])) {
       const p=await pair('selected',5,{manual:7})
       const review=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{manifest_version:1,resolution_version:2,client_request_id:`held-stale-${p.keepId}`,merge_groups:[{group_key:`barcode:${p.barcode}`,member_ids:[p.keepId,p.mergeId]}],remove_rows:[]},`held stale preview ${phase}`)
       assert.equal(review.status,200,JSON.stringify(review.body))
