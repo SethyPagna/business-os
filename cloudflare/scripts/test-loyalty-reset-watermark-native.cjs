@@ -42,25 +42,25 @@ await seed([
 ...Object.entries({loyalty_points_enabled:'true',customer_portal_points_basis:'usd',customer_portal_points_per_usd:'1.5',notifications_loyalty_threshold:'1',customer_portal_redeem_points:'100',exchange_rate:'4000'}).map(([key,value])=>({sql:'INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',params:[key,value]})),
 {sql:"INSERT INTO customers(id,name,membership_number) VALUES(9901,'Synthetic reset witness','LC-9901')"},
 {sql:"INSERT INTO sales(id,receipt_number,customer_id,total_usd,total_khr,sale_status,loyalty_accrual,created_at) VALUES(9001,'PRE-EARNED',9901,100,400000,'completed',1,"+old+"),(9002,'PRE-SPENT',9901,10,40000,'completed',1,"+old+")"},
-{sql:"UPDATE sales SET membership_points_redeemed=5 WHERE id=9002"},
+{sql:"UPDATE sales SET membership_points_redeemed=5,sale_status='awaiting_payment' WHERE id=9002"},
 {sql:"INSERT INTO returns(return_number,customer_id,sale_id,return_scope,status,total_refund_usd,total_refund_khr,created_at) VALUES('PRE-RETURN',9901,9001,'customer','completed',60,240000,"+old+")"},
 {sql:"INSERT INTO loyalty_point_adjustments(customer_id,points,created_at) VALUES(9901,1000,"+old+")"},
 {sql:"INSERT INTO loyalty_point_adjustments(customer_id,points,created_at) VALUES(9901,7,datetime('now','+3 days'))"},
-{sql:"INSERT INTO customer_share_submissions(customer_id,status,reward_points,reviewed_at,created_at) VALUES(9901,'approved',500,"+old+","+old+")"},
+{sql:"INSERT INTO customer_share_submissions(customer_id,status,reward_points,reviewed_at,created_at) VALUES(9901,'approved',500,"+old+","+old+"),(9901,'pending',0,NULL,"+old+")"},
 {sql:"INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Synthetic shop','shop',1,1)"},
 {sql:"INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(10,'Powder','RESET-PRODUCT',10,9.5,38000,4,16000,1)"},
 {sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)'},
 {sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number) VALUES(500,10,'reset-lot','RESET-LOT','2027-06-01','2026-09-01',1,1)"},
 {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)'}])
 const request=async(p,body,method)=>call({path:p,token,body,method})
-const readers=async()=>{
- const member=await request('/api/customers/membership/LC-9901');assert.equal(member.status,200,JSON.stringify(member.body))
- const list=await request('/api/customers?search=LC-9901');assert.equal(list.status,200,JSON.stringify(list.body))
- const rows=Array.isArray(list.body)?list.body:(list.body.items||list.body.rows||list.body.data||[]);const row=rows.find(x=>x.id===9901);assert.ok(row,'customer list row '+JSON.stringify(list.body).slice(0,300))
- const summary=await request('/api/customers/points-summary');assert.equal(summary.status,200,JSON.stringify(summary.body));const sumRows=Array.isArray(summary.body)?summary.body:(summary.body.items||summary.body.rows||[]);const sum=sumRows.find(x=>x.id===9901)
- const note=await request('/api/notifications/summary');assert.equal(note.status,200,JSON.stringify(note.body));const section=note.body.sections.find(x=>x.id==='loyalty');const item=section&&section.items.find(x=>x.id==='loyalty-9901')
+const readers=async(customerId=9901)=>{
+ const member=await request('/api/customers/membership/LC-'+customerId);assert.equal(member.status,200,JSON.stringify(member.body))
+ const list=await request('/api/customers?search=LC-'+customerId);assert.equal(list.status,200,JSON.stringify(list.body))
+ const rows=Array.isArray(list.body)?list.body:(list.body.items||list.body.rows||list.body.data||[]);const row=rows.find(x=>x.id===customerId);assert.ok(row,'customer list row '+JSON.stringify(list.body).slice(0,300))
+ const summary=await request('/api/customers/points-summary');assert.equal(summary.status,200,JSON.stringify(summary.body));const sumRows=Array.isArray(summary.body)?summary.body:(summary.body.items||summary.body.rows||[]);const sum=sumRows.find(x=>x.id===customerId)
+ const note=await request('/api/notifications/summary');assert.equal(note.status,200,JSON.stringify(note.body));const section=note.body.sections.find(x=>x.id==='loyalty');const item=section&&section.items.find(x=>x.id==='loyalty-'+customerId)
  return {member:member.body.points.balance,list:Number(row.points_balance),summary:sum?Number(sum.points_balance):null,notification:item?Number(item.meta.split(' ')[0]):0}}
-const parity=async(expected,label)=>{const r=await readers();for(const [name,value] of Object.entries(r))assert.equal(value,expected,label+': reader '+name+' = '+value+', expected '+expected)}
+const parity=async(expected,label,customerId=9901)=>{const r=await readers(customerId);for(const [name,value] of Object.entries(r))assert.equal(value,expected,label+': reader '+name+' = '+value+', expected '+expected)}
 
 const checkSql=fs.readFileSync(path.join(__dirname,'..','..','ops','queries','loyalty-reset-check.sql'),'utf8').replace(/\r\n/g,'\n').split('\n').filter(l=>!l.startsWith('--')).join('\n').trim().replace(/;$/,'')
 assert.ok(/^WITH\b/i.test(checkSql)&&!/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH)\b/i.test(checkSql),'the ops check is SELECT-only')
@@ -136,6 +136,8 @@ await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE receipt_number=
 assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw,'enabling and paying OFF-born sale does not award history')
 const promotion=await call({op:'seed',statements:[{sql:'UPDATE sales SET loyalty_accrual=1 WHERE id='+offLegacy.id}]});assert.match(promotion.error,/loyalty_creation_eligibility_immutable/)
 const reward=async(id,points,status='approved')=>request('/api/portal/submissions/'+id+'/review',{status,reward_points:points},'PATCH')
+assert.equal((await reward(2,5)).status,400,'pre-reset pending reward never earns')
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id=9002"}]);await parity(6.5,'pre-reset unpaid sale never earns on later completion')
 const ineligible=await reward(offSubmission,9);assert.equal(ineligible.status,400,JSON.stringify(ineligible.body))
 await seed([{sql:"INSERT INTO customer_share_submissions(customer_id,status,loyalty_eligible) VALUES(9903,'pending',1)"}])
 const onSubmission=(await call({op:'read',sql:'SELECT MAX(id) id FROM customer_share_submissions'}))[0].id
@@ -147,12 +149,13 @@ await switchTo('false')
 const retry=await request('/api/customers/9903/points',{points:4,client_request_id:'birth-off-award'});assert.equal(retry.status,200);assert.equal(retry.body.replayed,true,'committed retry replays while OFF')
 assert.equal((await reward(onSubmission,3)).status,200,'unchanged earned approval survives OFF')
 assert.equal((await reward(onSubmission,4)).status,400,'OFF cannot increase reward')
+assert.equal((await reward(onSubmission,2)).status,200,'OFF permits correcting an existing earned reward downward')
 await seed([{sql:"INSERT INTO customer_share_submissions(customer_id,status,loyalty_eligible) VALUES(9903,'pending',1)"}])
 const forged=(await call({op:'read',sql:'SELECT loyalty_eligible FROM customer_share_submissions ORDER BY id DESC LIMIT 1'}))[0];assert.equal(forged.loyalty_eligible,0,'OFF submission backstop strips forged birth eligibility')
 await seed([{sql:"INSERT INTO returns(return_number,customer_id,sale_id,status,total_refund_usd) VALUES('BIRTH-OFF-REVERSAL',9903,"+born[3].id+",'completed',1)"}])
-assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+3+4-1.5,'OFF still reverses eligible earned sale')
+assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+2+4-1.5,'OFF still reverses eligible earned sale')
 await seed([{sql:"INSERT INTO returns(return_number,customer_id,sale_id,status,total_refund_usd) VALUES('BIRTH-OFF-NONE',9903,"+offLegacy.id+",'completed',80)"}])
-assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+3+4-1.5,'OFF-born sale return cannot deduct new points')
+assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+2+4-1.5,'OFF-born sale return cannot deduct new points')
 const snapshot={}
 for(const table of ['sales','customer_share_submissions','loyalty_point_adjustments'])snapshot[table]=await call({op:'read',sql:'SELECT * FROM '+table+' WHERE customer_id=9903'})
 await seed([{sql:"INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')"}])
@@ -162,9 +165,42 @@ for(const [table,rows] of Object.entries(snapshot)){
  }
 }
 await seed([{sql:"DELETE FROM system_flags WHERE key='maintenance'"}])
-assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+3+4-1.5,'dynamic restore preserves flags and identities while OFF')
+assert.equal(await call({op:'pointsRaw',customerId:9903}),enabledRaw+2+4-1.5,'dynamic restore preserves flags and identities while OFF')
+const restoreSale=async row=>{
+ await seed([{sql:"INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')"}])
+ const blocked=await request('/api/customers/9903/points',{points:1,client_request_id:'maintenance-must-block'});assert.equal(blocked.status,503,'restore exemption cannot admit ordinary user writes')
+ await seed([{sql:'DELETE FROM sales WHERE id=?',params:[row.id]},{sql:'INSERT INTO sales ('+Object.keys(row).join(',')+') VALUES('+Object.keys(row).map(()=>'?').join(',')+')',params:Object.values(row)},{sql:"DELETE FROM system_flags WHERE key='maintenance'"}])
+}
+await seed([{sql:"INSERT INTO customers(id,name,membership_number) VALUES(9904,'Synthetic first payment','LC-9904')"}])
+await switchTo('true')
+const unpaid=await request('/api/sales',{...ownCheckout(true,'birth-first-payment-off'),customer_id:9904,sale_status:'awaiting_payment',amount_paid_usd:0});assert.equal(unpaid.status,200,JSON.stringify(unpaid.body))
+const unpaidSnapshot=(await call({op:'read',sql:"SELECT * FROM sales WHERE client_request_id='birth-first-payment-off'"}))[0]
+assert.equal(unpaidSnapshot.loyalty_accrual,1)
+await switchTo('false')
+await seed([{sql:"UPDATE sales SET amount_paid_usd=total_usd,sale_status='completed' WHERE id="+unpaidSnapshot.id}])
+assert.equal((await call({op:'read',sql:'SELECT loyalty_accrual FROM sales WHERE id='+unpaidSnapshot.id}))[0].loyalty_accrual,0,'first payment OFF permanently strips earning')
+await parity(0,'first payment OFF never earns',9904);assert.equal(await call({op:'pointsRaw',customerId:9904}),0)
+await switchTo('true');await parity(0,'later enable never awards skipped first payment',9904)
+await restoreSale(unpaidSnapshot)
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id="+unpaidSnapshot.id}])
+await parity(0,'older pending backup cannot resurrect permanent skipped decision',9904)
+const deniedIdentity=await call({op:'seed',statements:[{sql:"UPDATE sales SET client_request_id='foreign-change' WHERE id="+unpaidSnapshot.id}]});assert.match(deniedIdentity.error,/loyalty_sale_identity_immutable/)
+await seed([{sql:"INSERT INTO sales(receipt_number,client_request_id,customer_id,total_usd,sale_status,loyalty_accrual) VALUES('EARNED-THEN-UNPAID','earned-then-unpaid',9904,2,'awaiting_payment',1)"}])
+const earnedPending=(await call({op:'read',sql:"SELECT * FROM sales WHERE client_request_id='earned-then-unpaid'"}))[0]
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id="+earnedPending.id}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),3)
+await switchTo('false');await restoreSale(earnedPending)
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id="+earnedPending.id}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),3,'older pending backup retains prior legitimate earned terminal decision')
+await seed([{sql:"UPDATE sales SET sale_status='cancelled' WHERE id="+earnedPending.id}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),0)
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id="+earnedPending.id}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),3,'cancel reversal while OFF preserves previously earned sale')
+const foreign={...earnedPending,client_request_id:'different-foreign-record',creation_snapshot_json:null}
+await restoreSale(foreign)
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE id="+foreign.id}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),0,'foreign record reusing numeric ID cannot inherit earned terminal decision')
+await switchTo('true')
+await seed([{sql:"INSERT INTO sales(receipt_number,customer_id,total_usd,sale_status) VALUES('BLANK-IDENTITY',9904,2,'awaiting_payment')"}])
+await switchTo('false')
+await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE receipt_number='BLANK-IDENTITY'"}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),0,'blank identity cannot inherit any earned decision')
 const portal=await request('/api/portal/membership/LC-9903');assert.equal(portal.status,403,'public membership stays disabled')
-console.log('PASS loyalty reset: immutable identity, future/same-second history, reward re-review, preserved returns/redemption, reader parity, default off and idempotent audited migration')
+console.log('PASS loyalty reset: immutable identity, future/same-second history, reward re-review, preserved returns/redemption, reader parity, default off, first-payment OFF permanence, restore identity and idempotent audited migration')
 }finally{await mf.dispose()}
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

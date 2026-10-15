@@ -7,6 +7,8 @@ export function loyaltyAfterResetSql(ledger: LoyaltyLedger, idSql = 'id'): strin
   return `${idSql} > COALESCE(json_extract(${reset}, '$.${ledger}'), 0)`
 }
 
+export const loyaltySaleAccrualSql = `CASE WHEN EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',sales.id,sales.client_request_id) AND value = 'skipped') THEN 0 ELSE COALESCE(loyalty_accrual,1) END`
+
 export const loyaltySaleSinceSql = loyaltyAfterResetSql('sales')
 export const loyaltySubmissionSinceSql = `(${loyaltyAfterResetSql('submissions')} AND loyalty_eligible = 1)`
 export const loyaltyAdjustmentSinceSql = loyaltyAfterResetSql('adjustments')
@@ -15,4 +17,4 @@ export const loyaltyAdjustmentSinceSql = loyaltyAfterResetSql('adjustments')
 export const customerPointsReturnSql = `(COALESCE(return_scope,'customer') <> 'supplier'
   AND ${loyaltyAfterResetSql('returns', 'returns.id')}
   AND NOT EXISTS (SELECT 1 FROM sales points_sale WHERE points_sale.id = returns.sale_id
-    AND (COALESCE(points_sale.loyalty_accrual,1) = 0 OR NOT (${loyaltyAfterResetSql('sales', 'points_sale.id')}))))`
+    AND (COALESCE(points_sale.loyalty_accrual,1) = 0 OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',points_sale.id,points_sale.client_request_id) AND value = 'skipped') OR NOT (${loyaltyAfterResetSql('sales', 'points_sale.id')}))))`

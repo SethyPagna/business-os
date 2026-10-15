@@ -2181,19 +2181,19 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
   if (!existing) return c.json({ error: 'Submission not found' }, 404)
 
   try {
-  await db.prepare(`
-    UPDATE customer_share_submissions
-    SET status = @status, reward_points = @rewardPoints, review_note = @reviewNote,
-        reviewed_by_id = @reviewedById, reviewed_by_name = @reviewedByName, reviewed_at = CURRENT_TIMESTAMP
-    WHERE id = @id
-  `).run({
-    id,
-    status,
-    rewardPoints: status === 'approved' ? rewardPoints : 0,
-    reviewNote: reviewNote || null,
-    reviewedById: user?.id ?? null,
-    reviewedByName: actorSnapshot(user),
-  })
+    await db.prepare(`
+      UPDATE customer_share_submissions
+      SET status = @status, reward_points = @rewardPoints, review_note = @reviewNote,
+          reviewed_by_id = @reviewedById, reviewed_by_name = @reviewedByName, reviewed_at = CURRENT_TIMESTAMP
+      WHERE id = @id
+    `).run({
+      id,
+      status,
+      rewardPoints: status === 'approved' ? rewardPoints : 0,
+      reviewNote: reviewNote || null,
+      reviewedById: user?.id ?? null,
+      reviewedByName: actorSnapshot(user),
+    })
   } catch (error) {
     if (String(error).includes(LOYALTY_DISABLED_CODE)) {
       return c.json({ error: 'This submission cannot receive new loyalty points. Loyalty must be on when it is created and rewarded.', code: LOYALTY_DISABLED_CODE }, 400)

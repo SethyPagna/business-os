@@ -2,7 +2,7 @@ import { LOYALTY_DISABLED_CODE } from '../lib/loyaltyEligibility'
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
-import { customerPointsReturnSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
+import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -823,7 +823,7 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   for (const idChunk of idChunks) {
     const placeholders = idChunk.map(() => '?').join(',')
     const [salesChunk, returnChunk, submissionChunk, adjustmentChunk] = await Promise.all([
-      db.prepare(`SELECT customer_id, sale_status, total_usd, total_khr, membership_points_redeemed, COALESCE(loyalty_accrual, 1) AS loyalty_accrual FROM sales WHERE customer_id IN (${placeholders}) AND ${loyaltySaleSinceSql} ORDER BY id ASC`)
+      db.prepare(`SELECT customer_id, sale_status, total_usd, total_khr, membership_points_redeemed, ${loyaltySaleAccrualSql} AS loyalty_accrual FROM sales WHERE customer_id IN (${placeholders}) AND ${loyaltySaleSinceSql} ORDER BY id ASC`)
         .all<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }>(idChunk),
       db.prepare(`SELECT customer_id, status, total_refund_usd, total_refund_khr FROM returns WHERE customer_id IN (${placeholders}) AND ${customerPointsReturnSql} ORDER BY id ASC`)
         .all<{ customer_id: number; status: string | null; total_refund_usd: number; total_refund_khr: number }>(idChunk),

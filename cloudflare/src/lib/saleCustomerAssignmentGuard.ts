@@ -1,6 +1,6 @@
 import { loyaltyPointsEnabled } from './loyaltyEligibility'
 import type { D1Compat } from './db'
-import { LOYALTY_POINTS_RESET_KEY, loyaltyAfterResetSql, customerPointsReturnSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from './customerPointsReturn'
+import { LOYALTY_POINTS_RESET_KEY, loyaltyAfterResetSql, customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from './customerPointsReturn'
 import { SaleBulkError } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
 
@@ -54,7 +54,7 @@ async function pointsConfig(db: D1Compat): Promise<PointsConfig> {
 // are already spent: the discount is off what the customer owes.
 function rawPointsSql(accountSql: string): string {
   return `(COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'cancelled' THEN
-    CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'awaiting_payment' AND COALESCE(loyalty_accrual,1)=1 THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_khr,0)*cfg.khr ELSE COALESCE(total_usd,0)*cfg.usd END ELSE 0 END
+    CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'awaiting_payment' AND (${loyaltySaleAccrualSql})=1 THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_khr,0)*cfg.khr ELSE COALESCE(total_usd,0)*cfg.usd END ELSE 0 END
     - COALESCE(membership_points_redeemed,0) ELSE 0 END) FROM sales WHERE customer_id=${accountSql} AND ${loyaltySaleSinceSql}),0)
     - COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(status,''),'completed')<>'cancelled' THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_refund_khr,0)*cfg.khr ELSE COALESCE(total_refund_usd,0)*cfg.usd END ELSE 0 END) FROM returns WHERE customer_id=${accountSql} AND ${customerPointsReturnSql}),0)
     + COALESCE((SELECT SUM(reward_points) FROM customer_share_submissions WHERE customer_id=${accountSql} AND status='approved' AND reward_points_voided_at IS NULL AND ${loyaltySubmissionSinceSql}),0)
