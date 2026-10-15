@@ -26,7 +26,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
   reviews: StockLineReview[]
 }) {
   const stockLabel = tr('stock', 'Stock')
-  const cost4 = (value: number | null): string => (value == null ? '—' : `${usdSymbol}${value.toFixed(4)}`)
+  const cost4 = (value: number | null): string => (value == null ? tr('cost_unknown', 'Unknown cost') : `${usdSymbol}${value.toFixed(4)}`)
   const money2 = (value: number | null): string => (value == null ? '—' : `${usdSymbol}${value.toFixed(2)}`)
   return (
     <div className="space-y-2" data-stock-session-review>
@@ -52,7 +52,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
                 {review.mode === 'add' ? (
                   <>
                     {stock}
-                    {canViewCosts && review.costAfter != null ? <><span aria-hidden="true">·</span><Change label={tr('cost', 'Cost')} before={cost4(review.costBefore)} after={cost4(review.costAfter)} /></> : null}
+                    {canViewCosts ? <><span aria-hidden="true">·</span><Change label={tr('cost', 'Cost')} before={cost4(review.costBefore)} after={cost4(review.costAfter)} /></> : null}
                     {review.priceAfter != null ? <><span aria-hidden="true">·</span><Change label={tr('price', 'Price')} before={money2(review.priceBefore)} after={money2(review.priceAfter)} /></> : null}
                     {review.tag ? <><span aria-hidden="true">·</span><span>{review.tag}</span></> : null}
                   </>
