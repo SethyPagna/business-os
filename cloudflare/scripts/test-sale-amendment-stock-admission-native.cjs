@@ -4,6 +4,7 @@ const path = require('node:path')
 const Module = require('node:module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs')
 const source = fs.readFileSync(file, 'utf8')
@@ -172,8 +173,13 @@ async function main() {
     const f = await fixture()
     const payload = physical ? body(f, 'line_removed') : body(f, 'line_updated', { selling_price_input_usd: 11, pricing_quote: quote(3, 11) })
     const before = snapshot(f)
-    f.control.beforeAmendment = () => f.raw.db.exec("INSERT OR IGNORE INTO system_flags(key,value) VALUES('maintenance','{}')")
+    f.control.beforeAmendment = () => {
+      seedStockFixture(f.raw.db, () => f.raw.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')"))
+      assert.equal(number(f, "SELECT COUNT(*) FROM system_flags WHERE key='maintenance'"), 1)
+      noPermit(f)
+    }
     assert.ok((await reviewed(f, payload)).status >= 400)
+    assert.equal(number(f, "SELECT COUNT(*) FROM system_flags WHERE key='maintenance'"), 1)
     assert.equal(snapshot(f), before)
     assert.equal(f.control.physicalBatches, physical ? 1 : 0)
     assert.equal(f.control.ordinaryBatches, physical ? 0 : 1)

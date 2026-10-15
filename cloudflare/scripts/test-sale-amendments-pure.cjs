@@ -62,6 +62,7 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
+const stockTransaction = compile('stockTransaction.ts')
 const moneyPrecision = compile('moneyPrecision.ts')
 const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyPrecision })
@@ -70,6 +71,7 @@ const saleItemPricing = compile('saleItemPricing.ts', {
   './promotionRules': promotionRules,
 })
 const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
+  './stockTransaction': stockTransaction,
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
@@ -103,6 +105,7 @@ const subject = compile('saleAmendments.ts', {
   './moneyPrecision': moneyPrecision,
 })
 const saleBulkStatus = compile('saleBulkStatus.ts', {
+  './stockTransaction': stockTransaction,
   './db': {},
   '../index': {},
   './auth': {},

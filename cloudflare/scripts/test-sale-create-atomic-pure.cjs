@@ -10,6 +10,7 @@ const ts = require('typescript')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const moduleCache = new Map()
 const USER = {
@@ -103,6 +104,7 @@ function routeDb(db, hooks = {}) {
 
 function fixture(hooks = {}) {
   const db = openDb(loadAll())
+  seedStockFixture(db.db, () => {
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
   db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
               VALUES(10,'Powder','POWDER',10,9.5,38000,4,16000,1)`).run()
@@ -110,6 +112,8 @@ function fixture(hooks = {}) {
   db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
               VALUES(500,10,'powder-lot','POWDER-LOT','2027-06-01','2026-09-01',1,1)`).run()
   db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run()
+  })
+  assert.throws(() => db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10').run(), /stock_transaction_required/)
   return { raw: db, route: routeDb(db, hooks) }
 }
 
@@ -142,6 +146,7 @@ function request(clientRequestId) {
 }
 
 async function postSale(db, body) {
+  assert.equal(Number((await db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get()).n), 0)
   // Positive-path fixture admission: every new sale request now names its
   // authenticated owner, even when online. Preserve explicit malformed/null
   // ownership. The owner regression suite calls the route directly to test
@@ -158,6 +163,7 @@ async function postSale(db, body) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(admittedBody),
   }, { DB: db }, executionCtx)
+  assert.equal(Number((await db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get()).n), 0)
   return { status: response.status, body: await response.json() }
 }
 
@@ -365,7 +371,7 @@ async function assertNativeD1TriggerMetadata() {
       beforeBatch(db, statements) {
         if (inject && statements.some(({ sql }) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) {
           inject = false
-          db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
+          seedStockFixture(db.db, () => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })]))
         }
       },
     })
@@ -405,8 +411,8 @@ async function assertNativeD1TriggerMetadata() {
 
   {
     const f = fixture()
-    f.raw.prepare(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining)
-                   VALUES(600,10,'Powder',1,2,2)`).run()
+    seedStockFixture(f.raw.db, () => f.raw.prepare(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining)
+                   VALUES(600,10,'Powder',1,2,2)`).run())
     f.raw.exec("CREATE TRIGGER fail_damaged_create_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='sale_creation' BEGIN SELECT RAISE(ABORT,'forced damaged audit'); END")
     const damagedRequest = request('damaged-rollback')
     damagedRequest.items = [{ product_id: 10, quantity: 1, branch_id: 1, damaged_lot_id: 600, applied_price_usd: 9.5 }]
