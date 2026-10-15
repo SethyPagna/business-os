@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Real Hono transfer routes + action-history undo/redo on production
 // migrations: fractional lots whose float sum is not exact must not refuse a
 // transfer the stock fully covers (U-transfer3, refuter R-transfer2 F2,
@@ -74,9 +80,9 @@ async function main() {
     const name = `${app}${route}: branch 10 with lots 0.1 + 0.2, lot-less q=10 moves all 10 (9.7 untracked), once; undo/redo exact`
     try {
     h.fresh(1, S)
-    sql().exec(`UPDATE branch_batch_stock SET quantity=0.1 WHERE batch_id=1 AND branch_id=${S};
+    seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=0.1 WHERE batch_id=1 AND branch_id=${S};
       INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES (61,1,'newer','newer','2026-09-02',1);
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES (61,${S},0.2)`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES (61,${S},0.2)`))
     // The premise: SQL's lot sum is not exact, and differs from the planner's residue.
     const sqlGap = 10 - lotsAt(1, S)
     const plannerUntracked = 10 - 0.1 - 0.2

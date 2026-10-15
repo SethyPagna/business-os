@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Real Hono POST /api/branches/transfer-bulk against production migrations:
 // the Worker half of the 26 Sep 2026 TransferModal fix (a ticked row may now
 // be submitted with no received date, like the single transfer).
@@ -28,13 +34,13 @@ function snapshot() {
 }
 function fixture() {
   h.fresh(1, 1)
-  sql().exec(`
+  seedFixture(sql(), () => sql().exec(`
     UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=1 AND branch_id=1;
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES
       (50,1,'older','older','2026-08-01',1),
       (51,1,'undated','undated',NULL,1);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES (50,1,2),(51,1,1);
-  `)
+  `))
 }
 const body = (quantity, key) => ({ ...h.intent(1, 1, key), items: [{ productId: 1, quantity }] })
 
@@ -92,7 +98,7 @@ async function main() {
 
   await check('a lot-less item with no lot at all moves on branch_stock (the "No received dates with stock" product)', async () => {
     fixture()
-    sql().exec('DELETE FROM branch_batch_stock')
+    seedFixture(sql(), () => sql().exec('DELETE FROM branch_batch_stock'))
     const result = await h.request('branches', '/transfer-bulk', body(10, 'lotless_nolot_001'))
     assert.equal(result.status, 200, JSON.stringify(result.body))
     assert.equal(branchQty(1), 0); assert.equal(branchQty(2), 10)
