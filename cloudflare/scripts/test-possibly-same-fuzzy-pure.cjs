@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // D6 (Part 578, item 5): the Products "Duplicates" review sweep must surface
 // the "same item, re-typed under a slightly different name, each with its own
 // barcode" case the user reported -- products that escape BOTH same_barcode
@@ -60,6 +61,7 @@ check('productIdentity exports findPossiblySameProductClusters', typeof findPoss
 
 // --- Seed a real DB with every path the sweep must distinguish -------------
 const rawDb = openDb(loadAll())
+assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
@@ -120,11 +122,11 @@ const products = [
   { id: 25, name: 'Placeholder Row', barcode: null },
 ]
 for (const p of products) {
-  db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group) VALUES (@id, @name, @barcode, @cost, 1, 0)`)
-    .run({ id: p.id, name: p.name, barcode: p.barcode, cost: p.cost ?? 0 })
+  seedStockFixture(rawDb, () => db.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, is_active, is_group) VALUES (@id, @name, @barcode, @cost, 1, 0)`)
+    .run({ id: p.id, name: p.name, barcode: p.barcode, cost: p.cost ?? 0 }))
 }
-db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)`).run({})
-db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 7)`).run({})
+seedStockFixture(rawDb, () => db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)`).run({}))
+seedStockFixture(rawDb, () => db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 7)`).run({}))
 
 const idsOf = (cluster) => cluster.products.map((x) => x.id).sort((a, b) => a - b).join(',')
 const findCluster = (clusters, sev, ids) => clusters.find((c) => c.severity === sev && idsOf(c) === ids)
@@ -202,7 +204,7 @@ async function run() {
   const fuzzyKey = normalizeProductClusterKey('similar', 'Anastasia Setting-Spray')
   check("normalizeProductClusterKey('similar', name) yields the fuzzy key",
     fuzzyKey === detailRule.normalizeProductFuzzyName('Anastasia Setting Spray'))
-  db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('similar', @v)`).run({ v: fuzzyKey })
+  seedStockFixture(rawDb, () => db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('similar', @v)`).run({ v: fuzzyKey }))
 
   const after = await findPossiblySameProductClusters(db)
   check('dismissing the Anastasia similar cluster removes it',
@@ -212,15 +214,15 @@ async function run() {
 
   // Regression guard for the shared dismissKey refactor: the pre-existing
   // same_name / same_barcode dismissals must still work through the same helper.
-  db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('name', @v)`)
-    .run({ v: normalizeProductClusterKey('name', 'Face Cream') })
-  db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('barcode', @v)`)
-    .run({ v: normalizeProductClusterKey('barcode', 'SHARE-9999') })
+  seedStockFixture(rawDb, () => db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('name', @v)`)
+    .run({ v: normalizeProductClusterKey('name', 'Face Cream') }))
+  seedStockFixture(rawDb, () => db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('barcode', @v)`)
+    .run({ v: normalizeProductClusterKey('barcode', 'SHARE-9999') }))
   // A leading-zero dismissal keys by the FOLDED barcode, so it can be recorded
   // from EITHER twin's spelling and still match. Keying it raw would have
   // repeated the detector's own defect one layer down.
-  db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('leadingzero', @v)`)
-    .run({ v: normalizeProductClusterKey('leadingzero', '03614274226546') })
+  seedStockFixture(rawDb, () => db.prepare(`INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value) VALUES ('leadingzero', @v)`)
+    .run({ v: normalizeProductClusterKey('leadingzero', '03614274226546') }))
   check("normalizeProductClusterKey('leadingzero', ...) folds either spelling to one key",
     normalizeProductClusterKey('leadingzero', '03614274226546') === normalizeProductClusterKey('leadingzero', '3614274226546'))
   const after2 = await findPossiblySameProductClusters(db)

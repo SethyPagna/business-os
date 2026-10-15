@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Regression test for the public catalog's BRAND-first browsing order
 // (G4, Part 399: was category-first from Part 226 until the user flipped
@@ -42,6 +43,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
 function transpile(relPath) {
@@ -145,10 +147,10 @@ function exec(sql) { db.exec(sql) }
 
 let branchId
 function seed() {
-  exec(`DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches;`)
-  branchId = db.prepare(
+  seedStockFixture(db, () => exec(`DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches;`))
+  branchId = seedStockFixture(db, () => db.prepare(
     `INSERT INTO branches (name, is_active, is_default) VALUES ('Main', 1, 1) RETURNING id`
-  ).get().id
+  ).get()).id
 
   // Deliberately inserted OUT of any sorted order, with mixed case and a
   // blank category, so a passing test can only mean the ORDER BY is doing
@@ -165,13 +167,13 @@ function seed() {
     { name: 'Body Lotion', category: 'Bath & Body', brand: 'Chanel' },
   ]
   for (const r of rows) {
-    const id = db.prepare(
+    const id = seedStockFixture(db, () => db.prepare(
       `INSERT INTO products (name, category, brand, is_active, stock_quantity, out_of_stock_threshold)
        VALUES (@name, @category, @brand, 1, 10, 0) RETURNING id`
-    ).get(r)?.id
-    db.prepare(
+    ).get(r))?.id
+    seedStockFixture(db, () => db.prepare(
       `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)`
-    ).run({ id, branchId })
+    ).run({ id, branchId }))
   }
 }
 
@@ -224,11 +226,11 @@ async function run() {
     // seeded above the catalog holds 8 CARDS over 10 rows. A row-paged
     // server used to report totals/pages from the 10.
     for (const barcode of ['g1', 'g2', 'g3']) {
-      const id = db.prepare(
+      const id = seedStockFixture(db, () => db.prepare(
         `INSERT INTO products (name, category, brand, barcode, is_active, stock_quantity, out_of_stock_threshold)
          VALUES ('Dior Lip Glow', 'Lips', 'Dior', @barcode, 1, 4, 0) RETURNING id`
-      ).get({ barcode })?.id
-      db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 4)`).run({ id, branchId })
+      ).get({ barcode }))?.id
+      seedStockFixture(db, () => db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 4)`).run({ id, branchId }))
     }
     const { status, json } = await get('/catalog/products/search?page=1&pageSize=50')
     assert.equal(status, 200)

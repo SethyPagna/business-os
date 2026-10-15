@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // AB-W4: the ten Website Editor settings the preview showed but the storefront config never carried. Each one is
 // published through its own normalizer, so the shop shows what the editor previews and nothing private or unbounded.
 const assert = require('node:assert/strict')
@@ -40,6 +41,7 @@ Intl.Segmenter = class WorkerdGraphemeSegmenter {
 }
 
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const queries = []
 const portalText = load('lib/portalText.ts')
 const loadPortal = (portalTextModule) => load('routes/portal.ts', {
@@ -113,11 +115,11 @@ async function get(url) {
 }
 
 function seedProduct(name, isActive) {
-  return db.prepare('INSERT INTO products (name, is_active, stock_quantity) VALUES (@name, @active, CASE WHEN @active=1 THEN 5 ELSE 0 END) RETURNING id').get({ name, active: isActive }).id
+  return seedStockFixture(db, () => db.prepare('INSERT INTO products (name, is_active, stock_quantity) VALUES (@name, @active, CASE WHEN @active=1 THEN 5 ELSE 0 END) RETURNING id').get({ name, active: isActive })).id
 }
 
 function storeSetting(key, value) {
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)').run({ key, value })
+  seedStockFixture(db, () => db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)').run({ key, value }))
 }
 
 async function main() {

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Pins a real fix to routes/portal.ts's initials/A-Z rail fan-out (item 10,
 // p8/tests sweep, Sep 16 2026). buildPortalCatalog and
@@ -30,6 +31,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const realDb = openDb(loadAll())
+assert.throws(() => realDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const fakeEnv = { DB: realDb, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
 // Fails ONLY the initials-rail query; every other prepare() call (including
@@ -131,20 +133,20 @@ async function get(url) {
 
 let branchId
 function seed() {
-  realDb.exec(`DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches;`)
-  branchId = realDb.prepare(
+  seedStockFixture(realDb, () => realDb.exec(`DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches;`))
+  branchId = seedStockFixture(realDb, () => realDb.prepare(
     `INSERT INTO branches (name, is_active, is_default) VALUES ('Main', 1, 1) RETURNING id`,
-  ).get().id
+  ).get()).id
   const rows = [
     { name: 'Zinc Cream', brand: 'Sulwhasoo' },
     { name: 'Argan Oil', brand: 'Dior' },
   ]
   for (const r of rows) {
-    const id = realDb.prepare(
+    const id = seedStockFixture(realDb, () => realDb.prepare(
       `INSERT INTO products (name, brand, is_active, stock_quantity, out_of_stock_threshold)
        VALUES (@name, @brand, 1, 10, 0) RETURNING id`,
-    ).get(r)?.id
-    realDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)`).run({ id, branchId })
+    ).get(r))?.id
+    seedStockFixture(realDb, () => realDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)`).run({ id, branchId }))
   }
 }
 

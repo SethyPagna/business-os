@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Fixture proof for ops/queries/branch-exceeds-lots.sql: the read-only sizing query for the
 // multi-lot Revert split (MULTILOT-REVERT, R2 review F1). It runs -- after the ops guard
 // canonicalises it, exactly as the ops workflow would -- against the REAL migration chain in an
@@ -62,31 +63,32 @@ async function check(name, fn) {
 const db = new DatabaseSync(':memory:')
 db.exec('PRAGMA foreign_keys = OFF;')
 for (const sql of loadAll()) db.exec(sql)
-db.exec(`INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1), (2, 'Store', 1, 0)`)
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+seedStockFixture(db, () => db.exec(`INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1), (2, 'Store', 1, 0)`))
 
 let nextProduct = 0
 let nextLot = 100
 function product(name) {
   nextProduct += 1
-  db.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
-    VALUES (?, ?, ?, 1, 0, 3, 12000)`).run(nextProduct, name, `B${1000 + nextProduct}`)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+    VALUES (?, ?, ?, 1, 0, 3, 12000)`).run(nextProduct, name, `B${1000 + nextProduct}`))
   return nextProduct
 }
 function branchStock(productId, branchId, quantity) {
-  db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)').run(productId, branchId, quantity)
-  db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?').run(quantity, productId)
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)').run(productId, branchId, quantity))
+  seedStockFixture(db, () => db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?').run(quantity, productId))
 }
 function lot(productId, branchId, quantity, { active = 1 } = {}) {
   nextLot += 1
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity, created_at)
-    VALUES (?, ?, ?, ?, '2026-09-05', ?, 2, ?, '2026-09-01 00:00:00')`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, active, quantity)
-  db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(nextLot, branchId, quantity)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity, created_at)
+    VALUES (?, ?, ?, ?, '2026-09-05', ?, 2, ?, '2026-09-01 00:00:00')`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, active, quantity))
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(nextLot, branchId, quantity))
   return nextLot
 }
 let lastMovement = 0
 function movement(productId, branchId, type, quantity, { batchId = null, reference = null, reason = 'fixture', createdAt = '2026-09-20 10:00:00' } = {}) {
-  lastMovement = Number(db.prepare(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, reference_id, batch_id, created_at)
-    VALUES (?, 'fixture', ?, ?, ?, ?, ?, ?, ?)`).run(productId, branchId, type, quantity, reason, reference, batchId, createdAt).lastInsertRowid)
+  lastMovement = Number(seedStockFixture(db, () => db.prepare(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, reference_id, batch_id, created_at)
+    VALUES (?, 'fixture', ?, ?, ?, ?, ?, ?, ?)`).run(productId, branchId, type, quantity, reason, reference, batchId, createdAt)).lastInsertRowid)
   return lastMovement
 }
 const reverted = (productId, id, type = 'add') => movement(productId, 1, type, 1, { reference: `revert:${id}` })
@@ -110,7 +112,7 @@ const rSplit = movement(pSplit, 1, 'remove', 7); const rSplitRevert = reverted(p
 const rPlain = movement(pUntracked, 1, 'remove', 3); reverted(pUntracked, rPlain)         // reverted, product never had a lot
 movement(pHealthy, 1, 'out', 2)                                                      // open CSV removal, lots, no shares
 const rShared = movement(pUndated, 1, 'remove', 2)                                   // open, lots, WITH recorded shares
-db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, -2)').run(rShared, undatedLot)
+seedStockFixture(db, () => db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, -2)').run(rShared, undatedLot))
 movement(pHealthy, 1, 'remove', 1, { batchId: healthyLot })                         // names one lot: not batch-less
 movement(pInactive, 1, 'remove', 1)                                                  // open, the product has a (dead) lot row
 const redo = reverted(pSplit, rSplitRevert, 'remove')                                  // a Redo counter: not a root removal
@@ -118,20 +120,20 @@ movement(pResidue, 1, 'remove', 1, { reason: 'Dated stock count import', created
 const pTyped = product('typed reason'); lot(pTyped, 1, 0)                            // no branch stock: not a pair
 movement(pTyped, 1, 'remove', 1, { reason: 'Dated stock count import' })               // open, the dated-count text typed on an ordinary removal at 10:00: refused
 const rZero = movement(pOther, 1, 'remove', 1)                                       // open, WITH the zero record (it took nothing from lots)
-db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, 0)').run(rZero, otherLot)
+seedStockFixture(db, () => db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, 0)').run(rZero, otherLot))
 const pBack = product('back-dated csv'); lot(pBack, 1, 0)                          // no branch stock: not a pair
 movement(pBack, 1, 'out', 1, { createdAt: '2026-01-15 00:00:00' })                    // open, a CSV removal dated long before its lot, written after the movements above: refused
 // The mark: every movement so far was written before removals recorded. What follows is written by recording code.
 const MARK_KEY = 'multilot_revert_watermark'
-const setMark = (value) => db.prepare('UPDATE system_flags SET value = ? WHERE key = ?').run(String(value), MARK_KEY)
+const setMark = (value) => seedStockFixture(db, () => db.prepare('UPDATE system_flags SET value = ? WHERE key = ?').run(String(value), MARK_KEY))
 setMark(lastMovement)
 const pMerged = product('keeper that a merge gave older lots'); lot(pMerged, 1, 0)   // no branch stock: not a pair
 movement(pMerged, 1, 'remove', 1)                                                    // open, no record, a lot "before" it, but ABOVE the mark: allowed
 
 // ---- Part 3 fixture ----------------------------------------------------------------------
 function held(productId, { source, batchId = null, remaining, quantity = 5 }) {
-  db.prepare(`INSERT INTO damaged_stock_lots (product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, condition_tag, source)
-    VALUES (?, 'fixture', 1, ?, ?, ?, 'damaged', ?)`).run(productId, batchId, quantity, remaining, source)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO damaged_stock_lots (product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, condition_tag, source)
+    VALUES (?, 'fixture', 1, ?, ?, ?, 'damaged', ?)`).run(productId, batchId, quantity, remaining, source))
 }
 held(pSplit, { source: 'remove', remaining: 3 })                          // counted: a Remove kept it, no lot, the product has lots
 held(pSplit, { source: 'remove', batchId: healthyLot, remaining: 2 })     // names a lot
@@ -196,16 +198,16 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
 
   await check('without a mark row the timestamps alone decide, as before the migration', () => {
     const kept = db.prepare('SELECT value FROM system_flags WHERE key = ?').get(MARK_KEY).value
-    db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY)
+    seedStockFixture(db, () => db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY))
     try {
       const row = run()[0]
       assert.strictEqual(row.removals_open_revert_refused, 6, 'every record-less removal after a lot counts, the above-the-mark one included')
       assert.strictEqual(row.removals_open_after_mark_lot_before, 0)
-      db.prepare("INSERT INTO system_flags (key, value) VALUES (?, 'not a number')").run(MARK_KEY)
+      seedStockFixture(db, () => db.prepare("INSERT INTO system_flags (key, value) VALUES (?, 'not a number')").run(MARK_KEY))
       assert.strictEqual(run()[0].removals_open_revert_refused, 6, 'an unreadable mark is no mark')
     } finally {
-      db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY)
-      db.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run(MARK_KEY, kept)
+      seedStockFixture(db, () => db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY))
+      seedStockFixture(db, () => db.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run(MARK_KEY, kept))
     }
     assert.strictEqual(run()[0].removals_open_revert_refused, 5)
   })

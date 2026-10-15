@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // PUBLIC-FILTER-MENU (owner, 5 Oct): the storefront's View + Sort live in the
 // filter menu and reach the Worker as `view` and `sort` on
@@ -37,6 +38,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
 function transpile(relPath) {
@@ -140,10 +142,10 @@ function exec(sql) { db.exec(sql) }
 
 let branchId
 function seed() {
-  exec('DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM settings;')
-  branchId = db.prepare(
+  seedStockFixture(db, () => exec('DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM settings;'))
+  branchId = seedStockFixture(db, () => db.prepare(
     "INSERT INTO branches (name, is_active, is_default) VALUES ('Main', 1, 1) RETURNING id"
-  ).get().id
+  ).get()).id
   // brand / category / price are deliberately uncorrelated with the name order.
   const rows = [
     { name: 'Cream', category: 'Skincare', brand: 'Zed', price: 30 },
@@ -157,11 +159,11 @@ function seed() {
     { name: 'Delta Duo', category: 'Bath', brand: 'Bold', price: 40, barcode: 'd2' },
   ]
   for (const r of rows) {
-    const id = db.prepare(
+    const id = seedStockFixture(db, () => db.prepare(
       `INSERT INTO products (name, category, brand, barcode, selling_price_usd, is_active, stock_quantity, out_of_stock_threshold)
        VALUES (@name, @category, @brand, @barcode, @price, 1, 10, 0) RETURNING id`
-    ).get({ barcode: null, ...r })?.id
-    db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)').run({ id, branchId })
+    ).get({ barcode: null, ...r }))?.id
+    seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)').run({ id, branchId }))
   }
 }
 
@@ -248,13 +250,13 @@ async function run() {
   })
 
   await check('a price sort is treated as unknown while the store hides its prices', async () => {
-    exec("INSERT INTO settings (key, value) VALUES ('customer_portal_show_prices', '0')")
+    seedStockFixture(db, () => exec("INSERT INTO settings (key, value) VALUES ('customer_portal_show_prices', '0')"))
     const { names, json } = await order('&view=all&sort=price_desc')
     assert.deepStrictEqual(names, flatAz, 'price order must not leak through the grid')
     assert.deepStrictEqual(json.browse, { view: 'all', sort: 'featured' })
     // A name sort is not price data, so it still applies.
     assert.deepStrictEqual((await order('&view=all&sort=name_desc')).names, [...flatAz].reverse())
-    exec("DELETE FROM settings WHERE key = 'customer_portal_show_prices'")
+    seedStockFixture(db, () => exec("DELETE FROM settings WHERE key = 'customer_portal_show_prices'"))
     assert.deepStrictEqual((await order('&view=all&sort=price_desc')).json.browse, { view: 'all', sort: 'price_desc' })
   })
 

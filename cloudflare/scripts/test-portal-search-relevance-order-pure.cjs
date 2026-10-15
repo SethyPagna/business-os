@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // THE ORDERING TEST for the PUBLIC STOREFRONT's product search.
 //
 // routes/portal.ts carried the LAST hand-copy of the product-search tail.
@@ -64,6 +65,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const root = path.join(__dirname, '..')
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
 function transpile(relPath) {
@@ -217,12 +219,13 @@ for (let i = 0; i < PAGEABLE_COUNT; i += 1) {
 }
 
 const raw = db.db
-raw.exec("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)")
+seedStockFixture(raw, () => raw.exec("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)"))
 const insert = raw.prepare(`INSERT INTO products
   (id, name, sku, barcode, brand, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold,
    is_active, name_normalized, selling_price_usd, discount_enabled, discount_type, discount_percent)
   VALUES (?, ?, ?, ?, ?, '', 'pcs', 50, 10, 0, 1, ?, 10, ?, ?, ?)`)
 const stock = raw.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 25)')
+seedStockFixture(raw, () => {
 for (const [id, name, brand, barcode, sku, discount] of FIXTURE) {
   // name_normalized is written in JS by lib/productWrites.ts's insertRow in
   // production; use the REAL fold here so the tier comparison is honest.
@@ -230,9 +233,10 @@ for (const [id, name, brand, barcode, sku, discount] of FIXTURE) {
     discount.discount_enabled, discount.discount_type, discount.discount_percent)
   stock.run(id)
 }
+})
 // name_key is what FAMILY_ROOT_KEY_SQL groups on. Production maintains it by
 // trigger (migration 0010); fill it in case the trigger did not fire here.
-raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''")
+seedStockFixture(raw, () => raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''"))
 
 const seeded = raw.prepare('SELECT COUNT(*) AS n FROM products').get().n
 assert.equal(seeded, FIXTURE.length, 'fixture must be fully seeded before any ordering assertion runs')

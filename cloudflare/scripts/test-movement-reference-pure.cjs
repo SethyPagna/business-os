@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // N13 -- the RECEIPT and the ACTOR on a movement row.
 //
 // Two read-time resolutions, both discriminating by construction:
@@ -75,48 +76,49 @@ ok(typeof searchLib.movementSearchHaystackSql === 'function', 'movementSearch ha
 
 // ---- real DB: full migration chain -----------------------------------------
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 ok(true, 'full migration chain applied')
 
-db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 1, name: 'Shop' }).run()
+seedStockFixture(db, () => db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 1, name: 'Shop' }).run())
 // The two accounts from the owner report: id 2 is "james" but every older
 // movement row snapshotted his full name; id 1 is "admin" snapshotted "Admin".
-db.prepare('INSERT INTO users (id, username, name, password) VALUES (@id, @username, @name, @password)')
-  .bind({ id: 1, username: 'admin', name: 'Admin', password: 'x' }).run()
-db.prepare('INSERT INTO users (id, username, name, password) VALUES (@id, @username, @name, @password)')
-  .bind({ id: 2, username: 'james', name: 'ung sethy pagna', password: 'x' }).run()
+seedStockFixture(db, () => db.prepare('INSERT INTO users (id, username, name, password) VALUES (@id, @username, @name, @password)')
+  .bind({ id: 1, username: 'admin', name: 'Admin', password: 'x' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO users (id, username, name, password) VALUES (@id, @username, @name, @password)')
+  .bind({ id: 2, username: 'james', name: 'ung sethy pagna', password: 'x' }).run())
 
 function insertProduct(id, name, barcode, stock) {
-  db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
-    .bind({ id, name, barcode, unit: 'pcs', stock }).run()
+  seedStockFixture(db, () => db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
+    .bind({ id, name, barcode, unit: 'pcs', stock }).run())
 }
 insertProduct(9601, 'Reference Ledger Cream', '8800000000611', 6)
 insertProduct(9602, 'Collision Test Serum', '8800000000612', 6)
 
 // sales.id 7 and returns.id 7 BOTH exist -- two autoincrement sequences that
 // collide freely in production, which is the whole point of this fixture.
-db.prepare('INSERT INTO sales (id, receipt_number, created_at) VALUES (@id, @receipt, @created_at)')
-  .bind({ id: 7, receipt: '20260901-193100', created_at: '2026-09-01 19:31:00' }).run()
-db.prepare('INSERT INTO sales (id, receipt_number, created_at) VALUES (@id, @receipt, @created_at)')
-  .bind({ id: 11, receipt: '20260901-142200', created_at: '2026-09-01 14:22:00' }).run()
-db.prepare('INSERT INTO returns (id, return_number, sale_id, created_at) VALUES (@id, @number, @sale_id, @created_at)')
-  .bind({ id: 7, number: 'RET-20260902-0007', sale_id: 11, created_at: '2026-09-02 09:00:00' }).run()
+seedStockFixture(db, () => db.prepare('INSERT INTO sales (id, receipt_number, created_at) VALUES (@id, @receipt, @created_at)')
+  .bind({ id: 7, receipt: '20260901-193100', created_at: '2026-09-01 19:31:00' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO sales (id, receipt_number, created_at) VALUES (@id, @receipt, @created_at)')
+  .bind({ id: 11, receipt: '20260901-142200', created_at: '2026-09-01 14:22:00' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO returns (id, return_number, sale_id, created_at) VALUES (@id, @number, @sale_id, @created_at)')
+  .bind({ id: 7, number: 'RET-20260902-0007', sale_id: 11, created_at: '2026-09-02 09:00:00' }).run())
 
 // Membership: sale 7 sold the SERUM; return 7 took back the CREAM.
-db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, quantity) VALUES (@sale_id, @product_id, @name, 1)')
-  .bind({ sale_id: 7, product_id: 9602, name: 'Collision Test Serum' }).run()
-db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, quantity) VALUES (@sale_id, @product_id, @name, 1)')
-  .bind({ sale_id: 11, product_id: 9601, name: 'Reference Ledger Cream' }).run()
-db.prepare('INSERT INTO return_items (return_id, product_id, product_name, quantity) VALUES (@return_id, @product_id, @name, 1)')
-  .bind({ return_id: 7, product_id: 9601, name: 'Reference Ledger Cream' }).run()
+seedStockFixture(db, () => db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, quantity) VALUES (@sale_id, @product_id, @name, 1)')
+  .bind({ sale_id: 7, product_id: 9602, name: 'Collision Test Serum' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, quantity) VALUES (@sale_id, @product_id, @name, 1)')
+  .bind({ sale_id: 11, product_id: 9601, name: 'Reference Ledger Cream' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO return_items (return_id, product_id, product_name, quantity) VALUES (@return_id, @product_id, @name, 1)')
+  .bind({ return_id: 7, product_id: 9601, name: 'Reference Ledger Cream' }).run())
 
 function insertMovement(row) {
-  db.prepare(
+  seedStockFixture(db, () => db.prepare(
     'INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at)' +
     ' VALUES (@id, @product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @reason, @reference_id, @user_id, @user_name, @created_at)',
   ).bind({
     branch_id: 1, branch_name: 'Shop', reason: null, reference_id: null,
     user_id: null, user_name: null, ...row,
-  }).run()
+  }).run())
 }
 
 // --- product 9601 -----------------------------------------------------------

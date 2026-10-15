@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // GET /api/notifications/summary: counts + a 50-item inventory preview, with the three expensive
 // sections (inventory, expiry, loyalty) answered from the Cache API between writes.
 //
@@ -29,6 +30,7 @@ const SRC = path.join(__dirname, '..', 'src')
 
 // ---- database with statement + row accounting ---------------------------------------------------
 const raw = openDb(loadAll())
+assert.throws(() => raw.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 raw.db.limits.exprDepth = 100
 const ledger = []
 function category(sql) {
@@ -127,11 +129,13 @@ const section = (body, id) => (body.json.sections || []).find((entry) => entry.i
 // 330 flagged products with deliberate ties (equal quantity, different names; an out-of-stock row
 // whose own threshold lifts it above the global one) plus 40 healthy and 5 inactive ones.
 function seedProducts() {
+  return seedStockFixture(raw.db, () => {
   const insert = raw.db.prepare('INSERT INTO products (name, stock_quantity, out_of_stock_threshold, low_stock_threshold, is_active) VALUES (?, ?, ?, ?, ?)')
   for (let i = 0; i < 120; i += 1) insert.run(`Out ${String(i).padStart(3, '0')}`, i % 3, 2, 10, 1) // qty 0..2, own out threshold 2 -> out
   for (let i = 0; i < 210; i += 1) insert.run(`Low ${String(i).padStart(3, '0')}`, 3 + (i % 8), 0, 10, 1) // qty 3..10 -> low
   for (let i = 0; i < 40; i += 1) insert.run(`Healthy ${i}`, 50 + i, 0, 10, 1)
   for (let i = 0; i < 5; i += 1) insert.run(`Retired ${i}`, 0, 0, 10, 0) // inactive: never listed
+  })
 }
 
 // The removed code, restated: one query returning every flagged row (LIMIT 5000), split in JS.
@@ -225,7 +229,7 @@ async function main() {
   })
 
   await check('a stock change is NOT visible before its version bump (the cache is real) and IS right after it', async () => {
-    raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run()
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run())
     const stale = await summary()
     assert.equal(section(stale, 'inventory').count, 330, 'control: still the cached answer')
     await cacheModule.bumpVersion(env, 'stock') // what a sale does
@@ -262,14 +266,14 @@ async function main() {
   })
 
   await check('changing the low-stock config changes the answer at once -- the config is part of the cache key, no bump needed', async () => {
-    raw.db.prepare("INSERT INTO settings (key, value) VALUES ('low_stock_alert_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run()
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('low_stock_alert_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
     lowStock.invalidateLowStockConfigMemo() // what the Settings POST does in this isolate
     const off = await summary()
     const inventory = section(off, 'inventory')
     assert.equal(statements('inventory'), 1, 'a different config is a different cache entry')
     assert.equal(inventory.count, 121 + 0, 'alerts off: only out-of-stock rows remain (the OR keeps them)')
     assert.equal(inventory.summary, '121 out of stock')
-    raw.db.prepare("DELETE FROM settings WHERE key = 'low_stock_alert_enabled'").run()
+    seedStockFixture(raw.db, () => raw.db.prepare("DELETE FROM settings WHERE key = 'low_stock_alert_enabled'").run())
     lowStock.invalidateLowStockConfigMemo()
     assert.equal(section(await summary(), 'inventory').count, 331, 'switching back returns the earlier numbers')
   })
@@ -287,7 +291,7 @@ async function main() {
   })
 
   await check('the sales section follows the sales READ rule: view-only sees it, a full user with sales:view off does not', async () => {
-    raw.db.prepare("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-1', 12.5, 'awaiting_payment')").run()
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-1', 12.5, 'awaiting_payment')").run())
     const viewOnly = { id: 4, username: 'viewer', name: 'Viewer', role_code: 'staff', permissions: JSON.stringify({ sales: 'view' }) }
     const fullButHidden = { id: 5, username: 'hidden', name: 'Hidden', role_code: 'staff', permissions: JSON.stringify({ sales: true, 'sales:view': false }) }
     const full = { id: 6, username: 'full', name: 'Full', role_code: 'staff', permissions: JSON.stringify({ sales: true }) }
@@ -313,7 +317,7 @@ async function main() {
   })
 
   await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
-    raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run()
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run())
     await cacheModule.bumpVersion(env, 'products')
     const small = await summary()
     const inventory = section(small, 'inventory')
@@ -338,22 +342,22 @@ async function main() {
   const loyaltyCheck = async (name, fn) => {
     try { await check(name, fn) } catch (error) { failures.push(name); console.error(`FAIL ${name}: ${error.message}`) }
   }
-  const setting = (key, value) => raw.db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, String(value))
+  const setting = (key, value) => seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, String(value)))
   const resetLoyaltyCache = () => cacheModule.bumpVersion(env, 'customers')
   const loyalty = async (user = ADMIN) => section(await summary(user), 'loyalty')
   const pointsOf = (value, id) => Number(value?.items.find(item => item.id === `loyalty-${id}`)?.meta.split(' ')[0])
   setting('loyalty_points_enabled', 'true')
   setting('notifications_loyalty_threshold', 100)
   await cacheModule.bumpVersion(env, 'settings')
-  for (let id = 5101; id <= 5109; id += 1) raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Loyalty customer ${id}`)
-  raw.db.exec(`
+  for (let id = 5101; id <= 5109; id += 1) seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Loyalty customer ${id}`))
+  seedStockFixture(raw.db, () => raw.db.exec(`
     INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5101,125),(5102,900);
     UPDATE loyalty_point_adjustments SET voided_at='2026-01-01' WHERE customer_id=5102;
     INSERT INTO customer_share_submissions(id,customer_id,status,reward_points,reward_points_voided_at,loyalty_eligible)
       VALUES (5103,5103,'approved',150,NULL,1),(5104,5104,'pending',1000,NULL,1),(5105,5105,'approved',1000,'2026-01-01',1),
         (5108,5108,'approved',1000,NULL,0),(5100,5109,'approved',1000,NULL,1);
     UPDATE system_flags SET value=json_set(value,'$.submissions',5100) WHERE key='loyalty_points_reset';
-  `)
+  `))
   await resetLoyaltyCache()
   await loyaltyCheck('loyalty includes manual and reward-only customers, excluding voided, pending, ineligible and pre-reset awards', async () => {
     const value = await loyalty()
@@ -365,7 +369,7 @@ async function main() {
     assert.equal(raw.db.prepare("SELECT json_extract(value,'$.submissions') AS checkpoint FROM system_flags WHERE key='loyalty_points_reset'").get().checkpoint, 5100)
   })
 
-  raw.db.exec(`
+  seedStockFixture(raw.db, () => raw.db.exec(`
     INSERT INTO sales(receipt_number,customer_id,sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual) VALUES
       ('LOY-PAID',5106,'completed',80,320000,0,1),
       ('LOY-NP',5106,'awaiting_payment',900,900000,25,1),
@@ -377,7 +381,7 @@ async function main() {
       ('LOY-VOIDRETURN',5106,'cancelled','customer',700,700000);
     INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5106,20.126);
     INSERT INTO customer_share_submissions(customer_id,status,reward_points,loyalty_eligible) VALUES (5106,'approved',5,1);
-  `)
+  `))
   setting('customer_portal_points_basis', 'usd')
   setting('customer_portal_points_per_usd', 2)
   await cacheModule.bumpVersion(env, 'settings')
@@ -390,7 +394,7 @@ async function main() {
   await loyaltyCheck('loyalty uses configured KHR rather than USD, excluding supplier and cancelled returns', async () => {
     assert.equal(pointsOf(await loyalty(), 5106), 275.13)
   })
-  raw.db.prepare("DELETE FROM settings WHERE key='customer_portal_points_per_khr'").run()
+  seedStockFixture(raw.db, () => raw.db.prepare("DELETE FROM settings WHERE key='customer_portal_points_per_khr'").run())
   setting('exchange_rate', 4000)
   setting('customer_portal_points_per_usd', 4)
   await cacheModule.bumpVersion(env, 'settings')
@@ -443,8 +447,8 @@ async function main() {
 
   await loyaltyCheck('loyalty count remains exact for600 customers while only50 names are read for the preview', async () => {
     for (let id = 6000; id < 6600; id += 1) {
-      raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Preview ${id}`)
-      raw.db.prepare('INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (?,?)').run(id, 1000 + id)
+      seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Preview ${id}`))
+      seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (?,?)').run(id, 1000 + id))
     }
     await resetLoyaltyCache()
     const value = await loyalty()

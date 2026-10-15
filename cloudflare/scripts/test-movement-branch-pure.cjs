@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // N13 -- the BRANCH column on a movement row.
 //
 // Discriminating by construction: every fixture row below has a branch_id, and
@@ -55,18 +56,19 @@ ok(typeof branchLib.movementBranchNameSql === 'function', 'movementBranchName ke
 
 // ---- real DB: full migration chain -----------------------------------------
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 ok(true, 'full migration chain applied')
 
-db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 1, name: 'Shop' }).run()
-db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 2, name: 'Warehouse' }).run()
-db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
-  .bind({ id: 9301, name: 'Branch Ledger Cream', barcode: '8800000000311', unit: 'pcs', stock: 4 }).run()
+seedStockFixture(db, () => db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 1, name: 'Shop' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').bind({ id: 2, name: 'Warehouse' }).run())
+seedStockFixture(db, () => db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
+  .bind({ id: 9301, name: 'Branch Ledger Cream', barcode: '8800000000311', unit: 'pcs', stock: 4 }).run())
 
 function insertMovement(row) {
-  db.prepare(
+  seedStockFixture(db, () => db.prepare(
     'INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)' +
     ' VALUES (@id, @product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @reason, @user_name, @created_at)',
-  ).bind({ product_id: 9301, product_name: 'Branch Ledger Cream', reason: null, user_name: 'za', ...row }).run()
+  ).bind({ product_id: 9301, product_name: 'Branch Ledger Cream', reason: null, user_name: 'za', ...row }).run())
 }
 
 // The stock-side writers stamp both columns; the sale/return-family writers
