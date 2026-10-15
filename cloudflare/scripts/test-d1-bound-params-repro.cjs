@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Regression test for the production failure
 //   GET /api/products -> D1_ERROR: too many SQL variables at offset 415
 // observed live on Aug 26 2026.
@@ -133,10 +134,13 @@ async function main() {
   // families expand, and 12x the limit.
   const insert = db.prepare('INSERT INTO products (name, sku, barcode, is_active, stock_quantity) VALUES (@name, @sku, @barcode, 1, 0)')
   const productIds = []
+  assert.throws(() => insert.run({ name: 'raw refused', sku: 'raw-refused', barcode: 'raw-refused' }), /stock_transaction_required/)
+  seedStockFixture(db, () => {
   for (let i = 1; i <= 1200; i++) {
     const info = insert.run({ name: 'Product ' + i, sku: 'SKU-' + i, barcode: '600' + String(i).padStart(7, '0') })
     productIds.push(Number(info.lastInsertRowid))
   }
+  })
   db.prepare("INSERT INTO branches (name, is_active, is_default) VALUES ('Shop', 1, 1)").run()
 
   await check('reading branch stock for 1,200 products succeeds (the exact query that returned "too many SQL variables at offset 415")', async () => {

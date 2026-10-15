@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Companion for cloudflare/migrations/0240_stock_revision_ignores_batch_label.sql
 // (cutover lane LD follow-up; owner rule: untouched products still undo).
 //
@@ -107,7 +108,7 @@ async function main() {
     await check(`a real lot change (${label}) still refuses Undo`, async () => {
       const f = fixture()
       const receipt = await recorded(f, api, `real-change-${label.replace(/\W+/g, '-')}`)
-      f.sql.prepare(`UPDATE product_batches SET ${set}`).run()
+      seedStockFixture(f.sql, () => f.sql.prepare(`UPDATE product_batches SET ${set}`).run())
       await assert.rejects(undo(f, api, receipt), stale)
     })
   }
@@ -116,15 +117,16 @@ async function main() {
     const f = fixture()
     const receipt = await recorded(f, api, 'real-stock-after-fill-001')
     fillLabel(f)
-    f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run()
+    assert.throws(() => f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run(), /stock_transaction_required/)
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run())
     await assert.rejects(undo(f, api, receipt), stale)
   })
 
   await check('insert and delete triggers still bump the lot revisions', () => {
     const f = fixture()
-    f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,received_quantity) VALUES(901,1,'K1','2026-10-01',1,1)")
+    seedStockFixture(f.sql, () => f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,received_quantity) VALUES(901,1,'K1','2026-10-01',1,1)"))
     const afterInsert = revisions(f).filter((r) => r.entity_type === 'batch' && r.entity_key === '901')[0].revision
-    f.sql.exec('DELETE FROM product_batches WHERE id=901')
+    seedStockFixture(f.sql, () => f.sql.exec('DELETE FROM product_batches WHERE id=901'))
     const afterDelete = revisions(f).filter((r) => r.entity_type === 'batch' && r.entity_key === '901')[0].revision
     assert.equal(afterInsert, 1)
     assert.equal(afterDelete, 2)

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // RET-D (owner, 5 Oct 2026): "Stock-in session edits: lowering or raising a
 // line's quantity adjusts stock to the new quantity WITHOUT booking a
 // loss/write-off", and "when Revert is not allowed, say concisely WHY and
@@ -61,6 +62,7 @@ function fresh() {
   load('lib/stockMutationReceipt.ts').resetStockMutationReceiptSchemaProbe()
   load('lib/stockInLineEdit.ts').resetStockInLineEditSchemaProbe()
   const f = fixture()
+  assert.throws(() => f.sql.prepare('UPDATE branch_stock SET quantity=quantity WHERE product_id=1').run(), /stock_transaction_required/)
   f.sql.prepare("INSERT INTO branches(id, name, is_default, is_active) VALUES(2, 'Warehouse', 0, 1)").run()
   return f
 }
@@ -118,6 +120,7 @@ function snapshot(f) {
 // A sale's stock effect as the POS lands it: a 'sale' movement on the lot
 // (reference = the sales row) and lot, branch and product decremented together.
 function sell(f, batchId, quantity, receipt) {
+  return seedStockFixture(f.sql, () => {
   const sale = Number(f.sql.prepare("INSERT INTO sales(receipt_number, branch_id, sale_status, total_usd) VALUES(?, 1, 'completed', 0)").run(receipt).lastInsertRowid)
   f.sql.prepare("INSERT INTO sale_items(sale_id, product_id, quantity) VALUES(?, 1, ?)").run(sale, quantity)
   const movement = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reference_id,batch_id)
@@ -126,9 +129,11 @@ function sell(f, batchId, quantity, receipt) {
   f.sql.prepare('UPDATE branch_stock SET quantity=quantity-? WHERE product_id=1 AND branch_id=1').run(quantity)
   f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity-? WHERE id=1').run(quantity)
   return { sale, movement }
+  })
 }
 // A transfer of lot units from Shop to Warehouse (the lot keeps its identity).
 function transfer(f, batchId, quantity) {
+  return seedStockFixture(f.sql, () => {
   const out = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reference_id,batch_id)
     VALUES(1,'Serum',1,'Shop','transfer_out',?, 'transfer:t-1', ?)`).run(quantity, batchId).lastInsertRowid)
   f.sql.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reference_id,batch_id)
@@ -138,6 +143,7 @@ function transfer(f, batchId, quantity) {
   f.sql.prepare('UPDATE branch_stock SET quantity=quantity-? WHERE product_id=1 AND branch_id=1').run(quantity)
   f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,?)').run(quantity)
   return out
+  })
 }
 
 const failures = []
@@ -208,11 +214,13 @@ async function main() {
     const { movementId, batchId } = await receive(f, 'blocker-xfer-001', 10)
     const sold = sell(f, batchId, 3, '20261004-100000')
     // Cancelled: the restock put the units back on the same lot.
+    seedStockFixture(f.sql, () => {
     f.sql.prepare("UPDATE sales SET sale_status='cancelled' WHERE id=?").run(sold.sale)
     f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reference_id,batch_id) VALUES(1,1,'return',3,?,?)`).run(sold.sale, batchId)
     f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity+3 WHERE batch_id=? AND branch_id=1').run(batchId)
     f.sql.prepare('UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=1 AND branch_id=1').run()
     f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=1').run()
+    })
     const out = transfer(f, batchId, 7)
     const refused = await edit(f, movementId, { quantity: 1, expected_quantity: 10, expected_batch_id: batchId })
     assert.equal(refused.status, 409); assert.equal(refused.json.code, 'below_consumed'); assert.equal(refused.json.minimum, 7)
@@ -256,9 +264,11 @@ async function main() {
     const stockOnly = (s) => JSON.parse(s).filter((_, i) => i !== 6)
     assert.deepEqual(stockOnly(snapshot(f)), stockOnly(before))
     // Reversal path still exact once the sale is out of the way (cancelled + restocked).
+    seedStockFixture(f.sql, () => {
     f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity+11 WHERE batch_id=? AND branch_id=1').run(batchId)
     f.sql.prepare('UPDATE branch_stock SET quantity=quantity+11 WHERE product_id=1 AND branch_id=1').run()
     f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity+11 WHERE id=1').run()
+    })
     const undone = await send(f, 'POST', `/api/action-history/${history}/undo`, { expected_generation: 0, require_applied: true })
     assert.equal(undone.status, 200, JSON.stringify(undone.json))
     assert.deepEqual(ledgers(f, batchId), { branch: 10, product: 10, lotsAtBranch: 10, lotEverywhere: 10, received: 10, receivedCost: 20, lots: 1 })
@@ -325,9 +335,11 @@ async function main() {
     assert.equal(undone.status, 200, JSON.stringify(undone.json))
     // Drift with no movement, deep enough that the redo's -4 cannot apply
     // (REVERT-SET: replay is by delta, so a 1-unit drift no longer refuses).
+    seedStockFixture(f.sql, () => {
     f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-7 WHERE batch_id=? AND branch_id=1').run(batchId)
     f.sql.prepare('UPDATE branch_stock SET quantity=quantity-7 WHERE product_id=1 AND branch_id=1').run()
     f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity-7 WHERE id=1').run()
+    })
     const refused = await send(f, 'POST', `/api/action-history/${set.json.action_history_id}/redo`, { expected_generation: 1, require_applied: true })
     assert.equal(refused.status, 409, JSON.stringify(refused.json))
     assert.equal(refused.json.blocker, undefined, 'the undo\'s own revert:<id> row is not a blocker')

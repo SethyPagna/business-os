@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -9,8 +10,10 @@ const moduleCache = new Map()
 let currentDb
 let beforeBatch
 let afterBatch
+const compiledSources = new Map()
 function compile(source) {
-  return ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  if (!compiledSources.has(source)) compiledSources.set(source, ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)
+  return compiledSources.get(source)
 }
 function evaluate(source, dependencies, result) {
   return new Function(...Object.keys(dependencies), 'exports', `${compile(source)};return ${result}`)(...Object.values(dependencies), {})
@@ -397,9 +400,7 @@ function read(rel) {
   sources.set(rel, { sha256: sha(bytes), bytes: bytes.length })
   return bytes.toString('utf8')
 }
-function compile(source) {
-  return ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-}
+
 const cache = new Map()
 function load(rel) {
   rel = path.posix.normalize(rel.replaceAll('\\', '/'))
@@ -530,7 +531,11 @@ async function main() {
     for (const flag of ['{"mode":"restore","token":"held"}', '{"mode":"branch-cutover","token":"held"}', '{corrupt']) {
       const w = world(); const row = await queue(w)
       const before = { branch: branch(w), pending: pending(w), audits: w.db.prepare('SELECT * FROM audit_logs').all() }
-      w.control.beforeBatch = db => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(flag)
+      w.control.beforeBatch = db => {
+        seedStockFixture(db, () => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(flag))
+        assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, flag)
+        assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      }
       const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
       assert.notEqual(response.status, 200)
       assert.equal(w.control.batches, 1)
@@ -539,7 +544,7 @@ async function main() {
       assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), before.audits)
       assert.equal(w.db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, flag)
       assert.equal(w.control.broadcasts.length, 0)
-      w.db.exec("DELETE FROM system_flags WHERE key='maintenance'")
+      seedStockFixture(w.db, () => w.db.exec("DELETE FROM system_flags WHERE key='maintenance'"))
       const approved = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
       assert.equal(approved.status, 200)
       assert.equal(branch(w).notes, 'approved')
@@ -552,7 +557,8 @@ async function main() {
   await check('already committed branch approval receipt replays read-only during maintenance', async () => {
     const w = world(); const row = await queue(w)
     assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
-    w.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','held')")
+    seedStockFixture(w.db, () => w.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','held')"))
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     const before = { branch: branch(w), pending: pending(w), audits: w.db.prepare('SELECT * FROM audit_logs').all(), batches: w.control.batches }
     const replayed = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
     assert.equal(replayed.status, 200)

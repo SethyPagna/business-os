@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -21,13 +22,15 @@ const batches = load('productBatches.ts')
 const transitions = load('saleTransitions.ts')
 const amendments = load('saleAmendments.ts')
 const additions = load('saleLineAddition.ts')
+const { executeStockTransaction } = load('stockTransaction.ts')
+const callerBatch = (db, statements) => executeStockTransaction(db, statements, 'retry')
 const migrationDir = path.resolve(__dirname, '../migrations')
 const migrationSql = fs.readdirSync(migrationDir).filter((file) => file.endsWith('.sql')).sort()
   .map((file) => fs.readFileSync(path.join(migrationDir, file), 'utf8'))
 
 function fixture() {
   const db = openDb(migrationSql)
-  db.exec(`INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1);
+  seedStockFixture(db.db, () => db.exec(`INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1);
     INSERT INTO products(id,name,stock_quantity,cost_price_usd) VALUES(1,'Serum',0,2.5);
     INSERT INTO sales(id,receipt_number,sale_status,total_usd) VALUES(1,'RESTORE-1','completed',15);
     INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,batch_id,applied_price_usd,cost_price_usd,total_usd)
@@ -38,7 +41,8 @@ function fixture() {
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0),(1,2,0);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,0),(2,2,0);
     INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date,released_quantity)
-      VALUES(1,1,1,1,3,'Original lot','2027-01-02',0);`)
+      VALUES(1,1,1,1,3,'Original lot','2027-01-02',0);`))
+  assert.throws(() => db.exec("UPDATE branch_stock SET quantity=quantity WHERE product_id=1"), /stock_transaction_required/)
   return db
 }
 const actor = { saleId: 1, reason: 'Correction', userId: null, userName: 'Tester' }
@@ -67,16 +71,16 @@ function stock(db, expected) {
 async function main() {
   {
     const db = fixture()
-    db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1')
-    await db.batch(transition().statements)
+    seedStockFixture(db.db, () => db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1'))
+    await callerBatch(db, transition().statements)
     stock(db, 3)
     assert.equal((await batches.listBatchesForProduct(db, 1, 1, { onlyAvailable: true }))[0].id, 1)
     assert.equal(db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE id=1').get().released_quantity, 3)
   }
   {
     const db = fixture()
-    db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1')
-    await assert.rejects(db.batch([...transition().statements,
+    seedStockFixture(db.db, () => db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1'))
+    await assert.rejects(callerBatch(db, [...transition().statements,
       { sql: 'INSERT INTO sale_bulk_guards(guard_value) VALUES(0)' }]), /constraint/i)
     stock(db, 0)
     assert.equal(db.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, null)
@@ -86,13 +90,13 @@ async function main() {
   console.log('PASS nullable legacy active flag: cancellation activates original dated lot and failure restores NULL atomically')
   for (const oldStatus of ['completed', 'awaiting_payment', 'awaiting_delivery', 'partial_return']) {
     const db = fixture()
-    await db.batch(transition({ oldStatus }).statements)
+    await callerBatch(db, transition({ oldStatus }).statements)
     stock(db, 3)
     assert.equal((await batches.listBatchesForProduct(db, 1, 1, { onlyAvailable: true }))[0].id, 1)
     assert.equal(db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE id=1').get().released_quantity, 3)
-    await db.batch(transition({ oldStatus: 'cancelled' }).statements)
+    await callerBatch(db, transition({ oldStatus: 'cancelled' }).statements)
     stock(db, 3)
-    await db.batch(transition({ oldStatus: 'cancelled', newStatus: oldStatus,
+    await callerBatch(db, transition({ oldStatus: 'cancelled', newStatus: oldStatus,
       items: [{ ...item, allocations: [{ ...allocation, released_quantity: 3 }] }] }).statements)
     stock(db, 0)
     assert.equal(db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE id=1').get().released_quantity, 0)
@@ -100,22 +104,22 @@ async function main() {
   console.log('PASS cancellation, repeated cancellation, status restore and selectable original lot for four held statuses')
   {
     const db = fixture()
-    db.exec('DELETE FROM sale_item_batch_allocations')
-    db.exec('DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1')
-    await db.batch(transition({ items: [item] }).statements)
+    seedStockFixture(db.db, () => db.exec('DELETE FROM sale_item_batch_allocations'))
+    seedStockFixture(db.db, () => db.exec('DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1'))
+    await callerBatch(db, transition({ items: [item] }).statements)
     stock(db, 3)
   }
   {
     const db = fixture()
-    db.exec('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE id=1')
-    await db.batch(transition({ oldStatus: 'partial_return', returnedByItem: new Map([[1, 1]]),
+    seedStockFixture(db.db, () => db.exec('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE id=1'))
+    await callerBatch(db, transition({ oldStatus: 'partial_return', returnedByItem: new Map([[1, 1]]),
       items: [{ ...item, allocations: [{ ...allocation, released_quantity: 1 }] }] }).statements)
     stock(db, 2)
   }
   console.log('PASS legacy explicit batch with missing branch-lot row and partial-return outstanding quantity')
   for (const removed of [1, 3]) {
     const db = fixture()
-    await db.batch(decrease(removed).statements)
+    await callerBatch(db, decrease(removed).statements)
     stock(db, removed)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, removed === 3 ? 0 : 1)
     if (removed === 1) {
@@ -125,7 +129,7 @@ async function main() {
   }
   {
     const db = fixture()
-    await db.batch(removal().statements)
+    await callerBatch(db, removal().statements)
     stock(db, 3)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, 0)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sale_item_batch_allocations').get().n, 0)
@@ -133,7 +137,7 @@ async function main() {
   console.log('PASS quantity decrease, full removal and Add Items undo restore the original archived lot')
   for (const plan of [transition(), decrease(1), decrease(3), removal()]) {
     const db = fixture()
-    await assert.rejects(db.batch([...plan.statements, { sql: 'INSERT INTO sale_bulk_guards(guard_value) VALUES(0)' }]), /constraint/i)
+    await assert.rejects(callerBatch(db, [...plan.statements, { sql: 'INSERT INTO sale_bulk_guards(guard_value) VALUES(0)' }]), /constraint/i)
     stock(db, 0)
     assert.equal(db.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, 0)
     assert.equal(db.prepare('SELECT quantity FROM sale_items WHERE id=1').get().quantity, 3)
@@ -145,7 +149,7 @@ async function main() {
     decrease(1, { sale: { sale_status: 'completed', stock_skipped: 1 } }),
     decrease(1, { allocations: [{ ...allocation, released_quantity: 3 }] }), removal(0)]) {
     const db = fixture()
-    await db.batch(plan.statements)
+    await callerBatch(db, plan.statements)
     stock(db, 0)
     assert.equal(db.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, 0)
   }

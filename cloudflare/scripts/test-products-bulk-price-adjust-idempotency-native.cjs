@@ -6,6 +6,7 @@
 //
 // Run (from cloudflare/): node scripts/test-products-bulk-price-adjust-idempotency-native.cjs
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 
@@ -24,13 +25,14 @@ let h = null
 function fixture(user = ADMIN) {
   if (!h) h = createProductsRouteHarness({ user })
   h.setUser(user)
-  h.raw.db.exec(`
+  assert.throws(() => h.raw.db.prepare("INSERT INTO products(name) VALUES('unadmitted fixture control')").run(), /stock_transaction_required/)
+  seedStockFixture(h.raw.db, () => h.raw.db.exec(`
     DELETE FROM audit_logs; DELETE FROM product_cost_entries; DELETE FROM products; DELETE FROM branches;
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, wholesale_price_usd, stock_quantity, is_active) VALUES
       (1, 'Gloss One', '8850000000011', 2, 5, 4, 0, 1),
       (2, 'Serum Other', '8850000000033', 4, 9, 7, 0, 1);
-  `)
+  `))
   return h
 }
 const sellingPrices = () => h.raw.prepare('SELECT selling_price_usd AS v FROM products ORDER BY id').all([]).map((row) => Number(row.v))
