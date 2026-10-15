@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // F37: the duplicate preview must remain bounded at catalog scale.
 //
 // This mounts the real preview handler, duplicate detector, money kernel and
@@ -137,9 +138,9 @@ function loadPreviewRoute(adapter) {
 
 function seedCatalog() {
   const d1 = openDb(loadAll())
+  assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const raw = d1.db
-  raw.exec('BEGIN IMMEDIATE')
-  try {
+  return seedStockFixture(raw, () => {
     raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1),(2,'Warehouse',0,1)")
     const insert = raw.prepare(`INSERT INTO products(
       id,name,barcode,cost_price_usd,cost_price_khr,
@@ -216,12 +217,8 @@ function seedCatalog() {
     raw.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
       VALUES('product.merge','applied',?)`).run(JSON.stringify({ bulkClusterPlan }))
     const originalPlanSnapshotId = raw.prepare('SELECT MAX(id) AS id FROM undo_snapshots').get().id
-    raw.exec('COMMIT')
     return { d1, fixtureGroups, productCount: nextId - 1, bulkClusterPlan, originalPlanSnapshotId }
-  } catch (error) {
-    raw.exec('ROLLBACK')
-    throw error
-  }
+  })
 }
 
 async function invokePreview(handler, user) {

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // The DRY RUN itself, exercised: ops/scripts/migration/plan-leading-zero-twin-merges.mjs
 // run against the REAL schema (full migration chain) with the production twin
 // shapes seeded into it.
@@ -28,9 +29,10 @@ const SCRIPT = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', '
 
 function seed() {
   const d1 = openDb(loadAll())
+  assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const run = (sql) => d1.db.prepare(sql).run()
-  run("INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')")
-  run(`INSERT INTO products (id, name, barcode, cost_price_usd, stock_quantity, is_active, is_group) VALUES
+  seedStockFixture(d1.db, () => run("INSERT INTO branches (id, name) VALUES (1, 'shop'), (2, 'warehouse')"))
+  seedStockFixture(d1.db, () => run(`INSERT INTO products (id, name, barcode, cost_price_usd, stock_quantity, is_active, is_group) VALUES
     -- The owner's pair: one name, one code, one row carrying the extra zero.
     (100, 'Zero Twin', '3614274226546', 5, 4, 1, 0),
     (101, 'Zero Twin', '03614274226546', 7.9, 3, 1, 0),
@@ -47,23 +49,23 @@ function seed() {
     (108, 'Typo Twin', '7777777777777', 2, 0, 1, 0),
     (109, 'Typo Twin', '07777777777777', 200, 0, 1, 0),
     -- An inactive row is already merged away and must not be planned again.
-    (110, 'Zero Twin', '003614274226546', 5, 0, 0, 0)`)
+    (110, 'Zero Twin', '003614274226546', 5, 0, 0, 0)`))
   // The links a merge has to carry, hung off the row that would be discarded.
-  run("INSERT INTO sales (id, receipt_number, total_usd) VALUES (900, '20260906-000001', 10)")
-  run('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (900, 900, 101, 2)')
-  run("INSERT INTO inventory_movements (id, product_id, branch_id, movement_type, quantity) VALUES (900, 101, 1, 'in', 3)")
-  run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (101, 1, 3)')
+  seedStockFixture(d1.db, () => run("INSERT INTO sales (id, receipt_number, total_usd) VALUES (900, '20260906-000001', 10)"))
+  seedStockFixture(d1.db, () => run('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (900, 900, 101, 2)'))
+  seedStockFixture(d1.db, () => run("INSERT INTO inventory_movements (id, product_id, branch_id, movement_type, quantity) VALUES (900, 101, 1, 'in', 3)"))
+  seedStockFixture(d1.db, () => run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (101, 1, 3)'))
   // The two links MERGE_REPARENT_TABLES structurally cannot hold, and which the
   // plan therefore used to leave out of its row count: a promotion rule whose
   // scope is a JSON id ARRAY in a TEXT column, and a child variant pointing at
   // the row that would be discarded.
-  run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
-       VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[101]', 1)`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+       VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[101]', 1)`))
   // NEGATIVE CONTROL: a rule naming a different product must not be counted.
-  run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
-       VALUES (11, 'Someone else', 'percent_off', 5, 'products', '[102]', 1)`)
-  run(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
-       VALUES (111, 'Zero Twin Small', '4444444444444', 101, 1, 0)`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
+       VALUES (11, 'Someone else', 'percent_off', 5, 'products', '[102]', 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO products (id, name, barcode, parent_id, is_active, is_group)
+       VALUES (111, 'Zero Twin Small', '4444444444444', 101, 1, 0)`))
   return d1
 }
 

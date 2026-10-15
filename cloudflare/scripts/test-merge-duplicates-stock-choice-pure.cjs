@@ -1,3 +1,5 @@
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // "What happens when I keep one and the other row also has stock?"
 //
 // Resolving a name-twin pair used to fold the discarded row's stock onto the
@@ -63,6 +65,7 @@ function loadTs(relPath, stubs) {
   })
   const original = Module._load
   Module._load = (request, parent, isMain) => {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
@@ -100,6 +103,7 @@ function dbAdapter(d1) {
         },
       }
     },
+    batchOnce(stmts) { return this.batch(stmts) },
     batch: (stmts) => {
       const readOnly = stmts.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) return d1.batch(stmts)
@@ -168,51 +172,52 @@ const WAREHOUSE = 2
 
 function seed() {
   const d1 = openDb(loadAll())
+  assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const run = (sql) => d1.db.prepare(sql).run()
-  run(`INSERT INTO branches (id, name) VALUES (${SHOP}, 'shop'), (${WAREHOUSE}, 'warehouse')`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO branches (id, name) VALUES (${SHOP}, 'shop'), (${WAREHOUSE}, 'warehouse')`))
   // The twin is priced HIGHER than the keeper, which is the case that makes a
   // merge quietly raise the shelf price (resolveMergedPricing takes the max).
   // wholesale_price_* is the LIVE discounted tier (migration 0111 moved it off
   // special_price_* and zeroed that pair), so the fixture prices the tier that
   // a merge can actually move: equal on both rows here, which is what makes the
   // 'an unchanged field is still reported' assertion below mean something.
-  run(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, wholesale_price_usd, stock_quantity, is_active)
+  seedStockFixture(d1.db, () => run(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, wholesale_price_usd, stock_quantity, is_active)
        VALUES (${KEEPER}, 'Anastasia Dipbrow Pomade Dark Brown', '689304051040', 8, 22, 20, 5, 1),
-              (${DUP},    'Anastasia Dipbrow Pomade Dark Brown', '0689304051040', 8, 25, 20, 10, 1)`)
+              (${DUP},    'Anastasia Dipbrow Pomade Dark Brown', '0689304051040', 8, 25, 20, 10, 1)`))
 
   // Keeper: 5 pcs at the shop, all in lot SHARED.
-  run(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (${KEEPER}, ${SHOP}, 5)`)
-  run(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, batch_number, expiry_date, received_at, unit_cost_usd, is_active)
-       VALUES (900, ${KEEPER}, 'SHARED', 'LOT-SHARED', 1, '2027-01-31', '2026-01-05', 8, 1)`)
-  run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (900, ${SHOP}, 5)`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (${KEEPER}, ${SHOP}, 5)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, batch_number, expiry_date, received_at, unit_cost_usd, is_active)
+       VALUES (900, ${KEEPER}, 'SHARED', 'LOT-SHARED', 1, '2027-01-31', '2026-01-05', 8, 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (900, ${SHOP}, 5)`))
 
   // Discarded twin: 7 at the shop (4 in its OWN lot, 3 in the colliding SHARED
   // lot) and 3 at the warehouse in its own lot.
-  run(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (${DUP}, ${SHOP}, 7), (${DUP}, ${WAREHOUSE}, 3)`)
-  run(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, batch_number, expiry_date, received_at, unit_cost_usd, is_active)
+  seedStockFixture(d1.db, () => run(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (${DUP}, ${SHOP}, 7), (${DUP}, ${WAREHOUSE}, 3)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, batch_number, expiry_date, received_at, unit_cost_usd, is_active)
        VALUES (901, ${DUP}, 'OWN', 'LOT-OWN-0817', 1, '2027-08-17', '2026-02-11', 9, 1),
-              (902, ${DUP}, 'SHARED', 'LOT-SHARED', 2, '2027-01-31', '2026-01-05', 8, 1)`)
-  run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (901, ${SHOP}, 4), (901, ${WAREHOUSE}, 3), (902, ${SHOP}, 3)`)
+              (902, ${DUP}, 'SHARED', 'LOT-SHARED', 2, '2027-01-31', '2026-01-05', 8, 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (901, ${SHOP}, 4), (901, ${WAREHOUSE}, 3), (902, ${SHOP}, 3)`))
 
   // The receipts that PUT that stock on the discarded row. A write-off has to
   // cancel these for the survivor's ledger to still add up.
-  run(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason)
+  seedStockFixture(d1.db, () => run(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason)
        VALUES (${DUP}, 'twin', ${SHOP}, 'stock_in', 7, 'received'),
-              (${DUP}, 'twin', ${WAREHOUSE}, 'stock_in', 3, 'received')`)
+              (${DUP}, 'twin', ${WAREHOUSE}, 'stock_in', 3, 'received')`))
 
   // One linked row in every table the merge must move.
-  run(`INSERT INTO sales (id, receipt_number) VALUES (500, '20260901-101010')`)
-  run(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (600, 500, ${DUP}, 'twin', 1)`)
-  run(`INSERT INTO returns (id, return_number, sale_id) VALUES (700, 'RET-1', 500)`)
-  run(`INSERT INTO return_items (id, return_id, product_id, product_name, quantity) VALUES (710, 700, ${DUP}, 'twin', 1)`)
-  run(`INSERT INTO return_replacement_items (id, return_id, product_id, product_name, quantity) VALUES (720, 700, ${DUP}, 'twin', 1)`)
-  run(`INSERT INTO damaged_stock_lots (id, product_id, product_name, branch_id, quantity, quantity_remaining) VALUES (730, ${DUP}, 'twin', ${SHOP}, 1, 1)`)
-  run(`INSERT INTO stock_transfers (id, from_branch_id, to_branch_id, product_id, quantity) VALUES (740, ${WAREHOUSE}, ${SHOP}, ${DUP}, 1)`)
-  run(`INSERT INTO rfid_tags (id, epc_id, product_id, branch_id) VALUES (750, 'EPC-1', ${DUP}, ${SHOP})`)
-  run(`INSERT INTO rfid_events (id, session_id, epc_id, product_id, event_type) VALUES (760, 1, 'EPC-1', ${DUP}, 'read')`)
-  run(`INSERT INTO rfid_session_items (id, session_id, epc_id, product_id, status) VALUES (770, 1, 'EPC-1', ${DUP}, 'expected')`)
-  run(`INSERT INTO promotions (id, title, link_product_id) VALUES (780, 'Twin promo', ${DUP})`)
-  run(`INSERT INTO product_cost_entries (id, product_id, cost_usd, source) VALUES (790, ${DUP}, 9, 'manual')`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO sales (id, receipt_number) VALUES (500, '20260901-101010')`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (600, 500, ${DUP}, 'twin', 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO returns (id, return_number, sale_id) VALUES (700, 'RET-1', 500)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO return_items (id, return_id, product_id, product_name, quantity) VALUES (710, 700, ${DUP}, 'twin', 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO return_replacement_items (id, return_id, product_id, product_name, quantity) VALUES (720, 700, ${DUP}, 'twin', 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO damaged_stock_lots (id, product_id, product_name, branch_id, quantity, quantity_remaining) VALUES (730, ${DUP}, 'twin', ${SHOP}, 1, 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO stock_transfers (id, from_branch_id, to_branch_id, product_id, quantity) VALUES (740, ${WAREHOUSE}, ${SHOP}, ${DUP}, 1)`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO rfid_tags (id, epc_id, product_id, branch_id) VALUES (750, 'EPC-1', ${DUP}, ${SHOP})`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO rfid_events (id, session_id, epc_id, product_id, event_type) VALUES (760, 1, 'EPC-1', ${DUP}, 'read')`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO rfid_session_items (id, session_id, epc_id, product_id, status) VALUES (770, 1, 'EPC-1', ${DUP}, 'expected')`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO promotions (id, title, link_product_id) VALUES (780, 'Twin promo', ${DUP})`))
+  seedStockFixture(d1.db, () => run(`INSERT INTO product_cost_entries (id, product_id, cost_usd, source) VALUES (790, ${DUP}, 9, 'manual')`))
   return d1
 }
 
@@ -465,8 +470,8 @@ async function main() {
   {
     const d1 = seed()
     const { mod, adapter } = loadProductsRoute(d1)
-    d1.db.prepare(`DELETE FROM branch_stock WHERE product_id = ${DUP}`).run()
-    d1.db.prepare(`DELETE FROM branch_batch_stock WHERE batch_id IN (901, 902)`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`DELETE FROM branch_stock WHERE product_id = ${DUP}`).run())
+    seedStockFixture(d1.db, () => d1.db.prepare(`DELETE FROM branch_batch_stock WHERE batch_id IN (901, 902)`).run())
     await check('cache-only stock refuses the fold with the existing product_has_stock409', async () => {
       const before = JSON.stringify(d1.db.prepare('SELECT * FROM products ORDER BY id').all())
       await assert.rejects(mod.foldDuplicateProductInto(
@@ -476,7 +481,7 @@ async function main() {
       ), error => error.code === 'product_has_stock' && error.status === 409)
       assert.equal(JSON.stringify(d1.db.prepare('SELECT * FROM products ORDER BY id').all()), before)
     })
-    d1.db.prepare(`UPDATE products SET stock_quantity=0 WHERE id=${DUP}`).run()
+    seedStockFixture(d1.db, () => d1.db.prepare(`UPDATE products SET stock_quantity=0 WHERE id=${DUP}`).run())
 
     await check('an unstocked row needs no answer', async () => {
       const impact = await mod.readMergeStockImpact(adapter, DUP, branchNames)
