@@ -10,7 +10,7 @@
 // real runImportAnalyze / runImportApply. Covered for each job type that moves stock or records a sale
 // (products, inventory, sales, stock_actions):
 //   * before the cutover (both branches active) the new code writes byte-identical business statements and ends
-//     in identical rows -- an ORACLE world loads the import files exactly as they were at eb5dd0ba3 (the documented
+//     in identical rows -- an ORACLE world loads the import files exactly as they were at da2004932 (the documented
 //     exceptions: the stock-action add batch gains its in-batch landing-branch guard, the closed loophole; and the
 //     inventory row also moves its branch and counted lot, AL-STOCK B, so it is held to the oracle's rows plus that);
 //   * after the cutover with no header: 409 branch_redirect_required with the redirect detail, the job stays in
@@ -65,6 +65,28 @@ const USER = { id: 71, username: 'owner', name: 'Owner', role_code: 'admin', per
 const executionCtx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 const noop = async () => {}
 const REPO_ROOT = path.join(__dirname, '..', '..')
+const loyaltyModule = { exports: {} }
+new Function('exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'loyaltyEligibility.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(loyaltyModule.exports)
+const LOYALTY_PROJECTION = loyaltyModule.exports.loyaltyAccrualSql('?39')
+
+function normalizeLoyaltyBirthProjection(writes) {
+  let projections = 0
+  const normalized = writes.map(batch => batch.map(text => {
+    const statement = JSON.parse(text)
+    const index = statement.sql.indexOf(LOYALTY_PROJECTION)
+    if (index < 0) return text
+    assert.match(statement.sql, /^INSERT INTO sales\s*\(/)
+    assert.match(statement.sql, /\bloyalty_accrual\b/)
+    assert.match(statement.sql.slice(0, index), /\?37,\s*\?38,\s*$/)
+    assert.match(statement.sql.slice(index + LOYALTY_PROJECTION.length), /^,\s*\?40,/)
+    assert.equal(statement.sql.indexOf(LOYALTY_PROJECTION, index + 1), -1)
+    projections++
+    return JSON.stringify({ ...statement, sql: statement.sql.replace(LOYALTY_PROJECTION, '?39') })
+  }))
+  return { normalized, projections }
+}
 
 // The engine's own timing lines are noise here.
 const consoleLog = console.log
@@ -238,9 +260,9 @@ async function world(state, { oracle = false } = {}) {
 }
 
 // Creates the job, gives it the CSV, runs the analysis to the review step.
-async function analysed(w, type, jobId) {
+async function analysed(w, type, jobId, policy = POLICY[type] || {}) {
   nextJobId = jobId
-  const created = await w.request('POST', '/', { type, policy: POLICY[type] || {} })
+  const created = await w.request('POST', '/', { type, policy })
   nextJobId = null
   assert.equal(created.status, 200, JSON.stringify(created.body))
   assert.equal(created.body.job.id, jobId)
@@ -286,11 +308,26 @@ let checks = 0
 const check = async (name, fn) => { await fn(); checks++; console.log(`PASS ${name}`) }
 
 async function main() {
+  for (const enabled of [false, true]) {
+    await check(`sales: actual import route preserves financial rows with loyalty ${enabled ? 'ON' : 'OFF'}`, async () => {
+      const w = await world('before')
+      w.sql.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(enabled))
+      const id = `job-loyalty-${enabled}`
+      await analysed(w, 'sales', id, { accrue_loyalty: true })
+      const approved = await w.request('POST', `/${id}/approve`, approveBody('sales'))
+      assert.equal(approved.status, 200, JSON.stringify(approved.body))
+      await w.drain()
+      assert.match(w.sql.prepare('SELECT status FROM import_jobs WHERE id=?').get(id).status, /^completed/)
+      const sale = w.sql.prepare('SELECT loyalty_accrual,sale_status,total_usd,branch_id FROM sales').get()
+      assert.deepEqual(sale, { loyalty_accrual: enabled ? 1 : 0, sale_status: 'partial_return', total_usd: 24, branch_id: 2 })
+      assert.equal(w.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 4)
+    })
+  }
   const TYPES = ['products', 'inventory', 'sales', 'stock_actions']
 
   for (const type of TYPES) {
     // ---- before the cutover: inert ------------------------------------------------------------------------------
-    await check(`${type}: before the cutover the approve + apply writes ${type === 'inventory' ? 'the oracle\'s rows plus the AL-STOCK B branch and lot halves' : 'byte-identical business statements and rows'} (oracle eb5dd0ba3)`, async () => {
+    await check(`${type}: before the cutover the approve + apply writes ${type === 'inventory' ? 'the oracle\'s rows plus the AL-STOCK B branch and lot halves' : 'byte-identical business statements and rows'} (oracle da2004932)`, async () => {
       const results = []
       for (const oracle of [false, true]) {
         const w = await world('before', { oracle })
@@ -349,7 +386,15 @@ async function main() {
         assert.ok(adds === 2 && added.length === adds, 'exactly one landing guard per applied add (shop 2 -> Shop, warehouse 1 -> Warehouse)')
         assert.deepEqual(withoutProductAdmission(fresh.writes).map((batch) => batch.filter((text) => !isLandingGuard(text))), withoutProductAdmission(old.writes), `${type}: otherwise byte-identical`)
       } else {
-        assert.deepEqual(withoutProductAdmission(fresh.writes), withoutProductAdmission(old.writes), `${type}: byte-identical business statements`)
+        if (type === 'sales') {
+          const current = normalizeLoyaltyBirthProjection(fresh.writes)
+          const historical = normalizeLoyaltyBirthProjection(old.writes)
+          assert.equal(current.projections, 1, 'only the imported sale birth projection differs')
+          assert.equal(historical.projections, 0, 'the historical oracle keeps its original bare binding')
+          assert.deepEqual(withoutProductAdmission(current.normalized), withoutProductAdmission(historical.normalized), `${type}: all other SQL and bound financial/branch/stock values remain byte-identical`)
+        } else {
+          assert.deepEqual(withoutProductAdmission(fresh.writes), withoutProductAdmission(old.writes), `${type}: byte-identical business statements`)
+        }
       }
     })
 

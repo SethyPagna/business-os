@@ -29,7 +29,7 @@ const call=async input=>{const response=await mf.dispatchFetch('http://local/',{
 const seed=async statements=>{const r=await call({op:'seed',statements});assert.equal(r.ok,true,JSON.stringify(r))}
 try{
 const files=fs.readdirSync(path.join(root,'migrations')).filter(n=>n.endsWith('.sql')).sort()
-const isReset=n=>/loyalty_points_watermark/.test(n)
+const isReset=n=>n==='0251_loyalty_points_watermark.sql'
 const apply=async names=>{const list=[];for(const name of names)for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8'))){if(name==='0098_user_aliases.sql'&&/^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim()))continue;list.push({sql})}for(let i=0;i<list.length;i+=50)await seed(list.slice(i,i+50))}
 await apply(files.filter(n=>!isReset(n)))
 const token='synthetic-reset-session',hash=createHash('sha256').update(token).digest('hex')
