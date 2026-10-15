@@ -8,6 +8,7 @@ import { resolveReplayAction } from '../src/utils/actionReplay.ts'
 import { withLoaderTimeout } from '../src/utils/loaders.ts'
 import { noteQueuedForReview } from '../src/utils/pendingReviewTargets.ts'
 import { withWriteTimeout } from '../src/utils/writeIntent.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, resetActorReadSession } from '../src/api/actorReadScope.ts'
 
 const ts = createRequire(new URL('../../cloudflare/package.json', import.meta.url))('typescript')
 const read = (file: string): string => readFileSync(new URL(file, import.meta.url), 'utf8')
@@ -229,8 +230,14 @@ async function replayWorkflow(language: 'en' | 'km', direction: 'undo' | 'redo')
   })
   assert.equal(await page.run({ ...initial(branch), notes: 'committed edit' }), true)
   const historySource = read('../src/utils/actionHistory.ts')
+  const readScope = captureActorReadScope('actionHistory')
+  const actorScope = 'branch-editor-7'
+  const actorScopeRef = { current: actorScope }
   const run = (action: 'undo' | 'redo') => load(historySource, 'runEntry', {
     useCallback: (fn: unknown) => fn, undoStack, redoStack, busy: '', limit: 10,
+    actorScope, actorScopeRef, readScope, isActorReadScopeCurrent,
+    committedGroupRedo: load(historySource, 'committedGroupRedo', { pendingGroupRedo: load(historySource, 'pendingGroupRedo') }),
+    isCommittedGroupRedo: load(historySource, 'isCommittedGroupRedo'),
     setBusy: () => {}, refreshServerItems: () => {}, resolveReplayAction,
     setUndoStack: (update: (current: any[]) => any[]) => { undoStack = update(undoStack) },
     setRedoStack: (update: (current: any[]) => any[]) => { redoStack = update(redoStack) },
@@ -240,11 +247,26 @@ async function replayWorkflow(language: 'en' | 'km', direction: 'undo' | 'redo')
   })(action)
   if (direction === 'redo') assert.equal(await run('undo'), true)
   return {
-    pack, notices, run, get row() { return row },
+    pack, notices, run, actorScopeRef, get row() { return row },
     get entry() { return (direction === 'undo' ? undoStack : redoStack)[0] },
     reject(error: Error) { rejection = error }, queue() { queued = true },
   }
 }
+await check('local branch replay refuses a changed actor or expired read session before writing', async () => {
+  for (const direction of ['undo', 'redo'] as const) {
+    for (const boundary of ['actor', 'session'] as const) {
+      const flow = await replayWorkflow('en', direction)
+      const before = { ...flow.row }
+      const entry = flow.entry
+      if (boundary === 'actor') flow.actorScopeRef.current = 'branch-editor-8'
+      else resetActorReadSession()
+      assert.equal(await flow.run(direction), false)
+      assert.deepEqual(flow.row, before)
+      assert.equal(flow.entry, entry)
+      assert.deepEqual(flow.notices, [])
+    }
+  }
+})
 for (const language of ['en', 'km'] as const) {
   for (const direction of ['undo', 'redo'] as const) {
     for (const kind of ['permission', 'timestamp'] as const) {

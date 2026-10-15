@@ -99,13 +99,19 @@ function assertReviewCreatePaths(modal: string, appliers: string, writers: strin
   const writer = functionText('createProductWithInitialStock')
   assert.match(writer, /const \{ branchId, quantity(?:, landing)? \} = await productCreateDestination\(env, body(?:, redirectTarget)?\)/)
   assert.match(writer, /planInsertRow\('products',[\s\S]*?stock_quantity: quantity, client_request_id: key/)
+  const dispatch = "await executeStockTransaction(db, addressedStatements(landing, statements), 'once')"
+  const dispatchAt = writer.indexOf(dispatch)
+  assert.ok(dispatchAt > 0)
   for (const table of ['branch_stock', 'product_batches', 'branch_batch_stock']) {
     const insert = writer.indexOf('INSERT INTO ' + table + '(')
-    assert.ok(insert > 0 && insert < writer.indexOf('await db.batchOnce(addressedStatements(landing, statements))'), table)
+    assert.ok(insert > 0 && insert < dispatchAt, table)
   }
   assert.match(writer, /if \(approval\) \{\s*statements\.push\(\.\.\.pendingActionApprovalStatements\(approval\.row, approval\.reviewer\)\)/)
   assert.match(writer, /statements\.push\(receivingBranchAssertion\(branchId\)\)/)
-  assert.equal((writer.match(/await db\.batchOnce\(addressedStatements\(landing, statements\)\)/g) || []).length, 1)
+  assert.ok(writer.indexOf('...pendingActionApprovalStatements(approval.row, approval.reviewer)') < dispatchAt)
+  assert.ok(writer.indexOf('statements.push(receivingBranchAssertion(branchId))') < dispatchAt)
+  assert.equal(writer.split(dispatch).length - 1, 1)
+  assert.doesNotMatch(writer, /await db\.batch(?:Once)?\(/)
 }
 assertReviewCreatePaths(floatSource, applierSource, writerSource)
 for (const [before, after] of [
@@ -121,5 +127,13 @@ for (const [before, after] of [
 assert.throws(() => assertReviewCreatePaths(floatSource, applierSource.replace('await createProductWithInitialStock(env, body', 'await insertRow(env, body'), writerSource), assert.AssertionError)
 for (const before of ['INSERT INTO branch_stock(', 'INSERT INTO product_batches(', 'INSERT INTO branch_batch_stock(', '...pendingActionApprovalStatements(approval.row, approval.reviewer)']) {
   assert.throws(() => assertReviewCreatePaths(floatSource, applierSource, writerSource.replace(before, 'removed_atomic_statement')), assert.AssertionError)
+}
+const dispatch = "await executeStockTransaction(db, addressedStatements(landing, statements), 'once')"
+for (const replacement of [
+  'await db.batchOnce(addressedStatements(landing, statements))',
+  "await executeStockTransaction(db, statements, 'once')",
+  `${dispatch}; ${dispatch}`,
+]) {
+  assert.throws(() => assertReviewCreatePaths(floatSource, applierSource, writerSource.replace(dispatch, replacement)), assert.AssertionError)
 }
 console.log('PASS Review-tier product creation stays on the review workflow; the Stock Session refuses a pending product')
