@@ -81,6 +81,7 @@ await runTest('a NULL cost loads as an empty input, a recorded $0 as "0"', () =>
 })
 
 await runTest('saving an empty cost sends null, a typed 0 sends 0', () => {
+  for (const invalid of ['.', '100000000001', '-1']) assert.throws(() => helpers.costInputToPayload(invalid), /Invalid cost input/)
   for (const empty of ['', '   ', null, undefined]) assert.equal(helpers.costInputToPayload(empty), null, `empty ${String(empty)}`)
   assert.equal(helpers.costInputToPayload('0'), 0)
   assert.equal(helpers.costInputToPayload('0.00'), 0)
@@ -103,7 +104,7 @@ await runTest('a new product defaults to an unknown cost, not 0', () => {
 await runTest('the cost input says "Unknown" when empty and the review row does not print $0.00', () => {
   const form = read('components/products/forms/ProductForm.tsx')
   assert.match(form, /placeholderUsd=\{tr\('cost_input_unknown_placeholder'/)
-  assert.match(form, /costInputToPayload\(form\.cost_price_usd\)\) === null \? tr\('cost_unknown'/)
+  assert.match(form, /costInputPreview\(form\.cost_price_usd\) === null \? tr\('cost_unknown'/)
   assert.match(read('components/products/shared/primitives.tsx'), /placeholder=\{placeholderUsd \|\| '0\.00'\}/)
 })
 
@@ -194,7 +195,7 @@ await runTest('restore payload keeps NULL cost NULL and a recorded $0 as 0', () 
   const legacy = helpers.buildProductWritePayload({ name: 'A', purchase_price_usd: 7 })
   assert.equal(legacy.cost_price_usd, 7, 'a snapshot with no cost key still reads the purchase column')
   const bare = helpers.buildProductWritePayload({ name: 'A' })
-  assert.equal(bare.cost_price_usd, null)
+  assert.ok(!('cost_price_usd' in bare), 'no cost key means redacted, not an explicit clear')
 })
 
 await runTest('clearing stock does not value the removal at $0 when the cost is unknown', () => {
@@ -207,11 +208,12 @@ await runTest('clearing stock does not value the removal at $0 when the cost is 
   assert.equal(free.unitCostUsd, 0)
 })
 
-function productCallback(name: string, scope: Record<string, unknown>): (...args: any[]) => Promise<void> {
-  const source = ts.createSourceFile('Products.tsx', read('components/products/Products.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+function productCallback(name: string, scope: Record<string, unknown>, file = 'components/products/Products.tsx'): (...args: any[]) => Promise<void> {
+  const source = ts.createSourceFile('Products.tsx', read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   let body = ''
   function visit(node: ts.Node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer && ts.isCallExpression(node.initializer)) body = node.initializer.arguments[0].getText(source)
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer) body = (ts.isCallExpression(node.initializer) ? node.initializer.arguments[0] : node.initializer).getText(source)
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) body = node.getText(source)
     ts.forEachChild(node, visit)
   }
   visit(source)
@@ -219,6 +221,63 @@ function productCallback(name: string, scope: Record<string, unknown>): (...args
   const code = ts.transpileModule(`const callback = ${body}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
   return new Function(...Object.keys(scope), `${code};return callback`)(...Object.values(scope))
 }
+
+await runTest('nonblank unsupported costs refuse in actual product/variant save callbacks with localized guidance', async () => {
+  const access = require('../src/utils/acquisitionCostAccess.ts')
+  const guards = require('../src/utils/actionGuards.ts')
+  for (const language of ['en', 'km']) for (const invalid of ['.', '100000000001', '-1', 'not money']) {
+    const pack = JSON.parse(read(`lang/${language}.json`))
+    const messages: string[] = []
+    let writes = 0
+    const form = { name: 'Existing', barcode: '', cost_price_usd: invalid, cost_price_khr: '' }
+    const common = {
+      form, canEditCosts: true, canViewCosts: true, blindCostInputs: { usd: '', khr: '' },
+      isValidCostInput: (writeHelpers as Record<string, any>).isValidCostInput,
+      costInputToPayload: writeHelpers.costInputToPayload, saving: false, saveInFlightRef: { current: false },
+      tr: (key: string, fallback: string) => pack[key] || fallback, user: { id: 1, role_code: 'admin' },
+      omitUnauthorizedCatalogCosts: access.omitUnauthorizedCatalogCosts,
+    }
+    const productScope = {
+      ...common, imageUploading: false, imageUploadInFlightRef: { current: false }, aliveRef: { current: true },
+      currentFormDraftKeyRef: { current: 'A' }, draftKey: 'A', draftScope: null, product: null,
+      scopedWorkDraftKey: () => 'A', productFormDraftBaseKey: () => 'A', draftAuthority: { authority: {} },
+      isDraftAuthorityCurrent: () => true, setSaveAuthorityWarning: () => {}, refuseWhileAPhotoFailed: () => false,
+      alert: (message: string) => messages.push(message), isCreateMode: false, createSessionDuplicate: false,
+      createVerdict: { kind: null }, branches: [], onSave: async () => { writes++ },
+      canManageImages: false, initialForm: {}, normalizeGallery: () => [], ADMIN_MAX_PRODUCT_GALLERY_IMAGES: 5,
+      normalizePriceValue: Number, parseNumericInput: (value: unknown) => Number(value || 0), normalizeInternalMoney: Number,
+      showReceivedDate: false, canonicalizePersistedMediaPath: (value: unknown) => value,
+      askSaveConfirm: async () => true, flushPendingWorkDraft: () => {}, readWorkDraft: () => null,
+      restoredLegacyDraftKeyRef: { current: null }, setSaving: () => {}, clearUnchangedWorkDraft: () => true,
+      clearCurrentProductDraft: () => {}, onClose: () => {}, getErrorMessage: (error: Error) => error.message,
+      clearAfterSuccessfulProductSave: async (save: () => Promise<void>, clear: () => void, close: () => void) => { await save(); clear(); close() },
+    }
+    await productCallback('saveForm', productScope, 'components/products/forms/ProductForm.tsx')()
+    assert.equal(writes, 0)
+    assert.deepEqual(messages, [pack.cost_input_invalid], `product refusal in ${language}`)
+    messages.length = 0
+    const variantScope = {
+      ...common, beginSingleAction: guards.beginSingleAction, finishSingleAction: guards.finishSingleAction,
+      setSaving: () => {}, setErr: (message: string) => { if (message) messages.push(message) },
+      runVariantMutation: (fn: () => unknown) => fn(), getProductVariantApi: () => ({ createProductVariant: () => { writes++; return { success: true } } }),
+      normalizePriceValue: Number, parseNumericInput: (value: unknown) => Number(value || 0),
+      notify: () => {}, parent: { name: 'Parent' }, onDone: undefined, extractHistoryResultId: () => 1,
+      getErrorMessage: (error: Error) => error.message,
+    }
+    await productCallback('handleSave', variantScope, 'components/products/forms/VariantFormModal.tsx')()
+    assert.equal(writes, 0)
+    assert.deepEqual(messages, [pack.cost_input_invalid], `variant refusal in ${language}`)
+  }
+})
+
+await runTest('cost snapshot restoration preserves precision and omits redacted cost fields', () => {
+  for (const cost of [null, 0, 2.3456, 2.345678]) {
+    const payload = helpers.buildProductWritePayload({ name: 'Restore', cost_price_usd: cost, cost_price_khr: cost, purchase_price_usd: cost, purchase_price_khr: cost })
+    for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) assert.equal(payload[field], cost)
+  }
+  const hidden = helpers.buildProductWritePayload({ name: 'Redacted' })
+  for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) assert.ok(!(field in hidden), 'an absent cost is not an explicit clear')
+})
 
 await runTest('actual Products bulk callbacks show catalog before/after and pin the confirmed cost', async () => {
   for (const mode of ['relative', 'absolute']) for (const [field, own] of [['purchase_price_usd', 'cost_price_usd'], ['purchase_price_khr', 'cost_price_khr']]) {
@@ -260,6 +319,7 @@ await runTest('bulk cost uses the catalog value when the purchase mirror is abse
 })
 
 await runTest('absolute bulk cost payload keeps null, zero and raw decimal validation on canonical fields', () => {
+  assert.equal(writeHelpers.buildProductBulkUpdatePayload({ cost_price_usd: null, purchase_price_usd: 5 }).cost_price_usd, null, 'explicit canonical NULL wins over a conflicting legacy alias')
   for (const value of [null, 0, '0', '1.234567', '-0.00004']) {
     const payload = writeHelpers.buildProductBulkUpdatePayload(helpers.buildProductBulkPricingUpdates({ purchase_price_usd: value, purchase_price_khr: value }))
     assert.equal(payload.cost_price_usd, value)

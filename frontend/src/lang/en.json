@@ -7532,5 +7532,6 @@
   "conflict_issue_queued": "Sent for review",
   "conflict_cost_permission_needed": "Entering a cost needs the cost-entry permission",
   "conflict_cost_already_set": "This received date already has a cost — refresh",
-  "cost_breakdown_excluded_unknown": "Unknown cost — not counted"
+  "cost_breakdown_excluded_unknown": "Unknown cost — not counted",
+  "cost_input_invalid": "Enter a valid cost from 0 to 100,000,000,000, or leave it blank for unknown."
 }

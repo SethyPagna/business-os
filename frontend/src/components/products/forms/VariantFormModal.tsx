@@ -3,7 +3,7 @@ import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { costInputToPayload, editableCostText } from '../helpers/productWriteHelpers.ts'
+import { costInputToPayload, editableCostText, isValidCostInput } from '../helpers/productWriteHelpers.ts'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
@@ -238,6 +238,11 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       return
     }
 
+    if (canEditCosts && [form.cost_price_usd, form.cost_price_khr].some(value => !isValidCostInput(value))) {
+      setErr(tr('cost_input_invalid', 'Enter a valid cost from 0 to 100,000,000,000, or leave it blank for unknown.'))
+      finishSingleAction(saveInFlightRef)
+      return
+    }
     setSaving(true)
     setErr('')
     try {

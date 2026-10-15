@@ -21,8 +21,7 @@ import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
 import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { costInputToPayload, editableCostText } from '../helpers/productWriteHelpers.ts'
-import { knownCost } from '../../../utils/costDisplay.ts'
+import { costInputToPayload, costInputPreview, editableCostText, isValidCostInput } from '../helpers/productWriteHelpers.ts'
 import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
@@ -922,7 +921,7 @@ function ProductFormContent({
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
       { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
-      ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: knownCost(costInputToPayload(form.cost_price_usd)) === null ? tr('cost_unknown', 'Unknown cost') : `${usdSymbol}${Number(costInputToPayload(form.cost_price_usd)).toFixed(2)}` }] : []),
+      ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: costInputPreview(form.cost_price_usd) === null ? tr('cost_unknown', 'Unknown cost') : `${usdSymbol}${Number(costInputPreview(form.cost_price_usd)).toFixed(2)}` }] : []),
     ]
     const barcode = String(form.barcode || '').trim()
     if (barcode) items.push({ label: tr('barcode', 'Barcode'), value: barcode })
@@ -1320,6 +1319,10 @@ function ProductFormContent({
     }
     if (isCreateMode && branches.length > 0 && !form.branch_id) {
       alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
+      return
+    }
+    if (canEditCosts && [canViewCosts ? form.cost_price_usd : blindCostInputs.usd, canViewCosts ? form.cost_price_khr : blindCostInputs.khr].some(value => !isValidCostInput(value))) {
+      alert(tr('cost_input_invalid', 'Enter a valid cost from 0 to 100,000,000,000, or leave it blank for unknown.'))
       return
     }
     saveInFlightRef.current = true
@@ -2071,7 +2074,7 @@ function ProductFormContent({
           </div>
           {canViewCosts && activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 ? (
             <MarginCard
-              costUsd={costInputToPayload(form.cost_price_usd)}
+              costUsd={costInputPreview(form.cost_price_usd)}
               sellingUsd={Number(form.selling_price_usd || 0)}
               usdSymbol={usdSymbol}
               labels={{

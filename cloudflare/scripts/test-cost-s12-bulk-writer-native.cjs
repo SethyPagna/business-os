@@ -89,6 +89,37 @@ const apply = (id, updates, user = admin) => request(products, 'PUT', '/' + id, 
     assert.equal(row(id).cost_price_usd,6)
     assert.equal(entries(id).length,1)
   })
+  await check('real snapshot undo keeps exact internal/historical cost and redacted undo cannot clear cost; recreate retains four decimals', async () => {
+    for (const value of [2.3456,2.345678]) {
+      const id = make('S12 Snapshot ' + value,value,value)
+      raw.prepare('UPDATE products SET purchase_price_usd=?,purchase_price_khr=? WHERE id=?').run(value,value,id)
+      const before = row(id)
+      const count = await frontendWriter.restoreProductSnapshotFields([before],{
+        fetchProductsByIds:async()=>[row(id)],buildPayload:frontendWriter.buildProductWritePayload,
+        updateProduct:async(productId,payload)=>{const result=await request(products,'PUT','/' + productId,payload);assert.equal(result.status,200,JSON.stringify(result))},
+      })
+      assert.equal(count,1)
+      assert.deepEqual([row(id).cost_price_usd,row(id).cost_price_khr,row(id).purchase_price_usd,row(id).purchase_price_khr],[value,value,value,value])
+      assert.equal(entries(id).length,0,'unchanged snapshot is not a new cost override')
+      await frontendWriter.restoreProductSnapshotFields([{id,name:before.name,description:'Undo without cost access'}],{
+        fetchProductsByIds:async()=>[row(id)],buildPayload:frontendWriter.buildProductWritePayload,
+        updateProduct:async(productId,payload)=>{assert.ok(!Object.keys(payload).some(k=>/^(cost|purchase)_price_/.test(k)));const result=await request(products,'PUT','/' + productId,payload);assert.equal(result.status,200)},
+      })
+      assert.equal(row(id).cost_price_usd,value)
+      assert.equal(row(id).custom_fields,before.custom_fields,'redacted undo omits custom fields and preserves stored JSON')
+    }
+    for (const custom of [{size:'large'},['one','two'],'{"legacy":true}',null]) {
+      const id = make('S12 Custom ' + JSON.stringify(custom),2.3456,null)
+      const payload = frontendWriter.buildProductWritePayload({id,name:row(id).name,cost_price_usd:2.3456,custom_fields:custom})
+      const expected = custom !== null && typeof custom === 'object' ? JSON.stringify(custom) : custom
+      assert.equal((await request(products,'PUT','/' + id,payload)).status,200)
+      assert.equal(row(id).custom_fields,expected)
+      assert.equal(row(id).cost_price_usd,2.3456)
+    }
+    const recreated = await request(products,'POST','/',frontendWriter.buildProductWritePayload({name:'S12 Recreated Fraction',cost_price_usd:2.3456,cost_price_khr:9600.1234}))
+    assert.equal(recreated.status,200,JSON.stringify(recreated))
+    assert.deepEqual([row(recreated.body.id).cost_price_usd,row(recreated.body.id).cost_price_khr],[2.3456,9600.1234])
+  })
   process.exitCode = failed ? 1 : 0
 })().catch(error=>{console.error(error);process.exitCode=1})
 `

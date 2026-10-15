@@ -7532,5 +7532,6 @@
   "conflict_issue_queued": "បានផ្ញើទៅពិនិត្យ",
   "conflict_cost_permission_needed": "ការបញ្ចូលថ្លៃដើមត្រូវការសិទ្ធិបញ្ចូលថ្លៃដើម",
   "conflict_cost_already_set": "ថ្ងៃចូលនេះមានថ្លៃដើមរួចហើយ — សូមផ្ទុកឡើងវិញ",
-  "cost_breakdown_excluded_unknown": "មិនស្គាល់ថ្លៃដើម — មិនរាប់"
+  "cost_breakdown_excluded_unknown": "មិនស្គាល់ថ្លៃដើម — មិនរាប់",
+  "cost_input_invalid": "បញ្ចូលថ្លៃដើមត្រឹមត្រូវពី 0 ដល់ 100,000,000,000 ឬទុកទទេបើមិនស្គាល់ថ្លៃដើម។"
 }

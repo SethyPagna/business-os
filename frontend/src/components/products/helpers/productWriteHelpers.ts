@@ -146,28 +146,50 @@ function stringOrEmpty(value: unknown): string {
   return value ? String(value) : ''
 }
 
-/** What a cost input shows for a stored cost: empty when unknown (never "0"), the exact figure otherwise (a recorded $0 is "0"). */
 export function editableCostText(value: unknown): string {
   return knownCost(value) === null ? '' : editableMoneyValue(value)
 }
 
-/** What a cost input saves: an empty field is unknown (null), never 0; a typed 0 stays 0. */
+export function costInputPreview(raw: unknown): number | null {
+  return knownCost(typeof raw === 'string' ? raw.replace(/,/g, '') : raw)
+}
+
+export function isValidCostInput(raw: unknown): boolean {
+  return raw == null || (typeof raw === 'string' && raw.trim() === '') || costInputPreview(raw) !== null
+}
+
 export function costInputToPayload(raw: unknown): number | null {
-  const cost = knownCost(typeof raw === 'string' ? raw.replace(/,/g, '') : raw)
+  if (!isValidCostInput(raw)) throw new TypeError('Invalid cost input')
+  const cost = costInputPreview(raw)
   return cost === null ? null : normalizeInternalMoney(cost)
 }
 
-/** A restored cost keeps its own state: NULL stays NULL, a recorded $0 stays $0. The purchase mirror only stands in for a snapshot that carries no cost key at all. */
-function snapshotCost(own: unknown, mirror: unknown): number | null {
-  if (own !== undefined) {
-    const cost = knownCost(own)
-    return cost === null ? null : normalizePriceValue(cost)
-  }
-  const fallback = knownCost(mirror)
-  return fallback !== null && fallback > 0 ? normalizePriceValue(fallback) : null
+function snapshotCostValue(value: unknown): unknown {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null
+  return knownCost(value) ?? value
 }
 
-export function buildProductWritePayload(snapshot: ProductRecord = {}, user: UserRecord = {}) {
+function snapshotCostFields(snapshot: ProductRecord): ProductUpdates {
+  const result: ProductUpdates = {}
+  for (const currency of ['usd', 'khr']) {
+    const cost = `cost_price_${currency}`
+    const purchase = `purchase_price_${currency}`
+    const own = snapshot[cost]
+    const mirror = snapshot[purchase]
+    if (own === undefined && mirror === undefined) continue
+    if (own !== undefined) result[cost] = snapshotCostValue(own)
+    else {
+      const fallback = knownCost(mirror)
+      result[cost] = fallback !== null && fallback > 0 ? snapshotCostValue(mirror) : null
+    }
+    result[purchase] = mirror !== undefined && mirror !== '' ? snapshotCostValue(mirror) : result[cost] ?? 0
+  }
+  return result
+}
+
+export function buildProductWritePayload(snapshot: ProductRecord = {}, user: UserRecord = {}): ProductUpdates {
+  const customFields = snapshot.custom_fields
+  const serializedCustomFields = customFields !== null && typeof customFields === 'object' ? JSON.stringify(customFields) : customFields
   const gallery = normalizeProductGallery(snapshot.image_gallery, snapshot.image_path || null)
   return {
     name: stringOrEmpty(snapshot.name),
@@ -190,14 +212,11 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     // price set" everywhere and offers no tier at the POS.
     wholesale_price_usd: normalizePriceValue(snapshot.wholesale_price_usd ?? 0),
     wholesale_price_khr: normalizePriceValue(snapshot.wholesale_price_khr ?? 0),
-    purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
-    purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
-    cost_price_usd: snapshotCost(snapshot.cost_price_usd, snapshot.purchase_price_usd),
-    cost_price_khr: snapshotCost(snapshot.cost_price_khr, snapshot.purchase_price_khr),
+    ...snapshotCostFields(snapshot),
     low_stock_threshold: Number(snapshot.low_stock_threshold || 0),
     out_of_stock_threshold: Number(snapshot.out_of_stock_threshold || 0),
     supplier: stringOrEmpty(snapshot.supplier),
-    custom_fields: snapshot.custom_fields || {},
+    ...(customFields === undefined ? {} : { custom_fields: serializedCustomFields }),
     image_gallery: gallery,
     image_path: gallery[0] || null,
     is_group: snapshot.parent_id ? 0 : (snapshot.is_group ? 1 : 0),
@@ -436,7 +455,7 @@ export function buildProductBulkUpdatePayload(
   currentProduct: ProductRecord = {},
   user: UserRecord = {},
   fallbackUpdatedAt: unknown = undefined,
-) {
+): ProductUpdates {
   const expectedUpdatedAt = currentProduct?.updated_at || fallbackUpdatedAt || undefined
   return {
     ...canonicalProductBulkUpdates(updates),
