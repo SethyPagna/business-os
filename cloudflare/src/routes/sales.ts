@@ -4772,6 +4772,7 @@ app.post('/:id/amendments', async (c) => {
   let subtotalDeltaUsd = 0
   let historicalSubtotalTerms: number[] | null = null
   let unitsMoved = 0
+  let writesStock = false
   let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
   const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
   const historicalBasket=Number((sale as Record<string,unknown>).money_precision_version)===0
@@ -4802,6 +4803,7 @@ app.post('/:id/amendments', async (c) => {
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
+      writesStock ||= quantityPlan.unitsMoved !== 0
     }
     const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
     if(changedFields.some(key=>!['quantity','total_usd','total_khr','base_price_usd','base_price_khr','manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','applied_price_usd','applied_price_khr'].includes(key)))throw new Error('Unexpected historical price column')
@@ -4889,6 +4891,7 @@ app.post('/:id/amendments', async (c) => {
       }
       statements.push(...quantityPlan.statements)
       unitsMoved += quantityPlan.unitsMoved
+      writesStock ||= quantityPlan.unitsMoved !== 0
     }
 
 
@@ -4938,6 +4941,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
+    writesStock ||= plan.unitsMoved !== 0
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
       saleItemId: line.id, productId: line.product_id, productName: line.product_name,
@@ -4965,6 +4969,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
+    writesStock ||= plan.unitsMoved !== 0
     ledgerEntries.push({
       saleId,
       kind: plan.quantityAfter <= 0 ? 'line_removed' : 'line_quantity_decreased',
@@ -5065,6 +5070,7 @@ app.post('/:id/amendments', async (c) => {
       replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
     unitsMoved += -additionPlan.deductedUnits || 0
+    writesStock ||= additionPlan.deductedUnits !== 0
     ledgerEntries.push({
       saleId, kind: 'line_added', groupId,
       productId, productName: product.name,
@@ -5214,8 +5220,8 @@ app.post('/:id/amendments', async (c) => {
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ]
-    if (!lineEffect) amendmentStatements.push(ordinaryBusinessMaintenanceGuard)
-    await (lineEffect ? executeStockTransaction(db, amendmentStatements, 'retry') : db.batch(amendmentStatements))
+    if (!writesStock) amendmentStatements.push(ordinaryBusinessMaintenanceGuard)
+    await (writesStock ? executeStockTransaction(db, amendmentStatements, 'retry') : db.batch(amendmentStatements))
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
