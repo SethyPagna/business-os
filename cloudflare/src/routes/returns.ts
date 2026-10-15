@@ -8,6 +8,7 @@ import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCo
 import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
+import { executeStockTransaction, stockTransactionStatementCount, stockTransactionRefusal } from '../lib/stockTransaction'
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -2452,11 +2453,13 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }))
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
+  const hasStockWrite = touchedProducts.size > 0 || returnItems.some(item => normalizeStockAction(item) === 'damaged')
+  const transactionStatementCount = hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length + 1
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including
     // retries (six). The successful atomic batch returns its durable receipt.
-    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 12 + (replacementNotice ? 2 : 0))
+    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), transactionStatementCount, 12 + (replacementNotice ? 2 : 0))
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
@@ -2466,10 +2469,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   let committed: Pick<NonNullable<Awaited<ReturnType<typeof readReceipt>>>,
     'return_id' | 'sale_id' | 'request_digest' | 'response_json'> | undefined
   try {
-    routeStatements += statements.length + 1
+    routeStatements += transactionStatementCount
     if (!db.batchOnce) throw new Error('Customer returns require single-attempt atomic writes')
-    const results = await db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard])
-    if (results.length === statements.length + 1) {
+    const results = hasStockWrite ? await executeStockTransaction(db, statements, 'once')
+      : (await db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard])).slice(0, -1)
+    if (results.length === statements.length) {
       committed = results[receiptResultIndex]?.results?.[0] as typeof committed
     }
   } catch (error) {
@@ -2483,6 +2487,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         }
         return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
       }
+      const transactionRefusal = stockTransactionRefusal(error)
+      if (transactionRefusal) return c.json(transactionRefusal, 503)
       return c.json({ error: 'The sale or stock changed while this return was being recorded. Reload and try again.', code: 'write_conflict', action: 'reload_required' }, 409)
     } catch (_) {
       return c.json({
@@ -2829,7 +2835,8 @@ app.post('/supplier', async (c) => {
         params: { productId },
       })
     }
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    if (touchedProductIds.size) await executeStockTransaction(db, statements, 'retry')
+    else await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
     const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
@@ -2842,6 +2849,8 @@ app.post('/supplier', async (c) => {
         .get<{ id: number; return_number: string }>([clientRequestId])
       if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
     }
+    const transactionRefusal = stockTransactionRefusal(error)
+    if (transactionRefusal) return c.json(transactionRefusal, 503)
     // An availability refusal is the caller's input problem (400), not a
     // server failure -- everything composed after it never ran (the one
     // atomic batch at the end is all-or-nothing).
@@ -3620,9 +3629,11 @@ app.patch('/:id', async (c) => {
       requestJson, responseJson: JSON.stringify(fixedResponse), occurredAt: mutationStamp,
     },
   })
-  assertSaleRecordBatchBounds(statements.length, canonicalIntent, eventBytes)
+  const hasStockWrite = touchedProductIds.size > 0 || editReversedDamaged.length > 0 || newItems.some(item => normalizeStockAction(item) === 'damaged')
+  assertSaleRecordBatchBounds(hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length, canonicalIntent, eventBytes)
 
-  await db.batch(statements)
+  if (hasStockWrite) await executeStockTransaction(db, statements, 'retry')
+  else await db.batch(statements)
 
   } catch (error) {
 
@@ -3643,6 +3654,8 @@ app.patch('/:id', async (c) => {
     if (error instanceof SaleRecordEventError) {
       return c.json({ error: error.message, code: 'return_edit_too_large' }, 400)
     }
+    const transactionRefusal = stockTransactionRefusal(error)
+    if (transactionRefusal) return c.json(transactionRefusal, 503)
     if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
       return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }

@@ -6,6 +6,7 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
+import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTransaction'
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -1475,11 +1476,11 @@ async function resolveAddStockTarget(
     stock_quantity: 0,
   }
   const columns = Object.keys(insertPayload)
-  const result = await db.prepare(`
+  const [result] = await executeStockTransaction(db, [{ sql: `
     INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
     VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `).run(insertPayload)
-  return { product: { id: Number(result.lastInsertRowid), name: source.name, ...cost }, created: true }
+  `, params: insertPayload }], 'retry')
+  return { product: { id: Number(result.meta.last_row_id), name: source.name, ...cost }, created: true }
 }
 
 async function defaultBranchId(env: Env): Promise<number | null> {
@@ -1509,10 +1510,10 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
     // CHECK(quantity >= 0) (migration 0058) on that candidate row before ON
     // CONFLICT is considered, and so the write failed every time. The strict,
     // guarded UPDATE is the one removal idiom (planBranchStockRemoval).
-    await db.batch(planBranchStockRemoval({ productId, branchId, quantity: -delta }))
+    await executeStockTransaction(db, planBranchStockRemoval({ productId, branchId, quantity: -delta }), 'retry')
     return
   }
-  await db.batch([
+  await executeStockTransaction(db, [
     ...(delta > 0 ? [productStockGuardStatement([productId], 'active')] : []),
     ...(ordinaryReceiving ? [receivingBranchAssertion(branchId)] : []),
     {
@@ -1524,7 +1525,7 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
       sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @delta, updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
       params: { productId, delta },
     },
-  ])
+  ], 'retry')
 }
 
 // Pulled out from behind `app.post('/adjust', ...)` (P4-B, batched fast
@@ -1554,6 +1555,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
+        const transactionRefusal = stockTransactionRefusal(error)
+        if (transactionRefusal) return c.json(transactionRefusal, 503)
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -2439,7 +2442,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       movementWrittenAtomically = true
       }
     } catch (err) {
-      if (err instanceof StockMutationBudgetError) throw err
+      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -2507,7 +2510,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
-      if (err instanceof StockMutationBudgetError) throw err
+      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
@@ -2518,14 +2521,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     movementWrittenAtomically = true
   } else if (delta !== 0) {
     if (conditionTag && type === 'remove') {
-      const mark = atomicMark?.statement() ?? null
-      await db.batch(addressedStatements(landing, [
+      await executeStockMutationBatch(db, addressedStatements(landing, [
         productStockGuardStatement([targetProductId], 'active'),
-        ...(mark ? [mark] : []),
         ...planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) }),
         ...holdRemovedStatements(conditionTag),
-      ]))
-      atomicMark?.committed()
+      ]), atomicMark)
       movementWrittenAtomically = true
     } else await applyStockDelta(c.env, targetProductId, branchId, delta, type === 'add')
   }
@@ -2539,7 +2539,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // at what they cost -- but as damage_out, which a loss report must not
   // count; the loss is booked once, when the held row is disposed of.
   if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
-    await db.batch(addressedStatements(landing, holdRemovedStatements(conditionTag)))
+    await executeStockTransaction(db, addressedStatements(landing, holdRemovedStatements(conditionTag)), 'retry')
     movementWrittenAtomically = true
   }
 
@@ -2574,7 +2574,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       ? planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity: Math.abs(delta),
           allocations: [{ batchId: heldBatchId, quantity: Math.abs(delta) }] }).statements
       : planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) })
-    await db.batch(addressedStatements(landing, [
+    await executeStockTransaction(db, addressedStatements(landing, [
       productStockGuardStatement([targetProductId], 'active'),
       ...removal,
       ...planHoldAsTagged({
@@ -2594,7 +2594,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
     }),
-    ]))
+    ]), 'retry')
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
@@ -2926,7 +2926,7 @@ app.post('/transfer', async (c) => {
       lines: [{ productId, destProductId: productId, quantity, batchId }], response: responsePayload,
     })
     allocationSummaries = planned
-    await ordinaryBusinessBatch(db, statements)
+    await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -3101,7 +3101,7 @@ app.post('/move-row', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
   }
   try {
-    await db.batch(addressedStatements(landing, [
+    await executeStockTransaction(db, addressedStatements(landing, [
       receivingBranchAssertion(branchId),
       ...removal.statements,
       ...receipt.statements,
@@ -3122,7 +3122,7 @@ app.post('/move-row', async (c) => {
                 (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
         params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, ...moveCost, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchKey: receipt.batchKey },
       },
-    ]))
+    ]), 'retry')
   } catch (err) {
     const stockGuard = productStockGuardError(err)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -3131,6 +3131,8 @@ app.post('/move-row', async (c) => {
     if (isStockRemovalConflict(err)) {
       return c.json({ ...STOCK_REMOVAL_CONFLICT, error: 'The stock changed while it was being moved. Nothing was moved; refresh and try again.' }, 409)
     }
+    const transactionRefusal = stockTransactionRefusal(err)
+    if (transactionRefusal) return c.json(transactionRefusal, 503)
     return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
   }
 
@@ -3279,6 +3281,8 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     (value, status) => c.json(value as never, status as never),
     async (_markWritten, atomicMark) => {
       try { return await runTaggedLotActionKernel(c, action, body, atomicMark) } catch (error) {
+        const transactionRefusal = stockTransactionRefusal(error)
+        if (transactionRefusal) return c.json(transactionRefusal, 503)
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const refusal = branchEffectRefusal(error)
@@ -3333,12 +3337,11 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
   }
   try {
-    const mark = atomicMark.statement()
-    await ordinaryBusinessBatch(db, addressedStatements(landing, [
-      ...(mark ? [mark] : []),
+    await executeStockMutationBatch(db, addressedStatements(landing, [
       ...(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
-    ]))
+    ]), atomicMark)
   } catch (error) {
+    if (stockTransactionRefusal(error) || error instanceof StockMutationBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
@@ -3350,8 +3353,6 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     }
     return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
   }
-  atomicMark.committed()
-
   await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
     branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
     ...(landing.redirected ? { addressedBranchId: branchId } : {}),

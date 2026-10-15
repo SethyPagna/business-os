@@ -76,6 +76,8 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
+  stock_schema_unavailable: 'stock_receipt_unavailable',
+  stock_transaction_outcome_unknown: 'stock_request_outcome_unknown',
   loyalty_points_disabled: 'loyalty_points_disabled',
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
   bulk_price_request_not_saved: 'bulk_price_request_not_saved',

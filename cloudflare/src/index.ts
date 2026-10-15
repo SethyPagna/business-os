@@ -38,6 +38,7 @@ import { hasPermission, isAdminControlUser } from './lib/permissions'
 import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsForRequest } from './lib/coreInvariantsGate'
 import { getMaintenance, isBranchCutoverOperatorPath, isMaintenanceGatedRequest } from './lib/maintenance'
+import { stockTransactionRefusal } from './lib/stockTransaction'
 import branchCutoverOperatorRoute from './routes/branchCutoverOperator'
 import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
@@ -218,6 +219,8 @@ installReviewAlerts()
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  const transactionRefusal = stockTransactionRefusal(error)
+  if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
   const stockRefusal = productStockGuardError(error)
   if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
   if (error instanceof ReportMoneyPrecisionError) {
