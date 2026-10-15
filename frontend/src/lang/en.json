@@ -7562,5 +7562,6 @@
 ,
   "merge_cost_source_manual": "Saved manual cost"
 ,
-  "merge_cost_source_keeper_fallback": "Saved product cost"
+  "merge_cost_source_keeper_fallback": "Saved product cost",
+  "migration_stock_finalize_unavailable": "This migration action is unavailable because stock changes must preserve their history. No data was changed. Use a recorded stock adjustment."
 }

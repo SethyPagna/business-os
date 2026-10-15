@@ -5,6 +5,7 @@
 // codes the Worker answers with.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import ts from 'typescript'
 
 let failed = 0
 
@@ -103,6 +104,27 @@ await runTest('the Worker answers with the codes the packs translate, in both la
   }
   assert.ok(en.reset_password_hint && km.reset_password_hint, 'the dialog hint needs both packs')
   assert.ok(/No data was changed/.test(en.incorrect_password) && /No data was changed/.test(en.current_password_required))
+})
+
+await runTest('unavailable legacy stock finalization uses the actual error formatter in EN and KM', () => {
+  const tree = ts.createSourceFile('ResetData.tsx', resetData, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const functions = tree.statements.filter(node => ts.isFunctionDeclaration(node)
+    && ['getErrorMessage', 'describeError'].includes(node.name?.text || ''))
+  assert.equal(functions.length, 2)
+  const code = ts.transpileModule(functions.map(node => node.getText(tree)).join('\n'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText
+  const describe = new Function(`${code}\nreturn describeError`)() as (error: unknown, T: (key: string, fallback: string) => string) => string
+  const error = Object.assign(new Error('server refusal'), { code: 'migration_stock_finalize_unavailable', status: 409 })
+  assert.ok(system.includes(`code: '${error.code}'`))
+  for (const pack of [en, km]) {
+    assert.ok(pack[error.code])
+    assert.equal(describe(error, (key, fallback) => pack[key] || fallback), pack[error.code])
+    assert.notEqual(describe(error, key => pack[key] || key), error.code)
+  }
+  assert.notEqual(en[error.code], km[error.code])
+  assert.equal(describe(error, key => key), 'server refusal', 'missing translations retain the server message')
+  assert.equal(describe(new Error('ordinary failure'), key => key), 'ordinary failure')
 })
 
 await runTest('a backup restore asks for the built-in admin and the password after the dry run returns, and the dialog sends it', () => {

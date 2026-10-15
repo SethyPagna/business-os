@@ -1,19 +1,5 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
-// Regression test for POST /finalize-migration (routes/system.ts) -- the
-// in-app version of the old-system import runbook's last hand-run steps
-// (Downloads/businessos-migration-aug28/IMPORT-MANIFEST.md, Steps 4d + 4e),
-// which used to be typed into `wrangler d1 execute` by hand.
-//
-// Same approach as test-reset-products-pure.cjs: transpile the REAL route
-// file, run it against a real in-memory SQLite database with every real
-// migration applied, and call the actual Hono app.request() the same way
-// the real Worker would. Auth/audit/broadcast/cache/R2 are stubbed to
-// permissive fakes; the backup prerequisite is stubbed but its call and
-// scoped-table list are asserted; everything about WHICH rows get zeroed vs.
-// kept is the real, shipped SQL.
-//
-// Run (from cloudflare/): node scripts/test-migration-finalize-pure.cjs
-
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -64,6 +50,7 @@ let passwordChecks = []
 let backupCallLog = []
 let backupShouldFail = false
 let sectionBackupTables = null
+let sideEffects = []
 
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
@@ -82,7 +69,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
-  '../lib/audit': { audit: async () => {} },
+  '../lib/audit': { audit: async (_env, _id, _name, action, entity, route, details) => { sideEffects.push({ action, entity, route, reason: details?.reason }) } },
   '../lib/currentPasswordGuard': {
     CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.',
     verifyCurrentPassword: async (_c, _who, plain, hash) => {
@@ -119,8 +106,8 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
     },
   },
   '../lib/media': media,
-  '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../durable-objects/broadcastHub': { broadcast: async () => { sideEffects.push('broadcast') } },
+  '../lib/cache': { bumpVersion: async () => { sideEffects.push('cache') } },
 })
 
 const app = systemRoute.default
@@ -143,7 +130,8 @@ function row(sql) { return rawDbHandle.prepare(sql).get() }
 // batch_id 1 = a 'Received via product import' OPENING lot (must survive
 // park_lots, since migration 0081 reconciles the ledger onto it).
 // batch_id 2 = a 'Unified stock import' HISTORICAL lot (must be parked).
-function seed() {
+function seed(empty = false) {
+  seedStockFixture(rawDbHandle.db, () => {
   exec(`INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{"all":true}'); INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'tester','Tester','hash:${OWNER_PASSWORD}',901,1)`)
   passwordChecks = []
   exec('DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches;')
@@ -170,6 +158,22 @@ function seed() {
   backupCallLog = []
   backupShouldFail = false
   sectionBackupTables = null
+  sideEffects = []
+  if (empty) exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches;')
+  })
+  assert.throws(() => rawDbHandle.db.prepare("INSERT INTO products(name) VALUES('unadmitted')").run(), /stock_transaction_required/)
+  assert.strictEqual(row("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
+}
+function snapshot() {
+  return JSON.stringify(rawDbHandle.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+    .map(({ name }) => [name, rawDbHandle.db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()]))
+}
+function noEffects(before, refusalCodes = []) {
+  assert.strictEqual(snapshot(), before, 'all application rows, including physical stock and history, are unchanged')
+  assert.deepStrictEqual(backupCallLog, [])
+  assert.strictEqual(sectionBackupTables, null)
+  assert.deepStrictEqual(sideEffects, refusalCodes.map(reason => ({ action: 'step_up_refused', entity: 'system', route: '/finalize-migration', reason })))
+  assert.strictEqual(row("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
 }
 
 let passed = 0
@@ -180,80 +184,48 @@ async function check(name, fn) {
 }
 
 async function main() {
-  await check('zero_stock zeros every branch_stock quantity and products.stock_quantity', async () => {
-    seed()
-    const { status, json } = await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    assert.strictEqual(status, 200, JSON.stringify(json))
-    assert.strictEqual(json.success, true, JSON.stringify(json))
-
-    assert.strictEqual(row('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').n, 0, 'no branch_stock row may remain non-zero')
-    assert.strictEqual(row('SELECT COUNT(*) AS n FROM products WHERE stock_quantity <> 0').n, 0, 'no product may remain non-zero')
-  })
-
-  await check('zero_stock reports affected counts of only the rows it actually changed', async () => {
-    seed()
-    const { json } = await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    // 2 branch_stock rows were non-zero (ids 1,2); id 3 was already 0.
-    assert.strictEqual(json.affected.branch_stock, 2, JSON.stringify(json.affected))
-    // 2 products were non-zero (ids 1,2); id 3 was already 0.
-    assert.strictEqual(json.affected.products, 2, JSON.stringify(json.affected))
-  })
-
-  await check('zero_stock backs up EXACTLY branch_stock + products before writing', async () => {
-    seed()
-    await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    assert.deepStrictEqual(sectionBackupTables, ['branch_stock', 'products'], 'the scoped backup must cover exactly what it is about to zero')
-    assert.strictEqual(backupCallLog.length, 1, 'exactly one section backup must be taken')
-    assert.strictEqual(backupCallLog[0], 'section', 'must use the scoped section backup, never the full backup')
-  })
-
-  await check('zero_stock aborts with zero rows changed if the backup fails', async () => {
-    seed()
-    backupShouldFail = true
-    const { status, json } = await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    assert.strictEqual(status, 500, JSON.stringify(json))
-    assert.strictEqual(json.success, false, JSON.stringify(json))
-    assert.ok(/backup/i.test(json.error || ''), `error should mention the backup, got: ${json.error}`)
-    assert.strictEqual(row('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').n, 2, 'branch_stock must be UNCHANGED when the pre-op backup fails')
-    assert.strictEqual(row('SELECT COUNT(*) AS n FROM products WHERE stock_quantity <> 0').n, 2, 'products must be UNCHANGED when the pre-op backup fails')
-  })
-
-  await check('zero_stock is idempotent -- a second run reports 0 affected', async () => {
-    seed()
-    await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    const { json } = await req('POST', '/finalize-migration', { step: 'zero_stock' })
-    assert.strictEqual(json.success, true, JSON.stringify(json))
-    assert.strictEqual(json.affected.branch_stock, 0, 'nothing left to zero on the second run')
-    assert.strictEqual(json.affected.products, 0, 'nothing left to zero on the second run')
-  })
-
-  await check("park_lots zeros ONLY the 'Unified stock import' lots, leaving the opening import lots untouched", async () => {
-    seed()
-    const { status, json } = await req('POST', '/finalize-migration', { step: 'park_lots' })
-    assert.strictEqual(status, 200, JSON.stringify(json))
-    assert.strictEqual(json.success, true, JSON.stringify(json))
-    assert.strictEqual(json.affected.branch_batch_stock, 1, 'exactly one historical lot row should be parked')
-
-    assert.strictEqual(row('SELECT quantity FROM branch_batch_stock WHERE id = 1').quantity, 5, "the 'Received via product import' opening lot must be UNTOUCHED (0081 reconciles onto it)")
-    assert.strictEqual(row('SELECT quantity FROM branch_batch_stock WHERE id = 2').quantity, 0, "the 'Unified stock import' historical lot must be parked to 0")
-  })
-
-  await check('park_lots backs up exactly branch_batch_stock, and is idempotent', async () => {
-    seed()
-    await req('POST', '/finalize-migration', { step: 'park_lots' })
-    assert.deepStrictEqual(sectionBackupTables, ['branch_batch_stock'], 'park_lots scopes its backup to just the lot-stock table')
-    const { json } = await req('POST', '/finalize-migration', { step: 'park_lots' })
-    assert.strictEqual(json.affected.branch_batch_stock, 0, 'nothing left to park on the second run')
-  })
+  for (const step of ['zero_stock', 'park_lots']) for (const empty of [false, true]) {
+    await check(`${step} is unavailable before backup or writes in a ${empty ? 'stock-empty' : 'populated guarded'} world`, async () => {
+      seed(empty)
+      backupShouldFail = true
+      const before = snapshot()
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { status, json } = await req('POST', '/finalize-migration', { step })
+        assert.strictEqual(status, 409, JSON.stringify(json))
+        assert.strictEqual(json.success, false)
+        assert.strictEqual(json.code, 'migration_stock_finalize_unavailable')
+        assert.match(json.error, /No data was changed/)
+        noEffects(before)
+      }
+      assert.deepStrictEqual(passwordChecks, [OWNER_PASSWORD, OWNER_PASSWORD], 'the existing password gate still runs')
+    })
+  }
+  for (const step of ['zero_stock', 'park_lots']) {
+    await check(`${step} still refuses an actor without restore permission before step-up`, async () => {
+      seed()
+      const original = FAKE_USER.permissions
+      const before = snapshot()
+      FAKE_USER.permissions = '{}'
+      try {
+        assert.strictEqual((await req('POST', '/finalize-migration', { step })).status, 403)
+        assert.deepStrictEqual(passwordChecks, [])
+        noEffects(before)
+      } finally { FAKE_USER.permissions = original }
+    })
+  }
 
   for (const step of ['zero_stock', 'park_lots']) {
     await check(`${step} refuses a missing or wrong current password before any backup or write`, async () => {
       seed()
+      const before = snapshot()
+      const refusalCodes = []
       for (const [label, extra, code] of [['missing', { currentPassword: undefined }, 'current_password_required'], ['empty', { currentPassword: '' }, 'current_password_required'], ['not text', { currentPassword: 12345 }, 'current_password_required'], ['wrong', { currentPassword: 'not-the-password' }, 'incorrect_password']]) {
         const { status, json } = await req('POST', '/finalize-migration', { step, ...extra })
         assert.strictEqual(status, 403, `${label}: ${JSON.stringify(json)}`)
         assert.strictEqual(json.code, code, label)
         assert.strictEqual(json.success, false, label)
+        refusalCodes.push(code)
+        noEffects(before, refusalCodes)
       }
       assert.strictEqual(backupCallLog.length, 0, 'a refused step-up must not even take a backup')
       assert.strictEqual(row('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').n, 2, 'branch stock must be untouched')
@@ -265,8 +237,10 @@ async function main() {
 
   await check('an unknown step is rejected with 400 and changes nothing', async () => {
     seed()
+    const before = snapshot()
     const { status, json } = await req('POST', '/finalize-migration', { step: 'nuke_everything' })
     assert.strictEqual(status, 400, JSON.stringify(json))
+    noEffects(before)
     assert.ok(/unknown step/i.test(json.error || ''), `error should name the bad step, got: ${json.error}`)
     assert.strictEqual(row('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').n, 2, 'a rejected step must not touch data')
     assert.strictEqual(backupCallLog.length, 0, 'a rejected step must not even take a backup')
