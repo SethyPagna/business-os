@@ -667,6 +667,7 @@ function manualChunks(id: string): string | undefined {
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
   const normalized = id.replace(/\\/g, '/')
+  if (normalized.endsWith('/src/utils/costDisplay.ts')) return 'pricing-utils'
   const neutralChunk = neutralPrimitiveChunk(normalized)
   if (neutralChunk) return neutralChunk
   // Font CSS has no JavaScript exports. Assigning it to generic vendor emits
