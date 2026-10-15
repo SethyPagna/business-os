@@ -13,10 +13,12 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
   let beforeBatch = null
   const db = {
     prepare(sql) {
@@ -52,6 +54,7 @@ function freshDb() {
       // test-dated-stock-count-apply-pure.cjs's two provenance failures.
       return rawDb.batch(items)
     },
+    batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   return { rawDb, db, setBeforeBatch(hook) { beforeBatch = hook } }
@@ -80,6 +83,8 @@ function loadReal(relPath) {
 }
 
 const relMap = {
+  './stockTransaction': () => loadReal('lib/stockTransaction.ts'),
+  './stockTransaction.ts': () => loadReal('lib/stockTransaction.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
@@ -125,7 +130,7 @@ async function testAsync(name, fn) {
 }
 
 function seedProduct(rawDb, { id, name, sku = null, barcode = null, usd = 0, khr = 0 }) {
-  rawDb.prepare('INSERT INTO products (id, name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@id, @name, @sku, @barcode, @usd, @khr, 1)').run({ id, name, sku, barcode, usd, khr })
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@id, @name, @sku, @barcode, @usd, @khr, 1)').run({ id, name, sku, barcode, usd, khr }))
 }
 
 function unresolvedRow(overrides = {}) {
@@ -213,7 +218,7 @@ async function main() {
   await testAsync('create_child records the child row with an unknown cost, and leaves the candidate\'s own cost alone', async () => {
     const { db, rawDb } = freshDb()
     seedProduct(rawDb, { id: 21, name: 'Costed Parent', sku: 'P-1' })
-    rawDb.prepare('UPDATE products SET cost_price_usd = 6.5, cost_price_khr = 26650 WHERE id = 21').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = 6.5, cost_price_khr = 26650 WHERE id = 21').run())
     const unresolved = [unresolvedRow({
       rowNumber: 1, reason: 'ambiguous_name', suggestedActions: ['link_variant', 'create_child', 'create_new'], candidateProductIds: [21],
       raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Costed Parent', sku: 'C-1', barcode: '777888', count: 2 },
@@ -380,7 +385,7 @@ async function main() {
 
   await testAsync('submitted non-canonical branch ids are rejected before price or product writes', async () => {
     const { db, rawDb } = freshDb()
-    rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run())
     seedProduct(rawDb, { id: 80, name: 'Existing Price', usd: 3 })
     const result = await applyDatedStockCountDecisions(
       db,
@@ -396,11 +401,11 @@ async function main() {
   for (const scenario of [
     {
       name: 'deactivated after decision validation',
-      mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run(),
+      mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run()),
     },
     {
       name: 'made ambiguous after decision validation',
-      mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (8, ' SHOP ', 1, 0)").run(),
+      mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (8, ' SHOP ', 1, 0)").run()),
     },
   ]) {
     await testAsync(`create decision performs no product write when Shop is ${scenario.name}`, async () => {

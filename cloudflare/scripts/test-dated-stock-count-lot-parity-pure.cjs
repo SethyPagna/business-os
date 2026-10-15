@@ -33,6 +33,7 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const SRC = path.join(__dirname, '..', 'src')
 const cache = new Map()
@@ -84,6 +85,7 @@ function loadWithStubs(relPath, stubs) {
   })
   const original = Module._load
   Module._load = (request, parent, isMain) => {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return lib('stockTransaction')
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
@@ -151,6 +153,7 @@ function loadFold(rawDb) {
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -164,19 +167,19 @@ function freshDb() {
     async batchOnce(items) { return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run())
   return { rawDb, db }
 }
 
 function addProduct(rawDb, productId) {
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, 'Gel ' || @id, 1, 0)").run({ id: productId })
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, 'Gel ' || @id, 1, 0)").run({ id: productId }))
 }
 
 // Two rows of one item (same name, same barcode): what every merge path folds.
 function addTwin(rawDb, productId) {
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, stock_quantity, is_active)
-    VALUES (@id, 'Twin Gel', '8859199', 5, 20500, 2, 8200, 0, 1)`).run({ id: productId })
+  seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO products (id, name, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, stock_quantity, is_active)
+    VALUES (@id, 'Twin Gel', '8859199', 5, 20500, 2, 8200, 0, 1)`).run({ id: productId }))
 }
 
 // A supplier receipt, through the same helper Inventory > Adjust > Add uses.
@@ -206,7 +209,7 @@ async function sell(db, rawDb, productId, quantity) {
       { sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @p) WHERE id = @p', params: { p: productId } },
     )
   }
-  await db.batch(statements)
+  await lib('stockTransaction').executeStockTransaction(db,statements,'retry')
   return { ok: true, available, lotTotal }
 }
 
@@ -355,7 +358,7 @@ async function main() {
     await runSteps(rawDb, P, [
       ['receipt 5 @09-01', () => receive(db, P, 5, '2026-09-01'), { branch: 5 }],
       ['count 09-05 = 0 (drains it)', () => applyCount(db, P, [['2026-09-05', 0]]), { branch: 0, lots: '2026-09-01=0' }],
-      ['empty lot soft-deleted', () => rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE variant_product_id = @p').run({ p: P }), { lots: '2026-09-01=0(inactive)' }],
+      ['empty lot soft-deleted', () => seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE variant_product_id = @p').run({ p: P })), { lots: '2026-09-01=0(inactive)' }],
       ['corrected count 09-05 = 2', () => applyCount(db, P, [['2026-09-05', 2]]), { branch: 2, lotSum: 2 }],
       ['re-applied', () => applyCount(db, P, [['2026-09-05', 2]]), { branch: 2, lotSum: 2 }],
     ])
@@ -448,9 +451,9 @@ async function main() {
     await receive(db, P, 5, '2026-09-01', 1)
     const lotId = supplierLot().id
     // The supplier lot once held stock at the Warehouse too: a zero row there.
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 2, 0)').run({ id: lotId })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 2, 0)').run({ id: lotId }))
     await applyCount(db, P, [['2026-09-05', 0]])
-    rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: lotId })
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: lotId }))
     const file = [
       { date: '2026-09-05', productId: P, branchId: SHOP, count: 2 },
       { date: '2026-09-01', productId: P, branchId: WAREHOUSE, count: 3 },
@@ -471,8 +474,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 10
     addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: P })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: P }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: P }))
     const check = (label, expected) => {
       const s = ledger(rawDb, P)
       assert.ok(s.lotSum <= s.branch, `${label}: sum(lots) ${s.lotSum} > branch_stock ${s.branch} [${s.lots}]`)
@@ -517,8 +520,8 @@ async function main() {
         ['count 09-12 = 0 drains both', () => applyCount(db, P, [['2026-09-12', 0]]), { branch: 0, lots: '2026-09-01=0 2026-09-10=0' }],
         [`09-10 lot ${variant}`, () => {
           const id = lotOn('2026-09-10')
-          rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id })
-          if (variant.endsWith('gone')) rawDb.prepare('DELETE FROM branch_batch_stock WHERE batch_id = @id').run({ id })
+          seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id }))
+          if (variant.endsWith('gone')) seedStockFixture(rawDb,()=>rawDb.prepare('DELETE FROM branch_batch_stock WHERE batch_id = @id').run({ id }))
         }, { branch: 0 }],
         ['receipt 4 @09-15', () => receive(db, P, 4, '2026-09-15'), { branch: 4 }],
         // Reversal: 09-01 +2, 09-10 +3, baseline 9; the count's -3 drains
@@ -533,8 +536,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 13
     addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 10)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = @p').run({ p: P })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 10)').run({ p: P }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = @p').run({ p: P }))
     const stale = await buildDatedStockCountPlan(db, entriesFor(P, [['2026-08-16', 4]]))
     await sell(db, rawDb, P, 8)
     const before = ledger(rawDb, P)
@@ -670,8 +673,8 @@ async function main() {
     const D = 115
     addTwin(rawDb, K)
     addTwin(rawDb, D)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: K })
-    rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: K })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: K }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: K }))
     const fold = loadFold(rawDb)
     await receive(db, D, 6, '2026-09-01')
     await applyCount(db, D, [['2026-09-10', 2]])
@@ -747,8 +750,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 123
     addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 3)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 3 WHERE id = @p').run({ p: P })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 3)').run({ p: P }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 3 WHERE id = @p').run({ p: P }))
     await receive(db, P, 4, '2026-09-01')
     await applyCount(db, P, [['2026-09-20', 0]])
     const count = countRow(rawDb, P, '2026-09-20')
@@ -904,7 +907,7 @@ async function main() {
           const empty = rawDb.prepare(`SELECT pb.id FROM product_batches pb WHERE pb.variant_product_id = @p AND pb.is_active = 1
             AND NOT EXISTS (SELECT 1 FROM branch_batch_stock b WHERE b.batch_id = pb.id AND b.quantity > 0) ORDER BY pb.id LIMIT 1`).get({ p: P })
           if (empty) {
-            rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: empty.id })
+            seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: empty.id }))
             trace.push(`soft-delete empty lot ${empty.id}`)
           }
         } else {

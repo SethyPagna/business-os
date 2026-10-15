@@ -14,9 +14,11 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -36,6 +38,7 @@ function freshDb() {
       // real results through unchanged.
       return rawDb.batch(items)
     },
+    batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   return { rawDb, db }
@@ -84,6 +87,8 @@ const relMap = {
   // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
   './branchEffect': () => loadReal('lib/branchEffect.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+  './stockTransaction': () => loadReal('lib/stockTransaction.ts'),
+  './stockTransaction.ts': () => loadReal('lib/stockTransaction.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
 }
@@ -124,10 +129,10 @@ async function testAsync(name, fn) {
 }
 
 function seedBranch(rawDb, id, name, isDefault = 0, isActive = 1) {
-  rawDb.prepare('INSERT INTO branches (id, name, is_default, is_active) VALUES (@id, @name, @isDefault, @isActive)').run({ id, name, isDefault, isActive })
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branches (id, name, is_default, is_active) VALUES (@id, @name, @isDefault, @isActive)').run({ id, name, isDefault, isActive }))
 }
 function seedProduct(rawDb, { id, name, sku = null, barcode = null }) {
-  rawDb.prepare('INSERT INTO products (id, name, sku, barcode, is_active) VALUES (@id, @name, @sku, @barcode, 1)').run({ id, name, sku, barcode })
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, sku, barcode, is_active) VALUES (@id, @name, @sku, @barcode, 1)').run({ id, name, sku, barcode }))
 }
 function row(overrides = {}) {
   return { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Widget', count: 5, ...overrides }
@@ -287,7 +292,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 40, name: 'Widget' })
-    rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 40').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 40').run())
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget' })])
     assert.strictEqual(resolved.length, 1)
     assert.strictEqual(resolved[0].priceConflict, undefined)
@@ -297,7 +302,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 41, name: 'Widget' })
-    rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 41').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET selling_price_usd = 9.99 WHERE id = 41').run())
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget', sellingPriceUsd: 9.99 })])
     assert.strictEqual(resolved[0].priceConflict, undefined)
   })
@@ -306,7 +311,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 42, name: 'Widget' })
-    rawDb.prepare('UPDATE products SET selling_price_usd = 9.99, selling_price_khr = 40000 WHERE id = 42').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET selling_price_usd = 9.99, selling_price_khr = 40000 WHERE id = 42').run())
     const { resolved } = await resolveDatedStockCountRows(db, [row({ productName: 'Widget', sellingPriceUsd: 12.5 })])
     assert.strictEqual(resolved.length, 1)
     assert.ok(resolved[0].priceConflict)
@@ -471,8 +476,8 @@ async function main() {
 
   // ---- CUTOVER-LC G-G: a sheet row's branch is an identity (shop / warehouse), not a display name --------
   const seedConsolidated = (rawDb) => {
-    rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key) VALUES (1, 'LC Store', 1, 1, 'shop', 'warehouse')").run()
-    rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key, successor_branch_id) VALUES (2, 'Old Shop', 0, 0, 'shop', 'shop', 1)").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key) VALUES (1, 'LC Store', 1, 1, 'shop', 'warehouse')").run())
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key, successor_branch_id) VALUES (2, 'Old Shop', 0, 0, 'shop', 'shop', 1)").run())
   }
   await testAsync('after the consolidation shop and warehouse rows of one product and date are ONE count of LC Store: the SUM', async () => {
     const { rawDb, db } = freshDb()

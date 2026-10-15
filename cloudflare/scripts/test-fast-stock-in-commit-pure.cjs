@@ -28,6 +28,7 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const root = path.join(__dirname, '..')
 
@@ -59,6 +60,7 @@ function loadReal(relPath, overrides = {}) {
   })
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return loadReal('lib/stockTransaction.ts')
     if (request in overrides) return overrides[request]
     if (request.startsWith('.')) return autoStub()
     // A real npm package (e.g. 'hono'): resolve it for real, and while doing
@@ -119,6 +121,7 @@ function wrapFlat(rawDb) {
     async batch(items) {
       return rawDb.batch(items)
     },
+    batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
   }
 }
@@ -233,7 +236,8 @@ assert.equal(typeof batchesMod.runReceiveBatchAction, 'function', 'routes/batche
 // ---------------------------------------------------------------------------
 function freshDb() {
   const rawDb = openDb(loadAll())
-  rawDb.exec(`
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
+  seedStockFixture(rawDb,()=>rawDb.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
@@ -241,7 +245,7 @@ function freshDb() {
       VALUES(2, 'Toner', 'TON-1', 3, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(2, 1, 0);
-  `)
+  `))
   return wrapFlat(rawDb)
 }
 
@@ -353,11 +357,12 @@ async function run() {
   //    oversized statement by this route.
   {
     const rawDb = openDb(loadAll())
-    rawDb.exec("INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);")
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
+    seedStockFixture(rawDb,()=>rawDb.exec("INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);"))
     const lines = []
     for (let i = 1; i <= 30; i += 1) {
-      rawDb.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active) VALUES(${i}, 'P${i}', 'B${i}', 1, 0, 0, 1);`)
-      rawDb.exec(`INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(${i}, 1, 0);`)
+      seedStockFixture(rawDb,()=>rawDb.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active) VALUES(${i}, 'P${i}', 'B${i}', 1, 0, 0, 1);`))
+      seedStockFixture(rawDb,()=>rawDb.exec(`INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(${i}, 1, 0);`))
       lines.push({ key: `p${i}`, wire: 'receive', body: { client_request_id: `paid-receive-${i}-0001`, product_id: i, branch_id: 1, quantity: 1, unit_cost_usd: 1, supplier_name: 'Acme', payment_status: 'paid' } })
     }
     const db = wrapFlat(rawDb)

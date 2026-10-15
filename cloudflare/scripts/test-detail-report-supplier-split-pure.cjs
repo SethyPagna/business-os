@@ -20,6 +20,7 @@ const path = require('path')
 const assert = require('assert')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 let checks = 0
 function check(label, cond) {
@@ -58,7 +59,8 @@ check('no inline naive supplier key remains in products.ts',
 
 // --- Seed a real DB with a split-supplier scenario ------------------------
 const db = openDb(loadAll())
-db.prepare(`INSERT INTO suppliers (id, name) VALUES (5, 'Acme'), (7, 'Gamma')`).run({})
+  assert.throws(()=>db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
+seedStockFixture(db,()=>db.prepare(`INSERT INTO suppliers (id, name) VALUES (5, 'Acme'), (7, 'Gamma')`).run({}))
 
 // variant_product_id 100. Lots exercise every path:
 //   A id-attributed to 5; B/C/F name-only that must resolve to 5 (exact, case,
@@ -73,11 +75,11 @@ const lots = [
   { id: 6, sid: null, sname: '  ACME  ', qty: 2 },
 ]
 for (const l of lots) {
-  db.prepare(
+  seedStockFixture(db,()=>db.prepare(
     `INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, supplier_id, supplier_name, received_at)
      VALUES (@id, 100, @bk, 1, @sid, @sname, '2026-01-0' || @id)`,
-  ).run({ id: l.id, bk: 'BK' + l.id, sid: l.sid, sname: l.sname })
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @qty)`).run({ id: l.id, qty: l.qty })
+  ).run({ id: l.id, bk: 'BK' + l.id, sid: l.sid, sname: l.sname }))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @qty)`).run({ id: l.id, qty: l.qty }))
 }
 
 // --- The resolved grouping query (mirrors the route's Suppliers query) -----

@@ -17,9 +17,11 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -39,6 +41,7 @@ function freshDb() {
       // real results through unchanged.
       return rawDb.batch(items)
     },
+    batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   return { rawDb, db }
@@ -77,6 +80,8 @@ const relMap = {
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
   './datedStockCountImport': () => loadReal('lib/datedStockCountImport.ts'),
   './datedStockCountImport.ts': () => loadReal('lib/datedStockCountImport.ts'),
+  './stockTransaction': () => loadReal('lib/stockTransaction.ts'),
+  './stockTransaction.ts': () => loadReal('lib/stockTransaction.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
@@ -121,10 +126,10 @@ async function testAsync(name, fn) {
 }
 
 function seed(rawDb) {
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 0)').run()
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 0)').run())
 }
 
 async function main() {
@@ -185,8 +190,8 @@ async function main() {
   })
 
   for (const scenario of [
-    { name: 'non-canonical', mutate: (rawDb) => rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run() },
-    { name: 'ambiguous', mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (3, ' shop ', 1, 0)").run() },
+    { name: 'non-canonical', mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()) },
+    { name: 'ambiguous', mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (3, ' shop ', 1, 0)").run()) },
   ]) {
     await testAsync(`buildDatedStockCountPlan rejects a ${scenario.name} submitted branch identity`, async () => {
       const { rawDb, db } = freshDb()
@@ -205,7 +210,7 @@ async function main() {
   await testAsync('buildDatedStockCountPlan refuses an entry addressed to a disabled branch with the coded redirect (409)', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb)
-    rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run())
     const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-16', productId: 1, branchId: 1, count: 5 }])
     assert.ok('error' in built)
     assert.strictEqual(built.status, 409)
@@ -218,19 +223,19 @@ async function main() {
     const { rawDb, db } = freshDb()
     seed(rawDb)
     // A prior run of this same importer already created this movement.
-    const priorId = rawDb.prepare(
+    const priorId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
-    ).run().meta.last_row_id
+    ).run()).meta.last_row_id
     // An unrelated manual adjustment on the same product/branch/day, a
     // different reason -- must NOT be picked up as this importer's own
     // prior movement, and must not be deleted by a rerun.
-    const unrelatedId = rawDb.prepare(
+    const unrelatedId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (1, 'Widget', 1, 'Shop', 'add', 2, 'Manual count', '2026-08-16 00:00:00')`
-    ).run().meta.last_row_id
-    rawDb.prepare('UPDATE branch_stock SET quantity = 7 WHERE product_id = 1 AND branch_id = 1').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id = 1').run()
+    ).run()).meta.last_row_id
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = 7 WHERE product_id = 1 AND branch_id = 1').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id = 1').run())
 
     // Rerun with a corrected count for the same date (was 5, now 8).
     const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-16', productId: 1, branchId: 1, count: 8 }])
@@ -247,14 +252,14 @@ async function main() {
   await testAsync('buildDatedStockCountPlan only pulls existing batches whose (productId, branchId) pair is actually in this request -- a batch at a different branch does not leak into another branch\'s group', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb)
-    const batchId = rawDb.prepare(
+    const batchId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number)
        VALUES (1, '08102026', '08102026', '2026-08-10', 1, 1)`
-    ).run().meta.last_row_id
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, 2, 4)').run({ batchId })
+    ).run()).meta.last_row_id
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, 2, 4)').run({ batchId }))
     // This request only imports branch 1 -- the branch-2 batch stock
     // above must not surface as an existingBatches entry for branch 1.
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, 4)').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, 4)').run())
 
     const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-20', productId: 1, branchId: 1, count: 3 }])
     assert.ok('plan' in built, JSON.stringify(built))
@@ -270,21 +275,21 @@ async function main() {
   await testAsync('buildDatedStockCountPlan loads this importer\'s own recorded batch-action provenance (migration 0035) onto the matching prior movement, and feeds it through to a real rerun top-up', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb)
-    const batchId = rawDb.prepare(
+    const batchId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number)
        VALUES (1, '08102026', '08102026', '2026-08-10', 1, 1)`
-    ).run().meta.last_row_id
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, 1, 5)').run({ batchId })
-    rawDb.prepare('UPDATE branch_stock SET quantity = 5 WHERE product_id = 1 AND branch_id = 1').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = 1').run()
+    ).run()).meta.last_row_id
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, 1, 5)').run({ batchId }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = 5 WHERE product_id = 1 AND branch_id = 1').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = 1').run())
 
-    const priorId = rawDb.prepare(
+    const priorId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
-    ).run().meta.last_row_id
-    rawDb.prepare(
+    ).run()).meta.last_row_id
+    seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, @batchId, 5)`,
-    ).run({ movementId: priorId, batchId })
+    ).run({ movementId: priorId, batchId }))
 
     // Rerun with the same count -- should recompute the same +5 top-up
     // on the SAME real batch, not double it, thanks to the loaded
@@ -299,11 +304,11 @@ async function main() {
   await testAsync('buildDatedStockCountPlan tolerates a prior movement with no recorded batch actions (predates migration 0035) -- no crash, just nothing to reconstruct', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb)
-    rawDb.prepare(
+    seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
-    ).run()
-    rawDb.prepare('UPDATE branch_stock SET quantity = 5 WHERE product_id = 1 AND branch_id = 1').run()
+    ).run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = 5 WHERE product_id = 1 AND branch_id = 1').run())
 
     const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-10', productId: 1, branchId: 1, count: 5 }])
     assert.ok('plan' in built, JSON.stringify(built))

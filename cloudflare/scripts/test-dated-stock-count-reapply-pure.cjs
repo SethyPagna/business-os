@@ -16,6 +16,7 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const SRC = path.join(__dirname, '..', 'src')
 const cache = new Map()
@@ -48,6 +49,7 @@ const { applyMovementRevert } = lib('stockRevert')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -61,18 +63,18 @@ function freshDb() {
     async batchOnce(items) { return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run())
   return { rawDb, db }
 }
 
 function seed(rawDb, { stock, lot }) {
-  rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, \'Widget\', 1, @stock)').run({ stock })
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, \'Widget\', 1, @stock)').run({ stock }))
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock }))
   if (lot) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
-      VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, @stock)`).run({ stock })
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
+      VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, @stock)`).run({ stock }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock }))
   }
 }
 
@@ -148,9 +150,9 @@ async function main() {
       seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       // A sale of 2 after the count (direct write, same shape as a till deduction).
-      rawDb.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE product_id = 1 AND branch_id = 1').run()
-      rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - 2 WHERE id = 1').run()
-      if (lot) rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE batch_id = 1').run()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE product_id = 1 AND branch_id = 1').run())
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - 2 WHERE id = 1').run())
+      if (lot) seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE batch_id = 1').run())
       await applyEntries(db, COUNT_10)
       const s = snapshot(rawDb)
       // Pre-fix: 8 + 5 without reversing the prior +3 = 13.

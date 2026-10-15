@@ -7,9 +7,11 @@ const ts = require('typescript')
 const { Hono } = require('hono')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const root = path.resolve(__dirname, '../src')
 const modules = new Map()
 const db = openDb(loadAll())
+  assert.throws(()=>db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 let user = { id: 1, username: 'admin', role_code: 'admin' }
 let reads = 0
 const filtersSeen = []
@@ -67,8 +69,8 @@ const timed = { ...dates, createdFrom: '2026-09-10T15:00:00.000Z', createdTo: '2
 const selected = [2, 3, 4, 5, 6, 7]
 const sortedIds = rows => rows.map(row => row.id).sort((a, b) => a - b)
 async function main() {
-  db.exec(`INSERT INTO products (id, name, unit, is_active, stock_quantity, cost_price_usd, expiry_date)
-    VALUES (1, 'Timed item', 'pcs', 1, 0, 2, date('now', '+1 day'))`)
+  seedStockFixture(db,()=>db.exec(`INSERT INTO products (id, name, unit, is_active, stock_quantity, cost_price_usd, expiry_date)
+    VALUES (1, 'Timed item', 'pcs', 1, 0, 2, date('now', '+1 day'))`))
   const times = [
     '2026-09-10 14:59:59',       // before start
     '2026-09-10 15:00:00',       // inclusive start, space
@@ -84,26 +86,26 @@ async function main() {
   ]
   for (const [index, createdAt] of times.entries()) {
     const id = index + 1
-    db.prepare(`INSERT INTO sales (id, receipt_number, created_at, sale_status, branch_id, branch_name,
+    seedStockFixture(db,()=>db.prepare(`INSERT INTO sales (id, receipt_number, created_at, sale_status, branch_id, branch_name,
       subtotal_usd, total_usd, total_khr, customer_name, customer_id, payment_method)
       VALUES (@id, @receipt, @createdAt, 'completed', 1, 'Main', 10, 10, 40000, 'Buyer', 1, 'Cash')`)
-      .run({ id, receipt: `T-${id}`, createdAt })
-    db.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, cost_price_usd)
-      VALUES (@id, 1, 'Timed item', 1, 10, 10, 2)`).run({ id })
+      .run({ id, receipt: `T-${id}`, createdAt }))
+    seedStockFixture(db,()=>db.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, cost_price_usd)
+      VALUES (@id, 1, 'Timed item', 1, 10, 10, 2)`).run({ id }))
     for (const scope of ['customer', 'supplier']) {
-      db.prepare(`INSERT INTO returns (return_number, created_at, sale_id, return_scope, status, branch_id,
+      seedStockFixture(db,()=>db.prepare(`INSERT INTO returns (return_number, created_at, sale_id, return_scope, status, branch_id,
         total_refund_usd, supplier_compensation_usd, supplier_loss_usd)
         VALUES (@number, @createdAt, NULL, @scope, 'completed', 1, 1, 2, 3)`)
-        .run({ number: `${scope}-${id}`, createdAt, scope })
+        .run({ number: `${scope}-${id}`, createdAt, scope }))
     }
   }
   // A refund posted AFTER the selected window still reverses its sale's
   // revenue, while activity cards use the refund's own created_at.
-  db.prepare(`INSERT INTO returns (return_number, created_at, sale_id, return_scope, status, branch_id, total_refund_usd)
-    VALUES ('late-refund', '2026-09-15 05:00:00', 2, 'customer', 'completed', 1, 2)`).run()
-  db.prepare(`INSERT INTO sales (id, receipt_number, created_at, sale_status, branch_id, subtotal_usd, total_usd)
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO returns (return_number, created_at, sale_id, return_scope, status, branch_id, total_refund_usd)
+    VALUES ('late-refund', '2026-09-15 05:00:00', 2, 'customer', 'completed', 1, 2)`).run())
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO sales (id, receipt_number, created_at, sale_status, branch_id, subtotal_usd, total_usd)
     VALUES (20, 'other-branch', '2026-09-11 05:00:00', 'completed', 2, 100, 100),
-           (21, 'cancelled', '2026-09-11 05:00:00', 'cancelled', 1, 100, 100)`).run()
+           (21, 'cancelled', '2026-09-11 05:00:00', 'cancelled', 1, 100, 100)`).run())
 
   const summary = await request('/dashboard', timed)
   equal(summary.today_count, 6, 'summary selected sale count')

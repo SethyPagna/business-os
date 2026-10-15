@@ -6,6 +6,7 @@ const Module = require('node:module')
 const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 
@@ -35,6 +36,7 @@ function loadReal(relPath, requireOverrides = {}) {
 
 async function run() {
   const db = openDb(loadAll())
+  assert.throws(()=>db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const familyPagination = loadReal('lib/familyPagination.ts', { './db': {} })
   const lowStockSettings = loadReal('lib/lowStockSettings.ts', { './db': {} })
   const familyStockStats = loadReal('lib/familyStockStats.ts', {
@@ -42,10 +44,10 @@ async function run() {
     './lowStockSettings': lowStockSettings,
   })
 
-  const insert = async (name, quantity, low = 10, out = 0) => db.prepare(`
+  const insert = async (name, quantity, low = 10, out = 0) => seedStockFixture(db,()=>db.prepare(`
     INSERT INTO products (name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active)
     VALUES (@name, 'Test', 'pcs', @quantity, @low, @out, 1)
-  `).run({ name, quantity, low, out })
+  `).run({ name, quantity, low, out }))
 
   // A low-looking row in a family with a healthy sibling must disappear:
   // family classification happens before filtering and pagination.

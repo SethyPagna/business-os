@@ -17,9 +17,11 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   let beforeBatch = null
   const db = {
     prepare(sql) {
@@ -57,6 +59,7 @@ function freshDb() {
       // internally) and then look up its batch-action rows by that id.
       return rawDb.batch(items)
     },
+    batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   return { rawDb, db, setBeforeBatch(hook) { beforeBatch = hook } }
@@ -110,6 +113,8 @@ const relMap = {
   './db.ts': () => ({}),
   './datedStockCountImport': () => loadReal('lib/datedStockCountImport.ts'),
   './datedStockCountImport.ts': () => loadReal('lib/datedStockCountImport.ts'),
+  './stockTransaction': () => loadReal('lib/stockTransaction.ts'),
+  './stockTransaction.ts': () => loadReal('lib/stockTransaction.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
@@ -154,19 +159,19 @@ async function testAsync(name, fn) {
 }
 
 function seedProduct(rawDb, { id, name, stockQuantity }) {
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1) ON CONFLICT(id) DO NOTHING").run()
-  rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, @name, 1, @stockQuantity)').run({ id, name, stockQuantity })
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, 1, @stockQuantity)').run({ id, stockQuantity })
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1) ON CONFLICT(id) DO NOTHING").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, @name, 1, @stockQuantity)').run({ id, name, stockQuantity }))
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, 1, @stockQuantity)').run({ id, stockQuantity }))
 }
 
 async function main() {
   await testAsync('plain (non-batch-tracked) group: reverses AND deletes superseded movements, applies new ones, updates branch_stock/products.stock_quantity', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 1, name: 'Widget', stockQuantity: 10 })
-    const oldMovementId = rawDb.prepare(
+    const oldMovementId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
-    ).run().meta.last_row_id
+    ).run()).meta.last_row_id
 
     const plan = {
       movementsToDelete: [oldMovementId],
@@ -346,15 +351,15 @@ async function main() {
     // reverses a lot effect strictly, so a fixture whose provenance names
     // units that were never there is refused rather than clamped).
     seedProduct(rawDb, { id: 7, name: 'Widget Pro', stockQuantity: 10 })
-    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, received_quantity) VALUES (999, 7, '7:a', 'a', '2026-08-01', 1, 10)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (999, 1, 10)').run()
-    const oldMovementId = rawDb.prepare(
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, received_quantity) VALUES (999, 7, '7:a', 'a', '2026-08-01', 1, 10)").run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (999, 1, 10)').run())
+    const oldMovementId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (7, 'Widget Pro', 1, 'Shop', 'add', 10, 'Dated stock count import', '2026-08-01 00:00:00')`
-    ).run().meta.last_row_id
-    rawDb.prepare(
+    ).run()).meta.last_row_id
+    seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, 999, 10)`,
-    ).run({ movementId: oldMovementId })
+    ).run({ movementId: oldMovementId }))
 
     const plan = {
       movementsToDelete: [oldMovementId],
@@ -375,11 +380,11 @@ async function main() {
   await testAsync('direct apply refuses a non-canonical branch before deleting movements or changing stock', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 8, name: 'Guarded Widget', stockQuantity: 4 })
-    rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()
-    const oldMovementId = rawDb.prepare(
+    seedStockFixture(rawDb,()=>rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run())
+    const oldMovementId = seedStockFixture(rawDb,()=>rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (8, 'Guarded Widget', 1, 'Main', 'add', 4, 'Dated stock count import', '2026-08-01 00:00:00')`,
-    ).run().meta.last_row_id
+    ).run()).meta.last_row_id
     const plan = {
       movementsToDelete: [oldMovementId],
       supersededMovements: [{ id: oldMovementId, productId: 8, branchId: 1, date: '2026-08-01', signedQuantity: 4 }],
@@ -396,11 +401,11 @@ async function main() {
   for (const scenario of [
     {
       name: 'deactivated after validation',
-      mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run(),
+      mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run()),
     },
     {
       name: 'duplicate normalized Shop inserted after validation',
-      mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (9, ' shop ', 1, 0)").run(),
+      mutate: (rawDb) => seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (9, ' shop ', 1, 0)").run()),
     },
   ]) {
     await testAsync(`apply rolls back when the selected Shop is ${scenario.name}`, async () => {
