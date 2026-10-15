@@ -78,6 +78,10 @@ function loadReal(relPath, requireOverrides = {}) {
     if (['./productStockGuard', '../lib/productStockGuard'].includes(request)) return productStockGuard
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
+    if (request.startsWith('.')) {
+      const dependencyPath = path.resolve(path.dirname(sourcePath), request.endsWith('.ts') ? request : `${request}.ts`)
+      if (fs.existsSync(dependencyPath)) return loadReal(path.relative(path.join(__dirname, '..', 'src'), dependencyPath), requireOverrides)
+    }
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
@@ -270,6 +274,8 @@ const productsRoute = loadReal('routes/products.ts', {
 const app = productsRoute.default || productsRoute
 
 async function post(pathname, body) {
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => db.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1').run(), /stock_transaction_required/)
   const response = await app.request(`http://local${pathname}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -278,7 +284,8 @@ async function post(pathname, body) {
   return { status: response.status, json: await response.json().catch(() => null) }
 }
 
-function seed() {
+const seed = db.transaction(() => {
+  db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
   db.exec('DELETE FROM product_images; DELETE FROM products; DELETE FROM file_assets;')
   db.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Rose Serum', 1, 0)").run()
   db.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Chanel No 5', 1, 0)").run()
@@ -293,7 +300,8 @@ function seed() {
   insertAsset.run({ id: 12, name: 'Rose Serum_2.jpg', path: '/uploads/rose-2.jpg' })
   insertAsset.run({ id: 13, name: 'Chanel No 5.jpg', path: '/uploads/chanel-5.jpg' })
   insertAsset.run({ id: 14, name: 'Nothing Matches This.jpg', path: '/uploads/orphan.jpg' })
-}
+  db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+})
 
 function gallery(productId) {
   return db.prepare('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC')
