@@ -120,7 +120,7 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
     return dependency.exports
   }
   for (const name of ['branchWrites', 'customerGenderRestoration', 'saleMoneyPrecision', 'productMergeLineage',
-    'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'productCostReview', 'actorSnapshot', 'productMerge']) {
+    'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'productCostReview', 'stockTransaction', 'actorSnapshot', 'productMerge']) {
     stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
   }
   // A test that drives the sale add-items replay asks for the real line planner

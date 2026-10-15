@@ -305,7 +305,14 @@ function raceBatch(world, write, skip = 0) {
   world.d1.batch = async (statements) => {
     if (calls++ === skip) {
       world.d1.batch = batch
-      write()
+      world.d1.db.exec('BEGIN IMMEDIATE')
+      try {
+        world.run("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+        write()
+        world.run("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+        world.d1.db.exec('COMMIT')
+      } catch (error) { world.d1.db.exec('ROLLBACK'); throw error }
+      assert.equal(world.get("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n,0)
     }
     return batch(statements)
   }

@@ -2,6 +2,7 @@ import { mergeCostContinuationGuard, readMergeReviewGroups, mergeReviewGroupGuar
 import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph, type MergeCostAuthority } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
+import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { acquisitionCostResponses, canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
@@ -2028,7 +2029,7 @@ app.post('/bulk-price-adjust', async (c) => {
     params: { claimNonce },
   })
   let uncertain = false
-  try { await db.batchOnce(statements) } catch { uncertain = true }
+  try { await executeStockTransaction(db, statements, 'once') } catch { uncertain = true }
   let receipt
   try { receipt = await findBulkPriceReceipt(db, actorIdForReceipt, requestId) } catch { return outcomeUnknown() }
   if (!receipt) return outcomeUnknown()
@@ -2854,7 +2855,7 @@ app.delete('/:id', async (c) => {
   }
   const transitionStamp = new Date().toISOString()
   try {
-    await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
+    await executeStockTransaction(db, productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }), 'retry')
   } catch (error) {
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
@@ -4499,17 +4500,32 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // Keep each atomic write batch within the same conservative 100-statement
   // bound used by the catalog's D1 query chunking. Refuse before the first
   // write so an unusually linked product cannot create an ambiguous outcome.
-  if (statements.length > 100) throw new Error('merge_case_statement_budget_exceeded')
+  if (stockTransactionStatementCount(statements.length) > 100) throw new Error('merge_case_statement_budget_exceeded')
 
   let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
   try {
-    batchResults = await db.batch(statements)
+    batchResults = await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
-    const stockError = productStockGuardError(error)
-    if (stockError) throw stockError
-    if (String(error).includes(MERGE_CONFLICT_RETRY)) throw new Error(MERGE_CONFLICT_RETRY)
-    if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
-    throw error
+    let receipt: { id: number } | null | undefined = null
+    const receiptPayloadSql = "CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END"
+    if (atomicHistory && stockTransactionRefusal(error)?.action !== 'reload_required') {
+      try { receipt = await db.prepare(`SELECT id FROM undo_snapshots WHERE ((kind='product.merge' AND status='applied')
+          OR (kind='product.merge.group.child' AND status IN ('recorded','applied')))
+          AND json_extract(${receiptPayloadSql},'$.operationId')=@operationId
+          AND json_extract(${receiptPayloadSql},'$.keeperId')=@keeper AND json_extract(${receiptPayloadSql},'$.dupId')=@discarded
+          AND created_by_id IS @actor AND (@root IS NULL OR (json_extract(${receiptPayloadSql},'$.costReviewOutcome.rootKey')=@root
+            AND json_extract(${receiptPayloadSql},'$.costReviewOutcome.reviewKey')=@reviewKey))
+          ORDER BY id DESC LIMIT 1`)
+        .get<{ id: number }>({ operationId: atomicHistory.operationId, keeper: canonicalId, discarded: dup.id,
+          actor: user?.id ?? null, root: costOutcome?.rootKey ?? null, reviewKey: costOutcome?.reviewKey ?? null }) } catch {}
+    }
+    if (!receipt) {
+      const stockError = productStockGuardError(error)
+      if (stockError) throw stockError
+      if (String(error).includes(MERGE_CONFLICT_RETRY)) throw new Error(MERGE_CONFLICT_RETRY)
+      if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
+      throw error
+    }
   }
 
   // The stock-fold inserted one 'adjustment' inventory_movement per branch on
@@ -6317,7 +6333,7 @@ function selectedConflictStatementEstimate(
   statements += 2 // committed receipt transition + assertion
   statements += 3 // snapshot + action history + audit
   statements += SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT
-  return statements
+  return stockTransactionStatementCount(statements)
 }
 
 function selectedConflictProjection(
@@ -6608,7 +6624,7 @@ function selectedConflictLightStatementEstimate(
     }
   }
   mergeBatchStatements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK)
-  const common = 1 + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear
+  const common = stockTransactionStatementCount(1) + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear
     + (canChangeImages ? mergedImages.length + 2 : 1)
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
@@ -8693,9 +8709,9 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
           status: 'approval_pending', pending_action_id: pending?.pending_action_id ?? null, undo_availability: 'unavailable', generation: 0 })
       } else {
         const transitionStamp = new Date().toISOString()
-        await db.batch(productRemoveApplyStatements({ plan, operationId: operation.operation_id, source: 'conflict_review',
+        await executeStockTransaction(db, productRemoveApplyStatements({ plan, operationId: operation.operation_id, source: 'conflict_review',
           requestId: operation.request_id, reviewId: review.id, actionOrdinal: Number(operation.action_ordinal), user,
-          transitionStamp, planDigest: operation.plan_digest, receiptActorId: operation.actor_id, requesterId: operation.requester_id }))
+          transitionStamp, planDigest: operation.plan_digest, receiptActorId: operation.actor_id, requesterId: operation.requester_id }), 'retry')
         const applied = await db.prepare(`SELECT action_history_id,generation FROM product_remove_operations
           WHERE operation_id=@operation AND status='undo_ready'`).get<{ action_history_id: number | null; generation: number }>({ operation: operation.operation_id })
         if (!applied?.action_history_id) throw new Error('product_remove_history_missing')
@@ -9551,6 +9567,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       keepMode ? { follows: true, requiresProductEdit: resolveChoicesTypeValues({ choices }), ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {
+    if (stockTransactionRefusal(error)) throw error
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
       return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
     }
@@ -9780,7 +9797,7 @@ app.post('/zero-quantity-delete', async (c) => {
   }
 
   if (statements.length) {
-    try { await db.batch([productStockGuardStatement(deletedIds), ...statements]) } catch (error) {
+    try { await executeStockTransaction(db, [productStockGuardStatement(deletedIds), ...statements], 'retry') } catch (error) {
       const stockError = productStockGuardError(error)
       if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       throw error
