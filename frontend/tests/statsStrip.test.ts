@@ -535,6 +535,51 @@ test('preset buttons execute the shared date-only and timestamp range callbacks'
   }
 })
 
+test('actual StatsStrip detail opts into guarded keyboard handling and a named scroll focus target', () => {
+  const require = createRequire(import.meta.url)
+  const ModalProbe = () => null
+  const state: unknown[] = [true, 'keyboard-detail']
+  let stateIndex = 0
+  const mod = { exports: {} as Record<string, any> }
+  const compiled = transformSync(read('src/components/shared/StatsStrip.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id === 'react') return {
+      useEffect: () => {},
+      useState: (initial: unknown) => {
+        const index = stateIndex++
+        if (index >= state.length) state[index] = initial
+        return [state[index], (next: unknown) => { state[index] = typeof next === 'function' ? next(state[index]) : next }]
+      },
+    }
+    if (id === './Modal.tsx') return ModalProbe
+    if (id === 'react/jsx-runtime' || id.includes('statsStripPresets')) return require(id === 'react/jsx-runtime' ? id : '../src/components/shared/statsStripPresets.ts')
+    return () => null
+  }, mod, mod.exports)
+  const find = (node: any, matches: (element: any) => boolean): any => {
+    if (!node || typeof node !== 'object') return null
+    if (matches(node)) return node
+    for (const child of [node.props?.children].flat(Infinity)) {
+      const found = find(child, matches)
+      if (found) return found
+    }
+    return null
+  }
+  const render = () => {
+    stateIndex = 0
+    return mod.exports.default({ cards: [{ key: 'keyboard-detail', label: 'Keyboard detail', value: '1', details: [{ label: 'Read-only amount', value: '$1.00' }] }], t: (key: string) => key })
+  }
+  const modal = find(render(), element => element.type === ModalProbe)
+  assert.ok(modal, 'execute the actual open-card detail rather than a duplicated fixture component')
+  assert.equal(modal.props.keyboard, true, 'Escape, Tab containment and focus return use the existing Modal contract')
+  assert.equal(modal.props.unsavedChanges, 'read-only', 'detail closing cannot discard page work')
+  const region = find(modal.props.children, element => element.props?.role === 'region')
+  assert.equal(region?.props.tabIndex, 0, 'keyboard users can reach the long breakdown body after Close')
+  assert.equal(region.props['aria-label'], 'Keyboard detail', 'the focus target is named by the actual stat')
+  modal.props.onClose()
+  assert.deepEqual(state, [true, null], 'closing clears only the selected detail; the stats strip remains open')
+  assert.equal(find(render(), element => element.type === ModalProbe), null)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)
