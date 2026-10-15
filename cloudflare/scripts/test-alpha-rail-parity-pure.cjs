@@ -24,6 +24,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const MIGRATION_SQLS = loadAll()
@@ -48,13 +49,27 @@ async function seed(db) {
     { name: 'Amber Oil', barcode: '555', price: 30, qty: 0, active: 1 },
     { name: 'Retired Balm', barcode: '666', price: 9, qty: 0, active: 0 },
   ]
-  for (const row of rows) {
-    await db.prepare(`
-      INSERT INTO products (name, barcode, selling_price_usd, stock_quantity, is_active, out_of_stock_threshold)
-      VALUES (@name, @barcode, @price, @qty, @active, 0)
-    `).run(row)
-  }
+  seedStockFixture(db.db, () => {
+    for (const row of rows) {
+      db.prepare(`
+        INSERT INTO products (name, barcode, selling_price_usd, stock_quantity, is_active, out_of_stock_threshold)
+        VALUES (@name, @barcode, @price, @qty, @active, 0)
+      `).run(row)
+    }
+  })
+  assert.throws(() => db.db.exec('UPDATE products SET stock_quantity=stock_quantity+1'), /stock_transaction_required/)
 }
+
+check('fixture setup rolls back and releases its permit', () => {
+  const db = openDb(MIGRATION_SQLS)
+  assert.throws(() => seedStockFixture(db.db, () => {
+    db.db.exec("INSERT INTO products(name,stock_quantity) VALUES('rollback fixture',3)")
+    throw new Error('fixture fault')
+  }), /fixture fault/)
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM products WHERE name='rollback fixture'").get().n, 0)
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => seedStockFixture(db.db, async () => {}), /false/)
+})
 
 check('a name group counts as ONE product in the rail, not once per row', async () => {
   const db = openDb(MIGRATION_SQLS)
@@ -108,7 +123,7 @@ check('an inactive product never appears in the rail', async () => {
 check('a blank-named row cannot create an empty letter bucket', async () => {
   const db = openDb(MIGRATION_SQLS)
   await seed(db)
-  await db.prepare(`INSERT INTO products (name, is_active) VALUES ('   ', 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (name, is_active) VALUES ('   ', 1)`).run({}))
   const rows = await db.prepare(`
     SELECT upper(substr(trim(p.name), 1, 1)) AS value, ${GROUP_COUNT} AS count
     FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.name, '')) <> ''

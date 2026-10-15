@@ -35,6 +35,7 @@ const ts = require('typescript')
 const Module = require('node:module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const repoRoot = path.join(cloudflareRoot, '..')
@@ -568,7 +569,7 @@ function productsFixture() {
   // prove nothing about what lands in old_value/new_value.
   const real = new Set([
     'acquisitionCostAccess', 'audit',
-    'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
+    'stockTransaction', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
     'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
     'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute',
   ])
@@ -633,7 +634,7 @@ async function productsRoute() {
   const fixture = productsFixture()
   const raw = fixture.raw
   const request = fixture.request
-  raw.prepare("INSERT INTO products(id, name, barcode, unit, category, is_active, discount_enabled, discount_percent, low_stock_threshold, expiry_alert_days, tag_label, selling_price_usd, purchase_price_usd, cost_price_usd, updated_at) VALUES (1, 'Coke 330ml', '8851', 'pcs', 'Drinks', 1, 0, 0, 10, 30, NULL, 1.25, 0.9, 0.8, NULL)").run()
+  seedStockFixture(raw, () => raw.prepare("INSERT INTO products(id, name, barcode, unit, category, is_active, discount_enabled, discount_percent, low_stock_threshold, expiry_alert_days, tag_label, selling_price_usd, purchase_price_usd, cost_price_usd, updated_at) VALUES (1, 'Coke 330ml', '8851', 'pcs', 'Drinks', 1, 0, 0, 10, 30, NULL, 1.25, 0.9, 0.8, NULL)").run())
 
   // E1 reproduction, verbatim from the verifier: a rename with NO
   // __rename_scope, alongside two ordinary field edits.
@@ -683,7 +684,7 @@ async function productsRoute() {
 
   // Bulk price adjust: the scope never materializes ids, so the honest
   // before/after is the catalog total per adjusted field plus the row count.
-  raw.prepare("INSERT INTO products(id, name, unit, is_active, selling_price_usd) VALUES (2, 'Pepsi 330ml', 'pcs', 1, 2.0)").run()
+  seedStockFixture(raw, () => raw.prepare("INSERT INTO products(id, name, unit, is_active, selling_price_usd) VALUES (2, 'Pepsi 330ml', 'pcs', 1, 2.0)").run())
   response = await request('POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.5, fields: ['selling_price_usd'], client_request_id: 'audit_price_adjust_0001' })
   assert.equal(response.status, 200, JSON.stringify(response.body))
   check('bulk price adjust reports the rows it actually changed', () => {
