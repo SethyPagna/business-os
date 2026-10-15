@@ -20,12 +20,12 @@ function loadTs(file: string, stubs: Record<string, unknown> = {}): Record<strin
   )
   const mod = { exports: {} as Record<string, any> }
   try {
-    new Function('exports', 'require', 'module', '__filename', '__dirname', output)(mod.exports, require, mod, abs, path.dirname(abs))
+    new Function('exports', 'require', 'module', '__filename', '__dirname', output)(mod.exports, createRequire(abs), mod, abs, path.dirname(abs))
   } finally { (Module as any)._load = original }
   return mod.exports
 }
 
-const responseModule = loadTs('src/components/products/mergeDuplicatesPreviewResponse.ts')
+const responseModule = loadTs('src/components/products/mergeDuplicatesPreviewResponse.ts', { '../../utils/mergeCostPreview.ts': require('../src/utils/mergeCostPreview.ts') })
 const validPreview = {
   success: true,
   scope: 'leading_zero',
@@ -134,7 +134,11 @@ function callbackHarness(writeReply: () => Promise<any>, refreshReply = async ()
   const events: Array<[string, string, unknown?]> = []
   const reads: string[] = []
   const generationRef = { current: 0 }
+  const requests: any[] = []
+  const costReview = {version:1,reviewed_digest:'a'.repeat(64),groups:[{keeper_id:2,member_ids:[1,2],reviewed_digest:'b'.repeat(64)}]}
   const deps: Record<string, any> = {
+    canViewCosts: true,
+    mergeCostReviewRef: {current:costReview},
     mergeDuplicatesBusy: false,
     leadingZeroWriteInFlightRef: { current: false },
     mergeDuplicatesScope: 'leading_zero',
@@ -146,7 +150,7 @@ function callbackHarness(writeReply: () => Promise<any>, refreshReply = async ()
     captureActorReadScope: () => ({ authority: actor }),
     isActorReadScopeCurrent: (scope: { authority: string }) => scope.authority === actor,
     productApi: {
-      mergeDuplicates: writeReply,
+      mergeDuplicates: async (options:any) => { requests.push(options); return writeReply() },
       previewMergeDuplicates: async () => { reads.push(actor); return refreshReply() },
       invalidateProductReadCacheForReconciliation: async () => { events.push(['invalidate', actor]) },
     },
@@ -160,7 +164,7 @@ function callbackHarness(writeReply: () => Promise<any>, refreshReply = async ()
     deps[name] = (value: unknown) => { events.push([name, actor, value]) }
   }
   const handler = new Function(...Object.keys(deps), `${compiledHandler}; return handler`)(...Object.values(deps)) as () => Promise<void>
-  return { handler, events, reads, generationRef, switchActor: () => { actor = 'employee-session' } }
+  return { handler, events, reads, generationRef, requests, costReview, deps, switchActor: () => { actor = 'employee-session' } }
 }
 
 {
@@ -202,6 +206,33 @@ function callbackHarness(writeReply: () => Promise<any>, refreshReply = async ()
   await running
   assert.deepEqual(harness.reads, [])
   assert.equal(harness.events.filter((event) => event[0] === 'setMergeDuplicatesBusy').length, 1)
+}
+
+{
+ const h=callbackHarness(async()=>({success:true,mergedGroups:1,mergedProducts:1}))
+ await h.handler()
+ assert.deepEqual(h.requests[0].costReview,h.costReview)
+ const missing=callbackHarness(async()=>({success:true}))
+ missing.deps.mergeCostReviewRef.current=null
+ await missing.handler()
+ assert.equal(missing.requests.length,0,'no modern bulk write without reviewed approval')
+}
+
+{
+ let chunks=0,refreshes=0
+ const pending=structuredClone(validPreview) as any
+ pending.groups[0].canonicalId=6;pending.groups[0].duplicates[0].id=5;pending.groups[0].caseKeys=['6:5']
+ pending.applyManifest.groups=[{keeper_id:6,member_ids:[5,6]}]
+ const h=callbackHarness(async()=>{chunks++;return {success:true,mergedGroups:1,mergedProducts:1}},async()=>++refreshes===1?pending:{...pending,groups:[],applyManifest:{...pending.applyManifest,groups:[]}})
+ h.deps.leadingZeroConfirmedGroupsRef.current=new Map([[2,'1,2'],[6,'5,6']])
+ h.deps.leadingZeroManifestRef.current={...validPreview.applyManifest,groups:[{keeper_id:2,member_ids:[1,2]},{keeper_id:6,member_ids:[5,6]}]}
+ const frozen={version:1,reviewed_digest:'a'.repeat(64),groups:[{keeper_id:2,member_ids:[1,2],reviewed_digest:'b'.repeat(64)},{keeper_id:6,member_ids:[5,6],reviewed_digest:'c'.repeat(64)}]}
+ h.deps.mergeCostReviewRef.current=frozen
+ await h.handler()
+ assert.equal(chunks,2)
+ assert.deepEqual(h.requests.map(r=>r.costReview),[frozen,frozen],'progressive manifest cannot replace original pending-group approval')
+ assert.equal(h.requests[0].manifest.groups.length,2)
+ assert.equal(h.requests[1].manifest.groups.length,1)
 }
 
 console.log('leadingZeroMergeUi: all checks passed')

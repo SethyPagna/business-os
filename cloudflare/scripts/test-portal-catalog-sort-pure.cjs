@@ -76,6 +76,7 @@ const searchMatch = loadReal('lib/searchMatch.ts')
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/loyaltyEligibility': loadReal('lib/loyaltyEligibility.ts'),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),

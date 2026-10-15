@@ -23,7 +23,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { costAverageRows, costMoveRows, mergeNeedsConfirmation } from '../src/components/products/mergeConfirmationRule.ts'
+import { formatMergeCost, readMergeCostAuthority } from '../src/utils/mergeCostPreview.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (...parts: string[]): string => readFileSync(join(here, '..', 'src', ...parts), 'utf8')
@@ -65,7 +65,7 @@ test('both dispositions are offered and neither is pre-selected', () => {
   // Starting unanswered is the point: a pre-selected option would let a
   // distracted Enter pick a disposition nobody chose.
   assert.match(dialog, /useState<MergeStockChoice \| null>\(null\)/)
-  assert.match(dialog, /confirmDisabled=\{needsChoice && !choice\}/)
+  assert.match(dialog, /confirmDisabled=\{!pageActive \|\| \(needsChoice && !choice\) \|\| \(canViewCosts && !authority\)\}/)
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/, 'writing stock off is the destructive branch')
 })
 
@@ -106,63 +106,19 @@ test('a merge that would raise the keeper\'s price says so, before -> after per 
     assert.ok(dialog.includes(field), `${field} must have a label in the price-change table`)
   }
   assert.ok(!/special_price_usd: \[/.test(dialog), 'a column zeroed by 0111 must not be labelled as a price')
-  assert.match(hook, /if \(!mergeNeedsConfirmation\(\{ needsChoice, pricing, identity \}\)\)/,
-    'a silent reprice must still stop for confirmation')
-  assert.equal(mergeNeedsConfirmation({
-    needsChoice: false,
-    pricing: { before: {}, after: {}, changes: [{ field: 'selling_price_usd', from: 14, to: 16 }] },
-    identity: { same: true, differs: [] },
-  }), true)
+  assert.match(hook, /const answer = await ask/, 'every modern pair presents the authoritative result before writing')
 })
 
-// THE CANONICAL N15 PAIR, as the merge preview actually describes it: one
-// article whose two rows differ only by a leading zero, both costs recorded
-// and close enough to average, no stock on the discarded row, selling prices
-// already equal. Every other gate is quiet on it, so before 2026-09-06 it
-// merged with NO dialog at all -- and the cost the fold wrote (the mean of two
-// figures neither row recorded) was discoverable only afterwards, on the kept
-// row. This is the case that discriminates: the pre-repair gate returns false
-// here, the repaired one returns true.
-const N15_IDENTITY = {
-  same: true,
-  differs: [],
-  costVerdict: 'differs' as const,
-  costFill: [],
-  costBefore: { cost_price_usd: 5, cost_price_khr: 0 },
-  costAfter: { cost_price_usd: 6.45, cost_price_khr: 0 },
-}
-
-test('a merge that AVERAGES a real cost stops for confirmation', () => {
-  assert.equal(mergeNeedsConfirmation({ needsChoice: false, pricing: null, identity: N15_IDENTITY }), true,
-    'the leading-zero twin rewrites the kept row’s cost to $6.45 -- never on the quiet')
-  // ...and the dialog it opens can actually say so: the section is fed by the
-  // SAME function the gate consults, so one cannot be reachable without the
-  // other.
-  assert.deepEqual(costAverageRows(N15_IDENTITY), [{ field: 'cost_price_usd', from: 5, to: 6.45 }])
-  assert.match(dialog, /const costAverages = costAverageRows\(identity\)/)
-  assert.match(dialog, /\{canViewCosts && costAverages\.length \? \(/, 'before/after cost rendering requires the independent view grant; confirmation still uses the same cost rule')
-})
-
-test('a merge that changes nothing but the row count still needs no dialog', () => {
-  // The control for the case above: same shape, but the mean lands back on the
-  // keeper's own cost, so there is nothing to show and nothing to ask.
-  assert.equal(mergeNeedsConfirmation({
-    needsChoice: false,
-    pricing: { before: {}, after: {}, changes: [] },
-    identity: { same: true, differs: [], costVerdict: 'same', costFill: [], costBefore: { cost_price_usd: 5 }, costAfter: { cost_price_usd: 5 } },
-  }), false)
-  assert.deepEqual(costAverageRows({ same: true, differs: [], costVerdict: 'differs', costBefore: { cost_price_usd: 5 }, costAfter: { cost_price_usd: 5 } }), [],
-    'a mean equal to the kept cost is not a change')
-  // Stock, a cross-identity difference and a cost FILL each stop it too.
-  assert.equal(mergeNeedsConfirmation({ needsChoice: true, pricing: null, identity: null }), true)
-  assert.equal(mergeNeedsConfirmation({
-    needsChoice: false, pricing: null,
-    identity: { same: false, differs: [{ field: 'barcode', keeper: '123', discarded: '456' }] },
-  }), true)
-  assert.equal(mergeNeedsConfirmation({
-    needsChoice: false, pricing: null,
-    identity: { same: true, differs: [], costVerdict: 'missing', costFill: [{ field: 'cost_price_usd', value: 6.45 }] },
-  }), true)
+test('authoritative costs retain NULL, genuine zero and four decimal currency precision',()=>{
+ assert.equal(formatMergeCost(null,'usd'),'—')
+ assert.equal(formatMergeCost(0,'usd'),'$0')
+ assert.equal(formatMergeCost(5.1234,'usd'),'$5.1234')
+ assert.equal(formatMergeCost(5.1244,'usd'),'$5.1244')
+ assert.equal(formatMergeCost(5.1244,'khr'),'5.1244៛')
+ assert.match(dialog,/loadCost\(choice \?\? 'merge', controller.signal\)/)
+ assert.match(dialog,/controller.abort\(\)/)
+ assert.match(dialog,/canViewCosts && !authority/)
+ assert.match(hook,/answer\.costReview/)
 })
 
 test('exact-identity twin surfaces use the shared stock choice flow', () => {
@@ -183,7 +139,7 @@ test('exact-identity twin surfaces use the shared stock choice flow', () => {
   assert.match(duplicatesTab, /<ResolveModal/)
   assert.doesNotMatch(duplicatesTab, /mergeWithChoice\(/, 'the tab has one merge path: the Resolve grid')
   assert.match(productResolveAdapter, /if \(!ctx\.data\.previews\.get\(id\)\?\.needsStockChoice\) return undefined/)
-  assert.match(productResolveAdapter, /api\.merge\(token\.keepId, step\.mergeId, step\.stock, keep\)/)
+  assert.match(productResolveAdapter, /api\.merge\(token\.keepId, step\.mergeId, step\.stock, keep, token\.costReview\)/)
   // No surface may reach past the flow and merge without an answer.
   for (const [label, src] of [['duplicates tab', duplicatesTab], ['products page', productsPage], ['product form', productForm]] as const) {
     assert.ok(!/mergePossiblySameProducts\(/.test(src), `${label} must not call the raw merge transport directly`)
@@ -214,7 +170,7 @@ test('the transport carries the answer and the server refusal keeps its breakdow
     'an unanswered merge must omit the field so the server can refuse rather than guess')
   assert.match(transport, /merge-preview/)
   assert.match(http, /error\.stockImpact = parsed\?\.stockImpact \|\| null/)
-  assert.match(hook, /'stock_choice_required'/, 'the server refusal must reopen the same dialog')
+  assert.match(hook, /merge_cost_preview_unavailable/, 'an unavailable preview refuses before any mutation')
   // The two refusals that are decisions, not failures: their details must
   // survive the transport, or the flow can only echo the server's English.
   assert.match(http, /error\.costOutlier = parsed\?\.costOutlier \|\| null/)
@@ -302,7 +258,7 @@ test('a cross-identity merge says which field differs, and is never silent', () 
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/,
     'moving stock onto a different-identity row is a destructive-looking decision')
   // The hook must stop for it even when there is no stock and no price to move.
-  assert.match(hook, /if \(!mergeNeedsConfirmation\(\{ needsChoice, pricing, identity \}\)\)/)
+  assert.match(hook, /const answer = await ask/)
   assert.ok(en.merge_identity_differs_title && km.merge_identity_differs_title)
   assert.match(en.merge_stock_choice_merge_cross_identity, /different barcode or cost/i)
 })
@@ -326,27 +282,14 @@ test('every child row under the name is swept -- no rows[0], no LIMIT 1', () => 
 // refused pairs. The server has sent both since N15 -- costBefore/costAfter
 // and costRefusals per group, costRefusalCount and refusals for the run -- so
 // what is pinned here is that the UI stops dropping them on the floor.
-test('the whole-catalog dry run shows the cost it will write, and what it will refuse', () => {
-  // Behaviour first: the rows the modal renders come from the SAME function
-  // the one-pair dialog uses, so the two cannot describe one fold differently.
-  assert.deepEqual(
-    costMoveRows({ cost_price_usd: 5, cost_price_khr: 0 }, { cost_price_usd: 6.45, cost_price_khr: 0 }),
-    [{ field: 'cost_price_usd', from: 5, to: 6.45 }],
-  )
-  assert.deepEqual(costMoveRows({ cost_price_usd: 5 }, { cost_price_usd: 5 }), [],
-    'a fold that lands on the kept cost is not a change to announce')
-  assert.deepEqual(costMoveRows(undefined, undefined), [], 'an older Worker sends no cost -- show nothing, not NaN')
-  assert.match(reviewModal, /return costMoveRows\(group\.costBefore, group\.costAfter\)/)
-  assert.match(reviewModal, /\{\(canViewCosts \? costMoves\(group\) : \[\]\)\.map\(\(move\) =>/, 'each group renders cost before/after only with the independent view grant')
-  assert.match(reviewModal, /group\.costRefusals \|\| \[\]/, 'and the rows this run will skip')
-  assert.match(reviewModal, /const costRefusalCount = preview\?\.costRefusalCount \|\| 0/)
-  assert.match(reviewModal, /merge_duplicates_preview_cost_refused/)
-  // The modal can only render a refusal count after the page has accepted a
-  // complete response whose aggregate matches the nested refusal rows.
-  assert.match(productsPage, /validateMergeDuplicatesPreviewResponse/,
-    'the preview loader must validate the complete preview before returning it')
-  assert.match(previewValidator, /costRefusalCount !== derivedCostRefusalCount/,
-    'the validated preview carries only a refusal count that matches its groups')
+test('bulk review consumes authoritative nullable results and blocks unavailable cost',()=>{
+ assert.match(reviewModal,/group.costAuthority/)
+ assert.match(reviewModal,/costReady/)
+ assert.match(reviewModal,/Cost needs review/)
+ assert.match(productsPage,/costReview/)
+ assert.match(previewValidator,/readMergeCostAuthority/)
+ assert.match(productsPage,/validateMergeDuplicatesPreviewResponse/)
+ assert.match(previewValidator,/costRefusalCount !== derivedCostRefusalCount/)
 })
 
 test('a whole-catalog run that skipped pairs does not report plain success', () => {
@@ -376,9 +319,16 @@ test('the explanations live in InfoHints, not inline prose', () => {
   assert.match(dialog, /text=\{option\.hint\}/)
 })
 
-test('an unknown keeper stays unknown in the cost-move review model', () => {
-  assert.deepEqual(costMoveRows({ cost_price_usd: null }, { cost_price_usd: 5 }), [{ field: 'cost_price_usd', from: null, to: 5 }])
-  assert.deepEqual(costMoveRows({ cost_price_usd: 0 }, { cost_price_usd: 5 }), [{ field: 'cost_price_usd', from: 0, to: 5 }])
+test('authority parser distinguishes valid NULL/zero from absent or malformed cost',()=>{
+ const authority={version:1,keeperId:10,cost_price_usd:null,cost_price_khr:0,needsReview:true,source:'keeper_fallback'}
+ assert.deepEqual(readMergeCostAuthority(authority,10),authority)
+ for(const patch of [{version:2},{keeperId:11},{cost_price_usd:undefined},{cost_price_usd:-1},{cost_price_usd:Infinity},{cost_price_usd:100000000001},{source:'catalog_mean'}]) assert.throws(()=>readMergeCostAuthority({...authority,...patch},10))
+})
+
+test('pair cost requests retain original actor ownership and reset refusal is translated',()=>{
+ assert.match(hook,/loadCost: async \(stock, signal\) => \{ assertActorReadScope\(actorScope\); return getMergeCostPreview/)
+ assert.equal(en.merge_cost_review_history_required,'Audit history is required for merged product cost review. No records were deleted.')
+ assert.match(km.merge_cost_review_history_required,/[ក-៿]/)
 })
 
 if (failed > 0) {

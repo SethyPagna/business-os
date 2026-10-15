@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -82,7 +83,7 @@ function world(lots = [1], untracked = 0) {
     if (stats.after) { const hook = stats.after; stats.after = null; hook(raw) }
     return result
   } })
-  return { raw, db, stats, quantity }
+  return { raw, db, stats, quantity, auditRows: captureAuditBaseline(raw) }
 }
 const ownership = row => ({ operationId: row.operation_id, actorId: row.actor_id, organizationId: row.organization_id, controlIncarnation: row.control_incarnation, token: row.maintenance_token })
 async function planned(w, transfer = {}, manifestQuantityText = w.quantity.toLocaleString('en-US', { useGrouping: false, maximumSignificantDigits: 21 })) {
@@ -271,7 +272,7 @@ async function main() {
     assert.ok(Math.abs(w.raw.prepare('SELECT quantity FROM branch_stock WHERE branch_id=1').get().quantity) < 1e-9)
     assert.ok(Math.abs(w.raw.prepare('SELECT SUM(quantity) n FROM branch_batch_stock').get().n - lots.reduce((a, b) => a + b, 0)) < 1e-9)
     assert.equal(w.raw.prepare('SELECT stock_quantity FROM products').get().stock_quantity, w.quantity)
-    for (const table of ['transfer_operation_receipts', 'transfer_operation_members', 'action_history', 'audit_logs', 'stock_transfers']) assert.equal(w.raw.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 1)
+    for (const table of ['transfer_operation_receipts', 'transfer_operation_members', 'action_history', 'audit_logs', 'stock_transfers']) assert.equal(table === 'audit_logs' ? w.auditRows().length : w.raw.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 1)
     const movements = w.raw.prepare('SELECT movement_type,batch_id,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr FROM inventory_movements ORDER BY id').all()
     const direction = value => movements.filter(m => m.movement_type === value).map(({ movement_type, ...m }) => m)
     assert.deepEqual(direction('transfer_out'), direction('transfer_in'))

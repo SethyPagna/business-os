@@ -32,9 +32,12 @@ async function fixture() {
       (2,'Beta','012345679','012345679','B2','','[{"phone":"012345679","address":"House Beta Unique"}]','Keep beta','beta@example.invalid',0,'2026-01-01'),
       (3,'General',NULL,NULL,NULL,NULL,NULL,'Keep General',NULL,1,'2026-01-01'),
       (4,'Untouched','012345680','012345680','C4',NULL,NULL,'Keep all',NULL,0,'2026-01-01')`)
-  raw.exec(`INSERT INTO sales(id,receipt_number,customer_id,customer_name,customer_phone,total_usd,amount_paid_usd,membership_points_redeemed)
-    VALUES(101,'fixture-sale',1,'Alpha','012345678',12,4,3);
-    INSERT INTO loyalty_point_adjustments(id,customer_id,points,note) VALUES(101,1,100,'Keep points')`)
+  raw.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+  try {
+    raw.exec(`INSERT INTO sales(id,receipt_number,customer_id,customer_name,customer_phone,total_usd,amount_paid_usd,membership_points_redeemed)
+      VALUES(101,'fixture-sale',1,'Alpha','012345678',12,4,3);
+      INSERT INTO loyalty_point_adjustments(id,customer_id,points,note) VALUES(101,1,100,'Keep points')`)
+  } finally { raw.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run() }
   let hook = null; let fault = false; let lost = false; let user = ADMIN
   const db = {
     prepare: sql => native.prepare(sql),
@@ -79,7 +82,8 @@ async function fixture() {
     try { return {status:res.status,body:JSON.parse(text)} } catch { throw Error(`${method} ${url} status${res.status}: ${text}`) }
   }
   const state = () => JSON.stringify(raw.prepare('SELECT * FROM customers ORDER BY id').all())
-  const counts = () => [raw.prepare('SELECT COUNT(*) n FROM undo_snapshots').get().n,raw.prepare('SELECT COUNT(*) n FROM action_history').get().n,raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n]
+  const baselineAuditCount=raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n
+  const counts = () => [raw.prepare('SELECT COUNT(*) n FROM undo_snapshots').get().n,raw.prepare('SELECT COUNT(*) n FROM action_history').get().n,raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n-baselineAuditCount]
   const related = () => JSON.stringify({sales:raw.prepare('SELECT * FROM sales ORDER BY id').all(),points:raw.prepare('SELECT * FROM loyalty_point_adjustments ORDER BY id').all()})
   return {native,raw,db,restoration,manifest,request,state,counts,related,setUser:u=>{user=u},hook:fn=>{hook=fn},fault:()=>{fault=true},lost:()=>{lost=true}}
 }

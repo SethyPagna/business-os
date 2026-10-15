@@ -1,3 +1,4 @@
+import { loyaltyAccrualSql } from './loyaltyEligibility'
 import type { D1Compat } from './db'
 import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
@@ -787,11 +788,11 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     sql: `INSERT INTO sales (
             receipt_number, client_request_id, cashier_name, branch_id, branch_name,
             payment_method, payment_currency, subtotal_usd, total_usd, amount_paid_usd,
-            sale_status, notes, items, creation_snapshot_json, created_at, updated_at
+            loyalty_accrual, sale_status, notes, items, creation_snapshot_json, created_at, updated_at
           )
           SELECT @receiptNumber, @clientRequestId, 'Unified stock import', @branchId, @branchName,
             'Cash', 'USD', @subtotalUsd, @subtotalUsd, @subtotalUsd,
-            'completed', @notes, @items, @creationSnapshotJson, @soldAt, CURRENT_TIMESTAMP
+            ${loyaltyAccrualSql()}, 'completed', @notes, @items, @creationSnapshotJson, @soldAt, CURRENT_TIMESTAMP
           WHERE ${guard}`,
     params: {
       ...common,

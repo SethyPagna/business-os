@@ -24,6 +24,7 @@ function compileSubject() {
   let saleMoneyPrecision
   const localRequire = (request) => {
     if (request === './db') return {}
+    if (request === './loyaltyEligibility') return compileLib('loyaltyEligibility',localRequire)
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
@@ -459,6 +460,17 @@ function customerMatch(overrides = {}) {
         assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 1, label + ': a rename is not an identity change')
       }
     }
+  }
+
+  for(const value of [undefined,'garbage','false','true']){
+    const world=setup()
+    world.sqlite.prepare("DELETE FROM settings WHERE key='loyalty_points_enabled'").run()
+    if(value!==undefined)world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?)").run(value)
+    await subject.applyHistoricalSaleImport(world.db,{...input,accrueLoyalty:true})
+    assert.equal(world.sqlite.prepare("SELECT loyalty_accrual FROM sales").get().loyalty_accrual,value==='true'?1:0,'import opt-in obeys current switch '+value)
+    world.sqlite.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+    await subject.applyHistoricalSaleImport(world.db,{...input,accrueLoyalty:true})
+    assert.equal(world.sqlite.prepare("SELECT loyalty_accrual FROM sales").get().loyalty_accrual,value==='true'?1:0,'retry cannot promote OFF-born import')
   }
 
   const tooMany = Array.from({ length: subject.MAX_HISTORICAL_SALE_LINES + 1 }, () => ({ ...saleData().items[0] }))

@@ -68,14 +68,14 @@ assert.match(route, /processedCaseKeys/)
 assert.match(route, /resolveProductMergeClusterPlanEconomics\(clusterPlan\)/)
 assert.match(route, /bulkClusterPlan: clusterPlan/)
 assert.match(route, /readAppliedBulkClusterPlan/)
-assert.match(route, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/,
+assert.match(route, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db, (?:knownAtomicHistoryIds|undefined), preparedGraph\)/,
   'history finalization uses the counted database adapter')
 assert.doesNotMatch(post, /recordBulkMergeUndoSnapshot/,
   'the bulk route does not add a second undo snapshot beside atomic fold history')
 
 assert.equal((modal.match(/onClick=\{onConfirm\}/g) || []).length, 1, 'the reviewed catalog run has one confirmation action')
 assert.match(modal, /one confirmation starts a bounded, resumable merge/)
-assert.match(modal, /whole group\\u2019s distinct valid non-zero costs/)
+assert.match(modal, /Cost follows the received-cost calculation shown for each group/)
 assert.match(modal, /highest retail and wholesale prices are kept/)
 assert.match(modal, /mergeableDuplicateProductCount/)
 assert.match(modal, /group\(s\) are quarantined and will remain unchanged/)

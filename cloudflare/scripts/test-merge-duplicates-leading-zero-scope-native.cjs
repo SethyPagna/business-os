@@ -97,8 +97,10 @@ function loadRoute(db) {
   const conflictBatch = loadTs(path.join('lib', 'productConflictMergeBatch.ts'))
   // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
   const catalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} })
+  const costReview = loadTs(path.join('lib','productCostReview.ts'), { './catalogCostRecompute':catalogCost })
   const undoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     './catalogCostRecompute': catalogCost,
+    './productCostReview':costReview,
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -117,6 +119,7 @@ function loadRoute(db) {
     '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': undoAppliers,
     '../lib/catalogCostRecompute': catalogCost,
+    '../lib/productCostReview':costReview,
   }).default
 }
 
@@ -270,9 +273,10 @@ async function main() {
   assert.equal(success.body.mergedProducts, 3)
   assert.equal(successFixture.raw.prepare('SELECT is_active FROM products WHERE id=1').get().is_active, 0)
   assert.equal(successFixture.raw.prepare('SELECT stock_quantity FROM products WHERE id=2').get().stock_quantity, 5)
-  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=2').get().cost_price_usd, 5)
+  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=2').get().cost_price_usd, 6)
   assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=12').get().cost_price_usd, 8, 'zero is excluded when a positive cost exists')
-  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=14').get().cost_price_usd, 101, 'widely different positive costs still use the scoped DISTINCT mean')
+  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=14').get().cost_price_usd, 200, 'the original keeper cost remains when no recorded lot or manual cost exists')
+  assert.equal(successFixture.raw.prepare('SELECT COUNT(*) AS n FROM products WHERE id IN (2,12,14) AND cost_review_key IS NOT NULL').get().n,3)
   assert.equal(successFixture.raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 3)
 
   await concurrentGuard('price', (rawDb) => {

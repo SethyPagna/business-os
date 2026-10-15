@@ -123,6 +123,8 @@ console.log('PASS: historical finance and durable reversal backup coverage')
   const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
   for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) restored.exec(fs.readFileSync(path.join(heldDir,file),'utf8'))
   restored.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+  assert.match(source, /for \(const table of \[\.\.\.orderedTables\]\.reverse\(\)\)/)
+  for(const {table} of [...bundle].reverse()) restored.exec(`DELETE FROM "${table}"`)
   for(const {table,rows} of bundle) for(const row of rows) {
     const columns=Object.keys(row)
     restored.prepare(`INSERT INTO ${table}(${columns.map(key=>`"${key}"`).join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).run(...columns.map(key=>row[key]))

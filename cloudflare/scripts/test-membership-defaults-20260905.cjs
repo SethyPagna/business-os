@@ -28,6 +28,7 @@ const anonymousCustomer = load('lib/anonymousCustomer.ts')
 const sqlBinding = load('lib/sqlBinding.ts')
 const contactDuplicates = load('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding })
 const portal = load('routes/portal.ts', {
+  '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/anonymousCustomer': anonymousCustomer,
@@ -77,7 +78,10 @@ const imports = load('lib/importEngine.ts', {
 })
 async function main() {
   raw.prepare('INSERT INTO customers (id,name,membership_number,phone,address,notes) VALUES (1,@name,@number,@phone,@address,@notes)').run({ name: 'Member', number: ' legacy-Id ', phone: '12345678', address: 'SECRET_ADDRESS', notes: 'SECRET_NOTES' })
-  raw.prepare('INSERT INTO loyalty_point_adjustments (customer_id,points,note) VALUES (1,250,@note)').run({ note: 'SECRET_AWARD' })
+  raw.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+  try {
+    raw.prepare('INSERT INTO loyalty_point_adjustments (customer_id,points,note) VALUES (1,250,@note)').run({ note: 'SECRET_AWARD' })
+  } finally { raw.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run() }
   const request = (url, permissions, method = 'GET') => contacts.request(url, { method, headers: permissions ? { 'x-test-permissions': JSON.stringify(permissions) } : {} }, {})
   assert.equal((await request('/customers/membership/legacy-id')).status, 401)
   for (const perms of [{}, { customer_portal: true }]) assert.equal((await request('/customers/membership/legacy-id', perms)).status, 403)

@@ -1,7 +1,8 @@
+import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
-import { customerPointsReturnSql } from '../lib/customerPointsReturn'
+import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
@@ -161,7 +162,7 @@ async function loadPreferences(env: Env) {
     realertMinutes: Math.max(1, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
     driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
-    loyaltyPointsEnabled: normalizeBoolean(map.loyalty_points_enabled, true),
+    loyaltyPointsEnabled: loyaltyPointsEnabled(map.loyalty_points_enabled),
   }
 }
 
@@ -481,10 +482,10 @@ async function buildLoyaltySection(env: Env, threshold: number, statementsUsed: 
     return statement.allOnce ? statement.allOnce<T>(params) : statement.all<T>(params)
   }
   const ledgers: Array<{ kind: PointsLedger; table: string; columns: string; predicate: string }> = [
-    { kind: 'sales', table: 'sales', columns: 'sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual', predicate: "COALESCE(sale_status,'completed') <> 'cancelled'" },
+    { kind: 'sales', table: 'sales', columns: `sale_status,total_usd,total_khr,membership_points_redeemed,${loyaltySaleAccrualSql} AS loyalty_accrual`, predicate: `COALESCE(sale_status,'completed') <> 'cancelled' AND ${loyaltySaleSinceSql}` },
     { kind: 'returns', table: 'returns', columns: 'status,total_refund_usd,total_refund_khr', predicate: `COALESCE(status,'completed') <> 'cancelled' AND ${customerPointsReturnSql}` },
-    { kind: 'submissions', table: 'customer_share_submissions', columns: 'status,reward_points', predicate: "status = 'approved' AND reward_points_voided_at IS NULL" },
-    { kind: 'adjustments', table: 'loyalty_point_adjustments', columns: 'points', predicate: 'voided_at IS NULL' },
+    { kind: 'submissions', table: 'customer_share_submissions', columns: 'status,reward_points', predicate: `status = 'approved' AND reward_points_voided_at IS NULL AND ${loyaltySubmissionSinceSql}` },
+    { kind: 'adjustments', table: 'loyalty_point_adjustments', columns: 'points', predicate: `voided_at IS NULL AND ${loyaltyAdjustmentSinceSql}` },
   ]
   const counts = await readRows<{ kind: PointsLedger; count: number }>(ledgers.map(ledger =>
     `SELECT /* loyalty-ledger */ '${ledger.kind}' kind,COUNT(*) count FROM ${ledger.table} WHERE customer_id IS NOT NULL AND ${ledger.predicate}`).join(' UNION ALL '))

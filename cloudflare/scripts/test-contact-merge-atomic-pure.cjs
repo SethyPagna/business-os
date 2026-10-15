@@ -76,6 +76,7 @@ async function check(name, fn) {
 
 async function successfulMerges() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   const run = (sql, params) => db.prepare(sql).run(params)
   run("INSERT INTO customers(id,name,phone,address,membership_number) VALUES(1,'Same Customer',NULL,'',''),(2,'Same Customer','012 222 222','Loser address','LC-00002')")
   run("INSERT INTO sales(id,customer_id,customer_name) VALUES(1,2,'Same Customer')")
@@ -139,6 +140,7 @@ async function successfulMerges() {
 
 async function staleSnapshotRollsBack() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   db.prepare("INSERT INTO customers(id,name,phone) VALUES(1,'Same',NULL),(2,'Same','012 222 222')").run()
   db.prepare("INSERT INTO sales(id,customer_id,customer_name) VALUES(1,2,'Same')").run()
   const built = plan(db, 'customers', 1, 2, 'stale-contact-merge')
@@ -154,6 +156,7 @@ async function staleSnapshotRollsBack() {
 
 async function auditFailureRollsBack() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(1,'Same Supplier',NULL),(2,'Same Supplier','012 555 555')").run()
   db.prepare("INSERT INTO returns(id,supplier_id,supplier_name,return_scope) VALUES(1,2,'Same Supplier','supplier')").run()
   db.prepare(`CREATE TRIGGER reject_contact_merge_audit BEFORE INSERT ON audit_logs
@@ -168,6 +171,7 @@ async function auditFailureRollsBack() {
 
 async function whitespaceMembershipPreservesLoserIdentity() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   db.prepare("INSERT INTO customers(id,name,membership_number) VALUES(1,'Same','   '),(2,'Same','LEGACY-IDENTITY')").run()
   const built = plan(db, 'customers', 1, 2, 'whitespace-membership-contact-merge')
   await db.batch(built.statements)
@@ -183,6 +187,7 @@ async function whitespaceMembershipPreservesLoserIdentity() {
 // ids of every moved row.
 async function threeRecordsOneStatementList() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   const run = (sql, params) => db.prepare(sql).run(params)
   run("INSERT INTO customers(id,name,phone,notes,membership_number) VALUES(1,'Sokha',NULL,'VIP',NULL),(2,'Sokha Chan','012 222 222',NULL,'LC-00002'),(3,'sokha','012 333 333','Paid cash','LC-00003')")
   run("INSERT INTO sales(id,customer_id,customer_name) VALUES(1,2,'Sokha Chan'),(2,3,'sokha'),(3,1,'Sokha')")

@@ -1,3 +1,4 @@
+import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
 import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
@@ -434,7 +435,7 @@ export async function applyHistoricalSaleImport(
             @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone,
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-            @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id,
+            ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @items_json, @created_at, @client_request_id,
             @legacy_receipt_number, @creation_snapshot_json,
             1, @stock_skipped_at, @stock_skipped_by_name
           WHERE ${writeGuard}`,

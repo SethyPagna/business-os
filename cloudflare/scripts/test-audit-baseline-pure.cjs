@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict')
+const { DatabaseSync } = require('node:sqlite')
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
+
+for (const mutation of ['UPDATE audit_logs SET details=\'changed\' WHERE id=1', 'DELETE FROM audit_logs WHERE id=1']) {
+  const db = new DatabaseSync(':memory:')
+  db.exec("CREATE TABLE audit_logs(id INTEGER PRIMARY KEY,action TEXT,details TEXT); INSERT INTO audit_logs VALUES(1,'reset_data','original')")
+  const added = captureAuditBaseline(db)
+  assert.deepEqual(added(), [])
+  db.exec(mutation)
+  assert.throws(added, /pre-existing audit rows must remain unchanged/)
+  db.close()
+}
+const db = new DatabaseSync(':memory:')
+db.exec("CREATE TABLE audit_logs(id INTEGER PRIMARY KEY,action TEXT,details TEXT); INSERT INTO audit_logs VALUES(1,'reset_data','original')")
+const added = captureAuditBaseline(db)
+db.exec("INSERT INTO audit_logs VALUES(2,'unexpected','must not disappear')")
+assert.equal(added().length, 1)
+assert.equal(added()[0].action, 'unexpected')
+assert.throws(() => assert.equal(added().length, 0))
+db.close()
+console.log('PASS audit baseline detects changed, deleted and unexpected history')

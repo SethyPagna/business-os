@@ -35,6 +35,7 @@ import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useDialogKeyboard } from '../shared/useDialogKeyboard.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
 import { hasFinePointer } from '../../utils/pointerFocus.ts'
@@ -1188,17 +1189,12 @@ export default function FastStockInModal({
   const closeGuard = useCloseGuard({ dirty: closeDirty }, discardAndClose, onMinimize ? preserveAndMinimize : undefined)
   const requestCloseIfIdle = () => { if (!saving) closeGuard.requestClose() }
   const closeBackdropIfIdle = () => { if (!selectedGroup && !reasonsOpen) requestCloseIfIdle() }
-  useEffect(() => {
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || saving || selectedGroup || reasonsOpen || closeGuard.promptOpen) return
-      const targetDialog = event.target instanceof Element ? event.target.closest('[role="dialog"]') : null
-      if (targetDialog && targetDialog !== parentPanelRef.current) return
-      event.preventDefault()
-      closeGuard.requestClose()
-    }
-    window.addEventListener('keydown', onEscape)
-    return () => window.removeEventListener('keydown', onEscape)
-  }, [saving, selectedGroup, reasonsOpen, closeGuard.promptOpen, closeGuard.requestClose])
+  useDialogKeyboard(parentPanelRef, {
+    enabled: true,
+    promptOpen: closeGuard.promptOpen,
+    onEscape: () => { if (!selectedGroup && !reasonsOpen) requestCloseIfIdle() },
+    onPromptEscape: () => { if (!saving) closeGuard.dismissPrompt() },
+  })
 
   // ---- lot options ----
   const lotOptions = (() => {
@@ -1353,7 +1349,7 @@ export default function FastStockInModal({
         />
         <StockSessionSteps steps={steps} current={currentStep} onStep={(next) => { if (next === 'items' || !refuseDestination(pendingLines)) setStep(next) }} disabled={editLocked} tr={tr} />
 
-        <div className="modal-scroll space-y-2 px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
+        <div className="modal-scroll space-y-2 px-3 pb-3 pt-1 sm:px-4 sm:pb-4" tabIndex={0} role="region" aria-label={sessionLabel}>
           {currentStep === 'items' ? (
             <>
               <StockSessionSharedDetails

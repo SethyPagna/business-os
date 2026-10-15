@@ -150,7 +150,15 @@ async function main() {
       })
     }
     sameButS5(addNow.filter((text) => !/landing_branch_guard|product_has_stock/.test(text)), addThen, 'add: otherwise identical')
-    sameButS5(saleNow, saleThen, 'sale: identical')
+    const normalizeLoyalty = text => {
+      const item = JSON.parse(text)
+      if(/INSERT INTO sales \(/.test(item.sql)){
+        item.sql=item.sql.replace('loyalty_accrual, sale_status, notes, items','sale_status, notes, items')
+          .replace(/CASE WHEN \(lower\(trim\(COALESCE\(\(SELECT value FROM settings WHERE key = 'loyalty_points_enabled'\), ''\)\)\) IN \('1','true','yes','on'\)\) AND \(1\) = 1 THEN 1 ELSE 0 END, /,'')
+      }
+      return JSON.stringify(item)
+    }
+    sameButS5(saleNow.map(normalizeLoyalty), saleThen, 'sale: only reviewed cost and loyalty changes')
   })
 
   await check('a column redirected from Old Shop onto LC Store: the add movement is labelled; Old Shop re-enabled before the write aborts it', async () => {

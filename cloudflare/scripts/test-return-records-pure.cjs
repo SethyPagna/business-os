@@ -28,6 +28,7 @@
 // has no /:id/records route at all.
 //
 // Run: node scripts/test-return-records-pure.cjs
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -86,6 +87,7 @@ const RECEIPT_ID = '66666666-7777-4888-9999-aaaaaaaaaaaa'
 const OPERATION_ID = 'op-return-bulk-1'
 
 function seed(db) {
+  const auditOffset = db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM audit_logs').get().id
   db.exec(`
     INSERT INTO branches (id, name, is_active) VALUES (3, 'Main shop', 1);
     INSERT INTO users (id, username, password, name, is_active) VALUES (4, 'za', 'x', 'Za Sethy', 1);
@@ -96,24 +98,24 @@ function seed(db) {
 
     -- 1. the creation row: keyed by its RECEIPT id, naming the return only in record_id
     INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, table_name, record_id, details, new_value, created_at)
-      VALUES (1, 4, 'za', 'create', 'return_create', 'receipt-abc', 'returns', 12,
+      VALUES (${auditOffset + 1}, 4, 'za', 'create', 'return_create', 'receipt-abc', 'returns', 12,
         '{"return_number":"RET-20260920-0003","return_items":2}',
         '{"return_number":"RET-20260920-0003","return_items":2}', '2026-09-20 10:20:00');
 
     -- 2. an edit that really changed two columns (phase 1's changedFields shape)
     INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, table_name, record_id, details, old_value, new_value, created_at)
-      VALUES (2, 4, 'za', 'update', 'return', '12', 'returns', 12,
+      VALUES (${auditOffset + 2}, 4, 'za', 'update', 'return', '12', 'returns', 12,
         '{"reason":"Customer brought the receipt"}',
         '{"reason":"Damaged item","total_refund_usd":25}',
         '{"reason":"Wrong size","total_refund_usd":18}', '2026-09-20 11:00:00');
 
     -- 3. the CONTROL: an edit that changed nothing -- both value columns NULL
     INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, table_name, record_id, details, old_value, new_value, created_at)
-      VALUES (3, 4, 'za', 'update', 'return', '12', 'returns', 12, '{}', NULL, NULL, '2026-09-20 11:05:00');
+      VALUES (${auditOffset + 3}, 4, 'za', 'update', 'return', '12', 'returns', 12, '{}', NULL, NULL, '2026-09-20 11:05:00');
 
     -- 4. an audit row for a DIFFERENT return, which must never appear here
     INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, table_name, record_id, old_value, new_value, created_at)
-      VALUES (4, 4, 'za', 'update', 'return', '99', 'returns', 99, '{"status":"completed"}', '{"status":"cancelled"}', '2026-09-20 11:06:00');
+      VALUES (${auditOffset + 4}, 4, 'za', 'update', 'return', '99', 'returns', 99, '{"status":"completed"}', '{"status":"cancelled"}', '2026-09-20 11:06:00');
 
     -- 5. the linked sale's status move, reachable only through the edit receipt
     INSERT INTO return_mutation_receipts (id, actor_id, return_id, sale_id, mutation_kind, request_id, request_digest, request_json, response_json, occurred_at)
@@ -133,14 +135,16 @@ function seed(db) {
     INSERT INTO return_bulk_members (operation_id, return_id, revision, sale_id, sale_revision, stock_fingerprint)
       VALUES ('${OPERATION_ID}', 12, 0, 70, 0, 'fp');
     INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, table_name, record_id, details, created_at)
-      VALUES (5, 4, 'za', 'action_undo', 'return', '${OPERATION_ID}', 'returns', '${OPERATION_ID}',
+      VALUES (${auditOffset + 5}, 4, 'za', 'action_undo', 'return', '${OPERATION_ID}', 'returns', '${OPERATION_ID}',
         '{"kind":"return.fields.bulk"}', '2026-09-21 09:30:00');
   `)
+  return auditOffset
 }
 
 async function main() {
   const db = openDb(MIGRATION_SQLS)
-  seed(db)
+  const auditRows = captureAuditBaseline(db)
+  const auditOffset = seed(db)
   const { loadReturnRecords } = loadReal(workerSrc('lib/returnRecords.ts'))
 
   const body = await loadReturnRecords(db, 12)
@@ -152,7 +156,7 @@ async function main() {
     assert.equal(body.returnId, 12)
     assert.equal(body.returnNumber, 'RET-20260920-0003')
     assert.ok(records.length >= 5, `expected every source to contribute, got ${JSON.stringify(records.map((r) => r.kind))}`)
-    assert.ok(!records.some((record) => record.id === 'audit:4'), 'another return\'s audit row must never appear here')
+    assert.ok(!records.some((record) => record.id === `audit:${auditOffset + 4}`), 'another return\'s audit row must never appear here')
     const stamps = records.map((record) => record.at_ms).filter((value) => value !== null)
     assert.deepEqual(stamps, [...stamps].sort((a, b) => a - b), 'records read oldest first')
   })
@@ -166,7 +170,7 @@ async function main() {
   })
 
   check('an edit shows exactly the fields that moved, before -> after', () => {
-    const edit = records.find((record) => record.id === 'audit:2')
+    const edit = records.find((record) => record.id === `audit:${auditOffset + 2}`)
     assert.ok(edit)
     assert.equal(edit.kind, 'return_updated')
     assert.equal(edit.actor_username, 'za')
@@ -178,7 +182,7 @@ async function main() {
   })
 
   check('CONTROL: an edit that changed nothing produces no diff', () => {
-    const unchanged = records.find((record) => record.id === 'audit:3')
+    const unchanged = records.find((record) => record.id === `audit:${auditOffset + 3}`)
     assert.ok(unchanged, 'the row still says WHO saved and WHEN')
     assert.deepEqual(unchanged.changes, [], 'but it must not invent a field table out of the details blob')
   })
@@ -244,6 +248,7 @@ async function main() {
     assert.ok(!/FROM sale_record_events/.test(routeBody), 'the records route must hold no SQL of its own')
   })
 
+  assert.equal(auditRows().length, 5)
   console.log('\nOK ' + passed + ' checks')
 }
 

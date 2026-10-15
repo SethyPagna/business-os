@@ -1,13 +1,20 @@
-// Which returns move a customer's points. ONE predicate, applied by every reader of the returns term of the balance
-// (routes/contacts.ts customer membership balance, routes/notifications.ts loyalty notification, and the raw balance the
-// checkout redemption and the customer reassignment guard use in lib/saleCustomerAssignmentGuard.ts), so the till, the
-// customer card and checkout can never disagree. All three read the unaliased `returns` table; the sale subquery is
-// correlated to it by name.
-//
-//   * a supplier return is not a customer's;
-//   * a return of a sale that EARNED nothing takes nothing back. `sales.loyalty_accrual = 0` marks a sale that earns no
-//     points: migrated old-system history (the owner's standing rule 13 Oct 2026: historical sales never accrue loyalty;
-//     salesImportCommit.ts writes 0 unless the importer opts in) and a POS opt-out. Its points redeemed still count as
-//     spent on the sale side; only the refund of an unearned sale is ignored. A return that names no sale keeps
-//     deducting, and the flag is read at the time of the question, so opting a sale in restores its refund's effect.
-export const customerPointsReturnSql = "(COALESCE(return_scope,'customer') <> 'supplier' AND NOT EXISTS (SELECT 1 FROM sales points_sale WHERE points_sale.id = returns.sale_id AND COALESCE(points_sale.loyalty_accrual,1) = 0))"
+export const LOYALTY_POINTS_RESET_KEY = 'loyalty_points_reset'
+
+type LoyaltyLedger = 'sales' | 'returns' | 'submissions' | 'adjustments'
+
+export function loyaltyAfterResetSql(ledger: LoyaltyLedger, idSql = 'id'): string {
+  const reset = `(SELECT value FROM system_flags WHERE key = '${LOYALTY_POINTS_RESET_KEY}')`
+  return `${idSql} > COALESCE(json_extract(${reset}, '$.${ledger}'), 0)`
+}
+
+export const loyaltySaleAccrualSql = `CASE WHEN EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',sales.id,hex(sales.client_request_id)) AND value = 'skipped') THEN 0 ELSE COALESCE(loyalty_accrual,1) END`
+
+export const loyaltySaleSinceSql = loyaltyAfterResetSql('sales')
+export const loyaltySubmissionSinceSql = `(${loyaltyAfterResetSql('submissions')} AND loyalty_eligible = 1)`
+export const loyaltyAdjustmentSinceSql = loyaltyAfterResetSql('adjustments')
+
+// Refunding a sale whose earnings were cleared must not deduct newly earned points.
+export const customerPointsReturnSql = `(COALESCE(return_scope,'customer') <> 'supplier'
+  AND ${loyaltyAfterResetSql('returns', 'returns.id')}
+  AND NOT EXISTS (SELECT 1 FROM sales points_sale WHERE points_sale.id = returns.sale_id
+    AND (COALESCE(points_sale.loyalty_accrual,1) = 0 OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',points_sale.id,hex(points_sale.client_request_id)) AND value = 'skipped') OR NOT (${loyaltyAfterResetSql('sales', 'points_sale.id')}))))`

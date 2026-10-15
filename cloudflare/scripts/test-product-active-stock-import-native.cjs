@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -39,6 +40,7 @@ function fixture() {
   }
   db.staging = db
   raw.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(991,'Probe','shop','shop',1,1)").run()
+  raw.auditRows = captureAuditBaseline(raw)
   return { raw, db }
 }
 function product(raw, id, quantity = 0) {
@@ -91,16 +93,16 @@ async function main() {
     raw.exec("CREATE TRIGGER fail_removal_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='product' BEGIN SELECT RAISE(ABORT,'audit_fault'); END")
     await assert.rejects(()=>engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),/audit_fault/)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=90').get().is_active,1)
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    assert.equal(raw.auditRows().length,0)
     raw.exec('DROP TRIGGER fail_removal_audit')
     assert.equal(await engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),1)
-    const audit=raw.prepare('SELECT * FROM audit_logs').get()
+    const [audit]=raw.auditRows()
     assert.equal(audit.user_id,91)
     assert.equal(audit.user_name,'Operator')
     assert.equal(JSON.parse(audit.details).importJobId,'audit-fault')
     assert.equal(JSON.parse(audit.details).membership,'removed')
     assert.equal(await engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),0)
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,1)
+    assert.equal(raw.auditRows().length,1)
   }
   console.log('PASS replace-all removal and actor/job provenance atomic; audit fault retry has one event')
   {
@@ -109,13 +111,13 @@ async function main() {
     raw.exec("CREATE TRIGGER fail_bulk_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='product' BEGIN SELECT RAISE(ABORT,'audit_fault'); END")
     await assert.rejects(bulk.runBulkDeleteJob({DB:db},'audit-fault'), /audit_fault/)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=91').get().is_active,1)
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    assert.equal(raw.auditRows().length,0)
     const beforeRetry = raw.prepare("SELECT processed_count,failed_count FROM bulk_delete_jobs WHERE id='audit-fault'").get()
     assert.equal(beforeRetry.processed_count,0)
     assert.equal(beforeRetry.failed_count,0)
     raw.exec('DROP TRIGGER fail_bulk_audit')
     await bulk.runBulkDeleteJob({DB:db},'audit-fault')
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,1)
+    assert.equal(raw.auditRows().length,1)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=91').get().is_active,0)
   }
   console.log('PASS bulk audit fault rolls back cursor/audit/delete; later delivery commits one audit')
@@ -124,7 +126,7 @@ async function main() {
     materializedJob(raw,'incomplete',{...invalid},{import_mode:'replace_all'})
     await assert.rejects(()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},'incomplete'),e=>e.code==='product_replacement_incomplete')
     assert.deepEqual(raw.prepare('SELECT is_active FROM products ORDER BY id').all().map(p=>p.is_active),[1,1])
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    assert.equal(raw.auditRows().length,0)
     const job=raw.prepare("SELECT phase,chunk_cursor,summary_json FROM import_jobs WHERE id='incomplete'").get()
     assert.equal(job.phase,'replace_all_refused')
     assert.equal(job.chunk_cursor,1)
@@ -170,7 +172,7 @@ async function main() {
     product(raw,62)
     await assert.rejects(()=>engine.finalizeProductReplacement(db,'2026-10-08'),e=>e.code==='product_has_stock')
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=62').get().is_active,1)
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    assert.equal(raw.auditRows().length,0)
     console.log(`PASS status refusal and entire replacement guard preserve ${ledger}-alone holdings and empty sibling`)
   }
   {
@@ -207,7 +209,7 @@ async function main() {
     }
     await assert.rejects(bulk.runBulkDeleteJob({ DB: db }, 'race'), /product_has_stock/)
     assert.equal(raw.prepare("SELECT processed_count FROM bulk_delete_jobs WHERE id='race'").get().processed_count,0)
-    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n,0)
+    assert.equal(raw.auditRows().length,0)
     await bulk.runBulkDeleteJob({ DB: db }, 'race')
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=72').get().is_active, 1)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=71').get().is_active, 0)

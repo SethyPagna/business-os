@@ -8,13 +8,14 @@ const { Miniflare } = require('miniflare')
 
 async function main() {
   let source = fs.readFileSync(path.join(__dirname, 'test-sale-bulk-update-pure.cjs'), 'utf8')
-    .replace("const actual = new Set(['saleStatusResolution',", "const actual = new Set(['saleCustomerAssignmentGuard',")
+    .replace("const actual = new Set([", "const actual = new Set(['loyaltyEligibility',")
     .replace(/run\(\)\.catch[\s\S]*$/, '')
   const { sales, history, fixture, setUser, load } = new Function('require', '__dirname', source + '\nreturn {sales,history,fixture,load,setUser:value=>{user=value}};')(withProductStockGuard(require), __dirname)
   const contacts = load('routes/contacts.ts').default
   const createSource=fs.readFileSync(path.join(__dirname,'test-sale-create-atomic-pure.cjs'),'utf8').split(';(async () => {')[0]
   const createHarness=new Function('require','__dirname',createSource+';return {postSale,request};')(withProductStockGuard(require),__dirname)
   const f = fixture()
+  f.sql.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'employee','Employee','test')")
   const required = new Set(['sales','returns','sale_items','return_items','customers','users','roles','branches','settings','promotion_rules','inventory_movements','sale_write_revisions','sale_bulk_guards','sale_bulk_operations','sale_bulk_members','sale_record_events','undo_snapshots','action_history','audit_logs','system_flags','customer_receivables','loyalty_point_adjustments','customer_share_submissions'])
   required.add('return_write_revisions')
@@ -33,6 +34,16 @@ async function main() {
     }
     await db.batch([db.prepare('PRAGMA defer_foreign_keys=ON'),...inserts])
     await db.batch(objects.filter(o=>o.type==='index'||(o.type==='trigger'&&['sales','returns','sale_items','return_items','sale_record_events','undo_snapshots','sale_bulk_operations','sale_bulk_members'].includes(o.tbl_name))).map(o=>db.prepare(o.sql)))
+    const birthGuardSql=f.sql.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='loyalty_sale_birth_immutable'").get().sql
+    // Synthetic accounting cases need distinct birth states; every request keeps the full guard.
+    const fixtureSql=async sql=>{
+      if(!/loyalty_accrual\s*=\s*1\b/.test(sql))return db.prepare(sql).run()
+      await db.prepare('DROP TRIGGER loyalty_sale_birth_immutable').run()
+      try{return await db.prepare(sql).run()}finally{
+        await db.prepare(birthGuardSql).run()
+        assert.ok(await db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='loyalty_sale_birth_immutable'").first())
+      }
+    }
     let barrier=null
     const env={DB:{prepare:sql=>db.prepare(sql),batch:async statements=>{if(barrier){const run=barrier;barrier=null;await run()}return db.batch(statements)}}}
     const context={waitUntil(){},passThroughOnException(){}}
@@ -70,7 +81,7 @@ async function main() {
       // must block a reassignment is the refund of an ACCRUING sale; the refund of a sale that earned nothing is checked below.
       ['return50',["UPDATE sales SET loyalty_accrual=1 WHERE id=1","UPDATE returns SET total_refund_usd=50 WHERE id=1"],["UPDATE returns SET total_refund_usd=0 WHERE id=1","UPDATE sales SET loyalty_accrual=0 WHERE id=1"]],
     ]) {
-      for(const statement of [].concat(setup)) await db.prepare(statement).run()
+      for(const statement of [].concat(setup)) await fixtureSql(statement)
       if(label.startsWith('earned')) await db.prepare('UPDATE sales SET membership_points_redeemed=? WHERE id=2').bind(Number(label.slice(6))).run()
       before=await readAll()
       r=await call(sales,'/bulk-update',await request({kind:'customer',source_id:1,target_id:3},'blocked-'+label))
@@ -93,7 +104,7 @@ async function main() {
     const compat=load('lib/db.ts').getDb({DB:db})
     const helper=load('lib/saleCustomerAssignmentGuard.ts')
     // The racing refund must be one that takes points back, i.e. a refund of an accruing sale.
-    await db.prepare('UPDATE sales SET loyalty_accrual=1 WHERE id=1').run()
+    await fixtureSql('UPDATE sales SET loyalty_accrual=1 WHERE id=1')
     const independentPlan=await helper.prepareCustomerAssignments(compat,[{id:1,sourceId:1,targetId:3}])
     const race=await request({kind:'customer',source_id:1,target_id:3},'return-race-request')
     barrier=async()=>db.prepare('UPDATE returns SET total_refund_usd=100 WHERE id=1').run()
@@ -121,7 +132,7 @@ async function main() {
     console.log('PASS actual Contacts relink/resolve-missing cannot bypass restricted assignment or loyalty containment')
     // Ordinary accrued sales are transferable when the source has not spent
     // their points. Net return deductions move with the same sale.
-    await db.prepare('UPDATE sales SET loyalty_accrual=1,total_usd=100 WHERE id=1').run()
+    await fixtureSql('UPDATE sales SET loyalty_accrual=1,total_usd=100 WHERE id=1')
     await db.prepare('UPDATE returns SET total_refund_usd=40 WHERE id=1').run()
     let safe=await call(sales,'/bulk-update',await request({kind:'customer',source_id:1,target_id:3},'safe-earned-return'))
     assert.equal(safe.status,200,JSON.stringify(safe));assert.equal((await row()).customer_id,3)
@@ -139,7 +150,7 @@ async function main() {
     assert.equal(r.status,409,JSON.stringify(r));assert.equal(await readAll(),before)
     await db.prepare('UPDATE returns SET customer_id=1 WHERE id=1').run()
     console.log('PASS ordinary accrued sale plus return and independently funded redemption transfer/undo safely; third-party return attribution is rejected')
-    await db.prepare('UPDATE sales SET loyalty_accrual=1,total_usd=50 WHERE id IN (1,2)').run()
+    await fixtureSql('UPDATE sales SET loyalty_accrual=1,total_usd=50 WHERE id IN (1,2)')
     await db.prepare("INSERT INTO sales(receipt_number,customer_id,sale_status,loyalty_accrual,membership_points_redeemed) VALUES('ALREADY-SPENT',1,'completed',0,40)").run()
     const group=await request({kind:'customer',source_id:1,target_id:3},'group-source-budget')
     group.items.push({id:2,expected_updated_at:(await db.prepare('SELECT updated_at FROM sales WHERE id=2').first()).updated_at})
@@ -148,7 +159,7 @@ async function main() {
     await db.prepare("DELETE FROM sales WHERE receipt_number='ALREADY-SPENT'").run()
     await db.prepare('UPDATE sales SET loyalty_accrual=0,total_usd=0 WHERE id IN (1,2)').run()
     console.log('PASS grouped transfer cannot individually pass two sales against one insufficient source balance')
-    await db.prepare('UPDATE sales SET customer_id=NULL,customer_name=NULL,customer_phone=NULL,loyalty_accrual=1,total_usd=50 WHERE id=1').run()
+    await fixtureSql('UPDATE sales SET customer_id=NULL,customer_name=NULL,customer_phone=NULL,loyalty_accrual=1,total_usd=50 WHERE id=1')
     await db.prepare('UPDATE returns SET customer_id=NULL,customer_name=NULL,total_refund_usd=10 WHERE id=1').run()
     const general=await call(sales,'/bulk-update',await request({kind:'customer',source_id:null,target_id:3},'general-financial-transfer'))
     assert.equal(general.status,200,JSON.stringify(general));assert.equal((await row()).customer_id,3)
@@ -185,7 +196,7 @@ async function main() {
     // the Settings screen can flip back, so it still has to be proved safe.
     // What follows is the captured-rate guard, not the on/off decision.
     await db.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true'),('customer_portal_points_basis','khr'),('customer_portal_points_per_khr','0.01') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
-    await db.prepare('UPDATE sales SET customer_id=1,loyalty_accrual=1,total_usd=99,total_khr=10000 WHERE id=2').run()
+    await fixtureSql('UPDATE sales SET customer_id=1,loyalty_accrual=1,total_usd=99,total_khr=10000 WHERE id=2')
     assert.equal(await helper.readCustomerPointsRaw(compat,1),100)
     const redemption=await helper.preparePointsRedemption(compat,1,100)
     await db.prepare("UPDATE settings SET value='0.02' WHERE key='customer_portal_points_per_khr'").run()

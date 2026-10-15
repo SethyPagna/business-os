@@ -1,11 +1,13 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real Hono handlers, permission policy, receipt/stock/lot helpers and SQLite.
 // Only session acquisition, duplicate-product resolution and notifications are mocked.
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
+let auditRows
 let sqlite, beforeBatch = null, waits = [], mergeTarget = null, failStatement = null
 let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ branches: true, inventory: true }) }
 const modules = new Map()
@@ -72,6 +74,7 @@ function fresh(count = 3, from = 1, beforeMigration = null) {
     sqlite.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at) VALUES(?,?,?,?,'2026-09-01')").run(id, id, `lot-${id}`, `lot-${id}`)
     sqlite.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,10)').run(id, from)
   }
+  auditRows = captureAuditBaseline(sqlite)
   beforeBatch = null; waits = []; mergeTarget = null; failStatement = null
   user = { id: 7, name: 'Operator', permissions: JSON.stringify({ branches: true, inventory: true }) }
 }
@@ -87,7 +90,7 @@ function intent(from, count, key = 'transfer_test_001', bulk = true) {
   return bulk ? { ...common, items: Array.from({ length: count }, (_, index) => ({ productId: index + 1, quantity: 2.5 })) } : { ...common, productId: 1, quantity: 2.5 }
 }
 function counts() {
-  return Object.fromEntries(['transfer_operation_receipts', 'audit_logs', 'stock_transfers', 'inventory_movements'].map((table) => [table, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n]))
+  return Object.fromEntries(['transfer_operation_receipts', 'audit_logs', 'stock_transfers', 'inventory_movements'].map((table) => [table, table === 'audit_logs' ? auditRows().length : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n]))
 }
 let checks = 0
 async function check(name, fn) { await fn(); checks++; console.log(`PASS ${name}`) }

@@ -29,6 +29,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const subject = compile('stockActionCommit.ts', {
+  './loyaltyEligibility': compile('loyaltyEligibility.ts'),
   './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
@@ -57,7 +58,8 @@ function setup() {
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
-    CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
+    CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);
+    CREATE TABLE sales (loyalty_accrual INTEGER DEFAULT 1,id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
       cashier_name TEXT, branch_id INTEGER, branch_name TEXT, payment_method TEXT, payment_currency TEXT,
       subtotal_usd REAL, total_usd REAL, amount_paid_usd REAL, sale_status TEXT, notes TEXT,
       items TEXT, creation_snapshot_json TEXT, created_at TEXT, updated_at TEXT);
@@ -284,6 +286,16 @@ const base = {
   assert.strictEqual(replayResult.alreadyApplied, false)
   assert.strictEqual(replayed.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 1, 'a re-sent committed batch is a no-op')
   assert.strictEqual(replayed.sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id = 10 AND branch_id = 1`).get().quantity, 4)
+
+  for(const value of [undefined,'garbage','false','true']){
+    const world=setup()
+    if(value!==undefined)world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?)").run(value)
+    await subject.applyUnifiedStockSale(world.db,base)
+    assert.equal(world.sqlite.prepare('SELECT loyalty_accrual FROM sales').get().loyalty_accrual,value==='true'?1:0,'stock sale snapshots authoritative switch '+value)
+    world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'").run()
+    await subject.applyUnifiedStockSale(world.db,base)
+    assert.equal(world.sqlite.prepare('SELECT loyalty_accrual FROM sales').get().loyalty_accrual,value==='true'?1:0,'stock sale retry cannot promote OFF-born activity')
+  }
 
   console.log('PASS grouped stock sales are Shop-guarded, bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
 })().catch((error) => {

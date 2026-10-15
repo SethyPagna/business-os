@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -63,10 +64,10 @@ function world(old = false) {
     if (control.afterBatch) control.afterBatch(db)
     return results
   } } }
-  return { db, env, control }
+  return { db, env, control, auditRows: captureAuditBaseline(db) }
 }
 const branch = w => w.db.prepare('SELECT * FROM branches WHERE id=1').get()
-const audits = w => w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n
+const audits = w => w.auditRows().length
 async function request(w, body, tier = true, selectedHandler = handler) {
   return selectedHandler({ env: w.env, get: () => ({ id: 7, username: 'fixture', permissions: JSON.stringify({ branches: tier }) }),
     req: { param: () => '1', json: async () => body }, json: (value, status = 200) => ({ value: JSON.parse(JSON.stringify(value)), status }), executionCtx: { waitUntil: promise => promise.catch(() => {}) } })

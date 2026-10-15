@@ -1,3 +1,4 @@
+import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { getPlanLimits } from '../lib/planTier'
@@ -2143,7 +2144,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         @receipt_number,@replacementClientRequestId,@cashier_id,@cashier_name,@branch_id,@branch_name,
         @customer_id,@customer_name,@customer_phone,@customer_address,@payment_method,@payment_details,
         'USD',@exchange_rate,@subtotal_usd,@subtotal_khr,0,0,0,0,@total_usd,@total_khr,@amount_paid_usd,
-        @amount_paid_khr,0,0,0,0,0,0,1,'completed',@notes,@items,@search_normalized,
+        @amount_paid_khr,0,0,0,0,0,0,${loyaltyAccrualSql()},'completed',@notes,@items,@search_normalized,
         ${returnIdExpression},@creation_snapshot_json,@occurredAt
       )`,
       params: {

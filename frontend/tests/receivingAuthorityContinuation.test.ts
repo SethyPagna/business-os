@@ -416,13 +416,25 @@ const exits = (saving: boolean, receivingIdentity: unknown) => {
     onClose: () => reached.push('closed'), notify: (message: string) => reached.push(`notice:${message.slice(0, 7)}`),
     tr: (_key: string, fallback: string) => fallback, isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity,
   })()
-  let onKey: ((event: unknown) => void) | undefined
-  extract(`const listen = ${effectCallback(modal, 'onEscape')}`, 'listen', {
-    saving, selectedGroup: null, reasonsOpen: false, closeGuard: { ...closeGuard, requestClose: () => reached.push('escape') },
-    parentPanelRef: { current: null }, Element: class {}, window: { addEventListener: (_type: string, handler: any) => { onKey = handler }, removeEventListener() {} },
+  const tree = ts.createSourceFile('modal.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const calls: ts.CallExpression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useDialogKeyboard') calls.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  assert.equal(calls.length, 1, 'one actual dialog keyboard registration owns this session')
+  const keyboards: Array<{ enabled: boolean; onEscape: () => void }> = []
+  const parentPanelRef = { current: null }
+  extract(`const listen = () => { ${calls[0].getText(tree)} }`, 'listen', {
+    saving, selectedGroup: null, reasonsOpen: false, closeGuard, parentPanelRef,
+    requestCloseIfIdle: extract(modal, 'requestCloseIfIdle', { saving, closeGuard: { requestClose: () => reached.push('escape') } }),
+    useDialogKeyboard: (ref: unknown, options: { enabled: boolean; onEscape: () => void }) => { assert.equal(ref, parentPanelRef); keyboards.push(options) },
   })()
-  assert(onKey)
-  onKey({ key: 'Escape', defaultPrevented: false, target: null, preventDefault() {} })
+  const keyboard = keyboards[0]
+  assert(keyboard)
+  assert.equal(keyboard.enabled, true)
+  keyboard.onEscape()
   return reached
 }
 

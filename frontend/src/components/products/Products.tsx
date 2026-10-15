@@ -1,3 +1,4 @@
+import type { MergeCostReview } from '../../api/productWriteTransport.ts'
 import ProductNameRail from '../shared/ProductNameRail'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -364,7 +365,7 @@ type ProductApiResponse = Record<string, unknown> & {
   success?: boolean
 }
 
-type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal; manifest?: LeadingZeroMergeManifest }
+type MergeDuplicateRequestOptions = { costReview?: MergeCostReview; requestId?: string; signal?: AbortSignal; manifest?: LeadingZeroMergeManifest }
 
 type MergeDuplicateProductsResult = ProductApiResponse & {
   complete?: boolean
@@ -1767,6 +1768,7 @@ function ProductsFullEditor() {
   const [mergeDuplicatesScope, setMergeDuplicatesScope] = useState<'leading_zero' | null>(null)
   const [mergeDuplicatesRecovery, setMergeDuplicatesRecovery] = useState<MergeDuplicatesRecoveryNotice | null>(null)
   const mergeDuplicatesAbortRef = useRef<AbortController | null>(null)
+  const mergeCostReviewRef = useRef<MergeCostReview | null>(null)
   const leadingZeroManifestRef = useRef<ValidatedLeadingZeroMergeManifest | null>(null)
   const leadingZeroConfirmedGroupsRef = useRef<Map<number, string> | null>(null)
   const leadingZeroWriteInFlightRef = useRef(false)
@@ -2996,6 +2998,7 @@ function ProductsFullEditor() {
     if (mergeDuplicatesBusy) return
     leadingZeroRequestGenerationRef.current += 1
     leadingZeroPreviewGenerationRef.current += 1
+    mergeCostReviewRef.current = null
     leadingZeroManifestRef.current = null
     leadingZeroConfirmedGroupsRef.current = null
     setMergeDuplicatesRecovery(null)
@@ -3020,6 +3023,7 @@ function ProductsFullEditor() {
     if (!isActorReadScopeCurrent(actorScope, false) || previewGeneration !== leadingZeroPreviewGenerationRef.current) {
       throw Object.assign(new Error('Preview belongs to an earlier account or request.'), { name: 'AbortError', code: 'stale_read_scope' })
     }
+    mergeCostReviewRef.current = preview.costReview ?? null
     if (mergeDuplicatesScope === 'leading_zero') {
       leadingZeroManifestRef.current = preview.applyManifest || null
       if (!leadingZeroConfirmedGroupsRef.current) {
@@ -3034,6 +3038,8 @@ function ProductsFullEditor() {
   const handleLeadingZeroMerge = async () => {
     if (mergeDuplicatesBusy || leadingZeroWriteInFlightRef.current || mergeDuplicatesScope !== 'leading_zero') return
     const initialAllowed = leadingZeroConfirmedGroupsRef.current
+    const costReview = mergeCostReviewRef.current
+    if (canViewCosts && !costReview) return
     let manifest = leadingZeroManifestRef.current
     if (!initialAllowed || !manifest?.groups.length) return
     const controller = new AbortController()
@@ -3059,7 +3065,7 @@ function ProductsFullEditor() {
         if (calls > initialAllowed.size || !manifestWasConfirmed(manifest)) {
           throw new Error(t('merge_leading_zero_scope_changed') || 'The leading-zero candidate set changed. Review it again before continuing.')
         }
-        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, manifest }) as MergeDuplicateProductsResult | undefined
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, manifest, ...(costReview ? { costReview } : {}) }) as MergeDuplicateProductsResult | undefined
         if (!requestIsCurrent()) return
         if (result?.success === false) throw new Error(result.error || 'Failed to merge leading-zero barcode duplicates')
         mergedGroups += Math.max(0, Number(result?.mergedGroups || 0))
@@ -3113,6 +3119,8 @@ function ProductsFullEditor() {
 
   const handleMergeDuplicates = async () => {
     if (mergeDuplicatesBusy) return
+    const costReview = mergeCostReviewRef.current
+    if (canViewCosts && !costReview) return
     const controller = new AbortController()
     mergeDuplicatesAbortRef.current = controller
     const requestId = `product-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
@@ -3133,7 +3141,7 @@ function ProductsFullEditor() {
         // have committed complete atomic cases. Every started POST therefore
         // takes the authoritative reload path on an unknown outcome.
         calls += 1
-        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal }) as MergeDuplicateProductsResult | undefined
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, ...(costReview ? { costReview } : {}) }) as MergeDuplicateProductsResult | undefined
         if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
         mergedGroups += Number(result?.mergedGroups || 0)
         mergedProducts += Number(result?.mergedProducts || 0)

@@ -752,7 +752,27 @@ async function runMergeFingerprintReadBatch(
 
 type MergeFingerprintRead = { key: string; sql: string; params?: unknown[] }
 
-function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata = false): MergeFingerprintRead[] {
+function mergeFingerprintReadGuard(read: MergeFingerprintRead, rows: Array<Record<string, unknown>>): AtomicMergeStatement {
+  const columns = Object.keys(rows[0] || {})
+  if (columns.some((column) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column))) {
+    throw new UndoConflictError('Invalid merge fingerprint column.')
+  }
+  let index = 0
+  const query = read.sql.replace(/\?/g, () => `@fingerprintValue${index++}`)
+  if (index !== (read.params || []).length) throw new UndoConflictError('Invalid merge fingerprint bindings.')
+  const equality = !columns.length ? '' : joinBalanced(columns.map((column) => `live."${column}" IS json_extract(saved.value,'$.${column}')`), 'AND')
+  return {
+    sql: `WITH live AS MATERIALIZED (${query})
+      SELECT CASE WHEN (SELECT COUNT(*) FROM live)=json_array_length(@fingerprintRows)
+        ${columns.length ? `AND NOT EXISTS(SELECT 1 FROM json_each(@fingerprintRows) saved
+          WHERE NOT EXISTS(SELECT 1 FROM live WHERE ${equality}))` : ''}
+        THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_guard`,
+    params: { fingerprintRows: JSON.stringify(rows),
+      ...Object.fromEntries((read.params || []).map((value, i) => [`fingerprintValue${i}`, value])) },
+  }
+}
+
+function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata = false, currentCostEntries = false): MergeFingerprintRead[] {
   const productIds = [...new Set(reversals.flatMap(r => [Number(r.keeperId),Number(r.dupId)]).filter(id => Number.isInteger(id) && id>0))].sort((a,b)=>a-b)
   const fullBatchMetadata = reversals.some(reversal => reversal.fullBatchMetadataFingerprint)
   const reads: MergeFingerprintRead[] = []
@@ -775,6 +795,8 @@ function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata 
         params: ids,
       },
     )
+    if (currentCostEntries) reads.push({ key: `currentCostEntries:${index}`,
+      sql: `SELECT id,product_id,cost_usd,baseline_batch_id FROM product_cost_entries WHERE product_id IN (${placeholders})`, params: ids })
     // Old fingerprints intentionally project only lot identity/activation.
     // Preserve that serialized contract, but lock the entire current lot row
     // (received date, cost, supplier, etc.) against races during group undo.
@@ -833,7 +855,7 @@ function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata 
 }
 
 export async function mergeStateFingerprint(
-  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[],
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[], options: { currentCostEntries?: boolean } = {},
 ): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
@@ -850,7 +872,8 @@ export async function mergeStateFingerprint(
   const childProducts: Array<Record<string, unknown>> = []
   const saleAllocations: Array<Record<string, unknown>> = []
   const returnAllocations: Array<Record<string, unknown>> = []
-  const reads = mergeFingerprintReads(reversals, Boolean(transactionGuards))
+  const currentCostEntries: Array<Record<string, unknown>> = []
+  const reads = mergeFingerprintReads(reversals, Boolean(transactionGuards), options.currentCostEntries)
   const resultSets = await runMergeFingerprintReadBatch(db, reads)
   if (transactionGuards) {
     // Re-run the exact fingerprint projections inside the write transaction.
@@ -859,27 +882,12 @@ export async function mergeStateFingerprint(
     // saved fingerprint's products, lots, links, allocations or promotions.
     for (const read of reads) {
       const rows = resultSets.get(read.key)!
-      const columns = Object.keys(rows[0] || {})
-      if (columns.some((column) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column))) {
-        throw new UndoConflictError('Invalid merge fingerprint column.')
-      }
-      let index = 0
-      const query = read.sql.replace(/\?/g, () => `@fingerprintValue${index++}`)
-      if (index !== (read.params || []).length) throw new UndoConflictError('Invalid merge fingerprint bindings.')
-      const equality = !columns.length ? '' : joinBalanced(columns.map((column) => `live."${column}" IS json_extract(saved.value,'$.${column}')`), 'AND')
-      transactionGuards.push({
-        sql: `WITH live AS MATERIALIZED (${query})
-          SELECT CASE WHEN (SELECT COUNT(*) FROM live)=json_array_length(@fingerprintRows)
-            ${columns.length ? `AND NOT EXISTS(SELECT 1 FROM json_each(@fingerprintRows) saved
-              WHERE NOT EXISTS(SELECT 1 FROM live WHERE ${equality}))` : ''}
-            THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_guard`,
-        params: { fingerprintRows: JSON.stringify(rows),
-          ...Object.fromEntries((read.params || []).map((value, i) => [`fingerprintValue${i}`, value])) },
-      })
+      transactionGuards.push(mergeFingerprintReadGuard(read, rows))
     }
   }
   for (const [key, rows] of resultSets) {
     if (key.startsWith('products:')) products.push(...rows)
+    else if (key.startsWith('currentCostEntries:')) currentCostEntries.push(...rows)
     else if (key.startsWith('branchStock:')) branchStock.push(...rows)
     else if (key.startsWith('batches:')) batches.push(...rows)
     else if (key.startsWith('movementHeads:')) movementHeads.push(...rows)
@@ -922,7 +930,38 @@ export async function mergeStateFingerprint(
   saleAllocations.sort(byNumbers(['id']))
   returnAllocations.sort(byNumbers(['id']))
   for (const rows of Object.values(linkedRows)) rows.sort(byNumbers(['id']))
-  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
+  currentCostEntries.sort(byNumbers(['id']))
+  return JSON.stringify({ ...(options.currentCostEntries ? { costDependencyVersion: 1, currentCostEntries } : {}), products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
+}
+
+type MergeReviewGraph = Record<string, unknown>
+const mergeReviewRows = (graph: MergeReviewGraph, key: string): Array<Record<string, unknown>> =>
+  Array.isArray(graph[key]) ? graph[key] as Array<Record<string, unknown>> : []
+
+export function mergeReviewGroupGraph(graph: MergeReviewGraph, ids: number[]): MergeReviewGraph {
+  const members = new Set(ids)
+  const batches = mergeReviewRows(graph, 'batches').filter(row => members.has(Number(row.variant_product_id)))
+  const batchIds = new Set(batches.map(row => Number(row.id)))
+  return { ...graph,
+    products: mergeReviewRows(graph, 'products').filter(row => members.has(Number(row.id))),
+    batches, batchStock: mergeReviewRows(graph, 'batchStock').filter(row => batchIds.has(Number(row.batch_id))),
+    ...Object.fromEntries(['branchStock','movementHeads','productImages','stockSessions','currentCostEntries']
+      .map(key => [key, mergeReviewRows(graph, key).filter(row => members.has(Number(row.product_id)))])),
+  }
+}
+
+export function mergeReviewGroupGuards(graph: MergeReviewGraph, ids: number[]): AtomicMergeStatement[] {
+  const scoped = mergeReviewGroupGraph(graph, ids)
+  const reads = mergeFingerprintReads(ids.map(id => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), true, true)
+  return reads.map(read => mergeFingerprintReadGuard(read, mergeReviewRows(scoped,
+    read.key.startsWith('batchStockByProduct:') ? 'batchStock' : read.key.split(':')[0])))
+}
+
+export async function readMergeReviewGroups(db: ReturnType<typeof getDb>, groups: number[][]) {
+  const ids = [...new Set(groups.flat())].sort((a,b)=>a-b)
+  const serialized = await mergeStateFingerprint(db, ids.map(id => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), undefined, { currentCostEntries: true })
+  const graph = JSON.parse(serialized) as MergeReviewGraph
+  return groups.map(members => ({ graph: mergeReviewGroupGraph(graph, members) }))
 }
 
 async function assertMergeStateUnchanged(
@@ -3133,6 +3172,17 @@ function mergeReplayGraphPredicate(reversal: MergeReversal, state: MergeCostRepl
     AND ${mergeReplayGallerySql()} IS @galleryState AND ${graph.sql} IS @graphState`,
   params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision,
     duplicateRevision: state.duplicate_revision, galleryState: state.gallery_state, graphState: state.graph_state, ...graph.params } }
+}
+
+export async function mergeCostContinuationGuard(db: ReturnType<typeof getDb>, reversal: MergeReversal, snapshotId: number, payload: string): Promise<AtomicMergeStatement> {
+  const state = reversal.costReviewState
+  if (!state || !mergeReplayStateValid(state, state.generation)) throw new UndoConflictError('The previous merge has no current cost dependency receipt.')
+  const { graph } = await prepareAtomicMergeGraphReceipt(db, reversal)
+  const predicate = mergeReplayGraphPredicate(reversal, state, graph)
+  const condition = `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`
+  const params = { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload }
+  if (!await db.prepare(`SELECT 1 AS valid WHERE ${condition}`).get(params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+  return { sql: `SELECT CASE WHEN ${condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params }
 }
 
 async function finalizeMergeCostGraph(

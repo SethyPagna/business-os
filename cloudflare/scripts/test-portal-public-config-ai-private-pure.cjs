@@ -38,6 +38,7 @@ const fakeDb = {
 }
 
 const portal = load('routes/portal.ts', {
+  '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
   '../lib/db': { getDb: () => fakeDb },
   '../lib/cache': {
     getVersionWithFallback: async () => 'v1',

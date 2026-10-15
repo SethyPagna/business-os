@@ -59,6 +59,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './loyaltyEligibility' || request === '../lib/loyaltyEligibility') return loadReal('lib/loyaltyEligibility.ts')
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

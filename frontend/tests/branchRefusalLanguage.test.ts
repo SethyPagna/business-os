@@ -53,6 +53,20 @@ const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sal
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 // A step-up refusal of a destructive system route (cloudflare/src/lib/destructiveStepUp.ts), restated like the branch rules.
 CODES.push('repair_integrity_restore_permission_required')
+CODES.push('loyalty_points_disabled')
+
+await runTest('loyalty refusal is localized without promising retroactive points or changing its status', async () => {
+  uiLanguage = 'km'; packServed = KM
+  const error = refusal('loyalty_points_disabled', 'Loyalty points are disabled.')
+  await lang.restateBranchRefusal(error)
+  assert.equal(error.message, KM.loyalty_points_disabled)
+  assert.equal(error.status, 400)
+  assert.equal(error.code, 'loyalty_points_disabled')
+  assert.equal(localizeBranchRuleError(error, key => KM[key]), KM.loyalty_points_disabled)
+  assert.equal(branchRuleMessageKey(EN.loyalty_points_disabled), 'loyalty_points_disabled')
+  assert.match(EN.loyalty_points_disabled, /before the reset or while loyalty was off cannot earn points/)
+  assert.match(KM.loyalty_points_disabled, /មុនការកំណត់ពិន្ទុឡើងវិញ.*មិនអាចទទួលពិន្ទុបានទេ/)
+})
 
 await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable code in Khmer', async () => {
   uiLanguage = 'km'; packServed = KM

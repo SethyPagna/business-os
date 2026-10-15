@@ -1,3 +1,4 @@
+import type { MergeCostAuthority, MergeCostReview } from '../../api/productWriteTransport.ts'
 import { useEffect, useRef, useState } from 'react'
 import GitMerge from 'lucide-react/dist/esm/icons/git-merge.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
@@ -7,7 +8,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
-import { costMoveRows } from './mergeConfirmationRule'
+import { formatMergeCost, mergeCostReviewMatches } from '../../utils/mergeCostPreview.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
@@ -17,6 +18,8 @@ import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorR
 type Translate = (key: string, fallback?: string) => string | undefined
 
 export type MergeDuplicatesPreviewGroup = {
+  costAuthority?: MergeCostAuthority
+
   caseKeys?: string[]
   canonicalId: number
   canonicalName: string | null
@@ -45,6 +48,7 @@ export type MergeDuplicatesPreviewGroup = {
 }
 
 type PreviewResult = {
+  costReview?: MergeCostReview
   groupCount: number
   duplicateProductCount: number
   mergeableDuplicateProductCount?: number
@@ -61,27 +65,7 @@ export type MergeDuplicatesRecoveryNotice = {
   detail: string
 }
 
-const COST_FIELD_LABEL: Record<string, [string, string]> = {
-  cost_price_usd: ['cost', 'Cost'],
-  cost_price_khr: ['cost_price_khr', 'Cost (KHR)'],
-}
-
 const DETAIL_PAGE_SIZE = 25
-
-function formatCost(field: string, value: number): string {
-  const amount = Number(value) || 0
-  return field.endsWith('_khr')
-    ? `${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\u17db`
-    : `$${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
-}
-
-/** The cost fields this group’s fold actually moves, as before -> after. */
-function costMoves(group: MergeDuplicatesPreviewGroup): Array<{ field: string; from: number | null; to: number }> {
-  // The SAME function the pair dialog uses (mergeConfirmationRule), so the
-  // whole-catalog dry run and the one-pair confirm cannot describe one fold
-  // two different ways.
-  return costMoveRows(group.costBefore, group.costAfter)
-}
 
 interface MergeDuplicatesReviewModalProps {
   t?: Translate
@@ -186,7 +170,8 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
   const blockedGroupCount = preview?.blockedGroupCount || 0
   const costRefusalCount = preview?.costRefusalCount || 0
-  const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
+  const costReady = !canViewCosts || Boolean(preview && mergeCostReviewMatches(preview.costReview, preview.groups) && preview.groups.every(group => group.mergeable === false || group.costAuthority))
+  const canMerge = costReady && !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   useEffect(() => {
     setDetailPage((current) => Math.min(Math.max(current, 1), detailPageCount))
@@ -241,8 +226,8 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           </h3>
           <p>
             {T(
-              'merge_duplicates_what_counts_body',
-              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost is reconciled, not used as identity: one mean is taken from the whole group\u2019s distinct valid non-zero costs. The highest retail and wholesale prices are kept.',
+              'merge_duplicates_authority_body',
+              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost follows the received-cost calculation shown for each group; an empty cost needs review. The highest retail and wholesale prices are kept.',
             )}
           </p>
         </section>
@@ -396,19 +381,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         </li>
                       ))}
                     </ul>
-                    {(canViewCosts ? costMoves(group) : []).map((move) => (
-                      <div key={move.field} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {T(COST_FIELD_LABEL[move.field]?.[0] || move.field, COST_FIELD_LABEL[move.field]?.[1] || move.field)}
-                        </span>
-                        <span className="line-through opacity-60">{move.from === null ? T('cost_unknown', 'Unknown cost') : formatCost(move.field, move.from)}</span>
-                        <span aria-hidden>{'\u2192'}</span>
-                        <span className="font-medium text-gray-900 dark:text-gray-100">{formatCost(move.field, move.to)}</span>
-                        <span className="text-gray-400">
-                          {T('merge_cost_average_title', 'One mean of the group\u2019s distinct non-zero costs')}
-                        </span>
-                      </div>
-                    ))}
+                    {canViewCosts ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs" role="status"><span>{T('cost', 'Cost')}</span>{group.costAuthority ? <><strong>{formatMergeCost(group.costAuthority.cost_price_usd, 'usd')}</strong><span>{formatMergeCost(group.costAuthority.cost_price_khr, 'khr')}</span>{group.costAuthority.needsReview ? <span>{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}</> : <span>{T('merge_cost_preview_unavailable', 'Cost preview unavailable')}</span>}</div> : null}
                     {(group.costRefusals || []).length > 0 && (
                       <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
                         {T('merge_duplicates_preview_cost_refused_group', '{count} invalid numeric value(s) block this whole group until corrected.')

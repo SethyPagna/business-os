@@ -43,6 +43,7 @@ const db = openDb(loadAll())
 const queries = []
 const portalText = load('lib/portalText.ts')
 const loadPortal = (portalTextModule) => load('routes/portal.ts', {
+  '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
   '../lib/db': {
     getDb: () => ({
       prepare: (sql) => {

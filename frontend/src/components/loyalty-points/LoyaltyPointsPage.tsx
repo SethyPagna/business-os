@@ -121,8 +121,8 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueKhr: 'Value per redemption unit (KHR)',
     showPointValue: 'Show point value on the website',
     membershipPointsEnabled: 'Membership points',
-    membershipPointsEnabledHint: 'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
-    membershipPointsOff: 'Default earning is off',
+    membershipPointsEnabledHint: 'Enable earning for new eligible activity and point redemption. POS can turn earning off for an order, but cannot turn it on while this switch is off. Existing points are kept.',
+    membershipPointsOff: 'Loyalty points are off',
     infoText: 'Customer-facing membership note',
     infoTextHint: 'This note appears in the website membership panel under the point summary and redemption rules.',
     submissionRewardPoints: 'Default reward points per approved share',
@@ -145,11 +145,11 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redemptionUnits: 'Redeemable units',
     wholeUnitsOnly: 'Customers can view balances with decimals, but staff redeem points only in whole units.',
     behaviorTitle: 'How points move',
-    behavior1: 'Completed sales earn points based on the active earning basis.',
-    behavior2: 'Partial and full returns deduct points from the refunded value.',
-    behavior3: 'Not Paid sales and cancelled sales do not earn points until they are completed.',
-    behavior4: 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.',
-    attachHint: 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.',
+    behavior1: 'Eligible completed sales earn points based on the active earning basis.',
+    behavior2: 'Returns reverse points only for sales that earned them.',
+    behavior3: 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points. First paying an unpaid sale while loyalty is off permanently skips earning, even if it was on when the sale was created.',
+    behavior4: 'Attaching a customer later adds points only for an eligible sale.',
+    attachHint: 'Use Sales > sale details > attach customer to link an eligible anonymous sale to a member.',
     pointsPreview: 'Current policy preview',
     unitLabel: '1 redemption unit',
     reviewQueue: 'Review queue',
@@ -183,8 +183,8 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueKhr: 'តម្លៃក្នុងមួយឯកតាប្តូរ (KHR)',
     showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅលើគេហទំព័រ',
     membershipPointsEnabled: 'ពិន្ទុសមាជិក',
-    membershipPointsEnabledHint: 'កំណត់លំនាំដើមនៃការគិតពិន្ទុសម្រាប់ការលក់ថ្មី។ អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។ ពិន្ទុចាស់ត្រូវបានរក្សាទុក។',
-    membershipPointsOff: 'ការគិតពិន្ទុតាមលំនាំដើមត្រូវបានបិទ',
+    membershipPointsEnabledHint: 'បើកការទទួលពិន្ទុសម្រាប់សកម្មភាពថ្មីដែលមានសិទ្ធិ និងការប្តូរពិន្ទុ។ នៅ POS អាចបិទការគិតពិន្ទុសម្រាប់ការលក់នីមួយៗ ប៉ុន្តែមិនអាចបើកបានទេ ពេលកុងតាក់នេះបិទ។ ពិន្ទុដែលមានស្រាប់ត្រូវបានរក្សាទុក។',
+    membershipPointsOff: 'ពិន្ទុសមាជិកត្រូវបានបិទ',
     infoText: 'សារពន្យល់សម្រាប់អតិថិជន',
     submissionRewardPoints: 'ពិន្ទុលំនាំដើមសម្រាប់ការអនុម័តការចែករំលែក',
     validationUsd: 'តម្លៃប្តូរជា USD ត្រូវប្រើជាចំនួនគត់ប៉ុណ្ណោះ។',
@@ -206,11 +206,11 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redemptionUnits: 'ឯកតាអាចប្តូរ',
     wholeUnitsOnly: 'អតិថិជនអាចមើលសមតុល្យមានខ្ទង់ទសភាគបាន ប៉ុន្តែបុគ្គលិកអាចប្តូរបានតែជាឯកតាគត់។',
     behaviorTitle: 'របៀបផ្លាស់ប្តូរពិន្ទុ',
-    behavior1: 'ការលក់ដែលបានបញ្ចប់ទើបគិតពិន្ទុតាមគោលការណ៍ដែលបានជ្រើស។',
-    behavior2: 'Partial return និង full return កាត់ពិន្ទុតាមតម្លៃ Refund។',
-    behavior3: 'ការលក់ជាប្រាក់ជំពាក់ និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុ រហូតដល់បញ្ចប់។',
-    behavior4: 'បុគ្គលិកអាចភ្ជាប់អតិថិជនបន្ថែមនៅ Sales ប្រសិនបើការលក់ចាស់ត្រូវបន្ថែមពិន្ទុពេលក្រោយ។',
-    attachHint: 'ប្រើ Sales > sale details > attach customer នៅពេលត្រូវភ្ជាប់សមាជិកទៅការលក់អនាមិកចាស់។',
+    behavior1: 'ការលក់ដែលបានបញ្ចប់ និងមានសិទ្ធិ ទទួលបានពិន្ទុតាមគោលការណ៍ដែលបានជ្រើស។',
+    behavior2: 'ការបង្វិលទំនិញកាត់ពិន្ទុតែពីការលក់ដែលបានទទួលពិន្ទុប៉ុណ្ណោះ។',
+    behavior3: 'ការលក់ជាប្រាក់ជំពាក់ និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុទេ។ ការបញ្ចប់ការលក់ដែលបង្កើតមុនការកំណត់ពិន្ទុឡើងវិញ ឬពេលពិន្ទុសមាជិកបិទ មិនបន្ថែមពិន្ទុទេ។ ការបង់ប្រាក់លើកដំបូងសម្រាប់ការលក់ជាប្រាក់ជំពាក់ ពេលពិន្ទុសមាជិកបិទ នឹងមិនទទួលបានពិន្ទុជាអចិន្ត្រៃយ៍ ទោះបីបានបើកពេលបង្កើតការលក់ក៏ដោយ។',
+    behavior4: 'ការភ្ជាប់អតិថិជនពេលក្រោយ បន្ថែមពិន្ទុតែសម្រាប់ការលក់ដែលមានសិទ្ធិប៉ុណ្ណោះ។',
+    attachHint: 'ប្រើ Sales > sale details > attach customer ដើម្បីភ្ជាប់ការលក់អនាមិកដែលមានសិទ្ធិទៅសមាជិក។',
     pointsPreview: 'ការមើលជាមុននៃច្បាប់បច្ចុប្បន្ន',
     unitLabel: '1 ឯកតាប្តូរ',
     reviewQueue: 'ការត្រួតពិនិត្យការចែករំលែក',
@@ -331,7 +331,7 @@ export default function LoyaltyPointsPage() {
     customer_portal_show_point_value: true,
     customer_portal_membership_info_text: '',
     customer_portal_submission_reward_points: '5',
-    loyalty_points_enabled: true,
+    loyalty_points_enabled: false,
   })
   const [saving, setSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
@@ -381,11 +381,8 @@ export default function LoyaltyPointsPage() {
       customer_portal_show_point_value: String(settings.customer_portal_show_point_value ?? 'true') === 'true',
       customer_portal_membership_info_text: String(settings.customer_portal_membership_info_text || ''),
       customer_portal_submission_reward_points: String(settings.customer_portal_submission_reward_points || '5'),
-      // Absent reads as ON, so a shop that has never touched this switch is
-      // unchanged. Only the four explicit off-spellings turn it off, matching
-      // the Worker's own read of the same key.
-      loyalty_points_enabled: !['0', 'false', 'no', 'off'].includes(
-        String(settings.loyalty_points_enabled ?? 'true').trim().toLowerCase(),
+      loyalty_points_enabled: ['1', 'true', 'yes', 'on'].includes(
+        String(settings.loyalty_points_enabled ?? 'false').trim().toLowerCase(),
       ),
     })
   }, [settings])
@@ -635,9 +632,6 @@ export default function LoyaltyPointsPage() {
                 </button>
               </div>
 
-              {/* Default for each new order. POS may override earning for that
-                  draft only; redemption retains its existing settings gate.
-                  Existing balances and sale history are never rewritten. */}
               <label htmlFor="loyalty-points-enabled" className="mt-4 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700">
                 <div className="pr-3">
                   <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -646,7 +640,7 @@ export default function LoyaltyPointsPage() {
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     {copy(
                       'membershipPointsEnabledHint',
-                      'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
+                      'Enable earning for new eligible activity and point redemption. POS can turn earning off for an order, but cannot turn it on while this switch is off. Existing points are kept.',
                     )}
                   </div>
                 </div>
@@ -662,7 +656,7 @@ export default function LoyaltyPointsPage() {
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
                 {!form.loyalty_points_enabled ? (
                   <span className="rounded-full border border-gray-300 bg-gray-100 px-3 py-1 text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                    {copy('membershipPointsOff', 'Default earning is off')}
+                    {copy('membershipPointsOff', 'Loyalty points are off')}
                   </span>
                 ) : null}
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-300">
@@ -820,12 +814,12 @@ export default function LoyaltyPointsPage() {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('behaviorTitle', 'How points move')}</h2>
                   <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                    <li>{copy('behavior1', 'Completed sales earn points based on the active earning basis.')}</li>
-                    <li>{copy('behavior2', 'Partial and full returns deduct points from the refunded value.')}</li>
-                    <li>{copy('behavior3', 'Not Paid sales and cancelled sales do not earn points until they are completed.')}</li>
-                    <li>{copy('behavior4', 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.')}</li>
+                    <li>{copy('behavior1', 'Eligible completed sales earn points based on the active earning basis.')}</li>
+                    <li>{copy('behavior2', 'Returns reverse points only for sales that earned them.')}</li>
+                    <li>{copy('behavior3', 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points. First paying an unpaid sale while loyalty is off permanently skips earning, even if it was on when the sale was created.')}</li>
+                    <li>{copy('behavior4', 'Attaching a customer later adds points only for an eligible sale.')}</li>
                   </ul>
-                  <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{copy('attachHint', 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.')}</p>
+                  <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{copy('attachHint', 'Use Sales > sale details > attach customer to link an eligible anonymous sale to a member.')}</p>
                 </div>
               </div>
             </section>

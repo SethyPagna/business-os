@@ -73,7 +73,10 @@ app.route('/api', contacts)
 
 function fresh(seed) {
   const native = openDb(loadAll())
-  native.db.exec(seed)
+  native.db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+  try { native.db.exec(seed) } finally {
+    native.db.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
+  }
   Object.assign(state, { batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN })
   state.db = {
     prepare: (sql) => native.prepare(sql),

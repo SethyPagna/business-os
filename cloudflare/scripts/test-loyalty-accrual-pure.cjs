@@ -12,9 +12,12 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8').replace(/\r\n/g, '\n')
 
-// ---- 1. Schema: column exists, defaults to 1 ----
+// Legacy schema defaults are fenced by commit-time programme state.
 const sqlite = new Database(':memory:')
 for (const migration of loadAll()) sqlite.exec(migration)
+sqlite.prepare("INSERT INTO sales(receipt_number,sale_status) VALUES('OFF-CONTROL','completed')").run()
+assert.equal(sqlite.prepare("SELECT loyalty_accrual FROM sales WHERE receipt_number='OFF-CONTROL'").get().loyalty_accrual,0,'old-writer default is OFF')
+sqlite.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
 sqlite.prepare(`INSERT INTO customers (id, name) VALUES (7, 'Dara')`).run()
 const insertSale = sqlite.prepare(`
   INSERT INTO sales (receipt_number, customer_id, total_usd, total_khr, membership_points_redeemed, sale_status, loyalty_accrual)
@@ -24,7 +27,7 @@ insertSale.run({ r: 'R-1', usd: 10, khr: 41000, redeemed: 0, accrual: 1 })
 insertSale.run({ r: 'R-2', usd: 90, khr: 369000, redeemed: 5, accrual: 0 }) // historical
 sqlite.prepare(`INSERT INTO sales (receipt_number, customer_id, total_usd, total_khr, sale_status) VALUES ('R-3', 7, 2, 8200, 'completed')`).run()
 const defaulted = sqlite.prepare(`SELECT loyalty_accrual FROM sales WHERE receipt_number = 'R-3'`).get()
-assert.equal(defaulted.loyalty_accrual, 1, 'omitting the column must default to accruing (old writers unaffected)')
+assert.equal(defaulted.loyalty_accrual, 1, 'omitting the column accrues only while ON')
 
 // ---- 2. The shared redemption/assignment SQL, extracted from production ----
 const salesRoute = read(path.join('routes', 'sales.ts'))
@@ -35,7 +38,7 @@ assert.ok(rawStart >= 0 && rawEnd > rawStart, 'shared production raw balance fun
 const rawOutput = ts.transpileModule(pointsSource.slice(rawStart, rawEnd), {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
 const scopeOutput = ts.transpileModule(read(path.join('lib', 'customerPointsReturn.ts')), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
 const scopeExports = {}; new Function('exports', scopeOutput)(scopeExports)
-const rawPointsSql = new Function('customerPointsReturnSql',rawOutput+';return rawPointsSql;')(scopeExports.customerPointsReturnSql)
+const rawPointsSql = new Function(...Object.keys(scopeExports),rawOutput+';return rawPointsSql;')(...Object.values(scopeExports))
 const rawBalance = (basis='usd', usd=1, khr=0) => sqlite.prepare(`WITH cfg AS (SELECT ? AS basis,? AS usd,? AS khr) SELECT ${rawPointsSql('7')} AS raw FROM cfg`).get(basis,usd,khr).raw
 assert.equal(rawBalance(), 7, 'raw USD is earned12 minus redeemed5, excluding historical90 accrual')
 assert.equal(rawBalance('khr',0,1), 49195, 'raw KHR is earned49200 minus redeemed5, excluding historical369000 accrual')
@@ -45,7 +48,7 @@ assert.match(salesRoute, /redemptionGuard \? \[redemptionGuard\] : \[\][\s\S]{0,
 
 // ---- 3. Notification reads preserve per-row accrual/redemption inputs ----
 const notifications = read(path.join('routes', 'notifications.ts'))
-assert.match(notifications, /columns: 'sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual'/,
+assert.match(notifications, /columns: `sale_status,total_usd,total_khr,membership_points_redeemed,\$\{loyaltySaleAccrualSql\} AS loyalty_accrual`/,
   'notification pages carry every per-sale points input; actual route parity is tested separately')
 assert.doesNotMatch(notifications.slice(notifications.indexOf('async function buildLoyaltySection'), notifications.indexOf('function importPermissionForType')), /SUM\(/,
   'SQL aggregate arithmetic cannot replace the shared sequential points contract')
@@ -93,9 +96,9 @@ assert.equal(getSalesImportAccrueLoyalty(JSON.stringify({ accrue_loyalty: false 
 assert.equal(getSalesImportAccrueLoyalty(null), false, 'absent policy defaults to no accrual')
 assert.equal(getSalesImportAccrueLoyalty('{bad json'), false, 'malformed policy defaults to no accrual')
 assert.match(engine, /accrueLoyalty,\n\s*\}\)/, 'apply loop threads accrueLoyalty into the sale writer')
-assert.match(salesRoute, /loyalty_accrual: \(typeof body\.loyalty_accrual === 'boolean' \? body\.loyalty_accrual : loyaltyPointsEnabled\) \? 1 : 0/, 'POS route: explicit boolean wins, otherwise use the current setting default')
+assert.match(salesRoute, /loyalty_accrual: body\.loyalty_accrual === false \? 0 : 1/, 'POS preserves opt-out before authoritative SQL switch')
 const contacts = read(path.join('routes', 'contacts.ts'))
-assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')
+assert.match(contacts, /\$\{loyaltySaleAccrualSql\} AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')
 const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8').replace(/\r\n/g, '\n')
 const posPayload = pos.match(/loyalty_accrual: ([^,\n]+),/)
 assert.ok(posPayload, 'POS checkout sends an explicit accrual decision')
@@ -119,49 +122,36 @@ assert.match(pointsSource, /SUM\(points\) FROM loyalty_point_adjustments/, 'shar
 const portalRoute = read(path.join('routes', 'portal.ts'))
 assert.match(portalRoute, /\+ rewarded \+ manuallyAwarded\)/, 'summarizePoints keeps the same term (display/checkout parity)')
 
-// ---- 6. The shop-wide membership-points switch (settings key
-// `loyalty_points_enabled`). User, Sep 4 2026: "make the membership points on
-// off in settings". Sep 5 clarification: the setting is the default for new
-// sales; an explicit per-sale boolean overrides it. Existing rows are never
-// rewritten. Redemption still has its separate shop-wide gate below.
-assert.match(
-  salesRoute,
-  /SELECT value FROM settings WHERE key = 'loyalty_points_enabled'/,
-  'the sale writer reads the switch from settings rather than trusting the request',
-)
-
-// Take the REAL two lines out of the route and run them, so this proves the
-// shipped expression rather than a restatement of it.
-const switchReadMatch = salesRoute.match(/const loyaltyPointsEnabled = !\[[^\]]*\]\.includes\(String\(loyaltyEnabledRow\?\.value \?\? ''\)[^\n]*\)/)
-assert.ok(switchReadMatch, 'routes/sales.ts still resolves loyaltyPointsEnabled from the settings row')
-const writerMatch = salesRoute.match(/loyalty_accrual: (\(typeof body\.loyalty_accrual[^\n]+\? 1 : 0),/)
-assert.ok(writerMatch, 'routes/sales.ts still writes loyalty_accrual through a single expression')
-
-const resolveAccrual = new Function('settingValue', 'bodyFlag', [
-  'const loyaltyEnabledRow = settingValue === undefined ? undefined : { value: settingValue }',
-  switchReadMatch[0],
-  'const body = { loyalty_accrual: bodyFlag }',
-  'return ' + writerMatch[1],
-].join('\n'))
-
-// Default OFF can be deliberately overridden ON on this sale.
-assert.equal(resolveAccrual('false', true), 1, 'explicit true overrides default off')
-for (const off of ['0', 'false', 'no', 'off', 'OFF', ' False ']) {
-  assert.equal(resolveAccrual(off, true), 1, `explicit true overrides "${off}"`)
-  assert.equal(resolveAccrual(off, false), 0, `explicit false preserves "${off}"`)
-  assert.equal(resolveAccrual(off, undefined), 0, `"${off}" must read as off with no body flag`)
+const eligibilityOutput = ts.transpileModule(read('lib/loyaltyEligibility.ts'), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
+const eligibility = {}; new Function('exports', eligibilityOutput)(eligibility)
+assert.match(salesRoute, /isLoyaltyEnabled\(loyaltyEnabledRow\?\.value\)/, 'redemption defaults OFF')
+assert.match(salesRoute, /loyaltyAccrualSql\('@loyalty_accrual'\)/, 'sale INSERT snapshots switch atomically')
+const writerMatch = salesRoute.match(/loyalty_accrual: ([^,\n]+),/)
+assert.ok(writerMatch)
+const requested = new Function('body', 'return '+writerMatch[1])
+const resolveAccrual = (value,flag) => {
+  sqlite.prepare("DELETE FROM settings WHERE key='loyalty_points_enabled'").run()
+  if(value!==undefined)sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?)").run(String(value))
+  return sqlite.prepare('SELECT '+eligibility.loyaltyAccrualSql('?')+' AS eligible').get(requested({loyalty_accrual:flag})).eligible
 }
-// On, and absent, both accrue -- a shop that has never touched the switch is
-// unchanged, which is the whole reason the default is on.
-for (const on of [undefined, '', 'true', '1', 'yes', 'anything']) {
-  assert.equal(resolveAccrual(on, true), 1, `"${on}" must read as on`)
-  assert.equal(resolveAccrual(on, undefined), 1, `"${on}" must accrue by default`)
+for(const off of [undefined,'','garbage','0','false','no','off','OFF',' False ']){
+  assert.equal(resolveAccrual(off,true),0,'explicit true cannot override OFF '+off)
+  assert.equal(resolveAccrual(off,false),0)
+  assert.equal(resolveAccrual(off,undefined),0)
+  assert.equal(eligibility.loyaltyPointsEnabled(off),false)
 }
-// The per-sale opt-out still works while the programme is on.
-assert.equal(resolveAccrual('true', false), 0, 'an explicit per-sale opt-out still opts out')
-for (const invalid of [null, '', 'false', 'true', 0, 1, {}, []]) {
-  assert.equal(resolveAccrual('true', invalid), 1, 'non-boolean body uses default on')
-  assert.equal(resolveAccrual('false', invalid), 0, 'non-boolean body uses default off')
+for(const on of ['true','1','yes','on',' TRUE ']){
+  assert.equal(resolveAccrual(on,true),1)
+  assert.equal(resolveAccrual(on,undefined),1)
+  assert.equal(resolveAccrual(on,false),0,'explicit opt-out remains OFF')
+  assert.equal(eligibility.loyaltyPointsEnabled(on),true)
+}
+for(const invalid of [null,'','false','true',0,1,{},[]]){
+  assert.equal(resolveAccrual('true',invalid),1,'only explicit false opts out')
+  assert.equal(resolveAccrual('false',invalid),0,'invalid per-sale input cannot bypass OFF')
+}
+for(const file of ['routes/sales.ts','routes/returns.ts','lib/salesImportCommit.ts','lib/stockActionCommit.ts']){
+  assert.match(read(file),/loyaltyAccrualSql\(/,file+' must stamp birth eligibility')
 }
 
 // Off must also stop a redemption being TAKEN. Dropping it silently would
@@ -252,6 +242,7 @@ assert.match(notifications, /kind: 'adjustments', table: 'loyalty_point_adjustme
 {
   const db = new Database(':memory:')
   for (const migration of loadAll()) db.exec(migration)
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   db.prepare(`INSERT INTO customers (id, name) VALUES (8, 'Sokha')`).run()
   const add = db.prepare(`INSERT INTO sales (receipt_number, customer_id, total_usd, total_khr, membership_points_redeemed, sale_status)
     VALUES (@r, 8, @usd, @khr, @redeemed, @status)`)

@@ -66,7 +66,7 @@ async function outerProof(staleAuth) {
       const offset=(tier==='free'?50:1000)-33+extra
       const boundedKernel=loadStockSession()
       const perform=()=>boundedKernel.commitStockSession(bound.env,user,receiveRequest('boundary-'+tier+'-'+extra),null,{statementsUsed:()=>offset,reserveStatements:0})
-      if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(bound.batches(),0);assert.equal(bound.sql.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)}
+      if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(bound.batches(),0);assert.equal(bound.auditRows().length,0)}
       else {await perform();assert.equal(bound.count(),33)}
     }
   }

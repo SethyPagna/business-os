@@ -32,7 +32,7 @@ const migrationsDir = path.join(__dirname, '..', 'migrations')
 // apply path actually calls into -- the writers, resolver, catalog bridge,
 // and their pure helpers -- plus the same real deps importEngine needs just
 // to finish loading (mirrors test-import-engine-pure.cjs's real set).
-const REAL = new Set([
+const REAL = new Set(['loyaltyEligibility',
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
   // P10-4: applyUnifiedStockAdd calls recomputeCatalogCost after every add
@@ -151,7 +151,8 @@ function makeDb() {
       notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL, received_branch_id INTEGER, received_branch_name TEXT, received_cost_usd REAL, created_at TEXT, updated_at TEXT);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
-    CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
+    CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);
+    CREATE TABLE sales (loyalty_accrual INTEGER DEFAULT 1,id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
       cashier_name TEXT, branch_id INTEGER, branch_name TEXT, payment_method TEXT, payment_currency TEXT,
       subtotal_usd REAL, total_usd REAL, amount_paid_usd REAL, sale_status TEXT, notes TEXT, items TEXT,
       creation_snapshot_json TEXT, created_at TEXT, updated_at TEXT);

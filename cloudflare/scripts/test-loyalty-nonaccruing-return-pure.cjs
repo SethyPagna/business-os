@@ -21,6 +21,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8').replace(/\r\n/g, '\n')
 const sqlite = new Database(':memory:')
 for (const migration of loadAll()) sqlite.exec(migration)
+sqlite.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
 sqlite.prepare(`INSERT INTO customers (id, name) VALUES (7, 'Dara')`).run()
 const sale = sqlite.prepare(`INSERT INTO sales (id, receipt_number, customer_id, total_usd, total_khr, membership_points_redeemed, sale_status, loyalty_accrual)
   VALUES (@id, @r, 7, @usd, @khr, @redeemed, 'completed', @accrual)`)
@@ -54,7 +55,7 @@ assert.deepEqual(counted, [2, 3, 4, 6],
 const guardSource = read(path.join('lib', 'saleCustomerAssignmentGuard.ts'))
 const transpiled = (from, to) => ts.transpileModule(guardSource.slice(guardSource.indexOf(from), guardSource.indexOf(to, guardSource.indexOf(from))).replace(/^export function/, 'function'),
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-const rawPointsSql = new Function('customerPointsReturnSql', transpiled('function rawPointsSql(', '\nfunction configCte(') + ';return rawPointsSql;')(scope.customerPointsReturnSql)
+const rawPointsSql = new Function(...Object.keys(scope), transpiled('function rawPointsSql(', '\nfunction configCte(') + ';return rawPointsSql;')(...Object.values(scope))
 const rawBalance = (basis = 'usd', usd = 1.5, khr = 0) => sqlite.prepare(`WITH cfg AS (SELECT ? AS basis,? AS usd,? AS khr) SELECT ${rawPointsSql('7')} AS raw FROM cfg`).get(basis, usd, khr).raw
 // earned: 10 + 1 = 11 USD of accruing sales x 1.5 = 16.5; redeemed 4 (on the non-accruing sale 13: still spent);
 // returns that count and are not cancelled: RET-EARNED 2 USD + RET-NO-SALE 1 + RET-NULL-SCOPE 1 = 4 USD x 1.5 = 6.

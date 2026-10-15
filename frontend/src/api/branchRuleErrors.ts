@@ -17,6 +17,7 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['Points were not added. Loyalty must be on, and the activity must be eligible. Activity from before the reset or while loyalty was off cannot earn points.', 'loyalty_points_disabled'],
   ["This stock change is too large for the current plan. Use fewer products or received dates, then try again.", 'stock_session_query_budget_exceeded'],
   ["This return is too large for the current plan. Return fewer items or received dates, then try again.", 'customer_return_over_plan_budget'],
   ["This stock action is too large for the current plan. Use fewer items or received dates, then try again.", 'stock_import_unit_over_tier_budget'],
@@ -75,6 +76,7 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
+  loyalty_points_disabled: 'loyalty_points_disabled',
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
   bulk_price_request_not_saved: 'bulk_price_request_not_saved',
   stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',

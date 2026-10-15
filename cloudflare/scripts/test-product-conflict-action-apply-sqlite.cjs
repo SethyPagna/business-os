@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
@@ -47,6 +48,7 @@ async function apply(app, review, digest, actor = user) {
 
 async function prepareThreeMemberReview(parentChain = false) {
   const { d1, groups } = seed(1)
+  const auditRows = captureAuditBaseline(d1.db)
   d1.db.prepare(`INSERT INTO products
     (id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,
      selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,updated_at)
@@ -91,7 +93,7 @@ async function prepareThreeMemberReview(parentChain = false) {
     { source: 99002, target: 99002, collision: 'reparent', supplier: 'Supplier B', received: '2026-09-02' },
     { source: 99003, target: 99002, collision: 'fold', supplier: 'Supplier C', received: '2026-09-03' },
   ])
-  return { d1, groups, ...loaded, review: review.body, finalized: finalized.body }
+  return { d1, groups, ...loaded, review: review.body, finalized: finalized.body, auditRows }
 }
 
 function catalogState(d1) {
@@ -421,7 +423,7 @@ async function main() {
       assert.equal(stale.body.code, 'merge_state_conflict', label)
       assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10001').get().is_active, 1, label)
       assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0, label)
-      assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0, label)
+      assert.equal(fixture.auditRows().length, 0, label)
     }
   }
 

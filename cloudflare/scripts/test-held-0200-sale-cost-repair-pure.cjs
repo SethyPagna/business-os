@@ -36,6 +36,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -675,10 +676,63 @@ function completeState(raw) {
   return { schema, tables }
 }
 
-function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revisionTriggers = []) {
+const LOYALTY_RESET_FILE = '0251_loyalty_points_watermark.sql'
+const executableHash = text => createHash('sha256').update(sqlCode(text).replace(/('(?:[^']|'')*')|\s+/g, (match, literal) => literal ?? ' ').trim()).digest('hex')
+const loyaltyResetIndependent = (text, repairText, context) => {
+  if (!(context?.indirectWrites instanceof Set)) return false
+  if (executableHash(text) !== '827b1deb7f38e3d4863e92689ee75692a158c8474ca67873c302d3139cf0cbb7'
+    || executableHash(repairText) !== 'edc19472b89441a9561781bb0471693b9f14003f8aaaead9bc9a42fa7861789d') return false
+  const resetInputs = ['sales', 'returns', 'customer_share_submissions', 'loyalty_point_adjustments', 'settings', 'system_flags', 'audit_logs']
+  return resetInputs.every(table => !context.indirectWrites.has(table))
+    && !/\b(?:loyalty\w*|settings|system_flags)\b/i.test(sqlCode(repairText))
+}
+
+function assertLoyaltyResetStatic(text, repairText, context) {
+  assert.ok(loyaltyResetIndependent(text, repairText, context), 'reviewed reset and repair are independent')
+  assert.ok(loyaltyResetIndependent(`-- harmless header\n${text}`, repairText, context))
+  assert.equal(loyaltyResetIndependent(text, repairText), false, 'trigger context is required')
+  for (const wrong of [
+    `${text}\nUPDATE sale_items SET cost_price_usd = 123;`,
+    text.replace("SELECT 'reset_data', 'system'", "SELECT 'batch_update', 'product_batch'"),
+    text.replace("'sales', (SELECT COALESCE(MAX(id), 0) FROM sales)", "'sales', (SELECT COALESCE(MAX(id), 0) FROM sale_items)"),
+    text.replace('AFTER UPDATE OF sale_status ON sales', 'AFTER UPDATE ON sale_items'),
+  ]) {
+    assert.notEqual(wrong, text)
+    assert.equal(loyaltyResetIndependent(wrong, repairText, context), false, 'changed reset SQL requires a new ordering proof')
+  }
+  for (const table of ['sales', 'returns', 'customer_share_submissions', 'loyalty_point_adjustments', 'settings', 'system_flags', 'audit_logs']) {
+    assert.equal(loyaltyResetIndependent(text, repairText, { indirectWrites: new Set([...context.indirectWrites, table]) }), false, `indirect repair writes to ${table} invalidate independence`)
+  }
+  const repairCode = sqlCode(repairText)
+  for (const wrong of [
+    `${repairCode}\nSELECT * FROM settings;`,
+    `${repairCode}\nDELETE FROM sales;`,
+    repairCode.replace("a.action = 'batch_update'", "a.action = 'reset_data'"),
+    repairCode.replace('2026-09-16 14:04:42', '2026-09-16\t14:04:42'),
+  ]) {
+    assert.notEqual(wrong, repairCode)
+    assert.equal(loyaltyResetIndependent(text, wrong, context), false, 'changed repair inputs or writes require re-review')
+  }
+}
+
+const fixedNow = '2026-10-03 10:00:00'
+const clockSql = openDb([]).db
+function freezeClock(raw) {
+  raw.function('current_timestamp', () => fixedNow)
+  raw.function('strftime', { varargs: true }, (...args) => clockSql.prepare(`SELECT strftime(${args.map(() => '?').join(',')}) AS value`)
+    .get(...args.map(arg => arg === 'now' ? fixedNow : arg)).value)
+}
+function fixedClockDb(sql) {
+  const raw = openDb([]).db
+  freezeClock(raw)
+  for (const statement of sql) raw.exec(statement)
+  return raw
+}
+
+function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revisionTriggers = [], loyaltyResets = []) {
   const { raw, ids } = seed()
   raw.limits.exprDepth = 100
-  raw.function('current_timestamp', () => '2026-10-03 10:00:00')
+  freezeClock(raw)
   try {
     const heldNumber = Number(heldName.slice(0, 4))
     for (const file of chain.filter(file => Number(file.slice(0, 4)) > 195 && Number(file.slice(0, 4)) < heldNumber)) raw.exec(chainText(file))
@@ -687,6 +741,10 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
     // both orders -- one the repair also repairs (s1), one outside its window.
     raw.exec(`UPDATE sales SET client_request_id = 'sales-import:J:1' WHERE id = ${ids.s1.saleId}`)
     raw.exec("INSERT INTO sales(receipt_number, client_request_id, created_at, subtotal_usd, total_usd, sale_status, branch_id) VALUES ('IMP2', 'sales-import:J:2', '2026-08-01 09:00:00', 0, 0, 'completed', 1)")
+    raw.exec("INSERT INTO customers(id,name) VALUES(901,'Loyalty ordering control'); INSERT INTO customer_share_submissions(id,customer_id,status,reward_points) VALUES(73,901,'pending',0),(89,901,'approved',7); INSERT INTO loyalty_point_adjustments(id,customer_id,points) VALUES(97,901,5); INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'")
+    const resetExpected = Object.fromEntries([['sales','sales'],['returns','returns'],['submissions','customer_share_submissions'],['adjustments','loyalty_point_adjustments']]
+      .map(([key, table]) => [key, raw.prepare(`SELECT MAX(id) AS id FROM ${table}`).get().id]))
+    assert.ok(Object.values(resetExpected).every(id => id > 0), 'all four checkpoint ledgers are populated')
     // ---- RET-B 0235 seed (end)
     const later = chain.filter(file => Number(file.slice(0, 4)) > heldNumber)
     const run = (before, override = new Map(), repeat = true) => {
@@ -703,11 +761,15 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
         }
         assert.throws(() => raw.exec('INSERT INTO branches(name) SELECT NULL WHERE 1'), /NOT NULL/, 'branch sentinel still aborts')
         raw.exec(recoverySql())
-        return { state, audit, repaired, returned, recovered: completeState(raw) }
+        const loyaltyReset = JSON.parse(raw.prepare("SELECT value FROM system_flags WHERE key='loyalty_points_reset'").get().value)
+        const loyaltyEnabled = raw.prepare("SELECT value FROM settings WHERE key='loyalty_points_enabled'").get().value
+        return { state, audit, repaired, returned, recovered: completeState(raw), loyaltyReset, loyaltyEnabled }
       } finally { raw.exec('ROLLBACK TO held_order_probe; RELEASE held_order_probe') }
     }
     const before = run(true), after = run(false)
     assert.deepEqual(before, after, 'populated full-chain orders preserve schema, all rows, audit, repair and recovery outcomes')
+    assert.deepEqual(before.loyaltyReset, { version: 1, reset_at: '2026-10-03T10:00:00.000Z', ...resetExpected })
+    assert.equal(before.loyaltyEnabled, 'false', 'both orders turn previously enabled loyalty OFF')
     // ---- RET-B 0235 (begin): the proof above really exercised 0235.
     if (later.includes('0235_imported_sales_stock_skipped.sql')) {
       const marked = before.state.tables.find((t) => t.name === 'sales').rows
@@ -732,6 +794,7 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
     }
     assertIdentityBackfillPopulated(backfills, chainText, run, ids) // cutover lane LA (0229)
     assertIdentityBackfillPopulated(revisionTriggers, chainText, run, ids) // cutover lane LD (0240): the same appended-SQL proofs
+    assertIdentityBackfillPopulated(loyaltyResets, chainText, run, ids)
   } finally { raw.close() }
 }
 
@@ -749,12 +812,15 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.ok(movedIn.indexOf(heldName) > movedIn.indexOf('0195_catalog_cost_on_hand.sql'), 'it reads the backup 0195 creates, so it must sort after 0195')
   // What it depends on: every chain file that names a table the repair names,
   // the tables read from the migrated schema itself.
-  const fresh = openDb(chain.map(chainText)).db
+  const fresh = fixedClockDb(chain.map(chainText))
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
   // ---- RET-B 0235 call (begin) ----
   const flagContext = flagOnlyContext(chain, chainText, migrationText)
+  assertLoyaltyResetStatic(chainText(LOYALTY_RESET_FILE), migrationText, flagContext)
+  const loyaltyResets = chain.filter(file => file === LOYALTY_RESET_FILE && loyaltyResetIndependent(chainText(file), migrationText, flagContext))
+  assert.deepEqual(loyaltyResets, [LOYALTY_RESET_FILE])
   const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
   // ---- RET-B 0235 call (end) ----
   const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
@@ -781,7 +847,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
   assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -852,11 +918,12 @@ check('held: outside deploy chain, after dependencies including0195; independent
   fresh.exec(migrationText)
   assert.equal(fresh.prepare('SELECT COUNT(*) n FROM sale_cost_repair_0200').get().n, 0, 'fresh database: nothing to repair')
   // ... and a fresh database's once it is moved in (file-number order).
-  const byNumber = openDb(movedIn.map((f) => (f === heldName ? migrationText : chainText(f)))).db
-  const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
-  assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
+  const byNumber = fixedClockDb(movedIn.map((f) => (f === heldName ? migrationText : chainText(f))))
+  assert.deepEqual(completeState(byNumber), completeState(fresh), `before or after ${later.join(', ') || 'no later file'}: identical full fresh state`)
+  fresh.close()
+  byNumber.close()
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
-  assertPopulatedOrders(chain, chainText, mixed, backfills, revisionTriggers)
+  assertPopulatedOrders(chain, chainText, mixed, backfills, revisionTriggers, loyaltyResets)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
@@ -906,4 +973,5 @@ check('owner-run audit: every header command is --command (never --file); the cu
   }
 })
 
+clockSql.close()
 console.log(`${checks} checks passed`)

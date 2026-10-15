@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -67,6 +68,7 @@ function world() {
   afterBatch = null
   currentDb = openDb(loadAll()).db
   currentDb.exec("INSERT INTO branches(id,name,location,notes,is_active,is_default,updated_at) VALUES(1,'Shop','Market','before',1,1,'same'),(2,'Warehouse','Depot','bulk',1,0,'same')")
+  currentDb.auditRows = captureAuditBaseline(currentDb)
   return currentDb
 }
 const writes = load('branchWrites')
@@ -347,13 +349,14 @@ async function main() {
   await check('schema installation between pre-read and direct batch refuses the old presence mask', async () => {
     currentDb = openDb(loadAll({ through: 222 })).db
     const db = currentDb
+    db.auditRows = captureAuditBaseline(db)
     db.exec("INSERT INTO branches(id,name,notes,is_active,is_default,updated_at) VALUES(1,'Shop','before',1,1,'same'),(2,'Warehouse','bulk',1,0,'same')")
     const original = db.prepare('SELECT * FROM branches WHERE id=1').get()
     beforeBatch = db => db.exec(fs.readFileSync(migrationPath, 'utf8'))
     const response = await routeHandler('put', '/:id')(context({ notes: 'must not save', expectedEditEtag: await writes.branchEditEtag(original) }))
     assert.equal(response.status, 409)
     assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'before')
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+    assert.equal(db.auditRows().length, 0)
     db.close()
   })
   for (const mode of ['direct', 'approval']) {
@@ -370,7 +373,7 @@ async function main() {
       }
       assert.deepEqual(db.prepare('SELECT * FROM branches WHERE id=1').get(), original)
       if (pending) assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), pending)
-      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+      assert.equal(db.auditRows().length, 0)
       db.close()
     })
   }
@@ -379,6 +382,7 @@ async function main() {
 async function receiptTransportTests() {
 const fs = require('node:fs')
 const path = require('node:path')
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const { DatabaseSync } = require('node:sqlite')
@@ -456,7 +460,7 @@ function nativeD1(db) {
   const env = { DB: d1, BROADCAST_HUB: { idFromName: name => name, get: () => ({ fetch: async (_url, init) => {
     control.broadcasts.push(JSON.parse(init.body)); if (control.broadcastFailure) throw new Error('fixture broadcast unavailable'); return new Response('{}')
   } }) } }
-  return { db, env, control }
+  return { db, env, control, auditRows: captureAuditBaseline(db) }
 }
 const migrations = fs.readdirSync(path.join(root, 'cloudflare/migrations')).filter(n => n.endsWith('.sql')).sort()
 function world(old = false) {
@@ -594,7 +598,7 @@ async function main() {
     const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
     assert.notEqual(response.status, 200); assert.equal(w.control.batches, 1)
     assert.deepEqual(branch(w), before.branch); assert.deepEqual(pending(w), before.pending)
-    assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0); w.db.close()
+    assert.equal(w.auditRows().length, 0); w.db.close()
   })
   await check('unreadable committed receipt reports explicit uncertainty without retrying write', async () => {
     const w = world(); const row = await queue(w)
@@ -718,7 +722,7 @@ async function main() {
       const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'mine', expectedEditEtag: token }))
       assert.equal(response.status, 503); assert.equal(response.value.code, 'branch_edit_outcome_unknown')
       assert.equal(w.control.batches, 1); assert.deepEqual(branch(w), before)
-      assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+      assert.equal(w.auditRows().length, 0)
       w.db.close()
     }
   })
@@ -728,7 +732,7 @@ async function main() {
     const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'mine', expectedEditEtag: token }))
     assert.equal(response.status, 409); assert.equal(response.value.code, 'branch_edit_conflict')
     assert.equal(w.control.batches, 1); assert.equal(branch(w).notes, 'other actor')
-    assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0); w.db.close()
+    assert.equal(w.auditRows().length, 0); w.db.close()
   })
   await check('wrong retrying batch helper turns a durable direct edit into false409 instead of uncertainty', async () => {
     const w = world(); const token = await writes.branchEditEtag(branch(w))

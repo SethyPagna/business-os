@@ -92,6 +92,7 @@ const adapter = {
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const permissions = load('lib/permissions.ts')
 const planTier = load('lib/planTier.ts')
+const requestBodyGuard = load('lib/requestBodyGuard.ts')
 const actorSnapshot = load('lib/actorSnapshot.ts')
 const sqlBinding = load('lib/sqlBinding.ts')
 const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
@@ -104,6 +105,7 @@ const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) 
 const broadcastHub = { broadcast: async () => {} }
 const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
 const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
+const costPreview = load('lib/productMergeCostPreview.ts', { './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': load('lib/productConflictActionGroups.ts') })
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
@@ -127,6 +129,9 @@ const productModule = load('routes/products.ts', {
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
   '../lib/productCostReview': costReview,
+  '../lib/productMergeCostPreview': costPreview,
+  '../lib/requestBodyGuard': requestBodyGuard,
+  '../lib/productConflictActionGroups': load('lib/productConflictActionGroups.ts'),
   '../lib/db': { getDb: () => adapter },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,

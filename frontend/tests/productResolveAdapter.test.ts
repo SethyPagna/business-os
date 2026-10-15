@@ -74,6 +74,11 @@ function fakeApi(cluster: Cluster, extra: FakeOptions = {}) {
   let merges = 0
   const byId = new Map(cluster.products.map((entry) => [entry.id, entry]))
   const api = {
+    async costPreview(plan: { keepId: number }): Promise<import('../src/utils/mergeCostPreview.ts').MergeCostQuotation> {
+      const costs = [...new Set(cluster.products.map(p => Number(p.cost_price_usd) || 0).filter(Boolean))]
+      const mean = costs.length ? costs.reduce((a,b) => a+b,0) / costs.length : null
+      return { costAuthority:{ version: 1 as const, keeperId: plan.keepId, cost_price_usd: mean, cost_price_khr: null, needsReview: false, source: 'received_lot' as const },costReview:{version:1,reviewed_digest:'b'.repeat(64)} }
+    },
     async preview(keepId: number, mergeId: number, options: { keep: true; groupIds: number[] }) {
       calls.push({ kind: 'preview', args: [keepId, mergeId, options.keep, options.groupIds] })
       const merged = byId.get(mergeId)!
@@ -92,8 +97,8 @@ function fakeApi(cluster: Cluster, extra: FakeOptions = {}) {
         ...(extra.choices ? { choicesSupported: true } : {}),
       }
     },
-    async merge(keepId: number, mergeId: number, stock: unknown, keep: unknown) {
-      calls.push({ kind: 'merge', args: [keepId, mergeId, stock, keep] })
+    async merge(keepId: number, mergeId: number, stock: unknown, keep: unknown, costReview?: unknown) {
+      calls.push({ kind: 'merge', args: [keepId, mergeId, stock, keep, costReview] })
       merges += 1
       if (extra.failMergeAt === merges) throw Object.assign(new Error('network down'), { code: 'write_outcome_unknown', outcome: 'unknown' })
       const keeper = byId.get(keepId)!
@@ -311,31 +316,27 @@ await test('N3: every conflict type reviews to a before/after confirm with no bl
 await test('N4: cost is hidden without cost view, locked without cost edit, and sent only by an editor', async () => {
   const hidden = await open(CLUSTERS.same_name, {})
   assert.equal(rowOf(hidden.adapter.rows(hidden.data, EMPTY), 'cost'), undefined)
-  assert.equal((await hidden.adapter.review(hidden.data, EMPTY, signal)).token.cost, null)
+  assert.equal((await hidden.adapter.review(hidden.data, EMPTY, signal)).token['cost' as never], undefined)
 
   const viewer = await open(CLUSTERS.same_name, { view: true })
   const locked = rowOf(viewer.adapter.rows(viewer.data, EMPTY), 'cost')
-  assert.equal(locked.locked, 'Changing the cost needs the cost edit permission.')
+  assert.equal(locked.kind, 'computed')
   assert.equal(locked.custom, undefined)
   const typedByViewer: Draft = { selection: { cost: { custom: '1' } }, columns: {} }
   assert.equal(rowOf(viewer.adapter.rows(viewer.data, typedByViewer), 'cost').final.text, '$6', 'a viewer cannot change it: the rule stays')
-  assert.equal((await viewer.adapter.review(viewer.data, typedByViewer, signal)).token.cost, null)
+  assert.equal((await viewer.adapter.review(viewer.data, typedByViewer, signal)).token['cost' as never], undefined)
 
   const editor = await open(CLUSTERS.same_name)
   const rule = rowOf(editor.adapter.rows(editor.data, EMPTY), 'cost')
   assert.equal(rule.final.text, '$6', 'the rule: average of the different costs')
-  assert.deepEqual(rule.choice, { option: 'rule' })
-  assert.equal(rule.custom.kind, 'money')
-  assert.equal(rule.custom.validate('-1'), 'Enter a cost of zero or more.')
-  assert.equal(rule.custom.validate('6.25'), null)
-  assert.equal((await editor.adapter.review(editor.data, EMPTY, signal)).token.cost, null, 'the server freezes the rule without accepting a client override')
-  const typed: Draft = { selection: { cost: { custom: '6.25' } }, columns: {} }
-  assert.equal(rowOf(editor.adapter.rows(editor.data, typed), 'cost').final.text, '$6.25')
-  const review = await editor.adapter.review(editor.data, typed, signal)
-  assert.deepEqual(review.token.cost, { cost_price_usd: 6.25 })
-  assert.deepEqual(review.changes.find((change) => change.label === 'Cost'), { label: 'Cost', before: '$5', after: '$6.25' })
-  const picked: Draft = { selection: { cost: { source: '11' } }, columns: {} }
-  assert.deepEqual((await editor.adapter.review(editor.data, picked, signal)).token.cost, { cost_price_usd: 7, cost_price_khr: 28700 })
+  assert.equal(rule.kind, 'computed')
+  assert.equal(rule.choice, undefined)
+  assert.equal(rule.custom, undefined)
+  for (const cost of [{ custom: '6.25' }, { source: '11' }, { custom: '0' }, { custom: '' }]) {
+    const draft: Draft = { selection: { cost }, columns: {} }
+    assert.equal(rowOf(editor.adapter.rows(editor.data, draft), 'cost').final.text, '$6')
+    assert.equal((await editor.adapter.review(editor.data, draft, signal)).token['cost' as never], undefined)
+  }
 })
 
 await test('stock: Carry is shown on each stocked product, Write off changes the after and is warned', async () => {
@@ -353,7 +354,7 @@ await test('stock: Carry is shown on each stocked product, Write off changes the
   ])
   const writeOff: Draft = { selection: { [productCellKey('stock', '11')]: { option: 'write_off' } }, columns: {} }
   assert.equal(rowOf(adapter.rows(data, writeOff), 'stock').final.text, '3 pcs · shop 3')
-  const review = await adapter.review(data, writeOff, signal)
+  const review = await adapter.review(await adapter.load(signal, writeOff), writeOff, signal)
   assert.equal(review.token.steps[0].stock, 'write_off')
   assert.ok(review.warnings!.includes('The stock of Rose Toner 100ml (#11) (2 pcs) will be written off.'))
 })
@@ -361,7 +362,7 @@ await test('stock: Carry is shown on each stocked product, Write off changes the
 await test('a product kept separate is not merged; only Merge in / Keep separate reads the group again', async () => {
   const { adapter, data } = await open(CLUSTERS.three)
   const separate: Draft = { selection: {}, columns: { '52': { disposition: 'separate' } } }
-  assert.deepEqual((await adapter.review(data, separate, signal)).token.steps.map((step) => step.mergeId), [51])
+  assert.deepEqual((await adapter.review(await adapter.load(signal, separate), separate, signal)).token.steps.map((step) => step.mergeId), [51])
   assert.equal(adapter.reloadWhen!(EMPTY, separate), true, 'the group cost depends on who is in')
   assert.equal(adapter.reloadWhen!(EMPTY, { selection: { record: { source: '51' } }, columns: {} }), false, 'there is no record to pick any more')
   assert.equal(adapter.reloadWhen!(EMPTY, { selection: { cost: { custom: '1' } }, columns: {} }), false)
@@ -401,11 +402,12 @@ await test('apply merges every product one step each, stops where a step fails a
   const merges = calls.filter((call) => call.kind === 'merge').map((call) => call.args)
   assert.deepEqual(merges.map((args) => args[1]), [51, 52, 52], 'the resumed apply re-sends only the step that did not answer')
   assert.deepEqual(merges[0], [50, 51, 'merge', {
-    resolve: { requestId: review.token.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 51, stock: 'merge' }, { mergeId: 52 }] },
+    resolve: { requestId: review.token.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 51, stock: 'merge' }, { mergeId: 52, stock: 'merge' }] },
     choices: review.token.choices,
-  }], 'every step carries the frozen group, its stock answers and the same choices')
+  },{version:1,reviewed_digest:'b'.repeat(64)}], 'every step carries the frozen group, its stock answers and the same choices')
   assert.deepEqual(merges[1][3], merges[2][3], 'lost responses resend exactly the same receipt identity and choices')
-  assert.equal(merges[1][2], undefined, 'a product with no stock needs no answer')
+  assert.deepEqual(merges.map(args=>args[4]),Array(3).fill({version:1,reviewed_digest:'b'.repeat(64)}),'lost responses retain server quote, never outer graph digest')
+  assert.equal(merges[1][2], 'merge', 'the no-stock default matches the authoritative ordered plan')
   assert.equal(result.done, 2)
   assert.equal(result.total, 2)
   assert.deepEqual(result.after.map((item) => item.label), ['Name', 'Barcode', 'Cost', 'Selling price', 'Stock', 'Merged products', 'Barcodes kept on the merged records'])
@@ -498,37 +500,58 @@ await test('every key the adapter reads exists in both packs', () => {
   }
 })
 
-await test('picking an unknown source preserves NULL while a recorded zero remains zero', async () => {
-  const cluster: Cluster = { type: 'name', value: 'Nullable', severity: 'same_name', products: [
-    product(80, 'Nullable', '80', 5, 10),
-    product(81, 'Nullable', '81', 0, 10, 0, { cost_price_usd: null, cost_price_khr: null }),
-    product(82, 'Nullable', '82', 0, 10),
-  ] }
-  const { adapter, data } = await open(cluster, { view: true, edit: true }, { choices: true })
-  const unknownDraft = pick({ cost: { source: '81' } })
-  assert.equal(rowOf(adapter.rows(data, unknownDraft), 'cost').final.text, en.cost_unknown)
-  assert.deepEqual((await adapter.review(data, unknownDraft, signal)).token.cost, { cost_price_usd: null, cost_price_khr: null })
-  assert.deepEqual((await adapter.review(data, pick({ cost: { source: '82' } }), signal)).token.cost, { cost_price_usd: 0, cost_price_khr: 0 })
+await test('authority NULL, zero and manual7 are read-only, independent KHR and never client cost overrides', async () => {
+  for (const [usd, khr] of [[null, null], [0, 0], [7, 5.1244]] as Array<[number | null, number | null]>) {
+    const {api,calls} = fakeApi(CLUSTERS.same_name, { choices: true })
+    api.costPreview = async plan => ({costAuthority:{version:1,keeperId:plan.keepId,cost_price_usd:usd,cost_price_khr:khr,needsReview:true,source:'manual'},costReview:{version:1,reviewed_digest:'b'.repeat(64)}})
+    const adapter = createProductResolveAdapter({ cluster:CLUSTERS.same_name,t,canViewCosts:true,canEditCosts:true,canMerge:()=>true,api })
+    const data = await adapter.load(signal, EMPTY)
+    for (const choice of [{source:'11'}, {custom:'0'}, {custom:''}]) {
+      const draft = pick({cost:choice})
+      const row = rowOf(adapter.rows(data,draft),'cost')
+      assert.equal(row.kind,'computed')
+      assert.equal(row.choice,undefined)
+      assert.ok(row.final.text.includes(usd === null ? '—' : '$'+usd))
+      assert.ok(row.final.text.includes(en.merge_cost_needs_review))
+      const {token}=await adapter.review(data,draft,signal)
+      assert.equal('cost' in token,false)
+      await adapter.apply(token,signal,()=>{})
+    }
+    for(const call of calls.filter(c=>c.kind==='merge')) assert.deepEqual(Object.keys(call.args[3] as object).filter(k=>k.startsWith('cost_price_')),[])
+    const changed=pick({'stock|11':{option:'write_off'}})
+    assert.equal(adapter.reloadWhen!(EMPTY,changed),true)
+    await assert.rejects(adapter.review(data,changed,signal),/Cost preview unavailable/)
+  }
 })
 
-await test('apply preserves selected NULL and zero and omits an absent KHR custom override', async () => {
-  const cluster: Cluster = { type: 'name', value: 'Nullable apply', severity: 'same_name', products: [
-    product(80, 'Nullable apply', '80', 5, 10),
-    product(81, 'Nullable apply', '81', 0, 10, 0, { cost_price_usd: null, cost_price_khr: null }),
-    product(82, 'Nullable apply', '82', 0, 10),
-  ] }
-  for (const [selection, expected] of [
-    [{ cost: { source: '81' } }, { cost_price_usd: null, cost_price_khr: null }],
-    [{ cost: { source: '82' } }, { cost_price_usd: 0, cost_price_khr: 0 }],
-    [{ cost: { custom: '4.1234' } }, { cost_price_usd: 4.1234 }],
-    [{}, {}],
-  ] as Array<[Draft['selection'], Record<string, unknown>]>) {
-    const { adapter, data, calls } = await open(cluster, { view: true, edit: true }, { choices: true })
-    const { token } = await adapter.review(data, pick(selection), signal)
-    await adapter.apply(token, signal, () => {})
-    const keep = calls.find(call => call.kind === 'merge')!.args[3] as Record<string, unknown>
-    assert.deepEqual(Object.fromEntries(Object.entries(keep).filter(([key]) => key.startsWith('cost_price_'))), expected)
-  }
+await test('a quoted ordered plan stays frozen through continuation and a changed stock answer requires a new quote',async()=>{
+ const {api,calls}=fakeApi(CLUSTERS.three,{choices:true,failMergeAt:2})
+ const graph='a'.repeat(64),quote='c'.repeat(64)
+ let costReads=0
+ api.costPreview=async plan=>{costReads++;return {costAuthority:{version:1,keeperId:plan.keepId,cost_price_usd:7,cost_price_khr:null,needsReview:true,source:'manual'},costReview:{version:1,reviewed_digest:quote}}}
+ const adapter=createProductResolveAdapter({cluster:CLUSTERS.three,t,canViewCosts:true,canEditCosts:true,canMerge:()=>true,api})
+ const data=await adapter.load(signal,EMPTY)
+ const {token}=await adapter.review(data,EMPTY,signal)
+ assert.deepEqual(token.costReview,{version:1,reviewed_digest:quote})
+ assert.notEqual(token.costReview?.reviewed_digest,graph)
+ data.costReview!.reviewed_digest='d'.repeat(64)
+ await assert.rejects(adapter.apply(token,signal,()=>{}))
+ await adapter.apply(token,signal,()=>{})
+ assert.equal(costReads,1,'retry never refreshes original cost approval')
+ for(const c of calls.filter(c=>c.kind==='merge'))assert.deepEqual(c.args[4],{version:1,reviewed_digest:quote})
+ const changed=pick({'stock|51':{option:'write_off'}})
+ await assert.rejects(adapter.review(data,changed,signal),/Cost preview unavailable/)
+ await adapter.load(signal,changed)
+ assert.equal(costReads,2,'changed stock plan requests a fresh server quote')
+})
+
+await test('missing authority blocks cost-visible review and does not manufacture NULL or zero', async()=>{
+ const {api}=fakeApi(CLUSTERS.same_name);api.costPreview=async()=>{throw new Error('offline')}
+ const adapter=createProductResolveAdapter({cluster:CLUSTERS.same_name,t,canViewCosts:true,canEditCosts:true,canMerge:()=>true,api})
+ const data=await adapter.load(signal,EMPTY)
+ assert.equal(rowOf(adapter.rows(data,EMPTY),'cost').final.text,en.merge_cost_preview_unavailable)
+ assert.ok(adapter.blockers!(data,EMPTY).includes(en.merge_cost_preview_unavailable))
+ await assert.rejects(adapter.review(data,EMPTY,signal),/Cost preview unavailable/)
 })
 
 console.log(failed ? `\n${failed} test(s) failed` : '\nall product resolve adapter tests passed')

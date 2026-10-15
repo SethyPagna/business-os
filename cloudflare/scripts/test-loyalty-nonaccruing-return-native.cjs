@@ -84,11 +84,12 @@ async function main() {
       await seed([returnRow('NA-RET-UNLINKED', null, 1, 4000)])
       await check(`[${tier}] B3 control: a return linked to no sale keeps its existing deduction (12 - 1.5 = 10.5)`, async () => assert.equal(await membership(), 10.5))
 
-      // C. The rule is read at the time of the question, not stored: opt the historical sale INTO accrual and its return counts.
-      await seed([{ sql: 'UPDATE sales SET loyalty_accrual = 1 WHERE id = 7002' }])
-      await check(`[${tier}] C1 once the sale accrues, its return subtracts (15 + 135 - 3 - 30 - 1.5 = 115.5)`, async () => assert.equal(await membership(), 115.5))
-      await seed([{ sql: 'UPDATE sales SET loyalty_accrual = 0 WHERE id = 7002' }])
-      await check(`[${tier}] C2 and flipping it back restores 10.5`, async () => assert.equal(await membership(), 10.5))
+      const immutable = await call({op:'seed',statements:[{sql:'UPDATE sales SET loyalty_accrual=1 WHERE id=7002'}]})
+      assert.match(immutable.error,/loyalty_creation_eligibility_immutable/)
+      await seed([{sql:"INSERT INTO sales(id,receipt_number,customer_id,total_usd,total_khr,sale_status,loyalty_accrual) VALUES(7003,'NA-NEW-ELIGIBLE',9902,90,360000,'completed',1)"},{sql:"UPDATE returns SET sale_id=7003 WHERE return_number='NA-RET-HISTORICAL'"}])
+      await check(`[${tier}] C1 eligible new sale and its refund count`, async () => assert.equal(await membership(),115.5))
+      await seed([{sql:"UPDATE returns SET sale_id=7002 WHERE return_number='NA-RET-HISTORICAL'"},{sql:'DELETE FROM sales WHERE id=7003'}])
+      await check(`[${tier}] C2 restoring the original link retains 10.5`, async () => assert.equal(await membership(),10.5))
 
       // D. Checkout re-validates with the SAME rule (lib/saleCustomerAssignmentGuard.ts): the balance the till showed is the balance it spends.
       const checkout = { offline_owner: { version: 1, actor_id: 71, organization_id: null, authority: 'https://admin.scope.example', runtime: 'cloudflare-workers' }, branch_id: 1, money_precision_version: 1, items: [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500, applied_price_usd: 9.5, client_line_key: 'na-line', pricing_source: 'selling', pricing_quote: { gross_usd: 9.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9.5, total_khr: 38000 } }], exchange_rate: 4000, payment_method: 'Cash', payment_currency: 'USD', amount_paid_usd: 9.4, customer_id: 9902, membership_points_redeemed: 10, membership_discount_usd: 0.1, loyalty_accrual: false, client_request_id: 'na-redeem' }

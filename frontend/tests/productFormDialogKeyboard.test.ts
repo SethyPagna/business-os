@@ -17,6 +17,8 @@ const words = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta
 const harness = await createHarness({ observe: ['api/methods.ts'] })
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+const realClientRects = MemoryNode.prototype.getClientRects
+MemoryNode.prototype.getClientRects = function (): unknown[] { return this.isConnected ? [{}] : [] }
 const realQuerySelectorAll = MemoryNode.prototype.querySelectorAll
 MemoryNode.prototype.querySelectorAll = function (this: MemoryNode, selector: string): MemoryNode[] {
   if (selector !== FOCUSABLE) return realQuerySelectorAll.call(this, selector)
@@ -117,6 +119,7 @@ try {
 
 console.log('PASS the product form dialog closes on Escape through its guard, traps Tab, restores focus, and yields Escape to a dialog above it')
 } finally {
+  MemoryNode.prototype.getClientRects = realClientRects
   MemoryNode.prototype.querySelectorAll = realQuerySelectorAll
   document.addEventListener = realAddListener
   document.removeEventListener = realRemoveListener

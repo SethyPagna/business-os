@@ -1,9 +1,10 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import type { CloseGuard } from '../../utils/useCloseGuard.ts'
 import MinimizeButton from './MinimizeButton.tsx'
+import { useDialogKeyboard } from './useDialogKeyboard.ts'
 
 // S4-21: the one prompt raised when a modal with unsaved changes is closed.
 //
@@ -28,6 +29,9 @@ export type UnsavedChangesPromptItem = { label: ReactNode; value: ReactNode }
 
 export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGuard; items?: UnsavedChangesPromptItem[] }) {
   const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const requestBack = () => { if (!guard.saving) guard.dismissPrompt() }
+  useDialogKeyboard(panelRef, { enabled: guard.promptOpen, promptOpen: false, onEscape: requestBack, onPromptEscape: requestBack })
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -37,6 +41,8 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
 
   const node = (
     <div
+      ref={panelRef}
+      tabIndex={-1}
       className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1080] flex items-center justify-center overflow-y-auto bg-black/60 p-4"
       role="dialog"
       aria-modal="true"

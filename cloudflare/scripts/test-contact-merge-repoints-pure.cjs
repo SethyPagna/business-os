@@ -67,6 +67,7 @@ run(`INSERT INTO suppliers (id, name) VALUES (11, 'KeepSup'), (22, 'LoseSup')`)
 run(`INSERT INTO delivery_contacts (id, name) VALUES (31, 'KeepDrv'), (32, 'LoseDrv')`)
 run(`INSERT INTO products (id, name, supplier) VALUES (101, 'P1', 'LoseSup')`)
 
+run("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'")
 // Customer-linked
 run(`INSERT INTO sales (customer_id, customer_name, customer_phone, customer_address) VALUES (2, 'Loser Co', '012 222 222', 'Loser address')`)
 run(`INSERT INTO returns (customer_id, customer_name, return_scope) VALUES (2, 'Loser Co', 'customer')`)
@@ -75,6 +76,8 @@ run(`INSERT INTO loyalty_point_adjustments (customer_id, points) VALUES (2, 10)`
 run(`INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES ('M1', 'Loser', '012000000', 'h', 2)`)
 run(`INSERT INTO customer_receivables (legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (1, 2, 'Loser Co', '2026-01-01', 'outstanding', 'ar.csv', 1)`)
 run(`INSERT INTO customer_receivables (legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (2, NULL, 'Loser Co', '2026-01-02', 'outstanding', 'ar.csv', 2)`)
+
+run("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'")
 
 // Supplier-linked
 run(`INSERT INTO returns (supplier_id, supplier_name, return_scope) VALUES (22, 'LoseSup old', 'supplier')`)

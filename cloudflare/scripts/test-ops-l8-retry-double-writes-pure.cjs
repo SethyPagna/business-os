@@ -83,19 +83,22 @@ function seed(db) {
   supplier(24, 51, 1, '2026-09-20 09:00:30', [[21, 902, 2]])            // other lot: not a twin
   supplier(25, 52, 1, '2026-09-20 09:30:00', [[22, 903, 1]], 2)
   supplier(26, 52, 1, '2026-09-20 09:30:10', [[22, 903, 1]], 3)         // other compensation: not a twin
-  // Loyalty awards.
-  const points = db.prepare(`INSERT INTO loyalty_point_adjustments (id, customer_id, points, note, created_by_id, created_at, voided_at)
-    VALUES (@id, @customer, @points, @note, @by, @at, @voided)`)
-  const award = (id, customerId, pts, note, by, at, voided = null) => points.run({ id, customer: customerId, points: pts, note, by, at, voided })
-  award(1, 5, 25, 'Birthday', 1, '2026-09-20 09:00:00')
-  award(2, 5, 25, 'Birthday', 1, '2026-09-20 09:00:15')                  // twin of 1 (a)
-  award(3, 5, 50, 'Birthday', 1, '2026-09-20 09:00:45')                  // other points: not a twin
-  award(4, 6, 10, 'Promo', 1, '2026-09-20 09:10:00')
-  award(5, 6, 10, 'Promo', 2, '2026-09-20 09:10:05')                     // other admin: not a twin
-  award(6, 7, 10, null, 1, '2026-09-20 09:20:00')
-  award(7, 7, 10, null, 1, '2026-09-20 09:20:20', '2026-09-20 10:00:00') // voided (c)
-  award(8, 8, 10, 'Promo', 1, '2026-09-20 09:30:00')
-  award(9, 8, 10, 'Promo', 1, '2026-09-20 09:33:00')                     // 3 min later: not a twin
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+  try {
+    // Loyalty awards.
+    const points = db.prepare(`INSERT INTO loyalty_point_adjustments (id, customer_id, points, note, created_by_id, created_at, voided_at)
+      VALUES (@id, @customer, @points, @note, @by, @at, @voided)`)
+    const award = (id, customerId, pts, note, by, at, voided = null) => points.run({ id, customer: customerId, points: pts, note, by, at, voided })
+    award(1, 5, 25, 'Birthday', 1, '2026-09-20 09:00:00')
+    award(2, 5, 25, 'Birthday', 1, '2026-09-20 09:00:15')                  // twin of 1 (a)
+    award(3, 5, 50, 'Birthday', 1, '2026-09-20 09:00:45')                  // other points: not a twin
+    award(4, 6, 10, 'Promo', 1, '2026-09-20 09:10:00')
+    award(5, 6, 10, 'Promo', 2, '2026-09-20 09:10:05')                     // other admin: not a twin
+    award(6, 7, 10, null, 1, '2026-09-20 09:20:00')
+    award(7, 7, 10, null, 1, '2026-09-20 09:20:20', '2026-09-20 10:00:00') // voided (c)
+    award(8, 8, 10, 'Promo', 1, '2026-09-20 09:30:00')
+    award(9, 8, 10, 'Promo', 1, '2026-09-20 09:33:00')                     // 3 min later: not a twin
+  } finally { db.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run() }
   // Stock movements.
   const mv = db.prepare(`INSERT INTO inventory_movements (id, product_id, branch_id, movement_type, quantity, reason, reference_id, user_id, batch_id, created_at)
     VALUES (@id, @product, @branch, @type, @qty, @reason, @ref, @user, @batch, @at)`)

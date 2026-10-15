@@ -62,7 +62,10 @@ async function main() {
       }
     }
     for (let i = 0; i < migrations.length; i += 50) await db.batch(migrations.slice(i, i + 50))
+    const auditBaseline = (await db.prepare('SELECT * FROM audit_logs ORDER BY id').all()).results
+    const auditOffset = Math.max(0, ...auditBaseline.map(row => row.id))
     const data = fixture.rows({ scale: SCALE })
+    data.audit_logs = data.audit_logs.map(row => ({ ...row, id: row.id + auditOffset }))
     const inserts = fixture.statements(data, 60000, 250).map(statement => db.prepare(statement.sql).bind(...(statement.params || [])))
     for (let i = 0; i < inserts.length; i += 10) await db.batch(inserts.slice(i, i + 10))
     await db.prepare('CREATE TABLE probe_writes(id INTEGER PRIMARY KEY)').run()
@@ -118,6 +121,7 @@ async function main() {
     assert.deepEqual(branches.map(b => [b.id, b.name, b.is_active, b.is_default, b.successor_branch_id]), [[1, 'LC Store', 1, 1, null], [2, 'Old Shop', 0, 0, 1]])
     const journal = await first("SELECT phase,committed_children FROM branch_cutovers WHERE operation_id='" + started.state.operationId + "'")
     assert.deepEqual([journal.phase, journal.committed_children], ['completed', moving])
+    assert.deepEqual((await db.prepare('SELECT * FROM audit_logs WHERE id<=? ORDER BY id').bind(auditOffset).all()).results, auditBaseline)
     console.log('test-branch-cutover-operator-workerd: PASS (' + moving + ' products moved through the real endpoint on workerd D1)')
   } finally { await mf.dispose(); await dark.dispose() }
 }

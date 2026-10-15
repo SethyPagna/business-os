@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const { loadRoute, loadTs, seed } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
@@ -28,7 +29,7 @@ function setup() {
   d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;')
   const loaded = loadRoute(d1, true)
   reset(loaded.controls)
-  return { d1, ...loaded }
+  return { d1, ...loaded, auditRows: captureAuditBaseline(d1.db) }
 }
 
 function loadReviewApply(fixture) {
@@ -193,7 +194,7 @@ async function main() {
     assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 1)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM action_history").get().n, 0)
-    assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM audit_logs").get().n, 0)
+    assert.equal(fixture.auditRows().length, 0)
     const pending = { ...fixture.d1.db.prepare('SELECT * FROM pending_actions WHERE status=\'open\'').get() }
     reset(fixture.controls)
     const reviewApply = loadReviewApply(fixture)
@@ -221,7 +222,7 @@ async function main() {
     assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
     assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM product_remove_operations').get().n, 0)
     assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
-    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0)
+    assert.equal(fixture.auditRows().length, 0)
   }
 
   console.log('product conflict action direct remove sqlite: atomic graph, permission, idempotency, race checks passed')

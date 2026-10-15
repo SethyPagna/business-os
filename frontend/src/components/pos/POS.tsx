@@ -628,10 +628,9 @@ async function lookupPosMembership(membershipNumber: string): Promise<Membership
   return lookupCustomerMembership(membershipNumber) as Promise<MembershipInfo | null>
 }
 
-// Missing means no manual choice. Resolve on every render so delayed/cached
-// settings work, while each saved draft keeps its explicit boolean override.
 export function resolveOrderLoyaltyAccrual(override: unknown, setting: unknown): boolean {
-  return typeof override === 'boolean' ? override : !['0', 'false', 'no', 'off'].includes(String(setting ?? 'true').trim().toLowerCase())
+  const enabled = ['1', 'true', 'yes', 'on'].includes(String(setting ?? 'false').trim().toLowerCase())
+  return enabled && override !== false
 }
 
 async function createPosSale(payload: Record<string, unknown>, scope = captureActorReadScope('pos-checkout')): Promise<SaleResult> {
@@ -4131,10 +4130,6 @@ export default function POS() {
                     </div>
                   )}
                 </div>
-                {/* Earn-points toggle: any sale attached to a customer accrues
-                    points (balances are computed by summing sales server-side),
-                    so this shows for every selected customer, not only members.
-                    Each new order follows settings; a manual choice stays on this draft. */}
                 {active.customer?.id ? (
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
@@ -4143,10 +4138,13 @@ export default function POS() {
                       role="switch"
                       aria-checked={loyaltyAccrual}
                       aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
+                      disabled={!resolveOrderLoyaltyAccrual(undefined, settings.loyalty_points_enabled)}
                       onClick={() => patchActive({ loyaltyAccrual: !loyaltyAccrual })}
-                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      className="relative h-11 w-11 flex-shrink-0 rounded-full"
                     >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span aria-hidden="true" className={`pointer-events-none absolute left-1 top-3 h-5 w-9 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
                     </button>
                   </div>
                 ) : null}
