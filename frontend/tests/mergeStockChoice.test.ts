@@ -325,6 +325,12 @@ test('authority parser distinguishes valid NULL/zero from absent or malformed co
  for(const patch of [{version:2},{keeperId:11},{cost_price_usd:undefined},{cost_price_usd:-1},{cost_price_usd:Infinity},{cost_price_usd:100000000001},{source:'catalog_mean'}]) assert.throws(()=>readMergeCostAuthority({...authority,...patch},10))
 })
 
+test('pair cost requests retain original actor ownership and reset refusal is translated',()=>{
+ assert.match(hook,/loadCost: async \(stock, signal\) => \{ assertActorReadScope\(actorScope\); return getMergeCostPreview/)
+ assert.equal(en.merge_cost_review_history_required,'Audit history is required for merged product cost review. No records were deleted.')
+ assert.match(km.merge_cost_review_history_required,/[ក-៿]/)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

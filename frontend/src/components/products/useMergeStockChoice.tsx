@@ -102,7 +102,7 @@ export function useMergeStockChoice(t: TranslateFn) {
     if (needsChoice !== null) {
       assertActorReadScope(actorScope)
       setWorking(false)
-      const answer = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice, loadCost: (stock, signal) => getMergeCostPreview({ keepId: keeper.id, reviewedDigest, steps: [{ mergeId: other.id, stock }] }, signal) })
+      const answer = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice, loadCost: async (stock, signal) => { assertActorReadScope(actorScope); return getMergeCostPreview({ keepId: keeper.id, reviewedDigest, steps: [{ mergeId: other.id, stock }] }, signal) } })
       if (!answer) return 'cancelled'
       setWorking(true)
       try {

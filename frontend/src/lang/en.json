@@ -7545,5 +7545,6 @@
   "merge_cost_needs_review": "Cost needs review",
   "merge_cost_preview_unavailable": "Cost preview unavailable",
   "merge_cost_preview_calculating": "Calculating cost…",
-  "merge_duplicates_authority_body": "Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost follows the received-cost calculation shown for each group; an empty cost needs review. The highest retail and wholesale prices are kept."
+  "merge_duplicates_authority_body": "Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost follows the received-cost calculation shown for each group; an empty cost needs review. The highest retail and wholesale prices are kept.",
+  "merge_cost_review_history_required": "Audit history is required for merged product cost review. No records were deleted."
 }
