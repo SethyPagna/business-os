@@ -64,9 +64,24 @@ ok(true, `sign classification pinned to frontend movementSign (${kernelOutTypes.
 const db = openDb(loadAll())
 ok(true, 'full migration chain applied')
 
+function seedStockRows(seed) {
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    seed()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+}
+
 function insertProduct(id, name, barcode, stock) {
-  db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
-    .bind({ id, name, barcode, unit: 'pcs', stock }).run()
+  seedStockRows(() => db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
+    .bind({ id, name, barcode, unit: 'pcs', stock }).run())
 }
 function insertMovement(row) {
   db.prepare(`INSERT INTO inventory_movements
@@ -79,6 +94,13 @@ function insertMovement(row) {
 // and current stock is set to that same 5, so every derived before/after
 // is exact.
 insertProduct(9001, 'Ledger Test Cream', '8800000000011', 5)
+assert.throws(() => db.exec('UPDATE products SET stock_quantity=6 WHERE id=9001'), /stock_transaction_required/)
+assert.throws(() => seedStockRows(() => {
+  db.exec('UPDATE products SET stock_quantity=6 WHERE id=9001')
+  throw new Error('fixture rollback')
+}), /fixture rollback/)
+assert.equal(db.prepare('SELECT stock_quantity FROM products WHERE id=9001').get().stock_quantity, 5)
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 const A = (over) => ({ product_id: 9001, product_name: 'Ledger Test Cream', branch_id: 1, branch_name: 'Main Store', reason: '', user_name: 'tester', ...over })
 insertMovement(A({ id: 1, movement_type: 'add', quantity: 10, reason: 'initial stock', created_at: '2026-08-20 10:00:00' }))
 insertMovement(A({ id: 2, movement_type: 'sale', quantity: 3, created_at: '2026-08-21 11:00:00' }))
@@ -179,6 +201,7 @@ ok(true, 'pagination returns the correct slice with the full total')
 // lot, the six existing rows stay batch-less (pre-0084 history).
 db.prepare(`INSERT INTO suppliers (id, name) VALUES (61, 'Bong Long')`).run({})
 db.prepare(`INSERT INTO suppliers (id, name) VALUES (62, 'Dane Japan')`).run({})
+seedStockRows(() => {
 db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
   VALUES (501, 9001, '08202026', '08202026', '2026-08-20 10:00:00', 1, 1, 61, 'Bong Long')`).run({})
 db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
@@ -193,6 +216,7 @@ db.prepare(`INSERT INTO inventory_movements
   (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at, batch_id)
   VALUES (9, 9001, 'Ledger Test Cream', 1, 'Main Store', 'sale', 1, '', 'tester', '2026-08-28 10:00:00', 502)`).run({})
 db.prepare(`UPDATE products SET stock_quantity = 8 WHERE id = 9001`).run({})
+})
 
 const withBatch = runLedger({ productId: 9001 })
 assert.equal(withBatch.total, 8)
