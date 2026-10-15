@@ -69,6 +69,7 @@ const db = {
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(this) },
 }
 const fakeEnv = { DB: db }
@@ -89,6 +90,7 @@ function loadReal(relPath, requireOverrides = {}) {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request.endsWith('/productStockGuard')) return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -112,7 +114,8 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockTransaction = loadReal('lib/stockTransaction.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
@@ -385,7 +388,23 @@ async function req(method, url, body, targetApp = app) {
   return { status: res.status, json }
 }
 
+function fixtureWrite(db, write) {
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  db.exec('BEGIN IMMEDIATE')
+  let result
+  try {
+    const epoch=db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+    if(epoch)db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    result=write()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch(error) { db.exec('ROLLBACK');throw error }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return result
+}
+
 function seed() {
+  fixtureWrite(rawDb,()=>{
   rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
     DELETE FROM suppliers; DELETE FROM action_history;`)
@@ -393,6 +412,8 @@ function seed() {
   rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 3, 12000)").run()
   rawDb.prepare('INSERT INTO suppliers (id, name) VALUES (@id, @name)').run({ id: SUPPLIER.id, name: SUPPLIER.name })
   audits.length = 0
+  })
+  assert.throws(()=>rawDb.prepare("INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,1)").run(),/stock_transaction_required/)
 }
 
 // ---- readers over the two ledgers this feature moves ----------------------
@@ -817,15 +838,15 @@ const ADD = (extra) => ({
       quantity: 1, reason: 'seed', userId: 1, userName: 'tester', conditionTag: 'broken', source: 'remove', unitCostUsd: 1,
     })]
     for (let i = 2; i <= 151; i++) {
-      rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
-        VALUES (@id, @name, @barcode, 1, 0, 3, 12000)`).run({ id: i, name: `Widget ${i}`, barcode: `TAG${i}` })
+      fixtureWrite(rawDb,()=>rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+        VALUES (@id, @name, @barcode, 1, 0, 3, 12000)`).run({ id: i, name: `Widget ${i}`, barcode: `TAG${i}` }))
       lotStatements.push(returnsStockForCheck.createDamagedLotStatement({
         productId: i, productName: `Widget ${i}`, branchId: 1, batchId: null, returnIdSql: 'NULL',
         quantity: 1, reason: 'seed', userId: 1, userName: 'tester', conditionTag: 'broken', source: 'remove', unitCostUsd: 1,
       }))
       ids.push(i)
     }
-    await db.batch(lotStatements)
+    await stockTransaction.executeStockTransaction(db,lotStatements,'retry')
 
     const boundCounts = []
     const countingDb = {
@@ -862,7 +883,7 @@ const ADD = (extra) => ({
   // the shapes the owner's report named: 0 ids, 1 id, and 150 ids (Products
   // pages a server page of up to 100 plus pinned recently-edited rows).
   await check('GET /tagged-lots survives the exact frontend request shape against an empty table (0/1/150 ids)', async () => {
-    rawDb.exec('DELETE FROM damaged_stock_lots')
+    fixtureWrite(rawDb,()=>rawDb.exec('DELETE FROM damaged_stock_lots'))
     const encodedQuery = (ids) => new URLSearchParams({ productIds: ids.join(',') }).toString()
     const zero = await req('GET', `/tagged-lots?${encodedQuery([])}`)
     assert.equal(zero.status, 200, JSON.stringify(zero))

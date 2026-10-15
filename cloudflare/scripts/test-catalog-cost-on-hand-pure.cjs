@@ -40,10 +40,13 @@ function loadTs(relative) {
   return mod.exports
 }
 const costs = loadTs('lib/catalogCostRecompute.ts')
+const { executeStockTransaction } = loadTs('lib/stockTransaction.ts')
 
 // A lib/db.ts-shaped handle (get/all/run with @named params) over the harness.
 function libDb(d1) {
   return {
+    batch: items=>d1.batch(items),
+    batchOnce: items=>d1.batch(items),
     prepare(sql) {
       const stmt = d1.prepare(sql)
       return {
@@ -61,13 +64,37 @@ async function check(name, fn) {
   catch (error) { console.log(`FAIL ${name} - ${error.stack}`); process.exitCode = 1 }
 }
 
+function fixtureWrite(db, write) {
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  db.exec('BEGIN IMMEDIATE')
+  let result
+  try {
+    const epoch=db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+    if(epoch)db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    result=write()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch(error) { db.exec('ROLLBACK');throw error }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return result
+}
+
 function fresh() {
   const d1 = openDb(loadAll())
   const raw = d1.db
-  const product = (storedCost = 99) => Number(raw.prepare(
+  const db = libDb(d1)
+  const dispatch=statement=>executeStockTransaction(db,[statement],'retry')
+  const recomputeJs=productId=>costs.recomputeCatalogCost({ ...db, prepare(sql) {
+    return {...db.prepare(sql),async run(params) {
+      const [result]=await dispatch({sql,params})
+      return {changes:Number(result.meta?.changes ?? 0),lastInsertRowid:Number(result.meta?.last_row_id ?? 0)}
+    }}
+  } },productId)
+  assert.throws(()=>raw.prepare("INSERT INTO products(name) VALUES('guard control')").run(),/stock_transaction_required/)
+  const product = (storedCost = 99) => fixtureWrite(d1,()=>Number(raw.prepare(
     'INSERT INTO products(name, cost_price_usd, purchase_price_usd, cost_price_khr, is_active) VALUES (?, ?, ?, 0, 1)',
-  ).run(`P${Math.random()}`, storedCost, storedCost).lastInsertRowid)
-  const lot = (productId, cost, receivedAt, quantities = {}) => {
+  ).run(`P${Math.random()}`, storedCost, storedCost).lastInsertRowid))
+  const lot = (productId, cost, receivedAt, quantities = {}) => fixtureWrite(d1,()=>{
     const id = Number(raw.prepare(
       'INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, received_at) VALUES (?, ?, 1, ?, ?)',
     ).run(productId, `k${Math.random()}`, cost, receivedAt).lastInsertRowid)
@@ -75,15 +102,15 @@ function fresh() {
       raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(id, Number(branchId), quantity)
     }
     return id
-  }
-  const setQty = (lotId, branchId, quantity) => raw.prepare('UPDATE branch_batch_stock SET quantity = ? WHERE batch_id = ? AND branch_id = ?').run(quantity, lotId, branchId)
+  })
+  const setQty = (lotId, branchId, quantity) => fixtureWrite(d1,()=>raw.prepare('UPDATE branch_batch_stock SET quantity = ? WHERE batch_id = ? AND branch_id = ?').run(quantity, lotId, branchId))
   const stored = (productId) => raw.prepare('SELECT cost_price_usd c, purchase_price_usd p FROM products WHERE id = ?').get(productId)
   const recomputeSql = async (productId) => {
     const statement = costs.catalogCostRecomputeStatement(productId)
-    d1.prepare(statement.sql).run(statement.params)
+    await dispatch(statement)
     return stored(productId).c
   }
-  return { d1, raw, db: libDb(d1), product, lot, setQty, stored, recomputeSql }
+  return { d1, raw, db, product, lot, setQty, stored, recomputeSql, recomputeJs }
 }
 
 async function main() {
@@ -105,7 +132,7 @@ async function main() {
 
     const productRevision = () => f.raw.prepare("SELECT revision r FROM stock_session_revisions WHERE entity_type = 'product' AND entity_key = ?").get(String(id))?.r ?? 0
     const revisionBefore = productRevision()
-    const js = await costs.recomputeCatalogCost(f.db, id)
+    const js = await f.recomputeJs(id)
     assert.deepEqual([js.before.usd, js.after.usd, js.changed], [12.5, 12.5, false], 'JS entry point applies the same formula')
     assert.equal(productRevision(), revisionBefore, 'an unchanged recompute writes nothing (no product revision bump)')
     f.setQty(onHand, 1, 0)
@@ -113,8 +140,8 @@ async function main() {
     assert.equal(f.stored(id).c, 12, 'the 0195 triggers already followed both crossings')
     // A figure stored before 0195 (or by a trigger-less path): the JS entry
     // point still moves it, and mirrors purchase_price_usd.
-    f.raw.prepare('UPDATE products SET cost_price_usd = 12.5, purchase_price_usd = 12.5 WHERE id = ?').run(id)
-    const moved = await costs.recomputeCatalogCost(f.db, id)
+    fixtureWrite(f.d1,()=>f.raw.prepare('UPDATE products SET cost_price_usd = 12.5, purchase_price_usd = 12.5 WHERE id = ?').run(id))
+    const moved = await f.recomputeJs(id)
     assert.deepEqual([moved.before.usd, moved.after.usd, moved.changed], [12.5, 12, true])
     assert.equal(f.stored(id).p, 12, 'purchase_price_usd mirrors on the JS path too')
   })
@@ -132,12 +159,12 @@ async function main() {
     assert.equal(await f.recomputeSql(id), 13, 'double-apply: recomputing again changes nothing')
     f.setQty(b, 1, 3)
     assert.equal(await f.recomputeSql(id), 12.8125, 'reversal (void/undo/return restock) restores the earlier figure exactly')
-    await f.d1.batch([
+    await executeStockTransaction(f.db,[
       { sql: 'UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = @lot AND branch_id = 1', params: { lot: c } },
       { sql: 'INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (@lot, 2, 5)', params: { lot: c } },
-    ])
+    ],'retry')
     assert.equal(await f.recomputeSql(id), 12.8125, 'a lot moved between branches stays on hand, same quantity')
-    f.raw.prepare('DELETE FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 2').run(c)
+    fixtureWrite(f.d1,()=>f.raw.prepare('DELETE FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 2').run(c))
     assert.equal(await f.recomputeSql(id), 12.5, 'deleting the last positive row of lot C drops it')
   })
 
@@ -161,7 +188,7 @@ async function main() {
     const id = f.product(0)
     f.lot(id, 12, '2026-09-01', { 1: 4 })
     const plan = costs.planManualCostEntry(id, { cost_price_usd: 12, cost_price_khr: 0 }, { cost_price_usd: 10 }, { id: 1, name: 'Owner' })
-    f.d1.prepare(plan.sql).run(plan.params)
+    await executeStockTransaction(f.db,[plan],'retry')
     assert.equal(await f.recomputeSql(id), 10, 'override re-prices the four units of the pre-baseline lot')
     const later = f.lot(id, 14, '2026-09-22', { 1: 2 })
     assert.equal(await f.recomputeSql(id), 11.3333, '(4 x 10 + 2 x 14) / 6')
@@ -193,12 +220,12 @@ async function main() {
       for (let j = 0; j < lotCount; j++) {
         const lotId = f.lot(id, pool[rand(pool.length)], `2026-09-${String(1 + rand(28)).padStart(2, '0')}`, rand(2) ? { 1: rand(3) } : {})
         if (rand(6) === 0 && !f.raw.prepare('SELECT 1 FROM branch_batch_stock WHERE batch_id = ? AND quantity > 0').get(lotId)) {
-          f.raw.prepare('UPDATE product_batches SET is_active = 0 WHERE id = ?').run(lotId)
+          fixtureWrite(f.d1,()=>f.raw.prepare('UPDATE product_batches SET is_active = 0 WHERE id = ?').run(lotId))
         }
       }
       if (rand(4) === 0) {
         const plan = costs.planManualCostEntry(id, f.stored(id).c == null ? { cost_price_usd: 0, cost_price_khr: 0 } : { cost_price_usd: f.stored(id).c, cost_price_khr: 0 }, { cost_price_usd: pool[rand(pool.length)] + 0.5 }, { id: 1, name: 'O' })
-        if (plan) f.d1.prepare(plan.sql).run(plan.params)
+        if (plan) await executeStockTransaction(f.db,[plan],'retry')
         if (rand(2)) f.lot(id, pool[rand(pool.length)], '2026-09-29', { 1: rand(2) })
       }
       const sql = await f.recomputeSql(id)
