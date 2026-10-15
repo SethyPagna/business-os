@@ -53,12 +53,15 @@ function fixture() {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.pragma('foreign_keys = ON')
-  sql.exec(`
+  sql.transaction(() => sql.exec(`
+    INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch';
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
+    DELETE FROM system_flags WHERE key='stock_transaction_permit';
+  `))()
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   let failAfterMetadata = false
   let loseNextAcknowledgement = false
   let beforeNextBatch = null
