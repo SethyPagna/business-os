@@ -55,7 +55,7 @@ for (const language of ['en', 'km']) {
   const labels = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
   const t = (key: string) => labels[key] || key
   const tr = (key: string, fallback: string) => labels[key] || fallback
-  const review = reviewStockLine({ key: 'unknown', productName: 'Fixture', mode: 'add', product: { id: 1, cost_price_usd: null, stock_quantity: 3 }, quantity: 0, freeQuantity: 2, unitCost: '', freeGoods: true, sellingPrice: '', reason: '' } as StockSessionLine, '1')
+  const review = reviewStockLine({ key: 'unknown', productName: 'Fixture', mode: 'add', product: { id: 1, cost_price_usd: null, stock_quantity: 3 }, quantity: 0, freeQuantity: 2, unitCost: '', freeGoods: true, sellingPrice: '', reason: '' } as StockSessionLine, '1', { status: 'ready', beforeUsd: null, afterUsd: null })
   const reviewHtml = plain(renderToStaticMarkup(React.createElement(reviewModule.exports.default, { tr, usdSymbol: '$', canViewCosts: true, summary: [], reviews: [review] })))
   assert.ok(reviewHtml.includes(labels.cost_unknown), `${language}: an unknown result remains visible in the actual confirmation step`)
   const render = (overrides: Record<string, unknown>, view = true) => plain(renderToStaticMarkup(renderFacts(React, costModule.exports.default, {

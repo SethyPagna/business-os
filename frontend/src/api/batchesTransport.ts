@@ -1,6 +1,27 @@
 import { apiFetch, route } from './http.ts'
 import { createClientRequestId } from './requestIds.ts'
 
+export type ReceivingCostPreviewLine = { key: string; wire: 'receive' | 'adjust' | 'stock_session'; body: object }
+export type ReceivingCostPreviewResult = { key: string; productId: number; status: 'ready' | 'unavailable'; beforeUsd: number | null; afterUsd: number | null; reason: string | null }
+export type ReceivingCostPreviewResponse = { advisory: true; results: ReceivingCostPreviewResult[] }
+
+export function receivingCostPreviewBatches(lines: ReceivingCostPreviewLine[]): ReceivingCostPreviewLine[][] {
+  const batches: ReceivingCostPreviewLine[][] = []
+  let batch: ReceivingCostPreviewLine[] = []
+  const bytes = (rows: ReceivingCostPreviewLine[]) => new TextEncoder().encode(JSON.stringify({ lines: rows })).byteLength
+  for (const line of lines) {
+    if (bytes([line]) > 65536) continue
+    if (batch.length === 25 || bytes([...batch, line]) > 65536) { batches.push(batch); batch = [] }
+    batch.push(line)
+  }
+  if (batch.length) batches.push(batch)
+  return batches
+}
+
+export function getReceivingCostPreview(lines: ReceivingCostPreviewLine[], signal?: AbortSignal): Promise<ReceivingCostPreviewResponse> {
+  return apiFetch('POST', '/api/products/receiving-cost-preview', { lines }, undefined, signal ? { signal } : undefined) as Promise<ReceivingCostPreviewResponse>
+}
+
 // Batch / lot / expiry-date tracking transport (see
 // cloudflare/src/routes/batches.ts + cloudflare/src/lib/productBatches.ts).
 // No local/offline mirror -- like notes, this rides on top of the same

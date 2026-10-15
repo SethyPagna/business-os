@@ -4,11 +4,11 @@ type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => stri
 
 function Change({ label, before, after }: { label: string; before: string; after: string }) {
   return (
-    <span className="whitespace-nowrap">
+    <span className="inline-flex min-w-0 max-w-full flex-wrap items-baseline">
       {label ? <span className="text-gray-400">{label} </span> : null}
       <span className="tabular-nums">{before}</span>
       <span aria-hidden="true" className="px-0.5 text-gray-400">→</span>
-      <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{after}</span>
+      <span className="min-w-0 max-w-full break-words font-semibold tabular-nums text-gray-900 dark:text-gray-100">{after}</span>
     </span>
   )
 }
@@ -33,6 +33,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
       <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
         {summary.map((line) => <div key={line} className="break-words">{line}</div>)}
       </div>
+      {canViewCosts && reviews.some(review => review.mode === 'add') ? <p className="break-words text-[11px] text-gray-500">{tr('stock_cost_estimate_advisory', 'Estimate from current received lots. The saved cost may change before completion.')}</p> : null}
       <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
         {reviews.map((review) => {
           const lot = review.lotBefore != null && review.lotAfter != null
@@ -52,7 +53,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
                 {review.mode === 'add' ? (
                   <>
                     {stock}
-                    {canViewCosts ? <><span aria-hidden="true">·</span><Change label={tr('cost', 'Cost')} before={cost4(review.costBefore)} after={cost4(review.costAfter)} /></> : null}
+                    {canViewCosts ? <><span aria-hidden="true">·</span><span aria-live="polite"><Change label={tr('stock_cost_estimate', 'Cost estimate')} before={cost4(review.costBefore)} after={review.costPreview?.status === 'ready' ? cost4(review.costAfter) : review.costPreview?.status === 'calculating' ? tr('stock_cost_estimate_calculating', 'Calculating…') : tr('stock_cost_estimate_unavailable', 'Estimate unavailable')} /></span></> : null}
                     {review.priceAfter != null ? <><span aria-hidden="true">·</span><Change label={tr('price', 'Price')} before={money2(review.priceBefore)} after={money2(review.priceAfter)} /></> : null}
                     {review.tag ? <><span aria-hidden="true">·</span><span>{review.tag}</span></> : null}
                   </>

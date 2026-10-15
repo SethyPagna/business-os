@@ -1,5 +1,5 @@
 // UI-STOCK 5.3-5.5 / 11.4: the stock session's money rules run twice -- in the
-// browser (the Payment step's items total, auto-adjust and review estimate)
+// browser (the Payment step's items total, auto-adjust)
 // and in the Worker (the commit route's supplier-total check and the receipt
 // kernels' effective cost). This test holds the two copies to one behaviour:
 // the shared code must be the same text, and every case below must give the
@@ -13,7 +13,6 @@ import ts from 'typescript'
 const frontendSource = readFileSync(new URL('../src/utils/stockSessionMath.ts', import.meta.url), 'utf8')
 const workerSource = readFileSync(new URL('../../cloudflare/src/lib/stockSessionMath.ts', import.meta.url), 'utf8')
 const workerMoneySource = readFileSync(new URL('../../cloudflare/src/lib/moneyPrecision.ts', import.meta.url), 'utf8')
-const BROWSER_ONLY = '// ---- browser only below this line ----'
 
 // ------------------------------------------------------------ 1. same text
 const code = (source: string) => source
@@ -22,8 +21,8 @@ const code = (source: string) => source
   .split('\n')
   .filter((line) => !/^\s*\/\//.test(line) && !/^import /.test(line) && line.trim())
   .join('\n')
-assert.ok(frontendSource.includes(BROWSER_ONLY), 'the browser-only estimate sits below the marker')
-assert.equal(code(frontendSource.slice(0, frontendSource.indexOf(BROWSER_ONLY))), code(workerSource), 'the shared functions are the same code in both packages')
+assert.equal(code(frontendSource), code(workerSource), 'the shared functions are the same code in both packages')
+assert.doesNotMatch(frontendSource, /estimateCatalogCostAfter/, 'the browser does not reconstruct a lot numerator from the catalog mean')
 assert.doesNotMatch(workerSource, /estimateCatalogCostAfter/, 'the estimate is browser only; the server recompute is authoritative')
 console.log('PASS the browser and Worker copies are the same code')
 
@@ -77,15 +76,3 @@ both('a declared-free line stays free', (m) => m.matchCostsToPaid([{ qty: 5, uni
 both('nothing to spread a payment over', (m) => m.matchCostsToPaid([{ qty: 3, unitCost: 0 }], 12), { ok: false, code: 'items_total_zero' })
 both('a zero payment against priced items: use Free instead', (m) => m.matchCostsToPaid(invoice, 0), { ok: false, code: 'paid_zero' })
 console.log('PASS the browser and Worker give the same money answers')
-
-// ------------------------------------------------------------ 3. the review estimate (browser only)
-assert.equal(browser.estimateCatalogCostAfter(2, 12, 8, 12.5), 12.4, '2 on hand at $12 + 8 at $12.50 = $12.40 (quantity-weighted, the 25 Sep rule)')
-assert.equal(browser.estimateCatalogCostAfter(0, 12, 5, 10), 10, 'nothing on hand: the new lot sets the cost')
-assert.equal(browser.estimateCatalogCostAfter(4, 12, 6, 0), 12, 'a $0 (free) lot is not a recorded cost and does not lower the average')
-assert.equal(browser.estimateCatalogCostAfter(10, 0, 5, 3), 3, 'an unrecorded current cost takes no part')
-assert.equal(browser.estimateCatalogCostAfter(3, 1.0001, 3, 1.0002), 1.0002, 'a tie rounds half up, like the server')
-assert.equal(browser.estimateCatalogCostAfter(3, null, 4, 0), null, 'an excluded free lot cannot turn an unknown catalog cost into zero')
-assert.equal(browser.estimateCatalogCostAfter(3, 0, 4, 0), 0, 'an existing recorded zero remains zero')
-assert.equal(browser.estimateCatalogCostAfter(3, null, 4, 2.1234), 2.1234, 'a positive incoming lot supplies the estimate without unknown weight')
-assert.equal(browser.estimateCatalogCostAfter(0, 5.1234, 4, 0), 5.1234, 'excluded incoming costs preserve the catalog fallback at four decimals')
-console.log('PASS the review estimate follows the catalog cost rule')

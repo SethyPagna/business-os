@@ -7537,5 +7537,9 @@
   "csv_invalid_cost": "Enter a valid non-negative cost, or leave it blank for unknown cost.",
   "csv_pricing_review_hint": "Rows where price/cost values differ from a match, or all price columns are blank.",
   "csv_blank_prices_review": "All price/cost columns are blank. Confirm that is intentional before applying this row.",
-  "csv_invalid_cost_label": "Invalid cost"
+  "csv_invalid_cost_label": "Invalid cost",
+  "stock_cost_estimate": "Cost estimate",
+  "stock_cost_estimate_advisory": "Estimate from current received lots. The saved cost may change before completion.",
+  "stock_cost_estimate_calculating": "Calculating…",
+  "stock_cost_estimate_unavailable": "Estimate unavailable"
 }

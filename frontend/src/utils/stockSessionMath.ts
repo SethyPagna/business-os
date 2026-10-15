@@ -1,10 +1,8 @@
 import { addMoney4, divideMoney4, multiplyMoney4, roundMoney4, subtractMoney4, sumMoney4, weightedMeanMoney4 } from './moneyPrecision.ts'
-import { knownCost } from './costDisplay.ts'
 
 // Stock-session money rules shared by the browser and the Worker. The copy in
 // cloudflare/src/lib/stockSessionMath.ts must stay identical apart from its
-// import line and the browser-only estimate at the end;
-// frontend/tests/stockSessionMathParity.test.ts runs both.
+// import line; frontend/tests/stockSessionMathParity.test.ts runs both.
 
 /** Half a cent: the same "fully paid" tolerance sales use. */
 export const SUPPLIER_TOTAL_TOLERANCE_USD = 0.005
@@ -65,19 +63,4 @@ export function matchCostsToPaid(lines: readonly StockSessionCostLine[], paid: n
     if (next > 0) costs[index] = next
   }
   return { ok: true, costs }
-}
-
-// ---- browser only below this line ----
-
-export function estimateCatalogCostAfter(onHand: number, currentCost: number | null, addedQty: number, addedCost: number): number | null {
-  const held = units(onHand)
-  const added = units(addedQty)
-  const current = knownCost(currentCost)
-  const incoming = knownCost(addedCost)
-  const terms = [
-    ...(held && current ? [{ amount: current, factor: held }] : []),
-    ...(added && incoming ? [{ amount: incoming, factor: added }] : []),
-  ]
-  if (!terms.length) return current
-  return weightedMeanMoney4(terms, terms.reduce((sum, term) => sum + term.factor, 0))
 }
