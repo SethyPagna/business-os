@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // K2 (Part 410, 11.12/11.13): lib/returnsStock.ts against a REAL sqlite
 // database with the REAL migrations (0074's damaged_stock_lots /
@@ -20,9 +21,11 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const ts = require(path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'typescript'))
+const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
+const { executeStockTransaction } = stockTransaction
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -39,6 +42,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request.endsWith('/productStockGuard')) return productStockGuard
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
@@ -74,29 +78,53 @@ async function seed(db) {
     { name: 'Other Serum', barcode: 'os1' },
   ]
   for (const row of rows) {
-    await db.prepare(`
+    await seedStockFixture(db, () => db.prepare(`
       INSERT INTO products (name, barcode, is_active, stock_quantity, out_of_stock_threshold, selling_price_usd)
       VALUES (@name, @barcode, 1, 0, 0, 10)
-    `).run(row)
+    `).run(row))
   }
   const idOf = async (barcode) => (await db.prepare('SELECT id FROM products WHERE barcode = ?').get([barcode])).id
   const ids = { tc1: await idOf('tc1'), tc2: await idOf('tc2'), os1: await idOf('os1') }
   for (const pid of Object.values(ids)) {
-    await db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 10)').run([pid])
-    await db.prepare('UPDATE products SET stock_quantity = 10 WHERE id = ?').run([pid])
+    await seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 10)').run([pid]))
+    await seedStockFixture(db, () => db.prepare('UPDATE products SET stock_quantity = 10 WHERE id = ?').run([pid]))
   }
-  await db.prepare(`
+  await seedStockFixture(db, () => db.prepare(`
     INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number)
     VALUES (@id, 'lotA', '08012026', '2026-08-01', 1, 1)
-  `).run({ id: ids.tc2 })
+  `).run({ id: ids.tc2 }))
   const batchId = (await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').get([ids.tc2])).id
-  await db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 6)').run([batchId])
+  await seedStockFixture(db, () => db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 6)').run([batchId]))
   return { ids, batchId }
+}
+
+function callerAdmittedKernelDb(db) {
+  return {
+    prepare(sql) {
+      const statement = db.prepare(sql)
+      return {
+        get: (params) => statement.get(params),
+        all: (params) => statement.all(params),
+        async run(params) {
+          const [result] = await executeStockTransaction(db, [{ sql, params }], 'retry')
+          return result
+        },
+      }
+    },
+    batch: (statements) => executeStockTransaction(db, statements, 'retry'),
+  }
 }
 
 async function run() {
   const db = openDb(MIGRATION_SQLS)
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const { ids, batchId } = await seed(db)
+  const admittedKernel = callerAdmittedKernelDb(db)
+  await assert.rejects(() => kernel.createDamagedLot(db, {
+    productId: ids.tc1, productName: 'Twin Cream', branchId: 1, batchId: null,
+    returnId: 9999, quantity: 1, reason: 'raw refusal control', userId: 1, userName: 'test',
+  }), /stock_transaction_required/)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 
   await check('normalizeStockAction: explicit three-way wins, boolean keeps its historical default', async () => {
     assert.equal(kernel.normalizeStockAction({ stock_action: 'damaged', return_to_stock: true }), 'damaged')
@@ -158,7 +186,7 @@ async function run() {
 
   await check('damaged lot: traceable, never sellable stock; open-lot listing sees it', async () => {
     const before = (await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = 1').get([ids.tc1])).quantity
-    await kernel.createDamagedLot(db, {
+    await kernel.createDamagedLot(admittedKernel, {
       productId: ids.tc1, productName: 'Twin Cream', branchId: 1, batchId: null,
       returnId: 501, quantity: 2, reason: 'crushed box', userId: 1, userName: 'Tester',
     })
@@ -172,18 +200,18 @@ async function run() {
   })
 
   await check('reverseDamagedLots: untouched lots reverse; a drawn-from lot blocks the edit', async () => {
-    const reversed = await kernel.reverseDamagedLots(db, 501)
+    const reversed = await kernel.reverseDamagedLots(admittedKernel, 501)
     assert.equal(reversed.length, 1)
     assert.equal(reversed[0].quantity, 2)
     assert.equal((await kernel.listOpenDamagedLots(db, { productId: ids.tc1 })).length, 0)
 
-    await kernel.createDamagedLot(db, {
+    await kernel.createDamagedLot(admittedKernel, {
       productId: ids.tc1, productName: 'Twin Cream', branchId: 1, batchId: null,
       returnId: 502, quantity: 3, reason: 'leaked', userId: 1, userName: 'Tester',
     })
-    await db.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 2 WHERE return_id = 502').run([])
+    await seedStockFixture(db, () => db.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 2 WHERE return_id = 502').run([]))
     await assert.rejects(
-      () => kernel.reverseDamagedLots(db, 502),
+      () => kernel.reverseDamagedLots(admittedKernel, 502),
       (err) => err.name === 'ConsumedDamagedStockError' && /already been drawn/.test(err.message),
     )
     // the blocked reversal left the lot in place
@@ -191,7 +219,7 @@ async function run() {
   })
 
   await check('replacement drain, plain path: validated decrement + replacement_out movement', async () => {
-    await kernel.applyReplacementStock(db, {
+    await kernel.applyReplacementStock(admittedKernel, {
       productId: ids.tc1, productName: 'Twin Cream', branchId: 1, batchId: null,
       quantity: 4, unitCostUsd: 3, unitCostKhr: 12300, returnId: 601, returnNumber: 'RET-TEST',
       userId: 1, userName: 'Tester',
@@ -202,7 +230,7 @@ async function run() {
     assert.equal(move.quantity, -4)
     assert.match(move.reason, /RET-TEST/)
     await assert.rejects(
-      () => kernel.applyReplacementStock(db, {
+      () => kernel.applyReplacementStock(admittedKernel, {
         productId: ids.tc1, productName: 'Twin Cream', branchId: 1, batchId: null,
         quantity: 99, unitCostUsd: 0, unitCostKhr: 0, returnId: 602, returnNumber: null,
         userId: null, userName: null,
@@ -214,7 +242,7 @@ async function run() {
   })
 
   await check('replacement drain, batch path: the exact lot drains and all three stores stay in step', async () => {
-    await kernel.applyReplacementStock(db, {
+    await kernel.applyReplacementStock(admittedKernel, {
       productId: ids.tc2, productName: 'Twin Cream', branchId: 1, batchId,
       quantity: 2, unitCostUsd: 3, unitCostKhr: 12300, returnId: 603, returnNumber: 'RET-BATCH',
       userId: 1, userName: 'Tester',
@@ -224,7 +252,7 @@ async function run() {
     assert.equal((await db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get([ids.tc2])).stock_quantity, 8)
     // a lot that can't cover the ask refuses BEFORE writing (its own error)
     await assert.rejects(
-      () => kernel.applyReplacementStock(db, {
+      () => kernel.applyReplacementStock(admittedKernel, {
         productId: ids.tc2, productName: 'Twin Cream', branchId: 1, batchId,
         quantity: 50, unitCostUsd: 0, unitCostKhr: 0, returnId: 604, returnNumber: null,
         userId: null, userName: null,
@@ -234,29 +262,29 @@ async function run() {
   })
 
   await check('11.9: consumeDamagedLot draws strictly, refuses shortfalls and wrong products', async () => {
-    await kernel.createDamagedLot(db, {
+    await kernel.createDamagedLot(admittedKernel, {
       productId: ids.tc2, productName: 'Twin Cream', branchId: 1, batchId: null,
       returnId: 701, quantity: 4, reason: 'POS damage source test', userId: 1, userName: 'Tester',
     })
     const lot = (await kernel.listOpenDamagedLots(db, { productId: ids.tc2 })).find((row) => row.return_id === 701)
-    const drawn = await kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.tc2, quantity: 3 })
+    const drawn = await kernel.consumeDamagedLot(admittedKernel, { lotId: lot.id, productId: ids.tc2, quantity: 3 })
     assert.equal(drawn.productName, 'Twin Cream')
     assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 1)
     // a draw the lot can't cover throws WITHOUT writing
     await assert.rejects(
-      () => kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.tc2, quantity: 2 }),
+      () => kernel.consumeDamagedLot(admittedKernel, { lotId: lot.id, productId: ids.tc2, quantity: 2 }),
       (err) => err.name === 'DamagedLotShortfallError' && err.available === 1,
     )
     assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 1)
     // a different product's id never draws from this lot
     await assert.rejects(
-      () => kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.os1, quantity: 1 }),
+      () => kernel.consumeDamagedLot(admittedKernel, { lotId: lot.id, productId: ids.os1, quantity: 1 }),
       /does not belong to this product/,
     )
     // restore comes back but clamps at the lot's original quantity
-    await kernel.restoreDamagedLot(db, { lotId: lot.id, quantity: 3 })
+    await kernel.restoreDamagedLot(admittedKernel, { lotId: lot.id, quantity: 3 })
     assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 4)
-    await kernel.restoreDamagedLot(db, { lotId: lot.id, quantity: 99 })
+    await kernel.restoreDamagedLot(admittedKernel, { lotId: lot.id, quantity: 99 })
     assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 4)
   })
 
@@ -331,6 +359,7 @@ async function run() {
     assert.match(atomicCreateMigration, /CREATE TABLE return_create_receipts/)
   })
 
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   console.log(`\n${passed} check(s) passed.`)
 }
 
