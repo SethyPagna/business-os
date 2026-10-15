@@ -3,6 +3,7 @@ import { getMergePreview, mergePossiblySameProducts, type ProductResolveChoices 
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { isRetryableFailure } from '../../utils/retryableFailure.ts'
 import { roundMoney4 } from '../../utils/moneyPrecision.ts'
+import { formatCostOrUnknown, knownCost } from '../../utils/costDisplay.ts'
 import { identityBarcodeKey, isRealBarcode } from '../../utils/productDetailRule.ts'
 import type { ProductConflictCluster, ProductConflictProduct } from '../../utils/selectedConflictMerge.ts'
 import type { ResolveCell, ResolveChoice, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
@@ -60,7 +61,7 @@ export type ProductResolvePreview = {
   needsStockChoice: boolean
   blocked: { code: string; operationId?: string } | null
   keeperStock: StockImpact | null
-  groupCost: { cost_price_usd?: number; cost_price_khr?: number } | null
+  groupCost: { cost_price_usd?: number | null; cost_price_khr?: number | null } | null
   /** Stock-in sessions whose Undo this merge closes (operation ids). */
   closesStockSessions: string[]
   choicesSupported: boolean
@@ -79,7 +80,7 @@ export type ProductResolveData = {
   choicesSupported: boolean
 }
 
-export type ProductResolveCost = { cost_price_usd: number; cost_price_khr?: number | null }
+export type ProductResolveCost = { cost_price_usd: number | null; cost_price_khr?: number | null }
 
 export type ProductResolveToken = {
   requestId: string
@@ -93,7 +94,7 @@ export type ProductResolveToken = {
 }
 
 type MergeKeep = {
-  cost_price_usd?: number
+  cost_price_usd?: number | null
   cost_price_khr?: number | null
   resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
   choices?: ProductResolveChoices
@@ -181,7 +182,7 @@ function readPreview(value: unknown): ProductResolvePreview {
     keeperStock: raw.keeperStock ? readImpact(raw.keeperStock) : null,
     closesStockSessions: Array.isArray(raw.closesStockSessions) ? raw.closesStockSessions.map(String) : [],
     groupCost: groupCost && 'cost_price_usd' in groupCost
-      ? { cost_price_usd: Number(groupCost.cost_price_usd) || 0, cost_price_khr: Number(groupCost.cost_price_khr) || 0 }
+      ? { cost_price_usd: knownCost(groupCost.cost_price_usd), ...(Object.hasOwn(groupCost, 'cost_price_khr') ? { cost_price_khr: knownCost(groupCost.cost_price_khr) } : {}) }
       : null,
     choicesSupported: raw.choicesSupported === true,
   }
@@ -397,12 +398,12 @@ function costPick(ctx: Context, canEdit: boolean): CostPick {
   return { kind: 'rule' }
 }
 
-function ruleCost(ctx: Context): { cost_price_usd: number; cost_price_khr: number } {
+function ruleCost(ctx: Context): ProductResolveCost {
   const fromPreview = ctx.merged.map((id) => ctx.data.previews.get(id)?.groupCost).find(Boolean)
   const keeper = ctx.keeperId === null ? undefined : recordOf(ctx, ctx.keeperId)
   return {
-    cost_price_usd: Number(fromPreview?.cost_price_usd ?? keeper?.cost_price_usd ?? 0) || 0,
-    cost_price_khr: Number(fromPreview?.cost_price_khr ?? keeper?.cost_price_khr ?? 0) || 0,
+    cost_price_usd: knownCost(fromPreview ? fromPreview.cost_price_usd : keeper?.cost_price_usd),
+    cost_price_khr: knownCost(fromPreview ? fromPreview.cost_price_khr : keeper?.cost_price_khr),
   }
 }
 
@@ -410,7 +411,7 @@ function chosenCost(ctx: Context, canEdit: boolean): ProductResolveCost {
   const pick = costPick(ctx, canEdit)
   if (pick.kind === 'source') {
     const product = recordOf(ctx, pick.id)
-    return { cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: product?.cost_price_khr == null ? null : Number(product.cost_price_khr) || 0 }
+    return { cost_price_usd: knownCost(product?.cost_price_usd), cost_price_khr: knownCost(product?.cost_price_khr) }
   }
   if (pick.kind === 'custom') return { cost_price_usd: pick.value }
   return ruleCost(ctx)
@@ -590,8 +591,8 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
   if (canViewCosts) {
     const pick = costPick(ctx, canEditCosts)
     const cost = chosenCost(ctx, canEditCosts)
-    const costRow = cells((id) => formatProductMoney(product(id)?.cost_price_usd))
-    const finalText = formatProductMoney(cost.cost_price_usd)
+    const costRow = cells((id) => formatCostOrUnknown(product(id)?.cost_price_usd, formatProductMoney, t))
+    const finalText = formatCostOrUnknown(cost.cost_price_usd, formatProductMoney, t)
     const ruleOption: ResolveOption = { id: 'rule', label: tr(t, 'resolve_cost_rule', 'Average of the costs') }
     rows.push({
       key: 'cost',
@@ -683,7 +684,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       items.push({ label: tr(t, 'barcode', 'Barcode'), value: String(keeper.barcode ?? '') })
       if ('brand' in keeper) items.push({ label: tr(t, 'brand', 'Brand'), value: String(keeper.brand ?? '') })
       if ('category' in keeper) items.push({ label: tr(t, 'category', 'Category'), value: String(keeper.category ?? '') })
-      if ('cost_price_usd' in keeper && options.canViewCosts) items.push({ label: tr(t, 'cost', 'Cost'), value: formatProductMoney(keeper.cost_price_usd) })
+      if ('cost_price_usd' in keeper && options.canViewCosts) items.push({ label: tr(t, 'cost', 'Cost'), value: formatCostOrUnknown(keeper.cost_price_usd, formatProductMoney, t) })
       items.push({ label: tr(t, 'selling_price', 'Selling price'), value: formatProductMoney(keeper.selling_price_usd) })
       if ('wholesale_price_usd' in keeper) items.push({ label: tr(t, 'wholesale_price', 'Wholesale price'), value: formatProductMoney(keeper.wholesale_price_usd) })
       const branches = Array.isArray(keeper.branch_stock) ? readImpact({ branches: keeper.branch_stock }).branches : []

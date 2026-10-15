@@ -376,6 +376,11 @@ test('the explanations live in InfoHints, not inline prose', () => {
   assert.match(dialog, /text=\{option\.hint\}/)
 })
 
+test('an unknown keeper stays unknown in the cost-move review model', () => {
+  assert.deepEqual(costMoveRows({ cost_price_usd: null }, { cost_price_usd: 5 }), [{ field: 'cost_price_usd', from: null, to: 5 }])
+  assert.deepEqual(costMoveRows({ cost_price_usd: 0 }, { cost_price_usd: 5 }), [{ field: 'cost_price_usd', from: 0, to: 5 }])
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

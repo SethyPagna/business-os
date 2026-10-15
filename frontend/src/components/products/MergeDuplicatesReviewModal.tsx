@@ -36,8 +36,8 @@ export type MergeDuplicatesPreviewGroup = {
    * was never true. The server takes one whole-cluster DISTINCT mean before
    * any row is folded, and this modal shows it before confirmation.
    */
-  costBefore?: Record<string, number>
-  costAfter?: Record<string, number>
+  costBefore?: Record<string, number | null>
+  costAfter?: Record<string, number | null>
   /** Invalid stored numeric values that block this whole identity cluster. */
   costRefusals?: Array<{ mergedId: number | null; field: string; code: string; error: string }>
   mergeable?: boolean
@@ -76,7 +76,7 @@ function formatCost(field: string, value: number): string {
 }
 
 /** The cost fields this group’s fold actually moves, as before -> after. */
-function costMoves(group: MergeDuplicatesPreviewGroup): Array<{ field: string; from: number; to: number }> {
+function costMoves(group: MergeDuplicatesPreviewGroup): Array<{ field: string; from: number | null; to: number }> {
   // The SAME function the pair dialog uses (mergeConfirmationRule), so the
   // whole-catalog dry run and the one-pair confirm cannot describe one fold
   // two different ways.
@@ -401,7 +401,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         <span className="text-gray-500 dark:text-gray-400">
                           {T(COST_FIELD_LABEL[move.field]?.[0] || move.field, COST_FIELD_LABEL[move.field]?.[1] || move.field)}
                         </span>
-                        <span className="line-through opacity-60">{formatCost(move.field, move.from)}</span>
+                        <span className="line-through opacity-60">{move.from === null ? T('cost_unknown', 'Unknown cost') : formatCost(move.field, move.from)}</span>
                         <span aria-hidden>{'\u2192'}</span>
                         <span className="font-medium text-gray-900 dark:text-gray-100">{formatCost(move.field, move.to)}</span>
                         <span className="text-gray-400">

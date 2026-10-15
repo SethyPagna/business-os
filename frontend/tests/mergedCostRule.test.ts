@@ -194,6 +194,13 @@ await runTest('resolveMergedCost survives a null row without throwing', () => {
   assert.equal(resolveMergedCost(rows).cost_price_usd, 4)
 })
 
+await runTest('NULL merge costs remain unknown without adding redacted fields', () => {
+  assert.deepEqual(resolveMergedCost([{ cost_price_usd: null }, { cost_price_usd: null }]), { cost_price_usd: null })
+  assert.deepEqual(resolveMergedCost([{}, {}]), {})
+  assert.equal(resolveMergedCost([{ cost_price_usd: 0 }, { cost_price_usd: null }]).cost_price_usd, 0)
+  assert.equal(resolveMergedCost([{ cost_price_usd: 0 }, { cost_price_usd: 5 }, { cost_price_usd: null }]).cost_price_usd, 5)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

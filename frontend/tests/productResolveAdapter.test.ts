@@ -498,5 +498,18 @@ await test('every key the adapter reads exists in both packs', () => {
   }
 })
 
+await test('picking an unknown source preserves NULL while a recorded zero remains zero', async () => {
+  const cluster: Cluster = { type: 'name', value: 'Nullable', severity: 'same_name', products: [
+    product(80, 'Nullable', '80', 5, 10),
+    product(81, 'Nullable', '81', 0, 10, 0, { cost_price_usd: null, cost_price_khr: null }),
+    product(82, 'Nullable', '82', 0, 10),
+  ] }
+  const { adapter, data } = await open(cluster, { view: true, edit: true }, { choices: true })
+  const unknownDraft = pick({ cost: { source: '81' } })
+  assert.equal(rowOf(adapter.rows(data, unknownDraft), 'cost').final.text, en.cost_unknown)
+  assert.deepEqual((await adapter.review(data, unknownDraft, signal)).token.cost, { cost_price_usd: null, cost_price_khr: null })
+  assert.deepEqual((await adapter.review(data, pick({ cost: { source: '82' } }), signal)).token.cost, { cost_price_usd: 0, cost_price_khr: 0 })
+})
+
 console.log(failed ? `\n${failed} test(s) failed` : '\nall product resolve adapter tests passed')
 process.exitCode = failed ? 1 : 0

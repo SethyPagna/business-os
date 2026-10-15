@@ -49,6 +49,17 @@ for (const [user, expected] of [
   assert.ok(html.includes('$50'), 'selling-price changes stay visible')
 }
 
+for (const language of ['en', 'km']) {
+  const labels = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
+  context.__costTestContext = { user: { permissions: { product_cost_view: true } } }
+  const renderFill = (before: number | null) => renderToStaticMarkup(React.createElement(Dialog, {
+    ...props, t: (key: string) => labels[key] || key,
+    identity: { same: true, differs: [], costVerdict: 'missing', costBefore: { cost_price_usd: before }, costAfter: { cost_price_usd: 5 }, costFill: [{ field: 'cost_price_usd', value: 5 }] },
+  }))
+  assert.ok(renderFill(null).includes(`line-through opacity-60">${labels.cost_unknown}</span>`), `${language}: real cost-fill component shows unknown keeper`)
+  assert.ok(renderFill(0).includes('line-through opacity-60">$0</span>'), `${language}: recorded zero remains numeric`)
+}
+
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const ReviewScreen = await loadComponent('../src/components/products/import/ProductServerImportReviewScreen.tsx')
 context.__costTestContext = { ...effectivePermissions({ permissions: { product_cost_edit: true } }) }

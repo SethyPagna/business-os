@@ -31,4 +31,13 @@ const quarantined = mergeSameDetailRows([
 ])
 assert.equal(quarantined.length, 2)
 
+assert.deepEqual(resolveProductMergeEconomics([{ cost_price_usd: null }, { cost_price_usd: null }]).merged, { cost_price_usd: null })
+assert.deepEqual(resolveProductMergeEconomics([{}, {}]).merged, {})
+assert.equal(resolveProductMergeEconomics([{ cost_price_usd: null }, { cost_price_usd: 0 }]).merged.cost_price_usd, 0)
+assert.equal(resolveProductMergeEconomics([{ cost_price_usd: 0 }, { cost_price_usd: 5 }]).merged.cost_price_usd, 5)
+assert.equal(mergeSameDetailRows([
+  { id: 10, name: 'Unknown', barcode: '123', cost_price_usd: null },
+  { id: 11, name: 'Unknown', barcode: '0123', cost_price_usd: null },
+])[0].cost_price_usd, null)
+
 console.log('productMergeKernel: all checks passed')

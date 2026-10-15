@@ -1,4 +1,5 @@
 import type { MergeIdentityDiff, MergePricingChange } from './MergeStockChoiceDialog'
+import { knownCost } from '../../utils/costDisplay.ts'
 
 // WHEN A MERGE MAY LAND WITHOUT ASKING -- one rule, one place.
 //
@@ -22,7 +23,7 @@ import type { MergeIdentityDiff, MergePricingChange } from './MergeStockChoiceDi
 /** Rounding scale for money comparisons: 4 decimal places, as roundCostUp4. */
 const COST_SCALE = 10000
 
-export type CostAverageRow = { field: string; from: number; to: number }
+export type CostAverageRow = { field: string; from: number | null; to: number }
 
 /**
  * The cost fields a fold actually MOVES, as before -> after rows. Shared by
@@ -31,16 +32,16 @@ export type CostAverageRow = { field: string; from: number; to: number }
  * back on the kept row's own cost is not one, and neither is a rounding hair.
  */
 export function costMoveRows(
-  before?: Record<string, number> | null,
-  after?: Record<string, number> | null,
+  before?: Record<string, number | null> | null,
+  after?: Record<string, number | null> | null,
 ): CostAverageRow[] {
   return Object.keys(after ?? {})
-    .map((field) => ({
-      field,
-      from: Number(before?.[field]) || 0,
-      to: Number(after?.[field]) || 0,
-    }))
-    .filter((row) => row.to && Math.round(row.from * COST_SCALE) !== Math.round(row.to * COST_SCALE))
+    .flatMap((field) => {
+      const from = knownCost(before?.[field])
+      const to = knownCost(after?.[field])
+      return to !== null && to > 0 && (from === null || Math.round(from * COST_SCALE) !== Math.round(to * COST_SCALE))
+        ? [{ field, from, to }] : []
+    })
 }
 
 /**

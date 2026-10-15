@@ -22,10 +22,10 @@ function round4(value: number): number {
 }
 
 export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, unknown>>): {
-  merged: Partial<Record<MergeField, number>>
+  merged: Partial<Record<MergeField, number | null>>
   issues: ProductMergeIssue[]
 } {
-  const merged: Partial<Record<MergeField, number>> = {}
+  const merged: Partial<Record<MergeField, number | null>> = {}
   const issues: ProductMergeIssue[] = []
   for (const field of [...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS]) {
     const values: number[] = []
@@ -36,7 +36,10 @@ export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, 
         issues.push({ field, rowId: Number.isSafeInteger(Number(row.id)) ? Number(row.id) : null, value: row[field], code: parsed.issue })
       } else if (parsed.value !== undefined) values.push(parsed.value)
     }
-    if (!values.length) continue
+    if (!values.length) {
+      if ((MERGE_COST_FIELDS as readonly string[]).includes(field) && rows.some(row => row[field] === null)) merged[field] = null
+      continue
+    }
     if ((MERGE_COST_FIELDS as readonly string[]).includes(field)) {
       const distinctPositive = [...new Set(values.filter((value) => value > 0))]
       merged[field] = distinctPositive.length

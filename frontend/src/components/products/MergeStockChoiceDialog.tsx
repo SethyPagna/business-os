@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
 import { costAverageRows } from './mergeConfirmationRule'
+import { knownCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
@@ -77,9 +78,9 @@ export type MergeIdentityDiff = {
   costVerdict?: 'same' | 'missing' | 'differs'
   costFill?: Array<{ field: string; value: number }>
   /** The kept row's cost as it stands, per currency field. */
-  costBefore?: Record<string, number>
+  costBefore?: Record<string, number | null>
   /** What the fold will write -- the mean of the distinct costs. */
-  costAfter?: Record<string, number>
+  costAfter?: Record<string, number | null>
   /** Fields the server refuses to average at all; the merge is blocked. */
   costOutliers?: Array<{ field: string; min: number; max: number }>
 }
@@ -274,7 +275,7 @@ export default function MergeStockChoiceDialog({
                 <div key={row.field} className="flex items-center justify-between gap-3">
                   <dt className="text-sky-700 dark:text-sky-400">{T(labelKey, labelFallback)}</dt>
                   <dd className="font-medium text-sky-900 dark:text-sky-200">
-                    <span className="line-through opacity-60">{formatPrice(row.field, row.from)}</span>
+                    <span className="line-through opacity-60">{row.from === null ? T('cost_unknown', 'Unknown cost') : formatPrice(row.field, row.from)}</span>
                     {' \u2192 '}
                     <span>{formatPrice(row.field, row.to)}</span>
                   </dd>
@@ -300,11 +301,12 @@ export default function MergeStockChoiceDialog({
           <dl className="space-y-0.5 text-xs">
             {costFill.map((fill) => {
               const [labelKey, labelFallback] = IDENTITY_FIELD_LABEL[fill.field] || [fill.field, fill.field]
+              const previousCost = knownCost(identity?.costBefore?.[fill.field])
               return (
                 <div key={fill.field} className="flex items-center justify-between gap-3">
                   <dt className="text-sky-700 dark:text-sky-400">{T(labelKey, labelFallback)}</dt>
                   <dd className="font-medium text-sky-900 dark:text-sky-200">
-                    <span className="line-through opacity-60">{formatPrice(fill.field, 0)}</span>
+                    <span className="line-through opacity-60">{previousCost === null ? T('cost_unknown', 'Unknown cost') : formatPrice(fill.field, previousCost)}</span>
                     {' → '}
                     <span>{formatPrice(fill.field, fill.value)}</span>
                   </dd>

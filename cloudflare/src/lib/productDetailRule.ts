@@ -421,12 +421,8 @@ export type MergedCostOutlier = {
  * one at $5 average to $4.50, not $4.09. Each currency field is resolved
  * independently.
  *
- * A cost of 0 is treated as NOT RECORDED and is excluded from the mean.
- * Both cost columns are `DEFAULT 0` and every importer writes 0 when the
- * source has no cost, so 0 is this schema's "unset", not a free item. Were
- * it averaged in, merging a $50.70 row with a legacy 0-cost row would halve
- * the cost and double the reported profit. If no row carries a cost, the
- * result is 0 -- unchanged from what every row already said.
+ * The owner excludes zero and unknown costs from the mean. With no positive
+ * cost, a recorded zero stays zero and an explicitly unknown cost stays null.
  *
  * SIMILARITY GUARD (owner ruling, 2026-09-04: "the add and divide is only for
  * those similar costs... not the 0 cost etc"). The 0 half is the exclusion
@@ -445,25 +441,28 @@ export type MergedCostOutlier = {
  * result can be spread over an existing row without clobbering it with zeros.
  */
 export function resolveMergedCostDetail(rows: MergeableCost[]): {
-  merged: Partial<Record<keyof MergeableCost, number>>
+  merged: Partial<Record<keyof MergeableCost, number | null>>
   outliers: MergedCostOutlier[]
 } {
   const fields: (keyof MergeableCost)[] = ['cost_price_usd', 'cost_price_khr']
-  const merged: Partial<Record<keyof MergeableCost, number>> = {}
+  const merged: Partial<Record<keyof MergeableCost, number | null>> = {}
   const outliers: MergedCostOutlier[] = []
   for (const field of fields) {
     const distinct = new Set<number>()
     let sawField = false
+    let sawZero = false
     for (const row of rows) {
       const raw = row?.[field]
-      if (raw === undefined || raw === null || raw === '') continue
+      if (raw === undefined || raw === '') continue
+      if (raw === null) { sawField = true; continue }
       const value = Number(raw)
       if (!Number.isFinite(value)) continue
       sawField = true
+      if (value === 0) sawZero = true
       if (value > 0) distinct.add(value)
     }
     if (!sawField) continue
-    if (!distinct.size) { merged[field] = 0; continue }
+    if (!distinct.size) { merged[field] = sawZero ? 0 : null; continue }
     const values = [...distinct]
     const min = Math.min(...values)
     const max = Math.max(...values)
@@ -483,7 +482,7 @@ export function resolveMergedCostDetail(rows: MergeableCost[]): {
  * per-row warnings, the merge endpoints' audit entry and response -- should
  * call resolveMergedCostDetail and surface `outliers` instead of this.
  */
-export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof MergeableCost, number>> {
+export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof MergeableCost, number | null>> {
   return resolveMergedCostDetail(rows).merged
 }
 

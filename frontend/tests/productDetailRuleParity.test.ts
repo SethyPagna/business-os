@@ -102,7 +102,8 @@ check('both actual rule modules compute nearest4 over raw distinct costs', () =>
     assert.equal(rule.roundCost4(-1.00005), -1.0001)
     assert.equal(rule.resolveMergedCost([1, 1.0001, 1.0003].map(cost_price_usd => ({ cost_price_usd }))).cost_price_usd, 1.0001)
     assert.equal(rule.resolveMergedCost([1.00001, 1.00004, 1.00009].map(cost_price_usd => ({ cost_price_usd }))).cost_price_usd, 1, 'distinct before rounding; no pre-rounded duplicate collapse')
-    assert.equal(rule.resolveMergedCost([{ cost_price_usd: null }]).cost_price_usd, undefined)
+    assert.equal(rule.resolveMergedCost([{ cost_price_usd: null }]).cost_price_usd, null)
+    assert.equal(Object.hasOwn(rule.resolveMergedCost([{}]), 'cost_price_usd'), false)
     assert.equal(rule.resolveMergedCost([{ cost_price_usd: 0 }]).cost_price_usd, 0)
   }
 })

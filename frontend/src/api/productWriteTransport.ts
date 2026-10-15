@@ -81,7 +81,7 @@ export type SelectedConflictGroupReviewGroup = {
     unit_source_ids: number[]
   }
   economics: {
-    merged: Partial<Record<'cost_price_usd' | 'cost_price_khr' | 'selling_price_usd' | 'selling_price_khr' | 'wholesale_price_usd' | 'wholesale_price_khr', number>>
+    merged: Partial<Record<'cost_price_usd' | 'cost_price_khr' | 'selling_price_usd' | 'selling_price_khr' | 'wholesale_price_usd' | 'wholesale_price_khr', number | null>>
     distinctCosts: Partial<Record<'cost_price_usd' | 'cost_price_khr', number[]>>
     issues: Array<{ field: string; rowId: number | null; value: unknown; code: 'negative' | 'malformed' }>
   }
@@ -462,7 +462,7 @@ export function mergePossiblySameProducts(
   // cost edit permission; the Worker refuses it otherwise) replaces the
   // averaged one, and `choices` set the survivor's other fields.
   keep?: {
-    cost_price_usd?: number
+    cost_price_usd?: number | null
     cost_price_khr?: number | null
     resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
     choices?: ProductResolveChoices
