@@ -231,4 +231,36 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
   assert.equal(snapshot(),capturedBefore)
   assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE 'cost-review-edit:%' OR key='stock_transaction_permit'").get().n,0)
   console.log('PASS captured confirmation failure rolls back cost, review, audit and ephemeral capture together')
+  const importSource=fs.readFileSync(path.join(root,'lib/importEngine.ts'),'utf8')
+  const composerStart=importSource.indexOf('        const pushImportedCostEntry =')
+  const composerEnd=importSource.indexOf('        let rowWriteGroupFinished',composerStart)
+  assert.ok(composerStart>0 && composerEnd>composerStart)
+  const composer=ts.transpileModule(`(function(productId,next,originalUsd,hasReceipt){
+    const d={__costPriceUsdProvided:originalUsd===null?0:1,__costPriceKhrProvided:0},r={}
+    const receiptUnitCostUsd=originalUsd,importCostActor={id:1,name:'Admin'}
+    const lastReceiptRowIndex=new Map(hasReceipt?[[productId,0]]:[]),importRowIndex=new Map([[r,0]])
+    let rowWriteGroup=[],costConfirmation=null
+    ${importSource.slice(composerStart,composerEnd)}
+    pushImportedCostEntry(productId,{usd:next})
+    return [...rowWriteGroup,{sql:'UPDATE products SET cost_price_usd=@next WHERE id=@id',params:{next,id:productId}},...(costConfirmation?.after||[])]
+  })`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
+  const compose=new Function('explicitCostReviewWritePlan','typedCostEntryBeforeWriteStatement',`return ${composer}`)(helper.explicitCostReviewWritePlan,load(path.join(root,'lib/catalogCostRecompute.ts')).typedCostEntryBeforeWriteStatement)
+  for(const separate of [false,true]) {
+    const productId=seed(7),first=compose(productId,9,9,false),second=compose(productId,null,null,false)
+    if(separate) { await transaction.executeStockTransaction(compat,first,'once');await transaction.executeStockTransaction(compat,second,'once') }
+    else await transaction.executeStockTransaction(compat,[...first,...second],'once')
+    const row=raw.prepare('SELECT cost_review_key,cost_price_usd FROM products WHERE id=?').get(productId)
+    assert.equal(row.cost_review_key,null)
+    assert.equal(row.cost_price_usd,null)
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity_id=? AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.source')='explicit-cost-edit'").get(String(productId)).n,1)
+  }
+  const meanId=seed(5)
+  await transaction.executeStockTransaction(compat,compose(meanId,7,9,false),'once')
+  assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(meanId).cost_review_key,'a'.repeat(32))
+  const receiptId=seed(7)
+  await transaction.executeStockTransaction(compat,compose(receiptId,9,9,true),'once')
+  assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(receiptId).cost_review_key,null)
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(receiptId).n,0)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE 'cost-review-edit:%' OR key='stock_transaction_permit'").get().n,0)
+  console.log('PASS actual import cost composer confirms per row across chunks; computed mean stays tagged and receipt suppression does not erase explicit intent')
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => raw.close())

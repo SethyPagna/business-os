@@ -288,6 +288,7 @@ const productImagePermissionModule = loadPureSibling('productImagePermission', (
 })
 
 function requireForProductBatches(request) {
+  if (request === './stockTransaction') return loadPureSibling('stockTransaction')
   if (request === './receivingBranch') return loadPureSibling('receivingBranch')
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
@@ -371,6 +372,8 @@ const originalLoad = Module._load
 // The './db' stub below is one object so the errors.csv block can give it a getDb.
 const dbStub = { isImportMaintenanceFenceError: () => false }
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockTransaction') return loadPureSibling('stockTransaction')
+  if (request === './productCostReview') return loadPureSibling('productCostReview')
   if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
   if (request === './movementCostSnapshot') return movementCostSnapshotModule
@@ -931,7 +934,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/const productStatementGroups/.test(source))
   assert.ok(/finishProductRowWriteGroup/.test(block))
   assert.ok(!/\bstatements\.push\(/.test(block), 'product row writes must never return to raw statement chunking')
-  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter')
+  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups, D1_IMPORT_BATCH_CHUNK_SIZE, true\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter and stock admission')
   console.log('PASS product import keeps each row\'s catalog, stock, batch, and merge-evidence writes in one canonical-branch guarded batch')
 }
 
