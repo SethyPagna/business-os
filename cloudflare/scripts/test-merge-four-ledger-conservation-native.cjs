@@ -8,21 +8,33 @@ async function check(name, run) {
   try { await run(); passed++; console.log(`PASS ${name}`) }
   catch (error) { failed++; console.error(`FAIL ${name}\n${error.stack}`) }
 }
+function fixtureWrite(h, run) {
+  h.raw.db.exec("BEGIN; INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+  try {
+    run()
+    h.raw.db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT")
+  } catch (error) { h.raw.db.exec('ROLLBACK'); throw error }
+  assert.equal(h.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+}
+
 function fixture() {
   const h = createProductsRouteHarness({ user: ADMIN })
-  h.raw.db.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0);
-    INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(1,'Twin','777',1,0),(2,'Twin','777',1,0);`)
+  fixtureWrite(h, () => h.raw.db.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0);
+    INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(1,'Twin','777',1,0),(2,'Twin','777',1,0);`))
+  assert.throws(() => h.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,1)').run(), /stock_transaction_required/)
   return h
 }
 function seed(h, ledger, id = 2, branch = 1, qty = 3) {
-  if (ledger === 'cache') h.raw.prepare('UPDATE products SET stock_quantity=? WHERE id=?').run([qty,id])
-  if (ledger === 'branch') h.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run([id,branch,qty])
-  if (ledger === 'lot') {
-    const batchId = id * 10 + branch
-    h.raw.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)').run([batchId,id,`lot-${branch}`,branch])
-    h.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run([batchId,branch,qty])
-  }
-  if (ledger === 'damaged') h.raw.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,reason) VALUES(?,?,?,?,'synthetic')").run([id,branch,qty,qty])
+  fixtureWrite(h, () => {
+    if (ledger === 'cache') h.raw.prepare('UPDATE products SET stock_quantity=? WHERE id=?').run([qty,id])
+    if (ledger === 'branch') h.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run([id,branch,qty])
+    if (ledger === 'lot') {
+      const batchId = id * 10 + branch
+      h.raw.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)').run([batchId,id,`lot-${branch}`,branch])
+      h.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run([batchId,branch,qty])
+    }
+    if (ledger === 'damaged') h.raw.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,reason) VALUES(?,?,?,?,'synthetic')").run([id,branch,qty,qty])
+  })
 }
 function digest(h) {
   return JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','inventory_movements','action_history','audit_logs','undo_snapshots'].map(table => [table,h.raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]))
@@ -114,10 +126,17 @@ async function main() {
   })
   await check('redo propagates late independent stock refusal without changing the merge graph',async () => {
     const h=fixture();assert.equal((await pair(h)).status,200)
-    const history=h.raw.prepare("SELECT id FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge' ORDER BY id DESC LIMIT 1").get()
+    const history=h.raw.prepare("SELECT id,scope FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge' ORDER BY id DESC LIMIT 1").get()
     const app=h.load('routes/actionHistory.ts').default
     const run=async direction=>{
-      const response=await app.request(`http://local/${history.id}/${direction}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({require_applied:true})},{DB:h.raw},{waitUntil(){},passThroughOnException(){}})
+      const listed=await app.request(`http://local/?scope=${encodeURIComponent(history.scope)}`,{},{DB:h.raw},{waitUntil(){},passThroughOnException(){}})
+      assert.equal(listed.status,200)
+      const current=(await listed.json()).items.find(row=>row.id===history.id)
+      assert.ok(current,'the current history row is visible')
+      const pointer=current[`${direction}_payload`]
+      assert.equal(pointer.merge_version,3)
+      assert.ok(Number.isSafeInteger(pointer.generation))
+      const response=await app.request(`http://local/${history.id}/${direction}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({require_applied:true,expected_generation:pointer.generation})},{DB:h.raw},{waitUntil(){},passThroughOnException(){}})
       return {status:response.status,json:await response.json()}
     }
     assert.equal((await run('undo')).status,200)

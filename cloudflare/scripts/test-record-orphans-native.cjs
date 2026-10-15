@@ -458,6 +458,14 @@ async function main() {
     } catch (error) { report('the audited schema is the schema the Worker actually runs on', error) }
 
     const headers = { 'content-type': 'application/json', 'x-test-permissions': JSON.stringify({ all: true }) }
+    const fixtureWrite = async (statements) => {
+      await db.batch([
+        db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+        ...statements,
+        db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+      ])
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+    }
     const call = async (url, body, method = 'POST') => {
       const response = await mf.dispatchFetch(`http://local${url}`, {
         method, headers, body: body === undefined ? undefined : JSON.stringify(body),
@@ -474,7 +482,7 @@ async function main() {
     const one = async (sql) => (await db.prepare(sql).first())
 
     // -- seed ---------------------------------------------------------------
-    await db.batch([
+    await fixtureWrite([
       db.prepare("INSERT INTO roles(id,code,name,permissions) VALUES(1,'admin','Admin','{\"all\":true}')"),
       db.prepare("INSERT INTO users(id,username,name,password,role_id,permissions,is_active) VALUES(7,'admin','Fixture Admin','x',1,'{\"all\":true}',1)"),
       db.prepare("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)"),
@@ -518,7 +526,7 @@ async function main() {
     }
     const allocation = { version: 1, lines: [{ line_key: 'orphan-return-line', amount: 20 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
     const priced = kernel.materializeCapturedPricingRow({ id: 900, product_id: 1 }, pool, { 'orphan-return-line': 2 }, 'orphan-return-line', allocation)
-    await db.batch([
+    await fixtureWrite([
       db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(500,1,'orphan-lot','ORPHAN-LOT','2026-09-01',1,1)"),
       db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)'),
       db.prepare(`INSERT INTO sales(id,receipt_number,branch_id,branch_name,customer_id,customer_name,exchange_rate,subtotal_usd,discount_usd,
@@ -536,6 +544,7 @@ async function main() {
       db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(900,500,1,2,0)'),
     ])
 
+    await assert.rejects(db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1').run(), /stock_transaction_required/)
     const steps = []
     const step = (name, run) => steps.push({ name, run })
 
@@ -733,10 +742,17 @@ async function main() {
     })
 
     step('action-history undo then redo of the merge', async () => {
-      const row = await one("SELECT id FROM action_history WHERE reversible=1 AND status='undoable' ORDER BY id DESC LIMIT 1")
+      const row = await one("SELECT id,scope FROM action_history WHERE reversible=1 AND status='undoable' ORDER BY id DESC LIMIT 1")
       assert.ok(row && row.id, 'no reversible action-history row was recorded by the writers above')
-      ok(await call(`/api/action-history/${row.id}/undo`, { require_applied: true }), 'POST /api/action-history/:id/undo')
-      ok(await call(`/api/action-history/${row.id}/redo`, { require_applied: true }), 'POST /api/action-history/:id/redo')
+      for (const direction of ['undo', 'redo']) {
+        const listed = ok(await call(`/api/action-history?scope=${encodeURIComponent(row.scope)}`, undefined, 'GET'), 'GET /api/action-history')
+        const current = listed.items.find(item => item.id === row.id)
+        assert.ok(current, 'the current history row is visible')
+        const pointer = current[`${direction}_payload`]
+        assert.equal(pointer.merge_version, 3)
+        assert.ok(Number.isSafeInteger(pointer.generation))
+        ok(await call(`/api/action-history/${row.id}/${direction}`, { require_applied: true, expected_generation: pointer.generation }), `POST /api/action-history/:id/${direction}`)
+      }
     })
 
     const state = {}

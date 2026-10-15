@@ -32,14 +32,26 @@ async function check(name, fn) {
   }
 }
 
+function fixtureWrite(h, run) {
+  h.raw.db.exec("BEGIN; INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+  try {
+    run()
+    h.raw.db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT")
+  } catch (error) { h.raw.db.exec('ROLLBACK'); throw error }
+  assert.equal(h.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+}
+
 function fixture(products) {
   const h = createProductsRouteHarness({ user: ADMIN })
   h.setUser(ADMIN)
   h.raw.db.exec(`INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1), (2, 'Warehouse', 0, 1);`)
-  for (const p of products) {
-    h.raw.prepare('INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active) VALUES(?,?,?,?,?,0,1)')
-      .run([p.id, p.name, p.barcode, 2, 5])
-  }
+  fixtureWrite(h, () => {
+    for (const p of products) {
+      h.raw.prepare('INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active) VALUES(?,?,?,?,?,0,1)')
+        .run([p.id, p.name, p.barcode, 2, 5])
+    }
+  })
+  assert.throws(() => h.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,1)').run(), /stock_transaction_required/)
   const sessions = h.load('lib/stockSession.ts')
   const env = { DB: h.raw }
   let counter = 0
@@ -167,14 +179,23 @@ async function main() {
     assert.equal(shelf(f), 10)
   })
 
-  await check('DISCRIMINATING: a merge REDO that meets a late receipt is a 409 merge_conflict_retry from History (not a 500), strands nothing, and the retry succeeds', async () => {
+  await check('DISCRIMINATING: a current merge REDO refuses a late receipt and its immutable retry preserves the graph', async () => {
     const f = fixture(TWINS)
     await f.receive(2, 4)
     assert.equal((await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })).status, 200)
-    const mergeHistoryId = one(f, "SELECT id FROM action_history WHERE undo_payload LIKE '%product.merge%' ORDER BY id DESC LIMIT 1").id
+    const mergeHistory = one(f, "SELECT id, scope FROM action_history WHERE undo_payload LIKE '%product.merge%' ORDER BY id DESC LIMIT 1")
+    const mergeHistoryId = mergeHistory.id
     const history = async (direction) => {
-      const res = await f.h.load('routes/actionHistory.ts').default.request(`http://local/${mergeHistoryId}/${direction}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ require_applied: true }),
+      const app = f.h.load('routes/actionHistory.ts').default
+      const listed = await app.request(`http://local/?scope=${encodeURIComponent(mergeHistory.scope)}`, {}, { DB: f.h.raw }, { waitUntil() {}, passThroughOnException() {} })
+      assert.equal(listed.status, 200)
+      const current = (await listed.json()).items.find(row => row.id === mergeHistoryId)
+      assert.ok(current, 'the current history row is visible')
+      const pointer = current[`${direction}_payload`]
+      assert.equal(pointer.merge_version, 3)
+      assert.ok(Number.isSafeInteger(pointer.generation))
+      const res = await app.request(`http://local/${mergeHistoryId}/${direction}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ require_applied: true, expected_generation: pointer.generation }),
       }, { DB: f.h.raw }, { waitUntil() {}, passThroughOnException() {} })
       return { status: res.status, json: await res.json().catch(() => null) }
     }
@@ -188,8 +209,11 @@ async function main() {
     assert.equal(refused.json.code, 'merge_conflict_retry')
     assert.equal(strandedOnInactive(f), 0)
     assert.equal(one(f, 'SELECT COUNT(*) AS n FROM products WHERE is_active = 1').n, 2, 'the products stay unmerged')
+    const afterReceipt = digest(f)
     const retried = await history('redo')
-    assert.equal(retried.status, 200, JSON.stringify(retried.json))
+    assert.equal(retried.status, 409, JSON.stringify(retried.json))
+    assert.equal(retried.json.code, 'undo_record_changed')
+    assert.equal(digest(f), afterReceipt, 'the immutable receipt retry preserves all stock and history rows')
     assert.equal(strandedOnInactive(f), 0)
     assert.equal(shelf(f), 10)
     assert.equal(shelf(f), lots(f))
@@ -208,8 +232,10 @@ async function main() {
     const f = fixture(TWINS)
     await f.receive(2, 4)
     const hook = interleave(f, async (discardedId) => {
-      f.h.raw.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id = ?').run([discardedId])
-      f.h.raw.prepare("INSERT INTO inventory_movements(product_id, product_name, branch_id, movement_type, quantity, reason) VALUES(?, 'Gloss One', 1, 'sale', -1, 'synthetic sale')").run([discardedId])
+      fixtureWrite(f.h, () => {
+        f.h.raw.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id = ?').run([discardedId])
+        f.h.raw.prepare("INSERT INTO inventory_movements(product_id, product_name, branch_id, movement_type, quantity, reason) VALUES(?, 'Gloss One', 1, 'sale', -1, 'synthetic sale')").run([discardedId])
+      })
     })
     const res = await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
     hook.restore()
@@ -222,12 +248,12 @@ async function main() {
   async function lotsFixture(count) {
     const f = fixture(TWINS)
     // Written directly: one real stock-in session per lot would take minutes.
-    f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
+    fixtureWrite(f.h, () => f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
       INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active, received_quantity)
       SELECT 2, 'lot-' || i, i, 1, 1 FROM n;
       INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) SELECT id, 1, 1 FROM product_batches WHERE variant_product_id = 2;
       INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(2, 1, ${count});
-      UPDATE products SET stock_quantity = ${count} WHERE id = 2;`)
+      UPDATE products SET stock_quantity = ${count} WHERE id = 2;`))
     return f
   }
   const maxStatements = (f) => {
@@ -266,12 +292,12 @@ async function main() {
 
   await check('DISCRIMINATING: a case too large for one atomic batch (many lots that fold into the keeper\'s) is a coded 409 that changes nothing, not a 500', async () => {
     const f = fixture(TWINS)
-    f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30)
+    fixtureWrite(f.h, () => f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30)
       INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active, received_quantity)
       SELECT 1, 'shared-' || i, i, 1, 1 FROM n UNION ALL SELECT 2, 'shared-' || i, i, 1, 1 FROM n;
       INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) SELECT id, 1, 1 FROM product_batches;
       INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 30), (2, 1, 30);
-      UPDATE products SET stock_quantity = 30;`)
+      UPDATE products SET stock_quantity = 30;`))
     const before = digest(f)
     const res = await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
     assert.equal(res.status, 409, JSON.stringify(res.json))
@@ -281,7 +307,7 @@ async function main() {
 
   await check('the lot-repoint chunking keeps batch numbers unique and increasing on the survivor', async () => {
     const f = await lotsFixture(30)
-    f.h.raw.prepare("INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active) VALUES(1, 'keeper-own', 5, 1)").run([])
+    fixtureWrite(f.h, () => f.h.raw.prepare("INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active) VALUES(1, 'keeper-own', 5, 1)").run([]))
     const res = await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     const numbers = f.h.raw.prepare('SELECT batch_number FROM product_batches WHERE variant_product_id = 1 ORDER BY batch_number').all([]).map((r) => Number(r.batch_number))
