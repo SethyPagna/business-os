@@ -21,6 +21,8 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
 import { STOCK_LOT_SET_KIND, notifyStockLotSet } from '../lib/stockLotAdjustment'
 import { STOCK_IN_LINE_EDIT_KIND, notifyStockInLineEdit } from '../lib/stockInLineEdit'
+import { productMergeGroupPrefixFingerprint } from '../lib/undoAppliers'
+import { parseMergeCostOutcome } from '../lib/productCostReview'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -161,7 +163,65 @@ function visibleHistoryReplayResponse(response: Record<string, unknown>, user: S
   return Object.fromEntries(Object.keys(response).map(key => [key, key === 'payload' ? projected.undo_payload : projected.response_json[key]]))
 }
 
-async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
+export async function pendingGroupRedoReceipts(db: ReturnType<typeof getDb>, rows: ActionHistoryRow[], user: SessionUser) {
+  const candidates = rows.filter(row => row.status === 'recorded' && !Number(row.reversible) && row.last_error == null
+    && Number(row.created_by_id) === Number(user.id) && canUseNamedAppliers(user, [parseJson(row.undo_payload), parseJson(row.redo_payload)])
+    && parseJson(row.redo_payload).applier === PRODUCT_MERGE_GROUP_ACTION_KIND && parseJson(row.redo_payload).merge_version === 3)
+  const found = new Map<number, { version: 1; history_id: number; group_operation_id: string; expected_generation: number }>()
+  if (!candidates.length) return found
+  const metadata = await db.prepare(`SELECT g.action_history_id,g.review_id,g.group_key,g.operation_id,g.reversal_generation,r.actor_id,
+    s.id snapshot_id,s.created_by_id snapshot_actor,s.status snapshot_status,
+    json_remove(CASE WHEN json_valid(s.payload_json) THEN s.payload_json ELSE '{}' END,'$.graph_receipt.graph_state') group_payload,
+    json_type(CASE WHEN json_valid(s.payload_json) THEN s.payload_json ELSE '{}' END,'$.graph_receipt.graph_state') graph_type,
+    m.member_ordinal,m.product_id,m.role,m.status member_status,m.undo_snapshot_id,m.operation_id child_operation,
+    c.status child_status,c.created_by_id child_actor,
+    CASE WHEN json_array_length(json_extract(c.payload_json,'$.dupImagesBefore'))>0
+      OR json_array_length(json_extract(c.payload_json,'$.imagesMovedToKeeper'))>0
+      OR (json_type(c.payload_json,'$.dupImagePathBefore') IS NOT NULL AND trim(COALESCE(json_extract(c.payload_json,'$.keeperImagePathBefore'),''))=''
+        AND trim(COALESCE(json_extract(c.payload_json,'$.dupImagePathBefore'),''))!='') THEN 1 ELSE 0 END changes_images,
+    json_object('keeperId',json_extract(c.payload_json,'$.keeperId'),'dupId',json_extract(c.payload_json,'$.dupId'),
+      'operationId',json_extract(c.payload_json,'$.operationId'),'fingerprintPending',json_extract(c.payload_json,'$.fingerprintPending'),
+      'costReviewOutcome',json_extract(c.payload_json,'$.costReviewOutcome')) child_payload
+    FROM product_conflict_action_groups g JOIN product_conflict_action_reviews r ON r.id=g.review_id
+    JOIN action_history h ON h.id=g.action_history_id
+    JOIN undo_snapshots s ON s.id=json_extract(CASE WHEN json_valid(h.redo_payload) THEN h.redo_payload ELSE '{}' END,'$.snapshot_id') AND s.kind='product.merge.group'
+    JOIN product_conflict_action_group_members m ON m.review_id=g.review_id AND m.group_ordinal=g.ordinal
+    LEFT JOIN undo_snapshots c ON c.id=m.undo_snapshot_id AND c.kind='product.merge.group.child' AND json_valid(c.payload_json)
+    WHERE g.action_history_id IN (SELECT value FROM json_each(@ids)) ORDER BY g.action_history_id,m.member_ordinal`)
+    .all<Record<string, unknown>>({ ids: JSON.stringify(candidates.map(row => row.id)) })
+  for (const row of candidates) {
+    const pointer = parseJson(row.redo_payload), undo = parseJson(row.undo_payload)
+    const keys = 'applier,generation,group_key,merge_version,operation_id,review_id,snapshot_id'
+    if (Object.keys(pointer).sort().join(',') !== keys || Object.keys(undo).sort().join(',') !== keys
+      || Object.keys(pointer).some(key => pointer[key] !== undo[key]) || !Number.isSafeInteger(pointer.generation) || Number(pointer.generation) < 1
+      || !/^product-merge-group-[a-f0-9]{64}$/.test(String(pointer.operation_id))) continue
+    const members = metadata.filter(item => Number(item.action_history_id) === Number(row.id)), first = members[0]
+    if (!first || first.review_id !== pointer.review_id || first.group_key !== pointer.group_key || first.operation_id !== pointer.operation_id
+      || Number(first.snapshot_id) !== pointer.snapshot_id || first.reversal_generation !== pointer.generation
+      || Number(first.actor_id) !== Number(user.id) || Number(first.snapshot_actor) !== Number(user.id) || first.snapshot_status !== 'applied' || first.graph_type !== 'text') continue
+    const group = parseJson(first.group_payload), receipt = group.graph_receipt as Record<string, unknown> | undefined
+    const children = members.filter(item => item.undo_snapshot_id != null), keepers = members.filter(item => item.role === 'keeper')
+    const ids = children.map(item => Number(item.undo_snapshot_id))
+    if (keepers.length !== 1 || keepers[0].undo_snapshot_id != null || members.length !== children.length + 1 || !ids.length || new Set(ids).size !== ids.length
+      || JSON.stringify(group.child_snapshot_ids) !== JSON.stringify(ids) || group.version !== 1 || group.generation !== pointer.generation
+      || Object.keys(group).sort().join(',') !== 'child_snapshot_ids,generation,graph_receipt,group_key,prefix_fingerprint,review_id,version'
+      || Object.keys(receipt || {}).sort().join(',') !== 'applied_prefix,generation,operation_id,version'
+      || group.review_id !== pointer.review_id || group.group_key !== pointer.group_key || receipt?.version !== 1
+      || receipt.operation_id !== pointer.operation_id || receipt.generation !== pointer.generation || receipt.applied_prefix !== ids.length
+      || group.prefix_fingerprint !== await productMergeGroupPrefixFingerprint(String(pointer.review_id), String(pointer.group_key), ids, Number(pointer.generation))) continue
+    const parsed = children.map(item => ({ item, payload: parseJson(item.child_payload) }))
+    if (parsed.some(({ item, payload }) => item.role !== 'merged' || item.member_status !== 'undo_ready' || item.child_status !== 'applied'
+      || Number(item.child_actor) !== Number(user.id) || payload.operationId !== item.child_operation || payload.dupId !== item.product_id
+      || payload.keeperId !== keepers[0].product_id || parseMergeCostOutcome(payload.costReviewOutcome)?.keeperId !== keepers[0].product_id
+      || (payload.fingerprintPending !== 0 && payload.fingerprintPending !== 1))
+      || parsed.filter(({ payload }) => payload.fingerprintPending === 1).length !== 1 || parsed.at(-1)?.payload.fingerprintPending !== 1
+      || (children.some(item => Number(item.changes_images) === 1) && getActionTier(user, 'products', 'image') !== 'full')) continue
+    found.set(Number(row.id), { version: 1, history_id: Number(row.id), group_operation_id: String(pointer.operation_id), expected_generation: Number(pointer.generation) - 1 })
+  }
+  return found
+}
+
+async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env, pendingRedo?: { version: 1; history_id: number; group_operation_id: string; expected_generation: number }) {
   const undoPayload = parseJson(row.undo_payload)
   const redoPayload = parseJson(row.redo_payload)
   // K1 slice 2: tells the client this row's next transition can be replayed
@@ -183,6 +243,7 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
+    ...(pendingRedo ? { pending_redo: pendingRedo } : {}),
     server_replayable: !!(applier
       && !choicePermissionError
       && canUseNamedAppliers(user, [undoPayload, redoPayload])
@@ -232,7 +293,8 @@ app.get('/', async (c) => {
         ORDER BY updated_at DESC, id DESC LIMIT @limit
       `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, ...cutoverParams, limit })
     }
-    return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
+    const pending = await pendingGroupRedoReceipts(db, rows, user)
+    return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env, pending.get(Number(row.id))))) })
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)

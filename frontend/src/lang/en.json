@@ -2435,6 +2435,7 @@
   "history_no_longer_reversible": "No longer reversible",
   "history_no_longer_reversible_hint": "This can only be undone/redone from the session where it happened.",
   "history_recorded_only": "Recorded",
+  "history_check_saved_redo": "Check saved redo receipt",
   "history_undo_closed_merged": "Undo closed: products were merged",
   "history_undo_closed_branch_retired": "Undo closed: done at the old branch before the branch consolidation",
   "history_undo_closed_branch_cutover_move": "Undo closed: branch consolidation",
