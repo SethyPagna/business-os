@@ -337,13 +337,35 @@ function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionU
   }
 }
 
+async function readMergeReplayPermissionSnapshot(env: Env, payload: Record<string, unknown>): Promise<{ payload_json: string } | undefined> {
+  const kind = String(payload.applier || ''), snapshotId = Number(payload.snapshot_id || 0)
+  if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return undefined
+  return getDb(env).prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+    .get<{ payload_json: string }>([snapshotId, kind])
+}
+
 export async function mergeReplayChoicePermissionError(env: Env, payload: Record<string, unknown>, user: SessionUser): Promise<string | null> {
+  if (!['product.merge', 'product.merge.bulk'].includes(String(payload.applier || ''))) return null
+  return mergeReplayChoicePermissionFromSnapshot(payload, user, await readMergeReplayPermissionSnapshot(env, payload))
+}
+
+export async function mergeReplayChangesProductImages(env: Env, payload: Record<string, unknown>, direction: 'undo' | 'redo'): Promise<boolean> {
+  return mergeReplayImagesFromSnapshot(env, payload, direction, await readMergeReplayPermissionSnapshot(env, payload))
+}
+
+export async function mergeReplayPermissionEffects(env: Env, payload: Record<string, unknown>, user: SessionUser, direction: 'undo' | 'redo'): Promise<{ changesProductImages: boolean; choicePermissionError: string | null }> {
+  const snap = await readMergeReplayPermissionSnapshot(env, payload)
+  return {
+    changesProductImages: await mergeReplayImagesFromSnapshot(env, payload, direction, snap),
+    choicePermissionError: mergeReplayChoicePermissionFromSnapshot(payload, user, snap),
+  }
+}
+
+function mergeReplayChoicePermissionFromSnapshot(payload: Record<string, unknown>, user: SessionUser, snap: { payload_json: string } | undefined): string | null {
   const kind = String(payload.applier || '')
   if (kind !== 'product.merge' && kind !== 'product.merge.bulk') return null
   const snapshotId = Number(payload.snapshot_id || 0)
   if (!Number.isInteger(snapshotId) || snapshotId <= 0) return 'product_edit_permission_required'
-  const snap = await getDb(env).prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-    .get<{ payload_json: string }>([snapshotId, kind])
   if (!snap) return 'product_edit_permission_required'
   try {
     const parsed = JSON.parse(snap.payload_json) as MergeReversal & { reversals?: MergeReversal[] }
@@ -371,17 +393,16 @@ function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
 }
 
 /** Whether this saved merge direction will change a cover or gallery. */
-export async function mergeReplayChangesProductImages(
+async function mergeReplayImagesFromSnapshot(
   env: Env,
   payload: Record<string, unknown>,
   direction: 'undo' | 'redo',
+  snap: { payload_json: string } | undefined,
 ): Promise<boolean> {
   const kind = String(payload.applier || '')
   const snapshotId = Number(payload.snapshot_id || 0)
   if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return false
   const db = getDb(env)
-  const snap = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-    .get<{ payload_json: string }>([snapshotId, kind])
   // A group pointer fans out to child snapshots. Missing or malformed group
   // state fails closed: the replay itself will reject it, and history must not
   // advertise the operation to an actor without image authority meanwhile.

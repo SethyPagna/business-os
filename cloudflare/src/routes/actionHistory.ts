@@ -6,7 +6,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -174,12 +174,10 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   const applier = replayable
     ? resolveUndoApplier(String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload)
     : null
-  const replayChangesImages = applier
-    ? await mergeReplayChangesProductImages(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
-    : false
-  const choicePermissionError = applier
-    ? await mergeReplayChoicePermissionError(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, user)
-    : null
+  const replayPermissionEffects = applier
+    ? await mergeReplayPermissionEffects(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, user, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
+    : { changesProductImages: false, choicePermissionError: null }
+  const { changesProductImages: replayChangesImages, choicePermissionError } = replayPermissionEffects
   return {
     ...row,
     reversible: !!row.reversible,
@@ -457,10 +455,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
     const serverManagedReplay = !!(applier && isServerManagedPayload(payload))
-    const replayChangesProductImages = applier
-      ? await mergeReplayChangesProductImages(c.env, payload, direction)
-      : false
-    const choicePermissionError = applier ? await mergeReplayChoicePermissionError(c.env, payload, user) : null
+    const replayPermissionEffects = applier
+      ? await mergeReplayPermissionEffects(c.env, payload, user, direction)
+      : { changesProductImages: false, choicePermissionError: null }
+    const { changesProductImages: replayChangesProductImages, choicePermissionError } = replayPermissionEffects
     if (choicePermissionError) return c.json({ success: false, code: choicePermissionError, error: 'Current permission is required to replay the saved Resolve choices.' }, 403)
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but

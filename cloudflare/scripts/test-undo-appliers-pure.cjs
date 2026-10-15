@@ -130,8 +130,10 @@ new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst)
 // moneyPrecision, which loadModule already maps).
 const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
 const catalogCostRecomputeKernel = loadModule('lib/catalogCostRecompute.ts', require)
+const productCostReviewKernel = loadModule('lib/productCostReview.ts', id => id === './catalogCostRecompute' ? catalogCostRecomputeKernel : require(id))
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './catalogCostRecompute') return catalogCostRecomputeKernel
+  if (id === './productCostReview') return productCostReviewKernel
   if (id === './actorSnapshot') return actorSnapshotKernel
   if (id === './saleMoneyPrecision') return saleMoneyPrecisionKernel
   if (id === './productMerge') return productMergeKernel
@@ -236,7 +238,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   }
   return require(id)
 })
-const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
+const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayPermissionEffects, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
 
 let passed = 0
 async function check(name, fn) {
@@ -690,6 +692,34 @@ await check('sale bulk replay needs sales.bulk while one-customer replay keeps s
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.single' })?.action, 'customer')
 })
 
+await check('combined merge permission effects use one root snapshot per phase and retain malformed identity refusals', async () => {
+  assert.equal(typeof mergeReplayPermissionEffects, 'function')
+  const db = new Database(':memory:')
+  db.exec('CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY, kind TEXT, payload_json TEXT); CREATE TABLE products(id INTEGER PRIMARY KEY,image_path TEXT)')
+  const base = { keeperId:1,dupId:2,keeperImagePathBefore:null,dupImagePathBefore:null,dupImagesBefore:[],imagesMovedToKeeper:[] }
+  db.prepare('INSERT INTO undo_snapshots VALUES(1,?,?)').run('product.merge',JSON.stringify(base))
+  let reads=0
+  const prepare=db.prepare.bind(db)
+  db.prepare=sql=>{if(sql.includes('SELECT payload_json FROM undo_snapshots'))reads++;return prepare(sql)}
+  sharedDb=db
+  const payload={applier:'product.merge',snapshot_id:1},user={id:3,role_code:'admin'}
+  try {
+    assert.deepEqual(await mergeReplayPermissionEffects({},payload,user,'undo'),{changesProductImages:false,choicePermissionError:null})
+    assert.equal(reads,1)
+    db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run(JSON.stringify({...base,dupImagesBefore:[{image_path:'/changed'}]}))
+    assert.deepEqual(await mergeReplayPermissionEffects({},payload,user,'redo'),{changesProductImages:true,choicePermissionError:null})
+    assert.equal(reads,2,'a later phase reads its current snapshot, never reuses the earlier result')
+    db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run('{bad')
+    assert.deepEqual(await mergeReplayPermissionEffects({},payload,user,'undo'),{changesProductImages:false,choicePermissionError:'product_edit_permission_required'})
+    assert.deepEqual(await mergeReplayPermissionEffects({}, {...payload,snapshot_id:999},user,'undo'),{changesProductImages:false,choicePermissionError:'product_edit_permission_required'})
+    db.prepare('INSERT INTO undo_snapshots VALUES(2,?,?)').run('product.merge.group','{bad')
+    assert.deepEqual(await mergeReplayPermissionEffects({}, {applier:'product.merge.group',snapshot_id:2},user,'undo'),{changesProductImages:true,choicePermissionError:null})
+    const before=reads
+    assert.deepEqual(await mergeReplayPermissionEffects({}, {applier:'branch.update'},user,'undo'),{changesProductImages:false,choicePermissionError:null})
+    assert.equal(reads,before)
+  } finally {sharedDb=null;db.close()}
+})
+
 await check('merge replay image authority is required only for saved cover/gallery effects', async () => {
   const db = new Database(':memory:')
   db.exec('CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY, kind TEXT, payload_json TEXT); CREATE TABLE products(id INTEGER PRIMARY KEY, image_path TEXT)')
@@ -928,7 +958,7 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   assert.ok(/payload\.snapshot_version !== 2 \|\| !canReplayStockSessionPayload\(user, payload\)/.test(permissionHelper), 'stock list/replayability must use the authoritative payload permission union and reject old snapshot formats')
   assert.ok(/STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession/.test(routeSrc), 'action history must import the stock permission helper')
   const operateHandler = routeSrc.slice(routeSrc.indexOf('completeServerHistoryTransition'))
-  assert.ok(/await mergeReplayChangesProductImages\(c\.env, payload, direction\)/.test(operateHandler), 'merge replay must inspect saved image effects at operate time')
+  assert.ok(/await mergeReplayPermissionEffects\(c\.env, payload, user, direction\)/.test(operateHandler), 'merge replay must inspect saved image effects at operate time')
   assert.ok(/replayChangesProductImages && getActionTier\(user, 'products', 'image'\) !== 'full'/.test(operateHandler), 'saved image effects must require current full image authority')
   assert.ok(/applier\.name === STOCK_SESSION_KIND[\s\S]*!canReplayStockSessionPayload\(user, payload\)[\s\S]*applierPermissionTier\(user, applier\) !== 'full'/.test(operateHandler), 'stock operate-time permission must use the authoritative union while other appliers keep their static full-tier gate')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
