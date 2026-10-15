@@ -450,6 +450,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const updateSql = `UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`
   const updateParams = [...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : [])]
   const statement = env.DB.prepare(updateSql).bind(...updateParams)
+  const writesAcquisitionCost = table === 'products' && keys.some(key => ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].includes(key))
+  const dispatch = (statements: D1PreparedStatement[]) => writesAcquisitionCost
+    ? executeRawStockTransaction(env.DB, statements) : env.DB.batch(statements)
   // This option is server-owned, never body metadata. Preserve the existing
   // full money preimage guard before recording an override or its baseline.
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
@@ -472,7 +475,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       )) THEN 1 ELSE json('product_money_state_conflict') END`)
       .bind(name.toLowerCase(), members.length, JSON.stringify(members))
     try {
-      const results = await env.DB.batch([
+      const results = await dispatch([
         ...(nativeStockGuard ? [nativeStockGuard] : []),
         guardGroup(group.from, group.members),
         guardGroup(group.to, group.target_members),
@@ -506,14 +509,14 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
               json_object('cost_entry_id',NULL,'baseline_batch_id',NULL,'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr)
             FROM products WHERE id=@productId`, params: auditParams }
     try {
-      const results = await getDb(env).batch([
+      const results = await executeStockTransaction(getDb(env), [
         ...(stockGuard ? [stockGuard] : []),
         { sql: updateSql, params: updateParams },
         { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
         ...(costChange.entry ? [costChange.entry] : []),
         overrideAudit,
         catalogCostRecomputeStatement(Number(id)),
-      ])
+      ], 'retry')
       result = results[stockGuard ? 1 : 0]
     } catch (error) {
       const stockError = productStockGuardError(error)
@@ -521,7 +524,8 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
       throw error
     }
-  } else result = nativeStockGuard ? (await env.DB.batch([nativeStockGuard, statement]))[1] : await statement.run()
+  } else result = nativeStockGuard ? (await dispatch([nativeStockGuard, statement]))[1]
+    : writesAcquisitionCost ? (await dispatch([statement]))[0] : await statement.run()
   if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
   return result.meta?.changes || 0
 }

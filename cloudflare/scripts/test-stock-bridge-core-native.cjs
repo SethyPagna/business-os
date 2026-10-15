@@ -28,7 +28,8 @@ function load(file, sourceOverride) {
 
 const sql = new DatabaseSync(':memory:')
 const migrationDirectory = path.join(__dirname, '../migrations')
-for (const file of fs.readdirSync(migrationDirectory).filter(file => file.endsWith('.sql') && file !== '0243_stock_schema_epoch.sql').sort()) {
+const admissionMigrations = ['0243_stock_schema_epoch.sql', '0258_catalog_cost_admission.sql']
+for (const file of fs.readdirSync(migrationDirectory).filter(file => file.endsWith('.sql') && !admissionMigrations.includes(file)).sort()) {
   sql.exec(fs.readFileSync(path.join(migrationDirectory, file), 'utf8'))
 }
 sql.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1);
@@ -38,7 +39,7 @@ sql.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1
     VALUES(1001,1001,'fixture','fixture','2026-10-08',7,2,14,1);
   INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1001,1,7);`)
 sql.exec('BEGIN IMMEDIATE')
-try { sql.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8')); sql.exec('COMMIT') }
+try { for (const file of admissionMigrations) sql.exec(fs.readFileSync(path.join(migrationDirectory, file), 'utf8')); sql.exec('COMMIT') }
 catch (e) { sql.exec('ROLLBACK'); throw e }
 sql.limits.exprDepth = 100
 

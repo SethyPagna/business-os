@@ -130,7 +130,7 @@ export async function foldCreateIntoExisting(
       ...(updates.cost_price_usd !== undefined ? { usd: updates.cost_price_usd as number } : {}),
       ...(updates.cost_price_khr !== undefined ? { khr: updates.cost_price_khr as number } : {}),
     }, { id: actorId(costActor), name: actorSnapshot(costActor) })
-    if (costEntry) await executeStockTransaction(db, [costEntry, write], 'retry')
+    if ('cost_price_usd' in updates || 'cost_price_khr' in updates) await executeStockTransaction(db, [...(costEntry ? [costEntry] : []), write], 'retry')
     else await db.prepare(write.sql).run(write.params)
   }
   await audit(env, actorId(user), actorSnapshot(user), 'fold', 'product', duplicate.id, {

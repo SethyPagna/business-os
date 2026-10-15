@@ -375,7 +375,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
     : null
   const changes = await updateRow(env, 'products', id, body, plannedMoney ? costActor : undefined)
   const legacyEntry = legacyCostBefore && changes ? typedCostEntryAfterWriteStatement(Number(id), legacyCostBefore, writesCost, costActor) : null
-  if (legacyEntry) await getDb(env).batch([legacyEntry, catalogCostRecomputeStatement(Number(id))])
+  if (legacyEntry) await executeStockTransaction(getDb(env), [legacyEntry, catalogCostRecomputeStatement(Number(id))], 'retry')
   const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
   if (appliedGroupRename) await audit(env, reviewer.id, reviewer.name, 'rename', 'product_group', id,
     { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
