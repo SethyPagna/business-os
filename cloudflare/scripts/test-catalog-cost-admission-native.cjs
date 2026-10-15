@@ -8,6 +8,7 @@ const executor = load('lib/stockTransaction.ts')
 const products = load('lib/productWrites.ts')
 const fold = load('lib/createFold.ts')
 const env = { DB: raw, PLAN_TIER: 'paid' }
+assert.equal(fs.readFileSync(path.join(__dirname, '../migrations/0258_catalog_cost_admission.sql'), 'utf8').includes('\r'), false)
 let checks = 0
 async function check(name, run) { await run(); assert.equal(f.permits(), 0); checks++; console.log(`PASS ${name}`) }
 async function main() {

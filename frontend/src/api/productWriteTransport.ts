@@ -7,6 +7,12 @@ import { captureActorReadScope, assertActorReadScope, assertActorWriteIdentity }
 import type { ActorWriteIdentity } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
+export async function confirmProductCostReview(productId: number | string, body: { client_request_id: string; reviewed_digest: string; value: number }): Promise<unknown> {
+  const result = await apiFetch('POST', `/api/products/${encodeURIComponent(String(productId))}/cost-review/confirm`, body)
+  cacheInvalidate('products')
+  return result
+}
+
 type ProductPayload = Record<string, unknown>
 
 export type MergeDuplicateProductsChunkResult = {
@@ -119,7 +125,7 @@ export type SelectedConflictGroupReviewGroup = {
   state_digest: string
   status?: 'actionable' | 'blocked' | 'ready' | 'partial' | 'completed' | 'refused' | 'reversed' | 'history_pending'
   resolution?: SelectedConflictGroupFinalizeRequest['resolutions'][number] | null
-  projected_result?: { economics?: SelectedConflictGroupReviewGroup['economics']['merged'] } | null
+  projected_result?: { economics?: SelectedConflictGroupReviewGroup['economics']['merged']; costAuthority?: import('../utils/mergeCostPreview.ts').MergeCostAuthority } | null
   blocked: null | {
     code: 'stale_group_members' | 'incompatible_group_identity' | 'overlap_requires_selection' | 'invalid_merge_numeric'
     message: string
@@ -171,6 +177,7 @@ export type SelectedConflictGroupReviewResult = {
 }
 
 export type SelectedConflictGroupFinalizeResult = {
+  costAuthorities?: Array<{ group_key: string; costAuthority: import('../utils/mergeCostPreview.ts').MergeCostAuthority }>
   success: true
   manifest_version: 1
   resolution_version: 2

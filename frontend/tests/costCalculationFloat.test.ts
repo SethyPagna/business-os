@@ -21,6 +21,8 @@ import {
   normalizeCostBreakdown,
 } from '../src/utils/costBreakdownFormat.ts'
 import * as costBreakdownFormat from '../src/utils/costBreakdownFormat.ts'
+import * as acquisitionCostAccess from '../src/utils/acquisitionCostAccess.ts'
+import * as permissions from '../src/utils/permissions.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcRoot = path.join(here, '..', 'src')
@@ -193,13 +195,18 @@ function renderBreakdown(payload: unknown, canViewCosts = true): string {
   const source = fs.readFileSync(path.join(srcRoot, 'components/shared/CostCalculationFloat.tsx'), 'utf8')
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
   const module = { exports: {} as any }
-  const states = [normalizeCostBreakdown(payload), '', false]
+  const user = canViewCosts ? { role_code: 'admin' } : { role_code: 'employee' }
+  const states = [{ breakdown: normalizeCostBreakdown(payload), productId: 42, user }, '', false, false, false]
   let stateIndex = 0
   const mockedRequire = (id: string): any => {
     if (id === 'react') return { ...React, useState: () => [states[stateIndex++], () => {}], useEffect: () => {}, useRef: () => ({ current: true }) }
     if (id === 'react/jsx-runtime') return require(id)
-    if (id.includes('AppContext')) return { useApp: () => ({ user: { role: 'admin' } }) }
-    if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts: () => canViewCosts }
+    if (id.includes('AppContext')) return { useApp: () => ({ user }) }
+    if (id.includes('acquisitionCostAccess')) return acquisitionCostAccess
+    if (id.includes('permissions')) return permissions
+    if (id.includes('productWriteTransport')) return { confirmProductCostReview: () => { throw new Error('render must not write') } }
+    if (id.includes('requestIds')) return { createClientRequestId: () => { throw new Error('render must not create request') } }
+    if (id.includes('actorReadScope')) return { captureActorReadScope: () => { throw new Error('render must not capture') }, assertActorReadScope: () => { throw new Error('render must not assert') } }
     if (id.includes('costBreakdownFormat')) return costBreakdownFormat
     if (id.includes('formatters')) return { fmtDate: (value: string) => value }
     if (id.includes('productReadTransport')) return { getProductCostBreakdown: () => { throw new Error('render must not fetch') } }
@@ -366,6 +373,22 @@ await runTest('both language packs carry every cost_breakdown_* key', () => {
   for (const key of keys) {
     assert.ok(km[key] && km[key] !== en[key], `km.json must carry a real Khmer translation for ${key}, not the English placeholder`)
   }
+})
+
+await runTest('confirmation accepts only server-issued known USD and retains zero/raw precision', () => {
+  for (const usd of [0, 7.123456789012345]) {
+    const payload = { product_id: 42, result_usd: usd, result_khr: 0, cost_needs_review: true, costConfirmation: { version: 1, reviewed_digest: 'a'.repeat(64), usd } }
+    assert.equal(normalizeCostBreakdown(payload)?.costConfirmation?.usd, usd)
+    assert.match(renderBreakdown(payload), /Confirm this known USD cost/)
+    assert.match(renderBreakdown(payload), /0 KHR/)
+    assert.doesNotMatch(renderBreakdown(payload, false), /Confirm this known USD cost|Cost needs review/)
+  }
+  for (const usd of [null, undefined, '', -1, Infinity, '0']) {
+    const payload = { product_id: 42, cost_needs_review: true, costConfirmation: { version: 1, reviewed_digest: 'a'.repeat(64), usd } }
+    assert.equal(normalizeCostBreakdown(payload)?.costConfirmation, undefined)
+    assert.doesNotMatch(renderBreakdown(payload), /Confirm this known USD cost/)
+  }
+  assert.equal(normalizeCostBreakdown({ costConfirmation: { version: 1, reviewed_digest: 'not-a-quote', usd: 0 } })?.costConfirmation, undefined)
 })
 
 if (failed > 0) {

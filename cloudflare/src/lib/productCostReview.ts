@@ -11,6 +11,30 @@ export type MergeCostOutcome = {
 }
 type Statement = { sql: string; params: Record<string, unknown> }
 
+export const COST_REVIEW_MONEY_FIELDS = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'purchase_price_usd', 'purchase_price_khr'] as const
+export type CostReviewState = Record<typeof COST_REVIEW_MONEY_FIELDS[number], number | null> & { id: number; revision: number; cost_review_key: string | null }
+
+export async function costReviewConfirmationQuote(state: CostReviewState): Promise<{ version: 1; reviewed_digest: string; usd: number } | null> {
+  if (!state.cost_review_key || typeof state.cost_price_usd !== 'number' || !Number.isFinite(state.cost_price_usd) || state.cost_price_usd < 0) return null
+  const bytes = new TextEncoder().encode(JSON.stringify(['product_cost_review_confirmation', 1, state.id, state.revision, state.cost_review_key, ...COST_REVIEW_MONEY_FIELDS.map(field => state[field])]))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return { version: 1, reviewed_digest: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''), usd: state.cost_price_usd }
+}
+
+export function costReviewConfirmationStatements(state: CostReviewState, receipt: { actorId: number; actorName: string | null; requestId: string; request: string; nonce: string }): Statement[] {
+  const params: Record<string, unknown> = { productId: state.id, entityId: String(state.id), revision: state.revision, reviewKey: state.cost_review_key, ...receipt }
+  for (const field of COST_REVIEW_MONEY_FIELDS) params[field] = state[field]
+  const prior = `SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.client_request_id')=@requestId`
+  const current = `SELECT 1 FROM products WHERE id=@productId AND is_active=1 AND cost_review_key IS @reviewKey AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0)=@revision AND ${COST_REVIEW_MONEY_FIELDS.map(field => `${field} IS @${field}`).join(' AND ')}`
+  const details = JSON.stringify({ kind: 'product.cost-review-confirm', version: 1, client_request_id: receipt.requestId, cost_request: receipt.request, claim_nonce: receipt.nonce,
+    cost_review: { version: 1, kind: 'confirm', before_key: state.cost_review_key, after_key: null, revision_before: state.revision, after_usd: state.cost_price_usd, after_khr: state.cost_price_khr } })
+  return [
+    { sql: `SELECT CASE WHEN EXISTS(${prior}) OR EXISTS(${current}) THEN 1 ELSE json('product_cost_review_state_conflict') END`, params },
+    { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) SELECT @actorId,@actorName,'cost_override','product',@entityId,@details WHERE NOT EXISTS(${prior})`, params: { ...params, details } },
+    { sql: `UPDATE products SET cost_review_key=NULL WHERE id=@productId AND EXISTS(SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product' AND entity_id=@entityId AND user_id=@actorId AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.claim_nonce')=@nonce)`, params },
+  ]
+}
+
 export function mergeCostOutcome(keeperId: number, original: MergeCostFallback, beforeKey: string | null = null, rootKey?: string): MergeCostOutcome {
   if (!Number.isSafeInteger(keeperId) || keeperId <= 0) throw new Error('Invalid merge cost keeper identity')
   for (const value of [original.usd, original.khr]) if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new Error('Invalid merge cost fallback')
@@ -109,4 +133,21 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
       OR json_extract(${event},'$.cost_review.kind') IN ('merge','merge_redo') AND (NEW.cost_review_key IS NULL OR json_extract(${event},'$.cost_review.operation_key')=NEW.cost_review_key)))
 BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
 `
+}
+
+export function productCostReviewConfirmationGuardSql(): string {
+  const event = "CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END"
+  const unchanged = COST_REVIEW_MONEY_FIELDS.map(field => `NEW.${field} IS OLD.${field}`).join(' AND ')
+  const confirmation = `AND NOT EXISTS(SELECT 1 FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(OLD.id AS TEXT)
+    AND json_extract(${event},'$.kind')='product.cost-review-confirm' AND json_extract(${event},'$.version')=1
+    AND json_extract(${event},'$.cost_review.version')=1 AND json_extract(${event},'$.cost_review.kind')='confirm'
+    AND OLD.cost_review_key IS NOT NULL AND NEW.cost_review_key IS NULL
+    AND typeof(OLD.cost_price_usd) IN ('integer','real') AND OLD.cost_price_usd>=0 AND OLD.cost_price_usd<=1.7976931348623157e308
+    AND ${unchanged}
+    AND json_extract(${event},'$.cost_review.before_key') IS OLD.cost_review_key
+    AND json_type(${event},'$.cost_review.after_key')='null'
+    AND json_extract(${event},'$.cost_review.revision_before')=COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(OLD.id AS TEXT)),0)
+    AND json_extract(${event},'$.cost_review.after_usd') IS NEW.cost_price_usd AND json_extract(${event},'$.cost_review.after_khr') IS NEW.cost_price_khr)
+  `
+  return productCostReviewUpdateGuardSql().replace('  AND NOT EXISTS(SELECT 1 FROM audit_logs a', `  ${confirmation}AND NOT EXISTS(SELECT 1 FROM audit_logs a`)
 }

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
-import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
-import type { PermissionUser } from '../../utils/permissions.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
+import { confirmProductCostReview } from '../../api/productWriteTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { captureActorReadScope, assertActorReadScope } from '../../api/actorReadScope.ts'
 import Modal from './Modal'
 import { getProductCostBreakdown } from '../../api/productReadTransport.ts'
 import { fmtDate } from '../../utils/formatters.ts'
@@ -39,9 +42,13 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key, fallback) || fallback
   const unknownLabel = tr('cost_unknown', 'Unknown cost')
-  const [breakdown, setBreakdown] = useState<CostBreakdown | null>(null)
+  const [loaded, setLoaded] = useState<{ breakdown: CostBreakdown; productId: number | string; user: PermissionUser } | null>(null)
+  const breakdown = loaded?.productId === productId && loaded.user === user ? loaded.breakdown : null
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+  const confirmationRef = useRef<{ body: { client_request_id: string; reviewed_digest: string; value: number }; scope: ReturnType<typeof captureActorReadScope> } | null>(null)
   const aliveRef = useRef(true)
 
   useEffect(() => {
@@ -49,13 +56,20 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
     let cancelled = false
     aliveRef.current = true
     setLoading(true)
+    setLoaded(null)
+    setConfirmed(false)
+    setConfirming(false)
+    confirmationRef.current = null
+    const scope = captureActorReadScope()
     setError('')
     getProductCostBreakdown(productId)
       .then((result) => {
         if (cancelled || !aliveRef.current) return
+        assertActorReadScope(scope)
         const normalized = normalizeCostBreakdown(result)
         if (!normalized) throw new Error('empty')
-        setBreakdown(normalized)
+        setLoaded({ breakdown: normalized, productId, user })
+        if (normalized.costConfirmation) confirmationRef.current = { scope, body: { client_request_id: createClientRequestId('cost_confirm'), reviewed_digest: normalized.costConfirmation.reviewed_digest, value: normalized.costConfirmation.usd } }
       })
       .catch(() => {
         if (!cancelled && aliveRef.current) setError(tr('cost_breakdown_failed', 'Could not load the cost calculation'))
@@ -68,10 +82,28 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   }, [productId, canViewCosts, user])
 
   const formula = breakdown ? formatBreakdownFormula(breakdown) : ''
+  const permissions = effectivePermissions(user)
+  const canConfirm = canViewCosts && canEditAcquisitionCosts(user) && permissions.getPermissionTier('products') === 'full' && permissions.can('products', 'edit')
+  const confirm = async () => {
+    const submission = confirmationRef.current
+    if (!submission || !canConfirm || confirming || confirmed) return
+    setConfirming(true)
+    setError('')
+    try {
+      assertActorReadScope(submission.scope)
+      const result = await confirmProductCostReview(productId, submission.body) as { success?: unknown; cost_needs_review?: unknown }
+      if (!aliveRef.current || confirmationRef.current !== submission) return
+      assertActorReadScope(submission.scope)
+      if (result.success !== true || result.cost_needs_review !== false) throw new Error(tr('cost_review_changed', 'The product needs a new cost review. Close and reopen its calculation.'))
+      if (aliveRef.current) setConfirmed(true)
+    } catch (failure) {
+      if (aliveRef.current && confirmationRef.current === submission) setError(failure instanceof Error ? failure.message : tr('cost_review_confirm_failed', 'Could not confirm the cost. Retry the original confirmation.'))
+    } finally { if (aliveRef.current && confirmationRef.current === submission) setConfirming(false) }
+  }
   if (!canViewCosts) return null
 
   return (
-    <Modal title={tr('cost_breakdown_title', 'Calculated cost price')} onClose={onClose} size="sm" unsavedChanges="read-only">
+    <Modal title={tr('cost_breakdown_title', 'Calculated cost price')} onClose={onClose} size="sm" unsavedChanges="read-only" closeDisabled={confirming}>
       <div className="space-y-3 text-sm">
         {productName ? <div className="min-w-0 detail-scroll-text text-xs font-medium text-gray-500 dark:text-gray-400">{productName}</div> : null}
 
@@ -81,7 +113,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
             <div className="h-4 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
             <div className="h-4 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
           </div>
-        ) : error ? (
+        ) : error && !breakdown ? (
           <p role="alert" className="text-red-600">{error}</p>
         ) : breakdown ? (
           <>
@@ -148,13 +180,16 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
             <div className="rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
               <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{tr('cost_breakdown_result_label', 'Catalog cost price')}</div>
               <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{breakdown.result_usd == null ? unknownLabel : fmtUSD(breakdown.result_usd)}</div>
-              {breakdown.result_khr != null && breakdown.result_khr > 0 ? (
+              {breakdown.result_khr != null ? (
                 <div className="text-xs text-gray-400">
                   {fmtKHR(breakdown.result_khr)}
                   <span className="ml-1">({tr('cost_breakdown_khr_note', 'recorded KHR cost, not averaged from lots')})</span>
                 </div>
               ) : null}
             </div>
+            {breakdown.cost_needs_review && !confirmed ? <div className="space-y-2" role="status"><p>{tr('merge_cost_needs_review', 'Cost needs review')}</p>{canConfirm && breakdown.costConfirmation ? <button type="button" className="btn-primary w-full" disabled={confirming || !confirmationRef.current} onClick={() => void confirm()}>{confirming ? tr('saving', 'Saving…') : tr('cost_review_confirm_usd', 'Confirm this known USD cost')}</button> : null}</div> : null}
+            {confirmed ? <p role="status">{tr('cost_review_confirmed', 'Cost confirmed')}</p> : null}
+            {error ? <p role="alert" className="text-red-600">{error}</p> : null}
           </>
         ) : null}
       </div>

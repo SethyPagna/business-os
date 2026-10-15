@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readGroupCostAuthorities } from '../src/utils/mergeCostPreview.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,6 +7,24 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
+
+const group = { group_key: 'group-1', member_ids: [1, 2], blocked: null }
+const choice = { 'group-1': { keeper_id: 1 } }
+const authority = { version: 1 as const, keeperId: 1, cost_price_usd: 7 as number | null, cost_price_khr: 5.1244, needsReview: true, source: 'manual' as const }
+const finalizedCosts = { review_id: 'review-1', manifest_digest: 'a'.repeat(64), counts: { ready_groups: 1 }, costAuthorities: [{ group_key: 'group-1', costAuthority: authority }] }
+for (const cost of [7, 0, null]) {
+  const result = readGroupCostAuthorities('review-1', [group], choice, { ...finalizedCosts, costAuthorities: [{ group_key: 'group-1', costAuthority: { ...authority, cost_price_usd: cost } }] })
+  assert.equal(result?.get('group-1')?.cost_price_usd, cost)
+  assert.equal(result?.get('group-1')?.cost_price_khr, 5.1244)
+}
+for (const bad of [undefined, [], [...finalizedCosts.costAuthorities, ...finalizedCosts.costAuthorities], [{ group_key: 'unshown', costAuthority: authority }], [{ group_key: 'group-1', costAuthority: { ...authority, keeperId: 2 } }], [{ group_key: 'group-1', costAuthority: { ...authority, cost_price_usd: undefined } }]]) {
+  assert.equal(readGroupCostAuthorities('review-1', [group], choice, { ...finalizedCosts, costAuthorities: bad }), null)
+}
+assert.equal(readGroupCostAuthorities('other-review', [group], choice, finalizedCosts), null)
+assert.equal(readGroupCostAuthorities('review-1', [group], choice, { ...finalizedCosts, manifest_digest: 'not-frozen' }), null)
+assert.equal(readGroupCostAuthorities('review-1', [group, group], choice, finalizedCosts), null)
+assert.ok(readGroupCostAuthorities('review-1', [group, { group_key: 'blocked', member_ids: [3, 4], blocked: {} }], choice, finalizedCosts))
+console.log('PASS actual frozen group authority map NULL/0/precision and scope refusals')
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, '..', 'src', 'components', 'products', 'SelectedConflictMergeReviewModal.tsx'), 'utf8')
@@ -34,13 +53,15 @@ assert.match(source, /group\.stock\.rows\.filter\(\(row\) => row\.product_id ===
 assert.match(source, /group\.stock\.projected_by_branch\.map/, 'resolved stock is shown by branch')
 assert.match(source, /group\.lots\.projected_quantity/, 'resolved lot quantity is visible')
 assert.match(source, /group\.economics\.merged/, 'server-computed original-group economics drive the After display')
-assert.match(source, /distinct non-zero values from the original group/, 'the immutable group-wide cost rule is explained')
+assert.doesNotMatch(source, /distinct non-zero values from the original group/, 'current review must not promise the retired catalog mean')
+assert.match(source, /readGroupCostAuthorities/, 'current group review validates the server-issued frozen authority map')
+assert.match(source, /confirmDisabled=\{working \|\| !costReady\}/, 'missing or mismatched current authority cannot confirm')
 assert.match(source, /function RemovalReviewCard[\s\S]*removal\.reason[\s\S]*removal\.branch_stock[\s\S]*removal\.batches/, 'independent removals show reason, stock, and lot evidence before apply')
 assert.match(source, /clears current stock and deactivates the product while preserving transaction and history records/, 'removal effects and same-identity Undo are explained')
 assert.match(source, /selectedConflictGroupChoicesComplete\(allGroups, choices\)/, 'finalization waits for every actionable group choice across every loaded page')
 assert.match(source, /review\.counts\.actionable_groups \+ review\.counts\.blocked_groups \+ review\.counts\.requested_removals/, 'page completion uses canonical stored groups plus every independent removal, not the larger pre-dedup request count')
 assert.match(source, /onFinalize\(\)[\s\S]*setConfirmOpen\(true\)/, 'the server freezes the complete review before the one confirmation opens')
-assert.match(source, /<ConfirmDialog[\s\S]*onConfirm=\{\(\) => \{ setConfirmOpen\(false\); onApply\(\) \}\}/, 'one confirmation starts the already frozen apply request')
+assert.match(source, /<ConfirmDialog[\s\S]*onConfirm=\{\(\) => \{ if \(!costReady \|\| working\) return; setConfirmOpen\(false\); onApply\(\) \}\}/, 'one confirmation starts the already frozen apply request')
 assert.match(source, /applyResult\.approval_required[\s\S]*not reported as completed/, 'approval-pending removals remain distinct from completed actions')
 assert.match(source, /status === 'approval_pending'[\s\S]*selected_conflict_pending_approval/, 'API status tokens are rendered as localized operator labels')
 assert.match(source, /review_reversed[\s\S]*Redo the visible group action/, 'a reversed prefix is not silently replayed')
