@@ -72,7 +72,7 @@ const resolveAdapter = read('../src/components/products/productResolveAdapter.ts
 assert.ok(!duplicates.includes('updateProduct(') && !duplicates.includes('cost_price_usd:'), 'the conflicts tab writes no cost itself: the grid is the only path')
 assert.ok(resolveAdapter.includes("kind: 'computed'"))
 assert.ok(!resolveAdapter.includes('costPick('))
-assert.ok(!resolveAdapter.includes('token.cost'))
+assert.doesNotMatch(resolveAdapter,/token\.cost\b/)
 const review = read('../src/components/products/import/ProductServerImportReviewScreen.tsx')
 assert.match(review, /if \(!hasPermission\('product_cost_view'\)\) return/)
 assert.match(review, /const saveDecision[^]*?if \(!canEditCosts\) return/)

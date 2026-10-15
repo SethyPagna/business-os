@@ -1,30 +1,9 @@
+import {captureActorReadScope,assertActorReadScope} from '../../api/actorReadScope.ts'
 import { useCallback, useState } from 'react'
 import MergeStockChoiceDialog, {
   type MergeIdentityDiff, type MergePricingChange, type MergeStockChoice, type MergeStockImpact,
 } from './MergeStockChoiceDialog'
-import { getMergePreview, getMergeCostPreview, type MergeCostAuthority, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
-
-// The ONE merge-a-duplicate-pair flow, shared by every surface that resolves a
-// twin: the Products → Conflicts review, the exact-duplicate "Keep this" action
-// on the products list, and the product form's "this name already exists"
-// collision path. Keeping it in one hook is what makes the answer to "what
-// happens to the other row's stock?" identical everywhere instead of a question
-// one surface asks and another quietly answers for you.
-//
-// Flow, per pair:
-//   1. Read the preview (stock the discarded row holds, per branch and per lot;
-//      any price the merge would move).
-//   2. Ask -- via the shared ConfirmDialog -- when there is stock to decide
-//      about, or when the merge would silently reprice the keeper. Never
-//      window.confirm.
-//   3. Merge with the operator's answer.
-//
-// The server is the real gate: it refuses a stocked row that arrives with no
-// answer (400 stock_choice_required). If the preview could not be read -- offline,
-// an older Worker -- the merge is attempted without an answer and that refusal
-// is caught, its attached breakdown opening the same dialog for a retry. So the
-// question gets asked even when the fast path is unavailable, and a merge that
-// skipped it cannot land.
+import { getMergePreview, getMergeCostPreview, type MergeCostQuotation, type MergeCostReview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type Product = { id: number; name?: string | null }
@@ -36,8 +15,8 @@ type PendingAsk = {
   pricing: MergePricingChange | null
   identity: MergeIdentityDiff | null
   needsChoice: boolean
-  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostAuthority>
-  resolve: (choice: MergeStockChoice | null) => void
+  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostQuotation>
+  resolve: (choice: {choice:MergeStockChoice;costReview?:MergeCostReview} | null) => void
 }
 
 const EMPTY_IMPACT = (productId: number): MergeStockImpact => ({
@@ -86,7 +65,7 @@ export function useMergeStockChoice(t: TranslateFn) {
   const [pending, setPending] = useState<PendingAsk | null>(null)
   const [working, setWorking] = useState(false)
 
-  const ask = useCallback((request: Omit<PendingAsk, 'resolve'>) => new Promise<MergeStockChoice | null>((resolve) => {
+  const ask = useCallback((request: Omit<PendingAsk, 'resolve'>) => new Promise<{choice:MergeStockChoice;costReview?:MergeCostReview} | null>((resolve) => {
     setPending({ ...request, resolve })
   }), [])
 
@@ -94,6 +73,7 @@ export function useMergeStockChoice(t: TranslateFn) {
   // operator's to skip. Resolves 'merged' or 'cancelled'; real failures throw so
   // the caller can report them the way it already does.
   const mergeWithChoice = useCallback(async (keeper: Product, other: Product): Promise<'merged' | 'cancelled'> => {
+    const actorScope=captureActorReadScope('products')
     const keeperName = nameOf(keeper)
     const discardedName = nameOf(other)
 
@@ -120,12 +100,14 @@ export function useMergeStockChoice(t: TranslateFn) {
     }
 
     if (needsChoice !== null) {
+      assertActorReadScope(actorScope)
       setWorking(false)
-      const choice = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice, loadCost: (stock, signal) => getMergeCostPreview({ keepId: keeper.id, reviewedDigest, steps: [{ mergeId: other.id, stock }] }, signal) })
-      if (!choice) return 'cancelled'
+      const answer = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice, loadCost: (stock, signal) => getMergeCostPreview({ keepId: keeper.id, reviewedDigest, steps: [{ mergeId: other.id, stock }] }, signal) })
+      if (!answer) return 'cancelled'
       setWorking(true)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id, choice, undefined, { version: 1, reviewed_digest: reviewedDigest })
+        assertActorReadScope(actorScope)
+        await mergePossiblySameProducts(keeper.id, other.id, answer.choice, undefined, answer.costReview)
         return 'merged'
       } catch (error) {
         throw localizeRefusal(t, error)
@@ -149,7 +131,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       needsChoice={pending.needsChoice}
       loadCost={pending.loadCost}
       working={working}
-      onConfirm={(choice) => pending.resolve(choice)}
+      onConfirm={(choice,costReview) => pending.resolve({choice,costReview})}
       onClose={() => { if (!working) { setPending(null); pending.resolve(null) } }}
     />
   ) : null

@@ -1,6 +1,6 @@
 import { formatMergeCost } from '../../utils/mergeCostPreview.ts'
 import type { ReactNode } from 'react'
-import { getMergePreview, getMergeCostPreview, type MergeCostAuthority, type MergeCostPreviewPlan, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
+import { getMergePreview, getMergeCostPreview, type MergeCostAuthority, type MergeCostQuotation, type MergeCostReview, type MergeCostPreviewPlan, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { isRetryableFailure } from '../../utils/retryableFailure.ts'
 import { roundMoney4 } from '../../utils/moneyPrecision.ts'
@@ -44,6 +44,7 @@ export type ProductResolvePreview = {
 }
 
 export type ProductResolveData = {
+  costReview?: MergeCostReview
   costAuthority?: MergeCostAuthority | null
   costPlan?: string
 
@@ -60,6 +61,7 @@ export type ProductResolveData = {
 }
 
 export type ProductResolveToken = {
+  costReview?: MergeCostReview
   requestId: string
   reviewedDigest: string
   keepId: number
@@ -74,10 +76,10 @@ type MergeKeep = {
 }
 
 export type ProductResolveApi = {
-  costPreview?: (plan: MergeCostPreviewPlan, signal?: AbortSignal) => Promise<MergeCostAuthority>
+  costPreview?: (plan: MergeCostPreviewPlan, signal?: AbortSignal) => Promise<MergeCostQuotation>
 
   preview: (keepId: number, mergeId: number, options: { keep: true; groupIds: number[]; signal?: AbortSignal }) => Promise<unknown>
-  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: MergeKeep) => Promise<unknown>
+  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: MergeKeep, costReview?: MergeCostReview) => Promise<unknown>
 }
 
 export type ProductResolveOptions = {
@@ -104,7 +106,7 @@ export type ProductResolveOptions = {
 const DEFAULT_API: ProductResolveApi = {
   costPreview: getMergeCostPreview,
   preview: (keepId, mergeId, options) => getMergePreview(keepId, mergeId, options),
-  merge: (keepId, mergeId, stock, keep) => mergePossiblySameProducts(keepId, mergeId, stock, keep),
+  merge: (keepId, mergeId, stock, keep, costReview) => mergePossiblySameProducts(keepId, mergeId, stock, keep, costReview),
 }
 
 const MAX_GROUP = 12
@@ -363,7 +365,7 @@ function costPlan(ctx: Context): MergeCostPreviewPlan {
 }
 
 function currentAuthority(ctx: Context): MergeCostAuthority | null {
-  return ctx.data.costPlan === JSON.stringify(costPlan(ctx)) ? ctx.data.costAuthority ?? null : null
+  return ctx.data.costReview && ctx.data.costPlan === JSON.stringify(costPlan(ctx)) ? ctx.data.costAuthority ?? null : null
 }
 
 type BranchLine = { branchId: number; name: string; before: number; after: number }
@@ -650,7 +652,11 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       if (options.canViewCosts) {
         const plan = costPlan(contextOf(data, edits))
         data.costPlan = JSON.stringify(plan)
-        try { data.costAuthority = api.costPreview ? await api.costPreview(plan, signal) : null } catch (error) { if (signal.aborted) throw error; data.costAuthority = null }
+        try {
+          const quotation=api.costPreview ? await api.costPreview(plan,signal) : null
+          data.costAuthority=quotation?.costAuthority ?? null
+          data.costReview=quotation?.costReview
+        } catch(error) { if(signal.aborted)throw error; data.costAuthority=null }
       }
       return data
     },
@@ -740,7 +746,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         message: fill(tr(t, 'resolve_product_confirm', 'Merge {products} into {name}.'), { products: ctx.merged.map(name).join(', '), name: productLabel({ name: finalName }, keepId) }),
         changes,
         warnings,
-        token: { keepId, steps, choices, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
+        token: { keepId, steps, ...(options.canViewCosts ? {costReview:data.costReview ? {...data.costReview} : undefined} : {}), choices, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
         undoable: true,
       }
     },
@@ -757,7 +763,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         }
         let response: { keeper?: Record<string, unknown> | null } | null
         try {
-          response = await api.merge(token.keepId, step.mergeId, step.stock, keep) as typeof response
+          response = await api.merge(token.keepId, step.mergeId, step.stock, keep, token.costReview) as typeof response
         } catch (error) {
           throw localizedRefusal(error, t, state.index > 0)
         }

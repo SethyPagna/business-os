@@ -151,15 +151,34 @@ try {
  for(const cost of [null,0,7]) {
   globalThis.fetch=(async(_url,init)=>{
    assert.deepEqual(JSON.parse(String(init?.body)),plan)
-   return new Response(JSON.stringify({success:true,...plan,costAuthority:{...authority,cost_price_usd:cost}}),{status:200,headers:{'Content-Type':'application/json'}})
+   return new Response(JSON.stringify({success:true,...plan,costReview:{version:1,reviewed_digest:'b'.repeat(64)},costAuthority:{...authority,cost_price_usd:cost}}),{status:200,headers:{'Content-Type':'application/json'}})
   }) as typeof fetch
-  assert.equal((await getMergeCostPreview(plan)).cost_price_usd,cost)
+  assert.equal((await getMergeCostPreview(plan)).costAuthority.cost_price_usd,cost)
  }
- for(const patch of [{costAuthority:undefined},{keepId:12},{reviewedDigest:'b'.repeat(64)},{steps:[{mergeId:11,stock:'write_off'}]},{costAuthority:{...authority,version:2}}]) {
-  globalThis.fetch=(async()=>new Response(JSON.stringify({success:true,...plan,costAuthority:authority,...patch}),{status:200,headers:{'Content-Type':'application/json'}})) as typeof fetch
+ for(const patch of [{costAuthority:undefined},{keepId:12},{reviewedDigest:'b'.repeat(64)},{steps:[{mergeId:11,stock:'write_off'}]},{costAuthority:{...authority,version:2}},{costReview:undefined},{costReview:{version:2,reviewed_digest:'b'.repeat(64)}},{costReview:{version:1,reviewed_digest:''}},{costReview:{version:1,reviewed_digest:'b'.repeat(64),groups:[]}}]) {
+  globalThis.fetch=(async()=>new Response(JSON.stringify({success:true,...plan,costAuthority:authority,costReview:{version:1,reviewed_digest:'b'.repeat(64)},...patch}),{status:200,headers:{'Content-Type':'application/json'}})) as typeof fetch
   await assert.rejects(getMergeCostPreview(plan))
  }
+ globalThis.fetch=(async()=>new Response(JSON.stringify({success:true,...plan,costAuthority:authority,costReview:{version:1,reviewed_digest:'b'.repeat(64)}}),{status:200,headers:{'Content-Type':'application/json'}})) as typeof fetch
  const controller=new AbortController();controller.abort()
  await assert.rejects(getMergeCostPreview(plan,controller.signal))
 } finally {globalThis.fetch=originalFetch;setSyncServerUrl('')}
 console.log('PASS authoritative cost transport preserves NULL/zero/manual7 and rejects missing/stale/invalid/aborted responses')
+
+setSyncServerUrl('http://merge-quote-fixture')
+try {
+ globalThis.fetch=(async()=>new Response(JSON.stringify({success:true,...plan,costAuthority:authority,costReview:{version:1,reviewed_digest:'b'.repeat(64)}}),{status:200,headers:{'Content-Type':'application/json'}})) as typeof fetch
+ const quotation=await getMergeCostPreview(plan)
+ assert.equal(quotation.costReview?.reviewed_digest,'b'.repeat(64),'retain server-issued plan quote, never synthesize outer graph digest')
+} finally {globalThis.fetch=originalFetch;setSyncServerUrl('')}
+
+setSyncServerUrl('http://merge-issued-quote-wire')
+try {
+ const issued={version:1 as const,reviewed_digest:'c'.repeat(64)}
+ let request:any
+ globalThis.fetch=(async(_url,init)=>{request=JSON.parse(String(init?.body));return new Response(JSON.stringify({success:true}),{status:200,headers:{'Content-Type':'application/json'}})}) as typeof fetch
+ await mergePossiblySameProducts(10,11,'write_off',undefined,issued)
+ assert.deepEqual(request,{keepId:10,mergeId:11,stock:'write_off',cost_review:issued})
+ await mergePossiblySameProducts(10,11,'merge')
+ assert.deepEqual(request,{keepId:10,mergeId:11,stock:'merge'},'intentional blind/legacy call carries no fabricated graph-only cost quote')
+} finally {globalThis.fetch=originalFetch;setSyncServerUrl('')}

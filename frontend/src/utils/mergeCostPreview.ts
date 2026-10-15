@@ -28,3 +28,12 @@ export function mergeCostReviewMatches(review: MergeCostReview | undefined, grou
     return g.keeper_id === target.keeper && (index===0 || g.keeper_id>review.groups![index-1].keeper_id) && /^[a-f0-9]{64}$/.test(g.reviewed_digest) && Array.isArray(g.member_ids) && g.member_ids.length>=2 && g.member_ids.length<=12 && g.member_ids.length===target.ids.length && g.member_ids.every((id,i)=>Number.isSafeInteger(id) && id>0 && (i===0 || id>g.member_ids[i-1]) && id===target.ids[i])
   })
 }
+
+export type MergeCostQuotation = {costAuthority:MergeCostAuthority; costReview:MergeCostReview}
+
+export function readMergeCostQuotation(value: unknown, keeperId: number): MergeCostQuotation {
+  const raw=value as {costAuthority?:unknown;costReview?:Partial<MergeCostReview>} | null
+  const review=raw?.costReview
+  if (!review || review.version !== 1 || typeof review.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(review.reviewed_digest) || Object.keys(review).some(key=>key!=='version'&&key!=='reviewed_digest')) throw Object.assign(new Error('Cost preview unavailable'),{code:'merge_cost_preview_unavailable'})
+  return {costAuthority:readMergeCostAuthority(raw?.costAuthority,keeperId),costReview:{version:1,reviewed_digest:review.reviewed_digest}}
+}

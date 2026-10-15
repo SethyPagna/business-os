@@ -106,7 +106,7 @@ test('a merge that would raise the keeper\'s price says so, before -> after per 
     assert.ok(dialog.includes(field), `${field} must have a label in the price-change table`)
   }
   assert.ok(!/special_price_usd: \[/.test(dialog), 'a column zeroed by 0111 must not be labelled as a price')
-  assert.match(hook, /const choice = await ask/, 'every modern pair presents the authoritative result before writing')
+  assert.match(hook, /const answer = await ask/, 'every modern pair presents the authoritative result before writing')
 })
 
 test('authoritative costs retain NULL, genuine zero and four decimal currency precision',()=>{
@@ -118,7 +118,7 @@ test('authoritative costs retain NULL, genuine zero and four decimal currency pr
  assert.match(dialog,/loadCost\(choice \?\? 'merge', controller.signal\)/)
  assert.match(dialog,/controller.abort\(\)/)
  assert.match(dialog,/canViewCosts && !authority/)
- assert.match(hook,/cost_review|reviewed_digest/)
+ assert.match(hook,/answer\.costReview/)
 })
 
 test('exact-identity twin surfaces use the shared stock choice flow', () => {
@@ -139,7 +139,7 @@ test('exact-identity twin surfaces use the shared stock choice flow', () => {
   assert.match(duplicatesTab, /<ResolveModal/)
   assert.doesNotMatch(duplicatesTab, /mergeWithChoice\(/, 'the tab has one merge path: the Resolve grid')
   assert.match(productResolveAdapter, /if \(!ctx\.data\.previews\.get\(id\)\?\.needsStockChoice\) return undefined/)
-  assert.match(productResolveAdapter, /api\.merge\(token\.keepId, step\.mergeId, step\.stock, keep\)/)
+  assert.match(productResolveAdapter, /api\.merge\(token\.keepId, step\.mergeId, step\.stock, keep, token\.costReview\)/)
   // No surface may reach past the flow and merge without an answer.
   for (const [label, src] of [['duplicates tab', duplicatesTab], ['products page', productsPage], ['product form', productForm]] as const) {
     assert.ok(!/mergePossiblySameProducts\(/.test(src), `${label} must not call the raw merge transport directly`)
@@ -258,7 +258,7 @@ test('a cross-identity merge says which field differs, and is never silent', () 
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/,
     'moving stock onto a different-identity row is a destructive-looking decision')
   // The hook must stop for it even when there is no stock and no price to move.
-  assert.match(hook, /const choice = await ask/)
+  assert.match(hook, /const answer = await ask/)
   assert.ok(en.merge_identity_differs_title && km.merge_identity_differs_title)
   assert.match(en.merge_stock_choice_merge_cross_identity, /different barcode or cost/i)
 })

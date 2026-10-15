@@ -1,5 +1,5 @@
-import { readMergeCostAuthority, type MergeCostAuthority, type MergeCostPreviewPlan, type MergeCostReview } from '../utils/mergeCostPreview.ts'
-export type { MergeCostAuthority, MergeCostPreviewPlan, MergeCostReview } from '../utils/mergeCostPreview.ts'
+import { readMergeCostQuotation, type MergeCostQuotation, type MergeCostPreviewPlan, type MergeCostReview } from '../utils/mergeCostPreview.ts'
+export type { MergeCostAuthority, MergeCostQuotation, MergeCostPreviewPlan, MergeCostReview } from '../utils/mergeCostPreview.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -432,12 +432,12 @@ export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' |
 // the system listed together is never blocked for a name or barcode
 // difference, and the answer adds the kept product's stock per branch and,
 // with `groupIds`, the cost the merge rule gives the whole group.
-export async function getMergeCostPreview(plan: MergeCostPreviewPlan, signal?: AbortSignal): Promise<MergeCostAuthority> {
+export async function getMergeCostPreview(plan: MergeCostPreviewPlan, signal?: AbortSignal): Promise<MergeCostQuotation> {
   const scope = captureActorReadScope('products')
   const raw = await apiFetch('POST', '/api/products/resolve/cost-preview', plan, undefined, signal ? { signal } : undefined) as Record<string, unknown>
   assertActorReadScope(scope)
   if (raw.success !== true || raw.keepId !== plan.keepId || raw.reviewedDigest !== plan.reviewedDigest || (!Array.isArray(raw.steps) || raw.steps.length !== plan.steps.length || raw.steps.some((step, index) => step?.mergeId !== plan.steps[index].mergeId || step?.stock !== plan.steps[index].stock)) || signal?.aborted) throw Object.assign(new Error('Cost preview changed. Reload and review again.'), { code: 'merge_state_conflict' })
-  return readMergeCostAuthority(raw.costAuthority, plan.keepId)
+  return readMergeCostQuotation(raw, plan.keepId)
 }
 
 export function getMergePreview(

@@ -74,10 +74,10 @@ function fakeApi(cluster: Cluster, extra: FakeOptions = {}) {
   let merges = 0
   const byId = new Map(cluster.products.map((entry) => [entry.id, entry]))
   const api = {
-    async costPreview(plan: { keepId: number }): Promise<import('../src/utils/mergeCostPreview.ts').MergeCostAuthority> {
+    async costPreview(plan: { keepId: number }): Promise<import('../src/utils/mergeCostPreview.ts').MergeCostQuotation> {
       const costs = [...new Set(cluster.products.map(p => Number(p.cost_price_usd) || 0).filter(Boolean))]
       const mean = costs.length ? costs.reduce((a,b) => a+b,0) / costs.length : null
-      return { version: 1 as const, keeperId: plan.keepId, cost_price_usd: mean, cost_price_khr: null, needsReview: false, source: 'received_lot' as const }
+      return { costAuthority:{ version: 1 as const, keeperId: plan.keepId, cost_price_usd: mean, cost_price_khr: null, needsReview: false, source: 'received_lot' as const },costReview:{version:1,reviewed_digest:'b'.repeat(64)} }
     },
     async preview(keepId: number, mergeId: number, options: { keep: true; groupIds: number[] }) {
       calls.push({ kind: 'preview', args: [keepId, mergeId, options.keep, options.groupIds] })
@@ -97,8 +97,8 @@ function fakeApi(cluster: Cluster, extra: FakeOptions = {}) {
         ...(extra.choices ? { choicesSupported: true } : {}),
       }
     },
-    async merge(keepId: number, mergeId: number, stock: unknown, keep: unknown) {
-      calls.push({ kind: 'merge', args: [keepId, mergeId, stock, keep] })
+    async merge(keepId: number, mergeId: number, stock: unknown, keep: unknown, costReview?: unknown) {
+      calls.push({ kind: 'merge', args: [keepId, mergeId, stock, keep, costReview] })
       merges += 1
       if (extra.failMergeAt === merges) throw Object.assign(new Error('network down'), { code: 'write_outcome_unknown', outcome: 'unknown' })
       const keeper = byId.get(keepId)!
@@ -404,8 +404,9 @@ await test('apply merges every product one step each, stops where a step fails a
   assert.deepEqual(merges[0], [50, 51, 'merge', {
     resolve: { requestId: review.token.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 51, stock: 'merge' }, { mergeId: 52, stock: 'merge' }] },
     choices: review.token.choices,
-  }], 'every step carries the frozen group, its stock answers and the same choices')
+  },{version:1,reviewed_digest:'b'.repeat(64)}], 'every step carries the frozen group, its stock answers and the same choices')
   assert.deepEqual(merges[1][3], merges[2][3], 'lost responses resend exactly the same receipt identity and choices')
+  assert.deepEqual(merges.map(args=>args[4]),Array(3).fill({version:1,reviewed_digest:'b'.repeat(64)}),'lost responses retain server quote, never outer graph digest')
   assert.equal(merges[1][2], 'merge', 'the no-stock default matches the authoritative ordered plan')
   assert.equal(result.done, 2)
   assert.equal(result.total, 2)
@@ -502,7 +503,7 @@ await test('every key the adapter reads exists in both packs', () => {
 await test('authority NULL, zero and manual7 are read-only, independent KHR and never client cost overrides', async () => {
   for (const [usd, khr] of [[null, null], [0, 0], [7, 5.1244]] as Array<[number | null, number | null]>) {
     const {api,calls} = fakeApi(CLUSTERS.same_name, { choices: true })
-    api.costPreview = async plan => ({version:1,keeperId:plan.keepId,cost_price_usd:usd,cost_price_khr:khr,needsReview:true,source:'manual'})
+    api.costPreview = async plan => ({costAuthority:{version:1,keeperId:plan.keepId,cost_price_usd:usd,cost_price_khr:khr,needsReview:true,source:'manual'},costReview:{version:1,reviewed_digest:'b'.repeat(64)}})
     const adapter = createProductResolveAdapter({ cluster:CLUSTERS.same_name,t,canViewCosts:true,canEditCosts:true,canMerge:()=>true,api })
     const data = await adapter.load(signal, EMPTY)
     for (const choice of [{source:'11'}, {custom:'0'}, {custom:''}]) {
@@ -521,6 +522,27 @@ await test('authority NULL, zero and manual7 are read-only, independent KHR and 
     assert.equal(adapter.reloadWhen!(EMPTY,changed),true)
     await assert.rejects(adapter.review(data,changed,signal),/Cost preview unavailable/)
   }
+})
+
+await test('a quoted ordered plan stays frozen through continuation and a changed stock answer requires a new quote',async()=>{
+ const {api,calls}=fakeApi(CLUSTERS.three,{choices:true,failMergeAt:2})
+ const graph='a'.repeat(64),quote='c'.repeat(64)
+ let costReads=0
+ api.costPreview=async plan=>{costReads++;return {costAuthority:{version:1,keeperId:plan.keepId,cost_price_usd:7,cost_price_khr:null,needsReview:true,source:'manual'},costReview:{version:1,reviewed_digest:quote}}}
+ const adapter=createProductResolveAdapter({cluster:CLUSTERS.three,t,canViewCosts:true,canEditCosts:true,canMerge:()=>true,api})
+ const data=await adapter.load(signal,EMPTY)
+ const {token}=await adapter.review(data,EMPTY,signal)
+ assert.deepEqual(token.costReview,{version:1,reviewed_digest:quote})
+ assert.notEqual(token.costReview?.reviewed_digest,graph)
+ data.costReview!.reviewed_digest='d'.repeat(64)
+ await assert.rejects(adapter.apply(token,signal,()=>{}))
+ await adapter.apply(token,signal,()=>{})
+ assert.equal(costReads,1,'retry never refreshes original cost approval')
+ for(const c of calls.filter(c=>c.kind==='merge'))assert.deepEqual(c.args[4],{version:1,reviewed_digest:quote})
+ const changed=pick({'stock|51':{option:'write_off'}})
+ await assert.rejects(adapter.review(data,changed,signal),/Cost preview unavailable/)
+ await adapter.load(signal,changed)
+ assert.equal(costReads,2,'changed stock plan requests a fresh server quote')
 })
 
 await test('missing authority blocks cost-visible review and does not manufacture NULL or zero', async()=>{

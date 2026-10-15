@@ -1,4 +1,4 @@
-import type { MergeCostAuthority } from '../../api/productWriteTransport.ts'
+import type { MergeCostQuotation, MergeCostReview } from '../../api/productWriteTransport.ts'
 import { useEffect, useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
@@ -116,9 +116,9 @@ export default function MergeStockChoiceDialog({
    */
   needsChoice: boolean
   working: boolean
-  onConfirm: (choice: MergeStockChoice) => void
+  onConfirm: (choice: MergeStockChoice, costReview?: MergeCostReview) => void
   onClose: () => void
-  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostAuthority>
+  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostQuotation>
 }) {
   // Starts unanswered on purpose. Pre-selecting either option would make the
   // dangerous case (a distracted Enter) pick a disposition nobody chose, which
@@ -131,9 +131,10 @@ export default function MergeStockChoiceDialog({
     return value && value !== key ? value : fallback
   }
 
-  const [costState, setCostState] = useState<{ value: MergeCostAuthority; choice: MergeStockChoice; user: PermissionUser } | null>(null)
+  const [costState, setCostState] = useState<{ value: MergeCostQuotation; choice: MergeStockChoice; user: PermissionUser; loadCost: typeof loadCost } | null>(null)
   const [pageActive, setPageActive] = useState(typeof document === 'undefined' || !document.hidden)
-  const authority = pageActive && costState?.choice === (choice ?? 'merge') && costState.user === user ? costState.value : null
+  const quotation = pageActive && costState?.choice === (choice ?? 'merge') && costState.user === user && costState.loadCost === loadCost ? costState.value : null
+  const authority=quotation?.costAuthority ?? null
   useEffect(() => {
     const update = () => setPageActive(!document.hidden)
     document.addEventListener('visibilitychange', update)
@@ -145,7 +146,7 @@ export default function MergeStockChoiceDialog({
     if (!pageActive || !canViewCosts || (needsChoice && !choice) || !loadCost) { setCostLoading(false); return }
     const controller = new AbortController()
     setCostLoading(true)
-    loadCost(choice ?? 'merge', controller.signal).then(value => { if (!controller.signal.aborted) setCostState({value, choice: choice ?? 'merge', user}) }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setCostLoading(false) })
+    loadCost(choice ?? 'merge', controller.signal).then(value => { if (!controller.signal.aborted) setCostState({value, choice: choice ?? 'merge', user, loadCost}) }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setCostLoading(false) })
     return () => controller.abort()
   }, [choice, needsChoice, loadCost, canViewCosts, user, pageActive])
   const pcs = T('pcs', 'pcs')
@@ -210,7 +211,7 @@ export default function MergeStockChoiceDialog({
       danger={choice === 'write_off' || identityDiffers}
       working={working}
       confirmDisabled={!pageActive || (needsChoice && !choice) || (canViewCosts && !authority)}
-      onConfirm={() => onConfirm(needsChoice ? (choice as MergeStockChoice) : 'merge')}
+      onConfirm={() => { if(pageActive && (!canViewCosts || quotation)) onConfirm(needsChoice ? (choice as MergeStockChoice) : 'merge', canViewCosts ? quotation?.costReview : undefined) }}
       onClose={onClose}
     >
       {identityDiffers ? (
