@@ -13,6 +13,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const MIGRATION_SQLS = loadAll()
@@ -24,8 +25,20 @@ async function check(name, fn) {
   console.log(`  ✓ ${name}`)
 }
 
+function assertGuardedAutoMergeGroup(source) {
+  const finishGroupIndex=source.indexOf('const finishProductRowWriteGroup = () => {')
+  const recordsIndex=source.indexOf('const mergeRecords = autoMergeRecords.filter(',finishGroupIndex)
+  const counterIndex=source.indexOf("sql: 'UPDATE products SET auto_merged_count",recordsIndex)
+  const queueGroupIndex=source.indexOf('productStatementGroups.push(rowWriteGroup)',counterIndex)
+  const calls=[...source.matchAll(/runD1BatchGroupsInChunks\(\s*importWriteDb,\s*productStatementGroups,\s*D1_IMPORT_BATCH_CHUNK_SIZE,\s*true\s*\)/g)]
+  assert.ok(finishGroupIndex!==-1 && recordsIndex!==-1 && counterIndex!==-1 && queueGroupIndex!==-1
+    && calls.some(call=>call.index>queueGroupIndex),
+    'auto-merge record + counter must join the product row group before its guarded group-atomic flush')
+}
+
 async function run() {
   const db = openDb(MIGRATION_SQLS)
+  assert.throws(()=>db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
   const engineSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importEngine.ts'), 'utf8')
   const routeSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
   const portalSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'portal.ts'), 'utf8')
@@ -58,28 +71,23 @@ async function run() {
     // SAME group before it is queued, and those groups must use the group-
     // atomic runner. A global statements flush would allow the product write
     // and its merge history to split across D1 batches.
-    const finishGroupIndex = engineSource.indexOf('const finishProductRowWriteGroup = () => {')
-    const recordsIndex = engineSource.indexOf('const mergeRecords = autoMergeRecords.filter(', finishGroupIndex)
-    const counterIndex = engineSource.indexOf("sql: 'UPDATE products SET auto_merged_count", recordsIndex)
-    const queueGroupIndex = engineSource.indexOf('productStatementGroups.push(rowWriteGroup)', counterIndex)
-    const flushAfterGroup = engineSource.indexOf(
-      'runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)',
-      queueGroupIndex,
-    )
-    assert.ok(
-      finishGroupIndex !== -1 && recordsIndex !== -1 && counterIndex !== -1
-        && queueGroupIndex !== -1 && flushAfterGroup !== -1,
-      'auto-merge record + counter must join the product row group before its group-atomic flush',
-    )
+    assertGuardedAutoMergeGroup(engineSource)
+    const guardedCall='runD1BatchGroupsInChunks(importWriteDb, productStatementGroups, D1_IMPORT_BATCH_CHUNK_SIZE, true)'
+    assert.ok(engineSource.includes(guardedCall))
+    assert.throws(()=>assertGuardedAutoMergeGroup(engineSource.replace(guardedCall,guardedCall.replace('true','false'))))
+    assert.throws(()=>assertGuardedAutoMergeGroup(engineSource.replace(guardedCall,guardedCall.replace('productStatementGroups','productStatementGroups.flat()'))))
+    const reordered=engineSource.replace('if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)','')
+      .replace('const mergeRecords = autoMergeRecords.filter(', 'if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup); const mergeRecords = autoMergeRecords.filter(')
+    assert.throws(()=>assertGuardedAutoMergeGroup(reordered))
     assert.match(engineSource, /UPDATE products SET auto_merged_count = COALESCE\(auto_merged_count, 0\) \+ @count WHERE id = @id/)
   })
 
   await check('the exact SQL shapes the engine emits are valid against the real schema', async () => {
-    await db.prepare(`INSERT INTO products (id, name, is_active, stock_quantity) VALUES (77, 'Merged Winner', 1, 0)`).run({})
-    await db.prepare(`INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
+    await seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, is_active, stock_quantity) VALUES (77, 'Merged Winner', 1, 0)`).run({}))
+    await seedStockFixture(db,()=>db.prepare(`INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
                       VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`)
-      .run({ product_id: 77, import_job_id: 5, row_number: 12, losing_json: JSON.stringify({ name: 'Merged Winner', barcode: 'b1', selling_price_usd: 9 }), created_at: '2026-08-28T00:00:00.000Z' })
-    await db.prepare('UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id').run({ count: 2, id: 77 })
+      .run({ product_id: 77, import_job_id: 5, row_number: 12, losing_json: JSON.stringify({ name: 'Merged Winner', barcode: 'b1', selling_price_usd: 9 }), created_at: '2026-08-28T00:00:00.000Z' }))
+    await seedStockFixture(db,()=>db.prepare('UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id').run({ count: 2, id: 77 }))
     assert.equal((await db.prepare('SELECT auto_merged_count FROM products WHERE id = 77').get()).auto_merged_count, 2)
     const record = await db.prepare('SELECT * FROM import_auto_merges WHERE product_id = 77').get()
     assert.equal(record.row_number, 12)

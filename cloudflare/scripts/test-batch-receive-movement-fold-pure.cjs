@@ -28,6 +28,7 @@ const ts = require('typescript')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const MIGRATION_SQLS = loadAll()
@@ -58,6 +59,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -72,6 +74,7 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
+const stockTransaction = loadReal('lib/stockTransaction.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
@@ -110,16 +113,18 @@ function countingDb(rawDb) {
         statements += 1
         return rawDb.batch(items)
       },
+      batchOnce(items) { return this.batch(items) },
     },
   }
 }
 
 function seedProduct(rawDb, { productId, branchId }) {
-  rawDb.prepare('INSERT INTO products (id, name, sku, selling_price_usd, cost_price_usd) VALUES (@id, @name, @sku, 10, 5)')
-    .run({ id: productId, name: 'Test Product', sku: `SKU-${productId}` })
-  rawDb.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').run({ id: branchId, name: 'Main' })
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, 0)')
-    .run({ productId, branchId })
+  assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, sku, selling_price_usd, cost_price_usd) VALUES (@id, @name, @sku, 10, 5)')
+    .run({ id: productId, name: 'Test Product', sku: `SKU-${productId}` }))
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branches (id, name) VALUES (@id, @name)').run({ id: branchId, name: 'Main' }))
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, 0)')
+    .run({ productId, branchId }))
 }
 
 // Mirrors routes/batches.ts's buildBatchStatements closure exactly (same SQL

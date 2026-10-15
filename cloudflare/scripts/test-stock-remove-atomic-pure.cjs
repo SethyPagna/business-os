@@ -41,8 +41,10 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const rawDb = openDb(loadAll())
+assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 let afterDbBatchHook = null
 let beforeDbBatchHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
@@ -71,6 +73,7 @@ const db = {
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(this) },
 }
 const fakeEnv = { DB: db }
@@ -89,6 +92,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -108,6 +112,7 @@ function loadReal(relPath, requireOverrides = {}) {
 
 // The REAL date module the route validates with and the kernel derives lot
 // codes with; a stub would test the stub.
+const stockTransaction = loadReal('lib/stockTransaction.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
@@ -345,24 +350,24 @@ async function req(method, url, body) {
 // destination and starts empty.
 const LOT_ID = 10
 function seedStock({ lot = 0, unlotted = 0 } = {}) {
-  rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
+  seedStockFixture(rawDb,()=>rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
-    DELETE FROM stock_mutation_receipts; DELETE FROM action_history;`)
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run({})
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
-    VALUES (1, 'Widget', 'B123', 1, @total, 3, 12000)`).run({ total: lot + unlotted })
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
-    VALUES (2, 'Widget relabelled', 'B124', 1, 0, 3, 12000)`).run({})
+    DELETE FROM stock_mutation_receipts; DELETE FROM action_history;`))
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run({}))
+  seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+    VALUES (1, 'Widget', 'B123', 1, @total, 3, 12000)`).run({ total: lot + unlotted }))
+  seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+    VALUES (2, 'Widget relabelled', 'B124', 1, 0, 3, 12000)`).run({}))
   if (lot + unlotted > 0) {
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @q)').run({ q: lot + unlotted })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @q)').run({ q: lot + unlotted }))
   }
   if (lot > 0) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
-      VALUES (@id, 1, '09052026', '09052026', '2026-09-05', 1, 2, @q)`).run({ id: LOT_ID, q: lot })
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @q)').run({ id: LOT_ID, q: lot })
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
+      VALUES (@id, 1, '09052026', '09052026', '2026-09-05', 1, 2, @q)`).run({ id: LOT_ID, q: lot }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @q)').run({ id: LOT_ID, q: lot }))
     // The catalog-cost trigger (0195) may have re-derived the catalog cost
     // from the lot; the fixture wants the catalog cost it set.
-    rawDb.prepare('UPDATE products SET cost_price_usd = 3 WHERE id = 1').run({})
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = 3 WHERE id = 1').run({}))
   }
   audits.length = 0
 }
@@ -396,12 +401,12 @@ function onFirstBatch(fn) {
 }
 // A concurrent POS sale of `quantity` units that the lot ledger did not carry.
 const concurrentUnlottedSale = (quantity) => () => {
-  rawDb.prepare('UPDATE branch_stock SET quantity = quantity - @q WHERE product_id = 1 AND branch_id = 1').run({ q: quantity })
-  rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - @q WHERE id = 1').run({ q: quantity })
+  seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = quantity - @q WHERE product_id = 1 AND branch_id = 1').run({ q: quantity }))
+  seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - @q WHERE id = 1').run({ q: quantity }))
 }
 // A concurrent POS sale of `quantity` units out of lot 10.
 const concurrentLotSale = (quantity) => () => {
-  rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - @q WHERE batch_id = @id AND branch_id = 1').run({ q: quantity, id: LOT_ID })
+  seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - @q WHERE batch_id = @id AND branch_id = 1').run({ q: quantity, id: LOT_ID }))
   concurrentUnlottedSale(quantity)()
 }
 
@@ -539,7 +544,7 @@ const hold = async (tag, quantity) => {
 
   await check('race: the branch_stock row vanished after the read -> 409, the lot is untouched', async () => {
     seedStock({ lot: 5 })
-    onFirstBatch(() => { rawDb.prepare('DELETE FROM branch_stock WHERE product_id = 1').run({}) })
+    onFirstBatch(() => { seedStockFixture(rawDb,()=>rawDb.prepare('DELETE FROM branch_stock WHERE product_id = 1').run({})) })
     const res = await req('POST', '/adjust', REMOVE({ quantity: 2 }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'stock_removal_conflict')
@@ -623,7 +628,7 @@ const hold = async (tag, quantity) => {
     seedStock({ lot: 5 })
     await hold('opened', 5)
     assert.deepEqual(stateOf(1), { branch: 0, product: 0, lots: 0 })
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    onFirstBatch(() => { seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({})) })
     const res = await req('POST', '/tagged-lots/restore', TAGGED())
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'tagged_lot_conflict')
@@ -634,7 +639,7 @@ const hold = async (tag, quantity) => {
   await check('STK-D: held units consumed after the read -> Dispose is 409 and books no loss', async () => {
     seedStock({ lot: 5 })
     await hold('broken', 5)
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    onFirstBatch(() => { seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({})) })
     const res = await req('POST', '/tagged-lots/dispose', TAGGED({ conditionTag: 'broken' }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'tagged_lot_conflict')
@@ -667,7 +672,7 @@ const hold = async (tag, quantity) => {
   await check('STK-D: a conflicted Restore RELEASES its claim (the write mark rides the aborted batch)', async () => {
     seedStock({ lot: 5 })
     await hold('expired', 5)
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    onFirstBatch(() => { seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({})) })
     const first = await req('POST', '/tagged-lots/restore', TAGGED({ conditionTag: 'expired', client_request_id: 'stkd-release-0001' }))
     assert.equal(first.status, 409, JSON.stringify(first.json))
     assert.equal(first.json?.code, 'tagged_lot_conflict')

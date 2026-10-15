@@ -26,6 +26,7 @@ const path = require('node:path')
 const cloudflareRoot = path.join(__dirname, '..')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
 const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
 
@@ -78,9 +79,10 @@ ok(true, 'isReceiptMovementType: add/stock_in are purchases; set/adjustment/remo
 
 // ---- real DB --------------------------------------------------------------
 const db = openDb(loadAll())
+assert.throws(()=>db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 ok(true, 'full migration chain applied')
 
-db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({})
+seedStockFixture(db,()=>db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({}))
 const actor = { userId: 7, userName: 'tester' }
 
 async function stockOf(productId, branchId) {
@@ -101,11 +103,11 @@ async function counterFor(originalId) {
   // removeStockFromBatch) are covered by their own pure tests; this test
   // pins the NEW orchestration -- direction, aggregate move, counter-movement,
   // double-revert guard -- against the real schema.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, cost_price_usd, cost_price_khr, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 99, 396000, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9201, 1, 10)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
-    VALUES (5001, 9201, 'Revert Cream', 1, 'Main Store', 'add', 10, 4.25, 17000, 42.5, 170000, 'received', 'tester', '2026-08-20 10:00:00')`).run({})
-  db.prepare(`UPDATE products SET cost_price_usd=123, cost_price_khr=492000 WHERE id=9201`).run({})
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, cost_price_usd, cost_price_khr, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 99, 396000, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9201, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
+    VALUES (5001, 9201, 'Revert Cream', 1, 'Main Store', 'add', 10, 4.25, 17000, 42.5, 170000, 'received', 'tester', '2026-08-20 10:00:00')`).run({}))
+  seedStockFixture(db,()=>db.prepare(`UPDATE products SET cost_price_usd=123, cost_price_khr=492000 WHERE id=9201`).run({}))
 
   const before1 = await stockOf(9201, 1)
   assert.deepEqual(before1, { product: 10, branch: 10 }, 'seeded add left 10 in stock (aggregate) before revert')
@@ -136,10 +138,10 @@ async function counterFor(originalId) {
   ok(true, 'double-revert of the same movement is refused (409)')
 
   // ---- case 2: revert a batch-less OUT (revert adds the stock back) ---------
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9202, 'Revert Serum', 'RS-1', 'pcs', 5, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9202, 1, 5)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
-    VALUES (5101, 9202, 'Revert Serum', 1, 'Main Store', 'out', 2, NULL, NULL, NULL, NULL, 'bulk import removal', 'tester', '2026-08-21 10:00:00')`).run({})
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9202, 'Revert Serum', 'RS-1', 'pcs', 5, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9202, 1, 5)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
+    VALUES (5101, 9202, 'Revert Serum', 1, 'Main Store', 'out', 2, NULL, NULL, NULL, NULL, 'bulk import removal', 'tester', '2026-08-21 10:00:00')`).run({}))
   const orig2 = await movementById(5101)
   const r2 = await kernel.applyMovementRevert(db, orig2, actor)
   assert.equal(r2.ok, true)
@@ -154,8 +156,8 @@ async function counterFor(originalId) {
   ok(true, 'batch-less outflow reverts by adding the stock back to the aggregate')
 
   // ---- case 3: non-revertible transactional type is refused ----------------
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
-    VALUES (5201, 9202, 'Revert Serum', 1, 'Main Store', 'sale', 1, '', 'tester', '2026-08-22 10:00:00')`).run({})
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
+    VALUES (5201, 9202, 'Revert Serum', 1, 'Main Store', 'sale', 1, '', 'tester', '2026-08-22 10:00:00')`).run({}))
   const r3 = await kernel.applyMovementRevert(db, await movementById(5201), actor)
   assert.equal(r3.ok, false)
   assert.equal(r3.status, 400)
@@ -166,10 +168,10 @@ async function counterFor(originalId) {
   ok(true, 'a sale movement cannot be reverted from the stock ledger (refused, no stock moved)')
 
   // ---- case 4: revert-remove blocked when stock has since been consumed -----
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9203, 'Revert Balm', 'RB-1', 'pcs', 0, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9203, 1, 0)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
-    VALUES (5301, 9203, 'Revert Balm', 1, 'Main Store', 'add', 4, 'received', 'tester', '2026-08-23 10:00:00')`).run({})
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9203, 'Revert Balm', 'RB-1', 'pcs', 0, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9203, 1, 0)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
+    VALUES (5301, 9203, 'Revert Balm', 1, 'Main Store', 'add', 4, 'received', 'tester', '2026-08-23 10:00:00')`).run({}))
   const r4 = await kernel.applyMovementRevert(db, await movementById(5301), actor)
   assert.equal(r4.ok, false)
   assert.equal(r4.status, 400)
@@ -185,15 +187,15 @@ async function counterFor(originalId) {
   // ---- case 5: two same-day receipts share ONE lot; reverting one subtracts
   // its OWN units and money and leaves the other receipt's purchase (and the
   // lot's supplier/credit state) intact. Pre-fix: 15 / 65 stayed as they were.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9301, 'Mirror Toner', 'MT-1', 'pcs', 15, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9301, 1, 15)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9301, 'Mirror Toner', 'MT-1', 'pcs', 15, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9301, 1, 15)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (8301, 9301, '09032026', '09032026', '2026-03-09', 1, 1, 41, 'Acme Supply', 4, 'credit', '2026-10-01', 15, 1, 65)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8301, 1, 15)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+    VALUES (8301, 9301, '09032026', '09032026', '2026-03-09', 1, 1, 41, 'Acme Supply', 4, 'credit', '2026-10-01', 15, 1, 65)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8301, 1, 15)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
     VALUES (6001, 9301, 'Mirror Toner', 1, 'Main Store', 'add', 10, 4, 40, 'Stock-in session A', 'tester', '2026-03-09 09:00:00', 8301),
-           (6002, 9301, 'Mirror Toner', 1, 'Main Store', 'add', 5, 5, 25, 'Stock-in session B', 'tester', '2026-03-09 15:00:00', 8301)`).run({})
+           (6002, 9301, 'Mirror Toner', 1, 'Main Store', 'add', 5, 5, 25, 'Stock-in session B', 'tester', '2026-03-09 15:00:00', 8301)`).run({}))
   const r5 = await kernel.applyMovementRevert(db, await movementById(6002), actor)
   assert.equal(r5.ok, true, r5.error)
   assert.equal(r5.usedBatchId, 8301)
@@ -238,14 +240,14 @@ async function counterFor(originalId) {
   // emptied by the removal and deactivated (the schema forbids positive stock
   // on an inactive lot), so the revert must also reactivate it. Pre-fix: the
   // lot's received_quantity went 20 -> 40 (receiveBatchStock top-up).
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9302, 'Mirror Mask', 'MM-1', 'pcs', 0, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9302, 1, 0)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9302, 'Mirror Mask', 'MM-1', 'pcs', 0, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9302, 1, 0)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (8302, 9302, '09022026', '09022026', '2026-02-09', 0, 1, 41, 'Acme Supply', 5, 'paid', 20, 1, 100)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8302, 1, 0)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
-    VALUES (6101, 9302, 'Mirror Mask', 1, 'Main Store', 'remove', 20, 5, 100, 'damaged', 'tester', '2026-02-10 09:00:00', 8302)`).run({})
+    VALUES (8302, 9302, '09022026', '09022026', '2026-02-09', 0, 1, 41, 'Acme Supply', 5, 'paid', 20, 1, 100)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8302, 1, 0)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+    VALUES (6101, 9302, 'Mirror Mask', 1, 'Main Store', 'remove', 20, 5, 100, 'damaged', 'tester', '2026-02-10 09:00:00', 8302)`).run({}))
   const r8 = await kernel.applyMovementRevert(db, await movementById(6101), actor)
   assert.equal(r8.ok, true, r8.error)
   assert.equal(r8.usedBatchId, 8302)
@@ -259,14 +261,14 @@ async function counterFor(originalId) {
 
   // ---- case 9: a lot that never tracked receipts (pre-0067 NULL) is not
   // guessed to 0 and its payment state is left alone.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9303, 'Legacy Lotion', 'LL-1', 'pcs', 8, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9303, 1, 8)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9303, 'Legacy Lotion', 'LL-1', 'pcs', 8, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9303, 1, 8)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_cost_usd)
-    VALUES (8303, 9303, '01012026', '01012026', '2026-01-01', 1, 1, 41, 'Acme Supply', 2, 'credit', '2026-12-01', NULL, NULL)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8303, 1, 8)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
-    VALUES (6201, 9303, 'Legacy Lotion', 1, 'Main Store', 'add', 3, 2, 6, 'received', 'tester', '2026-01-02 09:00:00', 8303)`).run({})
+    VALUES (8303, 9303, '01012026', '01012026', '2026-01-01', 1, 1, 41, 'Acme Supply', 2, 'credit', '2026-12-01', NULL, NULL)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8303, 1, 8)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+    VALUES (6201, 9303, 'Legacy Lotion', 1, 'Main Store', 'add', 3, 2, 6, 'received', 'tester', '2026-01-02 09:00:00', 8303)`).run({}))
   const r9 = await kernel.applyMovementRevert(db, await movementById(6201), actor)
   assert.equal(r9.ok, true, r9.error)
   assert.deepEqual(await stockOf(9303, 1), { product: 5, branch: 5 })
@@ -281,16 +283,16 @@ async function counterFor(originalId) {
   // supplier's credit stay -- partial and whole-lot alike. Review probe J: on
   // e3bf6fbf the partial revert took received 10 -> 8 and the whole-lot
   // revert wiped the supplier, the credit and the $50 invoice line.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7011, 'Probe J', 'PJ-1', 'pcs', 12, 1), (7012, 'Probe J2', 'PJ-2', 'pcs', 10, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7011, 1, 12), (7012, 1, 10)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7011, 'Probe J', 'PJ-1', 'pcs', 12, 1), (7012, 'Probe J2', 'PJ-2', 'pcs', 10, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7011, 1, 12), (7012, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
     VALUES (7111, 7011, '01132026', '01132026', '2026-01-13', 1, 1, 41, 'Acme Supply', 5, 'credit', '2026-11-01', 10, 1, 50),
-           (7112, 7012, '01142026', '01142026', '2026-01-14', 1, 1, 41, 'Acme Supply', 5, 'credit', '2026-11-01', 10, 1, 50)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7111, 1, 12), (7112, 1, 10)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+           (7112, 7012, '01142026', '01142026', '2026-01-14', 1, 1, 41, 'Acme Supply', 5, 'credit', '2026-11-01', 10, 1, 50)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7111, 1, 12), (7112, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
     VALUES (6301, 7011, 'Probe J', 1, 'set', 2, 'Quantity correction (received date #7111)', 7, 'tester', '2026-01-14 09:00:00', 7111),
-           (6302, 7012, 'Probe J2', 1, 'set', 10, 'Quantity correction (received date #7112)', 7, 'tester', '2026-01-15 09:00:00', 7112)`).run({})
+           (6302, 7012, 'Probe J2', 1, 'set', 10, 'Quantity correction (received date #7112)', 7, 'tester', '2026-01-15 09:00:00', 7112)`).run({}))
   const creditLot = { supplier_id: 41, supplier_name: 'Acme Supply', unit_cost_usd: 5, payment_status: 'credit', credit_due_date: '2026-11-01', received_quantity: 10, received_cost_usd: 50, received_branch_id: 1 }
   const r10 = await kernel.applyMovementRevert(db, await movementById(6301), actor)
   assert.equal(r10.ok, true, r10.error)
@@ -306,14 +308,14 @@ async function counterFor(originalId) {
   // credit state ride through both. Review probe A / pREAD shape 1: on
   // e3bf6fbf the full revert cleared the attribution, so the un-revert put
   // the $40 credit back under "No supplier recorded".
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7001, 'Probe A', 'PA-1', 'pcs', 10, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7001, 1, 10)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7001, 'Probe A', 'PA-1', 'pcs', 10, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7001, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (7101, 7001, '03092026', '03092026', '2026-03-09', 1, 1, 41, 'Acme Supply', 4, 'credit', '2026-10-01', 10, 1, 40)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7101, 1, 10)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
-    VALUES (6401, 7001, 'Probe A', 1, 'Main Store', 'add', 10, 4, 40, 'Stock-in A', 'tester', '2026-03-09 09:00:00', 7101)`).run({})
+    VALUES (7101, 7001, '03092026', '03092026', '2026-03-09', 1, 1, 41, 'Acme Supply', 4, 'credit', '2026-10-01', 10, 1, 40)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7101, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+    VALUES (6401, 7001, 'Probe A', 1, 'Main Store', 'add', 10, 4, 40, 'Stock-in A', 'tester', '2026-03-09 09:00:00', 7101)`).run({}))
   const acmeCredit = { supplier_id: 41, supplier_name: 'Acme Supply', unit_cost_usd: 4, payment_status: 'credit', credit_due_date: '2026-10-01', received_branch_id: 1 }
   const r11 = await kernel.applyMovementRevert(db, await movementById(6401), actor)
   assert.equal(r11.ok, true, r11.error)
@@ -328,14 +330,14 @@ async function counterFor(originalId) {
   // by the counter's own type. Review probe CHAIN: level 3 is an 'add' whose
   // root is the receipt -- on e3bf6fbf it was read as "revert of a removal"
   // and left an active lot with 10 / $40, zero stock and a phantom invoice.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7007, 'Probe Chain', 'PCH-1', 'pcs', 10, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7007, 1, 10)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7007, 'Probe Chain', 'PCH-1', 'pcs', 10, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7007, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (7107, 7007, '09092026', '09092026', '2026-09-09', 1, 1, 41, 'Acme Supply', 4, 'paid', 10, 1, 40)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7107, 1, 10)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
-    VALUES (6501, 7007, 'Probe Chain', 1, 'Main Store', 'add', 10, 4, 40, 'receipt', 'tester', '2026-09-09 09:00:00', 7107)`).run({})
+    VALUES (7107, 7007, '09092026', '09092026', '2026-09-09', 1, 1, 41, 'Acme Supply', 4, 'paid', 10, 1, 40)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7107, 1, 10)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+    VALUES (6501, 7007, 'Probe Chain', 1, 'Main Store', 'add', 10, 4, 40, 'receipt', 'tester', '2026-09-09 09:00:00', 7107)`).run({}))
   const acmePaid = { supplier_id: 41, supplier_name: 'Acme Supply', unit_cost_usd: 4, payment_status: 'paid', credit_due_date: null, received_branch_id: 1 }
   const chain = [
     { level: 1, type: 'add', is_active: 0, received_quantity: 0, received_cost_usd: 0, stock: 0 },
@@ -374,19 +376,19 @@ async function counterFor(originalId) {
   // refused with a 409 naming the session; the session's original receipt
   // row (a member) stays revertible. Review probe I: on e3bf6fbf the undo
   // row reverted as a plain removal -- stock back, purchase not.
-  db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('op-13', 7, 'req-13', 'stock_in', '{}')`).run({})
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('op-13', 7, 'req-13', 'stock_in', '{}')`).run({}))
   const opRowid = Number((await db.prepare(`SELECT rowid AS r FROM stock_session_operations WHERE id = 'op-13'`).get({})).r)
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7010, 'Probe I', 'PI-1', 'pcs', 5, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7010, 1, 5)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7010, 'Probe I', 'PI-1', 'pcs', 5, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7010, 1, 5)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (7110, 7010, '12092026', '12092026', '2026-12-09', 1, 1, 41, 'Acme Supply', 3, 'paid', 5, 1, 15)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7110, 1, 5)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+    VALUES (7110, 7010, '12092026', '12092026', '2026-12-09', 1, 1, 41, 'Acme Supply', 3, 'paid', 5, 1, 15)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7110, 1, 5)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
     VALUES (6601, 7010, 'Probe I', 1, 'Main Store', 'add', 5, 3, 15, 'Stock-in session op-13', @op, 7, 'tester', '2026-12-09 09:00:00', 7110),
-           (6602, 7010, 'Probe I', 1, 'Main Store', 'remove', 5, 3, 15, 'Stock session op-13 undo generation 1', @op, 7, 'tester', '2026-12-09 10:00:00', 7110)`).run({ op: opRowid })
-  db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, batch_id, movement_id, quantity, unit_cost_usd)
-    VALUES ('op-13', 'l1', 'receive', 7010, 1, 7110, 6601, 5, 3)`).run({})
+           (6602, 7010, 'Probe I', 1, 'Main Store', 'remove', 5, 3, 15, 'Stock session op-13 undo generation 1', @op, 7, 'tester', '2026-12-09 10:00:00', 7110)`).run({ op: opRowid }))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, batch_id, movement_id, quantity, unit_cost_usd)
+    VALUES ('op-13', 'l1', 'receive', 7010, 1, 7110, 6601, 5, 3)`).run({}))
   const lotBefore13 = await lotOf(7110)
   const r13 = await kernel.applyMovementRevert(db, await movementById(6602), actor)
   assert.equal(r13.ok, false)
@@ -404,17 +406,17 @@ async function counterFor(originalId) {
   // dated lot -- one lot or several, another supplier's delivery or its own
   // is a guess. With no undated stock to take it from, the Revert is refused
   // whole (review F7; the undated case is in test-stock-revert-past-reports).
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7009, 'Probe H', 'PH-1', 'pcs', 5, 1), (7019, 'Probe H2', 'PH-2', 'pcs', 6, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7009, 1, 5), (7019, 1, 6)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7009, 'Probe H', 'PH-1', 'pcs', 5, 1), (7019, 'Probe H2', 'PH-2', 'pcs', 6, 1)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7009, 1, 5), (7019, 1, 6)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
     VALUES (7109, 7009, '11092026', '11092026', '2026-11-09', 1, 1, 41, 'Acme Supply', 2, 'credit', '2026-12-01', 5, 1, 10),
            (7119, 7019, '01012026', '01012026', '2026-01-01', 1, 1, 41, 'Acme Supply', 2, 'paid', NULL, 3, 1, 6),
-           (7129, 7019, '01022026', '01022026', '2026-01-02', 1, 2, 41, 'Acme Supply', 2, 'paid', NULL, 3, 1, 6)`).run({})
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7109, 1, 5), (7119, 1, 3), (7129, 1, 3)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
+           (7129, 7019, '01022026', '01022026', '2026-01-02', 1, 2, 41, 'Acme Supply', 2, 'paid', NULL, 3, 1, 6)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (7109, 1, 5), (7119, 1, 3), (7129, 1, 3)`).run({}))
+  seedStockFixture(db,()=>db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
     VALUES (6701, 7009, 'Probe H', 1, 'Main Store', 'add', 5, 2, 10, 'legacy receipt, no stamp', 'tester', '2026-11-09 09:00:00', NULL),
-           (6702, 7019, 'Probe H2', 1, 'Main Store', 'add', 6, 2, 12, 'legacy receipt, no stamp', 'tester', '2026-01-02 09:00:00', NULL)`).run({})
+           (6702, 7019, 'Probe H2', 1, 'Main Store', 'add', 6, 2, 12, 'legacy receipt, no stamp', 'tester', '2026-01-02 09:00:00', NULL)`).run({}))
   for (const [movementId, productId, lots] of [[6701, 7009, [7109]], [6702, 7019, [7119, 7129]]]) {
     const before = JSON.stringify([await stockOf(productId, 1), ...(await Promise.all(lots.map(async (id) => [await lotOf(id), await lotStock(id)])))])
     const refused = await kernel.applyMovementRevert(db, await movementById(movementId), actor)

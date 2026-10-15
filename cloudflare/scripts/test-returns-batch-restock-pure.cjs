@@ -21,10 +21,15 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
+function seedRows(raw,seed) {
+  return raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get() ? seedStockFixture(raw,seed) : seed()
+}
 let rawDb = openDb(loadAll())
+assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 function deactivatePre0154LegacyLot(batchId) {
-  const deactivate = () => rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId])
+  const deactivate = () => seedRows(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId]))
   assert.throws(deactivate, /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
   // Legacy-corruption fixture only: preserve route refusal/race coverage even
   // though 0154 now prevents another writer from creating this state.
@@ -131,6 +136,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request.endsWith('/loyaltyEligibility')) return loadReal('lib/loyaltyEligibility.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -147,6 +153,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // receiveBatchStock now derives lot_code/batch_key through it, so it needs
 // to be the real transpiled module here too, not left to fall through to
 // node's own require() (which can't resolve a bare .ts file).
+const stockTransaction = loadReal('lib/stockTransaction.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
@@ -283,27 +290,27 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
+  seedRows(rawDb,()=>rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run())
   auditCalls = []
-  rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
+  seedRows(rawDb,()=>rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
     DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts; DELETE FROM return_create_receipts; DELETE FROM return_create_guards;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
-  rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
-  rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
-  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run()
-  rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
+    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`))
+  seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run())
+  seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run())
+  seedRows(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run())
+  seedRows(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run())
+  seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run())
 }
 
 function seedReplacementStock() {
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-  rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
-  rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run()
+  seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run())
+  seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run())
+  seedRows(rawDb,()=>rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run())
   const batchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
-  rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([batchId])
+  seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([batchId]))
   return batchId
 }
 
@@ -367,18 +374,18 @@ async function main() {
       discount_usd: 1, membership_discount_usd: 0, tax_usd: 0.5 }
     const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
       { 'return-v1-line': 1 }, 'return-v1-line', allocation)
-    rawDb.prepare(`UPDATE sales SET receipt_number='V1-SALE',exchange_rate=4000,subtotal_usd=10,discount_usd=1,
+    seedRows(rawDb,()=>rawDb.prepare(`UPDATE sales SET receipt_number='V1-SALE',exchange_rate=4000,subtotal_usd=10,discount_usd=1,
       membership_discount_usd=0,tax_usd=.5,calculated_total_usd=9.5,rounding_adjustment_usd=0,total_usd=9.5,
-      money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
-    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,batch_id,cost_price_usd,cost_price_khr,
+      money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run())
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,batch_id,cost_price_usd,cost_price_khr,
       total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
       product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
       manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
       VALUES(@id,1,@product_id,'Widget',@quantity,1,@batch_id,NULL,NULL,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
         @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
-        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run({ ...pricing, batch_id: batch.batchId })
-    rawDb.prepare(`INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)
-      VALUES(1,?,1,1,0)`).run([batch.batchId])
+        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run({ ...pricing, batch_id: batch.batchId }))
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)
+      VALUES(1,?,1,1,0)`).run([batch.batchId]))
 
     const capability = await req('GET', '/capabilities')
     assert.strictEqual(capability.status, 200)
@@ -395,26 +402,26 @@ async function main() {
         cost_price_usd: 999, cost_price_khr: 3996000 }] }
     assert.deepStrictEqual(returnCreateActionKernel.canonicalReturnCreateIntent(body).expected_quote, expectedQuote)
 
-    beforeBatchHook = async () => rawDb.prepare('UPDATE sales SET tax_usd=.6 WHERE id=1').run()
+    beforeBatchHook = async () => seedRows(rawDb,()=>rawDb.prepare('UPDATE sales SET tax_usd=.6 WHERE id=1').run())
     const stale = await req('POST', '/', body)
     assert.strictEqual(stale.status, 409, JSON.stringify(stale.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
-    rawDb.prepare('UPDATE sales SET tax_usd=.5 WHERE id=1').run()
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE sales SET tax_usd=.5 WHERE id=1').run())
 
     const refreshedQuoteResponse = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     const { customer_return_create_version: _freshCreate, customer_return_edit_version: _freshEdit,
       ...refreshedExpectedQuote } = refreshedQuoteResponse.json
     const refreshedBody = { ...body, expected_quote: refreshedExpectedQuote }
-    beforeBatchHook = async () => rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd)
-      VALUES(99,1,'completed','customer',0)`).run()
+    beforeBatchHook = async () => seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd)
+      VALUES(99,1,'completed','customer',0)`).run())
     const priorGraphStale = await req('POST', '/', refreshedBody)
     assert.strictEqual(priorGraphStale.status, 409, JSON.stringify(priorGraphStale.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE id<>99').get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
-    rawDb.prepare('DELETE FROM returns WHERE id=99').run()
+    seedRows(rawDb,()=>rawDb.prepare('DELETE FROM returns WHERE id=99').run())
 
     const postConflictQuoteResponse = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(postConflictQuoteResponse.status, 200, JSON.stringify(postConflictQuoteResponse.json))
@@ -481,29 +488,29 @@ async function main() {
       discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
     const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
       { 'fractional-return-line': 0.3 }, 'fractional-return-line', allocation)
-    rawDb.prepare(`UPDATE sales SET receipt_number='FRACTIONAL-SALE',exchange_rate=4000,subtotal_usd=3,
+    seedRows(rawDb,()=>rawDb.prepare(`UPDATE sales SET receipt_number='FRACTIONAL-SALE',exchange_rate=4000,subtotal_usd=3,
       discount_usd=0,membership_discount_usd=0,tax_usd=0,calculated_total_usd=3,rounding_adjustment_usd=0,
-      total_usd=3,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
-    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
+      total_usd=3,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run())
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
       total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
       product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
       manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
       VALUES(@id,1,@product_id,'Widget',@quantity,1,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
         @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
-        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing)
+        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing))
     const priorQuote = await returnsRoute.customerReturnQuoteFromDb(db, 1, [{ sale_item_id: 1, quantity: 0.1 }])
-    rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,money_precision_version,calculated_refund_usd,
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,money_precision_version,calculated_refund_usd,
       rounding_adjustment_usd,total_refund_usd,total_refund_khr) VALUES(98,1,'completed','customer',1,@calculated,@rounding,@usd,@khr)`).run({
       calculated: priorQuote.calculated_refund_usd, rounding: priorQuote.rounding_adjustment_usd,
       usd: priorQuote.total_refund_usd, khr: priorQuote.total_refund_khr,
-    })
-    rawDb.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,
+    }))
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,
       applied_price_usd,applied_price_khr,stock_action,refund_snapshot_json)
       VALUES(98,1,1,'Widget',.1,@usd,@khr,@appliedUsd,@appliedKhr,'none',@snapshot)`).run({
       usd: priorQuote.items[0].total_usd, khr: priorQuote.items[0].total_khr,
       appliedUsd: priorQuote.items[0].applied_price_usd, appliedKhr: priorQuote.items[0].applied_price_khr,
       snapshot: priorQuote.items[0].refund_snapshot_json,
-    })
+    }))
     const quote = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 0.2 }] })
     assert.strictEqual(quote.status, 200, JSON.stringify(quote.json))
     const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quote.json
@@ -526,16 +533,16 @@ async function main() {
       discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
     const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
       { 'merged-return-line': 1 }, 'merged-return-line', allocation)
-    rawDb.prepare(`UPDATE sales SET receipt_number='MERGED-V1-SALE',exchange_rate=4000,subtotal_usd=10,
+    seedRows(rawDb,()=>rawDb.prepare(`UPDATE sales SET receipt_number='MERGED-V1-SALE',exchange_rate=4000,subtotal_usd=10,
       discount_usd=0,membership_discount_usd=0,tax_usd=0,calculated_total_usd=10,rounding_adjustment_usd=0,
-      total_usd=10,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
-    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
+      total_usd=10,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run())
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
       total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
       product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,
       manual_discount_usd,manual_discount_khr,manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
       VALUES(@id,1,2,'Different Serum',@quantity,1,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
         @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@product_discount_type,@product_discount_label,
-        @manual_discount_usd,@manual_discount_khr,@manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing)
+        @manual_discount_usd,@manual_discount_khr,@manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing))
 
     const unproven = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(unproven.status, 409, JSON.stringify(unproven.json))
@@ -544,20 +551,20 @@ async function main() {
       VALUES('product.merge','applied',@payload) RETURNING id`).get({
       payload: JSON.stringify({ dupId: 1, keeperId: 2, reparentedSaleItemIds: [1] }),
     })
-    beforeLineageCoherenceHook = () => rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
+    beforeLineageCoherenceHook = () => seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id]))
     const racedQuote = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(racedQuote.status, 409, JSON.stringify(racedQuote.json))
     assert.strictEqual(racedQuote.json.code, 'product_merge_lineage_conflict')
-    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id]))
     const quotedMerged = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(quotedMerged.status, 200, JSON.stringify(quotedMerged.json))
 
-    rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
-    rawDb.prepare('UPDATE sale_items SET product_id=1 WHERE id=1').run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id]))
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE sale_items SET product_id=1 WHERE id=1').run())
     const quotedAfterUndo = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(quotedAfterUndo.status, 200, JSON.stringify(quotedAfterUndo.json))
-    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
-    rawDb.prepare('UPDATE sale_items SET product_id=2 WHERE id=1').run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id]))
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE sale_items SET product_id=2 WHERE id=1').run())
     const quotedAfterRedo = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
     assert.strictEqual(quotedAfterRedo.status, 200, JSON.stringify(quotedAfterRedo.json))
     const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quotedAfterRedo.json
@@ -565,12 +572,12 @@ async function main() {
       reason: 'Merged product identity', expected_quote: expectedQuote,
       items: [{ sale_item_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }] }
 
-    beforeBatchHook = async () => rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
+    beforeBatchHook = async () => seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id]))
     const raced = await req('POST', '/', body)
     assert.strictEqual(raced.status, 409, JSON.stringify(raced.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
-    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id]))
     const created = await req('POST', '/', body)
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
     const item = rawDb.prepare('SELECT product_id,refund_snapshot_json FROM return_items WHERE return_id=?').get([created.json.id])
@@ -581,7 +588,7 @@ async function main() {
 
   await check('legacy-sale event lots use the return business date and failed lot writes roll back create/edit/retry', async () => {
     seed()
-    rawDb.prepare('INSERT INTO sale_items(id,sale_id,product_id,quantity,batch_id) VALUES(1,1,1,5,NULL)').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items(id,sale_id,product_id,quantity,batch_id) VALUES(1,1,1,5,NULL)').run())
     const body = { client_request_id: 'legacy-return-provenance', sale_id: 1, branch_id: 1, reason: 'Legacy',
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, stock_action: 'restock' }] }
     rawDb.exec("CREATE TRIGGER fail_test_return_lot BEFORE INSERT ON product_batches BEGIN SELECT RAISE(ABORT,'test lot storage failure'); END")
@@ -597,7 +604,7 @@ async function main() {
     assert.deepStrictEqual(retried.json, created.json)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get([lot.id]).quantity, 3)
     // A historical return edited today retains its own UTC+7 receipt day.
-    rawDb.prepare("UPDATE returns SET created_at='2026-01-01T18:30:00Z' WHERE id=?").run([created.json.id])
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE returns SET created_at='2026-01-01T18:30:00Z' WHERE id=?").run([created.json.id]))
     rawDb.exec("CREATE TRIGGER fail_test_return_lot BEFORE INSERT ON product_batches BEGIN SELECT RAISE(ABORT,'test lot storage failure'); END")
     const editBody = { client_request_id: 'legacy-return-edit', reason: 'One returned',
       expected_updated_at: rawDb.prepare('SELECT updated_at FROM returns WHERE id=?').get([created.json.id]).updated_at,
@@ -622,7 +629,7 @@ async function main() {
     // lot picker would have recorded on sale_items.batch_id).
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-A' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const beforeBatchQty = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity
     assert.strictEqual(beforeBatchQty, 5, 'sanity: batch should have 5 left after the sale')
@@ -666,7 +673,7 @@ async function main() {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-B' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const created = await req('POST', '/', {
       sale_id: 1,
@@ -705,9 +712,9 @@ async function main() {
     assert.notStrictEqual(batchA.batchId, batchB.batchId, 'sanity: the two receives must be distinct lots')
     await productBatches.removeStockFromBatch(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
     await productBatches.removeStockFromBatch(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, NULL)').run()
-    rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @a, 1, 3, 0)').run({ a: batchA.batchId })
-    rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @b, 1, 2, 0)').run({ b: batchB.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, NULL)').run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @a, 1, 3, 0)').run({ a: batchA.batchId }))
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @b, 1, 2, 0)').run({ b: batchB.batchId }))
     assert.strictEqual(batchQtyOf(batchA), 7, 'sanity: A has 7 after the sale drew 3')
     assert.strictEqual(batchQtyOf(batchB), 8, 'sanity: B has 8 after the sale drew 2')
 
@@ -751,10 +758,10 @@ async function main() {
     for (const [batchId, productId, quantity] of [[a1.batchId, 1, 2], [a2.batchId, 1, 1], [b1.batchId, 2, 1], [b2.batchId, 2, 2]]) {
       await productBatches.removeStockFromBatch(db, { batchId, productId, branchId: 1, quantity })
     }
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3),(2,1,2,'Different Serum',3)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3),(2,1,2,'Different Serum',3)").run())
     for (const [saleItemId, batchId, quantity] of [[1, a1.batchId, 2], [1, a2.batchId, 1], [2, b1.batchId, 1], [2, b2.batchId, 2]]) {
-      rawDb.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(@saleItemId,@batchId,1,@quantity,0)')
-        .run({ saleItemId, batchId, quantity })
+      seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(@saleItemId,@batchId,1,@quantity,0)')
+        .run({ saleItemId, batchId, quantity }))
     }
     const items = [
       { sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 3, return_to_stock: true },
@@ -777,8 +784,8 @@ async function main() {
 
   await check('direct edit receipt, exact sale-status event, and frozen retry survive later mutable changes', async () => {
     seed()
-    rawDb.prepare("UPDATE sales SET sale_status='completed',updated_at='2026-09-08T01:00:00.000Z' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,applied_price_usd) VALUES(1,1,1,'Widget',5,10)").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET sale_status='completed',updated_at='2026-09-08T01:00:00.000Z' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,applied_price_usd) VALUES(1,1,1,'Widget',5,10)").run())
     const created = await req('POST', '/', {
       sale_id: 1, reason: 'Full return',
       items: [{ sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 5, return_to_stock: true }],
@@ -808,8 +815,8 @@ async function main() {
       source_kind: 'return_edit', source_id: receipt.id, generation: 0, sale_id: 1,
     }, 'the generic return audit carries exact provenance so count/detail suppress only its proven event twin')
 
-    rawDb.prepare("UPDATE returns SET reason='changed after response',updated_at='2026-09-09T00:00:00.000Z' WHERE id=@id").run({ id: created.json.id })
-    rawDb.prepare("UPDATE sale_items SET quantity=9 WHERE id=1").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE returns SET reason='changed after response',updated_at='2026-09-09T00:00:00.000Z' WHERE id=@id").run({ id: created.json.id }))
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sale_items SET quantity=9 WHERE id=1").run())
     const retry = await req('PATCH', `/${created.json.id}`, frozen)
     assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
     assert.deepStrictEqual(retry.json, edited.json, 'retry returns the immutable stored response before stale/mutable reads')
@@ -854,8 +861,8 @@ async function main() {
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_edit'").get().n, 0)
 
     seed()
-    rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,3)").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,3)").run())
     const linked = await req('POST', '/', { sale_id: 1, reason: 'One of three', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }] })
     assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
     const linkedEdit = await req('PATCH', `/${linked.json.id}`, {
@@ -912,8 +919,8 @@ async function main() {
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-bad-receipt'").get().n, 0)
 
     seed()
-    rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,2)").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,2)").run())
     const linked = await req('POST', '/', { sale_id: 1, reason: 'Full', items: [{ sale_item_id: 1, product_id: 1, quantity: 2, return_to_stock: true }] })
     const linkedStamp = rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: linked.json.id }).updated_at
     corruptNextSaleRecordEvent = true
@@ -985,7 +992,7 @@ async function main() {
     const replace = async (productCost) => {
       seed()
       seedReplacementStock()
-      rawDb.prepare('UPDATE products SET cost_price_usd = @usd, cost_price_khr = @khr WHERE id = 2').run({ usd: productCost, khr: productCost == null ? null : productCost * 4000 })
+      seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = @usd, cost_price_khr = @khr WHERE id = 2').run({ usd: productCost, khr: productCost == null ? null : productCost * 4000 }))
       const { status, json } = await req('POST', '/', {
         items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
         replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
@@ -1041,7 +1048,7 @@ async function main() {
       movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
       audit: auditCalls.length,
     }
-    beforeBatchHook = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
+    beforeBatchHook = () => seedRows(rawDb,()=>rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })]))
     const blocked = await req('POST', '/supplier', body)
     assert.notStrictEqual(blocked.status, 200, JSON.stringify(blocked.json))
     assert.strictEqual(beforeBatchHook, null, 'marker must be installed at the supplier business batch')
@@ -1050,7 +1057,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, before.movements)
     assert.strictEqual(auditCalls.length, before.audit)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
-    rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    seedRows(rawDb,()=>rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run())
     const retry = await req('POST', '/supplier', body)
     assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
@@ -1102,7 +1109,7 @@ async function main() {
     seed()
     const beforeAudit = auditCalls.length
     const beforeSetting = rawDb.prepare("SELECT value FROM settings WHERE key='return_reason_presets'").get()?.value ?? null
-    beforeOrdinaryWrite = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
+    beforeOrdinaryWrite = () => seedRows(rawDb,()=>rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })]))
     const body = { presets: { customer: ['Damaged'], supplier: ['Expired'] } }
     const blocked = await req('POST', '/reason-presets', body)
     assert.notStrictEqual(blocked.status, 200, JSON.stringify(blocked.json))
@@ -1110,7 +1117,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
     assert.strictEqual(rawDb.prepare("SELECT value FROM settings WHERE key='return_reason_presets'").get()?.value ?? null, beforeSetting)
     assert.strictEqual(auditCalls.length, beforeAudit)
-    rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    seedRows(rawDb,()=>rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run())
     const accepted = await req('POST', '/reason-presets', body)
     assert.strictEqual(accepted.status, 200, JSON.stringify(accepted.json))
   })
@@ -1202,11 +1209,11 @@ async function main() {
     // Simulate history from BEFORE this feature: a plain damaged lot with no
     // condition_tag/source/unit_cost_usd (the pre-P3-L6/P4-3 shape) and an
     // unrelated write_off row from an old remove-stock action.
-    rawDb.prepare(`INSERT INTO damaged_stock_lots(product_id, branch_id, batch_id, return_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name)
-      VALUES(1, 1, NULL, NULL, 5, 5, 'Legacy damaged batch, pre-tag', 1, 'Legacy User')`).run()
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO damaged_stock_lots(product_id, branch_id, batch_id, return_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name)
+      VALUES(1, 1, NULL, NULL, 5, 5, 'Legacy damaged batch, pre-tag', 1, 'Legacy User')`).run())
     const legacyLotId = rawDb.prepare('SELECT id FROM damaged_stock_lots WHERE return_id IS NULL').get().id
-    rawDb.prepare(`INSERT INTO inventory_movements(product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, reason, reference_id, user_id, user_name)
-      VALUES(1, 'Widget', 1, 'write_off', 5, 3, 'Legacy write-off, pre-tag', 'legacy-remove-1', 1, 'Legacy User')`).run()
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO inventory_movements(product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, reason, reference_id, user_id, user_name)
+      VALUES(1, 'Widget', 1, 'write_off', 5, 3, 'Legacy write-off, pre-tag', 'legacy-remove-1', 1, 'Legacy User')`).run())
     const legacyMovementId = rawDb.prepare("SELECT id FROM inventory_movements WHERE reference_id = 'legacy-remove-1'").get().id
     const before = {
       lot: rawDb.prepare('SELECT * FROM damaged_stock_lots WHERE id = ?').get([legacyLotId]),
@@ -1288,7 +1295,7 @@ async function main() {
     seed()
     seedReplacementStock()
     beforeBatchHook = () => {
-      rawDb.prepare("INSERT INTO sales (receipt_number, client_request_id, branch_id) VALUES ('20260830-120000', 'peer-till-replacement-race', 1)").run()
+      seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sales (receipt_number, client_request_id, branch_id) VALUES ('20260830-120000', 'peer-till-replacement-race', 1)").run())
     }
     const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
@@ -1315,7 +1322,7 @@ async function main() {
 
     seed()
     seedReplacementStock()
-    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Private address','GENERAL-7',1)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Private address','GENERAL-7',1)").run())
     const markedTarget = await createReplacement({ customer_id: 7, customer_name: 'General' })
     assert.strictEqual(markedTarget.status, 200, JSON.stringify(markedTarget.json))
     const markedTargetSale = rawDb.prepare('SELECT customer_id,customer_name,customer_phone,customer_address,search_normalized,creation_snapshot_json FROM sales WHERE id=?').get([markedTarget.json.replacementSaleId])
@@ -1329,7 +1336,7 @@ async function main() {
 
     seed()
     seedReplacementStock()
-    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Named General','0123','Shop address','MEM-7',0)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Named General','0123','Shop address','MEM-7',0)").run())
     const unmarkedTarget = await createReplacement({ customer_id: 7, customer_name: 'Named General' })
     assert.strictEqual(unmarkedTarget.status, 200, JSON.stringify(unmarkedTarget.json))
     const unmarkedSale = rawDb.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get([unmarkedTarget.json.replacementSaleId])
@@ -1338,9 +1345,9 @@ async function main() {
 
     seed()
     seedReplacementStock()
-    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Historical address','GENERAL-7',1)").run()
-    rawDb.prepare("UPDATE sales SET customer_id=7,customer_name='General',customer_phone='0123',customer_address='Historical address',sale_status='completed' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Historical address','GENERAL-7',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET customer_id=7,customer_name='General',customer_phone='0123',customer_address='Historical address',sale_status='completed' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run())
     const markedSource = await createReplacement({ sale_id: 1, items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }] })
     assert.strictEqual(markedSource.status, 200, JSON.stringify(markedSource.json))
     assert.deepStrictEqual(
@@ -1352,11 +1359,11 @@ async function main() {
     for (const race of ['marker', 'membership']) {
       seed()
       const batchId = seedReplacementStock()
-      rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Sok Dara','0123','Address','MEM-7',0)").run()
+      seedRows(rawDb,()=>rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Sok Dara','0123','Address','MEM-7',0)").run())
       const beforeSales = rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n
       beforeBatchHook = async () => {
-        if (race === 'marker') rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=7').run()
-        else rawDb.prepare("UPDATE customers SET membership_number='MEM-CHANGED' WHERE id=7").run()
+        if (race === 'marker') seedRows(rawDb,()=>rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=7').run())
+        else seedRows(rawDb,()=>rawDb.prepare("UPDATE customers SET membership_number='MEM-CHANGED' WHERE id=7").run())
       }
       const raced = await createReplacement({ customer_id: 7, customer_name: 'Sok Dara' })
       assert.strictEqual(raced.status, 409, `${race}: ${JSON.stringify(raced.json)}`)
@@ -1401,17 +1408,17 @@ async function main() {
 
   await check('a same-value replacement records a normal sale, carries the auto note, and keeps its hand-picked lot', async () => {
     seed()
-    rawDb.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run())
     // Product 2 is the replacement and its stock is lot-tracked, and the
     // operator picks the lot BY HAND (batch_id on the line) rather than
     // letting FIFO choose -- the one shape whose sale line used to end up
     // with no sale_item_batch_allocations row at all, breaking the batch
     // identity chain right where the customer could return it again.
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
-    rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'picked-lot', 'PICK-LOT', '2026-08-01', 1, 1)").run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'picked-lot', 'PICK-LOT', '2026-08-01', 1, 1)").run())
     const pickedBatchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 6)').run([pickedBatchId])
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 6)').run([pickedBatchId]))
 
     const { status, json } = await req('POST', '/', {
       // One line comes back DAMAGED: the flag is what marks it, and the
@@ -1487,8 +1494,8 @@ async function main() {
 
   await check('a replacement is an ORDINARY sale: full tender, real payment method, its own receipt', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run())
     const { status, json } = await req('POST', '/', {
       // $10 comes back as a refund and $25 goes out as a sale. Two separate
       // movements of money -- the old model collected only the $15 gap and
@@ -1530,7 +1537,7 @@ async function main() {
 
   await check('an "uneven" swap is just a return plus a sale now -- accepted, with both totals intact', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run())
     // $10 back, $20 out. The old model refused this outright (400
     // uneven_exchange) unless a Full-Access user ticked "settle the price
     // difference". It is now the ordinary case.
@@ -1549,7 +1556,7 @@ async function main() {
   await check('the refund is the ORIGINAL sale line price, whatever the client posts', async () => {
     seed()
     // The sale charged $7.50. The payload claims $99.
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 2, 7.5, 30000)').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 2, 7.5, 30000)').run())
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 99, applied_price_khr: 400000 }],
@@ -1572,7 +1579,7 @@ async function main() {
     // batch_id and no allocations. The old code silently bumped the branch
     // aggregate, leaving the lot ledger and the aggregate drifting apart.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 4, lotCode: 'LOT-DEST' })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 3, 10, NULL)').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 3, 10, NULL)').run())
 
     const refused = await req('POST', '/', {
       sale_id: 1,
@@ -1598,7 +1605,7 @@ async function main() {
 
   await check('the plain-return path needs no permission beyond returns:add', async () => {
     seed()
-    rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd) VALUES (1, 1, 1, 1, 12)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd) VALUES (1, 1, 1, 1, 12)").run())
     // The only per-action gate on this path is 'returns:add'. Switched off,
     // the plain return is refused; on (the suite's default user), it goes
     // through -- with no second tier to clear, as the retired
@@ -1634,14 +1641,14 @@ async function main() {
     // A fixture written the way production rows from before this change look:
     // settlement_mode/settlement_diff_* populated, a linked replacement sale
     // whose amount_paid is only the gap the customer topped up.
-    rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 'Widget', 1, 10, 41000)").run()
-    rawDb.prepare(`INSERT INTO sales (id, receipt_number, branch_id, source_return_id, total_usd, amount_paid_usd, payment_method, loyalty_accrual)
-                   VALUES (900, 'OLD-REP-1', 1, 800, 25, 15, 'Return Exchange', 0)`).run()
-    rawDb.prepare(`INSERT INTO returns (id, return_number, sale_id, branch_id, return_scope, reason, status,
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 'Widget', 1, 10, 41000)").run())
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO sales (id, receipt_number, branch_id, source_return_id, total_usd, amount_paid_usd, payment_method, loyalty_accrual)
+                   VALUES (900, 'OLD-REP-1', 1, 800, 25, 15, 'Return Exchange', 0)`).run())
+    seedRows(rawDb,()=>rawDb.prepare(`INSERT INTO returns (id, return_number, sale_id, branch_id, return_scope, reason, status,
                      total_refund_usd, total_refund_khr, replacement_sale_id, settlement_mode, settlement_diff_usd, settlement_diff_khr)
-                   VALUES (800, 'RET-OLD-1', 1, 1, 'customer', 'Upgraded', 'completed', 10, 41000, 900, 'price_difference', 15, 61500)`).run()
-    rawDb.prepare("INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, total_usd, return_to_stock, stock_action, branch_id) VALUES (800, 1, 1, 'Widget', 1, 10, 10, 0, 'none', 1)").run()
-    rawDb.prepare("INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, quantity, applied_price_usd, total_usd) VALUES (800, 2, 'Different Serum', 1, 1, 25, 25)").run()
+                   VALUES (800, 'RET-OLD-1', 1, 1, 'customer', 'Upgraded', 'completed', 10, 41000, 900, 'price_difference', 15, 61500)`).run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, total_usd, return_to_stock, stock_action, branch_id) VALUES (800, 1, 1, 'Widget', 1, 10, 10, 0, 'none', 1)").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, quantity, applied_price_usd, total_usd) VALUES (800, 2, 'Different Serum', 1, 1, 25, 25)").run())
 
     const detail = await req('GET', '/800')
     assert.strictEqual(detail.status, 200, JSON.stringify(detail.json))
@@ -1681,7 +1688,7 @@ async function main() {
     })
     assert.strictEqual(created.status, 200)
     // POS (11.9, next part) draws one unit from the lot
-    rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 2 WHERE return_id = @id').run({ id: created.json.id })
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 2 WHERE return_id = @id').run({ id: created.json.id }))
     const edited = await req('PATCH', `/${created.json.id}`, {
       items: [{ product_id: 1, quantity: 1, stock_action: 'damaged', branch_id: 1, applied_price_usd: 10 }],
       reason: 'Trying to shrink it',
@@ -1699,7 +1706,7 @@ async function main() {
     // refuse before its single batch; there is no compensation phase.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-R' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
@@ -1742,9 +1749,9 @@ async function main() {
     // drawing the lots by only what they held -- widening exactly that drift
     // on every exchange.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 5, lotCode: 'LOT-SHORT' })
-    rawDb.prepare('UPDATE branch_stock SET quantity = 50 WHERE product_id = 1 AND branch_id = 1').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 50 WHERE id = 1').run()
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity = 50 WHERE product_id = 1 AND branch_id = 1').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 50 WHERE id = 1').run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
@@ -1774,7 +1781,7 @@ async function main() {
     // A lot-backed sale and a return that restocked into that lot.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
     const created = await req('POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 2, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
@@ -1822,17 +1829,17 @@ async function main() {
   // routes/returns.ts and the first assertion below stores the JSON string.
   await check('N21: the replacement sale carries the DISPLAY address, not the source options JSON', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run())
     // The source sale must really have sold the returned line, so the route
     // takes the sale_id branch that reads saleMeta -- the whole point here.
-    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (1, 1, 1, 2)').run()
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (1, 1, 1, 2)').run())
     // The exact shape customers.address holds, as serializeContactOptions writes it.
     const optionsJson = JSON.stringify([
       { label: 'Default', name: null, phone: '012345678', email: null, address: 'St 271, Phnom Penh', area: null },
     ])
-    rawDb.prepare('UPDATE sales SET customer_id = 7, customer_name = @name, customer_phone = @phone, customer_address = @address WHERE id = 1')
-      .run({ name: 'Sok Dara', phone: '012345678', address: optionsJson })
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE sales SET customer_id = 7, customer_name = @name, customer_phone = @phone, customer_address = @address WHERE id = 1')
+      .run({ name: 'Sok Dara', phone: '012345678', address: optionsJson }))
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
@@ -1849,7 +1856,7 @@ async function main() {
     )
     // And a plainly typed address -- including a numeric house number that
     // happens to parse as JSON -- is not swallowed on the way through.
-    rawDb.prepare("UPDATE sales SET customer_address = '271' WHERE id = 1").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET customer_address = '271' WHERE id = 1").run())
     const plain = await req('POST', '/', {
       sale_id: 1,
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
@@ -1863,11 +1870,11 @@ async function main() {
 
   await check('replacement sale canonicalizes a marked anonymous source while preserving the return snapshot', async () => {
     seed()
-    rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7001,'General','', 'LC-07001',1)").run()
-    rawDb.prepare("UPDATE sales SET customer_id=7001,customer_name='General',customer_phone='',customer_address='Walk-in' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7001,'General','', 'LC-07001',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET customer_id=7001,customer_name='General',customer_phone='',customer_address='Walk-in' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run())
     const created = await reqExact('POST', '/', {
       client_request_id: 'return-create-anonymous-source', return_number: 'RET-ANON', sale_id: 1,
       customer_id: 7001, customer_name: 'General', reason: 'Exchange',
@@ -1889,13 +1896,13 @@ async function main() {
 
   await check('replacement create freezes the customer marker and membership before its atomic batch', async () => {
     seed()
-    rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7002,'Real Customer','012345678','LC-07002',0)").run()
-    rawDb.prepare("UPDATE sales SET customer_id=7002,customer_name='Real Customer',customer_phone='012345678' WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7002,'Real Customer','012345678','LC-07002',0)").run())
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET customer_id=7002,customer_name='Real Customer',customer_phone='012345678' WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run())
     beforeBatchHook = async () => {
-      rawDb.prepare("UPDATE customers SET is_anonymous=1,membership_number='LC-CHANGED' WHERE id=7002").run()
+      seedRows(rawDb,()=>rawDb.prepare("UPDATE customers SET is_anonymous=1,membership_number='LC-CHANGED' WHERE id=7002").run())
     }
     const raced = await reqExact('POST', '/', {
       client_request_id: 'return-create-customer-marker-race', return_number: 'RET-CUSTOMER-RACE', sale_id: 1,
@@ -1914,11 +1921,11 @@ async function main() {
 
   await check('replacement create freezes product prices used by its sale snapshot before the atomic batch', async () => {
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=2,selling_price_usd=10 WHERE id=2').run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=2,selling_price_usd=10 WHERE id=2').run())
     beforeBatchHook = async () => {
-      rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=2').run()
+      seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=2').run())
     }
     const raced = await reqExact('POST', '/', {
       client_request_id: 'return-create-product-price-race', return_number: 'RET-PRODUCT-RACE', sale_id: 1,
@@ -1940,9 +1947,9 @@ async function main() {
     rawDb.db.close()
     rawDb = openDb(loadAll({ through: 241 }))
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=2,is_active=0 WHERE id=2').run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=2,is_active=0 WHERE id=2').run())
     for (const sql of loadAll().slice(loadAll({ through: 241 }).length)) rawDb.exec(sql)
     const inactiveProduct = await reqExact('POST', '/', {
       client_request_id: 'return-create-inactive-product', return_number: 'RET-INACTIVE-PRODUCT', sale_id: 1,
@@ -1954,7 +1961,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
 
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
     const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'INACTIVE-LOT' })
     deactivatePre0154LegacyLot(lot.batchId)
     const inactiveLot = await reqExact('POST', '/', {
@@ -1970,10 +1977,10 @@ async function main() {
 
   await check('replacement create rejects product or lot deactivation races with zero effects', async () => {
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
-    beforeBatchHook = async () => { rawDb.prepare('UPDATE products SET is_active=0 WHERE id=2').run() }
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run())
+    seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run())
+    beforeBatchHook = async () => { seedRows(rawDb,()=>rawDb.prepare('UPDATE products SET is_active=0 WHERE id=2').run()) }
     const productRace = await reqExact('POST', '/', {
       client_request_id: 'return-create-product-active-race', return_number: 'RET-PRODUCT-ACTIVE-RACE', sale_id: 1,
       reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
@@ -1984,7 +1991,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
 
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run())
     const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'RACE-LOT' })
     beforeBatchHook = async () => { deactivatePre0154LegacyLot(lot.batchId) }
     const lotRace = await reqExact('POST', '/', {
@@ -2016,7 +2023,7 @@ async function main() {
     }
     const first = await reqExact('POST', '/', payload)
     assert.strictEqual(first.status, 200, JSON.stringify(first.json))
-    rawDb.prepare("UPDATE products SET name='Changed after commit' WHERE id=1").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE products SET name='Changed after commit' WHERE id=1").run())
     const replay = await reqExact('POST', '/', payload)
     assert.strictEqual(replay.status, 200, JSON.stringify(replay.json))
     assert.deepStrictEqual(replay.json, first.json)
@@ -2031,8 +2038,8 @@ async function main() {
 
   await check('two same-sale creates from one frozen revision produce one whole winner, then the loser retries from fresh truth', async () => {
     seed()
-    rawDb.prepare("UPDATE products SET stock_quantity=0 WHERE id=1").run()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run()
+    seedRows(rawDb,()=>rawDb.prepare("UPDATE products SET stock_quantity=0 WHERE id=1").run())
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run())
     const winnerPayload = {
       client_request_id: 'return-create-race-winner', return_number: 'RET-RACE-WINNER', sale_id: 1,
       reason: 'Race winner', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
@@ -2063,7 +2070,7 @@ async function main() {
 
   await check('status-unchanged and manual creates keep receipts without inventing sale events', async () => {
     seed()
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3)").run())
     const first = await reqExact('POST', '/', {
       client_request_id: 'return-create-status-first', return_number: 'RET-STATUS-1', sale_id: 1, reason: 'One',
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
@@ -2087,7 +2094,7 @@ async function main() {
   await check('event or receipt constraint failure rolls the entire create back with zero guards', async () => {
     seed()
     const createAuditBefore = rawDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='return_create'").get().n
-    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,1)").run()
+    seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,1)").run())
     corruptNextSaleRecordEvent = true
     const badEvent = await reqExact('POST', '/', {
       client_request_id: 'return-create-bad-event', return_number: 'RET-BAD-EVENT', sale_id: 1, reason: 'Bad event',
