@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const { loadRoute, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
 const user = { id: 900, username: 'reviewer' }
@@ -6,15 +12,15 @@ const pause = () => new Promise((resolve) => setTimeout(resolve, 1100))
 async function setup(single = false) {
   const { d1, groups } = seed(1)
   for (const id of [10002, 10003]) {
-    d1.db.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,
+    seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,
       cost_price_usd,selling_price_usd,wholesale_price_usd,updated_at)
-      VALUES(?, 'Third', 'third','700000','A','One','pcs',1,0,1,4,8,7,'2026-09-08 01:00:00')`).run(id)
-    d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id)
+      VALUES(?, 'Third', 'third','700000','A','One','pcs',1,0,1,4,8,7,'2026-09-08 01:00:00')`).run(id))
+    seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id))
   }
   groups[0].member_ids = [10000, 10001, 10002, 10003]
   if (single) groups[0].member_ids = [10000, 10001]
-  d1.db.prepare(`INSERT INTO products(id,name,is_active,parent_id,updated_at)
-    VALUES(10004,'Unmerged child',1,10001,'2026-09-01 00:00:00')`).run()
+  seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO products(id,name,is_active,parent_id,updated_at)
+    VALUES(10004,'Unmerged child',1,10001,'2026-09-01 00:00:00')`).run())
   d1.db.prepare(`INSERT INTO promotion_rules(title,product_ids,updated_at)
     VALUES('Shared member offer','[10001,10002,10003]','2026-09-01 00:00:00')`).run()
   d1.db.exec(`UPDATE product_batches SET batch_key='receipt-a' WHERE id=99002;
@@ -90,7 +96,9 @@ async function main() {
       if (!single) { await f.run('undo', 0); await f.run('undo', 0) }
       let expected
       f.controls.beforeNextWriteBatch = () => {
-        f.d1.db.exec(sql)
+        if (['cost/timestamp', 'branch quantity', 'added branch row', 'lot quantity', 'lot cost', 'removed lot row'].includes(label)) {
+          seedFixture(f.d1.db, () => f.d1.db.exec(sql))
+        } else f.d1.db.exec(sql)
         expected = f.state()
       }
       await assert.rejects(() => f.run('undo', 0), /changed concurrently/, `${single ? 'single' : 'final'} ${label}`)
