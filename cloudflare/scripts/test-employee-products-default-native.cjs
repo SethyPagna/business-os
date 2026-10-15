@@ -17,17 +17,35 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-// The harness leaves lib/reviewGate inert, which reads as "queued for review" (202). A Full-tier
-// actor is never queued, so give it the real answer for Full: null.
 const harnessBase = fs.readFileSync(path.join(__dirname, 'test-product-resolve-choices-native.cjs'), 'utf8').split('async function main() {')[0]
+const rawD1Binding = `
+const rawD1 = {
+  prepare(sql) {
+    return {
+      sql, params: [],
+      bind(...params) { this.params = params; return this },
+      async first() { return state.native.prepare(sql).get(this.params) ?? null },
+      async all() { return { success: true, results: state.native.prepare(sql).all(this.params) } },
+      async run() { return state.native.prepare(sql).run(this.params) },
+    }
+  },
+  async batch(statements) {
+    const results = await state.native.batch(statements)
+    assert.equal(state.native.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    return results
+  },
+}
+`
 // The route also writes an audit row with the changed fields; the harness audit stub has none, so add the shape.
 // The route needs the REAL money-plan code (the price gate reads the plan), the real alert formatter, and a Telegram stub that
 // records instead of sending. changedFields is a plain key diff (the audit library is not under test here).
 const harness = harnessBase
+  .replace('const adapter = {', rawD1Binding + '\nconst adapter = {')
+  .replace('{ DB: {}, PLAN_TIER: state.tier }', '{ DB: rawD1, PLAN_TIER: state.tier }')
   .replace("const undoAppliers = load('lib/undoAppliers.ts', {", "const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })\nconst undoAppliers = load('lib/undoAppliers.ts', {\n  './productCostReview': costReview,")
   .replace("  '../lib/catalogCostRecompute': catalogCost,", "  '../lib/catalogCostRecompute': catalogCost,\n  '../lib/productCostReview': costReview,")
-  .replace("  '../lib/cache':", "  '../lib/reviewGate': { maybeQueueForReview: async () => null },\n  '../lib/conflictControl': { getExpectedUpdatedAt: () => null, assertUpdatedAtMatch: () => {}, writeConflictResponse: () => null, WriteConflictError: class extends Error {} },\n  '../lib/telegram': { sendTelegramEvent: async (_env, event) => { TELEGRAM.push(event) } },\n  '../lib/productEditAlert': load('lib/productEditAlert.ts'),\n  '../lib/productWrites': { ...load('lib/productWrites.ts', { './db': { getDb: () => adapter }, './moneyPrecision': moneyPrecision, './catalogCostRecompute': catalogCost }), updateRow: updateRowStub },\n  '../lib/cache':")
-  .replace("const noAudit = { audit: async () => {} }", "const TELEGRAM = []\nconst AUDITS = []\nconst UPDATABLE = ['name', 'category', 'brand', 'unit', 'barcode', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr']\nasync function updateRowStub(_env, _table, id, body) { const keys = UPDATABLE.filter((key) => Object.hasOwn(body, key)); if (!keys.length) return 0; const params = { id: Number(id), updated_at: new Date().toISOString() }; for (const key of keys) params[key] = body[key]; return adapter.prepare('UPDATE products SET ' + keys.map((key) => key + ' = @' + key).join(', ') + ', updated_at = @updated_at WHERE id = @id').run(params).changes }\nconst plainDiff = (before, after) => { const b = {}; const a = {}; for (const key of new Set([...Object.keys(before || {}), ...Object.keys(after || {})])) { if (['updated_at', 'id'].includes(key) || JSON.stringify((before || {})[key]) === JSON.stringify((after || {})[key])) continue; b[key] = (before || {})[key]; a[key] = (after || {})[key] } return Object.keys(a).length ? { before: b, after: a } : null }\nconst noAudit = { audit: async (...args) => { AUDITS.push(args) }, changedFields: plainDiff, isSecretShapedAuditKey: (key) => /token|secret|password/i.test(key) }")
+  .replace("  '../lib/cache':", "  '../lib/reviewGate': { maybeQueueForReview: async () => null },\n  '../lib/conflictControl': { getExpectedUpdatedAt: () => null, assertUpdatedAtMatch: () => {}, writeConflictResponse: () => null, WriteConflictError: class extends Error {} },\n  '../lib/telegram': { sendTelegramEvent: async (_env, event) => { TELEGRAM.push(event) } },\n  '../lib/productEditAlert': load('lib/productEditAlert.ts'),\n  '../lib/productWrites': load('lib/productWrites.ts', { './db': { getDb: () => adapter }, './moneyPrecision': moneyPrecision, './catalogCostRecompute': catalogCost }),\n  '../lib/cache':")
+  .replace("const noAudit = { audit: async () => {} }", "const TELEGRAM = []\nconst AUDITS = []\nconst plainDiff = (before, after) => { const b = {}; const a = {}; for (const key of new Set([...Object.keys(before || {}), ...Object.keys(after || {})])) { if (['updated_at', 'id'].includes(key) || JSON.stringify((before || {})[key]) === JSON.stringify((after || {})[key])) continue; b[key] = (before || {})[key]; a[key] = (after || {})[key] } return Object.keys(a).length ? { before: b, after: a } : null }\nconst noAudit = { audit: async (...args) => { AUDITS.push(args) }, changedFields: plainDiff, isSecretShapedAuditKey: (key) => /token|secret|password/i.test(key) }")
 if (!harness.includes('maybeQueueForReview') || !harness.includes('plainDiff') || !harness.includes('productEditAlert')) throw new Error('the harness override anchors moved')
 const checks = `
 async function main() {
@@ -66,8 +84,6 @@ async function main() {
     state.user = EMPLOYEE_USER
     const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
     const edited = await request('PUT', '/api/products/' + KEEP, { name: 'Glow Serum 30ml Renewed', category: 'Skin', expected_updated_at: row.updated_at })
-    // The harness stubs the product write libraries, so what is under test here is the permission gate:
-    // an information edit is not refused (no 403, no review queue 202) for the seeded Employee.
     assert.equal(edited.status, 200, JSON.stringify(edited.body))
     assert.notEqual(edited.body.pending, true, 'a Full-tier Edit is applied, not queued')
     const before = dump()
