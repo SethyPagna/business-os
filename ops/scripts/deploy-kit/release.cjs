@@ -517,6 +517,7 @@ async function stepSnapshot(ctx) {
 async function stepMigrations(ctx) {
   heading('Database updates (migrations)')
   if (!needSha(ctx)) return false
+  if (!await checkClean(ctx)) return false
   const approval = await ex.confirm(ctx, 'confirm', 'Read the list of database updates that production has not had yet? (This changes nothing.)')
   if (!approval.ok) { log.say('Stopped.'); return false }
   const pending = {}
@@ -536,6 +537,26 @@ async function stepMigrations(ctx) {
   }
   ctx.state.migrations = { pending, touchedTables: [...touched] }
   saveState(ctx)
+  let guardFiles, guardExpected, config
+  try {
+    config = fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'wrangler.toml'), 'utf8')
+    lib.guardStageConfig(config, '.guard-stage-validation')
+    const lock = JSON.parse(fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'package-lock.json'), 'utf8'))
+    const installed = JSON.parse(fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'node_modules', 'wrangler', 'package.json'), 'utf8'))
+    if (lock.packages?.['node_modules/wrangler']?.version !== '4.116.0' || installed.version !== '4.116.0') throw Error('Guard stage requires pinned Wrangler4.116.0')
+    guardFiles = lib.GUARD_MIGRATIONS.map(file => ({ name: file.name, bytes: fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations', file.name)) }))
+    guardExpected = lib.validateGuardFiles(guardFiles)
+    if (!ctx.dryRun) {
+      for (const name of pending['business-os']) {
+        if (!fs.existsSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations', name))) throw Error('Pending migration absent from candidate')
+        if (name < lib.GUARD_MIGRATIONS[0].name) throw Error('Pending preguard baseline migration; establish prerequisites before guard staging')
+      }
+      const state = await readGuardState(ctx, approval, guardExpected)
+      const candidate = fs.readdirSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations')).filter(name => name.endsWith('.sql')).sort()
+      const actualPending = candidate.filter(name => !state.applied.includes(name))
+      if (JSON.stringify(actualPending) !== JSON.stringify([...pending['business-os']].sort())) throw Error('Pending migration list does not match exact candidate/ledger')
+    }
+  } catch (error) { log.say(`STOP: ${error.message}`); return false }
   const total = Object.values(pending).reduce((n, list) => n + (list ? list.length : 0), 0)
   summary(ctx, `### Database updates waiting\n\n${lib.DATABASES.map((d) => `- ${d.name}: ${pending[d.name] ? (pending[d.name].join(', ') || 'none') : 'not read'}`).join('\n')}`)
   if (!ctx.dryRun && total === 0) { log.say('Production already has every database update.'); return true }
@@ -546,6 +567,15 @@ async function stepMigrations(ctx) {
   }
   const write = await ex.confirm(ctx, 'typeYES', `Apply ${ctx.dryRun ? 'the waiting' : total} database update(s) to PRODUCTION now?`)
   if (!write.ok) { log.say('Stopped. No database update was applied.'); return false }
+  try {
+    await applyGuardStage(ctx, write, approval, config, guardFiles, guardExpected)
+  } catch (error) {
+    writeRecord(ctx, 'migration-error.txt', `Guard stage failed: ${error.message}\nNormal migrations and publication must stop.\n`)
+    ctx.state.migrations.failed = 'guard-stage'
+    saveState(ctx)
+    log.say(`STOP: guard stage failed: ${error.message}`)
+    return false
+  }
   for (const db of lib.DATABASES) {
     if (pending[db.name] && pending[db.name].length === 0) continue
     const r = await ex.runSpec(lib.commandCatalog.migrationsApply(db.name), ctx, write)
@@ -568,6 +598,52 @@ async function stepMigrations(ctx) {
   saveState(ctx)
   done(ctx, 'Database updates applied.')
   return true
+}
+
+async function readGuardState(ctx, approval, expected, complete = false) {
+  const result = await readProduction(ctx, lib.commandCatalog.guardState(lib.guardStateSql()), approval)
+  if (result.dry) return null
+  const raw = lib.findKey(result.json, 'guard_state')
+  if (!result.ok || typeof raw !== 'string') throw Error('Could not read exact migration ledger/guard state')
+  const state = JSON.parse(raw)
+  lib.validateGuardState(state, expected, complete)
+  writeRecord(ctx, complete ? 'guard-state-installed.json' : 'guard-state-before.json', state)
+  return state
+}
+
+async function applyGuardStage(ctx, write, read, config, files, expected) {
+  const cf = path.join(ctx.releaseDir, 'cloudflare')
+  const name = `.guard-stage-${crypto.randomUUID()}`
+  const directory = path.join(cf, name)
+  const configFile = path.join(cf, `${name}.toml`)
+  if (ctx.dryRun) {
+    log.say('[dry-run] verify ledger/epoch/triggers/no-permit, stage exact0243 then0258, verify both before normal migrations')
+    await ex.runSpec(lib.commandCatalog.guardStageApply(configFile), ctx, write)
+    return
+  }
+  await readGuardState(ctx, read, expected)
+  const stageConfig = lib.guardStageConfig(config, name)
+  try {
+    fs.mkdirSync(directory)
+    for (const file of files) fs.writeFileSync(path.join(directory, file.name), file.bytes, { flag: 'wx' })
+    fs.writeFileSync(configFile, stageConfig, { flag: 'wx' })
+    const staged = fs.readdirSync(directory).sort().map(filename => ({ name: filename, bytes: fs.readFileSync(path.join(directory, filename)) }))
+    lib.validateGuardFiles(staged)
+    if (fs.readFileSync(configFile, 'utf8') !== stageConfig) throw Error('Stage config changed before invocation')
+    writeRecord(ctx, 'guard-stage.json', { sha: ctx.sha, wrangler: '4.116.0', migrations: lib.GUARD_MIGRATIONS,
+      configSha256: crypto.createHash('sha256').update(stageConfig).digest('hex'), ledger: 'd1_migrations', database: 'business-os' })
+    const result = await ex.runSpec(lib.commandCatalog.guardStageApply(configFile), ctx, write)
+    if (result.code !== 0) throw Error('Wrangler guard migration apply failed; retain installed fences and inspect ledger before resume')
+    await readGuardState(ctx, read, expected, true)
+  } finally {
+    if (path.dirname(directory) !== cf || path.dirname(configFile) !== cf || !/^\.guard-stage-[a-f0-9-]+$/.test(path.basename(directory))) throw Error('Unsafe guard stage cleanup path')
+    for (const target of [directory, configFile]) {
+      if (!fs.existsSync(target)) continue
+      if (fs.lstatSync(target).isSymbolicLink() || fs.realpathSync(target) !== target) throw Error('Unsafe guard stage cleanup target')
+      fs.rmSync(target, { recursive: target === directory })
+      if (fs.existsSync(target)) throw Error('Guard stage cleanup incomplete')
+    }
+  }
 }
 
 async function stepDeploy(ctx) {

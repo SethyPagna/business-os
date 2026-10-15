@@ -10,6 +10,14 @@
 // approval (assertApproved).
 
 const path = require('path')
+const crypto = require('crypto')
+
+const GUARD_MIGRATIONS = [
+  { name: '0243_stock_schema_epoch.sql', sha256: '8e61d1d147354456b092427d7117de5aa3d849d511f5934b457058acfcd7deb2' },
+  { name: '0258_catalog_cost_admission.sql', sha256: 'a57dfe4f64c21af4bb08f82ebcbebdbaaf3bb17314128779b2c5e5c9cc53b8b9' },
+]
+const MAIN_DATABASE_ID = '49795be9-eabe-43f1-8e16-b86faed60cb1'
+const MAIN_ACCOUNT_ID = '743e5b727d139e85ed11679097f6f99e'
 
 const DEFAULT_REF = 'claude/urgent-20260925'
 // DEPLOY.md "Free vs paid deploy" marks Workers Paid as current, and every
@@ -42,6 +50,7 @@ const NPM_SCRIPTS_USED = {
 }
 // Every wrangler sub-command the kit calls.
 const WRANGLER_SUBCOMMANDS_USED = [
+  ['d1', 'migrations', 'apply'],
   ['whoami'],
   ['d1', 'time-travel', 'info'],
   ['d1', 'time-travel', 'restore'],
@@ -124,6 +133,8 @@ function countsSql(tables = KEY_TABLES) {
 // Every production command the kit can run. Parameters are filled in by the
 // caller; the gate is fixed here and cannot be lowered by a caller.
 const commandCatalog = {
+  guardState: (sql) => wrangler('stock-guard-state', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', sql], 'confirm'),
+  guardStageApply: (config) => wrangler('stock-guard-stage', ['d1', 'migrations', 'apply', 'business-os', '--remote', '--config', config], 'typeYES'),
   whoami: () => wrangler('whoami', ['whoami'], 'none'),
   timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
   deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
@@ -154,6 +165,8 @@ function sampleCatalog() {
     ...DATABASES.map((d) => commandCatalog.timeTravelInfo(d.name)),
     commandCatalog.deploymentStatus(),
     commandCatalog.counts(),
+    commandCatalog.guardState(guardStateSql()),
+    commandCatalog.guardStageApply('.guard-stage-sample.toml'),
     ...DATABASES.map((d) => commandCatalog.migrationsList(d.name)),
     ...DATABASES.map((d) => commandCatalog.migrationsApply(d.name)),
     commandCatalog.deploy('paid'),
@@ -225,6 +238,52 @@ function parseMigrationNames(text) {
     if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]) }
   }
   return out
+}
+
+function guardStageConfig(config, directory) {
+  const account = /^account_id\s*=\s*"([^"]+)"\s*$/m.exec(config)?.[1]
+  const blocks = [...config.matchAll(/^\[\[d1_databases\]\]\s*\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
+  const mains = blocks.filter(match => /^database_name\s*=\s*"business-os"\s*$/m.test(match[1]))
+  if (account !== MAIN_ACCOUNT_ID || mains.length !== 1) throw Error('Guard stage account/database configuration mismatch')
+  const block = mains[0][1]
+  const value = key => new RegExp(`^${key}\\s*=\\s*"([^"]+)"\\s*$`, 'm').exec(block)?.[1]
+  if (value('database_id') !== MAIN_DATABASE_ID || value('migrations_dir') !== 'migrations'
+    || (value('migrations_table') && value('migrations_table') !== 'd1_migrations')) throw Error('Guard stage database/ledger configuration mismatch')
+  if (!/^\.guard-stage-[A-Za-z0-9-]+$/.test(directory)) throw Error('Invalid guard stage directory')
+  return config.replace(mains[0][0], mains[0][0].replace(/^migrations_dir[ \t]*=[ \t]*"migrations"/m, match => match.replace('"migrations"', JSON.stringify(directory))))
+}
+
+function validateGuardFiles(files) {
+  if (files.length !== GUARD_MIGRATIONS.length) throw Error('Guard stage must contain exactly two files')
+  return GUARD_MIGRATIONS.map((expected, index) => {
+    const file = files[index]
+    if (file.name !== expected.name || crypto.createHash('sha256').update(file.bytes).digest('hex') !== expected.sha256) throw Error('Guard migration order/name/hash mismatch')
+    return { name: file.name, triggers: [...file.bytes.toString('utf8').matchAll(/CREATE TRIGGER\s+(\w+)\s+[\s\S]*?\bEND;/g)].map(match => ({ name: match[1], sql: match[0] })) }
+  })
+}
+
+function guardStateSql() {
+  return `SELECT json_object('applied',json((SELECT json_group_array(name) FROM d1_migrations)),
+    'epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'),
+    'boundary',(SELECT value FROM system_flags WHERE key='stock_schema_receipt_boundary'),
+    'permits',(SELECT COUNT(*) FROM system_flags WHERE key='stock_transaction_permit'),
+    'triggers',json((SELECT json_group_array(json_object('name',name,'sql',sql)) FROM sqlite_master
+      WHERE type='trigger' AND (name LIKE 'stock_epoch_%_0243' OR name LIKE 'catalog_cost_admission_%_0258')))) AS guard_state`
+}
+
+function validateGuardState(state, expected, complete = false) {
+  if (!state || !Array.isArray(state.applied) || !state.applied.every(name => typeof name === 'string')
+    || !Array.isArray(state.triggers) || state.permits !== 0) throw Error('Ambiguous guard state or transient permit')
+  const applied = new Set(state.applied)
+  if (applied.size !== state.applied.length) throw Error('Duplicate migration ledger names')
+  const first = applied.has(GUARD_MIGRATIONS[0].name), second = applied.has(GUARD_MIGRATIONS[1].name)
+  if ((!first && second) || ((!first || !second) && state.applied.some(name => /^025[567]_/.test(name)))) throw Error('Formula migrations precede complete guard installation; recovery required')
+  if (complete && (!first || !second)) throw Error('Both guard migrations must be recorded before normal migrations')
+  if (first ? state.epoch !== 'legacy-separate-pool-v1' || !/^\d+$/.test(state.boundary || '') : state.epoch != null || state.boundary != null) throw Error('Guard epoch/boundary mismatch')
+  const wanted = expected.filter((_, index) => index === 0 ? first : second).flatMap(file => file.triggers)
+  const normalized = sql => String(sql).replace(/\r\n/g, '\n').trim().replace(/;$/, '')
+  if (state.triggers.length !== wanted.length || wanted.some(trigger => state.triggers.filter(row => row.name === trigger.name && normalized(row.sql) === normalized(trigger.sql)).length !== 1)) throw Error('Guard trigger identity mismatch')
+  return { first, second }
 }
 
 function firstCommentLine(sql) {
@@ -393,6 +452,7 @@ function todayStamp(d = new Date()) {
 }
 
 module.exports = {
+  GUARD_MIGRATIONS, guardStageConfig, validateGuardFiles, guardStateSql, validateGuardState,
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
