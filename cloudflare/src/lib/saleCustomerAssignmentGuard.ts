@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { customerPointsReturnSql } from './customerPointsReturn'
+import { LOYALTY_POINTS_RESET_KEY, loyaltyAfterResetSql, customerPointsReturnSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from './customerPointsReturn'
 import { SaleBulkError } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
 
@@ -25,11 +25,13 @@ export function isLoyaltyAssignmentError(error: unknown): boolean {
 
 const POINT_SETTINGS = ['customer_portal_points_basis', 'customer_portal_points_per_usd', 'customer_portal_points_per_khr', 'exchange_rate', 'loyalty_points_enabled']
 const settingsSql = POINT_SETTINGS.map(key => `'${key}'`).join(',')
+const pointsSettingsSql = `SELECT key,value FROM settings WHERE key IN (${settingsSql})
+  UNION ALL SELECT key,value FROM system_flags WHERE key='${LOYALTY_POINTS_RESET_KEY}'`
 type PointsConfig = { basis: 'usd' | 'khr'; usd: number; khr: number; enabled: boolean; snapshot: string }
 export type CustomerAssignmentMove = { id: number; sourceId: number | null; targetId: number | null }
 
 async function pointsConfig(db: D1Compat): Promise<PointsConfig> {
-  const rows = await db.prepare(`SELECT key,value FROM settings WHERE key IN (${settingsSql}) ORDER BY key`).all<{ key: string; value: string | null }>()
+  const rows = await db.prepare(`${pointsSettingsSql} ORDER BY key`).all<{ key: string; value: string | null }>()
   const values = Object.fromEntries(rows.map(row => [row.key, row.value]))
   // Exact buildPortalConfig/toNumber semantics, including explicit zero and
   // explicit KHR rate. Never derive the loyalty rate from a client's FX rate.
@@ -52,16 +54,16 @@ async function pointsConfig(db: D1Compat): Promise<PointsConfig> {
 function rawPointsSql(accountSql: string): string {
   return `(COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'cancelled' THEN
     CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'awaiting_payment' AND COALESCE(loyalty_accrual,1)=1 THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_khr,0)*cfg.khr ELSE COALESCE(total_usd,0)*cfg.usd END ELSE 0 END
-    - COALESCE(membership_points_redeemed,0) ELSE 0 END) FROM sales WHERE customer_id=${accountSql}),0)
+    - COALESCE(membership_points_redeemed,0) ELSE 0 END) FROM sales WHERE customer_id=${accountSql} AND ${loyaltySaleSinceSql}),0)
     - COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(status,''),'completed')<>'cancelled' THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_refund_khr,0)*cfg.khr ELSE COALESCE(total_refund_usd,0)*cfg.usd END ELSE 0 END) FROM returns WHERE customer_id=${accountSql} AND ${customerPointsReturnSql}),0)
-    + COALESCE((SELECT SUM(reward_points) FROM customer_share_submissions WHERE customer_id=${accountSql} AND status='approved' AND reward_points_voided_at IS NULL),0)
-    + COALESCE((SELECT SUM(points) FROM loyalty_point_adjustments WHERE customer_id=${accountSql} AND voided_at IS NULL),0))`
+    + COALESCE((SELECT SUM(reward_points) FROM customer_share_submissions WHERE customer_id=${accountSql} AND status='approved' AND reward_points_voided_at IS NULL AND ${loyaltySubmissionSinceSql}),0)
+    + COALESCE((SELECT SUM(points) FROM loyalty_point_adjustments WHERE customer_id=${accountSql} AND voided_at IS NULL AND ${loyaltyAdjustmentSinceSql}),0))`
 }
 
 function configCte(): string {
   return `cfg AS (SELECT @basis AS basis,@usd AS usd,@khr AS khr),
     expected_settings AS (SELECT json_extract(value,'$[0]') AS key,json_extract(value,'$[1]') AS value FROM json_each(@settings)),
-    actual_settings AS (SELECT key,value FROM settings WHERE key IN (${settingsSql}))`
+    actual_settings AS (${pointsSettingsSql})`
 }
 const settingsMatch = `NOT EXISTS(SELECT key,value FROM actual_settings EXCEPT SELECT key,value FROM expected_settings)
   AND NOT EXISTS(SELECT key,value FROM expected_settings EXCEPT SELECT key,value FROM actual_settings)`
@@ -105,7 +107,7 @@ export async function prepareCustomerAssignments(db: D1Compat, input: CustomerAs
         OR EXISTS(SELECT 1 FROM customers c WHERE c.id IN (m.source_id,m.target_id) AND COALESCE(c.is_anonymous,0)<>0))))
     AND NOT EXISTS(SELECT 1 FROM moves m JOIN returns r ON r.sale_id=m.id WHERE r.customer_id IS NOT m.source_id)
     AND NOT EXISTS(SELECT 1 FROM moves m JOIN sales s ON s.id=m.id GROUP BY m.target_id
-      HAVING SUM(COALESCE(s.membership_points_redeemed,0)) > COALESCE((SELECT raw FROM balances WHERE id=m.target_id),0)+0.0000001)`
+      HAVING SUM(CASE WHEN ${loyaltyAfterResetSql('sales', 's.id')} THEN COALESCE(s.membership_points_redeemed,0) ELSE 0 END) > COALESCE((SELECT raw FROM balances WHERE id=m.target_id),0)+0.0000001)`
   const preQuery = `${cte} SELECT CASE WHEN ${predicate} THEN 1 ELSE 0 END AS ok`
   if (!(await db.prepare(preQuery).get<{ ok: number }>(params))?.ok) throw new SaleBulkError(LOYALTY_REASSIGNMENT_MESSAGE, 409)
   // After the actual writes, re-read these SAME accounts. This catches earned
