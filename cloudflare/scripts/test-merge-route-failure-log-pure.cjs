@@ -62,10 +62,16 @@ async function main() {
     const h = createProductsRouteHarness({ user: ADMIN })
     h.setUser(ADMIN)
     h.raw.db.exec(`
+      BEGIN IMMEDIATE;
+      INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch';
       INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
       INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active) VALUES
         (1, 'Gloss One', '8850000000011', 2, 5, 0, 1), (2, 'Gloss One', '8850000000011', 3, 5, 0, 1);
+      DELETE FROM system_flags WHERE key='stock_transaction_permit';
+      COMMIT;
     `)
+    assert.equal(h.raw.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.throws(() => h.raw.db.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1'), /stock_transaction_required/)
     const refused = await captureLogs(async () => {
       const res = await h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 1 })
       assert.equal(res.status, 400)
@@ -74,7 +80,16 @@ async function main() {
     })
     assert.deepEqual(refused.filter((line) => line.includes(MERGE_FAILURE_LOG_EVENT)), [], 'a definite refusal is not a fault')
 
-    h.raw.db.exec('DROP TABLE stock_session_members')
+    const before = JSON.stringify(h.raw.db.prepare('SELECT * FROM products ORDER BY id').all())
+    const originalBatch = h.raw.batch.bind(h.raw)
+    let injected = false
+    h.raw.batch = (statements) => {
+      if (!injected && statements.some(({ sql }) => /INSERT INTO undo_snapshots/i.test(sql))) {
+        injected = true
+        return originalBatch([...statements, { sql: 'SELECT * FROM stock_session_members_fixture_fault', params: {} }])
+      }
+      return originalBatch(statements)
+    }
     const lines = await captureLogs(async () => {
       const res = await h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
       assert.equal(res.status, 409)
@@ -83,12 +98,16 @@ async function main() {
     const logged = lines.filter((line) => line.startsWith('{') && line.includes(MERGE_FAILURE_LOG_EVENT))
     assert.equal(logged.length, 1, `exactly one structured line, got ${JSON.stringify(lines)}`)
     const entry = JSON.parse(logged[0])
+    assert.equal(injected, true, 'the fault must reach the actual merge write batch')
+    assert.equal(JSON.stringify(h.raw.db.prepare('SELECT * FROM products ORDER BY id').all()), before, 'the failed batch rolls back both products')
+    assert.equal(h.raw.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+    assert.equal(h.raw.db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get().n, 0)
     assert.equal(entry.route, '/possible-duplicates/merge')
     assert.equal(entry.method, 'POST')
     assert.equal(entry.status, 409)
     assert.match(entry.errorId, /^[0-9a-f-]{36}$/, 'the line carries the errorId the operator was shown')
     assert.deepEqual(entry.productIds, [1, 2])
-    assert.match(entry.error, /stock_session_members/, 'the real error text, so the cause is findable')
+    assert.match(entry.error, /stock_session_members/, `the real error text, so the cause is findable: ${entry.error}`)
     assert.ok(!logged[0].includes('Gloss One') && !logged[0].includes('8850000000011'), 'no product name or barcode in the line')
 
     const other = await captureLogs(async () => { await h.request('GET', '/zero-quantity-candidates') })
