@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Pins migration 0177 (product_cost_entries -- a durable record of manual
 // cost-price edits) on the REAL migration chain.
 //
@@ -33,8 +34,9 @@ function indexExists(db, name) {
 // A row can actually be written and read back with the columns the writer needs.
 {
   const db = fresh()
-  db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
-    VALUES (5, 9, 36000, 'manual', 7, 'sethy', 42)`).run()
+  assert.throws(() => db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source) VALUES(5,9,'manual')").run(), /stock_transaction_required/)
+  seedStockFixture(db, () => db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
+    VALUES (5, 9, 36000, 'manual', 7, 'sethy', 42)`).run())
   const row = db.prepare('SELECT product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id, created_at FROM product_cost_entries WHERE product_id = 5').get()
   assert.strictEqual(row.product_id, 5)
   assert.strictEqual(row.cost_usd, 9)
@@ -44,13 +46,14 @@ function indexExists(db, name) {
   assert.strictEqual(row.user_name, 'sethy')
   assert.strictEqual(row.baseline_batch_id, 42)
   assert.ok(row.created_at, 'created_at defaults')
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   db.close()
 }
 
 // baseline_batch_id defaults to 0 (no lots yet) when the writer omits it.
 {
   const db = fresh()
-  db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, source) VALUES (6, 3, 'manual')`).run()
+  seedStockFixture(db, () => db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, source) VALUES (6, 3, 'manual')`).run())
   const row = db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = 6').get()
   assert.strictEqual(row.baseline_batch_id, 0, 'DEFAULT 0 -- a product with no lots yet overrides against nothing')
   db.close()

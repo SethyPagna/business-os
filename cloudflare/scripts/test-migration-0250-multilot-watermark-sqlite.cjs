@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Pins migration 0250 (the multi-lot Revert watermark) on the REAL migration chain: it stores the highest
 // inventory_movements.id that exists at apply time, once, as text, in system_flags, and changes nothing else.
 //
@@ -78,9 +79,11 @@ check('applying it twice, or over a hand-written row, changes nothing', () => {
 check('it changes no business row and no other flag', () => {
   const db = new Database(schema)
   addMovements(db, 3)
-  db.prepare("INSERT INTO system_flags(key, value) VALUES('maintenance', '{}')").run()
+  seedStockFixture(db, () => db.prepare("INSERT INTO system_flags(key, value) VALUES('maintenance', '{}')").run())
+  assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, '{}')
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   const before = everything(db).filter((_, i) => i < 5)
-  const flagsBefore = db.prepare('SELECT key, value FROM system_flags').all()
+  const flagsBefore = db.prepare('SELECT key, value FROM system_flags ORDER BY key').all()
   db.exec(sql)
   assert.deepEqual(everything(db).filter((_, i) => i < 5), before)
   assert.deepEqual(db.prepare('SELECT key, value FROM system_flags WHERE key <> ? ORDER BY key').all(KEY), flagsBefore)

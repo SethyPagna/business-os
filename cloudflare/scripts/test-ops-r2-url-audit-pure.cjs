@@ -11,6 +11,7 @@
 //   neither   the relative '/uploads/<name>' paths the app stores.
 // No network, no wrangler.
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const assert = require('assert')
 const path = require('path')
@@ -93,7 +94,7 @@ function insert(db, table, column, value) {
     const type = String(c.type).toUpperCase()
     values.push(type.includes('INT') || type.includes('REAL') || type.includes('NUM') ? seq : `fixture-${seq}`)
   }
-  return db.prepare(`INSERT INTO ${table} (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})`).run(...values).lastInsertRowid
+  return seedStockFixture(db, () => db.prepare(`INSERT INTO ${table} (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})`).run(...values).lastInsertRowid)
 }
 
 function seed(db, urls) {
@@ -150,7 +151,7 @@ async function main() {
       for (const url of MOVE) {
         const rowid = insert(db, table, column, json ? JSON.stringify([url]) : url)
         const row = db.prepare(q.sql).get()
-        db.prepare(`DELETE FROM ${table} WHERE rowid = ?`).run(rowid)
+        seedStockFixture(db, () => db.prepare(`DELETE FROM ${table} WHERE rowid = ?`).run(rowid))
         assert.strictEqual(row[`${table}_move`], 1, `${table}.${column} missed ${url}`)
         assert.strictEqual(d1.interpretD1Output(out([{ ...row }]), q.rules).zeroCheck, 'FAIL', `${table} ${url}`)
         assert.strictEqual(d1.interpretD1Output(out([{ ...db.prepare(q.sql).get() }]), q.rules).zeroCheck, 'PASS', `${table} cleanup`)

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // A fresh deployment is the one world every data migration was never written
 // against: the whole chain applied, in order, to an EMPTY database. The two
 // existing chain-applying tests (lot-ledger reconcile, stock-in invoice
@@ -59,11 +60,12 @@ let batchId = 0
 check('branch_stock refuses a negative quantity (oversell CHECK survives the chain)', () => {
   sqlite.exec("INSERT INTO branches (name) VALUES ('Test Branch')")
   branchId = sqlite.prepare('SELECT last_insert_rowid() AS id').get().id
-  sqlite.exec("INSERT INTO products (name) VALUES ('Test Product')")
+  seedStockFixture(sqlite, () => sqlite.exec("INSERT INTO products (name) VALUES ('Test Product')"))
   productId = sqlite.prepare('SELECT last_insert_rowid() AS id').get().id
-  sqlite.prepare('INSERT INTO branch_stock (branch_id, product_id, quantity) VALUES (?, ?, 1)').run(branchId, productId)
+  seedStockFixture(sqlite, () => sqlite.prepare('INSERT INTO branch_stock (branch_id, product_id, quantity) VALUES (?, ?, 1)').run(branchId, productId))
+  assert.throws(() => sqlite.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND product_id = ?').run(branchId, productId), /stock_transaction_required/)
   assert.throws(
-    () => sqlite.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND product_id = ?').run(branchId, productId),
+    () => seedStockFixture(sqlite, () => sqlite.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND product_id = ?').run(branchId, productId)),
     /CHECK constraint failed/,
     'a concurrent oversell must abort, not clamp',
   )
@@ -74,14 +76,18 @@ check('branch_stock refuses a negative quantity (oversell CHECK survives the cha
 check('branch_batch_stock refuses a negative quantity (per-lot CHECK survives the chain)', () => {
   const batchCols = sqlite.prepare('PRAGMA table_info(product_batches)').all().map((r) => r.name)
   assert.ok(batchCols.includes('received_cost_usd'), 'migration 0080 column present')
-  sqlite.prepare("INSERT INTO product_batches (variant_product_id, batch_key) VALUES (?, '08302026')").run(productId)
+  seedStockFixture(sqlite, () => sqlite.prepare("INSERT INTO product_batches (variant_product_id, batch_key) VALUES (?, '08302026')").run(productId))
   batchId = sqlite.prepare('SELECT last_insert_rowid() AS id').get().id
-  sqlite.prepare('INSERT INTO branch_batch_stock (branch_id, batch_id, quantity) VALUES (?, ?, 1)').run(branchId, batchId)
+  seedStockFixture(sqlite, () => sqlite.prepare('INSERT INTO branch_batch_stock (branch_id, batch_id, quantity) VALUES (?, ?, 1)').run(branchId, batchId))
+  assert.throws(() => sqlite.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND batch_id = ?').run(branchId, batchId), /stock_transaction_required/)
   assert.throws(
-    () => sqlite.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND batch_id = ?').run(branchId, batchId),
+    () => seedStockFixture(sqlite, () => sqlite.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE branch_id = ? AND batch_id = ?').run(branchId, batchId)),
     /CHECK constraint failed/,
   )
 })
+
+assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE branch_id=? AND batch_id=?').get(branchId, batchId).quantity, 1)
+assert.strictEqual(sqlite.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 
 check('write-time search columns from migration 0082 exist on sales and returns', () => {
   for (const table of ['sales', 'returns']) {

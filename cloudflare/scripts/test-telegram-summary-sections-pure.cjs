@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner, 29 Sep 2026: the overview in the Summary topic stays short by default,
 // and each extra section is a Settings switch that is off until turned on.
@@ -57,7 +58,7 @@ function openShop() {
 }
 const insert = (db, table, row) => {
   const columns = Object.keys(row)
-  db.raw.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...columns.map((column) => row[column]))
+  seedStockFixture(db.raw, () => db.raw.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...columns.map((column) => row[column])))
 }
 const setting = (db, key, value) => db.raw.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
 const clearSetting = (db, key) => db.raw.prepare('DELETE FROM settings WHERE key = ?').run(key)

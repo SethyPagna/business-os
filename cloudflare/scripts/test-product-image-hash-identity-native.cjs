@@ -1,4 +1,5 @@
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 const ADMIN = { id: 7, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{"all":true}' }
@@ -14,7 +15,7 @@ async function main() {
   const batch = h.raw.batch.bind(h.raw)
   h.raw.batch = items => batch(items.map(item => item._params === undefined ? item : {sql:item.sql,params:item._params}))
   const media = h.load('lib/media.ts')
-  h.raw.db.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Synthetic',1,1); INSERT INTO products(id,name,stock_quantity,is_active) VALUES(10,'Existing synthetic',0,1)")
+  seedStockFixture(h.raw.db, () => h.raw.db.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Synthetic',1,1); INSERT INTO products(id,name,stock_quantity,is_active) VALUES(10,'Existing synthetic',0,1)"))
   const names = ['old#shade.png','literal%20shade.png','literal shade.png','រូបថត.png','literal%2fshade.png']
   for (const name of names) h.raw.prepare('INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?,?,?)').run([name,name,'/uploads/'+name,'image/png','image',10])
   const signed = 'https://cdn.fixture/photo.png?sig=kept%20exact#anchor'
