@@ -37,6 +37,43 @@ function check(name, fn) {
 const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n')
 const pkg = (name) => JSON.parse(read(name, 'package.json')).scripts
 
+const guardFiles = lib.GUARD_MIGRATIONS.map(file => ({ name: file.name, bytes: fs.readFileSync(path.join(ROOT, 'cloudflare', 'migrations', file.name)) }))
+const guardExpected = lib.validateGuardFiles(guardFiles)
+function guardState(names = lib.GUARD_MIGRATIONS.map(file => file.name)) {
+  const first = names.includes(lib.GUARD_MIGRATIONS[0].name)
+  return { applied: names, epoch: first ? 'legacy-separate-pool-v1' : null, boundary: first ? '42' : null, permits: 0,
+    triggers: guardExpected.filter(file => names.includes(file.name)).flatMap(file => file.triggers) }
+}
+
+check('guard files reject wrong order, extra files and changed raw bytes', () => {
+  assert.equal(guardExpected.length, 2)
+  assert.equal(guardExpected[0].triggers.length, 18)
+  assert.equal(guardExpected[1].triggers.length, 5)
+  assert.throws(() => lib.validateGuardFiles([...guardFiles].reverse()), /order\/name\/hash/)
+  assert.throws(() => lib.validateGuardFiles([...guardFiles, guardFiles[0]]), /exactly two/)
+  assert.throws(() => lib.validateGuardFiles([{ ...guardFiles[0], bytes: Buffer.concat([guardFiles[0].bytes, Buffer.from('\n')]) }, guardFiles[1]]), /hash/)
+})
+
+check('guard preflight allows clean and0243-only resume but refuses formula exposure and corrupt guards', () => {
+  for (const names of [[], [guardFiles[0].name], guardFiles.map(file => file.name)]) lib.validateGuardState(guardState(names), guardExpected)
+  for (const names of [[guardFiles[1].name], ['0255_product_cost_review.sql'], [guardFiles[0].name, '0256_validated_cost.sql'], ['0257_confirmation.sql']]) assert.throws(() => lib.validateGuardState(guardState(names), guardExpected), /precede/)
+  assert.throws(() => lib.validateGuardState(guardState([guardFiles[0].name]), guardExpected, true), /Both guard/)
+  for (const changed of [{ permits: 1 }, { epoch: 'wrong' }, { boundary: null }, { triggers: [] }]) assert.throws(() => lib.validateGuardState({ ...guardState(), ...changed }, guardExpected, true))
+  const changed = guardState(); changed.triggers = changed.triggers.map((row, i) => i ? row : { ...row, sql: 'CREATE TRIGGER wrong' })
+  assert.throws(() => lib.validateGuardState(changed, guardExpected), /trigger/)
+})
+
+check('stage configuration changes only main migration directory and rejects DB/account/ledger mismatch', () => {
+  const original = read('cloudflare', 'wrangler.toml')
+  const stage = lib.guardStageConfig(original, '.guard-stage-fixture')
+  assert.equal(stage.replace('migrations_dir = ".guard-stage-fixture"', 'migrations_dir = "migrations"'), original)
+  assert.ok(stage.includes('migrations_dir = "migrations-import"'))
+  for (const changed of [original.replace('49795be9-eabe-43f1-8e16-b86faed60cb1', 'wrong'), original.replace('743e5b727d139e85ed11679097f6f99e', 'wrong'), original.replace('migrations_dir = "migrations"', 'migrations_dir = "migrations"\nmigrations_table = "other"')]) assert.throws(() => lib.guardStageConfig(changed, '.guard-stage-fixture'), /mismatch/)
+  assert.throws(() => lib.guardStageConfig(original, '../escape'), /directory/)
+  assert.equal(lib.commandCatalog.guardStageApply('/safe/config.toml').gate, 'typeYES')
+  assert.throws(() => lib.assertApproved(lib.commandCatalog.guardStageApply('/safe/config.toml'), { ok: true, gate: 'confirm' }), /confirmation/)
+})
+
 // ------------------------------------------------------------- 1. exists
 
 check('every npm script the kit declares exists', () => {
@@ -504,7 +541,84 @@ function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = 
   return withStubs(stubs, () => COMMANDS.live(ctx))
 }
 
+async function runGuardMigrationProbe(options = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-guard-stage-'))
+  const cf = path.join(tmp, 'cloudflare')
+  fs.mkdirSync(path.join(cf, 'migrations'), { recursive: true })
+  fs.mkdirSync(path.join(cf, 'node_modules', 'wrangler'), { recursive: true })
+  fs.writeFileSync(path.join(cf, 'wrangler.toml'), options.config || read('cloudflare', 'wrangler.toml'))
+  fs.writeFileSync(path.join(cf, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/wrangler': { version: '4.116.0' } } }))
+  fs.writeFileSync(path.join(cf, 'node_modules', 'wrangler', 'package.json'), '{"version":"4.116.0"}')
+  for (const file of guardFiles) fs.writeFileSync(path.join(cf, 'migrations', file.name), file.bytes)
+  const later = ['0251_loyalty_reset.sql', '0255_product_review.sql', '0256_validated_cost.sql', '0257_confirmation.sql']
+  for (const name of later) fs.writeFileSync(path.join(cf, 'migrations', name), '-- fixture pending lower-numbered file\n')
+  const calls = []
+  let installed = false
+  const before = options.before || guardState([])
+  const ctx = { sha: SHA, args: { noApply: !!options.noApply }, ci: true, dryRun: false,
+    releaseDir: tmp, recordDir: tmp, state: {} }
+  try {
+    const result = await withStubs({
+      gitRead: args => args[0] === 'rev-parse' ? SHA : '',
+      confirm: async (_ctx, gate) => ({ ok: true, gate }),
+      runSpec: async (spec, _ctx, approval) => {
+        lib.assertApproved(spec, approval)
+        calls.push(spec.id)
+        if (spec.id === 'migrations-list:business-os') return { code: 0, out: [...guardFiles.map(file => file.name), ...later].filter(name => !before.applied.includes(name)).join('\n') }
+        if (spec.id === 'migrations-list:business-os-import') return { code: 0, out: 'No migrations to apply' }
+        if (spec.id === 'stock-guard-state') return { code: 0, out: JSON.stringify([{ success: true, results: [{ guard_state: JSON.stringify(installed ? (options.after || guardState()) : before) }] }]) }
+        if (spec.id === 'stock-guard-stage') {
+          const configFile = spec.args[spec.args.indexOf('--config') + 1]
+          const config = fs.readFileSync(configFile, 'utf8')
+          const directory = /^migrations_dir = "(\.guard-stage-[^"]+)"/m.exec(config)?.[1]
+          assert.ok(directory)
+          assert.equal(path.dirname(configFile), cf)
+          assert.equal(config, lib.guardStageConfig(options.config || read('cloudflare', 'wrangler.toml'), directory))
+          const names = fs.readdirSync(path.join(cf, directory)).sort()
+          assert.deepEqual(names, guardFiles.map(file => file.name))
+          for (const file of guardFiles) assert.deepEqual(fs.readFileSync(path.join(cf, directory, file.name)), file.bytes)
+          if (options.stageFails) return { code: 1, out: 'injected migration failure' }
+          installed = true
+          return { code: 0, out: '' }
+        }
+        if (spec.id === 'migrations-apply:business-os') {
+          assert.equal(installed, true)
+          assert.ok(calls.lastIndexOf('stock-guard-state') > calls.indexOf('stock-guard-stage'))
+          const unapplied = [...guardFiles.map(file => file.name), ...later].filter(name => !guardState().applied.includes(name))
+          assert.deepEqual(unapplied, later, 'higher0258 ledger name must retain lower pending formula/loyalty files')
+          return { code: 0, out: '' }
+        }
+        throw Error(`Unexpected migration command ${spec.id}`)
+      },
+    }, () => COMMANDS.migrations(ctx))
+    assert.deepEqual(fs.readdirSync(cf).filter(name => name.startsWith('.guard-stage-')), [], 'temporary config and files removed')
+    return { ...result, calls }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
+}
+
 ;(async () => {
+  await checkAsync('guard stage verifies both guards before ordinary lower-numbered pending migrations, including partial0243 resume', async () => {
+    for (const before of [guardState([]), guardState([guardFiles[0].name]), guardState()]) {
+      const result = await runGuardMigrationProbe({ before })
+      assert.equal(result.result, true, result.text)
+      assert.equal(result.calls.filter(id => id === 'stock-guard-stage').length, 1)
+      assert.equal(result.calls.filter(id => id === 'migrations-apply:business-os').length, 1)
+    }
+  })
+  await checkAsync('guard stage failures and ambiguous verification never fall through to normal apply', async () => {
+    for (const options of [{ stageFails: true }, { after: guardState([guardFiles[0].name]) }, { before: guardState([guardFiles[1].name]) }, { before: guardState(['0256_validated_cost.sql']) }, { config: read('cloudflare', 'wrangler.toml').replace('49795be9-eabe-43f1-8e16-b86faed60cb1', 'wrong') }]) {
+      const result = await runGuardMigrationProbe(options)
+      assert.equal(result.result, false, result.text)
+      assert.ok(!result.calls.includes('migrations-apply:business-os'))
+    }
+  })
+  await checkAsync('NoApply reads safe guard state without staging or applying any migration', async () => {
+    const result = await runGuardMigrationProbe({ noApply: true })
+    assert.equal(result.result, true, result.text)
+    assert.ok(result.calls.includes('stock-guard-state'))
+    assert.ok(!result.calls.includes('stock-guard-stage'))
+    assert.ok(!result.calls.some(id => id.startsWith('migrations-apply:')))
+  })
   await checkAsync('live, CI, site challenged: the Cloudflare API confirms the published version, and it says "with warnings"', async () => {
     const r = await runLive({})
     assert.strictEqual(r.result, true)
