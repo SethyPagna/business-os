@@ -3960,18 +3960,13 @@ export async function foldDuplicateProductInto(
   let nextCanonicalImageOrder = canonicalImageRows.length
 
   const canChangeProductImages = getActionTier(user, 'products', 'image') === 'full'
-  // A caller that reviewed the state itself (Resolve digest, selected-conflict
-  // fingerprint, leading-zero plan) brings guards with a more specific answer
-  // ("changed after review"), so they run before the generic stock-moved guard.
+  // New reviewed merges prioritize their captured state; redo reports stock refusals first.
   const sourceUnmovedGuard = productMergeSourceUnmovedAssertion(dup.id, productMergeSourceExtent(snapshot))
   const reviewedGuards = atomicHistory?.preStatements || []
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
-    ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
-    : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
   // Recomputing caches or combining identities must not hide unexplained
   // holdings. Lots belong to their product's branch stock; damaged lots are
   // a separate pool whose rows move unchanged with the product history.
-  statements.push({
+  const conservationGuard = {
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (@keeperId,@dupId) AND (
       COALESCE(p.stock_quantity,0)<0
       OR (COALESCE(p.stock_quantity,0)<>0 AND p.stock_quantity<>(SELECT COALESCE(SUM(bs.quantity),0) FROM branch_stock bs WHERE bs.product_id=p.id))
@@ -3983,7 +3978,11 @@ export async function foldDuplicateProductInto(
         HAVING SUM(bbs.quantity)>COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=bbs.branch_id),0))
     )) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END AS merge_stock_conservation_guard`,
     params: { keeperId: canonicalId, dupId: dup.id },
-  })
+  }
+  const identityGuard = productMergeCasAssertion([canonicalBefore, dupPricing])
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = (atomicHistory?.costReviewGeneration ?? 0) > 0
+    ? [conservationGuard, sourceUnmovedGuard, identityGuard, ...reviewedGuards]
+    : [...(reviewedGuards.length ? [identityGuard, ...reviewedGuards, sourceUnmovedGuard] : [sourceUnmovedGuard, identityGuard]), conservationGuard]
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }

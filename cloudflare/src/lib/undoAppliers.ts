@@ -3476,7 +3476,9 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       await reconcile().catch(() => {})
       return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
     }
-    if (/malformed JSON|merge_cost_.*guard/i.test(String(error))) throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
+    if ((error instanceof Error && error.message === 'merge_state_conflict') || /malformed JSON|merge_cost_.*guard/i.test(String(error))) {
+      throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
+    }
     throw error
   }
   await broadcast(ctx.env, 'products', { action: 'update' })
