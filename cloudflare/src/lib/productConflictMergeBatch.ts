@@ -1,5 +1,5 @@
 import { normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey } from './productIdentity'
-import { normalizeProductGroupName, resolveMergedCostDetail, barcodeIdentityMatches, isRealBarcode } from './productDetailRule'
+import { normalizeProductGroupName, barcodeIdentityMatches, isRealBarcode } from './productDetailRule'
 import { resolveProductMergeEconomics } from './productMerge'
 
 export const PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION = 1 as const
@@ -228,9 +228,6 @@ export function chooseProductConflictMergePair(rows: readonly ProductConflictEli
   const economics = resolveProductMergeEconomics(rows)
   if (economics.issues.length) {
     return { eligible: false, code: 'invalid_merge_numeric', message: 'One of the product money fields is not a valid non-negative decimal.' }
-  }
-  if (resolveMergedCostDetail([...rows]).outliers.length) {
-    return { eligible: false, code: 'cost_outlier_review', message: 'The product costs are too far apart for an automatic merge.' }
   }
   const rawBarcodes = new Set(rows.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
   const leadingZeroPair = rawBarcodes.size > 1 && rows.every((row) => isRealBarcode(row.barcode))

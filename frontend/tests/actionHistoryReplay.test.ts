@@ -43,6 +43,12 @@ await runTest('generation-guarded server appliers send their exact expected gene
   assert.match(actionHistorySource, /const replayRequest = buildServerReplayRequest\(payload\)/, 'Undo and Redo share the guarded request builder')
 })
 
+await runTest('current merge cost replay sends generation without changing legacy merge requests', () => {
+  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', merge_version: 3, generation: 0 }),
+    { require_applied: true, expected_generation: 0 })
+  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', generation: 0 }), { require_applied: true })
+})
+
 const transferReplaySource = actionHistorySource.match(/export async function executeTransferReplay[\s\S]*?\r?\n}\r?\n/)?.[0]
 assert.ok(transferReplaySource)
 const executeTransferReplay = new Function(`${stripTypeScriptTypes(transferReplaySource.replace('export ', ''))}; return executeTransferReplay`)()

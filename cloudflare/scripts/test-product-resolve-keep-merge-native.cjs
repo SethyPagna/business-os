@@ -12,8 +12,8 @@
 //       the preview never reports "different" for a detected pair
 //   --  only a CURRENT system-detected cluster merges: a hand-picked pair, a
 //       dismissed cluster or a pair that stopped matching is 409
-//   N4  a chosen cost is written only with product_cost_edit (403 without),
-//       and undo restores the kept product exactly, redo repeats the choice
+//   N4  new cost choices refuse; the prior permission gate remains.
+//       Legacy fold snapshots retain HTTP retry and undo/redo compatibility.
 //   --  the old body (no keep) keeps refusing a cross-identity pair
 //   B2  (MERGE-UNBLOCK, 1 Oct 2026) a stock-in session that can still be
 //       undone never blocks the Resolve merge: the same batch closes its Undo
@@ -103,6 +103,7 @@ const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissi
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
 const broadcastHub = { broadcast: async () => {} }
 const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
+const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
@@ -120,10 +121,12 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './branchWrites': { branchUpdateStatements: () => [] },
   // U-cost: merge undo re-derives catalog cost with the real formula.
   './catalogCostRecompute': catalogCost,
+  './productCostReview': costReview,
 })
-const products = load('routes/products.ts', {
+const productModule = load('routes/products.ts', {
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
+  '../lib/productCostReview': costReview,
   '../lib/db': { getDb: () => adapter },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,
@@ -143,7 +146,8 @@ const products = load('routes/products.ts', {
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
   '../durable-objects/broadcastHub': broadcastHub,
-}).default
+})
+const products = productModule.default
 const app = new Hono()
 app.route('/api/products', products)
 
@@ -198,6 +202,22 @@ async function request(method, url, body) {
 }
 const merge = (body) => request('POST', '/api/products/possible-duplicates/merge', body)
 const preview = (keepId, mergeId, extra = '') => request('GET', `/api/products/possible-duplicates/merge-preview?keepId=${keepId}&mergeId=${mergeId}&keep=1${extra}`)
+
+async function legacyMerge(body, bulkClusterPlan) {
+  const members = [body.keepId, ...(body.resolve?.steps.map(step => step.mergeId) ?? [body.mergeId])]
+    .map(id => one('SELECT * FROM products WHERE id=?', id))
+  const keeper = members.find(row => row.id === body.keepId), discarded = members.find(row => row.id === body.mergeId)
+  const cost = Object.hasOwn(body, 'cost_price_usd') ? { cost_price_usd: body.cost_price_usd,
+    ...(Object.hasOwn(body, 'cost_price_khr') ? { cost_price_khr: body.cost_price_khr } : {}) } : undefined
+  const operationId = crypto.randomUUID()
+  const resolvePlan = body.resolve ? { ...body.resolve, keepId: body.keepId, cost: cost ?? null, choices: {}, rows: members, fingerprints: {} } : undefined
+  await productModule.foldDuplicateProductInto({ DB: {} }, adapter, state.user, keeper, discarded,
+    new Map([[1, 'Main'], [2, 'Second']]), 'legacy compatibility fixture', body.stock ?? 'merge', undefined,
+    { operationId, ...(bulkClusterPlan ? { bulkClusterPlan, resumedCluster: members.some(row => row.id !== body.keepId && !row.is_active) } : {}),
+      ...(resolvePlan ? { auditContext: { resolvePlan, operationId, resolvedMergeId: body.mergeId } } : {}) },
+    { follows: true, ...(cost ? { cost } : {}) })
+  return { status: 200, body: { keeper: one('SELECT * FROM products WHERE id=?', body.keepId) } }
+}
 
 let failed = 0
 async function check(name, fn) {
@@ -291,7 +311,7 @@ async function main() {
     assert.equal('keeper' in twin.body, false, 'the old answer shape')
   })
 
-  await check('N4: a chosen cost needs product_cost_edit (403 without, nothing written); with it the cost is stored', async () => {
+  await check('new chosen costs refuse without writes after the existing cost permission gate; automatic merge needs no cost grant', async () => {
     fresh()
     const before = dump()
     state.user = MANAGER
@@ -308,26 +328,25 @@ async function main() {
     assert.equal('groupCost' in noCost.body && noCost.body.groupCost && 'cost_price_usd' in noCost.body.groupCost, false, 'cost is projected away without cost view')
     state.user = COST_EDITOR
     const seen = await preview(10, 11, '&groupIds=10,11')
-    assert.deepEqual(seen.body.groupCost, { cost_price_usd: 6, cost_price_khr: 24600 }, 'the rule: mean of the distinct costs')
+    assert.ok(Object.hasOwn(seen.body.groupCost, 'cost_price_usd'), 'the permitted actor can read the current preview costs')
     const invalid = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: -1 })
     assert.equal(invalid.status, 400)
     assert.equal(invalid.body.code, 'invalid_merge_cost')
     const outside = await merge({ keepId: 10, mergeId: 11, stock: 'merge', cost_price_usd: 6.5 })
-    assert.equal(outside.status, 400, 'only the Resolve merge takes a cost')
+    assert.equal(outside.status, 400)
     const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: 6.5, cost_price_khr: 26650 })
-    assert.equal(done.status, 200, JSON.stringify(done.body))
-    assert.deepEqual(one('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = 10'), { cost_price_usd: 6.5, cost_price_khr: 26650 })
-    assert.equal(done.body.keeper.cost_price_usd, 6.5)
+    assert.equal(done.status, 400, JSON.stringify(done.body)); assert.equal(done.body.code, 'invalid_merge_cost')
+    assert.equal(dump(), before)
     state.user = MANAGER
     const plain = await merge({ keepId: 20, mergeId: 21, keep: true })
     assert.equal(plain.status, 200, 'no cost chosen needs no cost grant')
     assert.equal('cost_price_usd' in plain.body.keeper, false, 'the answer hides cost from a user without cost view')
   })
 
-  await check('undo restores the kept product exactly and redo repeats the keeper choice and the chosen cost', async () => {
+  await check('legacy chosen-cost fold snapshots still undo exactly and redo their recorded choice', async () => {
     fresh()
     const keeperBefore = one('SELECT name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, is_active FROM products WHERE id = 10')
-    const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: 6.5 })
+    const done = await legacyMerge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: 6.5 })
     assert.equal(done.status, 200, JSON.stringify(done.body))
     const history = one("SELECT id, undo_payload, redo_payload FROM action_history WHERE status = 'undoable' ORDER BY id DESC LIMIT 1")
     assert.ok(history, 'the merge is in History, undoable like every pair merge')
@@ -342,7 +361,7 @@ async function main() {
     assert.equal(one('SELECT is_active FROM products WHERE id = 11').is_active, 0)
   })
 
-  await check('chosen NULL, zero, four-decimal cost and omitted KHR survive apply, exact retry, undo and redo', async () => {
+  await check('legacy chosen NULL, zero, four-decimal and omitted KHR receipts retain actual HTTP retry and undo/redo semantics', async () => {
     for (const [choice, expected] of [
       [{ cost_price_usd: null, cost_price_khr: null }, { cost_price_usd: null, cost_price_khr: null }],
       [{ cost_price_usd: 0, cost_price_khr: 0 }, { cost_price_usd: 0, cost_price_khr: 0 }],
@@ -355,7 +374,7 @@ async function main() {
       const seen = await preview(10, 11)
       const resolve = { requestId: 'nullable-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
       const body = { keepId: 10, mergeId: 11, keep: true, stock: 'merge', resolve, ...choice }
-      const result = await merge(body)
+      const result = await legacyMerge(body)
       assert.equal(result.status, 200, JSON.stringify(result.body))
       assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), expected)
       const count = one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n
@@ -378,7 +397,7 @@ async function main() {
     }
   })
 
-  await check('retry identity distinguishes omitted cost, chosen NULL, zero and omitted KHR without writes', async () => {
+  await check('legacy retry identity distinguishes omitted cost, chosen NULL, zero and omitted KHR without writes', async () => {
     for (const [cost, altered] of [[{}, { cost_price_usd: null }], [{ cost_price_usd: null }, {}],
       [{ cost_price_usd: null }, { cost_price_usd: 0 }], [{ cost_price_usd: 0 }, { cost_price_usd: null }],
       [{ cost_price_usd: 4.1234 }, { cost_price_usd: 4.1234, cost_price_khr: null }],
@@ -386,19 +405,19 @@ async function main() {
       fresh()
       const seen = await preview(10, 11)
       const base = { keepId: 10, mergeId: 11, keep: true, stock: 'merge', resolve: { requestId: 'presence-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] } }
-      const done = await merge({ ...base, ...cost }); assert.equal(done.status, 200, JSON.stringify(done.body))
+      const done = await legacyMerge({ ...base, ...cost }); assert.equal(done.status, 200, JSON.stringify(done.body))
       const before = dump(), refused = await merge({ ...base, ...altered })
       assert.equal(refused.status, 409, JSON.stringify(refused.body)); assert.equal(refused.body.code, 'resolve_request_conflict'); assert.equal(dump(), before)
     }
   })
 
-  await check('three-product continuation and exact retry retain selected unknown instead of re-averaging the survivor', async () => {
+  await check('three-product continuation and exact retry retain original keeper unknown', async () => {
     fresh()
-    state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',9,1); UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=11")
+    state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',9,1); UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10")
     const seen = await preview(10, 11, '&groupIds=10,11,12')
     const resolve = { requestId: 'unknown-three', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
     for (const mergeId of [11, 12]) {
-      const body = { keepId: 10, mergeId, keep: true, ...(mergeId === 11 ? { stock: 'merge' } : {}), cost_price_usd: null, cost_price_khr: null, resolve }
+      const body = { keepId: 10, mergeId, keep: true, ...(mergeId === 11 ? { stock: 'merge' } : {}), resolve }
       const done = await merge(body); assert.equal(done.status, 200, JSON.stringify(done.body))
       assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), { cost_price_usd: null, cost_price_khr: null })
       const count = one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n
@@ -427,7 +446,7 @@ async function main() {
     assert.equal(unscoped.status, 400); assert.equal(unscoped.body.code, 'invalid_merge_cost'); assert.equal(dump(), before)
   })
 
-  await check('a non-editor resolving three products stores the same whole-group cost the preview showed', async () => {
+  await check('a legacy v2 three-product plan preserves its frozen mean and undo/redo for a non-editor', async () => {
     fresh()
     state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)
       VALUES (60, 'Lip Oil', '600001', 2, 10, 1), (61, 'Lip Oil', '600002', 4, 10, 1), (62, 'Lip Oil', '600003', 6, 10, 1)`)
@@ -435,9 +454,9 @@ async function main() {
     const seen = await preview(60, 61, '&groupIds=60,61,62')
     assert.equal(seen.body.groupCost.cost_price_usd, 4)
     const resolve = { requestId: 'three-products', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 61 }, { mergeId: 62 }] }
+    const legacyPlan = productMerge.createProductMergeClusterPlan('legacy-three', 60, rows('SELECT * FROM products WHERE id IN (60,61,62)'), 2)
     for (const mergeId of [61, 62]) {
-      const done = await merge({ keepId: 60, mergeId, keep: true, resolve })
-      console.log('QUERY group step=' + done.queries + ' preview=' + seen.queries)
+      const done = await legacyMerge({ keepId: 60, mergeId, keep: true, resolve }, legacyPlan)
       assert.equal(done.status, 200, JSON.stringify(done.body))
     }
     assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 60').cost_price_usd, seen.body.groupCost.cost_price_usd)
@@ -466,7 +485,7 @@ async function main() {
     assert.equal(altered.body.code, 'resolve_request_conflict')
     const continued = await merge({ keepId: 10, mergeId: 12, keep: true, resolve })
     assert.equal(continued.status, 200, JSON.stringify(continued.body))
-    assert.equal(continued.body.keeper.cost_price_usd, 7)
+    assert.equal(continued.body.keeper.cost_price_usd, 5)
   })
 
   await check('reviewed and continuation snapshots refuse unrelated edits before any next fold', async () => {
@@ -559,7 +578,7 @@ async function main() {
       assert.ok(done.queries + 20 <= 1000, 'each invocation fits Paid with reserved middleware overhead')
     }
     console.log('QUERY maximum12 preview=' + seen.queries + ' apply=' + maximum + ' (SQL statements; excludes SQLite trigger internal effects)')
-    assert.equal(one('SELECT cost_price_usd FROM products WHERE id=100').cost_price_usd, 6.5)
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id=100').cost_price_usd, 1)
     fresh()
     state.tier = 'free'
     const before = dump()
@@ -611,7 +630,7 @@ async function main() {
     assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 0)
     const history = one("SELECT id, undo_payload FROM action_history WHERE entity = 'product' AND status = 'undoable' ORDER BY id DESC LIMIT 1")
     const payload = JSON.parse(history.undo_payload)
-    await undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
+    await undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id, generation: payload.generation })
     assert.equal(sessionRow(900).status, 'recorded', 'closed is permanent: undoing the merge does not reopen the session')
     assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 1)
   })

@@ -1,7 +1,10 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const harness = fs.readFileSync(path.join(__dirname, 'test-product-resolve-choices-native.cjs'), 'utf8').split('async function main() {')[0]
+const harness = fs.readFileSync(path.join(__dirname, 'test-product-resolve-choices-native.cjs'), 'utf8').replaceAll('\r\n','\n').split('async function main() {')[0]
+  .replace("const undoAppliers = load('lib/undoAppliers.ts', {", "const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })\nconst undoAppliers = load('lib/undoAppliers.ts', {\n  './productCostReview': costReview,")
+  .replace("const products = load('routes/products.ts', {", "const productModule = load('routes/products.ts', {\n  '../lib/productCostReview': costReview,")
+  .replace("}).default\nconst app = new Hono()", "})\nconst products = productModule.default\nconst app = new Hono()")
 const checks = `
 async function main() {
   const historyRoutes = load('routes/actionHistory.ts', {
@@ -22,12 +25,24 @@ async function main() {
     state.user = sameOwner
     const seen = await preview(KEEP, M1, '&groupIds=' + KEEP + ',' + M1)
     const resolve = { requestId: 'permission-' + crypto.randomUUID(), reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: M1 }] }
-    assert.equal((await merge({ keepId: KEEP, mergeId: M1, keep: true, resolve, choices, ...(cost ? { cost_price_usd: cost === 'null' ? null : cost === 'zero' ? 0 : 4.1234 } : {}) })).status, 200)
+    const body = { keepId: KEEP, mergeId: M1, keep: true, resolve, choices, ...(cost ? { cost_price_usd: cost === 'null' ? null : cost === 'zero' ? 0 : 4.1234 } : {}) }
+    if (cost) {
+      const before=dump(), response=await merge(body)
+      assert.equal(response.status,400,JSON.stringify(response.body))
+      assert.equal(response.body.code,'invalid_merge_cost')
+      assert.equal(dump(),before)
+      const keeper=one('SELECT * FROM products WHERE id=?',KEEP),discarded=one('SELECT * FROM products WHERE id=?',M1)
+      await productModule.foldDuplicateProductInto({DB:{}},adapter,state.user,keeper,discarded,new Map([[1,'Main'],[2,'Second']]),'legacy permission receipt','merge',undefined,{operationId:crypto.randomUUID()},{follows:true,cost:{cost_price_usd:body.cost_price_usd}})
+    } else {
+      const response=await merge(body)
+      assert.equal(response.status,200,JSON.stringify(response.body))
+    }
     return one("SELECT * FROM action_history WHERE entity='product' AND status='undoable' ORDER BY id DESC LIMIT 1")
   }
   const replay = (history, direction, user) => {
-    const payload = JSON.parse(history[direction + '_payload'])
-    return undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user, direction, historyId: history.id })
+    const current=one('SELECT * FROM action_history WHERE id=?',history.id)
+    const payload = JSON.parse(current[direction + '_payload'])
+    return undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user, direction, historyId: history.id, generation: payload.generation ?? 0 })
   }
   for (const [label, choices, cost, code] of [
     ['custom', { category: { custom: 'Face Care' } }, false, 'product_edit_permission_required'],
@@ -85,6 +100,29 @@ async function main() {
     const before = dump()
     await assert.rejects(replay(history, 'undo', demoted), (error) => error.code === 'product_edit_permission_required')
     assert.equal(dump(), before)
+  })
+  await check('combined permission snapshot keeps actor decisions and separate current phases with one root read', async () => {
+    const history=await merged({category:{custom:'Face Care'}})
+    const payload=JSON.parse(history.undo_payload),prepare=adapter.prepare
+    let roots=0
+    adapter.prepare=sql=>{if(sql.includes('SELECT payload_json FROM undo_snapshots'))roots++;return prepare.call(adapter,sql)}
+    try {
+      const allowed=await undoAppliers.mergeReplayPermissionEffects({DB:{}},payload,sameOwner,'undo')
+      assert.equal(allowed.choicePermissionError,null)
+      assert.equal(roots,1)
+      const denied=await undoAppliers.mergeReplayPermissionEffects({DB:{}},payload,demoted,'undo')
+      assert.equal(denied.choicePermissionError,'product_edit_permission_required')
+      assert.equal(roots,2)
+      const saved=one('SELECT payload_json FROM undo_snapshots WHERE id=?',payload.snapshot_id)
+      const changed=JSON.parse(saved.payload_json)
+      changed.dupImagesBefore=[{image_path:'/permission-phase'}]
+      state.native.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(changed),payload.snapshot_id)
+      assert.equal((await undoAppliers.mergeReplayPermissionEffects({DB:{}},payload,sameOwner,'redo')).changesProductImages,true)
+      assert.equal(roots,3,'later phase reads changed effects')
+      state.native.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run('{bad',payload.snapshot_id)
+      assert.equal((await undoAppliers.mergeReplayPermissionEffects({DB:{}},payload,sameOwner,'undo')).choicePermissionError,'product_edit_permission_required')
+      assert.equal((await undoAppliers.mergeReplayPermissionEffects({DB:{}},{...payload,applier:'product.merge.bulk'},sameOwner,'undo')).choicePermissionError,'product_edit_permission_required')
+    } finally {adapter.prepare=prepare}
   })
   process.exitCode = failed ? 1 : 0
 }

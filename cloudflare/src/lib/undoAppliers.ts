@@ -6,6 +6,7 @@ import type { SessionUser } from './auth'
 import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
+import { mergeCostUndoStatements, parseMergeCostOutcome, type MergeCostOutcome } from './productCostReview'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -301,7 +302,17 @@ export interface MergeReversal {
   fullBatchMetadataFingerprint?: boolean
   fingerprintPending?: boolean
   operationId?: string
+  costReviewOutcome?: MergeCostOutcome
+  costReviewState?: MergeCostReplayState
 }
+
+type MergeCostReplayState = {
+  generation: number; keeper_revision: number; duplicate_revision: number
+  gallery_state: string; graph_version: 2; graph_state: string
+  direction: 'apply' | 'undo' | 'redo'; from_generation: number
+}
+
+export type AtomicMergeGraphReceipt = { schema: Map<string, string[]>; graph: AtomicMergeStatement }
 
 export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
 export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
@@ -326,13 +337,26 @@ function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionU
   }
 }
 
-export async function mergeReplayChoicePermissionError(env: Env, payload: Record<string, unknown>, user: SessionUser): Promise<string | null> {
+async function readMergeReplayPermissionSnapshot(env: Env, payload: Record<string, unknown>): Promise<{ payload_json: string } | undefined> {
+  const kind = String(payload.applier || ''), snapshotId = Number(payload.snapshot_id || 0)
+  if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return undefined
+  return getDb(env).prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+    .get<{ payload_json: string }>([snapshotId, kind])
+}
+
+export async function mergeReplayPermissionEffects(env: Env, payload: Record<string, unknown>, user: SessionUser, direction: 'undo' | 'redo'): Promise<{ changesProductImages: boolean; choicePermissionError: string | null }> {
+  const snap = await readMergeReplayPermissionSnapshot(env, payload)
+  return {
+    changesProductImages: await mergeReplayImagesFromSnapshot(env, payload, direction, snap),
+    choicePermissionError: mergeReplayChoicePermissionFromSnapshot(payload, user, snap),
+  }
+}
+
+function mergeReplayChoicePermissionFromSnapshot(payload: Record<string, unknown>, user: SessionUser, snap: { payload_json: string } | undefined): string | null {
   const kind = String(payload.applier || '')
   if (kind !== 'product.merge' && kind !== 'product.merge.bulk') return null
   const snapshotId = Number(payload.snapshot_id || 0)
   if (!Number.isInteger(snapshotId) || snapshotId <= 0) return 'product_edit_permission_required'
-  const snap = await getDb(env).prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-    .get<{ payload_json: string }>([snapshotId, kind])
   if (!snap) return 'product_edit_permission_required'
   try {
     const parsed = JSON.parse(snap.payload_json) as MergeReversal & { reversals?: MergeReversal[] }
@@ -360,17 +384,16 @@ function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
 }
 
 /** Whether this saved merge direction will change a cover or gallery. */
-export async function mergeReplayChangesProductImages(
+async function mergeReplayImagesFromSnapshot(
   env: Env,
   payload: Record<string, unknown>,
   direction: 'undo' | 'redo',
+  snap: { payload_json: string } | undefined,
 ): Promise<boolean> {
   const kind = String(payload.applier || '')
   const snapshotId = Number(payload.snapshot_id || 0)
   if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return false
   const db = getDb(env)
-  const snap = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-    .get<{ payload_json: string }>([snapshotId, kind])
   // A group pointer fans out to child snapshots. Missing or malformed group
   // state fails closed: the replay itself will reject it, and history must not
   // advertise the operation to an actor without image authority meanwhile.
@@ -658,6 +681,7 @@ export type MergeFoldFn = (
   stockDisposition?: MergeStockDisposition,
   economicsOverride?: ProductMergeEconomics,
   keeperChoice?: ProductMergeKeeperChoice,
+  reviewReplay?: { outcome: MergeCostOutcome; operationId: string; generation: number; guards: AtomicMergeStatement[]; complete: (reversal: MergeReversal) => AtomicMergeStatement[] },
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -726,25 +750,12 @@ async function runMergeFingerprintReadBatch(
   ]))
 }
 
-export async function mergeStateFingerprint(
-  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[],
-): Promise<string> {
-  const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
-  if (!productIds.length) return ''
-  const fullBatchMetadata = reversals.some((reversal) => reversal.fullBatchMetadataFingerprint)
-  const products: Array<Record<string, unknown>> = []
-  const branchStock: Array<Record<string, unknown>> = []
-  const batches: Array<Record<string, unknown>> = []
-  const movementHeads: Array<Record<string, unknown>> = []
-  const productImages: Array<Record<string, unknown>> = []
-  const stockSessions: Array<Record<string, unknown>> = []
-  const adjustmentRows: Array<Record<string, unknown>> = []
-  const linkedRows: Record<string, Array<Record<string, unknown>>> = {}
-  const promotionRules: Array<Record<string, unknown>> = []
-  const childProducts: Array<Record<string, unknown>> = []
-  const saleAllocations: Array<Record<string, unknown>> = []
-  const returnAllocations: Array<Record<string, unknown>> = []
-  const reads: Array<{ key: string; sql: string; params?: unknown[] }> = []
+type MergeFingerprintRead = { key: string; sql: string; params?: unknown[] }
+
+function mergeFingerprintReads(reversals: MergeReversal[], lockAllBatchMetadata = false): MergeFingerprintRead[] {
+  const productIds = [...new Set(reversals.flatMap(r => [Number(r.keeperId),Number(r.dupId)]).filter(id => Number.isInteger(id) && id>0))].sort((a,b)=>a-b)
+  const fullBatchMetadata = reversals.some(reversal => reversal.fullBatchMetadataFingerprint)
+  const reads: MergeFingerprintRead[] = []
   const productChunks = chunk(productIds, 80)
   for (const [index, ids] of productChunks.entries()) {
     const placeholders = ids.map(() => '?').join(',')
@@ -767,7 +778,7 @@ export async function mergeStateFingerprint(
     // Old fingerprints intentionally project only lot identity/activation.
     // Preserve that serialized contract, but lock the entire current lot row
     // (received date, cost, supplier, etc.) against races during group undo.
-    if (transactionGuards && !fullBatchMetadata) reads.push({
+    if (lockAllBatchMetadata && !fullBatchMetadata) reads.push({
       key: `casBatchMetadata:${index}`,
       sql: `SELECT * FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids,
     })
@@ -803,7 +814,6 @@ export async function mergeStateFingerprint(
       .filter((saved) => saved.table === entry.table && saved.column === entry.column)
       .flatMap((saved) => intIds(saved.ids))))]
     if (!ids.length) continue
-    linkedRows[`${entry.table}.${entry.column}`] = []
     for (const [index, group] of chunk(ids, 80).entries()) {
       reads.push({ key: `linked:${tableIndex}:${index}`, sql: `SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`, params: group })
     }
@@ -819,6 +829,28 @@ export async function mergeStateFingerprint(
   for (const [index, ids] of chunk(allocationIds.sale, 80).entries()) reads.push({ key: `saleAllocations:${index}`, sql: `SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
   for (const [index, ids] of chunk(allocationIds.returns, 80).entries()) reads.push({ key: `returnAllocations:${index}`, sql: `SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
 
+  return reads
+}
+
+export async function mergeStateFingerprint(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[],
+): Promise<string> {
+  const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  if (!productIds.length) return ''
+  const fullBatchMetadata = reversals.some((reversal) => reversal.fullBatchMetadataFingerprint)
+  const products: Array<Record<string, unknown>> = []
+  const branchStock: Array<Record<string, unknown>> = []
+  const batches: Array<Record<string, unknown>> = []
+  const movementHeads: Array<Record<string, unknown>> = []
+  const productImages: Array<Record<string, unknown>> = []
+  const stockSessions: Array<Record<string, unknown>> = []
+  const adjustmentRows: Array<Record<string, unknown>> = []
+  const linkedRows: Record<string, Array<Record<string, unknown>>> = {}
+  const promotionRules: Array<Record<string, unknown>> = []
+  const childProducts: Array<Record<string, unknown>> = []
+  const saleAllocations: Array<Record<string, unknown>> = []
+  const returnAllocations: Array<Record<string, unknown>> = []
+  const reads = mergeFingerprintReads(reversals, Boolean(transactionGuards))
   const resultSets = await runMergeFingerprintReadBatch(db, reads)
   if (transactionGuards) {
     // Re-run the exact fingerprint projections inside the write transaction.
@@ -861,7 +893,7 @@ export async function mergeStateFingerprint(
     else if (key.startsWith('linked:')) {
       const [, tableIndexText] = key.split(':')
       const entry = MERGE_REPARENT_TABLES[Number(tableIndexText)]
-      if (entry) linkedRows[`${entry.table}.${entry.column}`]?.push(...rows)
+      if (entry) (linkedRows[`${entry.table}.${entry.column}`] ??= []).push(...rows)
     }
   }
   const batchStockByKey = new Map<string, Record<string, unknown>>()
@@ -1637,7 +1669,9 @@ export function buildAtomicMergeHistoryStatements(
   reversal: MergeReversal,
   operationId: string,
   auditDetails: Record<string, unknown>,
+  receipt?: AtomicMergeGraphReceipt,
 ): AtomicMergeStatement[] {
+  if (reversal.costReviewOutcome && !receipt) throw new Error('A committed merge graph receipt is required.')
   if (!operationId) throw new Error('A merge operation id is required.')
   const stored = { ...reversal, operationId, fingerprintPending: true }
   const keeperName = reversal.keeperName || `#${reversal.keeperId}`
@@ -1645,18 +1679,20 @@ export function buildAtomicMergeHistoryStatements(
   const actorId = user?.id ?? null
   const actorName = actorSnapshot(user)
   const details = JSON.stringify(auditDetails)
+  const reviewPointer = reversal.costReviewOutcome ? ",'merge_version',3,'generation',0" : ''
   return [
     {
       sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
-            VALUES('product.merge','applied',@payload,@byId,@byName)`,
-      params: { payload: JSON.stringify(stored), byId: actorId, byName: actorName },
+            VALUES('product.merge','applied',${receipt ? `json_set(@payload,'$.costReviewState',${mergeReplayStateSql(receipt.graph)})` : '@payload'},@byId,@byName)`,
+      params: { payload: JSON.stringify(stored), byId: actorId, byName: actorName, ...(receipt ? { nextGeneration: 0, direction: 'apply', generation: -1,
+        keeper: String(reversal.keeperId), discarded: String(reversal.dupId), ...receipt.graph.params } : {}) },
     },
     {
       sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
               undo_payload,redo_payload,created_by_id,created_by_name)
             VALUES('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded',
-              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
-              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId),
+              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId${reviewPointer}),
+              json_object('applier','product.merge','snapshot_id',last_insert_rowid(),'operation_id',@operationId${reviewPointer}),
               @byId,@byName)`,
       params: {
         entityId: String(reversal.dupId),
@@ -1673,6 +1709,10 @@ export function buildAtomicMergeHistoryStatements(
             VALUES(@byId,@byName,'merge_duplicate','product',@entityId,@details,'product',@entityId,@details)`,
       params: { byId: actorId, byName: actorName, entityId: String(reversal.dupId), details },
     },
+    ...(receipt ? [{ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE kind='product.merge'
+      AND json_extract(payload_json,'$.operationId')=@operationId
+      AND length(CAST(json_extract(payload_json,'$.costReviewState.graph_state') AS BLOB))<=131072)
+      THEN 1 ELSE json_extract('', '$') END AS merge_cost_graph_size_guard`, params: { operationId } }] : []),
   ]
 }
 
@@ -1682,6 +1722,7 @@ export async function finalizeAtomicMergeHistory(
   reversal: MergeReversal,
   dbOverride?: ReturnType<typeof getDb>,
   knownIds?: AtomicMergeKnownIds,
+  preparedGraph?: AtomicMergeGraphReceipt,
 ): Promise<{
   operationId: string
   committed: true
@@ -1709,19 +1750,21 @@ export async function finalizeAtomicMergeHistory(
     const db = dbOverride ?? getDb(env)
     let snapshotId = Number(knownIds?.snapshotId)
     let actionHistoryId = Number(knownIds?.actionHistoryId)
+    let mergeVersion = preparedGraph ? 3 : 0
     // A new fold knows both rows are pending because the INSERT statements are
     // fixed immediately above the audit insert. Missing metadata and explicit
     // reconciliation calls still discover and inspect the durable rows.
     if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
       const history = await db.prepare(`
-        SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
+        SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id,json_extract(undo_payload,'$.merge_version') AS merge_version
         FROM action_history
         WHERE json_extract(undo_payload,'$.operation_id')=@operationId
           AND json_extract(undo_payload,'$.applier')='product.merge'
         ORDER BY id DESC LIMIT 1
-      `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
+      `).get<{ id: number; reversible: number; status: string; snapshot_id: number; merge_version: number | null }>({ operationId })
       snapshotId = Number(history?.snapshot_id)
       actionHistoryId = Number(history?.id)
+      mergeVersion = Number(history?.merge_version)
       if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
         return pending()
       }
@@ -1731,12 +1774,16 @@ export async function finalizeAtomicMergeHistory(
         SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
         FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
       `).get<{ pending: number | null }>({ snapshotId })
-      if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
+      if (mergeVersion !== 3 && !Object.hasOwn(reversal, 'costReviewOutcome') && Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
         return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
       }
     }
     resolvedSnapshotId = snapshotId
     resolvedActionHistoryId = actionHistoryId
+    if (mergeVersion === 3 || Object.hasOwn(reversal, 'costReviewOutcome')) {
+      const fingerprintReady = await finalizeMergeCostGraph(db, snapshotId, actionHistoryId, operationId, preparedGraph)
+      return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady }
+    }
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
     await db.batch([
@@ -3009,6 +3056,258 @@ async function branchReplayExpectedFields(
   return other.fields as BranchWriteFields
 }
 
+function mergeReplayGallerySql(): string {
+  return `(SELECT json_group_array(json_array(id,product_id,image_path,sort_order,created_at,revision)) FROM (
+    SELECT i.*,COALESCE(r.revision,0) AS revision FROM product_images i
+    LEFT JOIN stock_session_revisions r ON r.entity_type='product_image' AND r.entity_key=CAST(i.id AS TEXT)
+    WHERE i.product_id IN (@keeper,@discarded) ORDER BY i.id))`
+}
+
+async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<string, string[]>> {
+  const tables = [...new Set(['products', 'product_images', 'product_batches', 'branch_stock', 'branch_batch_stock', 'inventory_movements',
+    'stock_session_members', 'promotion_rules', 'sale_item_batch_allocations', 'return_item_batch_allocations', ...MERGE_REPARENT_TABLES.map(row => row.table)])]
+  const rows = await db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
+    .all<{ table_name: string; name: string }>({ tables: JSON.stringify(tables) })
+  const columns = new Map<string, string[]>()
+  for (const row of rows) {
+    const names = columns.get(row.table_name) || []
+    names.push(row.name)
+    columns.set(row.table_name, names)
+  }
+  return columns
+}
+
+function mergeReplayGraphSql(reversal: MergeReversal, schema: Map<string, string[]>): AtomicMergeStatement {
+  const reads = mergeFingerprintReads([reversal], true)
+  reads.push({ key: 'currentCostEntries', sql: 'SELECT * FROM product_cost_entries WHERE product_id IN (?,?)', params: [reversal.keeperId, reversal.dupId] })
+  const params: Record<string, unknown> = {}
+  let sql = "json('{}')"
+  for (const [index, read] of reads.entries()) {
+    const wildcard = read.sql.match(/^SELECT \* FROM (\w+)/)
+    const projection = read.sql.match(/^SELECT ([\s\S]+?) FROM /)?.[1]
+    const columns = wildcard ? schema.get(wildcard[1]) : projection?.split(',').map(value => value.trim().match(/(?: AS )?(\w+)$/i)?.[1])
+    if (!columns?.length || columns.some(name => !name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
+      throw new UndoConflictError('Missing merge graph schema.')
+    }
+    let binding = 0
+    const query = read.sql.replace(/\?/g, () => `@mergeGraph${index}_${binding++}`)
+    if (binding !== (read.params || []).length) throw new UndoConflictError('Invalid merge graph bindings.')
+    for (const [i, value] of (read.params || []).entries()) params[`mergeGraph${index}_${i}`] = value
+    const values = columns.map(name => `live."${name}"`)
+    const encoded = values.map(value => `json_array(typeof(${value}),CASE WHEN typeof(${value})='real' THEN printf('%!.17g',${value}) ELSE ${value} END)`)
+    const groups = chunk(encoded, 15).map(group => `json_array(${group.join(',')})`)
+    const row = `json_array(${groups.join(',')})`
+    const rows = `(SELECT json_group_array(json(row)) FROM (SELECT ${row} row FROM (${query}) live ORDER BY ${values.join(',')}))`
+    const key = read.key.replaceAll('"', '')
+    params[`mergeColumns${index}`] = JSON.stringify(columns)
+    sql = `json_set(${sql},'$."${key}"',json_array(json(@mergeColumns${index}),json(${rows})))`
+  }
+  if (sql.length > 65536 || Object.keys(params).length > 85) throw new UndoConflictError('This merge graph is too large to replay safely.')
+  return { sql, params }
+}
+
+export async function prepareAtomicMergeGraphReceipt(db: ReturnType<typeof getDb>, reversal: MergeReversal): Promise<AtomicMergeGraphReceipt> {
+  const schema = await mergeReplayColumns(db)
+  return { schema, graph: mergeReplayGraphSql(reversal, schema) }
+}
+
+function mergeReplayStateSql(graph: AtomicMergeStatement): string {
+  return `json_object('generation',@nextGeneration,'direction',@direction,'from_generation',@generation,
+    'keeper_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0),
+    'duplicate_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0),
+    'gallery_state',printf('%s',${mergeReplayGallerySql()}),'graph_version',2,'graph_state',printf('%s',${graph.sql}))`
+}
+
+function mergeReplayStateValid(state: MergeCostReplayState | undefined, generation: number): state is MergeCostReplayState {
+  return !!state && state.generation === generation && Number.isSafeInteger(generation) && generation >= 0
+    && (generation === 0 ? state.direction === 'apply' && state.from_generation === -1
+      : ['undo','redo'].includes(state.direction) && state.from_generation === generation - 1)
+    && Number.isSafeInteger(state.keeper_revision) && state.keeper_revision >= 0
+    && Number.isSafeInteger(state.duplicate_revision) && state.duplicate_revision >= 0
+    && typeof state.gallery_state === 'string' && state.graph_version === 2 && typeof state.graph_state === 'string'
+}
+
+function mergeReplayGraphPredicate(reversal: MergeReversal, state: MergeCostReplayState, graph: AtomicMergeStatement): AtomicMergeStatement {
+  return { sql: `COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0)=@keeperRevision
+    AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0)=@duplicateRevision
+    AND ${mergeReplayGallerySql()} IS @galleryState AND ${graph.sql} IS @graphState`,
+  params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision,
+    duplicateRevision: state.duplicate_revision, galleryState: state.gallery_state, graphState: state.graph_state, ...graph.params } }
+}
+
+async function finalizeMergeCostGraph(
+  db: ReturnType<typeof getDb>, snapshotId: number, historyId: number, operationId: string, prepared?: AtomicMergeGraphReceipt,
+): Promise<boolean> {
+  const row = await db.prepare(`SELECT s.payload_json,h.undo_payload,h.redo_payload,h.status,h.reversible FROM undo_snapshots s
+    JOIN action_history h ON h.id=@history WHERE s.id=@snapshot AND s.kind='product.merge' AND s.status='applied'`)
+    .get<{ payload_json: string; undo_payload: string; redo_payload: string; status: string; reversible: number }>({ history: historyId, snapshot: snapshotId })
+  if (!row || row.undo_payload !== row.redo_payload) return false
+  let saved: MergeReversal, pointer: Record<string, unknown>
+  try { saved = JSON.parse(row.payload_json); pointer = JSON.parse(row.undo_payload) } catch { return false }
+  if (saved.operationId !== operationId || !parseMergeCostOutcome(saved.costReviewOutcome) || !mergeReplayStateValid(saved.costReviewState, 0)
+    || pointer.applier !== 'product.merge' || pointer.merge_version !== 3 || pointer.generation !== 0
+    || pointer.snapshot_id !== snapshotId || pointer.operation_id !== operationId) return false
+  if (!saved.fingerprintPending && row.status === 'undoable' && Number(row.reversible) === 1) return true
+  if (!saved.fingerprintPending || row.status !== 'recorded' || Number(row.reversible) !== 0) return false
+  const schema = prepared?.schema ?? await mergeReplayColumns(db)
+  const predicate = mergeReplayGraphPredicate(saved, saved.costReviewState, mergeReplayGraphSql(saved, schema))
+  const guards: AtomicMergeStatement[] = []
+  const fingerprint = await mergeStateFingerprint(db, [saved], guards)
+  await db.batch([{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status='applied' AND payload_json=@before)
+      AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status='recorded' AND reversible=0 AND undo_payload=@pointer AND redo_payload=@pointer)
+      AND ${predicate.sql} THEN 1 ELSE json_extract('', '$') END AS merge_cost_initial_fingerprint_guard`,
+    params: { snapshot: snapshotId, history: historyId, before: row.payload_json, pointer: row.undo_payload, ...predicate.params },
+  }, ...guards, {
+    sql: `UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,
+    params: { snapshot: snapshotId, payload: JSON.stringify({ ...saved, fingerprintPending: false, mergedStateFingerprint: fingerprint }) },
+  }, { sql: "UPDATE action_history SET reversible=1,status='undoable',updated_at=CURRENT_TIMESTAMP WHERE id=@history", params: { history: historyId } }])
+  return true
+}
+
+async function replayMergeCostReview(payload: Record<string, unknown>, ctx: UndoApplierContext, snapshot: { id: number; status: string; payload_json: string }, reversal: MergeReversal): Promise<UndoApplierOutcome> {
+  const refuse = () => new UndoConflictError('This merge review receipt is missing, stale, or changed.', UNDO_HISTORY_STALE_CODE)
+  if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || Number(ctx.historyId) <= 0
+    || !Number.isSafeInteger(ctx.generation) || Number(ctx.generation) < 0 || Number(ctx.generation) >= Number.MAX_SAFE_INTEGER) throw refuse()
+  if (getActionTier(ctx.user, 'products', 'merge_duplicates') !== 'full') throw new UndoConflictError('Current merge permission is required.')
+  const outcome = parseMergeCostOutcome(reversal.costReviewOutcome)
+  if (!outcome || outcome.keeperId !== Number(reversal.keeperId) || !String(reversal.operationId || '')) throw refuse()
+  const db = getDb(ctx.env), historyId = Number(ctx.historyId), generation = Number(ctx.generation)
+  const history = await db.prepare('SELECT id,status,reversible,undo_payload,redo_payload FROM action_history WHERE id=@id')
+    .get<{ id: number; status: string; reversible: number; undo_payload: string; redo_payload: string }>({ id: historyId })
+  let pointer: Record<string, unknown>
+  try { pointer = JSON.parse(history?.undo_payload || '') } catch { throw refuse() }
+  if (!history || history.undo_payload !== history.redo_payload || pointer.applier !== 'product.merge' || pointer.merge_version !== 3
+    || pointer.snapshot_id !== snapshot.id || pointer.operation_id !== reversal.operationId || !Number.isSafeInteger(pointer.generation)
+    || payload.snapshot_id !== snapshot.id || payload.operation_id !== reversal.operationId || payload.merge_version !== 3) throw refuse()
+  const state = reversal.costReviewState
+  if (!mergeReplayStateValid(state, Number(pointer.generation))) throw refuse()
+  const eventJson = (alias: string) => `CASE WHEN json_valid(${alias}.details) THEN ${alias}.details ELSE '{}' END`
+  const root = await db.prepare(`SELECT a.id,a.details FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=@keeper
+    AND json_extract(${eventJson('a')},'$.cost_review.version')=1 AND json_extract(${eventJson('a')},'$.cost_review.kind')='merge'
+    AND json_extract(${eventJson('a')},'$.cost_review.operation_key')=@rootKey AND json_extract(${eventJson('a')},'$.cost_review.root_key')=@rootKey
+    AND json_extract(${eventJson('a')},'$.cost_review.merge_operation_id')=@mergeOperation
+    AND json_extract(${eventJson('a')},'$.cost_review.generation')=0
+    AND json_extract(${eventJson('a')},'$.cost_review.before_key') IS @beforeKey
+    AND json_extract(${eventJson('a')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('a')},'$.cost_review.fallback_khr') IS @khr
+    AND EXISTS(SELECT 1 FROM audit_logs b WHERE b.action='cost_override' AND b.entity='product' AND b.entity_id=@keeper
+      AND json_extract(${eventJson('b')},'$.cost_review.version')=1 AND json_extract(${eventJson('b')},'$.cost_review.kind') IN ('merge','merge_redo')
+      AND json_extract(${eventJson('b')},'$.cost_review.operation_key')=@currentKey AND json_extract(${eventJson('b')},'$.cost_review.root_key')=@rootKey
+      AND json_extract(${eventJson('b')},'$.cost_review.merge_operation_id')=@mergeOperation
+      AND json_extract(${eventJson('b')},'$.cost_review.generation')=@eventGeneration
+      AND json_extract(${eventJson('b')},'$.cost_review.before_key') IS @beforeKey
+      AND json_extract(${eventJson('b')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('b')},'$.cost_review.fallback_khr') IS @khr)`)
+    .get<{ id: number; details: string }>({ keeper: String(reversal.keeperId), rootKey: outcome.rootKey, currentKey: outcome.reviewKey,
+      beforeKey: outcome.beforeKey, usd: outcome.original.usd, khr: outcome.original.khr, mergeOperation: reversal.operationId,
+      eventGeneration: state?.direction === 'undo' ? Number(pointer.generation) - 1 : Number(pointer.generation) })
+  if (!root) throw refuse()
+  const schema=await mergeReplayColumns(db)
+  const committed = async (): Promise<MergeReversal | null> => {
+    const row = await db.prepare(`SELECT s.payload_json,h.undo_payload,h.redo_payload FROM undo_snapshots s JOIN action_history h ON h.id=@history
+      WHERE s.id=@snapshot AND json_extract(h.undo_payload,'$.snapshot_id')=s.id AND json_extract(h.undo_payload,'$.operation_id')=@operation
+        AND json_extract(h.undo_payload,'$.merge_version')=3 AND json_extract(h.undo_payload,'$.generation')=@nextGeneration`)
+      .get<{ payload_json: string; undo_payload: string; redo_payload: string }>({ history: historyId, snapshot: snapshot.id, operation: reversal.operationId, nextGeneration: generation + 1 })
+    if (!row || row.undo_payload !== row.redo_payload) return null
+    try {
+      const saved = JSON.parse(row.payload_json) as MergeReversal, receipt = saved.costReviewState, proof = parseMergeCostOutcome(saved.costReviewOutcome)
+      return receipt?.generation === generation + 1 && receipt.from_generation === generation && receipt.direction === ctx.direction
+        && saved.operationId === reversal.operationId && proof?.rootKey === outcome.rootKey ? saved : null
+    } catch { return null }
+  }
+  const reconcile = async (): Promise<void> => {
+    if (ctx.direction !== 'redo') return
+    const saved = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get<{ payload_json: string }>([snapshot.id])
+    if (!saved) return
+    let fresh: MergeReversal
+    try { fresh = JSON.parse(saved.payload_json) as MergeReversal } catch { return }
+    const receipt = fresh.costReviewState
+    if (!fresh.fingerprintPending || receipt?.generation !== generation + 1 || receipt.direction !== 'redo') return
+    const predicate = mergeReplayGraphPredicate(fresh, receipt, mergeReplayGraphSql(fresh, schema))
+    const graphGuards: AtomicMergeStatement[] = []
+    const fingerprint = await mergeStateFingerprint(db, [fresh], graphGuards)
+    try {
+      await db.batch([{
+        sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status='applied' AND payload_json=@before)
+          AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status='recorded' AND reversible=0
+            AND json_extract(undo_payload,'$.generation')=@nextGeneration AND json_extract(undo_payload,'$.snapshot_id')=@snapshot)
+          AND ${predicate.sql}
+          THEN 1 ELSE json_extract('', '$') END AS merge_cost_fingerprint_guard`,
+        params: { snapshot: snapshot.id, before: saved.payload_json, history: historyId, nextGeneration: generation + 1,
+          ...predicate.params },
+      }, ...graphGuards,
+      { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.fingerprintPending',json('false'),'$.mergedStateFingerprint',@fingerprint) WHERE id=@snapshot`,
+        params: { fingerprint, snapshot: snapshot.id } },
+      { sql: "UPDATE action_history SET status='undoable',reversible=1 WHERE id=@history", params: { history: historyId } }])
+    } catch { /* The committed receipt remains recorded until its exact graph can be reconciled. */ }
+  }
+  if (pointer.generation === generation + 1 && state?.generation === generation + 1 && state.from_generation === generation && state.direction === ctx.direction) {
+    await reconcile().catch(() => {})
+    return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
+  }
+  const fromStatus = ctx.direction === 'undo' ? 'undoable' : 'redoable'
+  if (pointer.generation !== generation || history.status !== fromStatus || !Number(history.reversible)
+    || snapshot.status !== (ctx.direction === 'undo' ? 'applied' : 'reversed')) throw refuse()
+  const guards: AtomicMergeStatement[] = [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status=@fromStatus AND reversible=1
+      AND undo_payload=@pointer AND redo_payload=@pointer)
+      AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND status=@snapshotStatus AND payload_json=@snapshotPayload)
+      AND EXISTS(SELECT 1 FROM audit_logs WHERE id=@root AND details=@rootDetails)
+      THEN 1 ELSE json_extract('', '$') END AS merge_cost_replay_guard`,
+    params: { history: historyId, fromStatus, pointer: history.undo_payload, snapshot: snapshot.id, snapshotStatus: snapshot.status, snapshotPayload: snapshot.payload_json,
+      root: root.id, rootDetails: root.details },
+  }]
+  if (state) {
+    const predicate = mergeReplayGraphPredicate(reversal, state, mergeReplayGraphSql(reversal, schema))
+    guards.push({ sql: `SELECT CASE WHEN ${predicate.sql} THEN 1 ELSE json_extract('', '$') END AS merge_cost_revision_guard`, params: predicate.params })
+  }
+  const complete = (fresh: MergeReversal): AtomicMergeStatement[] => {
+    const graph=mergeReplayGraphSql(fresh,schema)
+    return [{
+    sql: `UPDATE undo_snapshots SET status=@status,payload_json=json_set(@payload,'$.costReviewState',${mergeReplayStateSql(graph)}),updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,
+    params: { status: ctx.direction === 'undo' ? 'reversed' : 'applied', payload: JSON.stringify(fresh), nextGeneration: generation + 1,
+      direction: ctx.direction, generation, keeper: String(reversal.keeperId), discarded: String(reversal.dupId), snapshot: snapshot.id, ...graph.params },
+  }, {
+    sql: `UPDATE action_history SET status=@status,reversible=@reversible,last_error=NULL,
+      undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),redo_payload=json_set(redo_payload,'$.generation',@nextGeneration),
+      updated_at=CURRENT_TIMESTAMP WHERE id=@history`,
+    params: { status: ctx.direction === 'undo' ? 'redoable' : 'recorded', reversible: ctx.direction === 'undo' ? 1 : 0, nextGeneration: generation + 1, history: historyId },
+  }, {sql:`SELECT CASE WHEN length(CAST(json_extract(payload_json,'$.costReviewState.graph_state') AS BLOB))<=131072 THEN 1 ELSE json_extract('', '$') END AS merge_cost_graph_size_guard FROM undo_snapshots WHERE id=@snapshot`,params:{snapshot:snapshot.id}}]
+  }
+  try {
+    if (ctx.direction === 'undo') {
+      await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint, guards)
+      const statements = await buildMergeReversalStatements(ctx.env, reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
+      await db.batch([...guards, ...statements,
+        ...mergeCostUndoStatements(outcome, { historyId, snapshotId: snapshot.id, operationId: String(reversal.operationId), generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }),
+        ...complete(reversal)])
+    } else {
+      if (!state || state.generation !== generation || state.direction !== 'undo'
+        || !Number.isSafeInteger(state.keeper_revision) || !Number.isSafeInteger(state.duplicate_revision) || !mergeFoldFn) throw refuse()
+      const keeper = await db.prepare('SELECT id,name,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; is_active: number }>([reversal.keeperId])
+      const discarded = await db.prepare('SELECT id,name,image_path,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; image_path: string | null; is_active: number }>([reversal.dupId])
+      if (!keeper?.is_active || !discarded?.is_active) throw refuse()
+      const branches = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
+      await mergeFoldFn(ctx.env, db, ctx.user, keeper, discarded, new Map(branches.map(row => [row.id, row.name])),
+        reversal.mergeContext || 'redo merge', reversal.stockDisposition || 'merge', savedBulkClusterEconomics(reversal), reversal.keeperChoice,
+        { outcome, operationId: String(reversal.operationId), generation: generation + 1, guards, complete: fresh => {
+          preserveBulkClusterPlan(reversal, fresh)
+          return complete({ ...fresh, fingerprintPending: true })
+        } })
+      await reconcile()
+    }
+  } catch (error) {
+    if (await committed().catch(() => null)) {
+      await reconcile().catch(() => {})
+      return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
+    }
+    if (/malformed JSON|merge_cost_.*guard/i.test(String(error))) throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
+    throw error
+  }
+  await broadcast(ctx.env, 'products', { action: 'update' })
+  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: generation + 1 }
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
@@ -3388,6 +3687,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       assertMergeChoicePermissions([reversal], ctx.user)
+
+      if (Object.hasOwn(reversal, 'costReviewOutcome') || payload.merge_version === 3 || (reversal.bulkClusterPlan as { version?: unknown } | undefined)?.version === 3) {
+        return replayMergeCostReview(payload, ctx, snap, reversal)
+      }
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)

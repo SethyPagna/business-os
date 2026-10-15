@@ -6,7 +6,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -135,6 +135,7 @@ function isServerManagedPayload(value: unknown): boolean {
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
   return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+    || (kind === 'product.merge' && payload.merge_version === 3)
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -173,12 +174,10 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   const applier = replayable
     ? resolveUndoApplier(String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload)
     : null
-  const replayChangesImages = applier
-    ? await mergeReplayChangesProductImages(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
-    : false
-  const choicePermissionError = applier
-    ? await mergeReplayChoicePermissionError(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, user)
-    : null
+  const replayPermissionEffects = applier
+    ? await mergeReplayPermissionEffects(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, user, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
+    : { changesProductImages: false, choicePermissionError: null }
+  const { changesProductImages: replayChangesImages, choicePermissionError } = replayPermissionEffects
   return {
     ...row,
     reversible: !!row.reversible,
@@ -431,7 +430,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
     const branchClosure = branchCutoverClosureRefusal(existing)
     if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
-    if (!Number(existing.reversible || 0)) {
+    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.merge_version === 3
+    if (!Number(existing.reversible || 0) && !(mergeCostReplay && existing.status === 'recorded')) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }
     const currentStatus = String(existing.status || '').toLowerCase()
@@ -444,7 +444,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay) {
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
 
@@ -455,10 +455,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
     const serverManagedReplay = !!(applier && isServerManagedPayload(payload))
-    const replayChangesProductImages = applier
-      ? await mergeReplayChangesProductImages(c.env, payload, direction)
-      : false
-    const choicePermissionError = applier ? await mergeReplayChoicePermissionError(c.env, payload, user) : null
+    const replayPermissionEffects = applier
+      ? await mergeReplayPermissionEffects(c.env, payload, user, direction)
+      : { changesProductImages: false, choicePermissionError: null }
+    const { changesProductImages: replayChangesProductImages, choicePermissionError } = replayPermissionEffects
     if (choicePermissionError) return c.json({ success: false, code: choicePermissionError, error: 'Current permission is required to replay the saved Resolve choices.' }, 403)
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but
@@ -537,7 +537,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
         ? notifyCustomerGenderRestoration(c.env)
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
@@ -570,7 +570,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         applied: true,
         item: row ? await mapRow(row, user, c.env) : null,
         payload,
-        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay || mergeCostReplay
           ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
           : {}),
       }, user))

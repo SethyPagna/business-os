@@ -78,6 +78,7 @@ type ServerHistoryItem = {
 export function buildServerReplayRequest(payload: Record<string, unknown> | undefined) {
   const applier = String(payload?.applier || '')
   const generationGuarded = applier.endsWith('.bulk')
+    || (applier === 'product.merge' && payload?.merge_version === 3)
     || applier === 'sale.settlement'
     || applier === 'sale.customer.single'
     || applier === 'product.merge.group'

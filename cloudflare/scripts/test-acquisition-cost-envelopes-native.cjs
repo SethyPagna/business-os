@@ -91,7 +91,7 @@ async function checkEnvelopeRoutes(api) {
   for(const table of ['sales','inventory_movements','returns','stock_row_moves'])native.exec('CREATE TABLE '+table+'(branch_id INTEGER,branch_name TEXT,updated_at TEXT)')
   native.exec("INSERT INTO branches(id,name,is_default,is_active,notes)VALUES(1,'Warehouse',1,1,'after'),(2,'Shop',0,1,NULL)")
   const declarations=undoSource.statements.filter(node=>
-    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayChoicePermissionError','mergeReplayChangesProductImages','replayRefusalCode'].includes(node.name?.text))
+    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayPermissionEffects','readMergeReplayPermissionSnapshot','mergeReplayChoicePermissionFromSnapshot','mergeReplayImagesFromSnapshot','mergeReversalHasSavedImageEffect','mergeChoicePermissionError','intIds','replayRefusalCode'].includes(node.name?.text))
     ||(ts.isClassDeclaration(node)&&node.name?.text==='UndoConflictError')
     ||(ts.isVariableStatement(node)&&node.declarationList.declarations.some(d=>/^(UNDO_|STOCK_SESSION_UNDO_CLOSED_BY_MERGE$|isUndoClosedByMerge$|PRODUCT_MERGE_GROUP_ACTION_KIND$|PRODUCT_MERGE_APPLIER_KINDS$)/.test(d.name.getText(undoSource)))))
   const registry=undoSource.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(d=>d.name.getText(undoSource)==='APPLIERS')

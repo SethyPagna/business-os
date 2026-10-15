@@ -176,6 +176,7 @@ export function hasProductMoneyPolicy(body: unknown): boolean {
 }
 
 export const PRODUCT_SKIP_KEYS = new Set([
+  'cost_review_key',
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
   'client_request_id', 'device_name', 'device_tz', 'client_time',
   PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN,

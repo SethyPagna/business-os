@@ -62,7 +62,7 @@ export type ProductMergeNumericIssue = {
 }
 
 export type ProductMergeEconomics = {
-  merged: Partial<Record<MergeMoneyField, number>>
+  merged: Partial<Record<MergeMoneyField, number | null>>
   distinctCosts: Partial<Record<typeof MERGE_COST_FIELDS[number], number[]>>
   issues: ProductMergeNumericIssue[]
 }
@@ -143,11 +143,12 @@ export type ProductMergeClusterPlanMember = {
 }
 
 export type ProductMergeClusterPlan = {
-  version: 1 | 2
+  version: 1 | 2 | 3
   identityKey: string
   keeperId: number
   memberIds: number[]
   members: ProductMergeClusterPlanMember[]
+  keeperCost?: { usd: number | null; khr: number | null }
 }
 
 const ALL_MERGE_MONEY_FIELDS = [...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS] as const
@@ -168,7 +169,7 @@ export function createProductMergeClusterPlan(
   identityKey: string,
   keeperId: number,
   rows: ReadonlyArray<Record<string, unknown>>,
-  version: 1 | 2 = 2,
+  version: 1 | 2 | 3 = 3,
 ): ProductMergeClusterPlan {
   if (!identityKey || !Number.isSafeInteger(keeperId) || keeperId <= 0) throw new Error('A merge cluster plan needs an identity and keeper.')
   const economics = resolveProductMergeEconomics(rows, version === 1)
@@ -182,13 +183,15 @@ export function createProductMergeClusterPlan(
   }).sort((a, b) => a.id - b.id)
   const memberIds = members.map((member) => member.id)
   if (new Set(memberIds).size !== memberIds.length || !memberIds.includes(keeperId)) throw new Error('A merge cluster plan contains duplicate ids or omits its keeper.')
-  return { version, identityKey, keeperId, memberIds, members }
+  const keeper = members.find(member => member.id === keeperId)!
+  return { version, identityKey, keeperId, memberIds, members,
+    ...(version === 3 ? { keeperCost: { usd: keeper.money.cost_price_usd ?? null, khr: keeper.money.cost_price_khr ?? null } } : {}) }
 }
 
 export function parseProductMergeClusterPlan(value: unknown): ProductMergeClusterPlan | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<ProductMergeClusterPlan>
-  if ((candidate.version !== 1 && candidate.version !== 2) || typeof candidate.identityKey !== 'string' || !candidate.identityKey) return null
+  if ((candidate.version !== 1 && candidate.version !== 2 && candidate.version !== 3) || typeof candidate.identityKey !== 'string' || !candidate.identityKey) return null
   if (!Number.isSafeInteger(candidate.keeperId) || Number(candidate.keeperId) <= 0 || !Array.isArray(candidate.members)) return null
   try {
     const rebuilt = createProductMergeClusterPlan(candidate.identityKey, Number(candidate.keeperId), candidate.members.map((member) => {
@@ -198,13 +201,20 @@ export function parseProductMergeClusterPlan(value: unknown): ProductMergeCluste
     }), candidate.version)
     if (!Array.isArray(candidate.memberIds) || candidate.memberIds.length !== rebuilt.memberIds.length) return null
     if (candidate.memberIds.some((id, index) => Number(id) !== rebuilt.memberIds[index])) return null
+    if (candidate.version === 3 && (!candidate.keeperCost || !Object.hasOwn(candidate.keeperCost, 'usd') || !Object.hasOwn(candidate.keeperCost, 'khr')
+      || candidate.keeperCost.usd !== rebuilt.keeperCost?.usd || candidate.keeperCost.khr !== rebuilt.keeperCost?.khr)) return null
     return rebuilt
   } catch { return null }
 }
 
 export function resolveProductMergeClusterPlanEconomics(plan: ProductMergeClusterPlan): ProductMergeEconomics {
   // A previously approved v1 plan must retain its original ceil4 economics.
-  return resolveProductMergeEconomics(plan.members.map((member) => ({ id: member.id, ...member.money })), plan.version === 1)
+  const economics = resolveProductMergeEconomics(plan.members.map((member) => ({ id: member.id, ...member.money })), plan.version === 1)
+  if (plan.version === 3) {
+    economics.merged.cost_price_usd = plan.keeperCost!.usd
+    economics.merged.cost_price_khr = plan.keeperCost!.khr
+  }
+  return economics
 }
 
 export function productMergePlanSourceMemberMatches(plan: ProductMergeClusterPlan, row: Record<string, unknown>): boolean {
