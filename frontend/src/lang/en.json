@@ -22,6 +22,7 @@
   "incorrect_password": "The current password is not correct. No data was changed.",
   "reset_password_hint": "Enter your current password to confirm. A fresh backup is taken before anything is deleted.",
   "product_has_stock": "Products with stock cannot be removed. Stock can only be added to products that have not been removed.",
+  "loyalty_points_disabled": "Points were not added. Loyalty must be on, and the activity must be eligible. Activity from before the reset or while loyalty was off cannot earn points.",
   "perm_product_cost_view": "View product costs",
   "perm_product_cost_edit": "Edit product costs",
   "product_cost_edit_required": "Cost edit permission is required to receive stock.",
