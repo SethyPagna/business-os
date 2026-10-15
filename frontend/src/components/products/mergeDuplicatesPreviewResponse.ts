@@ -1,3 +1,4 @@
+import { readMergeCostAuthority, type MergeCostAuthority, type MergeCostReview } from '../../utils/mergeCostPreview.ts'
 export type ValidatedMergeDuplicatesPreviewGroup = {
   caseKeys: string[]
   canonicalId: number
@@ -12,8 +13,9 @@ export type ValidatedMergeDuplicatesPreviewGroup = {
   }>
   totalQuantityToMove: number
   branchBreakdown: Array<{ branchId: number; branchName: string | null; quantity: number }>
-  costBefore?: Record<string, number>
-  costAfter?: Record<string, number>
+  costAuthority?: MergeCostAuthority
+  costBefore?: Record<string, number | null>
+  costAfter?: Record<string, number | null>
   costRefusals: Array<{ mergedId: number | null; field: string; code: string; error: string }>
   mergeable: boolean
   mergeBlockers: Array<{ code: string; error: string }>
@@ -27,6 +29,7 @@ export type ValidatedLeadingZeroMergeManifest = {
 }
 
 export type ValidatedMergeDuplicatesPreview = {
+  costReview?: MergeCostReview
   groupCount: number
   duplicateProductCount: number
   mergeableDuplicateProductCount: number
@@ -39,6 +42,7 @@ export type ValidatedMergeDuplicatesPreview = {
 
 const ROOT_KEYS = new Set([
   'success',
+  'costReview',
   'groupCount',
   'duplicateProductCount',
   'mergeableDuplicateProductCount',
@@ -59,6 +63,7 @@ const GROUP_KEYS = new Set([
   'duplicates',
   'totalQuantityToMove',
   'branchBreakdown',
+  'costAuthority',
   'costBefore',
   'costAfter',
   'costRefusals',
@@ -114,10 +119,10 @@ function expectNonemptyString(value: unknown, label: string): string {
   return value
 }
 
-function expectFiniteNumberMap(value: unknown, label: string): Record<string, number> {
+function expectFiniteNumberMap(value: unknown, label: string): Record<string, number | null> {
   const record = expectRecord(value, label)
-  for (const [key, item] of Object.entries(record)) expectFiniteNumber(item, `${label}.${key}`)
-  return record as Record<string, number>
+  for (const [key, item] of Object.entries(record)) if (item !== null) expectFiniteNumber(item, `${label}.${key}`)
+  return record as Record<string, number | null>
 }
 
 function nearlyEqual(left: number, right: number): boolean {
@@ -129,6 +134,18 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
   expectOnlyKeys(root, ROOT_KEYS, 'root')
   if (root.success !== true) invalid('success must be true')
 
+  let costReview: MergeCostReview | undefined
+  if (root.costReview !== undefined) {
+    const raw = expectRecord(root.costReview, 'costReview')
+    expectOnlyKeys(raw, new Set(['version','reviewed_digest','groups']), 'costReview')
+    if (raw.version !== 1 || typeof raw.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(raw.reviewed_digest) || !Array.isArray(raw.groups)) invalid('costReview identity')
+    costReview = { version:1, reviewed_digest:raw.reviewed_digest as string, groups:raw.groups.map((value,index)=>{
+      const g=expectRecord(value,'costReview.groups')
+      expectOnlyKeys(g,new Set(['keeper_id','member_ids','reviewed_digest']),'costReview.groups')
+      if(!Array.isArray(g.member_ids) || typeof g.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(g.reviewed_digest)) invalid('costReview group identity')
+      return {keeper_id:expectPositiveId(g.keeper_id,'costReview keeper'),member_ids:g.member_ids.map(id=>expectPositiveId(id,'costReview member')),reviewed_digest:g.reviewed_digest as string}
+    }) }
+  }
   const groupCount = expectCount(root.groupCount, 'groupCount')
   const duplicateProductCount = expectCount(root.duplicateProductCount, 'duplicateProductCount')
   if (!Array.isArray(root.groups)) invalid('groups must be an array')
@@ -250,6 +267,7 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
     return {
       caseKeys: normalizedCaseKeys,
       canonicalId,
+      ...(group.costAuthority === undefined ? {} : { costAuthority: readMergeCostAuthority(group.costAuthority, canonicalId) }),
       canonicalName,
       canonicalBarcode,
       duplicates,
@@ -328,6 +346,7 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
   }
 
   return {
+    ...(costReview ? { costReview } : {}),
     groupCount,
     duplicateProductCount,
     mergeableDuplicateProductCount,

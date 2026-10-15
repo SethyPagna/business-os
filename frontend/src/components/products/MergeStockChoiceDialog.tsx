@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import type { MergeCostAuthority } from '../../api/productWriteTransport.ts'
+import { useEffect, useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
-import { costAverageRows } from './mergeConfirmationRule'
+import { formatMergeCost } from '../../utils/mergeCostPreview.ts'
 import { knownCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -52,26 +53,6 @@ export type MergePricingChange = {
   changes: Array<{ field: string; from: number; to: number }>
 }
 
-// Name + barcode + cost is the identity rule. Two rows sharing a name but not
-// a barcode or a cost are legitimate SIBLING child rows, and the Conflicts
-// review surfaces those groups on purpose -- so "Keep this" there can be aimed
-// at a row that is not the same product. That is a decision the operator is
-// allowed to make and never one they should make unknowingly, so the dialog
-// names the field that differs and says plainly where the stock would land.
-//
-// The cost half of that rule has its own verdict, because a cost of 0 or NULL
-// is a cost NOBODY HAS RECORDED, not a different one:
-//   'same'    -- both sides agree (both set and equal, or both blank);
-//   'missing' -- exactly one side has a cost, so the rows do not disagree and
-//                the survivor keeps the real one (listed in costFill, and shown
-//                below so the operator is told which value lands on the kept row);
-//   'differs' -- BOTH carry a cost and they differ. Real money out: review only,
-//                never auto-merged, never averaged.
-//
-// costBefore/costAfter/costOutliers arrived with the same change that made
-// the server send this object at all (N15). Until then the merge preview
-// never mentioned cost: a pair with two real costs was averaged by the fold
-// and the operator saw the new figure only afterwards, on the kept row.
 export type MergeIdentityDiff = {
   same: boolean
   differs: Array<{ field: string; keeper: string; discarded: string }>
@@ -79,9 +60,7 @@ export type MergeIdentityDiff = {
   costFill?: Array<{ field: string; value: number }>
   /** The kept row's cost as it stands, per currency field. */
   costBefore?: Record<string, number | null>
-  /** What the fold will write -- the mean of the distinct costs. */
   costAfter?: Record<string, number | null>
-  /** Fields the server refuses to average at all; the merge is blocked. */
   costOutliers?: Array<{ field: string; min: number; max: number }>
 }
 
@@ -120,7 +99,7 @@ function formatPrice(field: string, value: number): string {
 }
 
 export default function MergeStockChoiceDialog({
-  t, keeperName, discardedName, impact, pricing, identity, needsChoice, working, onConfirm, onClose,
+  t, keeperName, discardedName, impact, pricing, identity, needsChoice, working, onConfirm, onClose, loadCost,
 }: {
   t: TranslateFn
   keeperName: string
@@ -139,36 +118,40 @@ export default function MergeStockChoiceDialog({
   working: boolean
   onConfirm: (choice: MergeStockChoice) => void
   onClose: () => void
+  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostAuthority>
 }) {
   // Starts unanswered on purpose. Pre-selecting either option would make the
   // dangerous case (a distracted Enter) pick a disposition nobody chose, which
   // is the exact failure this dialog exists to remove.
   const [choice, setChoice] = useState<MergeStockChoice | null>(null)
-  const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
+  const user = (useApp() as { user: PermissionUser }).user
+  const canViewCosts = canViewAcquisitionCosts(user)
   const T = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
 
+  const [costState, setCostState] = useState<{ value: MergeCostAuthority; choice: MergeStockChoice; user: PermissionUser } | null>(null)
+  const [pageActive, setPageActive] = useState(typeof document === 'undefined' || !document.hidden)
+  const authority = pageActive && costState?.choice === (choice ?? 'merge') && costState.user === user ? costState.value : null
+  useEffect(() => {
+    const update = () => setPageActive(!document.hidden)
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
+  const [costLoading, setCostLoading] = useState(false)
+  useEffect(() => {
+    setCostState(null)
+    if (!pageActive || !canViewCosts || (needsChoice && !choice) || !loadCost) { setCostLoading(false); return }
+    const controller = new AbortController()
+    setCostLoading(true)
+    loadCost(choice ?? 'merge', controller.signal).then(value => { if (!controller.signal.aborted) setCostState({value, choice: choice ?? 'merge', user}) }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setCostLoading(false) })
+    return () => controller.abort()
+  }, [choice, needsChoice, loadCost, canViewCosts, user, pageActive])
   const pcs = T('pcs', 'pcs')
   const lotWord = T('batches', 'received dates')
   const priceChanges = (pricing?.changes ?? []).filter(change => canViewCosts || !/cost|purchase/i.test(change.field))
   const identityDiffers = Boolean(identity && !identity.same && identity.differs.length)
-  // The kept row has no cost of its own and takes the removed row's. Not a
-  // difference and not a warning -- but it changes what the kept product cost,
-  // so it is said out loud rather than done quietly.
-  const costFill = canViewCosts ? identity?.costFill ?? [] : []
-  // BOTH rows carry a cost and the two differ, so the merge stores the mean
-  // of the distinct costs (owner ruling, 2026-09-04). The kept row ends up
-  // costing a figure neither row recorded, which is exactly the kind of
-  // change that must be seen before it happens, not found afterwards.
-  //
-  // Computed by the SAME function the flow's fast-path gate consults
-  // (mergeConfirmationRule.costAverageRows). While these were two separate
-  // expressions the gate did not know this section existed and merged straight
-  // past it, so the panel below was unreachable on the one pair it exists for.
-  const costAverages = costAverageRows(identity)
-
   const options: Array<{ value: MergeStockChoice; label: string; hint: string; tone: string }> = [
     {
       value: 'merge',
@@ -226,7 +209,7 @@ export default function MergeStockChoiceDialog({
       confirmLabel={choice === 'write_off' ? T('remove', 'Remove') : T('merge', 'Merge')}
       danger={choice === 'write_off' || identityDiffers}
       working={working}
-      confirmDisabled={needsChoice && !choice}
+      confirmDisabled={!pageActive || (needsChoice && !choice) || (canViewCosts && !authority)}
       onConfirm={() => onConfirm(needsChoice ? (choice as MergeStockChoice) : 'merge')}
       onClose={onClose}
     >
@@ -260,66 +243,10 @@ export default function MergeStockChoiceDialog({
         </div>
       ) : null}
 
-      {canViewCosts && costAverages.length ? (
-        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/40 dark:bg-sky-950/30">
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
-            <span>{T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}</span>
-            <InfoHint
-              label={T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}
-              text={T(
-                'merge_cost_average_hint',
-                'Both rows record a cost and they differ, so the kept product takes the average of the different costs. Undo restores the old cost exactly.',
-              )}
-            />
-          </div>
-          <dl className="space-y-0.5 text-xs">
-            {costAverages.map((row) => {
-              const [labelKey, labelFallback] = IDENTITY_FIELD_LABEL[row.field] || [row.field, row.field]
-              return (
-                <div key={row.field} className="flex items-center justify-between gap-3">
-                  <dt className="text-sky-700 dark:text-sky-400">{T(labelKey, labelFallback)}</dt>
-                  <dd className="font-medium text-sky-900 dark:text-sky-200">
-                    <span className="line-through opacity-60">{row.from === null ? T('cost_unknown', 'Unknown cost') : formatPrice(row.field, row.from)}</span>
-                    {' \u2192 '}
-                    <span>{formatPrice(row.field, row.to)}</span>
-                  </dd>
-                </div>
-              )
-            })}
-          </dl>
-        </div>
-      ) : null}
-
-      {costFill.length ? (
-        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/40 dark:bg-sky-950/30">
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
-            <span>{T('merge_cost_fill_title', 'The kept product takes this cost')}</span>
-            <InfoHint
-              label={T('merge_cost_fill_title', 'The kept product takes this cost')}
-              text={T(
-                'merge_cost_fill_hint',
-                'The kept product has no cost recorded, so the cost from the row being removed moves onto it. A cost of 0 means nobody entered one yet — it is not a different cost. Undo puts it back exactly.',
-              )}
-            />
-          </div>
-          <dl className="space-y-0.5 text-xs">
-            {costFill.map((fill) => {
-              const [labelKey, labelFallback] = IDENTITY_FIELD_LABEL[fill.field] || [fill.field, fill.field]
-              const previousCost = knownCost(identity?.costBefore?.[fill.field])
-              return (
-                <div key={fill.field} className="flex items-center justify-between gap-3">
-                  <dt className="text-sky-700 dark:text-sky-400">{T(labelKey, labelFallback)}</dt>
-                  <dd className="font-medium text-sky-900 dark:text-sky-200">
-                    <span className="line-through opacity-60">{previousCost === null ? T('cost_unknown', 'Unknown cost') : formatPrice(fill.field, previousCost)}</span>
-                    {' → '}
-                    <span>{formatPrice(fill.field, fill.value)}</span>
-                  </dd>
-                </div>
-              )
-            })}
-          </dl>
-        </div>
-      ) : null}
+      {canViewCosts ? <div className="flex flex-wrap items-center gap-2 text-xs" role="status">
+        <span>{T('cost', 'Cost')}</span>
+        {authority ? <><strong>{authority.cost_price_usd === null ? '—' : formatMergeCost(authority.cost_price_usd, 'usd')}</strong>{authority.cost_price_khr !== null ? <span>{formatMergeCost(authority.cost_price_khr, 'khr')}</span> : null}{authority.needsReview ? <span>{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}</> : <span>{costLoading ? T('merge_cost_preview_calculating', 'Calculating cost…') : T('merge_cost_preview_unavailable', 'Cost preview unavailable')}</span>}
+      </div> : null}
 
       <div className={needsChoice ? 'space-y-1.5' : 'hidden'}>
         {options.map((option) => (

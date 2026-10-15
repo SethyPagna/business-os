@@ -2,8 +2,7 @@ import { useCallback, useState } from 'react'
 import MergeStockChoiceDialog, {
   type MergeIdentityDiff, type MergePricingChange, type MergeStockChoice, type MergeStockImpact,
 } from './MergeStockChoiceDialog'
-import { mergeNeedsConfirmation } from './mergeConfirmationRule'
-import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { getMergePreview, getMergeCostPreview, type MergeCostAuthority, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
 
 // The ONE merge-a-duplicate-pair flow, shared by every surface that resolves a
 // twin: the Products → Conflicts review, the exact-duplicate "Keep this" action
@@ -37,6 +36,7 @@ type PendingAsk = {
   pricing: MergePricingChange | null
   identity: MergeIdentityDiff | null
   needsChoice: boolean
+  loadCost?: (choice: MergeStockChoice, signal: AbortSignal) => Promise<MergeCostAuthority>
   resolve: (choice: MergeStockChoice | null) => void
 }
 
@@ -82,18 +82,6 @@ function localizeRefusal(t: TranslateFn, error: unknown): unknown {
   return error
 }
 
-// The 400 refusal carries the same identity read the preview would have.
-function errorIdentity(error: unknown): MergeIdentityDiff | null {
-  const raw = (error as { identity?: unknown } | null)?.identity as MergeIdentityDiff | undefined
-  return raw && Array.isArray(raw.differs) ? raw : null
-}
-
-function errorStockImpact(error: unknown, productId: number): MergeStockImpact {
-  const raw = (error as { stockImpact?: unknown } | null)?.stockImpact as MergeStockImpact | undefined
-  if (!raw || !Array.isArray(raw.branches)) return EMPTY_IMPACT(productId)
-  return raw
-}
-
 export function useMergeStockChoice(t: TranslateFn) {
   const [pending, setPending] = useState<PendingAsk | null>(null)
   const [working, setWorking] = useState(false)
@@ -112,14 +100,17 @@ export function useMergeStockChoice(t: TranslateFn) {
     let impact: MergeStockImpact | null = null
     let pricing: MergePricingChange | null = null
     let identity: MergeIdentityDiff | null = null
+    let reviewedDigest = ''
     let needsChoice: boolean | null = null
     try {
       const preview = await getMergePreview(keeper.id, other.id) as {
+        reviewedDigest?: string
         stockImpact?: MergeStockImpact
         pricing?: MergePricingChange
         identity?: MergeIdentityDiff
         needsStockChoice?: boolean
       }
+      reviewedDigest = String(preview?.reviewedDigest ?? '')
       impact = preview?.stockImpact ?? EMPTY_IMPACT(other.id)
       pricing = preview?.pricing ?? null
       identity = preview?.identity ?? null
@@ -131,27 +122,12 @@ export function useMergeStockChoice(t: TranslateFn) {
     }
 
     if (needsChoice !== null) {
-      // ONE rule, shared with the dialog that renders the consequences
-      // (mergeConfirmationRule.ts). It lived inline here until 2026-09-06 and
-      // had drifted from the panel it opens: it never looked at the cost the
-      // merge AVERAGES, so the canonical leading-zero pair -- two recorded
-      // costs, similar enough to average, no stock, equal selling prices --
-      // merged with no dialog at all and the cost-average section could never
-      // be reached.
-      if (!mergeNeedsConfirmation({ needsChoice, pricing, identity })) {
-        try {
-          await mergePossiblySameProducts(keeper.id, other.id)
-        } catch (error) {
-          throw localizeRefusal(t, error)
-        }
-        return 'merged'
-      }
       setWorking(false)
-      const choice = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice })
+      const choice = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice, loadCost: (stock, signal) => getMergeCostPreview({ keepId: keeper.id, reviewedDigest, steps: [{ mergeId: other.id, stock }] }, signal) })
       if (!choice) return 'cancelled'
       setWorking(true)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id, needsChoice ? choice : undefined)
+        await mergePossiblySameProducts(keeper.id, other.id, needsChoice ? choice : undefined, undefined, { version: 1, reviewed_digest: reviewedDigest })
         return 'merged'
       } catch (error) {
         throw localizeRefusal(t, error)
@@ -161,30 +137,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       }
     }
 
-    // No preview: try, and let the server's refusal tell us what to ask.
-    try {
-      await mergePossiblySameProducts(keeper.id, other.id)
-      return 'merged'
-    } catch (error) {
-      if (errorCode(error) !== 'stock_choice_required') throw localizeRefusal(t, error)
-      const choice = await ask({
-        keeperName,
-        discardedName,
-        impact: errorStockImpact(error, other.id),
-        pricing: null,
-        identity: errorIdentity(error),
-        needsChoice: true,
-      })
-      if (!choice) return 'cancelled'
-      setWorking(true)
-      try {
-        await mergePossiblySameProducts(keeper.id, other.id, choice)
-        return 'merged'
-      } finally {
-        setWorking(false)
-        setPending(null)
-      }
-    }
+    throw new Error(t('merge_cost_preview_unavailable') || 'Cost preview unavailable')
   }, [ask, t])
 
   const mergeStockChoiceDialog = pending ? (
@@ -196,6 +149,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       pricing={pending.pricing}
       identity={pending.identity}
       needsChoice={pending.needsChoice}
+      loadCost={pending.loadCost}
       working={working}
       onConfirm={(choice) => pending.resolve(choice)}
       onClose={() => { if (!working) { setPending(null); pending.resolve(null) } }}

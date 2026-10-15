@@ -7541,5 +7541,8 @@
   "stock_cost_estimate": "Cost estimate",
   "stock_cost_estimate_advisory": "Estimate from current received lots. The saved cost may change before completion.",
   "stock_cost_estimate_calculating": "Calculating…",
-  "stock_cost_estimate_unavailable": "Estimate unavailable"
+  "stock_cost_estimate_unavailable": "Estimate unavailable",
+  "merge_cost_needs_review": "Cost needs review",
+  "merge_cost_preview_unavailable": "Cost preview unavailable",
+  "merge_cost_preview_calculating": "Calculating cost…"
 }

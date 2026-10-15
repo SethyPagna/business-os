@@ -1,5 +1,6 @@
+import { formatMergeCost } from '../../utils/mergeCostPreview.ts'
 import type { ReactNode } from 'react'
-import { getMergePreview, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
+import { getMergePreview, getMergeCostPreview, type MergeCostAuthority, type MergeCostPreviewPlan, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { isRetryableFailure } from '../../utils/retryableFailure.ts'
 import { roundMoney4 } from '../../utils/moneyPrecision.ts'
@@ -68,6 +69,9 @@ export type ProductResolvePreview = {
 }
 
 export type ProductResolveData = {
+  costAuthority?: MergeCostAuthority | null
+  costPlan?: string
+
   reviewedDigest: string
   /** Every product of the group in id order: one grid column each. */
   ids: number[]
@@ -80,15 +84,11 @@ export type ProductResolveData = {
   choicesSupported: boolean
 }
 
-export type ProductResolveCost = { cost_price_usd: number | null; cost_price_khr?: number | null }
-
 export type ProductResolveToken = {
   requestId: string
   reviewedDigest: string
   keepId: number
   steps: Array<{ mergeId: number; name: string; stock?: 'merge' | 'write_off' }>
-  /** Sent only by a user with the cost edit permission. */
-  cost: ProductResolveCost | null
   /** The Final column, sent on every step and every retry of the request. */
   choices: ProductResolveChoices | null
 }
@@ -101,6 +101,8 @@ type MergeKeep = {
 }
 
 export type ProductResolveApi = {
+  costPreview?: (plan: MergeCostPreviewPlan, signal?: AbortSignal) => Promise<MergeCostAuthority>
+
   preview: (keepId: number, mergeId: number, options: { keep: true; groupIds: number[]; signal?: AbortSignal }) => Promise<unknown>
   merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: MergeKeep) => Promise<unknown>
 }
@@ -127,6 +129,7 @@ export type ProductResolveOptions = {
 }
 
 const DEFAULT_API: ProductResolveApi = {
+  costPreview: getMergeCostPreview,
   preview: (keepId, mergeId, options) => getMergePreview(keepId, mergeId, options),
   merge: (keepId, mergeId, stock, keep) => mergePossiblySameProducts(keepId, mergeId, stock, keep),
 }
@@ -386,35 +389,12 @@ function stockAnswer(ctx: Context, id: number): StockAnswer | undefined {
   return choice && 'option' in choice && choice.option === 'write_off' ? 'write_off' : 'merge'
 }
 
-type CostPick = { kind: 'rule' } | { kind: 'source'; id: number } | { kind: 'custom'; value: number }
-
-function costPick(ctx: Context, canEdit: boolean): CostPick {
-  const choice = ctx.draft.selection.cost
-  if (canEdit && choice && 'source' in choice && ctx.included.includes(Number(choice.source))) return { kind: 'source', id: Number(choice.source) }
-  if (canEdit && choice && 'custom' in choice) {
-    const value = Number(choice.custom)
-    if (choice.custom.trim() !== '' && Number.isFinite(value) && value >= 0) return { kind: 'custom', value }
-  }
-  return { kind: 'rule' }
+function costPlan(ctx: Context): MergeCostPreviewPlan {
+  return { keepId: ctx.keeperId!, reviewedDigest: ctx.data.reviewedDigest, steps: ctx.merged.map(id => ({ mergeId: id, stock: stockAnswer(ctx, id) ?? 'merge' })) }
 }
 
-function ruleCost(ctx: Context): ProductResolveCost {
-  const fromPreview = ctx.merged.map((id) => ctx.data.previews.get(id)?.groupCost).find(Boolean)
-  const keeper = ctx.keeperId === null ? undefined : recordOf(ctx, ctx.keeperId)
-  return {
-    cost_price_usd: knownCost(fromPreview ? fromPreview.cost_price_usd : keeper?.cost_price_usd),
-    cost_price_khr: knownCost(fromPreview ? fromPreview.cost_price_khr : keeper?.cost_price_khr),
-  }
-}
-
-function chosenCost(ctx: Context, canEdit: boolean): ProductResolveCost {
-  const pick = costPick(ctx, canEdit)
-  if (pick.kind === 'source') {
-    const product = recordOf(ctx, pick.id)
-    return { cost_price_usd: knownCost(product?.cost_price_usd), cost_price_khr: knownCost(product?.cost_price_khr) }
-  }
-  if (pick.kind === 'custom') return { cost_price_usd: pick.value }
-  return ruleCost(ctx)
+function currentAuthority(ctx: Context): MergeCostAuthority | null {
+  return ctx.data.costPlan === JSON.stringify(costPlan(ctx)) ? ctx.data.costAuthority ?? null : null
 }
 
 type BranchLine = { branchId: number; name: string; before: number; after: number }
@@ -589,24 +569,10 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
   }
 
   if (canViewCosts) {
-    const pick = costPick(ctx, canEditCosts)
-    const cost = chosenCost(ctx, canEditCosts)
-    const costRow = cells((id) => formatCostOrUnknown(product(id)?.cost_price_usd, formatProductMoney, t))
-    const finalText = formatCostOrUnknown(cost.cost_price_usd, formatProductMoney, t)
-    const ruleOption: ResolveOption = { id: 'rule', label: tr(t, 'resolve_cost_rule', 'Average of the costs') }
-    rows.push({
-      key: 'cost',
-      label: tr(t, 'cost', 'Cost'),
-      kind: 'choice',
-      cells: costRow,
-      options: [ruleOption],
-      final: { text: finalText },
-      choice: pick.kind === 'rule' ? { option: 'rule' } : pick.kind === 'source' ? { source: String(pick.id) } : { custom: String(pick.value) },
-      identical: identical(costRow, finalText),
-      ...(canEditCosts
-        ? { custom: { kind: 'money' as const, validate: (value: string) => (value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? null : tr(t, 'resolve_cost_invalid', 'Enter a cost of zero or more.')) } }
-        : { locked: tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.') }),
-    })
+    const authority = currentAuthority(ctx)
+    const amount = (value: unknown) => formatMergeCost(knownCost(value), 'usd')
+    const finalText = authority ? [amount(authority.cost_price_usd), authority.cost_price_khr === null ? '' : formatMergeCost(authority.cost_price_khr, 'khr'), authority.needsReview ? tr(t, 'merge_cost_needs_review', 'Cost needs review') : ''].filter(Boolean).join(' · ') : tr(t, 'merge_cost_preview_unavailable', 'Cost preview unavailable')
+    rows.push({ key: 'cost', label: tr(t, 'cost', 'Cost'), kind: 'computed', cells: cells(id => amount(product(id)?.cost_price_usd)), final: { text: finalText }, identical: false })
   }
 
   const moneyRow = (rowKey: 'selling' | 'wholesale', field: MoneyField, label: string) => {
@@ -699,7 +665,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
     async load(signal, edits) {
       const included = includedIds(ids, edits)
       const keeperId = productSurvivor(included) ?? ids[0]
-      const empty = { ids, products: new Map(listedProducts), keeperId, previews: new Map<number, ProductResolvePreview>(), reviewedDigest: '', choicesSupported: false }
+      const empty = { costAuthority: null, costPlan: '', ids, products: new Map(listedProducts), keeperId, previews: new Map<number, ProductResolvePreview>(), reviewedDigest: '', choicesSupported: false }
       if (included.length > MAX_GROUP) return empty
       const others = included.filter((id) => id !== keeperId)
       const answers = await Promise.all(others.map((id) => api.preview(keeperId, id, { keep: true, groupIds: included, signal })))
@@ -711,7 +677,13 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       const products = new Map(listedProducts)
       for (const record of first?.groupProducts ?? []) products.set(Number(record.id), record)
       const choicesSupported = previews.size > 0 && [...previews.values()].every((preview) => preview.choicesSupported)
-      return { ids, products, keeperId, previews, reviewedDigest: first?.reviewedDigest ?? '', choicesSupported }
+      const data: ProductResolveData = { ids, products, keeperId, previews, reviewedDigest: first?.reviewedDigest ?? '', choicesSupported }
+      if (options.canViewCosts) {
+        const plan = costPlan(contextOf(data, edits))
+        data.costPlan = JSON.stringify(plan)
+        try { data.costAuthority = api.costPreview ? await api.costPreview(plan, signal) : null } catch (error) { if (signal.aborted) throw error; data.costAuthority = null }
+      }
+      return data
     },
 
     initialSelection() {
@@ -741,13 +713,14 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         const message = blockedMessage(ctx, id, t)
         if (message && !out.includes(message)) out.push(message)
       }
+      if (options.canViewCosts && ctx.included.length <= MAX_GROUP && ctx.included.length > 1 && !out.length && !currentAuthority(ctx)) out.push(tr(t, 'merge_cost_preview_unavailable', 'Cost preview unavailable'))
       return out
     },
 
     // The previews are read against the survivor and the group: only taking
     // a product in or out reads them again, never a field pick.
     reloadWhen(before, after) {
-      return includedIds(ids, before).join(',') !== includedIds(ids, after).join(',')
+      return includedIds(ids, before).join(',') !== includedIds(ids, after).join(',') || ids.some(id => JSON.stringify(before.selection[productCellKey('stock', String(id))]) !== JSON.stringify(after.selection[productCellKey('stock', String(id))]))
     },
 
     async review(data, draft) {
@@ -757,9 +730,9 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       const name = (id: number) => productLabel(data.products.get(id), id)
       const steps = ctx.merged.map((id) => {
         const stock = stockAnswer(ctx, id)
-        return { mergeId: id, name: name(id), ...(stock ? { stock } : {}) }
+        return { mergeId: id, name: name(id), stock: stock ?? 'merge' }
       })
-      const cost = options.canViewCosts && options.canEditCosts && costPick(ctx, true).kind !== 'rule' ? chosenCost(ctx, true) : null
+      if (options.canViewCosts && !currentAuthority(ctx)) throw new Error(tr(t, 'merge_cost_preview_unavailable', 'Cost preview unavailable'))
 
       const changes: ResolveChange[] = []
       for (const row of rows) {
@@ -798,7 +771,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         message: fill(tr(t, 'resolve_product_confirm', 'Merge {products} into {name}.'), { products: ctx.merged.map(name).join(', '), name: productLabel({ name: finalName }, keepId) }),
         changes,
         warnings,
-        token: { keepId, steps, cost, choices, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
+        token: { keepId, steps, choices, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
         undoable: true,
       }
     },
@@ -810,7 +783,6 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       for (let index = state.index; index < total; index += 1) {
         const step = token.steps[index]
         const keep: MergeKeep = {
-          ...(token.cost ? { cost_price_usd: token.cost.cost_price_usd, ...(token.cost.cost_price_khr !== undefined ? { cost_price_khr: token.cost.cost_price_khr } : {}) } : {}),
           resolve: { requestId: token.requestId, reviewedDigest: token.reviewedDigest, steps: token.steps.map(({ mergeId, stock }) => ({ mergeId, ...(stock ? { stock } : {}) })) },
           ...(token.choices ? { choices: token.choices } : {}),
         }

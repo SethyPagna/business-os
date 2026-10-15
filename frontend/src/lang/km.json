@@ -7541,5 +7541,8 @@
   "stock_cost_estimate": "ការប៉ាន់ស្មានថ្លៃដើម",
   "stock_cost_estimate_advisory": "ប៉ាន់ស្មានតាមកំណត់ត្រាទទួលបច្ចុប្បន្ន។ ថ្លៃដើមដែលរក្សាទុកអាចផ្លាស់ប្ដូរមុនពេលបញ្ចប់។",
   "stock_cost_estimate_calculating": "កំពុងគណនា…",
-  "stock_cost_estimate_unavailable": "មិនអាចប៉ាន់ស្មានបាន"
+  "stock_cost_estimate_unavailable": "មិនអាចប៉ាន់ស្មានបាន",
+  "merge_cost_needs_review": "តម្លៃដើមត្រូវការពិនិត្យ",
+  "merge_cost_preview_unavailable": "មិនអាចមើលតម្លៃដើមជាមុនបាន",
+  "merge_cost_preview_calculating": "កំពុងគណនាតម្លៃដើម…"
 }

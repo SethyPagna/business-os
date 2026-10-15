@@ -45,32 +45,18 @@ for (const [user, expected] of [
   const html = renderToStaticMarkup(React.createElement(Dialog, props))
   assert.equal(html.includes('913'), expected, 'real merge dialog respects independent cost view')
   assert.equal(html.includes('927'), expected, 'identity comparison cannot leak a hidden cost')
-  assert.equal(html.includes('7,654,321'), expected, 'filled-in cost is hidden too')
+  assert.equal(html.includes('7,654,321'), false, 'legacy fill estimate is never presented as new authority')
   assert.ok(html.includes('$50'), 'selling-price changes stay visible')
 }
 
-for (const language of ['en', 'km']) {
-  const labels = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
-  context.__costTestContext = { user: { permissions: { product_cost_view: true } } }
-  const renderFill = (before: number | null) => renderToStaticMarkup(React.createElement(Dialog, {
-    ...props, t: (key: string) => labels[key] || key,
-    identity: { same: true, differs: [], costVerdict: 'missing', costBefore: { cost_price_usd: before }, costAfter: { cost_price_usd: 5 }, costFill: [{ field: 'cost_price_usd', value: 5 }] },
-  }))
-  assert.ok(renderFill(null).includes(`line-through opacity-60">${labels.cost_unknown}</span>`), `${language}: real cost-fill component shows unknown keeper`)
-  assert.ok(renderFill(0).includes('line-through opacity-60">$0</span>'), `${language}: recorded zero remains numeric`)
-  for (const field of ['cost_price_usd', 'cost_price_khr']) {
-    const renderCost = (value: number, average: boolean) => renderToStaticMarkup(React.createElement(Dialog, {
-      ...props, t: (key: string) => labels[key] || key,
-      identity: { same: true, differs: [], costVerdict: average ? 'differs' : 'missing', costBefore: { [field]: average ? 5.1234 : null }, costAfter: { [field]: value }, costFill: average ? [] : [{ field, value }] },
-      pricing: { before: {}, after: {}, changes: [{ field: 'selling_price_usd', from: 12.34, to: 13.45 }, { field: 'wholesale_price_usd', from: 8.76, to: 9.87 }] },
-    }))
-    for (const value of [5.1234, 5.1244]) {
-      assert.ok(renderCost(value, false).includes(String(value)), `${language} ${field}: distinct cost source ${value}`)
-    }
-    const average = renderCost(5.1244, true)
-    assert.ok(average.includes('5.1234') && average.includes('5.1244'), `${language} ${field}: both average endpoints retain precision`)
-    for (const price of ['$12.34', '$13.45', '$8.76', '$9.87']) assert.ok(average.includes(price), `ordinary price remains ${price}`)
-  }
+for (const language of ['en','km']) {
+ const labels=JSON.parse(readFileSync(new URL('../src/lang/'+language+'.json',import.meta.url),'utf8'))
+ context.__costTestContext={user:{permissions:{product_cost_view:true}}}
+ const html=renderToStaticMarkup(React.createElement(Dialog,{...props,t:(key:string)=>labels[key]||key}))
+ assert.ok(html.includes(labels.merge_cost_preview_unavailable))
+ assert.ok(!html.includes(labels.merge_cost_average_title))
+ assert.ok(!html.includes(labels.merge_cost_fill_title))
+ assert.ok(html.includes('$50'),'selling change stays cents')
 }
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -84,8 +70,9 @@ assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mou
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
 const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')
 assert.ok(!duplicates.includes('updateProduct(') && !duplicates.includes('cost_price_usd:'), 'the conflicts tab writes no cost itself: the grid is the only path')
-assert.match(resolveAdapter, /\.\.\.\(canEditCosts\s*\? \{ custom:[^]*?: \{ locked:/, 'the grid locks the cost row without the cost edit permission')
-assert.ok(resolveAdapter.includes('options.canViewCosts && options.canEditCosts'), 'a cost is only sent by a user who can view and edit it')
+assert.ok(resolveAdapter.includes("kind: 'computed'"))
+assert.ok(!resolveAdapter.includes('costPick('))
+assert.ok(!resolveAdapter.includes('token.cost'))
 const review = read('../src/components/products/import/ProductServerImportReviewScreen.tsx')
 assert.match(review, /if \(!hasPermission\('product_cost_view'\)\) return/)
 assert.match(review, /const saveDecision[^]*?if \(!canEditCosts\) return/)

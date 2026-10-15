@@ -1,3 +1,5 @@
+import { readMergeCostAuthority, type MergeCostAuthority, type MergeCostPreviewPlan, type MergeCostReview } from '../utils/mergeCostPreview.ts'
+export type { MergeCostAuthority, MergeCostPreviewPlan, MergeCostReview } from '../utils/mergeCostPreview.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -40,6 +42,7 @@ export type LeadingZeroMergeManifest = {
 }
 
 export type MergeDuplicateProductsOptions = {
+  costReview?: MergeCostReview
   requestId?: string
   signal?: AbortSignal
   manifest?: LeadingZeroMergeManifest
@@ -378,6 +381,7 @@ export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = 
   const body = ensureClientRequestId({
     ...(options.manifest || getDevicePayload()),
     client_request_id: options.requestId,
+    ...(options.costReview ? { cost_review: options.costReview } : {}),
   }, 'product-merge')
   return route(
     'products:mergeDuplicates',
@@ -428,6 +432,14 @@ export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' |
 // the system listed together is never blocked for a name or barcode
 // difference, and the answer adds the kept product's stock per branch and,
 // with `groupIds`, the cost the merge rule gives the whole group.
+export async function getMergeCostPreview(plan: MergeCostPreviewPlan, signal?: AbortSignal): Promise<MergeCostAuthority> {
+  const scope = captureActorReadScope('products')
+  const raw = await apiFetch('POST', '/api/products/resolve/cost-preview', plan, undefined, signal ? { signal } : undefined) as Record<string, unknown>
+  assertActorReadScope(scope)
+  if (raw.success !== true || raw.keepId !== plan.keepId || raw.reviewedDigest !== plan.reviewedDigest || (!Array.isArray(raw.steps) || raw.steps.length !== plan.steps.length || raw.steps.some((step, index) => step?.mergeId !== plan.steps[index].mergeId || step?.stock !== plan.steps[index].stock)) || signal?.aborted) throw Object.assign(new Error('Cost preview changed. Reload and review again.'), { code: 'merge_state_conflict' })
+  return readMergeCostAuthority(raw.costAuthority, plan.keepId)
+}
+
 export function getMergePreview(
   keepId: number | string,
   mergeId: number | string,
@@ -467,8 +479,10 @@ export function mergePossiblySameProducts(
     resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
     choices?: ProductResolveChoices
   },
+  costReview?: { version: 1; reviewed_digest: string },
 ): Promise<unknown> {
   const body: Record<string, unknown> = stock ? { keepId, mergeId, stock } : { keepId, mergeId }
+  if (costReview) body.cost_review = costReview
   if (keep) {
     body.keep = true
     if (keep.resolve) body.resolve = keep.resolve

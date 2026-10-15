@@ -15,6 +15,7 @@ function open(pack: Record<string, string>, canEditProducts: boolean, refusal?: 
   const options: any = {
     cluster, t: (key: string) => pack[key] ?? key, canEditProducts, ...(canOverridePrices === undefined ? {} : { canOverridePrices }), canViewCosts: true, canEditCosts: false, canMerge: () => true,
     api: {
+      costPreview: async (plan: {keepId:number}) => ({ version: 1, keeperId: plan.keepId, cost_price_usd: 2, cost_price_khr: null, needsReview: false, source: 'received_lot' }),
       preview: async () => ({ choicesSupported: true, groupProducts: cluster.products, reviewedDigest: 'a'.repeat(64), stockImpact: { totalQuantity: 0, branches: [] }, keeperStock: { totalQuantity: 0, branches: [] } }),
       merge: async () => { writes += 1; if (writes === 2 && refusal) throw Object.assign(new Error('Refused'), { code: refusal, status: refusal === 'access_denied' ? 403 : 409 }); return { keeper: cluster.products[0] } },
     },

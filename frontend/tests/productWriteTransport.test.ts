@@ -142,3 +142,24 @@ try {
   }
 } finally { globalThis.fetch = originalFetch; setSyncServerUrl('') }
 console.log('PASS chosen-cost JSON preserves NULL, zero and absent currencies')
+
+const {getMergeCostPreview}=await import('../src/api/productWriteTransport.ts')
+const plan={keepId:10,reviewedDigest:'a'.repeat(64),steps:[{mergeId:11,stock:'merge' as const}]}
+const authority={version:1,keeperId:10,cost_price_usd:7,cost_price_khr:null,needsReview:true,source:'manual'}
+setSyncServerUrl('http://merge-authority-fixture')
+try {
+ for(const cost of [null,0,7]) {
+  globalThis.fetch=(async(_url,init)=>{
+   assert.deepEqual(JSON.parse(String(init?.body)),plan)
+   return new Response(JSON.stringify({success:true,...plan,costAuthority:{...authority,cost_price_usd:cost}}),{status:200,headers:{'Content-Type':'application/json'}})
+  }) as typeof fetch
+  assert.equal((await getMergeCostPreview(plan)).cost_price_usd,cost)
+ }
+ for(const patch of [{costAuthority:undefined},{keepId:12},{reviewedDigest:'b'.repeat(64)},{steps:[{mergeId:11,stock:'write_off'}]},{costAuthority:{...authority,version:2}}]) {
+  globalThis.fetch=(async()=>new Response(JSON.stringify({success:true,...plan,costAuthority:authority,...patch}),{status:200,headers:{'Content-Type':'application/json'}})) as typeof fetch
+  await assert.rejects(getMergeCostPreview(plan))
+ }
+ const controller=new AbortController();controller.abort()
+ await assert.rejects(getMergeCostPreview(plan,controller.signal))
+} finally {globalThis.fetch=originalFetch;setSyncServerUrl('')}
+console.log('PASS authoritative cost transport preserves NULL/zero/manual7 and rejects missing/stale/invalid/aborted responses')
