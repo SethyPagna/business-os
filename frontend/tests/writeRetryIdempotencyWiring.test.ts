@@ -288,7 +288,7 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
         }
       },
     },
-    app: adminApp({ page: 'returns' }),
+    app: adminApp({ page: 'returns', user: { ...operator, permissions: { product_cost_view: true, product_cost_edit: true } } }),
     doubles: {
       'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Store', is_active: true, is_default: true }] },
       'api/contactReadTransport.ts': { getSuppliers: async () => [{ id: 4, name: 'Glow Co' }] },

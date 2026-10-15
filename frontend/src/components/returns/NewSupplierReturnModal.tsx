@@ -1,3 +1,6 @@
+import CostValue from '../shared/CostValue.tsx'
+import { knownCost, costTotal } from '../../utils/costDisplay.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -63,18 +66,18 @@ interface InventoryProductRow {
   category?: string
   brand?: string
   display_quantity?: number | string
-  purchase_price_usd?: number | string
-  cost_price_usd?: number | string
-  purchase_price_khr?: number | string
-  cost_price_khr?: number | string
+  purchase_price_usd?: number | string | null
+  cost_price_usd?: number | string | null
+  purchase_price_khr?: number | string | null
+  cost_price_khr?: number | string | null
 }
 
 interface SupplierReturnItem {
   product_id: number | string
   product_name: string | null
   quantity: number
-  cost_price_usd: number
-  cost_price_khr: number
+  cost_price_usd: number | null
+  cost_price_khr: number | null
 }
 
 interface SupplierReturnPayload extends Record<string, unknown> {
@@ -86,8 +89,8 @@ interface SupplierReturnPayload extends Record<string, unknown> {
   reason: string
   notes: string | null
   settlement: SettlementMethod
-  supplier_compensation_usd: number
-  supplier_compensation_khr: number
+  supplier_compensation_usd: number | null
+  supplier_compensation_khr: number | null
   items: SupplierReturnItem[]
 }
 
@@ -99,14 +102,21 @@ interface NewSupplierReturnModalProps {
   fmtKHR: MoneyFormatter
 }
 
-function isSupplierReturnItem(item: SupplierReturnItem | null): item is SupplierReturnItem {
-  return item != null
+export function supplierReturnCost(product: InventoryProductRow, currency: 'usd' | 'khr'): number | null {
+  const canonical = `cost_price_${currency}` as 'cost_price_usd' | 'cost_price_khr'
+  const legacy = `purchase_price_${currency}` as 'purchase_price_usd' | 'purchase_price_khr'
+  return knownCost(Object.hasOwn(product, canonical) ? product[canonical] : product[legacy])
 }
 
-const useApp = useAppHook as () => {
-  user?: AppUser | null
-  t?: (key: string) => string
+export function selectSupplierReturnItems(products: InventoryProductRow[], quantities: Record<string, number | string>): SupplierReturnItem[] {
+  return products.flatMap(product => {
+    const quantity = Math.max(0, Math.min(Number(quantities[String(product.id)] || 0), Number(product.display_quantity || 0)))
+    return quantity ? [{ product_id: product.id, product_name: product.name || null, quantity,
+      cost_price_usd: supplierReturnCost(product, 'usd'), cost_price_khr: supplierReturnCost(product, 'khr') }] : []
+  })
 }
+
+const useApp = useAppHook as () => { user?: AppUser | null; t?: (key: string) => string }
 
 type BranchTransportModule = typeof import('../../api/branchTransport.ts')
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
@@ -169,6 +179,8 @@ async function createSupplierReturnRequest(payload: SupplierReturnPayload): Prom
 
 export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }: NewSupplierReturnModalProps) {
   const { user, t } = useApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canPriceReturn = canViewCosts && canEditAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
@@ -324,37 +336,20 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     return filterAndRankSupplierReturnProducts(products, search)
   }, [products, search])
 
-  const selectedItems = useMemo<SupplierReturnItem[]>(() => {
-    return products
-      .map((product) => {
-        const rawQty = quantities[String(product.id)]
-        const qty = Math.max(0, Math.min(Number(rawQty || 0), Number(product.display_quantity || 0)))
-        if (!qty) return null
-        const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
-        const unitCostKhr = Number(product.purchase_price_khr || product.cost_price_khr || 0)
-        return {
-          product_id: product.id,
-          product_name: product.name || null,
-          quantity: qty,
-          cost_price_usd: unitCostUsd,
-          cost_price_khr: unitCostKhr,
-        }
-      })
-      .filter(isSupplierReturnItem)
-  }, [products, quantities])
-
+  const selectedItems = useMemo(() => selectSupplierReturnItems(products, quantities), [products, quantities])
   const totals = useMemo(() => {
-    const totalUsd = selectedItems.reduce((sum, item) => sum + (item.quantity * item.cost_price_usd), 0)
-    const totalKhr = selectedItems.reduce((sum, item) => sum + (item.quantity * item.cost_price_khr), 0)
-    return { totalUsd, totalKhr }
+    const usd = costTotal(selectedItems, item => item.cost_price_usd === null ? null : item.quantity * item.cost_price_usd)
+    const khr = costTotal(selectedItems, item => item.cost_price_khr === null ? null : item.quantity * item.cost_price_khr)
+    return { totalUsd: usd.unknown ? null : usd.total ?? 0, totalKhr: khr.unknown ? null : khr.total ?? 0,
+      usd: { ...usd, total: selectedItems.length ? usd.total : 0 }, khr: { ...khr, total: selectedItems.length ? khr.total : 0 } }
   }, [selectedItems])
 
   const supplier = suppliers.find((row) => String(row.id) === String(supplierId))
   const defaultCompensationEnabled = settlement === 'refund' || settlement === 'credit'
   const effectiveCompensationUsd = compensationUsd === '' ? (defaultCompensationEnabled ? totals.totalUsd : 0) : Number(compensationUsd || 0)
   const effectiveCompensationKhr = compensationKhr === '' ? (defaultCompensationEnabled ? totals.totalKhr : 0) : Number(compensationKhr || 0)
-  const lossUsd = Math.max(0, totals.totalUsd - effectiveCompensationUsd)
-  const lossKhr = Math.max(0, totals.totalKhr - effectiveCompensationKhr)
+  const lossUsd = totals.totalUsd === null || effectiveCompensationUsd === null ? null : Math.max(0, totals.totalUsd - effectiveCompensationUsd)
+  const lossKhr = totals.totalKhr === null || effectiveCompensationKhr === null ? null : Math.max(0, totals.totalKhr - effectiveCompensationKhr)
   const branchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: tr('select_branch', 'Select branch') },
     ...branches.map((item) => ({ value: item.id, label: item.name || String(item.id) })),
@@ -375,7 +370,13 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     setQuantities((prev) => ({ ...prev, [String(productId)]: normalized }))
   }
 
+  const displayMoney = (value: number | null, fmt: MoneyFormatter): string => value === null ? tr('unknown', 'Unknown') : fmt(value)
+  const unitUsd = (value: number): string => `$${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+  const unitKhr = (value: number): string => `${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}៛`
+  const invalidCompensation = [effectiveCompensationUsd, effectiveCompensationKhr].some(value => value !== null && !Number.isFinite(value))
+
   const submit = async () => {
+    if (!canPriceReturn || invalidCompensation) return
     if (!branchId) return notify(tr('branch_required', 'Branch is required'), 'error')
     if (!supplierId) return notify(tr('supplier_required', 'Supplier is required'), 'error')
     if (!reason.trim()) return notify(tr('return_reason_required', 'Reason is required'), 'error')
@@ -520,8 +521,8 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                 {filteredProducts.map((product) => {
                   const maxQty = Number(product.display_quantity || 0)
                   const qty = Number(quantities[String(product.id)] || 0)
-                  const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
-                  const unitCostKhr = Number(product.purchase_price_khr || product.cost_price_khr || 0)
+                  const unitCostUsd = supplierReturnCost(product, 'usd')
+                  const unitCostKhr = supplierReturnCost(product, 'khr')
                   return (
                     <li key={product.id} data-supplier-return-row="" className="flex items-center gap-2 border-t border-gray-100 px-3 py-2 first:border-t-0 dark:border-gray-700">
                       <div className="min-w-0 flex-1">
@@ -529,7 +530,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                         <div className="break-words text-xs leading-relaxed text-gray-400">{product.sku || '-'} / {product.category || '-'}</div>
                         <div className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
                           {tr('available', 'Available')}: {maxQty}
-                          <span title={tr('unit_cost', 'Unit Cost')}> · {fmtUSD(unitCostUsd)}{unitCostKhr > 0 ? ` · ${fmtKHR(unitCostKhr)}` : ''}</span>
+                          {canViewCosts ? <span title={tr('unit_cost', 'Unit Cost')}> · <CostValue value={unitCostUsd} fmt={unitUsd} t={(key) => t?.(key)} /> · <CostValue value={unitCostKhr} fmt={unitKhr} t={(key) => t?.(key)} /></span> : null}
                         </div>
                       </div>
                       <input
@@ -551,7 +552,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        {canViewCosts ? <div className="grid grid-cols-2 gap-2">
           <div className="relative">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400" aria-hidden="true">$</span>
             <input
@@ -562,7 +563,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               step="0.01"
               value={compensationUsd}
               onChange={(event) => setCompensationUsd(event.target.value)}
-              placeholder={String(defaultCompensationEnabled ? totals.totalUsd.toFixed(2) : '0')}
+              placeholder={defaultCompensationEnabled && totals.totalUsd === null ? tr('unknown', 'Unknown') : String(defaultCompensationEnabled ? totals.totalUsd!.toFixed(2) : '0')}
               aria-label={tr('supplier_compensation_usd', 'Supplier compensation (USD)')}
               title={tr('supplier_compensation_usd', 'Supplier compensation (USD)')}
             />
@@ -577,41 +578,41 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               step="1"
               value={compensationKhr}
               onChange={(event) => setCompensationKhr(event.target.value)}
-              placeholder={String(defaultCompensationEnabled ? Math.round(totals.totalKhr) : 0)}
+              placeholder={defaultCompensationEnabled && totals.totalKhr === null ? tr('unknown', 'Unknown') : String(defaultCompensationEnabled ? Math.round(totals.totalKhr!) : 0)}
               aria-label={tr('supplier_compensation_khr', 'Supplier compensation (KHR)')}
               title={tr('supplier_compensation_khr', 'Supplier compensation (KHR)')}
             />
           </div>
-        </div>
+        </div> : null}
 
-        <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-700/40">
+        {canViewCosts ? <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-700/40">
           <div className={summaryRowClass}>
             <span className={summaryLabelClass}>{tr('supplier_return_items', 'Selected items')}</span>
             <span className={summaryValueClass}>{selectedItems.length}</span>
           </div>
           <div className={summaryRowClass}>
             <span className={summaryLabelClass}>{tr('total_cost', 'Total cost')}</span>
-            <span className={summaryValueClass}>{fmtUSD(totals.totalUsd)}</span>
+            <span className={summaryValueClass}><CostValue value={totals.usd.total} unknownCount={totals.usd.unknown} fmt={unitUsd} t={(key) => t?.(key)} /></span>
           </div>
           <div className={summaryRowClass}>
             <span className={summaryLabelClass}>{tr('supplier_compensation', 'Compensation')}</span>
-            <span className={summaryValueClass}>{fmtUSD(effectiveCompensationUsd)}</span>
+            <span className={summaryValueClass}>{displayMoney(effectiveCompensationUsd, fmtUSD)}</span>
           </div>
           <div className={summaryRowClass}>
             <span className={`flex items-center gap-1 ${summaryLabelClass}`}>
               {tr('business_loss', 'Business loss')}
               <InfoHint label={tr('business_loss', 'Business loss')} text={tr('supplier_return_summary_hint', 'Loss = total cost - supplier compensation. This affects inventory valuation and return accounting.')} align="left" />
             </span>
-            <span className="font-semibold text-rose-600 dark:text-rose-400">{fmtUSD(lossUsd)}</span>
+            <span className="font-semibold text-rose-600 dark:text-rose-400">{displayMoney(lossUsd, fmtUSD)}</span>
           </div>
           <p className="text-xs leading-relaxed text-gray-400">
-            {fmtKHR(totals.totalKhr)} / {fmtKHR(effectiveCompensationKhr)} / {fmtKHR(lossKhr)}
+            <CostValue value={totals.khr.total} unknownCount={totals.khr.unknown} fmt={unitKhr} t={(key) => t?.(key)} /> / {displayMoney(effectiveCompensationKhr, fmtKHR)} / {displayMoney(lossKhr, fmtKHR)}
           </p>
-        </div>
+        </div> : null}
       </fieldset>
 
       <div className="sticky bottom-0 -mx-3 -mb-3 mt-3 flex border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
-        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={loading || loadingProducts || submitting}>
+        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={loading || loadingProducts || submitting || !canPriceReturn || invalidCompensation}>
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
           {tr('save', 'Save')}
         </button>

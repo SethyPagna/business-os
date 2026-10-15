@@ -483,7 +483,7 @@ function recordedCost(value: unknown): number | null {
 
 // The first of several alternative cost fields that holds a value, as a recorded cost.
 function firstRecordedCost(...values: unknown[]): number | null {
-  for (const value of values) if (value != null && value !== '') return recordedCost(value)
+  for (const value of values) if (value !== undefined) return recordedCost(value)
   return null
 }
 
@@ -2535,8 +2535,8 @@ app.post('/supplier', async (c) => {
     supplier_id?: number
     supplier_name?: string
     settlement?: string
-    supplier_compensation_usd?: number
-    supplier_compensation_khr?: number
+    supplier_compensation_usd?: number | null
+    supplier_compensation_khr?: number | null
     exchange_rate?: number
     return_number?: string
     client_request_id?: string
@@ -2608,8 +2608,16 @@ app.post('/supplier', async (c) => {
   }
   const defaultCompensationUsd = ['refund', 'credit'].includes(settlement) ? totalCostUsd : 0
   const defaultCompensationKhr = ['refund', 'credit'].includes(settlement) ? totalCostKhr : 0
-  const supplierCompensationUsd = Number.isFinite(Number(body.supplier_compensation_usd)) ? Number(body.supplier_compensation_usd) : defaultCompensationUsd
-  const supplierCompensationKhr = Number.isFinite(Number(body.supplier_compensation_khr)) ? Number(body.supplier_compensation_khr) : defaultCompensationKhr
+  const compensation = (value: unknown, fallback: number | null): number | null | 'invalid' => {
+    if (value === undefined) return fallback
+    if (value === null) return null
+    if (typeof value !== 'number' && typeof value !== 'string') return 'invalid'
+    const amount = Number(value)
+    return Number.isFinite(amount) ? amount : 'invalid'
+  }
+  const supplierCompensationUsd = compensation(body.supplier_compensation_usd, defaultCompensationUsd)
+  const supplierCompensationKhr = compensation(body.supplier_compensation_khr, defaultCompensationKhr)
+  if (supplierCompensationUsd === 'invalid' || supplierCompensationKhr === 'invalid') return c.json({ error: 'Invalid supplier compensation', code: 'invalid_supplier_compensation' }, 400)
   const supplierLossUsd = totalCostUsd === null || supplierCompensationUsd === null ? null : Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
   const supplierLossKhr = totalCostKhr === null || supplierCompensationKhr === null ? null : Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
