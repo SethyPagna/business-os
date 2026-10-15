@@ -58,6 +58,7 @@ try {
     await press(surface, 'Escape')
     assert.equal(surface.findAll(node => node.getAttribute('data-unsaved-actions') != null).length, 0, `${mode}: prompt Escape returns to the unchanged session`)
     assert.equal(closed, 0)
+    assert.ok(panel.contains(document.activeElement as unknown as MemoryNode), `${mode}: prompt dismissal returns keyboard focus inside`)
     await press(surface, 'Escape')
     await surface.click(surface.button('Discard'))
     assert.equal(closed, 1, `${mode}: only explicit Discard closes dirty work`)

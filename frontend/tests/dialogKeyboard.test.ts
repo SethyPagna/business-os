@@ -14,10 +14,11 @@ type Listener = (event: Record<string, unknown>) => void
 const listeners: Listener[] = []
 let selectMenuOpen = false
 const focusLog: string[] = []
-const makeButton = (name: string, attributes: Record<string, string> = {}) => ({ name, getAttribute: (key: string) => attributes[key] ?? null, getClientRects: () => [{}], closest: () => null, focus() { focusLog.push(name); doc.activeElement = this } })
+const makeButton = (name: string, attributes: Record<string, string> = {}) => ({ name, isConnected: true, getAttribute: (key: string) => attributes[key] ?? null, getClientRects: () => [{}], closest: () => null, focus() { focusLog.push(name); doc.activeElement = this } })
 const portals = new Map<string, unknown>()
 const doc: Record<string, unknown> & { activeElement: unknown } = {
   activeElement: makeButton('opener'),
+  body: makeButton('body'),
   addEventListener: (_type: string, fn: Listener) => { listeners.push(fn) },
   removeEventListener: (_type: string, fn: Listener) => { const at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1) },
   querySelector: (selector: string) => (selector.includes('data-app-select-menu') && selectMenuOpen ? {} : null),
@@ -25,7 +26,7 @@ const doc: Record<string, unknown> & { activeElement: unknown } = {
   getElementById: (id: string) => portals.get(id) ?? null,
 }
 ;(globalThis as Record<string, unknown>).document = doc
-;(globalThis as Record<string, unknown>).window = { requestAnimationFrame: (fn: () => void) => fn() }
+;(globalThis as Record<string, unknown>).window = { requestAnimationFrame: (fn: () => void) => { fn(); return 1 }, cancelAnimationFrame() {} }
 
 const cleanups: Array<() => void> = []
 const reactStub = {
@@ -38,7 +39,7 @@ const useDialogKeyboard = exportsBag.useDialogKeyboard!
 
 const first = makeButton('first')
 const last = makeButton('last')
-const panel = { querySelector: () => first, querySelectorAll: () => [first, last], closest: () => null }
+const panel = { isConnected: true, getClientRects: () => [{}], contains: (element: unknown) => element === first || element === last || (element as { name?: string })?.name === 'middle', querySelector: () => first, querySelectorAll: () => [first, last], closest: () => null }
 const press = (key: string, extra: Record<string, unknown> = {}) => {
   const event = { key, shiftKey: false, defaultPrevented: false, preventDefault() { this.defaultPrevented = true }, ...extra }
   for (const fn of [...listeners]) fn(event)
@@ -78,7 +79,7 @@ assert.equal(escapes, 2, 'the older dialog answers again once the top one is gon
 // A dialog made inert (a confirm opened from inside it) sits under another surface: it must not answer the keyboard.
 let underneathEscapes = 0
 let underneathInert = true
-const underneath = { querySelector: () => first, querySelectorAll: () => [first, last], closest: (selector: string) => (selector === '[inert]' && underneathInert ? {} : null) }
+const underneath = { isConnected: true, getClientRects: () => [{}], contains: (element: unknown) => element === first || element === last || (element as { name?: string })?.name === 'middle', querySelector: () => first, querySelectorAll: () => [first, last], closest: (selector: string) => (selector === '[inert]' && underneathInert ? {} : null) }
 useDialogKeyboard({ current: underneath }, { enabled: true, promptOpen: false, onEscape: () => { underneathEscapes += 1 }, onPromptEscape: () => {} })
 press('Escape')
 assert.equal(underneathEscapes, 0, 'an inert dialog ignores Escape, so the surface above it can keep it')
@@ -95,7 +96,7 @@ assert.equal(focusLog.at(-1), 'opener', 'closing hands focus back to what opened
 
 const content = makeButton('named detail region', { 'aria-label': 'Read-only detail' })
 const hint = makeButton('owned hint trigger', { 'aria-controls': 'owned-hint', 'aria-expanded': 'true' })
-const tooltipFocus = { name: 'portaled tooltip' }
+const tooltipFocus = { name: 'portaled tooltip', closest: () => null, isConnected: true }
 let contentVisible = true
 let contentInert = false
 let hintOpen = true
@@ -103,6 +104,7 @@ let hintVisible = true
 const popup = { getAttribute: (key: string) => key === 'role' ? 'tooltip' : null, getClientRects: () => hintVisible ? [{}] : [], contains: (element: unknown) => element === tooltipFocus, hidden: false }
 portals.set('owned-hint', popup)
 const hintedPanel = {
+  isConnected: true, getClientRects: () => [{}], contains: (element: unknown) => [hint, first, content].some(child => (element as { name?: string })?.name === child.name),
   querySelector: (selector: string) => selector.includes('role="region"') ? { ...content, getClientRects: () => contentVisible ? [{}] : [], closest: () => contentInert ? {} : null } : hint,
   querySelectorAll: (selector: string) => selector.includes('aria-controls') ? (hintOpen ? [hint] : []) : [hint, first, content],
   closest: () => null,
@@ -151,3 +153,112 @@ cleanups.pop()!()
 assert.equal(listeners.length, 0)
 
 console.log('PASS dialogKeyboard: focus, Escape, listbox precedence, Tab wrap, stacking, restore')
+
+
+
+function stackCase(options: { removed?: boolean; disabled?: boolean; inert?: boolean; hidden?: boolean; newer?: boolean; foreign?: boolean; closeBoth?: boolean } = {}): void {
+  const opener = makeButton('true opener')
+  const priorAttributes: Record<string, string> = {}
+  const prior = makeButton('prior field', priorAttributes)
+  const region = makeButton('named parent region', { 'aria-label': 'Parent details' })
+  const promptFirst = makeButton('prompt minimize')
+  const promptLast = makeButton('prompt Back')
+  let parentInert = false
+  let parentHidden = false
+  const parent = {
+    isConnected: true, getAttribute: () => null, getClientRects: () => parentHidden ? [] : [{}],
+    querySelector: (selector: string) => selector.includes('role="region"') ? region : prior,
+    querySelectorAll: (selector: string) => selector.includes('aria-controls') ? [] : [prior, region],
+    contains: (element: unknown) => element === prior || element === region,
+    closest: () => parentInert ? {} : null,
+  }
+  prior.closest = (() => parentInert ? {} : null) as typeof prior.closest
+  prior.getClientRects = () => parentHidden ? [] : [{}]
+  const prompt = { isConnected: true, getAttribute: () => null, getClientRects: () => [{}], querySelector: () => promptFirst, querySelectorAll: () => [promptFirst, promptLast], contains: (element: unknown) => element === promptFirst || element === promptLast, closest: () => null }
+  doc.activeElement = opener
+  useDialogKeyboard({ current: parent }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
+  doc.activeElement = prior
+  let dismissed = 0
+  useDialogKeyboard({ current: prompt }, { enabled: true, promptOpen: false, onEscape: () => { dismissed += 1 }, onPromptEscape() {} })
+  assert.equal(doc.activeElement, promptFirst, 'the prompt owns its actual panel and initial focus')
+  doc.activeElement = promptLast
+  assert.equal(press('Tab').defaultPrevented, true)
+  assert.equal(doc.activeElement, promptFirst)
+  assert.equal(press('Tab', { shiftKey: true }).defaultPrevented, true)
+  assert.equal(doc.activeElement, promptLast)
+  press('Escape')
+  assert.equal(dismissed, 1, 'only the topmost prompt receives Escape')
+  if (options.removed || options.closeBoth) prior.isConnected = false
+  if (options.disabled) priorAttributes.disabled = ''
+  if (options.inert) parentInert = true
+  if (options.hidden) parentHidden = true
+  let newerControl: ReturnType<typeof makeButton> | undefined
+  if (options.newer) {
+    newerControl = makeButton('independently newer control')
+    const newer = { ...prompt, querySelector: () => newerControl!, querySelectorAll: () => [newerControl!], contains: (element: unknown) => element === newerControl }
+    useDialogKeyboard({ current: newer }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
+  }
+  const foreign = makeButton('unrelated connected focus')
+  if (options.foreign) doc.activeElement = foreign
+  else if (!options.newer) doc.activeElement = doc.body
+  prompt.isConnected = false
+  promptFirst.isConnected = false
+  promptLast.isConnected = false
+  const closeNewer = options.newer ? cleanups.pop()! : undefined
+  const closePrompt = cleanups.pop()!
+  const closeParent = cleanups.pop()!
+  if (options.closeBoth) { parent.isConnected = false; region.isConnected = false; closeParent() }
+  closePrompt()
+  if (options.newer) assert.equal(doc.activeElement, newerControl, 'closing a prompt cannot steal independently newer focus')
+  else if (options.foreign) assert.equal(doc.activeElement, foreign, 'closing a prompt cannot steal unrelated live focus')
+  else if (options.inert || options.hidden) assert.equal(doc.activeElement, doc.body, 'hidden or inert parent never receives restored focus')
+  else if (options.closeBoth) assert.equal(doc.activeElement, opener, 'simultaneous parent/prompt unmount follows the stack back to the true opener')
+  else assert.equal(doc.activeElement, options.removed || options.disabled ? region : prior, 'Escape and clicked Back share safe prior-control/named-region restoration')
+  closeNewer?.()
+  parentInert = false
+  parentHidden = false
+  if (!options.closeBoth) closeParent()
+  assert.equal(listeners.length, 0)
+}
+stackCase()
+stackCase({ removed: true })
+stackCase({ disabled: true })
+stackCase({ inert: true })
+stackCase({ hidden: true })
+stackCase({ newer: true })
+stackCase({ foreign: true })
+stackCase({ closeBoth: true })
+let savingControls: Array<ReturnType<typeof makeButton>> = []
+const emptyPanel = { isConnected: true, getAttribute: () => null, getClientRects: () => [{}], closest: () => null, querySelector: () => savingControls[0] ?? null, querySelectorAll: () => savingControls, contains: (element: unknown) => element === emptyPanel || savingControls.includes(element as ReturnType<typeof makeButton>), focus() { doc.activeElement = emptyPanel } }
+useDialogKeyboard({ current: emptyPanel }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
+assert.equal(doc.activeElement, emptyPanel, 'an all-disabled prompt can focus its own panel')
+assert.equal(press('Tab').defaultPrevented, true)
+assert.equal(press('Tab', { shiftKey: true }).defaultPrevented, true)
+assert.equal(doc.activeElement, emptyPanel)
+savingControls = [makeButton('reenabled first'), makeButton('reenabled last')]
+assert.equal(press('Tab', { shiftKey: true }).defaultPrevented, true)
+assert.equal(doc.activeElement, savingControls[1], 'saving-to-failure ShiftTab remains inside')
+doc.activeElement = emptyPanel
+assert.equal(press('Tab').defaultPrevented, true)
+assert.equal(doc.activeElement, savingControls[0])
+cleanups.pop()!()
+console.log('PASS own prompt stack, Tab boundaries, all-disabled target, restoration/fallback and newer/inert/foreign controls')
+
+const header = makeButton('header Close')
+const bodyInput = makeButton('body input')
+const pages: number[] = []
+const scrollRegion = { ...makeButton('scroll region', { 'aria-label': 'Scroll details' }), clientHeight: 120, contains: (element: unknown) => element === bodyInput, scrollBy: ({ top }: { top: number }) => pages.push(top) }
+scrollRegion.closest = ((selector: string) => selector === '.modal-scroll' ? scrollRegion : null) as typeof scrollRegion.closest
+const pagingPanel = { isConnected: true, getAttribute: () => null, getClientRects: () => [{}], closest: () => null, querySelector: (selector: string) => selector.includes('role="region"') ? scrollRegion : header, querySelectorAll: (selector: string) => selector.includes('aria-controls') ? [] : [header, scrollRegion], contains: (element: unknown) => element === header || element === bodyInput || element === scrollRegion }
+useDialogKeyboard({ current: pagingPanel }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
+assert.equal(press('PageDown', { target: header }).defaultPrevented, true)
+assert.equal(press('PageUp', { target: header }).defaultPrevented, true)
+assert.deepEqual(pages, [120, -120])
+assert.equal(press('PageDown', { target: bodyInput }).defaultPrevented, false, 'body/editor paging stays native')
+assert.equal(press('PageDown', { target: makeButton('unowned portal') }).defaultPrevented, false)
+selectMenuOpen = true
+assert.equal(press('PageDown', { target: header }).defaultPrevented, false, 'a picker retains native paging')
+selectMenuOpen = false
+assert.deepEqual(pages, [120, -120])
+cleanups.pop()!()
+console.log('PASS scoped named-region header paging; body, picker and portal defaults remain native')
