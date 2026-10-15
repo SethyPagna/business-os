@@ -32,6 +32,7 @@ type HistoryItem = {
   // Server-computed (K1 slice 2): this row's next transition can be replayed
   // by the Worker itself, so it is actionable even with no live closure here.
   server_replayable?: boolean
+  pending_redo?: { version: number; history_id: number; group_operation_id: string; expected_generation: number }
   // A stock-in session whose products were merged keeps this marker: the row is
   // recorded only, and History says why instead of leaving a dead Undo.
   last_error?: string | null
@@ -123,6 +124,7 @@ type ActionHistory = {
   redo: (id?: string | number) => void
   undoServer?: (serverId: string | number, label?: string) => void
   redoServer?: (serverId: string | number, label?: string) => void
+  checkReceipt?: (serverId: string | number) => void
   // Starts the recorded-history read; the hook makes none until asked.
   requestServerItems?: () => void
 }
@@ -361,6 +363,17 @@ export default function ActionHistoryBar({
             {recordedItems.map((item) => {
               const grouped = isGroupedHistory(item)
               const displayLabel = bulkHistoryLabel(item, T)
+              const pending = item.pending_redo
+              if (pending?.version === 1 && String(pending.history_id) === String(item.id)
+                && Number.isSafeInteger(pending.expected_generation) && pending.expected_generation >= 0
+                && /^product-merge-group-[a-f0-9]{64}$/.test(pending.group_operation_id) && history.checkReceipt) {
+                return <button key={`receipt-${item.id}`} type="button" disabled={!!history.busy}
+                  className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+                  onClick={() => { closeMenu(); history.checkReceipt!(item.id!) }}>
+                  <span className="min-w-0 whitespace-normal break-words">{displayLabel}</span>
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{T('history_check_saved_redo', 'Check saved redo receipt')}</span>
+                </button>
+              }
               // K1 slice 2: a server row whose payload the Worker can replay
               // is a REAL Undo/Redo button even though no live closure exists
               // in this tab (the whole point -- reversibility survives the

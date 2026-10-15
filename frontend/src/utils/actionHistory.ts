@@ -66,6 +66,8 @@ type ActionHistoryEntry = {
   scope: string
   entity: unknown | null
   entity_id: unknown | null
+  undoPayload?: Record<string, unknown>
+  redoPayload?: Record<string, unknown>
 }
 
 type ServerHistoryItem = {
@@ -98,6 +100,30 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
 // state this tab expected -- another session's Undo or Redo already moved it, or its generation moved on. The row
 // then holds THAT session's result, so nothing here may write a status over it.
 export const UNDO_HISTORY_STALE_CODE = 'undo_history_stale'
+
+export type PendingGroupRedo = { version: 1; history_id: number; group_operation_id: string; expected_generation: number }
+
+export function pendingGroupRedo(value: unknown, historyId: unknown): PendingGroupRedo | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const receipt = value as PendingGroupRedo
+  if (Object.keys(receipt).sort().join(',') !== 'expected_generation,group_operation_id,history_id,version' || receipt.version !== 1
+    || !Number.isSafeInteger(receipt.history_id) || receipt.history_id <= 0 || String(receipt.history_id) !== String(historyId)
+    || !Number.isSafeInteger(receipt.expected_generation) || receipt.expected_generation < 0
+    || !/^product-merge-group-[a-f0-9]{64}$/.test(receipt.group_operation_id)) return null
+  return receipt
+}
+
+function committedGroupRedo(error: unknown, historyId: unknown): PendingGroupRedo | null {
+  const refusal = error as { status?: unknown; code?: unknown; params?: Record<string, unknown> } | null
+  if (Number(refusal?.status) !== 409 || refusal?.code !== 'merge_group_redo_committed' || refusal.params?.committed !== true) return null
+  return pendingGroupRedo({ version: 1, history_id: refusal.params.history_id, group_operation_id: refusal.params.group_operation_id,
+    expected_generation: refusal.params.expected_generation }, historyId)
+}
+
+function isCommittedGroupRedo(error: unknown): boolean {
+  const refusal = error as { status?: unknown; code?: unknown } | null
+  return Number(refusal?.status) === 409 && refusal?.code === 'merge_group_redo_committed'
+}
 
 export function isStaleHistoryRefusal(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false
@@ -190,6 +216,8 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
     scope: String(entry.scope || 'global'),
     entity: entry.entity || null,
     entity_id: entry.entity_id || entry.entityId || null,
+    undoPayload: entry.undo_payload && typeof entry.undo_payload === 'object' ? entry.undo_payload as Record<string, unknown> : undefined,
+    redoPayload: entry.redo_payload && typeof entry.redo_payload === 'object' ? entry.redo_payload as Record<string, unknown> : undefined,
   }
 }
 
@@ -310,6 +338,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     cachedScopeRef.current = actorScope
     setUndoStack([])
     setRedoStack([])
+    setBusy('')
     setServerItems(enabled ? readCachedServerItems(actorScope, readScope) : [])
     setUserOptions([])
     setUserFilter('all')
@@ -380,6 +409,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   }, [limit, refreshServerItems, scope])
 
   const runEntry = useCallback(async (direction: ActionDirection, entryId: string | number | null = null): Promise<boolean> => {
+    const requestScope = actorScope
+    if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
     const source = direction === 'undo' ? undoStack : redoStack
     const entry = entryId ? source.find((item) => String(item.id) === String(entryId)) : source[source.length - 1]
     if (!entry || busy) return false
@@ -402,9 +433,13 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     try {
       if (entry.serverId) {
         const api = await loadActionHistoryTransport()
+        if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+        const payload = direction === 'undo' ? entry.undoPayload : entry.redoPayload
+        const request = payload?.applier === 'product.merge.group' ? buildServerReplayRequest(payload) : undefined
         const response = direction === 'undo'
-          ? await api.undoActionHistory(entry.serverId)
-          : await api.redoActionHistory(entry.serverId)
+          ? await (request ? api.undoActionHistory(entry.serverId, request) : api.undoActionHistory(entry.serverId))
+          : await (request ? api.redoActionHistory(entry.serverId, request) : api.redoActionHistory(entry.serverId))
+        if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
         serverTransitioned = true
         // applied:true means the Worker replayed the reversal itself (K1) --
         // the closure must not mutate again; a refresh-only callback (if the
@@ -414,6 +449,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       }
       const replay = resolveReplayAction({ serverApplied, refresh: entry.refresh, action })
       await Promise.resolve(replay ? replay() : undefined)
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
@@ -425,6 +461,20 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       }
       return true
     } catch (error) {
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+      const committed = direction === 'redo' ? committedGroupRedo(error, entry.serverId) : null
+      if (direction === 'redo' && isCommittedGroupRedo(error)) {
+        setUndoStack(current => current.filter(item => item.id !== entry.id))
+        setRedoStack(current => current.filter(item => item.id !== entry.id))
+        if (committed && (entry.redoPayload?.generation == null || committed.expected_generation === entry.redoPayload.generation)) {
+          setServerItems(current => [{ id: committed.history_id, label: entry.label, status: 'recorded', pending_redo: committed },
+            ...current.filter(item => String(item.id) !== String(committed.history_id))])
+        }
+        setServerItemsRequested(true)
+        refreshServerItems()
+        notify?.(getErrorMessage(error, ''), 'error')
+        return false
+      }
       // The Worker refused before flipping the row (serverTransitioned is still false) because the row is not in the
       // state this tab expected: another session's result is on it, so no status is written over it. Re-read the
       // recorded history, drop this tab's copy of the entry (its closure can no longer be applied, and Undo/Redo would
@@ -445,9 +495,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false
     } finally {
-      setBusy('')
+      if (actorScopeRef.current === requestScope && isActorReadScopeCurrent(readScope)) setBusy('')
     }
-  }, [busy, limit, notify, redoStack, refreshServerItems, undoStack])
+  }, [actorScope, busy, limit, notify, redoStack, refreshServerItems, undoStack])
 
   const undo = useCallback((entryId: string | number | null = null) => runEntry('undo', entryId), [runEntry])
   const redo = useCallback((entryId: string | number | null = null) => runEntry('redo', entryId), [runEntry])
@@ -460,7 +510,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   // flipping the status, so a reversal is never recorded that didn't happen.
   // Page data catches up through the applier's own broadcast, so no refresh
   // closure is needed (there is none to have -- that's the point).
-  const runServerEntry = useCallback(async (direction: ActionDirection, serverId: ActionHistoryId, label = ''): Promise<boolean> => {
+  const runServerEntry = useCallback(async (direction: ActionDirection, serverId: ActionHistoryId, label = '', receiptOnly = false): Promise<boolean> => {
     if (!serverId || busy) return false
     const requestScope = actorScope
     setBusy(direction)
@@ -469,8 +519,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
       if (navigator.onLine === false && !(await api.confirmServerReachable())) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
+      const pending = pendingGroupRedo(item?.pending_redo, serverId)
+      if (receiptOnly && (!pending || direction !== 'redo')) return false
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)
+      if (receiptOnly && pending) replayRequest.expected_generation = pending.expected_generation
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
       const response = payload?.applier === 'stock.transfer'
         ? await executeTransferReplay(window.sessionStorage, scopedWorkDraftKey('transfer_history_pending'), {
           serverId, direction, operationId: String(payload.operation_id || ''), generation: Number(payload.generation),
@@ -481,7 +535,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
           : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
       if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
-      if (!applied) {
+      if (!applied || (receiptOnly && (response as { processed_children?: unknown }).processed_children !== 0)) {
         notify?.(`Unable to ${direction} that action right now.`, 'error')
         return false
       }
@@ -491,18 +545,25 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (label) notify?.(label)
       return true
     } catch (error) {
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+      const committed = direction === 'redo' ? committedGroupRedo(error, serverId) : null
+      if (committed) {
+        setServerItems(current => current.map(item => String(item.id) === String(serverId) ? { ...item, pending_redo: committed } : item))
+        refreshServerItems()
+      }
       // The recorded row this list offered is no longer in the state the list shows: re-read it, so the dead row
       // stops being offered (this path writes no status of its own).
       if (isStaleHistoryRefusal(error)) refreshServerItems()
       notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false
     } finally {
-      setBusy('')
+      if (actorScopeRef.current === requestScope && isActorReadScopeCurrent(readScope)) setBusy('')
     }
   }, [actorScope, busy, notify, refreshServerItems, serverItems])
 
   const undoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('undo', serverId, label), [runServerEntry])
   const redoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('redo', serverId, label), [runServerEntry])
+  const checkReceipt = useCallback((serverId: ActionHistoryId) => runServerEntry('redo', serverId, '', true), [runServerEntry])
 
   return useMemo(() => ({
     busy,
@@ -524,5 +585,6 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     redo,
     undoServer,
     redoServer,
-  }), [actorScope, enabled, busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, requestServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
+    checkReceipt,
+  }), [actorScope, enabled, busy, checkReceipt, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, requestServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
 }

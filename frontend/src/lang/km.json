@@ -2435,6 +2435,7 @@
   "history_no_longer_reversible": "លែងអាចត្រឡប់វិញបានទៀតហើយ",
   "history_no_longer_reversible_hint": "នេះអាចត្រូវបានធ្វើមកវិញ/ធ្វើឡើងវិញបានតែក្នុងវគ្គដែលវាបានកើតឡើងប៉ុណ្ណោះ។",
   "history_recorded_only": "បានកត់ត្រា",
+  "history_check_saved_redo": "ពិនិត្យកំណត់ត្រា Redo ដែលបានរក្សាទុក",
   "history_undo_closed_merged": "ការត្រឡប់វិញត្រូវបានបិទ៖ ផលិតផលត្រូវបានបញ្ចូលគ្នា",
   "history_undo_closed_branch_retired": "ការត្រឡប់វិញត្រូវបានបិទ៖ បានធ្វើនៅសាខាចាស់ មុនការបញ្ចូលសាខា",
   "history_undo_closed_branch_cutover_move": "ការត្រឡប់វិញត្រូវបានបិទ៖ ការបញ្ចូលសាខា",
