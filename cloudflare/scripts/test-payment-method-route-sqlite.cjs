@@ -3,6 +3,7 @@
 // malformed-allocation refusal, split-summary rewrite, exact tender values,
 // same-second settings behavior, and raw-setting race guard.
 
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -83,6 +84,8 @@ run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,search_n
 run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,search_normalized,updated_at)
      VALUES(104,'R-104','Fcb','7','r 104 fcb',@stamp)`, { stamp: INITIAL_STAMP })
 
+const auditRows = captureAuditBaseline(db)
+
 ;(async () => {
   run("UPDATE settings SET value='[\"Cash\",\"Fcb\",\"fcb\"]' WHERE key='pos_payment_methods'")
   const duplicateConfig = await request('/payment-methods/impact?from=Fcb&to=FCB')
@@ -103,7 +106,7 @@ run(`INSERT INTO sales(id,receipt_number,payment_method,payment_details,search_n
   assert.equal(blocked.body.code, 'malformed_payment_details')
   assert.equal(get("SELECT value FROM settings WHERE key='pos_payment_methods'").value, JSON.stringify(['Cash', 'Fcb', 'ABA']))
   assert.equal(get('SELECT payment_method FROM sales WHERE id=101').payment_method, 'Cash + Fcb')
-  assert.equal(get('SELECT COUNT(*) AS count FROM audit_logs').count, 1)
+  assert.equal(auditRows().length, 0)
   assert.equal(get('SELECT details FROM audit_logs WHERE id=700').details, 'immutable-history')
 
   // A malformed but unrelated historical allocation remains untouched and

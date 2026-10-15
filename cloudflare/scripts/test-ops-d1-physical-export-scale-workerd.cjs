@@ -131,6 +131,7 @@ async function main() {
       assert.ok(again.manifest.totals.retries >= 2 && again.manifest.totals.cpuResets === 2)
       assert.deepEqual(again.manifest.tables.map((t) => [t.name, t.rows, t.sha256]), first.manifest.tables.map((t) => [t.name, t.rows, t.sha256]))
     })
+    await loaded.verifyAuditBaseline()
   } finally {
     await mf.dispose()
     fs.rmSync(tmp, { recursive: true, force: true })

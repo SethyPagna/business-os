@@ -143,6 +143,7 @@ async function main() {
       }
       assert.ok(now.stock.rows[0].info_folds > 0)
     })
+    await loaded.verifyAuditBaseline()
   } finally { await mf.dispose() }
   console.log(`${checks} branch cutover scale (workerd D1) checks passed`)
 }

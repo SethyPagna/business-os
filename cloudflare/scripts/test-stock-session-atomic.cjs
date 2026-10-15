@@ -5,6 +5,7 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // survived a later stock failure, and a lost acknowledgement doubled stock.
 const fs = require('node:fs')
 const path = require('node:path')
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
@@ -121,7 +122,7 @@ function fixture() {
     },
   }
   return {
-    sql, env: { DB: envDb },
+    sql, env: { DB: envDb }, auditRows: captureAuditBaseline(sql),
     failReceiptAfterMetadata() { failAfterMetadata = true },
     loseNextCommitAcknowledgement() { loseNextAcknowledgement = true },
     beforeCommit(mutate) { beforeNextBatch = mutate },
@@ -711,7 +712,7 @@ async function main() {
     )
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count, 0)
-    for (const table of ['product_batches','action_history','undo_snapshots','inventory_movements','audit_logs','stock_session_guards']) assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table)
+    for (const table of ['product_batches','action_history','undo_snapshots','inventory_movements','audit_logs','stock_session_guards']) assert.equal(table === 'audit_logs' ? f.auditRows().length : f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table)
     assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0)
   })
 
@@ -724,7 +725,7 @@ async function main() {
       assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0)
       assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
       for (const table of ['stock_session_operations', 'product_batches', 'action_history', 'undo_snapshots', 'audit_logs']) {
-        assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, `${mode} must not write ${table}`)
+        assert.equal(table === 'audit_logs' ? f.auditRows().length : f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, `${mode} must not write ${table}`)
       }
       f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
       const receipt = await commitStockSession(f.env, user, request)

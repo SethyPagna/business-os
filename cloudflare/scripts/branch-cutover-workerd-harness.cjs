@@ -4,6 +4,7 @@
 // (meta.duration, measured by D1 around SQLite) and rows_read. Not a test: the scale test and the bench use it.
 'use strict'
 const fs = require('fs')
+const assert = require('node:assert/strict')
 const path = require('path')
 const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
@@ -97,13 +98,22 @@ async function seed(call, { scale = 1, tables } = {}) {
     if (!r.ok) throw new Error('migration failed: ' + r.error + ' ' + r.sql)
   }
   const t1 = Date.now()
-  const data = tables || fixture.rows({ scale })
+  const auditBaseline = (await call({ op: 'query', sql: 'SELECT * FROM audit_logs ORDER BY id' })).rows
+  assert.ok(Array.isArray(auditBaseline))
+  const auditOffset = Math.max(0, ...auditBaseline.map(row => row.id))
+  const originalData = tables || fixture.rows({ scale })
+  const data = { ...originalData, audit_logs: (originalData.audit_logs || []).map(row => ({ ...row, id: row.id + auditOffset })) }
   const statements = fixture.statements(data, 60000, 250)
   for (let i = 0; i < statements.length; i += 10) {
     const r = await call({ op: 'exec', statements: statements.slice(i, i + 10) })
     if (!r.ok) throw new Error('seed failed: ' + r.error + ' ' + r.sql)
   }
-  return { migrationsMs: t1 - t0, seedMs: Date.now() - t1, statements: statements.length }
+  const verifyAuditBaseline = async () => {
+    const rows = (await call({ op: 'query', sql: 'SELECT * FROM audit_logs WHERE id<=? ORDER BY id', params: [auditOffset] })).rows
+    assert.deepEqual(rows, auditBaseline, 'fixture and operations must preserve migration audit history')
+  }
+  await verifyAuditBaseline()
+  return { migrationsMs: t1 - t0, seedMs: Date.now() - t1, statements: statements.length, verifyAuditBaseline }
 }
 
 const labelOf = (row) => {

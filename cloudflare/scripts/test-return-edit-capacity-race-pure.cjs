@@ -1,3 +1,4 @@
+const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -149,7 +150,7 @@ function fixture({ sold = 3, sibling = null } = {}) {
     await Promise.all(pending)
     return { status: response.status, body: payload }
   }
-  return { sql, call, snapshot, close: () => sql.close(), batches: () => batches,
+  return { sql, call, snapshot, auditRows: captureAuditBaseline(sql), close: () => sql.close(), batches: () => batches,
     afterRead(match, run) { afterRead = { match, run } }, beforeBatch(run) { beforeBatch = run },
     fail(text) { failSql = text }, loseAck() { loseAck = true },
   }
@@ -234,7 +235,7 @@ async function controls() {
     assert.equal(f.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=901 AND branch_id=901').get().n, 22)
     assert.equal(f.sql.prepare('SELECT quantity n FROM branch_batch_stock WHERE batch_id=901 AND branch_id=901').get().n, 2)
     assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=901').get().sale_status, 'returned')
-    for (const table of ['sale_record_events', 'return_mutation_receipts', 'audit_logs']) assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 1, table)
+    for (const table of ['sale_record_events', 'return_mutation_receipts', 'audit_logs']) assert.equal(table === 'audit_logs' ? f.auditRows().length : f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 1, table)
     const applied = f.snapshot()
     assert.deepEqual(await f.call(input), result, 'exact retry returns the durable response')
     assert.equal(f.snapshot(), applied)

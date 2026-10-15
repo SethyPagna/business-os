@@ -46,7 +46,7 @@ async function main() {
     assert.equal(sql().prepare('SELECT allocations_json FROM transfer_operation_members').get().allocations_json,originalMapping)
     assert.equal((await reverse(result.action_history_id,'undo',0)).status,409)
     assert.equal(sql().prepare('SELECT COUNT(*) n FROM stock_transfers').get().n,3)
-    assert.equal(sql().prepare('SELECT COUNT(*) n FROM audit_logs').get().n,3)
+    assert.equal(h.counts().audit_logs,3)
   })
   await check('untracked remainder is immutable and cannot consume tracked destination stock', async () => {
     const result = await forward({ untracked:true })
