@@ -1,5 +1,6 @@
 import type { RequestMetrics } from '../lib/requestMetrics'
 import { productStockGuardError } from '../lib/productStockGuard'
+import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -579,6 +580,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) ? ['products'] : []
         if (replayNamespaces.length) await import('../lib/cache').then(({ bumpVersions }) => bumpVersions(c.env, replayNamespaces)).catch(() => {})
       } catch (error) {
+        const transactionRefusal = stockTransactionRefusal(error)
+        if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
@@ -685,6 +688,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    const transactionRefusal = stockTransactionRefusal(error)
+    if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
     return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)
   }
 }

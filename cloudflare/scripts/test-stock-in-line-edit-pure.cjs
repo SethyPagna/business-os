@@ -19,6 +19,7 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
 const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const root = process.env.STOCK_IN_EDIT_TEST_ROOT || path.join(__dirname, '..')
 
@@ -184,8 +185,10 @@ async function main() {
       const line = sessionLines(f, movementId)[0]
       assert.equal(line.batch_revision, lineRevision(f, movementId), 'the same line SELECT exposes the lot revision')
       const body = { quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: line.batch_revision }
-      f.sql.prepare(`UPDATE product_batches SET ${change} WHERE id=?`).run(batchId)
-      if (change.startsWith('supplier_name')) f.sql.prepare("UPDATE product_batches SET supplier_name='Fixture Supplier' WHERE id=?").run(batchId)
+      seedStockFixture(f.sql, () => {
+        f.sql.prepare(`UPDATE product_batches SET ${change} WHERE id=?`).run(batchId)
+        if (change.startsWith('supplier_name')) f.sql.prepare("UPDATE product_batches SET supplier_name='Fixture Supplier' WHERE id=?").run(batchId)
+      })
       assert.ok(lineRevision(f, movementId) > line.batch_revision, 'including change then restore with the same timestamp')
       const before = writeSnapshot(f)
       const response = await edit(f, movementId, body)
@@ -195,7 +198,7 @@ async function main() {
     }
   })
 
-  await check('a metadata race immediately before ordinaryBusinessBatch fails the retained revision guard atomically', async () => {
+  await check('a metadata race immediately before commit fails the retained revision guard atomically', async () => {
     const f = fresh()
     const { movementId, batchId } = await receive(f, { requestId: 'revision-race-0001', quantity: 10 })
     const revision = lineRevision(f, movementId)
@@ -542,10 +545,81 @@ async function main() {
         assert.equal(result.json.after.totalCostUsd, expected)
         assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, expected)
         const history = historyOf(f, result.json.operation_id)
-        assert.equal((await undo(f, history.id, 0)).status, 200)
+        const undone = await undo(f, history.id, 0)
+        assert.equal(undone.status, 200, JSON.stringify({ shared, change, response: undone.json }))
         assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, 20)
         assert.equal((await redo(f, history.id, 1)).status, 200)
         assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, expected)
+      } finally { f.sql.close() }
+    }
+  })
+
+  await check('date-only replay restores the latest sold-out lot cost', async () => {
+    const f = fresh()
+    try {
+      const first = await receive(f, { requestId: 'sold-out-earlier', quantity: 10, cost: 2 })
+      const second = await receive(f, { requestId: 'sold-out-later', quantity: 5, cost: 8, date: '2026-09-06' })
+      sell(f, first.batchId, 10)
+      sell(f, second.batchId, 5)
+      const cost = () => f.sql.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd
+      assert.equal(cost(), 8)
+      const result = await edit(f, first.movementId, { quantity: 10, received_date: '2026-09-07' })
+      assert.equal(result.status, 200, JSON.stringify(result.json))
+      assert.equal(cost(), 2)
+      const history = historyOf(f, result.json.operation_id)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, JSON.stringify(undone.json))
+      assert.equal(cost(), 8)
+      const redone = await redo(f, history.id, 1)
+      assert.equal(redone.status, 200, JSON.stringify(redone.json))
+      assert.equal(cost(), 2)
+      assert.deepEqual(totals(f), { branch: 0, product: 0, lots: 0 })
+    } finally { f.sql.close() }
+  })
+
+  await check('supplier-only replay repairs a stale catalog projection within admission', async () => {
+    const f = fresh()
+    try {
+      const first = await receive(f, { requestId: 'supplier-only-replay', quantity: 10, cost: 2 })
+      const result = await edit(f, first.movementId, { quantity: 10, supplier_name: 'Second fixture supplier' })
+      assert.equal(result.status, 200, JSON.stringify(result.json))
+      const history = historyOf(f, result.json.operation_id)
+      for (const [generation, replay] of [[0, undo], [1, redo]]) {
+        seedStockFixture(f.sql, () => f.sql.exec('UPDATE products SET cost_price_usd=99,purchase_price_usd=99 WHERE id=1'))
+        const response = await replay(f, history.id, generation)
+        assert.equal(response.status, 200, JSON.stringify(response.json))
+        assert.equal(f.sql.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 2)
+        assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      }
+    } finally { f.sql.close() }
+  })
+
+  await check('cost-only replay refuses maintenance before any effects and retries once after clearing', async () => {
+    for (const raced of [false, true]) {
+      const f = fresh()
+      try {
+        const first = await receiveFree(f, 'cost-only-maintenance')
+        const result = await edit(f, first.movementId, { quantity: 12, unit_cost_usd: 2 })
+        assert.equal(result.status, 200, JSON.stringify(result.json))
+        const history = historyOf(f, result.json.operation_id)
+        const mark = () => seedStockFixture(f.sql, () => f.sql.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')"))
+        if (raced) f.beforeCommit(mark)
+        else mark()
+        const before = writeSnapshot(f)
+        const refused = await undo(f, history.id, 0)
+        assert.equal(refused.status, 503, JSON.stringify(refused.json))
+        assert.equal(refused.json.code, 'stock_schema_unavailable')
+        assert.equal(refused.json.action, 'reload_required')
+        assert.equal(writeSnapshot(f), before)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+        f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+        const recovered = await undo(f, history.id, 0)
+        assert.equal(recovered.status, 200, JSON.stringify(recovered.json))
+        assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, 20)
+        assert.equal(f.sql.prepare('SELECT generation FROM stock_lot_adjustment_operations WHERE id=?').get(result.json.operation_id).generation, 1)
+        assert.deepEqual(totals(f), { branch: 12, product: 12, lots: 12 })
       } finally { f.sql.close() }
     }
   })

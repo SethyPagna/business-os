@@ -49,7 +49,7 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 //   nothing changed   200 unchanged, no write
 //
 // B and P always move by exactly d; B + d < 0 is refused. Every edit is ONE
-// ordinaryBusinessBatch guarded on the exact preimage of every row it writes,
+// transaction guarded on the exact preimage of every row it writes,
 // so it lands completely or not at all.
 //
 // UNDO / REDO (`stock.session_line_edit`, REVERT-SET 6 Oct 2026): moves
@@ -75,7 +75,6 @@ import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { canEditAcquisitionCosts } from './acquisitionCostAccess'
 import { actorSnapshot } from './actorSnapshot'
-import { ordinaryBusinessBatch } from './businessMaintenanceGuard'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { resolveReceiptLotTarget, type ReceiptLotCandidate, type StockWriteStatement } from './productBatches'
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
@@ -1016,10 +1015,7 @@ export async function replayStockInLineEdit(
     } },
   ]
   try {
-    const writesStock = productDelta !== 0 || branchChange !== 0
-      || deltas.some(lot => lot.stockChange !== 0 || lot.to.isActive !== lot.from.isActive)
-    if (writesStock) await executeStockTransaction(db, statements, 'retry')
-    else await ordinaryBusinessBatch(db, statements)
+    await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     if (error instanceof StockTransactionUnavailableError) throw error
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
