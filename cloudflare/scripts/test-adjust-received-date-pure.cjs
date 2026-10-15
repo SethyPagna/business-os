@@ -24,8 +24,10 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const rawDb = openDb(loadAll())
+assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 let afterDbBatchHook = null
 let beforeDbBatchHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
@@ -54,6 +56,7 @@ const db = {
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(this) },
 }
 const fakeEnv = { DB: db }
@@ -72,6 +75,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -96,7 +100,8 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockTransaction = loadReal('lib/stockTransaction.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const receivingBranch = loadReal('lib/receivingBranch.ts')
@@ -348,9 +353,9 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
-  rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 10, 40000)").run()
+  seedStockFixture(rawDb,()=>rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;'))
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 10, 40000)").run())
 }
 
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
@@ -510,7 +515,7 @@ async function main() {
       quantity: 1, reason: 'maximum lot cost', branchId: 1, receivedDate: '2026-09-13',
     })
     assert.strictEqual(initial.status, 200, JSON.stringify(initial.json))
-    rawDb.prepare('UPDATE products SET selling_price_usd=0 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET selling_price_usd=0 WHERE id=1').run())
     const beforeTopUp = durableState()
     const topUp = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1e11, batchId: initial.json.batchId,
@@ -582,7 +587,7 @@ async function main() {
     }
     beforeDbBatchHook = async () => {
       beforeDbBatchHook = null
-      rawDb.prepare('UPDATE product_batches SET received_cost_usd=99 WHERE id=?').run([first.json.batchId])
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET received_cost_usd=99 WHERE id=?').run([first.json.batchId]))
     }
     const raced = await req('POST', '/adjust', {
       productId: 1, type: 'add', unitCostUsd: 1, quantity: 1,
@@ -707,7 +712,7 @@ async function main() {
   })
 
   await check("D4b: a batch_id belonging to a DIFFERENT product is refused (400), nothing written", async () => {
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Other', 1, 0)").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Other', 1, 0)").run())
     const foreign = batchRows()[0]
     const aggBefore = rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 2').get().stock_quantity
     const { status } = await req('POST', '/', {
@@ -755,7 +760,7 @@ async function main() {
   // is what forks a row now.
   await check('fast stock-in at a changed cost stays on the SAME row and keeps receipt/session metadata', async () => {
     seed()
-    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run())
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 7, reason: 'Stock-in session', branchId: 1,
       unlockPricing: true, receivedDate: '2026-08-20', expiryDate: '2027-08-20',
@@ -788,7 +793,7 @@ async function main() {
 
   await check('fast stock-in at a changed BARCODE does create a same-name variant and carries the metadata onto it', async () => {
     seed()
-    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run())
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 7, reason: 'Stock-in session', branchId: 1,
       unlockPricing: true, receivedDate: '2026-08-20', expiryDate: '2027-08-20',
@@ -815,7 +820,7 @@ async function main() {
 
   await check('unlock-pricing normalizes only explicit new costs and preserves omitted historical source costs', async () => {
     seed()
-    rawDb.prepare('UPDATE products SET cost_price_usd=2.345678,cost_price_khr=123.456789,selling_price_usd=4 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=2.345678,cost_price_khr=123.456789,selling_price_usd=4 WHERE id=1').run())
     const explicit = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
       quantity: 1, reason: 'explicit new costs', branchId: 1, unlockPricing: true, receivedDate: '2026-09-10',
@@ -849,7 +854,7 @@ async function main() {
 
   await check('same barcode + same day shares the product but distinct prices retain separate lots and mean catalog cost', async () => {
     seed()
-    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run())
     const first = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 2, reason: 'first receipt', branchId: 1,
       receivedDate: '2026-08-20', unitCostUsd: 1,
@@ -902,7 +907,7 @@ async function main() {
 
   await check('an omitted correction cost records NO cost on the new lot or its movement, whatever the catalog says', async () => {
     seed()
-    rawDb.prepare('UPDATE products SET cost_price_usd=2.345678 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=2.345678 WHERE id=1').run())
     const correction = await req('POST', '/adjust', {
       productId: 1, type: 'add', attribution: 'correction', quantity: 2,
       reason: 'historical precision correction', branchId: 1, batchId: 'new', receivedDate: '2026-08-03',
@@ -944,7 +949,7 @@ async function main() {
     afterDbBatchHook = async (items) => {
       if (!items.some((item) => /UPDATE branch_batch_stock SET quantity/i.test(item.sql))) return
       afterDbBatchHook = null
-      rawDb.prepare('UPDATE product_batches SET unit_cost_usd=99 WHERE id=?').run([batchId])
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET unit_cost_usd=99 WHERE id=?').run([batchId]))
     }
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'race fixture', branchId: 1, batchId })
     afterDbBatchHook = null
@@ -965,12 +970,12 @@ async function main() {
     beforeDbBatchHook = async (items) => {
       if (!items.some((item) => /captured_batch_allocation_conflict/.test(item.sql))) return
       beforeDbBatchHook = null
-      rawDb.prepare(`INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
-        VALUES(1,'earlier','earlier','2026-01-01',1,99,99)`).run()
+      seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+        VALUES(1,'earlier','earlier','2026-01-01',1,99,99)`).run())
       const newId = rawDb.prepare('SELECT last_insert_rowid() AS id').get().id
-      rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').run([newId])
-      rawDb.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1 AND branch_id=1').run()
-      rawDb.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1').run()
+      seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').run([newId]))
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1 AND branch_id=1').run())
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1').run())
     }
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'new lot race', branchId: 1 })
     beforeDbBatchHook = null
@@ -992,9 +997,9 @@ async function main() {
     beforeDbBatchHook = async (items) => {
       if (!items.some((item) => /captured_batch_allocation_conflict/.test(item.sql))) return
       beforeDbBatchHook = null
-      rawDb.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run([batchId])
-      rawDb.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run()
-      rawDb.prepare('UPDATE products SET stock_quantity=1 WHERE id=1').run()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run([batchId]))
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run())
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=1 WHERE id=1').run())
     }
     const beforeMovements = rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'availability race', branchId: 1 })
@@ -1014,7 +1019,7 @@ async function main() {
     seed()
     const seeded = await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, supplierName: 'Fixture Supplier', unitCostUsd: 10, reason: 'seed count', branchId: 1 })
     assert.strictEqual(seeded.status, 200, JSON.stringify(seeded.json))
-    rawDb.prepare('DELETE FROM inventory_movements').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('DELETE FROM inventory_movements').run())
     const down = await req('POST', '/adjust', { productId: 1, type: 'set', quantity: 2, reason: 'counted', branchId: 1 })
     assert.strictEqual(down.status, 200, JSON.stringify(down.json))
     const up = await req('POST', '/adjust', { productId: 1, type: 'set', quantity: 7, attribution: 'correction', reason: 'recounted', branchId: 1 })
@@ -1030,8 +1035,8 @@ async function main() {
 
   await check('revert route loads the original cost snapshot and denies review-tier writes before any apply', async () => {
     seed()
-    rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason)
-      VALUES(1,'Widget',1,'Main','add',2,3.5,14000,7,28000,'receipt')`).run()
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason)
+      VALUES(1,'Widget',1,'Main','add',2,3.5,14000,7,28000,'receipt')`).run())
     const id = rawDb.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     capturedRevertMovement = null
     const allowed = await req('POST', `/movements/${id}/revert`, {})
@@ -1055,7 +1060,7 @@ async function main() {
 
   await check('move-row drains the source lots and receives a fresh lot on the destination (no ledger drift)', async () => {
     seed()
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run())
     const add = await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 10, reason: 'stock in', branchId: 1, batchId: 'new' })
     assert.strictEqual(add.status, 200, JSON.stringify(add.json))
     const srcLot = batchRows()[0]
@@ -1080,11 +1085,11 @@ async function main() {
   // fact and must never be stamped on a movement, a held lot or a later disposal.
   const seedNullLotWithCatalog = (catalogUsd = 9) => {
     seed()
-    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
-      VALUES(501,1,'0501','0501','2026-05-01',1,1,NULL)`).run()
-    rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)').run()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=10, cost_price_usd=?, cost_price_khr=? WHERE id=1').run([catalogUsd, catalogUsd * 4000])
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+      VALUES(501,1,'0501','0501','2026-05-01',1,1,NULL)`).run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10)').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=10, cost_price_usd=?, cost_price_khr=? WHERE id=1').run([catalogUsd, catalogUsd * 4000]))
   }
   const costCols = (row) => ({ u: row.unit_cost_usd, uk: row.unit_cost_khr, t: row.total_cost_usd, tk: row.total_cost_khr })
   const UNKNOWN = { u: null, uk: null, t: null, tk: null }
@@ -1099,7 +1104,7 @@ async function main() {
 
   await check('S5: removing from a recorded $0 lot stays $0 beside a catalog price of 9 (control: the recorded zero is data)', async () => {
     seedNullLotWithCatalog()
-    rawDb.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=501').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=501').run())
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'thrown away', branchId: 1, batchId: 501 })
     assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
     const movement = rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='remove'").get()
@@ -1108,8 +1113,8 @@ async function main() {
 
   await check('S5: stock that predates lots (no lot holds it) is removed at an UNKNOWN cost, not the catalog price', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=5 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=5 WHERE id=1').run())
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'legacy stock', branchId: 1 })
     assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
     assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='remove'").get()), UNKNOWN)
@@ -1126,11 +1131,11 @@ async function main() {
 
   await check('S5: a multi-lot removal over lots {none, 4} holds rows {NULL, 4} and records one UNKNOWN movement (no blend with the catalog 9)', async () => {
     seedNullLotWithCatalog()
-    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
-      VALUES(502,1,'0502','0502','2026-05-02',1,2,4)`).run()
-    rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,2)').run()
-    rawDb.prepare('UPDATE branch_stock SET quantity=12 WHERE product_id=1').run()
-    rawDb.prepare('UPDATE products SET stock_quantity=12 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+      VALUES(502,1,'0502','0502','2026-05-02',1,2,4)`).run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,2)').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE branch_stock SET quantity=12 WHERE product_id=1').run())
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET stock_quantity=12 WHERE id=1').run())
     // FIFO drains lot 501 (no cost, 10 units) first, then lot 502 ($4): removing 12 takes both whole.
     const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 12, reason: 'flood', branchId: 1, conditionTag: 'damaged' })
     assert.strictEqual(held.status, 200, JSON.stringify(held.json))
@@ -1143,7 +1148,7 @@ async function main() {
     seedNullLotWithCatalog(9)
     const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'dropped', branchId: 1, batchId: 501, conditionTag: 'damaged' })
     assert.strictEqual(held.status, 200, JSON.stringify(held.json))
-    rawDb.prepare('UPDATE products SET cost_price_usd=77, cost_price_khr=308000 WHERE id=1').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=77, cost_price_khr=308000 WHERE id=1').run())
     const disposed = await req('POST', '/tagged-lots/dispose', withAdjustId({ productId: 1, branchId: 1, conditionTag: 'damaged', quantity: 3, reason: 'binned' }))
     assert.strictEqual(disposed.status, 200, JSON.stringify(disposed.json))
     assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='write_off'").get()), UNKNOWN)
@@ -1151,7 +1156,7 @@ async function main() {
 
   await check('S5: disposing and restoring a held lot with a recorded cost uses that cost (control: kept both before and after)', async () => {
     seedNullLotWithCatalog(9)
-    rawDb.prepare('UPDATE product_batches SET unit_cost_usd=4 WHERE id=501').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE product_batches SET unit_cost_usd=4 WHERE id=501').run())
     const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 5, reason: 'dropped', branchId: 1, batchId: 501, conditionTag: 'damaged' })
     assert.strictEqual(held.status, 200, JSON.stringify(held.json))
     assert.strictEqual((await req('POST', '/tagged-lots/restore', withAdjustId({ productId: 1, branchId: 1, conditionTag: 'damaged', quantity: 2, reason: 'fine after all' }))).status, 200)
@@ -1171,7 +1176,7 @@ async function main() {
 
   await check('S5: move-row stamps both movements with the source lot cost (explicit columns, never the DEFAULT 0), unknown when a lot has none', async () => {
     seed()
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run())
     assert.strictEqual((await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 10, reason: 'stock in', branchId: 1, batchId: 'new' })).status, 200)
     const moved = await req('POST', '/move-row', { sourceProductId: 1, destinationProductId: 2, quantity: 4, branchId: 1, reason: 'relabel' })
     assert.strictEqual(moved.status, 200, JSON.stringify(moved.json))
@@ -1181,7 +1186,7 @@ async function main() {
       { movement_type: 'move_in', unit_cost_usd: 2, unit_cost_khr: null, total_cost_usd: 8, total_cost_khr: null },
     ])
     seedNullLotWithCatalog(9)
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run())
     assert.strictEqual((await req('POST', '/move-row', { sourceProductId: 1, destinationProductId: 2, quantity: 4, branchId: 1, reason: 'relabel' })).status, 200)
     const unknownRows = rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type IN ('move_out','move_in')").all()
     assert.strictEqual(unknownRows.length, 2)
@@ -1191,10 +1196,12 @@ async function main() {
   await check('S5: stock value per product leaves an unknown cost out (NULL + a flag), values a recorded $0 as 0, and honours a purchase-price override', async () => {
     seed()
     const insert = rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr) VALUES (?,?,1,5,?,?,?,?)')
+    seedStockFixture(rawDb,()=>{
     insert.run([11, 'Unknown cost', null, null, 0, 0])
     insert.run([12, 'Recorded zero', 0, 0, 0, 0])
     insert.run([13, 'Costed two', 2, 8000, 0, 0])
     insert.run([14, 'Purchase override', 2, 8000, 3, 12000])
+    })
     const summary = await req('GET', '/summary')
     assert.strictEqual(summary.status, 200, JSON.stringify(summary.json))
     const byId = new Map(summary.json.map((row) => [row.id, row]))
@@ -1203,7 +1210,7 @@ async function main() {
     assert.deepStrictEqual(pick(12), { v: 0, k: 0, unknown: 0 }, 'a recorded $0 is a known 0')
     assert.deepStrictEqual(pick(13), { v: 10, k: 40000, unknown: 0 })
     assert.deepStrictEqual(pick(14), { v: 15, k: 60000, unknown: 0 }, 'a positive purchase price overrides the catalog cost')
-    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,3),(12,1,3),(13,1,3)').run()
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,3),(12,1,3),(13,1,3)').run())
     const scoped = await req('GET', '/summary?branchId=1')
     assert.strictEqual(scoped.status, 200, JSON.stringify(scoped.json))
     const scopedById = new Map(scoped.json.map((row) => [row.id, row]))
