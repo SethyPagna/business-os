@@ -33,7 +33,8 @@ export type ReceivingCostPreviewResult = {
 export class ReceivingCostPreviewInputError extends Error {}
 
 const object = (value: unknown): value is Row => value !== null && typeof value === 'object' && !Array.isArray(value)
-const positiveId = (value: unknown): number | null => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null
+const positiveId = (value: unknown): number | null => (typeof value === 'number' || typeof value === 'string')
+  && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null
 
 export function parseReceivingCostPreview(raw: unknown, today = new Date().toISOString().slice(0, 10)): PreviewLine[] {
   if (!object(raw) || !Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 25) {
@@ -54,35 +55,41 @@ export function parseReceivingCostPreview(raw: unknown, today = new Date().toISO
     const batchId = batch === 'new' || batch == null ? null : positiveId(batch)
     const supplier = value('supplierName', 'supplier_name')
     const line: PreviewLine = { key: input.key, productId, branchId, batchId, quantity: 0, availableDelta: 0,
-      unitCostUsd: null, receivedAt: today, supplierName: supplier == null ? null : String(supplier).trim(),
+      unitCostUsd: null, receivedAt: today, supplierName: typeof supplier === 'string' ? supplier.trim() : null,
       supplierId: positiveId(value('supplierId', 'supplier_id')), reason: null }
-    if (!['receive', 'adjust', 'stock_session'].includes(String(input.wire))
+    if (typeof input.wire !== 'string' || !['receive', 'adjust', 'stock_session'].includes(input.wire)
       || (input.wire === 'adjust' && (body.type !== 'add' || body.attribution === 'correction' || body.unlockPricing === true || body.pricing != null))
-      || (session && body.kind !== 'receive')) line.reason = 'unsupported_operation'
+      || (session && (body.kind !== 'receive' || body.freeQuantity != null || body.free_quantity != null))) line.reason = 'unsupported_operation'
     else if (!productId) line.reason = 'product_unavailable'
     else if (!branchId) line.reason = 'branch_unavailable'
     else if (batch != null && batch !== 'new' && batchId == null) line.reason = 'invalid_target'
+    else if (value('supplierId', 'supplier_id') != null && line.supplierId == null) line.reason = 'supplier_unavailable'
+    else if (supplier != null && typeof supplier !== 'string') line.reason = 'supplier_required'
     const rawDate = value('receivedDate', 'received_date')
-    if (rawDate != null && String(rawDate).trim()) {
-      const date = normalizeTypedDate(String(rawDate))
+    if (rawDate != null && typeof rawDate !== 'string') line.reason ||= 'invalid_date'
+    else if (typeof rawDate === 'string' && rawDate.trim()) {
+      const date = normalizeTypedDate(rawDate)
       if (!date) line.reason ||= 'invalid_date'
       else line.receivedAt = date
     } else if (session) line.reason ||= 'invalid_date'
     try {
       const paid = Number(body.quantity)
       const free = session ? 0 : body.freeQuantity == null ? 0 : parseFreeQuantity(body.freeQuantity)
-      if (!Number.isFinite(paid) || free == null || paid < 0 || paid + free <= 0) {
+      if (!Number.isFinite(paid) || free == null || paid < 0 || paid + free <= 0
+        || (session && (typeof body.quantity !== 'number' || paid > 1_000_000_000))) {
         line.reason ||= 'invalid_quantity'
         return line
       }
       const rawCost = value('unitCostUsd', 'unit_cost_usd')
+      if (rawCost != null && Number(rawCost) < 0) line.reason ||= 'cost_negative'
+      if (session && rawCost != null && (typeof rawCost !== 'number' || rawCost > 1_000_000_000)) line.reason ||= 'invalid_cost'
       let cost = input.wire === 'adjust' && rawCost != null
         ? roundMoney4(typeof rawCost === 'string' ? rawCost : Number(rawCost))
         : nullableMoney4(rawCost as number | string | null)
       if (cost != null && (!Number.isFinite(cost) || cost < 0)) line.reason ||= 'cost_negative'
       const freeGoods = value('freeGoods', 'free_goods') === true || (!session && paid === 0 && free > 0)
       line.reason ||= stockReceiptGateCode({ isStockIn: true, supplierName: line.supplierName,
-        lotAttributionDeferred: batchId != null || line.supplierId != null,
+        lotAttributionDeferred: batchId != null,
         unitCostUsd: cost, freeGoods, quantity: paid, freeQuantity: free }) || null
       if (cost != null) multiplyMoney4(cost, paid)
       if (free > 0) cost = paid === 0 ? 0 : effectiveUnitCost(paid, free, cost ?? 0)

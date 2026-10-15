@@ -72,6 +72,24 @@ async function check(name,action) {
   try{await action();checks++;console.log(`PASS ${name}`)}finally{f.sql().close()}
 }
 async function main() {
+  if(process.env.RECEIVING_PREVIEW_WORKER_ONLY==='1')return wholeWorker()
+  await check('raw negative sub-four-place receipt cannot round into free goods',async()=>{
+    for(const wire of ['receive','adjust']) {
+      const input={...line(-0.00001,1,{freeGoods:true}),wire}
+      assert.equal((await writer(input)).status,400)
+      const result=await preview([input]);assert.equal(result.body.results[0].status,'unavailable')
+    }
+  })
+  await check('malformed JSON primitives cannot turn advisory validation into500',async()=>{
+    for(const field of ['wire','productId','branchId','supplierId','supplierName','receivedDate','batchId']) {
+      const input=line(3)
+      if(field==='wire')input.wire={toString:0}
+      else input.body[field]={toString:0}
+      const result=await preview([input]);assert.equal(result.status,200);assert.equal(result.body.results[0].status,'unavailable',field)
+    }
+    const supplier=await preview([line(3,1,{supplierName:null,supplierId:1})]);assert.equal(supplier.body.results[0].reason,'supplier_required')
+    for(const quantity of ['2',1_000_000_001])assert.equal((await preview([{key:'atomic',wire:'stock_session',body:{kind:'receive',product_id:1,branch_id:1,quantity,unit_cost_usd:6,received_date:'03/09/2026',supplier_name:'Acme'}}])).body.results[0].reason,'invalid_quantity')
+  })
   await check('excluded free quantities use eligible weight',async()=>{await add(4,5);await add(0,5,'02/09/2026');await parity(line(8,5),6)})
   await check('unrounded numerator differs from rounded catalog reconstruction',async()=>{await add(1.0001);await add(1.0002,1,'02/09/2026');assert.equal(f.catalogCost().usd,1.0002);await parity(line(1.0001),1.0001)})
   await check('manual positive baseline weights overridden stock',async()=>{await add(4,4);manual(10);await add(20,2,'02/09/2026');await parity(line(30,2),17.5)})
@@ -123,6 +141,63 @@ async function main() {
     console.log('PLAN '+JSON.stringify(plans.map(row=>row.detail)))
   })
   console.log(`PASS ${checks} native groups; all forecasts read-only; cloned real writer parity`)
+  if(process.env.RECEIVING_PREVIEW_SQLITE_ONLY!=='1')await wholeWorker()
+}
+
+async function wholeWorker() {
+  const {startWorker}=require('./harness/al_money_native.cjs')
+  for(const tier of ['free','paid']) {
+    process.env.AL_PLAN_TIER=tier
+    const h=await startWorker()
+    try {
+      for(let id=1;id<=25;id++)await h.db.prepare('INSERT INTO products(id,name,cost_price_usd,cost_price_khr) VALUES(?,?,NULL,123.4567)').bind(id,`Preview ${id}`).run()
+      await h.db.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Inactive fixture',0)").run()
+      const lines=Array.from({length:25},(_,i)=>({...line(8),key:`line-${i}`,body:{...line(8).body,productId:i+1}}))
+      const tables=await h.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
+      const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async({name})=>[name,(await h.all(`SELECT * FROM "${name.replaceAll('"','""')}"`)).map(row=>JSON.stringify(row)).sort()])))
+      const before=await snapshot()
+      for(const size of [1,25]) {
+        const result=await h.call('POST','/api/products/receiving-cost-preview',{lines:lines.slice(0,size)},`${tier} ${size} preview`)
+        assert.equal(result.status,200,JSON.stringify(result.body))
+        assert.equal(result.body.results.length,size)
+        assert.ok(result.body.results.every(row=>row.status==='ready'&&row.beforeUsd===null&&row.afterUsd===8))
+      }
+      const measured=h.metrics.filter(m=>m.label.endsWith(' preview'))
+      assert.equal(measured[0].statements,measured[1].statements,'full request query count constant from1to25')
+      assert.ok(measured.every(m=>m.statements<=(tier==='free'?50:1000)))
+      assert.deepEqual(await snapshot(),before,'actual full Worker preview creates no persistent database changes')
+      const viewer=await h.addEmployee(911,'preview_viewer',{products:true,inventory:true,product_cost_view:true})
+      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} viewer`,{cookie:viewer})).status,200)
+      await h.db.prepare('UPDATE users SET permissions=? WHERE id=911').bind(JSON.stringify({product_cost_view:false})).run()
+      const revoked=await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} revoked viewer`,{cookie:viewer})
+      assert.equal(revoked.status,403,JSON.stringify(revoked.body));assert.equal(revoked.body.results,undefined)
+      const blind=await h.addEmployee(912,'preview_blind',{products:true,inventory:true,product_cost_edit:true})
+      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} cost edit alone`,{cookie:blind})).status,403)
+      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} no session`,{cookie:null})).status,401)
+      const inactive=await h.call('POST','/api/products/receiving-cost-preview',{lines:[line(8,1,{branchId:2})]},`${tier} inactive branch`)
+      assert.equal(inactive.body.results[0].reason,'branch_unavailable')
+      const negative=await h.call('POST','/api/products/receiving-cost-preview',{lines:[line(-0.00001,1,{freeGoods:true})]},`${tier} raw negative`)
+      assert.equal(negative.body.results[0].status,'unavailable')
+      for(let id=1;id<=25;id++) {
+        await h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) VALUES(?,?,'2026-09-01',4,1)").bind(id,`preview-base-${id}`).run()
+        const batch=await h.one('SELECT MAX(id) id FROM product_batches')
+        await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,2)').bind(batch.id).run()
+      }
+      await h.db.prepare("WITH RECURSIVE ids(id) AS (SELECT 100 UNION ALL SELECT id+1 FROM ids WHERE id<599) INSERT INTO products(id,name) SELECT id,'Unrelated '||id FROM ids").run()
+      await h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) SELECT id,'unrelated-'||id,'2026-09-01',99,1 FROM products WHERE id>=100").run()
+      await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,1,100 FROM product_batches WHERE variant_product_id>=100').run()
+      for(const size of [1,25]) {
+        const normalized=helper.parseReceivingCostPreview({lines:lines.slice(0,size)})
+        const query=await h.db.prepare(helper.RECEIVING_COST_PREVIEW_SQL).bind(JSON.stringify(normalized)).all().catch(error=>{throw new Error('raw preview row measurement: '+error.message)})
+        assert.equal(query.results.length,size)
+        assert.ok(query.results.every(row=>row.afterUsd===5.3333))
+        console.log(`ROWS ${tier} lines=${size} requestedLots=${size} unrelatedLots=500 rows_read=${query.meta.rows_read} rows_written=${query.meta.rows_written}`)
+        assert.equal(query.meta.rows_written,0)
+      }
+      console.log('HTTP '+JSON.stringify({tier,metrics:h.metrics.filter(m=>!m.label.startsWith('login'))}))
+      console.log(`PASS ${tier} whole Worker authenticated current permissions,1/25constant budgets,scope and zero persistent writes`)
+    } finally {await h.mf.dispose()}
+  }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
 
