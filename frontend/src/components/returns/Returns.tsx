@@ -696,6 +696,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
 
   const stripCards = useMemo<StatCardDef[]>(() => {
+    const supplierValue = (row: ReturnsStripRow, field: 'compensation' | 'loss', detail = false) => (
+      <span style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'right', ...(detail ? { width: 'min(55vw, 16rem)' } : { maxWidth: '100%' }) }}>
+        <span style={{ display: 'block' }}>{supplierMoney(row[`${field}_usd`], 'usd', Number(row[`${field}_usd_unknown_count`]) || 0)}</span>
+        <span style={{ display: 'block' }}>{supplierMoney(row[`${field}_khr`], 'khr', Number(row[`${field}_khr_unknown_count`]) || 0)}</span>
+      </span>
+    )
     const totals = stripData?.totals || {}
     const byType = stripData?.by_type || []
     const byReason = (stripData?.by_reason || []).slice(0, 8)
@@ -719,18 +725,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         {
           key: 'compensation',
           label: tr('supplier_compensation', 'Compensation'),
-          value: supplierMoney(totals.compensation_usd, 'usd', Number(totals.compensation_usd_unknown_count) || 0) + ' · ' + supplierMoney(totals.compensation_khr, 'khr', Number(totals.compensation_khr_unknown_count) || 0),
+          value: supplierValue(totals, 'compensation'),
           tone: 'ok' as const,
           hint: tr('stats_supplier_compensation_hint', 'Money or credit the supplier gave back for goods you returned, broken down by reason.'),
-          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierMoney(row.compensation_usd, 'usd', Number(row.compensation_usd_unknown_count) || 0) + ' · ' + supplierMoney(row.compensation_khr, 'khr', Number(row.compensation_khr_unknown_count) || 0) })),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierValue(row, 'compensation', true) })),
         },
         {
           key: 'loss',
           label: tr('business_loss', 'Business loss'),
-          value: supplierMoney(totals.loss_usd, 'usd', Number(totals.loss_usd_unknown_count) || 0) + ' · ' + supplierMoney(totals.loss_khr, 'khr', Number(totals.loss_khr_unknown_count) || 0),
+          value: supplierValue(totals, 'loss'),
           tone: (Number(totals.loss_usd) || 0) > 0 ? ('crit' as const) : undefined,
           hint: tr('stats_business_loss_hint', 'What the returned goods cost you that the supplier did NOT cover — money the shop absorbs, broken down by reason.'),
-          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierMoney(row.loss_usd, 'usd', Number(row.loss_usd_unknown_count) || 0) + ' · ' + supplierMoney(row.loss_khr, 'khr', Number(row.loss_khr_unknown_count) || 0), tone: (Number(row.loss_usd) || 0) > 0 ? ('crit' as const) : undefined })),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: supplierValue(row, 'loss', true), tone: (Number(row.loss_usd) || 0) > 0 ? ('crit' as const) : undefined })),
         },
       ].filter(card => canViewCosts || card.key === 'cases')
     }
