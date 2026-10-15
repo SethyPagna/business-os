@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real Hono handlers, permission policy, receipt/stock/lot helpers and SQLite.
 // Only session acquisition, duplicate-product resolution and notifications are mocked.
@@ -61,18 +62,34 @@ function load(relative) {
   return module.exports
 }
 const apps = { branches: load('routes/branches.ts').default, inventory: load('routes/inventory.ts').default }
-for (const app of Object.values(apps)) app.onError((error, c) => c.json({ error: error.message }, 500))
+const entry = ts.createSourceFile('index.ts', fs.readFileSync(path.join(__dirname, '../src/index.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
+const onError = entry.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(entry) === 'app.onError')
+const refusalStatements = onError.expression.arguments[0].body.statements.slice(0, 2).map(node => node.getText(entry)).join('\n')
+assert.match(refusalStatements, /stockTransactionRefusal\(error\)/)
+assert.match(refusalStatements, /if \(transactionRefusal\) return c\.json\(\{ success: false, \.\.\.transactionRefusal \}, 503\)/)
+const stockTransaction = withProductStockGuard(require)('../lib/stockTransaction')
+const onFixtureError = new Function('stockTransactionRefusal', `return (error, c) => { ${refusalStatements}; return c.json({ error: error.message }, 500) }`)(stockTransaction.stockTransactionRefusal)
+for (const app of Object.values(apps)) app.onError(onFixtureError)
 
 function fresh(count = 3, from = 1, beforeMigration = null) {
   sqlite = new Database(':memory:')
   const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && (!beforeMigration || file < beforeMigration)).sort()
   for (const file of migrations) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1),(3,'Other',1)")
-  for (let id = 1; id <= count; id++) {
+  const seed = () => {
+    for (let id = 1; id <= count; id++) {
     sqlite.prepare('INSERT INTO products(id,name,stock_quantity) VALUES(?,?,10)').run(id, `Product ${id}`)
     sqlite.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,10)').run(id, from)
     sqlite.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at) VALUES(?,?,?,?,'2026-09-01')").run(id, id, `lot-${id}`, `lot-${id}`)
     sqlite.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,10)').run(id, from)
+    }
+  }
+  if (beforeMigration && Number(beforeMigration.slice(0, 4)) <= 243) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+    seed()
+  } else {
+    seedStockFixture(sqlite, seed)
+    assert.throws(() => sqlite.exec('UPDATE products SET stock_quantity=stock_quantity WHERE id=1'), /stock_transaction_required/)
   }
   auditRows = captureAuditBaseline(sqlite)
   beforeBatch = null; waits = []; mergeTarget = null; failStatement = null
@@ -129,14 +146,14 @@ async function main() {
   for (const [app, route] of [['branches', '/transfer'], ['branches', '/transfer-bulk'], ['inventory', '/transfer']]) {
     for (const mutation of ['delete', 'drain', 'deactivate', 'delete-lot', 'deactivate-lot']) await check(`${app}${route}: ${mutation} source after preflight rolls back`, async () => {
       fresh()
-      beforeBatch = () => sqlite.exec(mutation === 'delete' ? 'DELETE FROM branch_stock WHERE product_id=1 AND branch_id=1'
+      beforeBatch = () => seedStockFixture(sqlite, () => sqlite.exec(mutation === 'delete' ? 'DELETE FROM branch_stock WHERE product_id=1 AND branch_id=1'
         : mutation === 'delete-lot' ? 'DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1'
         // Since 0154 a stocked lot cannot be deactivated (the mutation itself
         // used to throw here, so this case never reached a transfer guard):
         // a lot retires only once empty.
         : mutation === 'deactivate-lot' ? 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=1; UPDATE product_batches SET is_active=0 WHERE id=1'
         : mutation === 'drain' ? 'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1'
-          : 'UPDATE branches SET is_active=0 WHERE id=2')
+          : 'UPDATE branches SET is_active=0 WHERE id=2'))
       const response = await request(app, route, intent(1, 3, 'transfer_race_001', route.endsWith('bulk')))
       // A guard refusal, not a server error: 409 with a code the client localizes.
       assert.equal(response.status, 409, JSON.stringify(response))
@@ -176,7 +193,7 @@ async function main() {
   }
   await check('explicit lot deleted after preflight rolls back branch totals and receipt', async () => {
     fresh()
-    beforeBatch = () => sqlite.exec('DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1')
+    beforeBatch = () => seedStockFixture(sqlite, () => sqlite.exec('DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1'))
     const result = await request('branches', '/transfer', { ...intent(1, 1, 'transfer_explicit_001', false), batchId: 1 })
     assert.equal(result.status, 409, JSON.stringify(result))
     assert.equal(result.body.code, 'transfer_stock_changed')
@@ -188,7 +205,12 @@ async function main() {
     await check(`${app}${route}: ${mode} marker after admission blocks the entire transfer`, async () => {
       fresh()
       const body = intent(1, route.endsWith('bulk') ? 3 : 1, `maintenance_${mode}_${route.endsWith('bulk') ? 'bulk' : 'single'}`, route.endsWith('bulk'))
-      beforeBatch = () => sqlite.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+      const maintenanceValue = mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })
+      beforeBatch = () => {
+        seedStockFixture(sqlite, () => sqlite.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(maintenanceValue))
+        assert.equal(sqlite.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, maintenanceValue)
+        assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      }
       const blocked = await request(app, route, body)
       if (mode === 'corrupt') {
         // A restore-guard trigger's json_extract(value,'$.mode') fails on the
@@ -197,11 +219,11 @@ async function main() {
         assert.notEqual(blocked.status, 200)
       } else {
         assert.equal(blocked.status, 503, JSON.stringify(blocked))
-        assert.equal(blocked.body.code, 'maintenance_active')
+        assert.equal(blocked.body.code, 'stock_schema_unavailable')
       }
       assert.deepEqual(counts(), { transfer_operation_receipts: 0, audit_logs: 0, stock_transfers: 0, inventory_movements: 0 })
       assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
-      sqlite.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+      seedStockFixture(sqlite, () => sqlite.prepare("DELETE FROM system_flags WHERE key='maintenance'").run())
       const retry = await request(app, route, body)
       assert.equal(retry.status, 200, JSON.stringify(retry))
       assert.equal(retry.body.replayed, false)
