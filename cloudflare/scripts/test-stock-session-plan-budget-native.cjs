@@ -2,9 +2,12 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const { Hono } = require('hono')
 const { fixture, loadStockSession, user, receiveRequest, seedDistinctProducts } = require('./test-stock-session-atomic.cjs')
+const { stockTransactionStatementCount } = loadStockSession('lib/stockTransaction.ts')
+const coldKernelStatements = stockTransactionStatementCount(33)
 function measuredFixture() {
   const f = fixture(), raw = f.env.DB
   let queries = 0, batches = 0
+  const batchSql = []
   const statement = p => new Proxy(p, { get(t,k) {
     if(k === 'bind') return (...params) => statement(t.bind(...params))
     if(['first','all','run'].includes(k)) return (...params) => { queries += 1; return t[k](...params) }
@@ -12,10 +15,10 @@ function measuredFixture() {
   } })
   f.env.DB = new Proxy(raw, { get(t,k) {
     if(k === 'prepare') return sql => statement(t.prepare(sql))
-    if(k === 'batch') return statements => { queries += statements.length; batches += 1; return t.batch(statements) }
+    if(k === 'batch') return statements => { batchSql.push(statements.map(statement => statement.text)); queries += statements.length; batches += 1; return t.batch(statements) }
     return t[k]
   } })
-  return Object.assign(f, { count: () => queries, batches: () => batches, reset() { queries = 0; batches = 0 } })
+  return Object.assign(f, { count: () => queries, batches: () => batches, batchSql, reset() { queries = 0; batches = 0; batchSql.length = 0 } })
 }
 async function outerProof(staleAuth) {
   const f=measuredFixture(),core=loadStockSession('lib/coreDataInvariants.ts')
@@ -42,8 +45,12 @@ async function outerProof(staleAuth) {
   const body = receiveRequest('free-one-line-budget')
   const beforeProduct = f.sql.prepare('SELECT * FROM products WHERE id=1').get()
   const receipt = await commitStockSession(f.env,user,body)
-  assert.ok(f.count() <= 33, `cold kernel ${f.count()} must leave measured outer headroom`)
+  assert.equal(f.count(), coldKernelStatements)
   assert.equal(f.batches(),1)
+  assert.match(f.batchSql[0][0], /INSERT INTO system_flags[\s\S]*stock_transaction_permit/)
+  assert.match(f.batchSql[0].at(-1), /DELETE FROM system_flags[\s\S]*stock_transaction_permit/)
+  assert.equal(f.batchSql[0].filter(sql => /(?:INSERT INTO|DELETE FROM) system_flags[\s\S]*stock_transaction_permit/.test(sql)).length, 2)
+  assert.equal(f.count() - 2, 33, 'the original business and read statement count is unchanged')
   const operation = f.sql.prepare('SELECT * FROM stock_session_operations WHERE id=?').get(receipt.operationId)
   const snapshot = JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(operation.snapshot_id).payload_json)
   assert.deepEqual(snapshot.after.products, f.sql.prepare('SELECT * FROM products WHERE id=1').all())
@@ -63,11 +70,11 @@ async function outerProof(staleAuth) {
   for (const tier of ['free','paid']) {
     for (const extra of [0,1]) {
       const bound=measuredFixture();bound.env.PLAN_TIER=tier
-      const offset=(tier==='free'?50:1000)-33+extra
+      const offset=(tier==='free'?50:1000)-coldKernelStatements+extra
       const boundedKernel=loadStockSession()
       const perform=()=>boundedKernel.commitStockSession(bound.env,user,receiveRequest('boundary-'+tier+'-'+extra),null,{statementsUsed:()=>offset,reserveStatements:0})
       if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(bound.batches(),0);assert.equal(bound.auditRows().length,0)}
-      else {await perform();assert.equal(bound.count(),33)}
+      else {await perform();assert.equal(bound.count(),coldKernelStatements)}
     }
   }
   const paid=measuredFixture();paid.env.PLAN_TIER='paid';seedDistinctProducts(paid,25)
@@ -86,7 +93,7 @@ async function outerProof(staleAuth) {
   assert.equal(paid.count(),1,'successful compensation replay must resolve first')
   const lost=measuredFixture();lost.env.PLAN_TIER='free';lost.loseNextCommitAcknowledgement()
   const lostResult=await commitStockSession(lost.env,user,receiveRequest('free-lost-reply-budget'))
-  assert.equal(lostResult.replayed,true);assert.equal(lost.batches(),1);assert.equal(lost.count(),33)
+  assert.equal(lostResult.replayed,true);assert.equal(lost.batches(),1);assert.equal(lost.count(),coldKernelStatements)
   assert.equal(lost.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,1)
   assert.equal(lost.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)
   f.reset()

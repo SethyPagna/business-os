@@ -1,5 +1,6 @@
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Real SQLite regressions for POST /api/inventory/sessions' commit kernel.
 // These fixtures began red against the legacy receive path: batch metadata
 // survived a later stock failure, and a lost acknowledgement doubled stock.
@@ -155,10 +156,13 @@ function seedDistinctProducts(f, count) {
     VALUES(?,?,?,?,0,0,1)
   `)
   const insertStock = f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)')
-  for (let id = 2; id <= count; id += 1) {
-    insertProduct.run(id, `Session item ${id}`, `SESSION-${id}`, 2)
-    insertStock.run(id)
-  }
+  seedStockFixture(f.sql, () => {
+    for (let id = 2; id <= count; id += 1) {
+      insertProduct.run(id, `Session item ${id}`, `SESSION-${id}`, 2)
+      insertStock.run(id)
+    }
+  })
+  assert.throws(() => f.sql.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1').run(), /stock_transaction_required/)
 }
 
 function zeroCreateRequest(requestId = 'zero-create-request-001', name = 'Catalog only cream') {
