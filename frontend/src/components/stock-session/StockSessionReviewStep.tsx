@@ -51,6 +51,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
                 {review.mode === 'remove' ? <>{stock}{lot ? <><span aria-hidden="true">·</span>{lot}</> : null}<span aria-hidden="true">·</span><span>{review.tag || tr('stock_remove_entirely', 'Remove entirely')}</span></> : null}
                 {review.mode === 'add' ? (
                   <>
+                    {review.lotLabel ? <><span>{review.lotLabel}</span><span aria-hidden="true">·</span></> : null}
                     {stock}
                     {canViewCosts && review.costAfter != null ? <><span aria-hidden="true">·</span><Change label={tr('cost', 'Cost')} before={cost4(review.costBefore)} after={cost4(review.costAfter)} /></> : null}
                     {review.priceAfter != null ? <><span aria-hidden="true">·</span><Change label={tr('price', 'Price')} before={money2(review.priceBefore)} after={money2(review.priceAfter)} /></> : null}
