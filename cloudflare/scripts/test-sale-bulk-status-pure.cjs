@@ -92,6 +92,8 @@ async function run() {
     f.barrier(() => seedStockFixture(f.sql, () => f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(marker)))
     const refused = await f.call(sales, '/bulk-status', input)
     assert.notEqual(refused.status, 200, 'maintenance arriving after HTTP precheck must refuse commit')
+    assert.equal(f.sql.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get()?.value, marker, 'the competing maintenance write actually committed')
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'the competing setup closed admission before business dispatch')
     assert.equal(snapshot(f), before, 'refusal must leave stock, audit, receipt and history untouched')
     f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
     assert.equal((await f.call(sales, '/bulk-status', input)).status, 200, 'same request succeeds after release')
