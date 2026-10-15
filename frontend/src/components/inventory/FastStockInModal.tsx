@@ -5,7 +5,8 @@
 // (per-line 0192 ids, deferred rounds), with the per-line fallback for an old
 // Worker.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { captureActorWriteIdentity, isActorWriteIdentityCurrent, subscribeActorSessionQuarantine } from '../../api/actorReadScope.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, captureActorWriteIdentity, isActorWriteIdentityCurrent, subscribeActorSessionQuarantine } from '../../api/actorReadScope.ts'
+import { SIGNOUT_INTENT_EVENT } from '../../api/unresolvedSignout.ts'
 import { ACTOR_GUARD_KEYS } from '../../api/branchRefusalLanguage.ts'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
@@ -13,7 +14,7 @@ import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatal
 import { effectivePermissions } from '../../utils/permissions.ts'
 import { useProtectedCostEntry } from '../../utils/useProtectedCostEntry.ts'
 import type { SupplierChoice } from '../shared/SupplierPickerField.tsx'
-import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
+import { receiveBatchStock, getProductBatches, getReceivingCostPreview, receivingCostPreviewBatches, type ReceivingCostPreviewLine, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
 import { getProductFilters, searchProducts } from '../../api/methods.ts'
 import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
@@ -70,6 +71,7 @@ import {
   type StockSessionLine,
   type StockSessionProduct,
   type StockSessionStep,
+  type ReceivingCostEstimate,
 } from '../../utils/stockSessionDraft.ts'
 import { convertLegacyStockDraft, type LegacyStockDraft } from '../../utils/legacyStockDrafts.ts'
 import { discardStockAdjustDraft, stockAdjustDraftKey } from '../../utils/stockAdjustDraft.ts'
@@ -1229,7 +1231,64 @@ export default function FastStockInModal({
       : `${tr('paid', 'Paid')}${amount}`
     return [first, `${formatBatchReceivedDate(receivedDate) || receivedDate} · ${payment}`].filter(Boolean)
   })()
-  const reviews = currentStep === 'review' ? pendingLines.map((line) => reviewStockLine(line, branchId)) : []
+  const [previewActorEpoch, setPreviewActorEpoch] = useState(0)
+  const previewAbortRef = useRef<AbortController | null>(null)
+  const [costEstimates, setCostEstimates] = useState<{ signature: string; values: Record<string, ReceivingCostEstimate> }>({ signature: '', values: {} })
+  const previewScope = captureActorReadScope('receiving-cost-preview')
+  const canPreview = currentStep === 'review' && canViewCosts && !saving && !signInChanged && !destinationInvalid
+    && isActorWriteIdentityCurrent(receivingIdentity) && isActorReadScopeCurrent(previewScope)
+  const productCounts = new Map<number, number>()
+  for (const line of pendingLines) productCounts.set(Number(line.product.id), (productCounts.get(Number(line.product.id)) || 0) + 1)
+  const previewRequests: ReceivingCostPreviewLine[] = canPreview ? pendingLines.flatMap(line => {
+    if (line.mode !== 'add' || submissionsRef.current.requests[line.key] || !(Number(line.product.id) > 0) || line.createdProduct || line.createPayload || lineNeedsCreate(line) || line.needsRemoval || productCounts.get(Number(line.product.id)) !== 1) return []
+    try { return [buildLineRequest(line)] } catch { return [] }
+  }) : []
+  const previewBatches = receivingCostPreviewBatches(previewRequests)
+  const previewKeys = new Set(previewBatches.flat().map(line => line.key))
+  const previewSignature = canPreview ? JSON.stringify([previewScope, [user?.id, user?.organization_id, user?.role_code, user?.permissions, user?.role_permissions], previewActorEpoch, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, pendingLines, previewBatches]) : ''
+  const previewSignatureRef = useRef(previewSignature)
+  previewSignatureRef.current = previewSignature
+  useEffect(() => {
+    const invalidate = () => { previewAbortRef.current?.abort(); setPreviewActorEpoch(epoch => epoch + 1) }
+    const unsubscribe = subscribeActorSessionQuarantine(invalidate)
+    window.addEventListener(SIGNOUT_INTENT_EVENT, invalidate)
+    window.addEventListener('storage', invalidate)
+    return () => { unsubscribe(); window.removeEventListener(SIGNOUT_INTENT_EVENT, invalidate); window.removeEventListener('storage', invalidate) }
+  }, [])
+  useEffect(() => {
+    if (!previewSignature) { setCostEstimates({ signature: '', values: {} }); return }
+    const controller = new AbortController()
+    previewAbortRef.current = controller
+    const values: Record<string, ReceivingCostEstimate> = Object.fromEntries(pendingLines.filter(line => line.mode === 'add').map(line => [line.key, { status: previewKeys.has(line.key) ? 'calculating' : 'unavailable' }]))
+    setCostEstimates({ signature: previewSignature, values: { ...values } })
+    const current = () => !controller.signal.aborted && previewSignatureRef.current === previewSignature && isActorReadScopeCurrent(previewScope)
+    void (async () => {
+      for (const batch of previewBatches) {
+        try {
+          const response = await getReceivingCostPreview(batch, controller.signal)
+          if (!current()) return
+          if (response?.advisory !== true || !Array.isArray(response.results)) throw new Error('Invalid receiving cost preview')
+          for (const request of batch) {
+            values[request.key] = { status: 'unavailable' }
+            const result = response.results.find(row => row.key === request.key && Number(row.productId) === Number((request.body as Record<string, unknown>).productId))
+            const money = (value: unknown) => value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+            if (result?.status === 'ready' && money(result.beforeUsd) && money(result.afterUsd)) values[request.key] = { status: 'ready', beforeUsd: result.beforeUsd, afterUsd: result.afterUsd }
+          }
+          setCostEstimates({ signature: previewSignature, values: { ...values } })
+        } catch {
+          if (!current()) return
+          for (const request of previewBatches.flat()) if (values[request.key]?.status !== 'ready') values[request.key] = { status: 'unavailable' }
+          setCostEstimates({ signature: previewSignature, values: { ...values } })
+          return
+        }
+      }
+    })()
+    return () => { controller.abort(); if (previewAbortRef.current === controller) previewAbortRef.current = null }
+  }, [previewSignature])
+  const reviews = currentStep === 'review' ? pendingLines.map(line => reviewStockLine(line, branchId,
+    canPreview && isActorReadScopeCurrent(previewScope) && costEstimates.signature === previewSignature
+      ? costEstimates.values[line.key] ?? { status: 'unavailable' }
+      : { status: canPreview && previewKeys.has(line.key) ? 'calculating' : 'unavailable' })) : []
 
   const footerPrimary = currentStep === 'review'
     ? tr('complete_session', 'Complete Session')

@@ -3,7 +3,7 @@
 // tests share. React-free on purpose.
 import { adjustBranchQuantity, receiptDeclaresFree, scopedSetPreview, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, stockReceiptGateCode, type StockReceiptGateCode } from './stockReceiptFields.ts'
 import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from './moneyPrecision.ts'
-import { effectiveUnitCost, estimateCatalogCostAfter, matchCostsToPaid, paidItemsTotal, supplierTotalMatches } from './stockSessionMath.ts'
+import { matchCostsToPaid, paidItemsTotal, supplierTotalMatches } from './stockSessionMath.ts'
 import { formatBatchReceivedDate, lotCodeAsDate } from './batchLabel.ts'
 import { batchReceivedInstant, sortLotsForDisplay } from './lotDisplayOrder.ts'
 import type { ProductRecord } from './productGrouping.ts'
@@ -695,12 +695,17 @@ export type StockLineReview = {
   lotAfter: number | null
   costBefore: number | null
   costAfter: number | null
+  costPreview?: ReceivingCostEstimate
   priceBefore: number | null
   priceAfter: number | null
   tag: string
   reason: string
   freeQuantity: number
 }
+
+export type ReceivingCostEstimate =
+  | { status: 'calculating' | 'unavailable' }
+  | { status: 'ready'; beforeUsd: number | null; afterUsd: number | null }
 
 export function catalogCostOf(product: StockSessionProduct): number | null {
   const raw = product.cost_price_usd !== undefined ? product.cost_price_usd : product.purchase_price_usd
@@ -709,12 +714,7 @@ export function catalogCostOf(product: StockSessionProduct): number | null {
   return Number.isFinite(cost) && cost >= 0 ? cost : null
 }
 
-/**
- * Before and after for one line, from what the float read when the line was
- * picked. An estimate for the review only: the Worker recomputes the catalog
- * cost from the lots (catalogCostRecompute.ts) and its value is the one kept.
- */
-export function reviewStockLine(line: StockSessionLine, branchId: string): StockLineReview {
+export function reviewStockLine(line: StockSessionLine, branchId: string, costPreview: ReceivingCostEstimate = { status: 'unavailable' }): StockLineReview {
   const stockBefore = adjustBranchQuantity(line.product.branch_stock, branchId, line.product.stock_quantity)
   const base = {
     key: line.key, name: line.productName, barcode: String(line.product.barcode || ''), mode: line.mode, stockBefore, lotLabel: line.batchLabel,
@@ -724,16 +724,15 @@ export function reviewStockLine(line: StockSessionLine, branchId: string): Stock
   if (line.mode === 'add') {
     const added = Math.max(0, line.quantity) + Math.max(0, line.freeQuantity)
     const currentCost = catalogCostOf(line.product)
-    const wireCost = lineWireUnitCost(line)
-    const addedCost = wireCost == null ? null : effectiveUnitCost(line.quantity, line.freeQuantity, wireCost)
     const price = lineSellingPriceChange(line)
     return {
       ...base,
       stockAfter: stockBefore + added,
       lotBefore: null,
       lotAfter: null,
-      costBefore: currentCost,
-      costAfter: addedCost == null ? currentCost : estimateCatalogCostAfter(toNumber(line.product.stock_quantity), currentCost, added, addedCost),
+      costBefore: costPreview.status === 'ready' ? costPreview.beforeUsd : currentCost,
+      costAfter: costPreview.status === 'ready' ? costPreview.afterUsd : null,
+      costPreview,
       priceBefore: price == null ? null : (line.product.selling_price_usd == null ? null : toNumber(line.product.selling_price_usd)),
       priceAfter: price,
     }

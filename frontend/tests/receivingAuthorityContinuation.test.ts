@@ -30,16 +30,17 @@ function extract(text: string, name: string, dependencies: Record<string, any>):
   const compiled = ts.transpileModule(declaration, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
   return new Function(...Object.keys(dependencies), 'exports', `${compiled}; return ${name}`)(...Object.values(dependencies), {})
 }
-function effectCallback(text: string, marker: string): string {
+function effectCallback(text: string, marker: string, unique = false): string {
   const tree = ts.createSourceFile('modal.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  let callback: ts.Node | undefined
+  const callbacks: ts.Node[] = []
   const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes(marker)) callback = node.arguments[0]
+    if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes(marker)) callbacks.push(node.arguments[0])
     ts.forEachChild(node, visit)
   }
   visit(tree)
-  assert(callback, marker)
-  return callback.getText(tree)
+  assert(callbacks.length, marker)
+  if (unique) assert.equal(callbacks.length, 1, `exactly one effect matches ${marker}`)
+  return callbacks.at(-1)!.getText(tree)
 }
 const http = source('api/http.ts'), transport = source('api/inventoryWriteTransport.ts'), modal = source('components/inventory/FastStockInModal.tsx')
 
@@ -511,7 +512,11 @@ await check('autosave: the same owner keeps saving through churn; another owner 
 })
 await check('a locked session shows the message, and the same owner confirmed again clears it', async () => {
   const receivingIdentity = actor.captureActorWriteIdentity(), flags: boolean[] = []
-  const subscribe = extract(`const subscribe = ${effectCallback(modal, 'subscribeActorSessionQuarantine')}`, 'subscribe', {
+  const ownerBannerEffect = effectCallback(modal, 'queueMicrotask(() => setSignInChanged', true)
+  assert.throws(() => effectCallback(`${modal}\nuseEffect(${ownerBannerEffect}, [])`, 'queueMicrotask(() => setSignInChanged', true), /exactly one effect/, 'a duplicate owner-banner candidate is refused')
+  assert.match(ownerBannerEffect, /subscribeActorSessionQuarantine\(\(\) =>/)
+  assert.match(ownerBannerEffect, /isActorWriteIdentityCurrent\(receivingIdentity\)/)
+  const subscribe = extract(`const subscribe = ${ownerBannerEffect}`, 'subscribe', {
     subscribeActorSessionQuarantine: actor.subscribeActorSessionQuarantine, isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent,
     receivingIdentity, setSignInChanged: (value: boolean) => flags.push(value),
   })
