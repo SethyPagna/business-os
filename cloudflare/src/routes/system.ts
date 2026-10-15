@@ -745,7 +745,13 @@ app.post('/reset-section', async (c) => {
   }
 
   try {
-    await db.batch(config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+    await db.batch([
+      ...(section === 'audit_log' ? [{ sql: `SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product'
+          AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.version')=1
+      ) THEN 1 ELSE json_extract('[1]', '$[merge_cost_review_history_required]') END` }] : []),
+      ...config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })),
+    ])
 
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
       label: `${config.label} reset - ${config.tables.join(', ')} cleared`,
@@ -762,6 +768,9 @@ app.post('/reset-section', async (c) => {
       message: `${config.label} reset complete - all ${config.label.toLowerCase()} records deleted. Everything else kept. A fresh backup was taken first.`,
     })
   } catch (error) {
+    if (section === 'audit_log' && String(error).includes('merge_cost_review_history_required')) {
+      return c.json({ success: false, code: 'merge_cost_review_history_required', error: 'Audit history is required for merged product cost review. No records were deleted.' }, 409)
+    }
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
   }
 })

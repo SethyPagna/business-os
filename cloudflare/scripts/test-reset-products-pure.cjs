@@ -201,6 +201,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
       backupCallLog.push('called')
       sectionBackupTables = [...tables]
       if (backupShouldFail) throw new Error('simulated backup failure')
+      if (sectionBackupHook) await sectionBackupHook()
       return { name: 'fake-section-backup' }
     },
   },
@@ -233,6 +234,7 @@ const ALL_IMPORT_RESET_TABLES = [
 let backupCallLog = []
 let backupShouldFail = false
 let sectionBackupTables = null
+let sectionBackupHook = null
 
 const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
@@ -370,6 +372,27 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('audit reset refuses merge evidence inserted after its backup and preserves every row', async () => {
+    seed()
+    const snapshot = () => rawDbHandle.prepare('SELECT * FROM audit_logs ORDER BY id').all()
+    let before
+    sectionBackupHook = () => {
+      rawDbHandle.prepare("INSERT INTO audit_logs(action,entity,details) VALUES('cost_override','product',?)")
+        .run([JSON.stringify({ cost_review: { version: 1, kind: 'merge_undo' } })])
+      before = snapshot()
+    }
+    try {
+      const { status, json } = await req('POST', '/reset-section', { section: 'audit_log' })
+      assert.strictEqual(status, 409, JSON.stringify(json))
+      assert.strictEqual(json.code, 'merge_cost_review_history_required')
+      assert.deepStrictEqual(backupCallLog, ['called'])
+      assert.deepStrictEqual(snapshot(), before)
+      assert.strictEqual(count('products'), 2)
+    } finally {
+      sectionBackupHook = null
+      exec("DELETE FROM audit_logs WHERE action='cost_override' AND entity='product'")
+    }
+  })
   await check('reset-data (every mode) and reset-section refuse a missing or wrong current password before any backup or delete', async () => {
     seed()
     backupCallLog = []
