@@ -1649,7 +1649,7 @@ export function buildAtomicMergeHistoryStatements(
   const actorId = user?.id ?? null
   const actorName = actorSnapshot(user)
   const details = JSON.stringify(auditDetails)
-  const reviewPointer = reversal.costReviewOutcome ? ",'cost_authority_version',3,'generation',0" : ''
+  const reviewPointer = reversal.costReviewOutcome ? ",'merge_version',3,'generation',0" : ''
   return [
     {
       sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
@@ -3026,9 +3026,9 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     .get<{ id: number; status: string; reversible: number; undo_payload: string; redo_payload: string }>({ id: historyId })
   let pointer: Record<string, unknown>
   try { pointer = JSON.parse(history?.undo_payload || '') } catch { throw refuse() }
-  if (!history || history.undo_payload !== history.redo_payload || pointer.applier !== 'product.merge' || pointer.cost_authority_version !== 3
+  if (!history || history.undo_payload !== history.redo_payload || pointer.applier !== 'product.merge' || pointer.merge_version !== 3
     || pointer.snapshot_id !== snapshot.id || pointer.operation_id !== reversal.operationId || !Number.isSafeInteger(pointer.generation)
-    || payload.snapshot_id !== snapshot.id || payload.operation_id !== reversal.operationId || payload.cost_authority_version !== 3) throw refuse()
+    || payload.snapshot_id !== snapshot.id || payload.operation_id !== reversal.operationId || payload.merge_version !== 3) throw refuse()
   const state = reversal.costReviewState
   if (pointer.generation === 0 ? state !== undefined : !state || state.generation !== pointer.generation
     || state.from_generation !== Number(pointer.generation) - 1 || !['undo','redo'].includes(state.direction)
@@ -3055,7 +3055,7 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
   const committed = async (): Promise<MergeReversal | null> => {
     const row = await db.prepare(`SELECT s.payload_json,h.undo_payload,h.redo_payload FROM undo_snapshots s JOIN action_history h ON h.id=@history
       WHERE s.id=@snapshot AND json_extract(h.undo_payload,'$.snapshot_id')=s.id AND json_extract(h.undo_payload,'$.operation_id')=@operation
-        AND json_extract(h.undo_payload,'$.cost_authority_version')=3 AND json_extract(h.undo_payload,'$.generation')=@nextGeneration`)
+        AND json_extract(h.undo_payload,'$.merge_version')=3 AND json_extract(h.undo_payload,'$.generation')=@nextGeneration`)
       .get<{ payload_json: string; undo_payload: string; redo_payload: string }>({ history: historyId, snapshot: snapshot.id, operation: reversal.operationId, nextGeneration: generation + 1 })
     if (!row || row.undo_payload !== row.redo_payload) return null
     try {
@@ -3539,7 +3539,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
       assertMergeChoicePermissions([reversal], ctx.user)
 
-      if (Object.hasOwn(reversal, 'costReviewOutcome') || payload.cost_authority_version === 3 || (reversal.bulkClusterPlan as { version?: unknown } | undefined)?.version === 3) {
+      if (Object.hasOwn(reversal, 'costReviewOutcome') || payload.merge_version === 3 || (reversal.bulkClusterPlan as { version?: unknown } | undefined)?.version === 3) {
         return replayMergeCostReview(payload, ctx, snap, reversal)
       }
 

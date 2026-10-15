@@ -44,7 +44,7 @@ await runTest('generation-guarded server appliers send their exact expected gene
 })
 
 await runTest('current merge cost replay sends generation without changing legacy merge requests', () => {
-  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', cost_authority_version: 3, generation: 0 }),
+  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', merge_version: 3, generation: 0 }),
     { require_applied: true, expected_generation: 0 })
   assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', generation: 0 }), { require_applied: true })
 })

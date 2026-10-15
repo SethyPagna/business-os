@@ -135,7 +135,7 @@ function isServerManagedPayload(value: unknown): boolean {
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
   return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
-    || (kind === 'product.merge' && payload.cost_authority_version === 3)
+    || (kind === 'product.merge' && payload.merge_version === 3)
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -432,7 +432,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
     const branchClosure = branchCutoverClosureRefusal(existing)
     if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
-    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.cost_authority_version === 3
+    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.merge_version === 3
     if (!Number(existing.reversible || 0) && !(mergeCostReplay && existing.status === 'recorded')) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }

@@ -135,9 +135,11 @@ async function mergeCases(){
   assert.equal(fingerprint.cost_price_usd,6.1234);assert.equal(fingerprint.cost_price_khr,20500);assert.equal(fingerprint.cost_review_key,null)
   console.log('PASS actual positive-lot merge uses authoritative weighted value with matching final audit and no artificial manual cost entry')
  }finally{state.native.db.close()}
+ for(const quantity of [null,0,3]){
  fresh()
  try{
-  state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown-manual',1,NULL,3);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3);INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,7,'manual',900)")
+  state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown-manual',1,NULL,3);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,"+(quantity??0)+");INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,7,'manual',900)")
+  if(quantity===null)state.native.db.exec("DELETE FROM branch_batch_stock WHERE batch_id=900;DELETE FROM product_batches WHERE id=900")
   const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
   assert.equal(done.status,200,JSON.stringify(done.body))
   const stored=one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=10')
@@ -145,8 +147,24 @@ async function mergeCases(){
   assert.deepEqual(rows('SELECT * FROM product_cost_entries ORDER BY id'),before)
   const event=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
   assert.equal(event.fallback_usd,5);assert.equal(event.after_usd,7);assert.equal(event.recorded_lot,0);assert.equal(event.after_key,stored.cost_review_key)
-  console.log('PASS actual merge keeps saved manual7 over stale catalog5 with only unknown lots, retains review and leaves original manual history unchanged')
+  console.log('PASS actual merge keeps saved manual7 over stale catalog5 with '+(quantity===null?'no lots':quantity===0?'soldout unknown lot':'onhand unknown lot')+', retains review and leaves original manual history unchanged')
  }finally{state.native.db.close()}
+ }
+ for(const manual of [0,-1,'malformed']){
+  fresh()
+  try{
+   state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',0)")
+   state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',0)").run(manual)
+   const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
+   assert.equal(done.status,200,JSON.stringify(done.body))
+   const stored=one('SELECT cost_price_usd,cost_review_key FROM products WHERE id=10')
+   assert.equal(stored.cost_price_usd,manual===0?0:5);assert.match(stored.cost_review_key,/^[a-f0-9]{32}$/)
+   assert.deepEqual(rows('SELECT * FROM product_cost_entries ORDER BY id'),before)
+   const event=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
+   assert.equal(event.after_usd,stored.cost_price_usd)
+   console.log('PASS latest saved manual '+JSON.stringify(manual)+' is validated without selecting an older entry or rewriting history')
+  }finally{state.native.db.close()}
+ }
  fresh()
  try{
   state.tier='free'
