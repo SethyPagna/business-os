@@ -40,8 +40,10 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const rawDb = openDb(loadAll())
+assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
@@ -57,6 +59,7 @@ const db = {
   async batch(items) {
     return rawDb.batch(items)
   },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(this) },
 }
 const fakeEnv = { DB: db }
@@ -69,6 +72,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -83,7 +87,8 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const batchCode = loadReal('lib/batchCode.ts')
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockTransaction = loadReal('lib/stockTransaction.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -234,15 +239,15 @@ async function req(body) {
 }
 
 function seed(startingQuantity) {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;')
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare('INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, @name, @barcode, 1, @qty)')
-    .run({ name: 'Lip Oil A', barcode: 'B123', qty: startingQuantity })
+  seedStockFixture(rawDb,()=>rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;'))
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, @name, @barcode, 1, @qty)')
+    .run({ name: 'Lip Oil A', barcode: 'B123', qty: startingQuantity }))
   if (startingQuantity > 0) {
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @qty)').run({ qty: startingQuantity })
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity, received_cost_usd)
-                   VALUES (10, 1, '09052026', '09052026', '2026-09-05', 1, 2, @qty, @cost)`).run({ qty: startingQuantity, cost: startingQuantity * 2 })
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (10, 1, @qty)').run({ qty: startingQuantity })
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @qty)').run({ qty: startingQuantity }))
+    seedStockFixture(rawDb,()=>rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity, received_cost_usd)
+                   VALUES (10, 1, '09052026', '09052026', '2026-09-05', 1, 2, @qty, @cost)`).run({ qty: startingQuantity, cost: startingQuantity * 2 }))
+    seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (10, 1, @qty)').run({ qty: startingQuantity }))
   }
 }
 

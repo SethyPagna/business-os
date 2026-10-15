@@ -38,8 +38,10 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const rawDb = openDb(loadAll())
+assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
@@ -52,15 +54,8 @@ const db = {
       },
     }
   },
-  async batch(items) {
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
-    return results
-  },
+  async batch(items) { return rawDb.batch(items) },
+  batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(this) },
 }
 const fakeEnv = { DB: db }
@@ -79,6 +74,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -95,7 +91,8 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockTransaction = loadReal('lib/stockTransaction.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
@@ -302,10 +299,10 @@ const BARCODE = '075609215322'
 const nameKeyOf = (value) => String(value).trim().replace(/\s+/g, ' ').toLowerCase()
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Shop', 1, 1)").run()
-  rawDb.prepare('INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (4758, @name, @nameKey, @barcode, 1, 0, 0, 17.0, 17.0, 22.0)')
-    .run({ name: NAME, nameKey: nameKeyOf(NAME), barcode: BARCODE })
+  seedStockFixture(rawDb,()=>rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;'))
+  seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Shop', 1, 1)").run())
+  seedStockFixture(rawDb,()=>rawDb.prepare('INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (4758, @name, @nameKey, @barcode, 1, 0, 0, 17.0, 17.0, 22.0)')
+    .run({ name: NAME, nameKey: nameKeyOf(NAME), barcode: BARCODE }))
 }
 
 const productCount = () => rawDb.prepare('SELECT COUNT(*) AS n FROM products').get({}).n
@@ -396,8 +393,8 @@ async function main() {
 
   await check('a different barcode ALREADY held by a sibling routes there instead of making a third row', async () => {
     seed()
-    rawDb.prepare("INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (47155, @name, @nameKey, '999888777666', 1, 0, 0, 30.0, 30.0, 22.0)")
-      .run({ name: NAME, nameKey: nameKeyOf(NAME) })
+    seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (47155, @name, @nameKey, '999888777666', 1, 0, 0, 30.0, 30.0, 22.0)")
+      .run({ name: NAME, nameKey: nameKeyOf(NAME) }))
     const before = productCount()
     const { json } = await addAtCost(17.0, '999888777666')
     assert.equal(productCount(), before, 'the sibling already exists -- no third row')
