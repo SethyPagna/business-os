@@ -91,7 +91,7 @@ export function useDialogKeyboard(
       if (!wasTopmost || (active && active !== document.body && active.isConnected && !entry.panel?.contains(active))) return
       let origin: DialogEntry | null = entry
       while (origin) {
-        if (available(origin.previousFocus)) { origin.previousFocus.focus(); return }
+        if (origin.previousFocus !== document.body && origin.previousFocus !== document.documentElement && available(origin.previousFocus)) { origin.previousFocus.focus(); return }
         const parent = origin.parent?.panel
         if (parent?.isConnected) {
           if (!available(parent)) return

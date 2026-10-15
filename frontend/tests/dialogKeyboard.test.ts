@@ -19,6 +19,7 @@ const portals = new Map<string, unknown>()
 const doc: Record<string, unknown> & { activeElement: unknown } = {
   activeElement: makeButton('opener'),
   body: makeButton('body'),
+  documentElement: makeButton('html'),
   addEventListener: (_type: string, fn: Listener) => { listeners.push(fn) },
   removeEventListener: (_type: string, fn: Listener) => { const at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1) },
   querySelector: (selector: string) => (selector.includes('data-app-select-menu') && selectMenuOpen ? {} : null),
@@ -156,7 +157,7 @@ console.log('PASS dialogKeyboard: focus, Escape, listbox precedence, Tab wrap, s
 
 
 
-function stackCase(options: { removed?: boolean; disabled?: boolean; inert?: boolean; hidden?: boolean; newer?: boolean; foreign?: boolean; closeBoth?: boolean } = {}): void {
+function stackCase(options: { removed?: boolean; disabled?: boolean; inert?: boolean; hidden?: boolean; newer?: boolean; foreign?: boolean; closeBoth?: boolean; origin?: 'body' | 'html' } = {}): void {
   const opener = makeButton('true opener')
   const priorAttributes: Record<string, string> = {}
   const prior = makeButton('prior field', priorAttributes)
@@ -177,7 +178,7 @@ function stackCase(options: { removed?: boolean; disabled?: boolean; inert?: boo
   const prompt = { isConnected: true, getAttribute: () => null, getClientRects: () => [{}], querySelector: () => promptFirst, querySelectorAll: () => [promptFirst, promptLast], contains: (element: unknown) => element === promptFirst || element === promptLast, closest: () => null }
   doc.activeElement = opener
   useDialogKeyboard({ current: parent }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
-  doc.activeElement = prior
+  doc.activeElement = options.origin === 'body' ? doc.body : options.origin === 'html' ? doc.documentElement : prior
   let dismissed = 0
   useDialogKeyboard({ current: prompt }, { enabled: true, promptOpen: false, onEscape: () => { dismissed += 1 }, onPromptEscape() {} })
   assert.equal(doc.activeElement, promptFirst, 'the prompt owns its actual panel and initial focus')
@@ -213,7 +214,7 @@ function stackCase(options: { removed?: boolean; disabled?: boolean; inert?: boo
   else if (options.foreign) assert.equal(doc.activeElement, foreign, 'closing a prompt cannot steal unrelated live focus')
   else if (options.inert || options.hidden) assert.equal(doc.activeElement, doc.body, 'hidden or inert parent never receives restored focus')
   else if (options.closeBoth) assert.equal(doc.activeElement, opener, 'simultaneous parent/prompt unmount follows the stack back to the true opener')
-  else assert.equal(doc.activeElement, options.removed || options.disabled ? region : prior, 'Escape and clicked Back share safe prior-control/named-region restoration')
+  else assert.equal(doc.activeElement, options.removed || options.disabled || options.origin ? region : prior, 'Escape and clicked Back share safe prior-control/named-region restoration')
   closeNewer?.()
   parentInert = false
   parentHidden = false
@@ -228,6 +229,8 @@ stackCase({ hidden: true })
 stackCase({ newer: true })
 stackCase({ foreign: true })
 stackCase({ closeBoth: true })
+stackCase({ origin: 'body' })
+stackCase({ origin: 'html' })
 let savingControls: Array<ReturnType<typeof makeButton>> = []
 const emptyPanel = { isConnected: true, getAttribute: () => null, getClientRects: () => [{}], closest: () => null, querySelector: () => savingControls[0] ?? null, querySelectorAll: () => savingControls, contains: (element: unknown) => element === emptyPanel || savingControls.includes(element as ReturnType<typeof makeButton>), focus() { doc.activeElement = emptyPanel } }
 useDialogKeyboard({ current: emptyPanel }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
@@ -262,3 +265,13 @@ selectMenuOpen = false
 assert.deepEqual(pages, [120, -120])
 cleanups.pop()!()
 console.log('PASS scoped named-region header paging; body, picker and portal defaults remain native')
+
+for (const rootFocus of [doc.body, doc.documentElement]) {
+  doc.activeElement = rootFocus
+  const before = focusLog.length
+  useDialogKeyboard({ current: panel }, { enabled: true, promptOpen: false, onEscape() {}, onPromptEscape() {} })
+  doc.activeElement = doc.body
+  cleanups.pop()!()
+  assert.deepEqual(focusLog.slice(before), ['first'], 'a dialog without a parent does not fabricate BODY or HTML as an opener')
+}
+console.log('PASS BODY/HTML origin uses live parent fallback; no-parent cleanup leaves background focus alone')
