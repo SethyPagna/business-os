@@ -1669,7 +1669,7 @@ async function replayAtomicSaleAddItems(
       params: { nextGeneration, saleId, stamp, operation: operationId },
     },
     {
-      sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,
+      sql: `UPDATE action_history SET status=@status,reversible=@reversible,last_error=NULL,updated_at=@stamp,
             undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
             redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
             WHERE id=@history`,
@@ -2534,6 +2534,7 @@ export interface ProductMergeGroupSnapshot {
   child_snapshot_ids: number[]
   prefix_fingerprint: string
   generation: number
+  graph_receipt?: { version: 1; generation: number; operation_id:string; applied_prefix:number; graph_state: string }
 }
 
 export function productMergeGroupPrefixFingerprint(
@@ -2597,7 +2598,9 @@ export interface ProductMergeGroupRedoContext {
   historyId: number
   generation: number
   operationId: string
-  completionStatements: (freshReversal: MergeReversal) => AtomicMergeStatement[]
+  graphReversals?: MergeReversal[]
+  graphGuards?: AtomicMergeStatement[]
+  completionStatements: (freshReversal: MergeReversal, receipt?: AtomicMergeGraphReceipt) => AtomicMergeStatement[]
 }
 
 // The products route owns the forward fold. It registers this narrow group
@@ -2615,7 +2618,7 @@ function strictProductMergeGroupSnapshot(value: unknown): ProductMergeGroupSnaps
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   const keys = Object.keys(record).sort()
-  const expected = ['child_snapshot_ids', 'generation', 'group_key', 'prefix_fingerprint', 'review_id', 'version']
+  const expected = ['child_snapshot_ids', 'generation', ...(Object.hasOwn(record,'graph_receipt') ? ['graph_receipt'] : []), 'group_key', 'prefix_fingerprint', 'review_id', 'version']
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return null
   const ids = Array.isArray(record.child_snapshot_ids) ? record.child_snapshot_ids.map(Number) : []
   if (!ids.length || ids.length > 3999 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) return null
@@ -2625,7 +2628,10 @@ function strictProductMergeGroupSnapshot(value: unknown): ProductMergeGroupSnaps
   const groupKey = String(record.group_key || '')
   const prefixFingerprint = String(record.prefix_fingerprint || '')
   if (!reviewId || !groupKey || !/^sha256-[0-9a-f]{64}$/.test(prefixFingerprint)) return null
-  return { version: 1, review_id: reviewId, group_key: groupKey, child_snapshot_ids: ids, prefix_fingerprint: prefixFingerprint, generation }
+  const receipt=record.graph_receipt as ProductMergeGroupSnapshot['graph_receipt']
+  if (receipt && (Object.keys(receipt).sort().join(',')!=='applied_prefix,generation,graph_state,operation_id,version' || receipt.version!==1 || receipt.generation!==generation || typeof receipt.graph_state!=='string'
+    || typeof receipt.operation_id!=='string' || !/^product-merge-group-[a-f0-9]{64}$/.test(receipt.operation_id) || !Number.isSafeInteger(receipt.applied_prefix) || receipt.applied_prefix<0 || receipt.applied_prefix>ids.length)) return null
+  return { version: 1, review_id: reviewId, group_key: groupKey, child_snapshot_ids: ids, prefix_fingerprint: prefixFingerprint, generation, ...(receipt ? {graph_receipt:receipt} : {}) }
 }
 
 function strictProductMergeGroupPointer(payload: Record<string, unknown>): {
@@ -2659,6 +2665,7 @@ async function loadProductMergeGroupReplay(
   db: ReturnType<typeof getDb>
   pointer: NonNullable<ReturnType<typeof strictProductMergeGroupPointer>>
   groupSnapshot: ProductMergeGroupSnapshot
+  groupPayload: string
   association: ProductMergeGroupAssociation
   children: ProductMergeGroupChild[]
 }> {
@@ -2757,7 +2764,7 @@ async function loadProductMergeGroupReplay(
     || (firstReversed >= 0 && index >= firstReversed && child.status !== 'reversed'))) {
     throw new UndoConflictError('This group merge has an invalid child replay sequence.')
   }
-  return { db, pointer, groupSnapshot, association, children }
+  return { db, pointer, groupSnapshot, groupPayload:groupRow.payload_json, association, children }
 }
 
 function productMergeGroupCompletionStatements(args: {
@@ -2772,6 +2779,7 @@ function productMergeGroupCompletionStatements(args: {
   final: boolean
   nextPrefixFingerprint: string
   freshReversal?: MergeReversal
+  graph?: AtomicMergeGraphReceipt
 }): AtomicMergeStatement[] {
   const { direction, user, historyId, groupSnapshotId, association, child, generation, final } = args
   const fromSnapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
@@ -2840,11 +2848,11 @@ function productMergeGroupCompletionStatements(args: {
             WHERE id=@id AND kind=@kind AND CAST(json_extract(payload_json,'$.generation') AS INTEGER)=@generation`,
       params: { status: direction === 'undo' ? 'reversed' : 'applied', nextGeneration, nextPrefixFingerprint: args.nextPrefixFingerprint, stamp, id: groupSnapshotId, kind: PRODUCT_MERGE_GROUP_ACTION_KIND, generation },
     }, {
-      sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,
+      sql: `UPDATE action_history SET status=@status,reversible=@reversible,last_error=NULL,updated_at=@stamp,
             undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
             redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
             WHERE id=@history AND status=@fromStatus`,
-      params: { status: finalHistoryStatus, stamp, nextGeneration, history: historyId, fromStatus: direction === 'undo' ? 'undoable' : 'redoable' },
+      params: { status: direction==='redo' && args.graph ? 'recorded' : finalHistoryStatus, reversible:direction==='redo' && args.graph ? 0 : 1, stamp, nextGeneration, history: historyId, fromStatus: direction === 'undo' ? 'undoable' : 'redoable' },
     }] : []),
     {
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -2857,6 +2865,7 @@ function productMergeGroupCompletionStatements(args: {
         details: JSON.stringify({ via: 'undo_applier', applier: PRODUCT_MERGE_GROUP_ACTION_KIND, review_id: association.review_id, group_key: association.group_key, child_snapshot_id: child.id, generation }),
       },
     },
+    ...(args.graph ? captureProductMergeGroupGraph(args.graph.graph, association.review_id, Number(association.group_ordinal), nextGeneration) : []),
   ]
 }
 
@@ -2958,7 +2967,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     throw new UndoConflictError('An exact group reversal generation is required.', UNDO_HISTORY_STALE_CODE)
   }
   const loaded = await loadProductMergeGroupReplay(ctx.env, payload, Number(ctx.historyId))
-  const { db, pointer, groupSnapshot, association, children } = loaded
+  const { db, pointer, groupSnapshot, groupPayload, association, children } = loaded
   const generation = Number(association.reversal_generation)
   if (pointer.generation !== generation || groupSnapshot.generation !== generation) {
     throw new UndoConflictError('The saved group reversal generation is inconsistent.')
@@ -2973,6 +2982,8 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   if (targetIndex < 0 || targetIndex >= children.length) {
     throw new UndoConflictError(`This group merge is already ${ctx.direction === 'undo' ? 'reversed' : 'applied'}.`, UNDO_ALREADY_DONE_CODE)
   }
+  const preparedGroupGraph = pointer.mergeVersion===3 ? await prepareAtomicMergeGraphReceipt(db, children.map(row=>row.reversal)) : undefined
+  const groupGraphGuard = preparedGroupGraph ? productMergeGroupGraphGuard(preparedGroupGraph.graph, pointer.snapshotId, groupPayload, generation) : undefined
   const child = children[targetIndex]
   const final = ctx.direction === 'undo' ? targetIndex === 0 : targetIndex === children.length - 1
   const nextPrefixFingerprint = final
@@ -2985,9 +2996,9 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     const timestamps = productMergeGroupPredecessorTimestamps(child, children[targetIndex - 1])
     const completion = productMergeGroupCompletionStatements({
       direction: ctx.direction, user: ctx.user, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
-      groupSnapshot, association, child, generation, final, nextPrefixFingerprint,
+      groupSnapshot, association, child, generation, final, nextPrefixFingerprint, graph:preparedGroupGraph,
     })
-    statements.unshift(completion[0], ...currentGraphGuards, ...timestamps.before)
+    statements.unshift(completion[0], ...(groupGraphGuard?[groupGraphGuard]:[]), ...currentGraphGuards, ...timestamps.before)
     if (pointer.mergeVersion === 3) {
       const outcome = parseMergeCostOutcome(child.reversal.costReviewOutcome)
       if (!outcome || !pointer.operationId) throw new UndoConflictError('The grouped merge cost receipt is invalid.')
@@ -3008,9 +3019,10 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
       reviewId: association.review_id, groupOrdinal: Number(association.group_ordinal), groupKey: association.group_key,
       childSnapshotId: child.id, childOrdinal: targetIndex, historyId: Number(ctx.historyId), generation,
       operationId: String(child.reversal.operationId || ''),
-      completionStatements: (freshReversal) => productMergeGroupCompletionStatements({
+      graphReversals:preparedGroupGraph ? children.map(row=>row.reversal) : undefined, graphGuards:groupGraphGuard?[groupGraphGuard]:undefined,
+      completionStatements: (freshReversal, graph) => productMergeGroupCompletionStatements({
         direction: ctx.direction, user: ctx.user!, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
-        groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal,
+        groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal, graph,
       }),
     })
     const refreshed = await db.prepare(`SELECT payload_json FROM undo_snapshots
@@ -3021,12 +3033,22 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     catch { throw new UndoConflictError('The redone group child receipt is invalid.') }
     const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,
       mergedStateFingerprint: await mergeStateFingerprint(db, [refreshedReversal]) })
-    const updated = await db.prepare(`UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
-      WHERE id=@child AND kind=@kind AND status='applied' AND payload_json=@before`)
-      .run({ payload: fingerprinted, child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, before: refreshed.payload_json })
-    if (!Number((updated as { changes?: number; meta?: { changes?: number } }).changes
-      ?? (updated as { meta?: { changes?: number } }).meta?.changes)) {
-      throw new UndoConflictError('The redone group child changed before its fingerprint was recorded.', UNDO_RECORD_CHANGED_CODE)
+    const finalizeGuards:AtomicMergeStatement[]=[]
+    if(preparedGroupGraph) {
+      const row=await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=? AND kind=?').get<{payload_json:string}>([pointer.snapshotId,PRODUCT_MERGE_GROUP_ACTION_KIND])
+      if(!row) throw new UndoConflictError('The committed group graph receipt is unavailable.')
+      const freshGraph=mergeReplayGraphSql(children.map(row=>row.id===child.id?refreshedReversal:row.reversal),preparedGroupGraph.schema)
+      finalizeGuards.push(productMergeGroupGraphGuard(freshGraph,pointer.snapshotId,row.payload_json,final?generation+1:generation))
+    }
+    try { await db.batch([...finalizeGuards,{
+      sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@child AND kind=@kind AND status='applied' AND payload_json=@before)
+        THEN 1 ELSE json_extract('', '$') END AS product_merge_group_finalizer_guard`,
+      params:{child:child.id,kind:PRODUCT_MERGE_GROUP_CHILD_KIND,before:refreshed.payload_json},
+    },{
+      sql:`UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@child`,
+      params:{payload:fingerprinted,child:child.id},
+    },...(preparedGroupGraph && final?[{sql:"UPDATE action_history SET status='undoable',reversible=1,last_error=NULL WHERE id=@history AND status='recorded' AND reversible=0",params:{history:Number(ctx.historyId)}}]:[])]) } catch {
+      throw new UndoConflictError('This group redo committed, but its graph changed before the replay receipt was finalized. The committed changes were preserved.', UNDO_RECORD_CHANGED_CODE)
     }
   }
   const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1
@@ -3132,10 +3154,16 @@ async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<str
   return columns
 }
 
-function mergeReplayGraphSql(reversal: MergeReversal, schema: Map<string, string[]>): AtomicMergeStatement {
-  const reads = mergeFingerprintReads([reversal], true)
-  reads.push({ key: 'currentCostEntries', sql: 'SELECT * FROM product_cost_entries WHERE product_id IN (?,?)', params: [reversal.keeperId, reversal.dupId] })
-  const params: Record<string, unknown> = {}
+function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: Map<string, string[]>): AtomicMergeStatement {
+  const list=Array.isArray(reversal)?reversal:[reversal]
+  const reads = mergeFingerprintReads(list, true)
+  if(Array.isArray(reversal)) {
+    reads.push({key:'currentCostEntries',sql:'SELECT * FROM product_cost_entries WHERE product_id IN (SELECT value FROM json_each(@mergeReceiptProducts))'})
+    reads.push({key:'graphRevisions',sql:`SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE
+      (entity_type='product' AND entity_key IN (SELECT CAST(value AS TEXT) FROM json_each(@mergeReceiptProducts))) OR
+      (entity_type='product_image' AND entity_key IN (SELECT CAST(id AS TEXT) FROM product_images WHERE product_id IN (SELECT value FROM json_each(@mergeReceiptProducts))))`})
+  } else reads.push({ key: 'currentCostEntries', sql: 'SELECT * FROM product_cost_entries WHERE product_id IN (?,?)', params: [reversal.keeperId, reversal.dupId] })
+  const params: Record<string, unknown> = Array.isArray(reversal)?{mergeReceiptProducts:JSON.stringify([...new Set(list.flatMap(row=>[row.keeperId,row.dupId]))].sort((a,b)=>a-b))}:{}
   let sql = "json('{}')"
   for (const [index, read] of reads.entries()) {
     const wildcard = read.sql.match(/^SELECT \* FROM (\w+)/)
@@ -3161,9 +3189,32 @@ function mergeReplayGraphSql(reversal: MergeReversal, schema: Map<string, string
   return { sql, params }
 }
 
-export async function prepareAtomicMergeGraphReceipt(db: ReturnType<typeof getDb>, reversal: MergeReversal): Promise<AtomicMergeGraphReceipt> {
+export async function prepareAtomicMergeGraphReceipt(db: ReturnType<typeof getDb>, reversal: MergeReversal | MergeReversal[]): Promise<AtomicMergeGraphReceipt> {
   const schema = await mergeReplayColumns(db)
   return { schema, graph: mergeReplayGraphSql(reversal, schema) }
+}
+
+export function captureProductMergeGroupGraph(graph:AtomicMergeStatement,review:string,ordinal:number,generation:number):AtomicMergeStatement[] {
+  const where=`id=(SELECT CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER) FROM product_conflict_action_groups g JOIN action_history h ON h.id=g.action_history_id WHERE g.review_id=@receiptReview AND g.ordinal=@receiptOrdinal) AND kind='product.merge.group'`
+  return [{sql:`UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.graph_receipt',json_object('version',1,'generation',@receiptGeneration,
+      'operation_id',(SELECT operation_id FROM product_conflict_action_groups WHERE review_id=@receiptReview AND ordinal=@receiptOrdinal),
+      'applied_prefix',(SELECT COUNT(*) FROM product_conflict_action_group_members WHERE review_id=@receiptReview AND group_ordinal=@receiptOrdinal AND role='merged' AND status IN ('history_pending','undo_ready')),
+      'graph_state',printf('%s',${graph.sql}))) WHERE ${where}`,
+    params:{...graph.params,receiptReview:review,receiptOrdinal:ordinal,receiptGeneration:generation}},
+    {sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE ${where} AND length(CAST(json_extract(payload_json,'$.graph_receipt.graph_state') AS BLOB))<=131072)
+      THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_size_guard`,params:{receiptReview:review,receiptOrdinal:ordinal}}]
+}
+
+export function productMergeGroupGraphGuard(graph:AtomicMergeStatement,snapshotId:number,payload:string,generation:number):AtomicMergeStatement {
+  let saved:ProductMergeGroupSnapshot|null=null
+  try { saved=strictProductMergeGroupSnapshot(JSON.parse(payload)) } catch { saved=null }
+  if(!saved?.graph_receipt || saved.generation!==generation || saved.graph_receipt.generation!==generation) throw new UndoConflictError('The committed group graph receipt is missing or stale.')
+  return {sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@receiptSnapshot AND kind='product.merge.group' AND payload_json IS @receiptPayload)
+    AND EXISTS(SELECT 1 FROM product_conflict_action_groups g JOIN action_history h ON h.id=g.action_history_id
+      WHERE CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER)=@receiptSnapshot AND g.operation_id=@receiptOperation
+        AND g.reversal_generation=@receiptGeneration AND (SELECT COUNT(*) FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.role='merged' AND m.status IN ('history_pending','undo_ready'))=@receiptPrefix)
+    AND ${graph.sql} IS @receiptState THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_guard`,
+    params:{...graph.params,receiptSnapshot:snapshotId,receiptPayload:payload,receiptState:saved.graph_receipt.graph_state,receiptOperation:saved.graph_receipt.operation_id,receiptGeneration:generation,receiptPrefix:saved.graph_receipt.applied_prefix}}
 }
 
 function mergeReplayStateSql(graph: AtomicMergeStatement): string {

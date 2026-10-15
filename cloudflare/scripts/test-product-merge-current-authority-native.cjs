@@ -2,7 +2,11 @@ const assert = require('node:assert/strict')
 const { startWorker, recorder, budgetLine, historyStep } = require('./harness/al_money_native.cjs')
 
 async function main() {
-  const h = await startWorker({patches:[{name:'synthetic legacy cache entry omits new review boolean',file:'src/lib/cache.ts',
+  const initialRace=process.argv.includes('--group-initial-race'), redoRace=process.argv.includes('--group-redo-race'), postPce=process.argv.includes('--group-post-pce')
+  const racePatches=initialRace?[{name:'group initial committed stock edit before first fingerprint',file:'src/routes/products.ts',from:'  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }',to:`  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }
+  if (!await db.prepare("SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND status='planned' AND role='merged'").get({review:review.id,ordinal:group.ordinal})) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([reversal.keeperId])`}]:redoRace?[{name:'group redo committed stock edit before first fingerprint',file:'src/lib/undoAppliers.ts',from:'    const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,',to:`    if (final) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([refreshedReversal.keeperId])
+    const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,`}]:[]
+  const h = await startWorker({patches:[...racePatches,{name:'synthetic legacy cache entry omits new review boolean',file:'src/lib/cache.ts',
     from:'const response = new Response(JSON.stringify(value), {',
     to:"const response = new Response(JSON.stringify(value, (key, entry) => key === 'cost_needs_review' ? undefined : entry), {"}]}), proof = recorder('current merge authority')
   let nextId = 71000
@@ -26,7 +30,7 @@ async function main() {
     return { keepId,mergeId,name,barcode,echo }
   }
   try {
-    if(!process.argv.includes('--held-only')) {
+    if(!process.argv.includes('--held-only') && !initialRace && !redoRace && !postPce) {
     for (const value of [null,0,5]) {
       const p = await pair('identity',value,{echo:true})
       const before = await h.one('SELECT updated_at FROM products WHERE id=?',p.mergeId)
@@ -126,7 +130,7 @@ async function main() {
     const no=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',body,'denied selected preview',{cookie:denied})
     proof.check('selected permission denial remains enforced',()=>assert.equal(no.status,403,JSON.stringify(no.body)))
     }
-    for(const [value,manual,lot,expected] of [[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]]) {
+    for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]])) {
       const p=await pair('selected',value,{manual,lot})
       const third=nextId++
       await h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode).run()
@@ -139,11 +143,32 @@ async function main() {
       proof.check(`held ${value}/${manual}/${lot} finalized authority`,()=>{assert.equal(final.body.costAuthorities?.[0]?.costAuthority?.cost_price_usd,expected,JSON.stringify(final.body));assert.equal(page.body.page.groups[0].projected_result.costAuthority.cost_price_usd,expected);assert.ok(!JSON.stringify(page.body).includes('cost_dependency'))})
       const body={review_id:preview.body.review_id,manifest_digest:final.body.manifest_digest,client_request_id:preview.body.review_id}
       let result
-      for(let attempt=0;attempt<5;attempt++) {result=await h.call('POST','/api/products/possible-duplicates/merge-batch',body,`held apply ${p.keepId}/${attempt}`);if(result.status!==200||!result.body.continuation_required)break}
+      for(let attempt=0;attempt<5;attempt++) {result=await h.call('POST','/api/products/possible-duplicates/merge-batch',body,`held apply ${p.keepId}/${attempt}`);if(initialRace||result.status!==200||!result.body.continuation_required)break}
       const stored=await h.one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=?',p.keepId)
-      proof.check(`held ${p.keepId} actual ordered apply parity`,()=>{assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.continuation_required,false);assert.equal(stored.cost_price_usd,expected);assert.equal(stored.cost_price_khr,value===null?null:value*4000);assert.equal(Boolean(stored.cost_review_key),lot===null)})
+      proof.check(`held ${p.keepId} actual ordered apply parity`,()=>{assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.continuation_required,initialRace);assert.equal(stored.cost_price_usd,expected);assert.equal(stored.cost_price_khr,value===null?null:value*4000);assert.equal(Boolean(stored.cost_review_key),lot===null)})
       const history=await h.one('SELECT action_history_id,operation_id FROM product_conflict_action_groups WHERE review_id=?',preview.body.review_id)
+      const operational=await h.one("SELECT s.payload_json FROM action_history h JOIN undo_snapshots s ON s.id=CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER) WHERE h.id=?",history.action_history_id)
+      const groupReceipt=JSON.parse(operational.payload_json).graph_receipt
+      if(!initialRace) proof.check(`held ${p.keepId} group operational receipt identity`,()=>{assert.equal(groupReceipt.version,1);assert.equal(groupReceipt.generation,0);assert.equal(groupReceipt.operation_id,history.operation_id);assert.equal(groupReceipt.applied_prefix,2);assert.ok(Buffer.byteLength(groupReceipt.graph_state,'utf8')<=131072)})
+      if(groupReceipt) console.log('GROUP_RECEIPT',JSON.stringify({keeperId:p.keepId,bytes:Buffer.byteLength(groupReceipt.graph_state,'utf8'),scopes:Object.keys(JSON.parse(groupReceipt.graph_state)).length}))
       const costChain=async()=> (await h.all('SELECT s.payload_json FROM undo_snapshots s JOIN product_conflict_action_group_members m ON m.undo_snapshot_id=s.id WHERE m.review_id=? ORDER BY m.member_ordinal',preview.body.review_id)).map(row=>JSON.parse(row.payload_json).costReviewOutcome)
+      if(initialRace) {
+        const before=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
+        const undo=await historyStep(h,history.action_history_id,'undo',0,'group initial race undo')
+        const admission=await h.one('SELECT reversible,status FROM action_history WHERE id=?',history.action_history_id)
+        proof.check('group initial committed edit remains intact and nonreversible',()=>{assert.equal(admission.reversible,0,JSON.stringify(admission));assert.equal(admission.status,'recorded');assert.equal(undo.status,400,JSON.stringify(undo.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
+        assert.deepEqual(await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third),before)
+        break
+      }
+      if(postPce) {
+        await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(third).run()
+        const before=await h.all('SELECT * FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third), auditBefore=await h.one('SELECT COUNT(*) n FROM audit_logs')
+        const undo=await historyStep(h,history.action_history_id,'undo',0,'group inactive loser new PCE undo')
+        proof.check('group receipt rejects new entry in empty restored loser scope',()=>assert.equal(undo.status,409,JSON.stringify(undo.body)))
+        assert.deepEqual(await h.all('SELECT * FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third),before)
+        assert.deepEqual(await h.one('SELECT COUNT(*) n FROM audit_logs'),auditBefore)
+        break
+      }
       const originalChain=await costChain()
       const pointer=await h.one('SELECT undo_payload FROM action_history WHERE id=?',history.action_history_id)
       const originalPointer=JSON.parse(pointer.undo_payload)
@@ -172,6 +197,14 @@ async function main() {
       for(let attempt=0;attempt<5;attempt++){undo=await historyStep(h,history.action_history_id,'undo',0,`held undo ${p.keepId}/${attempt}`);if(undo.status!==200||!undo.body.continuation_required)break}
       if(undo.status!==200)console.log('HELD_UNDO_D1',p.keepId,JSON.stringify((await h.call('GET','/__fixture/d1-errors',undefined)).body))
       if(undo.status===200&&!undo.body.continuation_required)for(let attempt=0;attempt<5;attempt++){redo=await historyStep(h,history.action_history_id,'redo',1,`held redo ${p.keepId}/${attempt}`);if(redo.status!==200||!redo.body.continuation_required)break}
+      if(redoRace) {
+        const before=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
+        const refused=await historyStep(h,history.action_history_id,'undo',2,'group redo race next undo')
+        const admission=await h.one('SELECT status,reversible FROM action_history WHERE id=?',history.action_history_id)
+        proof.check('group redo committed edit remains intact and cannot be adopted',()=>{assert.equal(redo.status,409,JSON.stringify(redo.body));assert.match(redo.body.error,/redo committed/);assert.equal(admission.status,'recorded');assert.equal(admission.reversible,0);assert.equal(refused.status,400,JSON.stringify(refused.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
+        assert.deepEqual(await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third),before)
+        break
+      }
       proof.check(`held ${p.keepId} genuine history Undo Redo`,()=>{assert.equal(undo.status,200,JSON.stringify(undo.body));assert.equal(undo.body.continuation_required,false);assert.equal(redo?.status,200,JSON.stringify(redo?.body));assert.equal(redo.body.continuation_required,false)})
       if(redo?.status===200&&!redo.body.continuation_required) {
         const freshChain=await costChain()
@@ -187,7 +220,7 @@ async function main() {
       }
 
     }
-    for(const phase of ['draft','final']) {
+    for(const phase of (initialRace||redoRace||postPce?[]:['draft','final'])) {
       const p=await pair('selected',5,{manual:7})
       const review=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{manifest_version:1,resolution_version:2,client_request_id:`held-stale-${p.keepId}`,merge_groups:[{group_key:`barcode:${p.barcode}`,member_ids:[p.keepId,p.mergeId]}],remove_rows:[]},`held stale preview ${phase}`)
       assert.equal(review.status,200,JSON.stringify(review.body))

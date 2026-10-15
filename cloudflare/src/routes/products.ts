@@ -35,7 +35,7 @@ import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGr
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { prepareAtomicMergeGraphReceipt, buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
+import { captureProductMergeGroupGraph, productMergeGroupGraphGuard, type AtomicMergeGraphReceipt, prepareAtomicMergeGraphReceipt, buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
@@ -3718,7 +3718,8 @@ export async function foldDuplicateProductInto(
     reviewedRedo?: boolean
     reviewedMemberParentEffect?: { parentId: number; updatedAt: string }
     reviewedCatalogBefore?: MergeReversal['keeperCatalogBefore']
-    groupCompletionStatements?: (reversal: MergeReversal) => AtomicMergeStatement[]
+    groupGraphReversals?: MergeReversal[]
+    groupCompletionStatements?: (reversal: MergeReversal, graph?: AtomicMergeGraphReceipt) => AtomicMergeStatement[]
   },
   // N1/N3 (owner, 23 Sep 2026): the Resolve grid's Keep merge. The kept
   // product's identity (name and barcode) stays, a name or barcode difference
@@ -4481,9 +4482,15 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
   // audit trio. D1 returns one result per statement in input order.
-  const preparedGraph = costOutcome && atomicHistory && !atomicHistory.groupCompletionStatements ? await prepareAtomicMergeGraphReceipt(db, reversal) : undefined
+  let graphReversals: MergeReversal | MergeReversal[] = reversal
+  if (atomicHistory?.groupGraphReversals) {
+    graphReversals = atomicHistory.groupGraphReversals.map(row => row.dupId === reversal.dupId ? reversal : row)
+    if (!atomicHistory.groupGraphReversals.some(row => row.dupId === reversal.dupId)) graphReversals.push(reversal)
+  }
+  const preparedGraph = costOutcome && atomicHistory && (!atomicHistory.groupCompletionStatements || atomicHistory.groupGraphReversals)
+    ? await prepareAtomicMergeGraphReceipt(db, graphReversals) : undefined
   let atomicHistoryStatementIndexes: { snapshot: number; actionHistory: number } | null = null
-  if (atomicHistory?.groupCompletionStatements) statements.push(...atomicHistory.groupCompletionStatements(reversal))
+  if (atomicHistory?.groupCompletionStatements) statements.push(...atomicHistory.groupCompletionStatements(reversal, preparedGraph))
   else if (atomicHistory) {
     atomicHistoryStatementIndexes = { snapshot: statements.length, actionHistory: statements.length + 1 }
     statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails, preparedGraph))
@@ -7911,6 +7918,7 @@ type ProductConflictActionMemberReceipt = {
   status: 'planned' | 'history_pending' | 'undo_ready' | 'refused' | 'reversed'
   operation_id: string | null
   undo_snapshot_id: number | null
+  payload_json?: string | null
 }
 
 function strictProductConflictActionFinalPlan(row: ProductConflictActionStoredGroupRow, expectedReviewId?: string): ProductConflictActionFinalPlan {
@@ -8204,7 +8212,7 @@ function productConflictActionForwardStatements(args: {
   plan: ProductConflictActionFinalPlan
   member: ProductConflictActionMemberReceipt
   firstFold: boolean
-}): (reversal: MergeReversal) => AtomicMergeStatement[] {
+}): (reversal: MergeReversal, graph?:AtomicMergeGraphReceipt) => AtomicMergeStatement[] {
   const { user, review, group, plan, member, firstFold } = args
   const byName = actorSnapshot(user)
   const costPointer = plan.cost_dependency ? ",'merge_version',3,'operation_id',@groupOperation" : ''
@@ -8212,7 +8220,8 @@ function productConflictActionForwardStatements(args: {
     ...reversal, operationId: member.operation_id, fingerprintPending: true,
   })
   const groupSnapshotPlaceholder = 'sha256-' + '0'.repeat(64)
-  return (reversal) => {
+  return (reversal, graph) => {
+    if(plan.cost_dependency && !graph) throw new Error('Committed group graph receipt required.')
     const statements: AtomicMergeStatement[] = [{
       sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
             VALUES(@kind,'recorded',@payload,@actor,@byName)`,
@@ -8280,6 +8289,7 @@ function productConflictActionForwardStatements(args: {
           merged_id: member.product_id, operation_id: member.operation_id, authority: plan.authority }),
       },
     })
+    if(graph) statements.push(...captureProductMergeGroupGraph(graph.graph,review.id,Number(group.ordinal),Number(group.reversal_generation||0)))
     return statements
   }
 }
@@ -8295,25 +8305,31 @@ async function reconcileProductConflictActionChild(
   const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }
   if (stored.operationId !== member.operation_id || Number(stored.keeperId) !== Number(reversal.keeperId)
     || Number(stored.dupId) !== Number(reversal.dupId)) return false
-  const fingerprint = await mergeStateFingerprint(db, [reversal])
-  const memberRows = await db.prepare(`SELECT undo_snapshot_id FROM product_conflict_action_group_members
-    WHERE review_id=@review AND group_ordinal=@ordinal AND undo_snapshot_id IS NOT NULL ORDER BY member_ordinal`)
-    .all<{ undo_snapshot_id: number }>({ review: review.id, ordinal: group.ordinal })
+  const fingerprintGuards:AtomicMergeStatement[]=[]
+  const fingerprint = await mergeStateFingerprint(db, [reversal],fingerprintGuards)
+  const memberRows = await db.prepare(`SELECT m.undo_snapshot_id,s.payload_json FROM product_conflict_action_group_members m JOIN undo_snapshots s ON s.id=m.undo_snapshot_id
+    WHERE m.review_id=@review AND m.group_ordinal=@ordinal AND m.undo_snapshot_id IS NOT NULL ORDER BY m.member_ordinal`)
+    .all<{ undo_snapshot_id: number; payload_json:string }>({ review: review.id, ordinal: group.ordinal })
   const childIds = memberRows.map((row) => Number(row.undo_snapshot_id))
   if (!childIds.length || childIds[childIds.length - 1] !== Number(member.undo_snapshot_id)) return false
   const prefix = await productMergeGroupPrefixFingerprint(review.id, group.group_key, childIds, Number(group.reversal_generation || 0))
-  const groupSnapshot = await db.prepare(`SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS id
-    FROM action_history WHERE id=@history AND created_by_id=@actor AND status='recorded' AND reversible=0`)
-    .get<{ id: number }>({ history: group.action_history_id, actor: user.id })
+  const groupSnapshot = await db.prepare(`SELECT s.id,s.payload_json FROM action_history h JOIN undo_snapshots s ON s.id=CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER)
+    WHERE h.id=@history AND h.created_by_id=@actor AND h.status='recorded' AND h.reversible=0`)
+    .get<{ id: number;payload_json:string }>({ history: group.action_history_id, actor: user.id })
   if (!groupSnapshot?.id) return false
   const finalGroup = !await db.prepare(`SELECT 1 AS found FROM product_conflict_action_group_members
     WHERE review_id=@review AND group_ordinal=@ordinal AND role='merged' AND status='planned' LIMIT 1`)
     .get<{ found: number }>({ review: review.id, ordinal: group.ordinal })
   const readyPayload = JSON.stringify({ ...stored, fingerprintPending: false, mergedStateFingerprint: fingerprint })
-  const groupPayload = JSON.stringify({ version: 1, review_id: review.id, group_key: group.group_key,
+  const groupPayload = JSON.stringify({ ...JSON.parse(groupSnapshot.payload_json), version: 1, review_id: review.id, group_key: group.group_key,
     child_snapshot_ids: childIds, prefix_fingerprint: prefix, generation: Number(group.reversal_generation || 0) })
+  const graphGuards:AtomicMergeStatement[]=[]
+  if(JSON.parse(group.final_plan_json||'{}').cost_dependency) {
+    const prepared=await prepareAtomicMergeGraphReceipt(db,memberRows.map(row=>JSON.parse(row.payload_json) as MergeReversal))
+    graphGuards.push(productMergeGroupGraphGuard(prepared.graph,groupSnapshot.id,groupSnapshot.payload_json,Number(group.reversal_generation||0)))
+  }
   try {
-    await db.batch([{
+    await db.batch([...graphGuards,...fingerprintGuards,{
       sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_conflict_action_group_members
         WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal
           AND status='history_pending' AND undo_snapshot_id=@child AND operation_id=@operationId)
@@ -8481,8 +8497,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409)
     throw new ProductConflictActionApplyStop(validation.code, validation.message, 409)
   }
-  const members = await db.prepare(`SELECT member_ordinal,product_id,role,status,operation_id,undo_snapshot_id
-    FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal ORDER BY member_ordinal`)
+  const members = await db.prepare(`SELECT m.member_ordinal,m.product_id,m.role,m.status,m.operation_id,m.undo_snapshot_id,s.payload_json
+    FROM product_conflict_action_group_members m LEFT JOIN undo_snapshots s ON s.id=m.undo_snapshot_id WHERE m.review_id=@review AND m.group_ordinal=@ordinal ORDER BY m.member_ordinal`)
     .all<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal })
   if (members.some((member) => member.status === 'reversed')) {
     throw new ProductConflictActionApplyStop('review_reversed',
@@ -8578,6 +8594,13 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     params: { costEntriesJson: JSON.stringify(productConflictCostEntries({ ...detail, cost_dependency: plan.cost_dependency }, plan.keeper_id,
       members.filter(row => row.role === 'merged' && row.status === 'undo_ready').map(row => row.product_id))) },
   })
+  const groupGraphReversals=plan.cost_dependency ? members.filter(row=>row.payload_json).map(row=>JSON.parse(row.payload_json!) as MergeReversal) : undefined
+  if(plan.cost_dependency && !firstFold) {
+    const receipt=await db.prepare(`SELECT s.id,s.payload_json FROM action_history h JOIN undo_snapshots s ON s.id=CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER) WHERE h.id=@history`).get<{id:number;payload_json:string}>({history:group.action_history_id})
+    if(!receipt) throw new ProductConflictActionApplyStop('merge_state_conflict','The committed group graph receipt is missing.',409)
+    const graph=await prepareAtomicMergeGraphReceipt(db,groupGraphReversals!)
+    preStatements.push(productMergeGroupGraphGuard(graph.graph,receipt.id,receipt.payload_json,Number(group.reversal_generation||0)))
+  }
   if (firstFold) preStatements.push(productConflictActionSourceStateAssertion(detail, plan.keeper_id))
   if (parentEffect) preStatements.push(parentEffect.assertion)
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
@@ -8588,7 +8611,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         reviewedPlan: plan, reviewedCatalogBefore: reviewedKeeperCatalogBefore(detail, plan, firstFold),
         reviewedMemberParentEffect: parentEffect,
         preparedSnapshot,
-        preStatements, groupCompletionStatements: productConflictActionForwardStatements({ user, review, group, plan, member, firstFold }),
+        preStatements, groupGraphReversals, groupCompletionStatements: productConflictActionForwardStatements({ user, review, group, plan, member, firstFold }),
         snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
       })
   } catch (error) {
@@ -8758,7 +8781,7 @@ registerProductMergeGroupRedo(async (ctx) => {
     ctx.reversal.stockDisposition || 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
       operationId: ctx.operationId, bulkClusterPlan: plan.cluster_plan, resumedCluster: ctx.childOrdinal > 0,
       reviewedPlan: plan, reviewedRedo: true, reviewedCatalogBefore: ctx.reversal.keeperCatalogBefore,
-      groupCompletionStatements: ctx.completionStatements,
+      preStatements:ctx.graphGuards, groupGraphReversals:ctx.graphReversals, groupCompletionStatements: ctx.completionStatements,
       snapshotContext: { review_id: ctx.reviewId, group_key: ctx.groupKey, authority: plan.authority },
     })
 })
