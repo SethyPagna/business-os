@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Receipt-number race on the historical sales import writer
 // (lib/salesImportCommit.ts applyHistoricalSaleImport), against the complete
 // migrated schema.
@@ -49,11 +50,12 @@ const NOW = '2026-09-27T08:00:00.000Z'
 
 function fixture(hooks = {}) {
   const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
-  db.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',5,3,1)").run()
-  db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5)').run()
-  db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active,batch_number) VALUES(20,10,'lot-a','LOT-A',1,1)").run()
-  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(20,1,5)').run()
+  seedStockFixture(db, () => db.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',5,3,1)").run())
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5)').run())
+  seedStockFixture(db, () => db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active,batch_number) VALUES(20,10,'lot-a','LOT-A',1,1)").run())
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(20,1,5)').run())
   const route = {
     prepare(sql) {
       const statement = db.prepare(sql)
@@ -63,6 +65,7 @@ function fixture(hooks = {}) {
         run: async (params) => statement.run(params),
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch: async (statements) => {
       if (hooks.beforeBatch) await hooks.beforeBatch(db, statements)
       const results = await db.batch(statements)
@@ -235,8 +238,8 @@ function own(db, rowNumber, jobId = 'job-1') {
     const f = fixture({
       beforeBatch(db) {
         batches += 1
-        db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=20').run()
-        db.prepare('UPDATE product_batches SET is_active=0 WHERE id=20').run()
+        seedStockFixture(db, () => db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=20').run())
+        seedStockFixture(db, () => db.prepare('UPDATE product_batches SET is_active=0 WHERE id=20').run())
       },
     })
     const error = await applyHistoricalSaleImport(f.route, { jobId: 'job-1', rowNumber: 6, data: saleData(), nowIso: NOW, actor: ACTOR })

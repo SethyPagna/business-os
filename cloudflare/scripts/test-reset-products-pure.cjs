@@ -3,8 +3,8 @@
 // branch/batch stock, KEEP sales/returns/inventory-movement/contact/
 // customer/supplier data untouched. Same approach as test-returns-batch-
 // restock-pure.cjs: transpile the REAL route file and lib/coreDataInvariants.ts,
-// run them against a real in-memory SQLite database with the migrations
-// actually applied to production D1, and call the actual Hono app.request()
+// run them against a real in-memory SQLite database with the current active
+// migration chain, and call the actual Hono app.request()
 // the same way the real Worker would. Auth/audit/broadcast/cache/R2 are
 // stubbed to permissive fakes (there's no real R2/D1 in this sandbox);
 // everything about which rows get deleted vs. kept is the real, shipped
@@ -20,42 +20,18 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 
-// Repinned 2026-09-22: this used to build its schema from harness/
-// load_migrations.cjs's loadAll(), every .sql file checked into
-// cloudflare/migrations regardless of production status. That silently
-// included 0185_transfer_runs.sql/0186_transfer_run_retirement.sql/
-// 0188_transfer_receipt_retirement.sql/0190_dataset_operation_journal.sql/
-// 0191_dataset_operation_generation_transition.sql -- a transfer-run/
-// receipt-retirement/dataset-operation lifecycle kernel that is checked
-// into the repo but deliberately NOT applied to production D1 yet
-// (docs/fleet/2026-09-21-shift-close-release.md, "migrations .../0188/...
-// remain unapplied by design"; progress.md's 2026-09-21 entry says the
-// same). 0188's own top-of-file comment calls it a "local unwired
-// lifecycle kernel": its
-// `transfer_receipt_member_retirement_delete` trigger (BEFORE DELETE ON
-// transfer_operation_members, requiring prior retirement evidence) is a
-// real, working guard -- test-backup-replay-coverage-pure.cjs already
-// asserts that exact refusal on a schema WITH 0188 applied -- but no
-// route, including this reset route, has been wired to satisfy it yet.
-// mode='products' deletes transfer_operation_members as its very first
-// PRODUCTS_RESET_TABLES entry (coreDataInvariants.ts), so building this
-// test's DB from the FULL local migration set (post-0188) exercised a
-// schema that does not exist anywhere the reset route actually runs
-// today, and wrongly read as "reset-products is broken". Loading only
-// the migrations chain currently applied in production (file name below
-// '0185_') matches what the deployed route actually faces, and is the
-// same production-schema cutoff test-dataset-operation-native.cjs and
-// test-migration-0185-transfer-runs-pure.cjs already use for the same
-// reason. If 0188 is ever applied to production, the reset route must
-// first learn to retire the members it deletes through that same kernel
-// -- this cutoff should not move past '0185_' until that lands.
+const { loadAll } = require('./harness/load_migrations.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 const migrationsDir = path.join(__dirname, '..', 'migrations')
-const appliedMigrationSqls = fs.readdirSync(migrationsDir)
-  .filter((file) => file.endsWith('.sql') && file < '0185_')
-  .sort()
-  .map((file) => fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
+const migrationNames = fs.readdirSync(migrationsDir).filter(file => file.endsWith('.sql')).sort()
+for (const prefix of ['0185_', '0186_', '0188_', '0190_', '0191_']) {
+  assert.ok(!migrationNames.some(file => file.startsWith(prefix)), `${prefix} remains outside the active migration chain`)
+}
+const appliedMigrationSqls = loadAll()
 
 const rawDbHandle = openDb(appliedMigrationSqls)
+assert.throws(() => rawDbHandle.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const db = rawDbHandle
 const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
@@ -87,13 +63,14 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (['./productStockGuard','../lib/productStockGuard'].includes(request)) return require('./harness/product_stock_guard.cjs')
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
   // Overrides also answer requires made AFTER load: factory reset imports
   // lib/currentPasswordGuard lazily, at request time, once the patch is gone.
-  const localRequire = (request) => (Object.prototype.hasOwnProperty.call(requireOverrides, request) ? requireOverrides[request] : require(request))
+  const localRequire = (request) => request === './stockTransaction' || request === '../lib/stockTransaction' ? stockTransaction : (Object.prototype.hasOwnProperty.call(requireOverrides, request) ? requireOverrides[request] : require(request))
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
     moduleObj.exports, localRequire, moduleObj, sourcePath, path.dirname(sourcePath),
@@ -254,12 +231,11 @@ async function req(method, url, body, env = fakeEnv) {
 function exec(sql) { rawDbHandle.exec(sql) }
 function row(sql) { return rawDbHandle.prepare(sql).get() }
 function count(table) { return row(`SELECT COUNT(*) AS n FROM "${table}"`).n }
-// 0193 (stock_lot_adjustment_operations) ships ahead of the production chain
-// this file models; the reset skips it while absent (MIGRATION_GATED_RESET_TABLES).
 function tableExists(table) { return Boolean(row(`SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='${table}'`)) }
 const presentProductsResetTables = () => PRODUCTS_RESET_TABLES.filter(tableExists)
 
 function seed() {
+  return seedStockFixture(rawDbHandle, () => {
   exec(`INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{"all":true}'); DELETE FROM users WHERE id=900; INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'admin','Admin','${OWNER_PASSWORD_HASH}',901,1)`)
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
@@ -276,13 +252,14 @@ function seed() {
     'product_conflict_action_group_members', 'product_remove_operations',
     'product_conflict_action_groups', 'product_conflict_action_reviews',
     'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
-    'stock_session_members', 'stock_session_operations', 'stock_session_guards',
+    'stock_lot_adjustment_operations', 'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
     'rfid_tags', 'product_images', 'damaged_stock_lots', 'branch_batch_stock', 'product_batches', 'branch_stock',
     'products', 'branches', 'customers', 'suppliers', 'delivery_contacts', 'action_history',
     'file_assets',
   ]
+  exec('UPDATE products SET stock_quantity=0')
   exec(wipe.map((t) => `DELETE FROM "${t}";`).join(' '))
 
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
@@ -344,6 +321,9 @@ function seed() {
   rawDbHandle.prepare("INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('reset-fixture', 1, 'reset-fixture', 'stock_in', '{}')").run()
   rawDbHandle.prepare("INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, product_created, branch_id, batch_id, movement_id, quantity, unit_cost_usd) VALUES ('reset-fixture', 'line-1', 'receive', 1, 0, 1, 1, 1, 10, 2)").run()
   rawDbHandle.prepare('INSERT INTO stock_session_guards (id, guard_value) VALUES (1, 1)').run()
+  rawDbHandle.prepare(`INSERT INTO stock_lot_adjustment_operations(
+    id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json
+  ) VALUES('reset-lot-adjustment',1,'reset-lot-adjustment','{}','reset-digest','{}','{}','{}','{}')`).run()
   rawDbHandle.prepare("INSERT INTO transfer_operation_receipts(id,actor_id,request_id,request_digest,request_json,status,operation_id,provenance_version) VALUES(1,1,'reset-transfer','digest','{}','planning','reset-transfer-operation',1)").run()
   rawDbHandle.prepare("INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json) VALUES(1,0,1,1,1,2,1,1,'{}','{}','[]')").run()
 
@@ -362,6 +342,8 @@ function seed() {
   backupCallLog = []
   backupShouldFail = false
   sectionBackupTables = null
+
+  })
 }
 
 let passed = 0
@@ -723,6 +705,12 @@ async function main() {
     assert.strictEqual(count('return_create_receipts'), 1, 'sanity: immutable return-create receipt fixture exists')
     const confirmed = { acknowledged:true,confirm: 'FACTORY RESET', currentPassword: OWNER_PASSWORD }
     const ownerEnv = { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' }
+    const durableFlagsBefore = rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all()
+    assert.deepStrictEqual(durableFlagsBefore.map(flag => flag.key), [
+      'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+    ])
+    assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
+
     // The guards stay real: a restore-only account and a wrong password are
     // both refused before anything is touched.
     sessionUser = {...FAKE_USER,id:2}
@@ -757,23 +745,42 @@ async function main() {
     ]) assert.strictEqual(count(table), 0, `${table} should be empty after factory reset`)
     assert.strictEqual(count('return_mutation_receipts'), 0)
     assert.strictEqual(count('return_create_receipts'), 0)
-    assert.strictEqual(count('system_flags'), 0, 'the short-lived reset guard cannot survive the atomic batch')
+    assert.strictEqual(row(`SELECT COUNT(*) AS n FROM system_flags WHERE key IN (
+      'sale_record_events_reset_guard','sale_incident_recovery_reset_guard',
+      'sale_not_paid_stock_recovery_reset_guard','stock_transaction_permit'
+    )`).n, 0, 'short-lived reset authority and stock permit cannot survive the atomic batch')
+    assert.deepStrictEqual(rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all(), durableFlagsBefore,
+      'all four durable boundaries, including the exact stock epoch, survive factory reset unchanged')
   })
 
-  // 0193 gate, both halves: without the table the reset above already
-  // succeeded (production chain); once 0193 is applied its operation rows are
-  // cleared with the products they snapshot.
-  await check('mode=products clears scoped Set operations once 0193 is applied', async () => {
+  await check('mode=products clears current scoped Set operations and supports the optional-table-absent schema', async () => {
     assert.ok(PRODUCTS_RESET_TABLES.includes('stock_lot_adjustment_operations'))
-    assert.ok(!tableExists('stock_lot_adjustment_operations'), 'the production chain modelled here has no 0193')
-    exec(fs.readFileSync(path.join(migrationsDir, '0193_stock_lot_adjustment_operations.sql'), 'utf8'))
+    assert.ok(tableExists('stock_lot_adjustment_operations'), 'the current active chain includes 0193')
     seed()
     exec(`INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES('reset-set-op',1,'reset-set-request','{}','digest','{}','{}','{}','{}')`)
     const { status, json } = await req('POST', '/reset-data', { mode: 'products' })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(count('stock_lot_adjustment_operations'), 0)
+
+    seed()
+    const schema = rawDbHandle.prepare(`SELECT type,name,sql FROM sqlite_master
+      WHERE tbl_name='stock_lot_adjustment_operations' AND sql IS NOT NULL
+      ORDER BY CASE WHEN type='table' THEN 0 ELSE 1 END,name`).all()
     exec('DROP TABLE stock_lot_adjustment_operations')
+    try {
+      assert.ok(!tableExists('stock_lot_adjustment_operations'))
+      assert.strictEqual(row("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
+      const missing = await req('POST', '/reset-data', { mode: 'products' })
+      assert.strictEqual(missing.status, 200, JSON.stringify(missing.json))
+      assert.strictEqual(count('products'), 0)
+    } finally {
+      for (const object of schema) exec(object.sql)
+    }
+    assert.deepStrictEqual(rawDbHandle.prepare(`SELECT type,name,sql FROM sqlite_master
+      WHERE tbl_name='stock_lot_adjustment_operations' AND sql IS NOT NULL
+      ORDER BY CASE WHEN type='table' THEN 0 ELSE 1 END,name`).all(), schema)
+    assert.throws(() => rawDbHandle.prepare("INSERT INTO products(name) VALUES('unadmitted after optional schema control')").run(), /stock_transaction_required/)
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

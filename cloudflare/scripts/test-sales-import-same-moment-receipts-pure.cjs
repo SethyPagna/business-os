@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Receipts that share a sale moment must get distinct, deterministic receipt numbers when they commit concurrently.
 //
 // Old-system exports carry date-only sale dates, so every receipt of a day mints from the same second (00:00:00). The
@@ -44,14 +45,16 @@ const CONCURRENCY = 12
 
 function fixture() {
   const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
-  db.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',500,3,1)").run()
-  db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,500)').run()
+  seedStockFixture(db, () => db.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',500,3,1)").run())
+  seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,500)').run())
   const route = {
     prepare(sql) {
       const statement = db.prepare(sql)
       return { all: (params) => statement.all(params), get: (params) => statement.get(params), run: async (params) => statement.run(params) }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch: async (statements) => db.batch(statements),
   }
   return { raw: db, route }
