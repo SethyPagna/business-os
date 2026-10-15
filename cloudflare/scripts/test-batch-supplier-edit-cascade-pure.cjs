@@ -65,13 +65,31 @@ check('no migration ever added a lot-supplier snapshot to stock_movements',
   !/ALTER TABLE stock_movements\s+ADD COLUMN[^\n;]*supplier/i.test(migrations))
 
 // --- 3. The cascade itself, on a real migrated database -------------------
+function fixtureWrite(db, write) {
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  db.exec('BEGIN IMMEDIATE')
+  let result
+  try {
+    const epoch=db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+    if(epoch)db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    result=write()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch(error) { db.exec('ROLLBACK');throw error }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return result
+}
+
 const db = openDb(loadAll())
+fixtureWrite(db,()=>{
 db.prepare(`INSERT INTO suppliers (id, name) VALUES (5, 'Acme')`).run({})
 db.prepare(
   `INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, supplier_id, supplier_name, received_at, received_quantity, received_cost_usd, payment_status)
    VALUES (1, 100, 'BK1', 1, NULL, NULL, '2026-02-01', 12, 60.0, 'paid')`,
 ).run({})
 db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 12)`).run({})
+})
+assert.throws(()=>db.prepare("UPDATE product_batches SET is_active=is_active WHERE id=1").run(),/stock_transaction_required/)
 
 const RESOLVED = `COALESCE(pb.supplier_id, (SELECT s.id FROM suppliers s WHERE lower(trim(s.name)) = lower(trim(pb.supplier_name)) ORDER BY s.id LIMIT 1))`
 const KEY = `COALESCE('id:' || (${RESOLVED}), NULLIF('name:' || lower(trim(COALESCE(pb.supplier_name, ''))), 'name:'), 'none')`

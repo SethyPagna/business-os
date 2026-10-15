@@ -82,7 +82,23 @@ function modules(cdb, { planTier = load('lib/planTier.ts'), failCompute = null }
 // Deterministic PRNG so a failure reproduces.
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32) }
 
+function fixtureWrite(db, write) {
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  db.exec('BEGIN IMMEDIATE')
+  let result
+  try {
+    const epoch=db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+    if(epoch)db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    result=write()
+    db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    db.exec('COMMIT')
+  } catch(error) { db.exec('ROLLBACK');throw error }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return result
+}
+
 function seedCatalog(db, seed) {
+  return fixtureWrite(db,()=>{
   const r = rng(seed)
   const pick = (xs) => xs[Math.floor(r() * xs.length)]
   const names = Array.from({ length: 36 }, (_, i) => `Family ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? i : ''}`)
@@ -107,6 +123,7 @@ function seedCatalog(db, seed) {
     if (!row.active) row.qty = 0
     ins.run(row)
   }
+  })
 }
 
 const LOW_CONFIGS = [
@@ -120,6 +137,9 @@ async function check(name, fn) { await fn(); passed++; console.log('PASS', name)
 
 async function main() {
   const migrations = loadAll()
+  const guarded=openDb(migrations)
+  assert.throws(()=>guarded.prepare("INSERT INTO products(name) VALUES('guard control')").run(),/stock_transaction_required/)
+  guarded.db.close()
 
   await check('PARITY: one statement equals stats + low page + out page, on every config and preview size', async () => {
     const coverage = { truncatedLow: 0, truncatedOut: 0, lowOnly: 0, outOnly: 0, headerOnlyFamily: 0, lowRepNotMin: 0 }
@@ -182,14 +202,14 @@ async function main() {
 
   await check('INDEX 0228: expiry list/count walked the active catalog; now seek the partial index, same rows', async () => {
     const before = openDb(loadAll({ through: 227 }))
-    const seedExpiry = (db) => db.exec(`
+    const seedExpiry = (db) => fixtureWrite(db,()=>db.exec(`
       INSERT INTO products (id, name, is_active, expiry_date, expiry_alert_days) VALUES
         (1,'past',1,date('now','-3 day'),30),(2,'soon',1,date('now','+5 day'),30),(3,'later',1,date('now','+60 day'),30),
         (4,'later wide',1,date('now','+60 day'),90),(5,'inactive soon',0,date('now','+1 day'),30),(6,'no date',1,NULL,30),
         (7,'empty',1,'',30),(8,'garbage',1,'not a date',30),(9,'with time',1,datetime('now','+2 day'),NULL),
         (10,'zero window',1,date('now'),0),(11,'negative window',1,date('now','+1 day'),-5),(12,'fraction',1,date('now','+1 day'),1.5),
         (13,'text window',1,date('now','+1 day'),'abc'),(14,'tie a',1,date('now','+7 day'),30),(15,'tie b',1,date('now','+7 day'),30);
-      INSERT INTO products (name, is_active, stock_quantity) SELECT 'bulk ' || value, 1, 5 FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]');`)
+      INSERT INTO products (name, is_active, stock_quantity) SELECT 'bulk ' || value, 1, 5 FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]');`))
     seedExpiry(before)
     const { DASHBOARD_EXPIRY_WHERE_SQL } = modules(counting(before)).overview
     const LIST = `SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
@@ -271,7 +291,7 @@ async function main() {
     const before = await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
     await Promise.all(w.waits)
     // Sell everything: every active product to 0.
-    w.db.exec('UPDATE products SET stock_quantity = 0 WHERE is_active = 1')
+    fixtureWrite(w.db,()=>w.db.exec('UPDATE products SET stock_quantity = 0 WHERE is_active = 1'))
     const stale = await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
     assert.deepEqual(stale, before, 'CONTROL: without a bump the cached answer is served (the version is the invalidator)')
     await mod.cache.bumpVersion(w.env, 'stock')
