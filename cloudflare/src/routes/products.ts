@@ -3691,6 +3691,7 @@ export async function foldDuplicateProductInto(
     operationId: string
     costAuthorityVersion?: 3
     costFallback?: MergeCostFallback
+    costReviewRoot?: string
     bulkClusterPlan?: ProductMergeClusterPlan
     resumedCluster?: boolean
     preStatements?: Array<{ sql: string; params?: Record<string, unknown> }>
@@ -3807,7 +3808,7 @@ export async function foldDuplicateProductInto(
   const canonicalStockBefore = snapshot.canonicalStockBefore
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
-  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; parent_id?: number | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }
+  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; parent_id?: number | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null; cost_review_key?: string | null }
   const canonicalBefore = snapshot.canonicalProduct as MergeProductPricingRow | undefined
   const dupPricing = snapshot.duplicateProduct as MergeProductPricingRow | undefined
   const reviewedPlan = atomicHistory?.reviewedPlan
@@ -3872,7 +3873,7 @@ export async function foldDuplicateProductInto(
   const costOutcome = newCostAuthority ? mergeCostOutcome(canonicalId,
     costPlan?.version === 3 ? costPlan.keeperCost! : atomicHistory?.costFallback ?? {
       usd: costOrNull(canonicalBefore.cost_price_usd), khr: costOrNull(canonicalBefore.cost_price_khr),
-    }) : null
+    }, canonicalBefore.cost_review_key ?? null, atomicHistory?.costReviewRoot) : null
   const mergedEconomics = chosenCost
     ? {
       ...foldEconomics,
@@ -4552,8 +4553,10 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
 // since this file imports MergeReversal from there). See lib/undoAppliers.ts.
 // Redo repeats the original decisions: stock disposition, economics and the
 // Resolve grid's keeper choice (N1/N4), passed through to the fold's own slot.
-registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice) => (
-  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice)
+registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, reviewReplay) => (
+  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride,
+    reviewReplay ? { operationId: reviewReplay.operationId, costAuthorityVersion: 3, costFallback: reviewReplay.outcome.original,
+      costReviewRoot: reviewReplay.outcome.rootKey, preStatements: reviewReplay.guards, groupCompletionStatements: reviewReplay.complete } : undefined, keeperChoice)
 ))
 
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }

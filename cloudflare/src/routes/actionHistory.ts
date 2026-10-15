@@ -135,6 +135,7 @@ function isServerManagedPayload(value: unknown): boolean {
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
   return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+    || (kind === 'product.merge' && payload.cost_authority_version === 3)
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -444,7 +445,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay) {
+    const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.cost_authority_version === 3
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
 
@@ -537,7 +539,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
         ? notifyCustomerGenderRestoration(c.env)
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
@@ -570,7 +572,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         applied: true,
         item: row ? await mapRow(row, user, c.env) : null,
         payload,
-        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay || mergeCostReplay
           ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
           : {}),
       }, user))

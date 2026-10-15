@@ -121,6 +121,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './branchWrites': { branchUpdateStatements: () => [] },
   // U-cost: merge undo re-derives catalog cost with the real formula.
   './catalogCostRecompute': catalogCost,
+  './productCostReview': costReview,
 })
 const productModule = load('routes/products.ts', {
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
@@ -629,7 +630,7 @@ async function main() {
     assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 0)
     const history = one("SELECT id, undo_payload FROM action_history WHERE entity = 'product' AND status = 'undoable' ORDER BY id DESC LIMIT 1")
     const payload = JSON.parse(history.undo_payload)
-    await undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
+    await undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id, generation: payload.generation })
     assert.equal(sessionRow(900).status, 'recorded', 'closed is permanent: undoing the merge does not reopen the session')
     assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 1)
   })

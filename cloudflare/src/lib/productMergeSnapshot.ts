@@ -143,13 +143,13 @@ export function planProductMergeCaseSnapshot(
     { key: 'canonicalStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: keeperId } },
     {
       key: 'canonicalProduct',
-      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, ${PRODUCT_MONEY_COLUMNS}
+      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, cost_review_key, ${PRODUCT_MONEY_COLUMNS}
             FROM products WHERE id = @id`,
       params: { id: keeperId },
     },
     {
       key: 'duplicateProduct',
-      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, ${PRODUCT_MONEY_COLUMNS}
+      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, cost_review_key, ${PRODUCT_MONEY_COLUMNS}
             FROM products WHERE id = @id`,
       params: { id: duplicateId },
     },
