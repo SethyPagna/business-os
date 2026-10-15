@@ -4507,12 +4507,14 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     batchResults = await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     let receipt: { id: number } | null | undefined = null
+    const receiptPayloadSql = "CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END"
     if (atomicHistory && stockTransactionRefusal(error)?.action !== 'reload_required') {
-      try { receipt = await db.prepare(`SELECT id FROM undo_snapshots WHERE kind IN ('product.merge','product.merge.group.child') AND status='applied'
-          AND json_extract(payload_json,'$.operationId')=@operationId
-          AND json_extract(payload_json,'$.keeperId')=@keeper AND json_extract(payload_json,'$.dupId')=@discarded
-          AND created_by_id IS @actor AND (@root IS NULL OR (json_extract(payload_json,'$.costReviewOutcome.rootKey')=@root
-            AND json_extract(payload_json,'$.costReviewOutcome.reviewKey')=@reviewKey))
+      try { receipt = await db.prepare(`SELECT id FROM undo_snapshots WHERE ((kind='product.merge' AND status='applied')
+          OR (kind='product.merge.group.child' AND status IN ('recorded','applied')))
+          AND json_extract(${receiptPayloadSql},'$.operationId')=@operationId
+          AND json_extract(${receiptPayloadSql},'$.keeperId')=@keeper AND json_extract(${receiptPayloadSql},'$.dupId')=@discarded
+          AND created_by_id IS @actor AND (@root IS NULL OR (json_extract(${receiptPayloadSql},'$.costReviewOutcome.rootKey')=@root
+            AND json_extract(${receiptPayloadSql},'$.costReviewOutcome.reviewKey')=@reviewKey))
           ORDER BY id DESC LIMIT 1`)
         .get<{ id: number }>({ operationId: atomicHistory.operationId, keeper: canonicalId, discarded: dup.id,
           actor: user?.id ?? null, root: costOutcome?.rootKey ?? null, reviewKey: costOutcome?.reviewKey ?? null }) } catch {}
