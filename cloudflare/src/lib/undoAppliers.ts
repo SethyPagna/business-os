@@ -303,7 +303,7 @@ export interface MergeReversal {
   fingerprintPending?: boolean
   operationId?: string
   costReviewOutcome?: MergeCostOutcome
-  costReviewState?: { generation: number; keeper_revision: number; duplicate_revision: number; direction: 'undo' | 'redo'; from_generation: number }
+  costReviewState?: { generation: number; keeper_revision: number; duplicate_revision: number; gallery_state: unknown[]; direction: 'undo' | 'redo'; from_generation: number }
 }
 
 export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
@@ -3014,6 +3014,13 @@ async function branchReplayExpectedFields(
   return other.fields as BranchWriteFields
 }
 
+function mergeReplayGallerySql(): string {
+  return `(SELECT json_group_array(json_array(id,product_id,image_path,sort_order,created_at,revision)) FROM (
+    SELECT i.*,COALESCE(r.revision,0) AS revision FROM product_images i
+    LEFT JOIN stock_session_revisions r ON r.entity_type='product_image' AND r.entity_key=CAST(i.id AS TEXT)
+    WHERE i.product_id IN (@keeper,@discarded) ORDER BY i.id))`
+}
+
 async function replayMergeCostReview(payload: Record<string, unknown>, ctx: UndoApplierContext, snapshot: { id: number; status: string; payload_json: string }, reversal: MergeReversal): Promise<UndoApplierOutcome> {
   const refuse = () => new UndoConflictError('This merge review receipt is missing, stale, or changed.', UNDO_HISTORY_STALE_CODE)
   if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || Number(ctx.historyId) <= 0
@@ -3032,7 +3039,7 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
   const state = reversal.costReviewState
   if (pointer.generation === 0 ? state !== undefined : !state || state.generation !== pointer.generation
     || state.from_generation !== Number(pointer.generation) - 1 || !['undo','redo'].includes(state.direction)
-    || !Number.isSafeInteger(state.keeper_revision) || !Number.isSafeInteger(state.duplicate_revision)) throw refuse()
+    || !Number.isSafeInteger(state.keeper_revision) || !Number.isSafeInteger(state.duplicate_revision) || !Array.isArray(state.gallery_state)) throw refuse()
   const eventJson = (alias: string) => `CASE WHEN json_valid(${alias}.details) THEN ${alias}.details ELSE '{}' END`
   const root = await db.prepare(`SELECT a.id,a.details FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=@keeper
     AND json_extract(${eventJson('a')},'$.cost_review.version')=1 AND json_extract(${eventJson('a')},'$.cost_review.kind')='merge'
@@ -3081,9 +3088,10 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
             AND json_extract(undo_payload,'$.generation')=@nextGeneration AND json_extract(undo_payload,'$.snapshot_id')=@snapshot)
           AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0)=@keeperRevision
           AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0)=@duplicateRevision
+          AND ${mergeReplayGallerySql()} IS @galleryState
           THEN 1 ELSE json_extract('', '$') END AS merge_cost_fingerprint_guard`,
         params: { snapshot: snapshot.id, before: saved.payload_json, history: historyId, nextGeneration: generation + 1,
-          keeper: String(fresh.keeperId), discarded: String(fresh.dupId), keeperRevision: receipt.keeper_revision, duplicateRevision: receipt.duplicate_revision },
+          keeper: String(fresh.keeperId), discarded: String(fresh.dupId), keeperRevision: receipt.keeper_revision, duplicateRevision: receipt.duplicate_revision, galleryState: JSON.stringify(receipt.gallery_state) },
       }, ...graphGuards,
       { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.fingerprintPending',json('false'),'$.mergedStateFingerprint',@fingerprint) WHERE id=@snapshot`,
         params: { fingerprint, snapshot: snapshot.id } },
@@ -3110,7 +3118,8 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     sql: `UPDATE undo_snapshots SET status=@status,payload_json=json_set(@payload,'$.costReviewState',json_object(
       'generation',@nextGeneration,'direction',@direction,'from_generation',@generation,
       'keeper_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0),
-      'duplicate_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0))),updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,
+      'duplicate_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0),
+      'gallery_state',json(${mergeReplayGallerySql()}))),updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,
     params: { status: ctx.direction === 'undo' ? 'reversed' : 'applied', payload: JSON.stringify(fresh), nextGeneration: generation + 1,
       direction: ctx.direction, generation, keeper: String(reversal.keeperId), discarded: String(reversal.dupId), snapshot: snapshot.id },
   }, {
@@ -3132,8 +3141,9 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       guards.push({ sql: `SELECT CASE WHEN
         COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0)=@keeperRevision
         AND COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0)=@duplicateRevision
+        AND ${mergeReplayGallerySql()} IS @galleryState
         THEN 1 ELSE json_extract('', '$') END AS merge_cost_revision_guard`,
-      params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision, duplicateRevision: state.duplicate_revision } })
+      params: { keeper: String(reversal.keeperId), discarded: String(reversal.dupId), keeperRevision: state.keeper_revision, duplicateRevision: state.duplicate_revision, galleryState: JSON.stringify(state.gallery_state) } })
       const keeper = await db.prepare('SELECT id,name,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; is_active: number }>([reversal.keeperId])
       const discarded = await db.prepare('SELECT id,name,image_path,is_active FROM products WHERE id=?').get<{ id: number; name: string | null; image_path: string | null; is_active: number }>([reversal.dupId])
       if (!keeper?.is_active || !discarded?.is_active) throw refuse()

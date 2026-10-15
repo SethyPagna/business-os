@@ -173,6 +173,7 @@ function loadUndoAppliers(d1) {
   stubs['./saleItemPricing'] = loadActualDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   // U-cost: merge undo re-derives catalog cost with the real formula.
   stubs['./catalogCostRecompute'] = loadActualDependency(path.join(LIB_DIR, 'catalogCostRecompute.ts'))
+  stubs['./productCostReview'] = loadActualDependency(path.join(LIB_DIR, 'productCostReview.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -585,7 +586,9 @@ async function run() {
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     // Redo runs the real fold, passing the Resolve grid's keeper choice (N1/N4)
     // through to the fold's own slot (behaviour: test-product-resolve-keep-merge-native.cjs).
-    assert.match(productsSrc, /registerMergeFold\(\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice\) => \(\s*foldDuplicateProductInto\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice\)/)
+    assert.match(productsSrc, /registerMergeFold\(\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, reviewReplay\) => \(\s*foldDuplicateProductInto\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride,/)
+    assert.match(productsSrc, /reviewReplay \? \{ operationId: reviewReplay\.operationId, costAuthorityVersion: 3, costFallback: reviewReplay\.outcome\.original,/)
+    assert.match(productsSrc, /groupCompletionStatements: reviewReplay\.complete \} : undefined, keeperChoice\)/)
     assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
     assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/)
     assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)
@@ -679,7 +682,7 @@ async function runSavedClusterEconomics() {
      WHERE id IN (1,2,3)
      ORDER BY id
   `).all()
-  const clusterPlan = productMerge.createProductMergeClusterPlan('planned item\u0001plan-1', 1, planRows)
+  const clusterPlan = productMerge.createProductMergeClusterPlan('planned item\u0001plan-1', 1, planRows, 2)
   const plannedEconomics = productMerge.resolveProductMergeClusterPlanEconomics(clusterPlan)
   assert.equal(plannedEconomics.merged.cost_price_usd, 5)
   assert.equal(plannedEconomics.merged.cost_price_khr, 5000)
