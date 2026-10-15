@@ -2528,7 +2528,7 @@ app.put('/:id', async (c) => {
         // Sep 16 2026 ruling: this row's edit now identifies it as the SAME
         // product as `duplicate` -- fold this row INTO it (foldDuplicateProductInto,
         // the one merge path, transfer-aware and undo-evidenced) rather than
-        // refusing. Any other field this edit also carries (price/cost/image)
+        // refusing. Any other field this edit also carries (price/image)
         // is applied on top of the survivor afterwards, same as an ordinary edit.
         const db = getDb(c.env)
         const dupRow = await db.prepare('SELECT id, name, barcode, updated_at, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
@@ -2565,7 +2565,7 @@ app.put('/:id', async (c) => {
             { id: duplicate.id, name: duplicate.name },
             { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
             branchNameById,
-            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
+            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID(), costAuthorityVersion: 3 },
           )
         } catch (error) {
           const stockError = productStockGuardError(error)
@@ -2585,13 +2585,12 @@ app.put('/:id', async (c) => {
           if (refusal) return c.json({ success: false, ...refusal }, 409)
           throw error
         }
-        // Apply the remaining fields this edit carried (price/cost/image/etc,
-        // everything but identity/rename bookkeeping) onto the survivor.
         const rest: Record<string, unknown> = { ...body }
         delete rest.name
         delete rest.barcode
         delete rest.__rename_scope
         delete rest.expected_updated_at
+        for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) delete rest[field]
         // The money-write plan (if any) was computed by prepareProductMoneyWrite
         // above against THIS row's id and its before-image -- it is invalid
         // once the write is redirected onto the survivor's row. A plain field
@@ -6035,6 +6034,7 @@ type SelectedConflictPreparedCase = {
   discarded: SelectedConflictProductRow
   stateDigest: string
   stateFingerprint: string
+  costGraph: MergeCostPreviewGraph
   stateGuards: Array<{ sql: string; params: Record<string, unknown> }>
   needsStockChoice: boolean
   stockImpact: MergeStockImpact
@@ -6065,11 +6065,16 @@ function selectedConflictClusterPredicateSql(clusterType: ProductConflictPreview
   return '0'
 }
 
+const SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT = 3
 const SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS = 5
 const SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT = 11 + MERGE_REPARENT_TABLES.length
 const SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT = Math.ceil(
   SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT / SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS,
 )
+
+function selectedConflictExactScalarSql(value: string): string {
+  return `json_array(typeof(${value}),CASE WHEN typeof(${value})='real' THEN printf('%!.17g',${value}) ELSE ${value} END)`
+}
 
 function selectedConflictStateFingerprintSqlTerms(clusterType: ProductConflictPreviewCase['cluster_type']): string[] {
   const terms = [
@@ -6077,7 +6082,8 @@ function selectedConflictStateFingerprintSqlTerms(clusterType: ProductConflictPr
             json_object('id',id,'name',name,'barcode',barcode,'image_path',image_path,
               'is_active',is_active,'is_group',COALESCE(is_group,0),'parent_id',parent_id,
               'stock_quantity',stock_quantity,'updated_at',updated_at,
-              'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,
+              'cost_price_usd',${selectedConflictExactScalarSql('cost_price_usd')},
+              'cost_price_khr',${selectedConflictExactScalarSql('cost_price_khr')},
               'selling_price_usd',selling_price_usd,'selling_price_khr',selling_price_khr,
               'wholesale_price_usd',wholesale_price_usd,'wholesale_price_khr',wholesale_price_khr) AS value
      FROM products WHERE id IN (@keeperId, @mergedId)`,
@@ -6093,18 +6099,19 @@ function selectedConflictStateFingerprintSqlTerms(clusterType: ProductConflictPr
      FROM branch_stock WHERE product_id IN (@keeperId, @mergedId)`,
     `SELECT 'product_batch' AS kind, printf('%020d', id) AS row_key,
             json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,
-              'batch_number',batch_number,'is_active',is_active,'updated_at',updated_at) AS value
+              'batch_number',batch_number,'is_active',is_active,'updated_at',updated_at,
+              'unit_cost_usd',${selectedConflictExactScalarSql('unit_cost_usd')},'received_at',received_at) AS value
      FROM product_batches WHERE variant_product_id IN (@keeperId, @mergedId)`,
     `SELECT 'branch_batch_stock' AS kind, printf('%020d:%020d', bbs.batch_id, bbs.branch_id) AS row_key,
             json_object('batch_id',bbs.batch_id,'branch_id',bbs.branch_id,'quantity',bbs.quantity,
-              'updated_at',bbs.updated_at) AS value
+              'quantity_exact',${selectedConflictExactScalarSql('bbs.quantity')},'updated_at',bbs.updated_at) AS value
      FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
      WHERE pb.variant_product_id IN (@keeperId, @mergedId)`,
     `SELECT 'product_image' AS kind, printf('%020d:%020d', product_id, id) AS row_key,
             json_object('id',id,'product_id',product_id,'image_path',image_path,'sort_order',sort_order) AS value
      FROM product_images WHERE product_id IN (@keeperId, @mergedId)`,
     ...MERGE_REPARENT_TABLES.map(({ table, column }) => `SELECT 'reparent:${table}' AS kind, printf('%020d', id) AS row_key,
-            json_object('id', id, 'linked_product_id', ${column}) AS value
+            json_object('id', id, 'linked_product_id', ${column}${table === 'product_cost_entries' ? `, 'cost_usd',${selectedConflictExactScalarSql('cost_usd')},'baseline_batch_id',baseline_batch_id` : ''}) AS value
      FROM ${table} WHERE ${column} IN (@keeperId, @mergedId)`),
     `SELECT 'promotion_rule' AS kind, printf('%020d', pr.id) AS row_key,
             json_object('id',pr.id,'product_ids',pr.product_ids) AS value
@@ -6211,6 +6218,28 @@ async function readSelectedConflictFingerprint(
   }
 }
 
+function selectedConflictCostGraph(fingerprint: string): MergeCostPreviewGraph {
+  const entries = JSON.parse(fingerprint) as Array<{ kind: string; value: Record<string, unknown> }>
+  const exact = (value: unknown): unknown => {
+    if (!Array.isArray(value) || value.length !== 2) throw new Error('selected_conflict_cost_scalar_invalid')
+    if (value[0] === 'null') return null
+    if (value[0] === 'real' || value[0] === 'integer') {
+      const number = Number(value[1])
+      if (!Number.isFinite(number)) throw new Error('selected_conflict_cost_scalar_invalid')
+      return number
+    }
+    if (value[0] === 'text') return value[1]
+    throw new Error('selected_conflict_cost_scalar_invalid')
+  }
+  const rows = (kind: string) => entries.filter(row => row.kind === kind).map(row => row.value)
+  return {
+    products: rows('product').map(row => ({ ...row, cost_price_usd: exact(row.cost_price_usd), cost_price_khr: exact(row.cost_price_khr) })),
+    batches: rows('product_batch').map(row => ({ ...row, unit_cost_usd: exact(row.unit_cost_usd) })),
+    batchStock: rows('branch_batch_stock').map(row => ({ ...row, quantity: exact(row.quantity_exact) })),
+    currentCostEntries: rows('reparent:product_cost_entries').map(row => ({ ...row, product_id: row.linked_product_id, cost_usd: exact(row.cost_usd) })),
+  }
+}
+
 async function readSelectedConflictClusterMemberIds(
   db: ReturnType<typeof getDb>,
   clusterType: ProductConflictPreviewCase['cluster_type'],
@@ -6270,6 +6299,7 @@ function selectedConflictStatementEstimate(
   statements += 2 // close stock-in session Undo (audit + status)
   statements += 2 // committed receipt transition + assertion
   statements += 3 // snapshot + action history + audit
+  statements += SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT
   return statements
 }
 
@@ -6441,6 +6471,7 @@ async function prepareSelectedConflictCase(
   }
   const stateDigest = await productConflictSha256({
     version: PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
+    cost_dependency_version: 1,
     case_key: requested.case_key,
     keep_id: keeper.id,
     merge_id: discarded.id,
@@ -6455,6 +6486,7 @@ async function prepareSelectedConflictCase(
     discarded,
     stateDigest,
     stateFingerprint: fingerprint.fingerprint,
+    costGraph: selectedConflictCostGraph(fingerprint.fingerprint),
     stateGuards: fingerprint.guards,
     needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
     stockImpact,
@@ -6494,6 +6526,24 @@ async function prepareSelectedConflictCases(
     const result = await prepareSelectedConflictCase(db, requested, ordinal, clustersByKey, branchNameById, canChangeImages, executionStockChoices?.[ordinal])
     if ('stateDigest' in result) prepared.push(result)
     else skipped.push(result)
+  }
+  if (prepared.length) {
+    const graph: MergeCostPreviewGraph = { products: [], batches: [], batchStock: [], currentCostEntries: [] }
+    for (const item of prepared) {
+      for (const key of ['products', 'batches', 'batchStock', 'currentCostEntries'] as const) graph[key].push(...item.costGraph[key])
+    }
+    for (const stock of ['merge', 'write_off'] as const) {
+      const outcomes = await previewMergeCosts(db, graph, prepared.map(item => ({ keepId: item.keeper.id, steps: [{ mergeId: item.discarded.id, stock }] })))
+      for (const item of prepared) {
+        const authority = outcomes.find(row => row.keeperId === item.keeper.id)
+        if (!authority) throw new Error('selected_conflict_cost_projection_missing')
+        item.afterByStockChoice[stock].costAuthority = authority
+        item.afterByStockChoice[stock].costs = {
+          cost_price_usd: authority.cost_price_usd, cost_price_khr: authority.cost_price_khr,
+          purchase_price_usd: authority.cost_price_usd, purchase_price_khr: authority.cost_price_khr,
+        }
+      }
+    }
   }
   return { prepared, skipped }
 }
@@ -6546,8 +6596,8 @@ function selectedConflictLightStatementEstimate(
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
     + 1 + 2 + 2 + 2 + 3 // discarded-stock guard, stock caches, stock-session Undo close, receipt transition/guard, atomic history
-  const merge = common + branchStock.length * 2 + mergeBatchStatements
-  const writeOff = common + branchStock.length + mergedBatches.length * 2
+  const merge = common + SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT + branchStock.length * 2 + mergeBatchStatements
+  const writeOff = common + SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT + branchStock.length + mergedBatches.length * 2
 
   const chunksOf80 = (count: number) => Math.ceil(Math.max(0, count) / 80)
   const savedBatchIds = new Set<number>([
@@ -6620,7 +6670,7 @@ async function prepareSelectedConflictApplyPreflightCases(
       continue
     }
     const stateDigest = await productConflictSha256({
-      version: PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION, case_key: requested.case_key,
+      version: PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION, cost_dependency_version: 1, case_key: requested.case_key,
       keep_id: keeper.id, merge_id: discarded.id, state: after.fingerprint,
     })
     prepared.push({
@@ -8851,6 +8901,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
           undefined,
           {
             operationId: item.operation_id,
+            costAuthorityVersion: 3,
             preStatements: prepared.stateGuards,
             additionalStatements: receiptStatements,
             auditContext: {
