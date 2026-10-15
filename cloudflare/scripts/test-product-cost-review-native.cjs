@@ -68,6 +68,20 @@ async function storageCases(){
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
   console.log('PASS real lot cost becoming known clears review at unchanged derived value')
  }finally{state.native.db.close()}
+ for(const recursive of [0,1]){
+  fresh()
+  try{
+   state.native.db.exec('PRAGMA recursive_triggers='+recursive)
+   const review=real('productCostReview'),outcome=review.mergeCostOutcome(10,{usd:5.1234,khr:null})
+   await adapter.batch(review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}))
+   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
+   assert.throws(()=>state.native.db.exec('UPDATE products SET cost_review_key=NULL WHERE id=10'),/product_cost_review_write_refused/)
+   state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'recursion',1,5.1234,1)")
+   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
+   assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5.1234)
+   console.log('PASS review admission/refusal and same-value valid-lot clearing with recursive_triggers='+recursive)
+  }finally{state.native.db.close()}
+ }
 }
 async function mergeCases(){
  fresh()
@@ -123,6 +137,18 @@ async function mergeCases(){
  }finally{state.native.db.close()}
  fresh()
  try{
+  state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown-manual',1,NULL,3);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3);INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,7,'manual',900)")
+  const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
+  assert.equal(done.status,200,JSON.stringify(done.body))
+  const stored=one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=10')
+  assert.equal(stored.cost_price_usd,7);assert.equal(stored.cost_price_khr,20500);assert.match(stored.cost_review_key,/^[a-f0-9]{32}$/)
+  assert.deepEqual(rows('SELECT * FROM product_cost_entries ORDER BY id'),before)
+  const event=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
+  assert.equal(event.fallback_usd,5);assert.equal(event.after_usd,7);assert.equal(event.recorded_lot,0);assert.equal(event.after_key,stored.cost_review_key)
+  console.log('PASS actual merge keeps saved manual7 over stale catalog5 with only unknown lots, retains review and leaves original manual history unchanged')
+ }finally{state.native.db.close()}
+ fresh()
+ try{
   state.tier='free'
   const snapshot=()=>JSON.stringify(['products','audit_logs','action_history','product_cost_entries'].map(table=>rows('SELECT * FROM '+table+' ORDER BY rowid')))
   const before=snapshot(),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
@@ -140,7 +166,8 @@ async function backupCases(){
   const tables=backup.BACKUP_TABLES.filter(table=>one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table))
   const doc={format:'business-os-cloudflare-backup',formatVersion:1,tables:Object.fromEntries(tables.map(table=>[table,{columns:rows('PRAGMA table_info("'+table+'")').map(row=>row.name),rows:rows('SELECT * FROM "'+table+'"')}]))}
   const before=JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')]))
-  const text=JSON.stringify(doc),env={DB:binding(),ASSETS:{async get(key){return {key,etag:'fixed-source',version:'fixture',size:Buffer.byteLength(text),body:new Blob([text]).stream()}}}}
+  let text=JSON.stringify(doc)
+  const env={DB:binding(),ASSETS:{async get(key){return {key,etag:'fixed-source',version:'fixture',size:Buffer.byteLength(text),body:new Blob([text]).stream()}}}}
   state.native.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')")
   let error
   try{await backup.restoreCloudflareBackup(env,'fixture.json')}catch(failure){error=failure}
@@ -148,6 +175,25 @@ async function backupCases(){
   assert.match(error?.message??'',/merge cost review.*validated restore/i)
   assert.equal(JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')])),before)
   console.log('PASS protected review snapshot refuses before DELETE and preserves complete synthetic business snapshot')
+  doc.tables.products.rows.forEach(row=>{row.cost_review_key=null})
+  doc.tables.audit_logs.rows=doc.tables.audit_logs.rows.filter(row=>!JSON.parse(row.details||'{}').cost_review)
+  text=JSON.stringify(doc)
+  await assert.rejects(()=>backup.restoreCloudflareBackup(env,'fixture.json'),/merge cost review.*validated restore/i)
+  assert.equal(JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')])),before)
+  console.log('PASS unflagged older snapshot cannot erase live review marker or its admitted history before DELETE')
+ }finally{state.native.db.close()}
+ fresh();state.native.db.close()
+ state.native=require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll({through:254}))
+ try{
+  state.native.db.exec("DELETE FROM fees;INSERT INTO products(id,name,cost_price_usd) VALUES(10,'Legacy fixture',5.1234)")
+  assert.equal(rows('PRAGMA table_info(products)').some(row=>row.name==='cost_review_key'),false)
+  const backup=real('backup'),tables=backup.BACKUP_TABLES.filter(table=>one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table))
+  const doc={format:'business-os-cloudflare-backup',formatVersion:1,tables:Object.fromEntries(tables.map(table=>[table,{columns:rows('PRAGMA table_info("'+table+'")').map(row=>row.name),rows:rows('SELECT * FROM "'+table+'"')}]))}
+  const text=JSON.stringify(doc),env={DB:binding(),ASSETS:{async get(key){return key===backup.CLOUDFLARE_BACKUP_PREFIX+'legacy.json'?{key,etag:'legacy-source',version:'fixture',size:Buffer.byteLength(text),body:new Blob([text]).stream()}:null}}}
+  state.native.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')")
+  await backup.restoreCloudflareBackup(env,'legacy.json')
+  assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5.1234)
+  console.log('PASS actual full small unflagged restore on pre0255 live schema does not reference the absent review column')
  }finally{state.native.db.close()}
 }
 async function main(){if(process.argv.includes('--storage'))await storageCases();else if(process.argv.includes('--backup'))await backupCases();else {await storageCases();await mergeCases();await backupCases()}}
