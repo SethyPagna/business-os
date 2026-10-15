@@ -15,6 +15,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs')
 const source = fs.readFileSync(file, 'utf8')
@@ -162,7 +163,7 @@ const setStatus = async (route, saleId, body) => {
     // tolerates for a line that was NEVER batch-tracked (see
     // allocateAcrossLots's own "uncovered" comment), but must not tolerate
     // for a line that IS already batch-tracked (existingAllocations.length>0).
-    f.raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=500 AND branch_id=1').run()
+    seedStockFixture(f.raw.db, () => f.raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=500 AND branch_id=1').run())
 
     const before = { stock: f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=1').get().quantity,
       allocation: allocationsOf(f.raw, lineId)[0], item: f.raw.prepare('SELECT quantity FROM sale_items WHERE id=?').get([lineId]) }

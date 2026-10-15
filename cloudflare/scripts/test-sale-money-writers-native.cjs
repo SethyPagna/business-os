@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const file = path.join(__dirname,'test-sale-create-atomic-pure.cjs')
 const source = fs.readFileSync(file,'utf8')
 const boundary = source.indexOf(';(async () => {')
@@ -36,7 +37,7 @@ async function run() {
   const financialUser = {...h.USER, permissions:JSON.stringify({...JSON.parse(h.USER.permissions), product_cost_view:true})}
   h.setUser(financialUser)
   const f = h.fixture()
-  f.raw.prepare('UPDATE products SET cost_price_usd=1.2345 WHERE id=10').run()
+  seedStockFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET cost_price_usd=1.2345 WHERE id=10').run())
   const body = { ...h.request('precision-new'), money_precision_version:1, discount_usd:.0001,
     items:[{...intent('precision-line',1.24,1,.0055),selling_price_input_usd:1.23004}] }
   const result = await h.postSale(f.route,body)
@@ -197,7 +198,7 @@ async function run() {
   assert.equal(fingerprint(JSON.stringify({sale:{...legacyHeader,money_precision_version:1},lines:[],amendmentHeadId:0}),oldFingerprint),false)
   assert.throws(()=>h.load('lib/saleLineAddition.ts').saleMoneyUpdateStatement(1,{total_usd:1,calculated_total_usd:null}),/incomplete/)
   console.log('PASS v0 upgrade undo restores full header; old fingerprint permits only absent default precision fields')
-  legacyDb.raw.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10').run()
+  seedStockFixture(legacyDb.raw.db, () => legacyDb.raw.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10').run())
   const unknownCost = await h.postSale(legacyDb.route,{...h.request('null-cost'),money_precision_version:1})
   assert.equal(unknownCost.status,200,JSON.stringify(unknownCost.body))
   assert.equal(unknownCost.body.sale.items[0].cost_price_usd,null)
