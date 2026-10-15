@@ -132,6 +132,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
+    if (request.endsWith('/loyaltyEligibility')) return loadReal('lib/loyaltyEligibility.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
@@ -282,6 +283,7 @@ async function check(name, fn) {
 }
 
 function seed() {
+  rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
   auditCalls = []
   rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
@@ -1322,6 +1324,7 @@ async function main() {
 
   await check('a same-value replacement records a normal sale, carries the auto note, and keeps its hand-picked lot', async () => {
     seed()
+    rawDb.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
     // Product 2 is the replacement and its stock is lot-tracked, and the
     // operator picks the lot BY HAND (batch_id on the line) rather than
     // letting FIFO choose -- the one shape whose sale line used to end up
@@ -1394,6 +1397,7 @@ async function main() {
     // marked-down damaged stock -- and a return's hand-out is never that, so
     // the replacement line must leave it null rather than borrowing it to
     // carry this return's damaged flag onto the sale.
+    assert.strictEqual(rawDb.prepare('SELECT loyalty_accrual FROM sales WHERE id=?').get([json.replacementSaleId]).loyalty_accrual,1,'ON replacement snapshots earning eligibility')
     const replacementItem = rawDb.prepare('SELECT damaged_lot_id FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementItem.damaged_lot_id, null)
     assert.doesNotMatch(sale.notes, /damaged|restock/i, 'the auto note must not spell the internal choice onto the receipt')
@@ -1422,7 +1426,7 @@ async function main() {
     assert.strictEqual(sale.total_usd, 25)
     assert.strictEqual(sale.amount_paid_usd, 25, 'the customer pays for the sale in full, like any other sale')
     assert.strictEqual(sale.payment_method, 'ABA Bank', 'a real tender, not a "Return Exchange" placeholder')
-    assert.strictEqual(sale.loyalty_accrual, 1, 'and it earns loyalty exactly as any other sale does')
+    assert.strictEqual(sale.loyalty_accrual, 0, 'default OFF also fences replacement earning')
     const details = JSON.parse(sale.payment_details)
     assert.strictEqual(details.length, 1)
     assert.strictEqual(details[0].amount_usd, 25)

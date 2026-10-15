@@ -1,4 +1,5 @@
 export const LOYALTY_DISABLED_CODE = 'loyalty_points_disabled'
+export const LOYALTY_DISABLED_MESSAGE = 'Points were not added. Loyalty must be on, and the activity must be eligible. Activity from before the reset or while loyalty was off cannot earn points.'
 
 export function loyaltyPointsEnabled(value: unknown): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase())

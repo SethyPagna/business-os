@@ -274,6 +274,16 @@ const base = {
   assert.strictEqual(replayed.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 1, 'a re-sent committed batch is a no-op')
   assert.strictEqual(replayed.sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id = 10 AND branch_id = 1`).get().quantity, 4)
 
+  for(const value of [undefined,'garbage','false','true']){
+    const world=setup()
+    if(value!==undefined)world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?)").run(value)
+    await subject.applyUnifiedStockSale(world.db,base)
+    assert.equal(world.sqlite.prepare('SELECT loyalty_accrual FROM sales').get().loyalty_accrual,value==='true'?1:0,'stock sale snapshots authoritative switch '+value)
+    world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'").run()
+    await subject.applyUnifiedStockSale(world.db,base)
+    assert.equal(world.sqlite.prepare('SELECT loyalty_accrual FROM sales').get().loyalty_accrual,value==='true'?1:0,'stock sale retry cannot promote OFF-born activity')
+  }
+
   console.log('PASS grouped stock sales are Shop-guarded, bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
 })().catch((error) => {
   console.error(error)

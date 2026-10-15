@@ -1,4 +1,4 @@
-import { loyaltyAccrualSql, loyaltyPointsEnabled, LOYALTY_DISABLED_CODE } from '../lib/loyaltyEligibility'
+import { loyaltyAccrualSql, loyaltyPointsEnabled, LOYALTY_DISABLED_CODE, LOYALTY_DISABLED_MESSAGE } from '../lib/loyaltyEligibility'
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
@@ -2196,7 +2196,7 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
     })
   } catch (error) {
     if (String(error).includes(LOYALTY_DISABLED_CODE)) {
-      return c.json({ error: 'This submission cannot receive new loyalty points. Loyalty must be on when it is created and rewarded.', code: LOYALTY_DISABLED_CODE }, 400)
+      return c.json({ error: LOYALTY_DISABLED_MESSAGE, code: LOYALTY_DISABLED_CODE }, 400)
     }
     throw error
   }

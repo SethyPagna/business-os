@@ -1,4 +1,4 @@
-import { LOYALTY_DISABLED_CODE } from '../lib/loyaltyEligibility'
+import { LOYALTY_DISABLED_CODE, LOYALTY_DISABLED_MESSAGE } from '../lib/loyaltyEligibility'
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -3330,7 +3330,7 @@ app.post('/customers/:id/points', async (c) => {
         const committed = await replayAward()
         if (committed) return committed
       }
-      return c.json({ error: 'Loyalty points are disabled.', code: LOYALTY_DISABLED_CODE }, 400)
+      return c.json({ error: LOYALTY_DISABLED_MESSAGE, code: LOYALTY_DISABLED_CODE }, 400)
     }
     if ((await anonymousCustomerIds(db, [customerId])).has(customerId)) return anonymousCustomerMutationResponse(c)
     throw error

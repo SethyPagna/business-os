@@ -5,9 +5,8 @@ const root = process.env.LOYALTY_RESET_BASELINE || path.resolve(__dirname,'..')
 const script = `
 import worker from './src/index.ts';
 import { getDb } from './src/lib/db.ts';
-import { loyaltyAccrualSql } from './src/lib/loyaltyEligibility.ts';
 import { readCustomerPointsRaw, prepareCustomerAssignments } from './src/lib/saleCustomerAssignmentGuard.ts';
-let active=[],wrapped;
+let active=[],wrapped,beforeBatchSwitch;
 const note=(sql,r)=>active.push({sql,rows:r.results?.length||0,meta:r.meta});
 function statement(sql,s){return {inner:s,sql,bind(...v){return statement(sql,s.bind(...v))},async all(){const r=await s.all();note(sql,r);return r},async run(){const r=await s.run();note(sql,r);return r},async first(c){const r=await this.all();return c?r.results[0]?.[c]??null:r.results[0]??null}}}
 export default {async fetch(request,env,ctx){
@@ -17,8 +16,8 @@ if(input.op==='migrate'){await env.DB.prepare('CREATE TABLE IF NOT EXISTS d1_mig
 if(input.op==='pointsRaw')return Response.json(await readCustomerPointsRaw(getDb(env),input.customerId));
 if(input.op==='assign'){try{const db=getDb(env),guard=await prepareCustomerAssignments(db,[input.move]);await db.batch([guard.pre,{sql:'UPDATE sales SET customer_id=@target WHERE id=@id',params:{target:input.move.targetId,id:input.move.id}},guard.post]);return Response.json({ok:true})}catch(error){return Response.json({ok:false,status:error.status,message:String(error)})}}
 if(input.op==='read')return Response.json((await env.DB.prepare(input.sql).all()).results);
-if(!wrapped)wrapped={prepare:sql=>statement(sql,env.DB.prepare(sql)),async batch(items){const r=await env.DB.batch(items.map(x=>x.inner));r.forEach((v,i)=>note(items[i].sql,v));return r}};
-active=[];const pending=[],started=Date.now();const saved=globalThis.caches;globalThis.caches={default:{match:async()=>undefined,put:async()=>{},delete:async()=>false}};
+if(!wrapped)wrapped={prepare:sql=>statement(sql,env.DB.prepare(sql)),async batch(items){if(beforeBatchSwitch!==undefined){await env.DB.prepare("UPDATE settings SET value=? WHERE key='loyalty_points_enabled'").bind(beforeBatchSwitch).run();beforeBatchSwitch=undefined}const r=await env.DB.batch(items.map(x=>x.inner));r.forEach((v,i)=>note(items[i].sql,v));return r}};
+active=[];beforeBatchSwitch=input.flipBeforeBatch;const pending=[],started=Date.now();const saved=globalThis.caches;globalThis.caches={default:{match:async()=>undefined,put:async()=>{},delete:async()=>false}};
 const headers={cookie:'bos_session='+input.token,origin:'https://admin.scope.example','content-type':'application/json'};
 const response=await worker.fetch(new Request('https://admin.scope.example'+input.path,{method:input.method||(input.body?'POST':'GET'),headers,...(input.body?{body:JSON.stringify(input.body)}:{})}),{...env,DB:wrapped,BROADCAST_HUB:{idFromName:n=>n,get:()=>({fetch:async()=>Response.json({recipients:0})})}},{waitUntil(p){pending.push(p)},passThroughOnException(){}});
 await Promise.allSettled(pending);globalThis.caches=saved;return Response.json({status:response.status,body:await response.text().then(text=>{try{return JSON.parse(text)}catch{return text}}),log:active,wallMs:Date.now()-started});
@@ -65,6 +64,8 @@ const parity=async(expected,label,customerId=9901)=>{const r=await readers(custo
 const checkSql=fs.readFileSync(path.join(__dirname,'..','..','ops','queries','loyalty-reset-check.sql'),'utf8').replace(/\r\n/g,'\n').split('\n').filter(l=>!l.startsWith('--')).join('\n').trim().replace(/;$/,'')
 assert.ok(/^WITH\b/i.test(checkSql)&&!/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH)\b/i.test(checkSql),'the ops check is SELECT-only')
 const opsCheck=async()=>(await call({op:"read",sql:checkSql}))[0]
+assert.equal((await request('/api/settings')).body.loyalty_points_enabled,'true','pre-reset settings read is primed ON')
+assert.equal((await request('/api/auth/bootstrap')).body.settings.loyalty_points_enabled,'true','pre-reset bootstrap read is primed ON')
 const resetStatements=split(fs.readFileSync(path.join(root,'migrations',files.find(isReset)),'utf8'))
 const failedReset=await call({op:'migrate',name:files.find(isReset),statements:[...resetStatements, 'SELECT * FROM synthetic_missing_reset_table']});assert.ok(failedReset.error,'failure control must refuse the migration')
 assert.equal((await call({op:'read',sql:"SELECT COUNT(*) n FROM system_flags WHERE key='loyalty_points_reset'"}))[0].n,0,'failed migration rolls back checkpoint')
@@ -75,6 +76,8 @@ assert.ok(mark && JSON.parse(mark.value).sales === 9002, 'reset captures immutab
 assert.equal((await call({op:'read',sql:"SELECT value FROM settings WHERE key='loyalty_points_enabled'"}))[0].value,'false','reset defaults loyalty off')
 assert.equal((await call({op:'read',sql:"SELECT COUNT(*) n FROM sales WHERE id IN (9001,9002) AND created_at<datetime('now','-2 days')"}))[0].n,2,'history rows untouched')
 await parity(0,'reset excludes every pre-existing row, including future business dates')
+assert.equal((await request('/api/settings')).body.loyalty_points_enabled,'false','migration directSQL is visible in settings without KV version bump')
+assert.equal((await request('/api/auth/bootstrap')).body.settings.loyalty_points_enabled,'false','bootstrap immediately reads migrated OFF from D1')
 assert.equal(await call({op:'pointsRaw',customerId:9901}),0,'raw zero cannot be a clamped negative debt')
 await seed([{sql:"UPDATE customer_share_submissions SET reviewed_at=datetime('now','+1 day') WHERE id=1"},{sql:"UPDATE loyalty_point_adjustments SET created_at=(SELECT json_extract(value,'$.reset_at') FROM system_flags WHERE key='loyalty_points_reset') WHERE id=1"}])
 await parity(0,'old approvals and same-instant history cannot regain cleared points')
@@ -171,6 +174,9 @@ const restoreSale=async row=>{
  const blocked=await request('/api/customers/9903/points',{points:1,client_request_id:'maintenance-must-block'});assert.equal(blocked.status,503,'restore exemption cannot admit ordinary user writes')
  await seed([{sql:'DELETE FROM sales WHERE id=?',params:[row.id]},{sql:'INSERT INTO sales ('+Object.keys(row).join(',')+') VALUES('+Object.keys(row).map(()=>'?').join(',')+')',params:Object.values(row)},{sql:"DELETE FROM system_flags WHERE key='maintenance'"}])
 }
+await switchTo('true')
+const racedBirth=await call({path:'/api/sales',token,body:ownCheckout(true,'birth-commit-switch-race'),flipBeforeBatch:'false'});assert.equal(racedBirth.status,200,JSON.stringify(racedBirth.body))
+assert.equal((await call({op:'read',sql:"SELECT loyalty_accrual FROM sales WHERE client_request_id='birth-commit-switch-race'"}))[0].loyalty_accrual,0,'switch OFF between preflight and atomic insert cannot accrue')
 await seed([{sql:"INSERT INTO customers(id,name,membership_number) VALUES(9904,'Synthetic first payment','LC-9904')"}])
 await switchTo('true')
 const unpaid=await request('/api/sales',{...ownCheckout(true,'birth-first-payment-off'),customer_id:9904,sale_status:'awaiting_payment',amount_paid_usd:0});assert.equal(unpaid.status,200,JSON.stringify(unpaid.body))

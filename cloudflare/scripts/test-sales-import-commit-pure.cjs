@@ -462,6 +462,17 @@ function customerMatch(overrides = {}) {
     }
   }
 
+  for(const value of [undefined,'garbage','false','true']){
+    const world=setup()
+    world.sqlite.prepare("DELETE FROM settings WHERE key='loyalty_points_enabled'").run()
+    if(value!==undefined)world.sqlite.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled',?)").run(value)
+    await subject.applyHistoricalSaleImport(world.db,{...input,accrueLoyalty:true})
+    assert.equal(world.sqlite.prepare("SELECT loyalty_accrual FROM sales").get().loyalty_accrual,value==='true'?1:0,'import opt-in obeys current switch '+value)
+    world.sqlite.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+    await subject.applyHistoricalSaleImport(world.db,{...input,accrueLoyalty:true})
+    assert.equal(world.sqlite.prepare("SELECT loyalty_accrual FROM sales").get().loyalty_accrual,value==='true'?1:0,'retry cannot promote OFF-born import')
+  }
+
   const tooMany = Array.from({ length: subject.MAX_HISTORICAL_SALE_LINES + 1 }, () => ({ ...saleData().items[0] }))
   await assert.rejects(
     () => subject.applyHistoricalSaleImport(setup().db, { ...input, data: saleData({ items: tooMany }) }),
