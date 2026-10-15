@@ -63,6 +63,11 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
       controls.maxBatchStatements = Math.max(controls.maxBatchStatements, statements.length)
       return rawCompat.batch(statements)
     },
+    batchOnce(statements) {
+      statements.forEach(({ sql, params }) => observe(sql, params))
+      controls.maxBatchStatements = Math.max(controls.maxBatchStatements, statements.length)
+      return rawCompat.batchOnce(statements)
+    },
   }
   const detail = loadTs('lib/productDetailRule.ts')
   const binding = loadTs('lib/sqlBinding.ts')
@@ -82,8 +87,11 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
   const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
   // U-cost: merge folds, their post-fold checks and undo read the cost derivation.
   const catalogCost = loadTs('lib/catalogCostRecompute.ts', { './db': {} })
+  const stockTransaction = loadTs('lib/stockTransaction.ts')
+  const costReview = loadTs('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
+  const costPreview = loadTs('lib/productMergeCostPreview.ts', { './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': actionGroups })
   const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
-    './catalogCostRecompute': catalogCost,
+    './catalogCostRecompute': catalogCost, './productCostReview': costReview, './stockTransaction': stockTransaction,
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
@@ -104,7 +112,7 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
-    '../lib/catalogCostRecompute': catalogCost,
+    '../lib/stockTransaction': stockTransaction, '../lib/catalogCostRecompute': catalogCost, '../lib/productCostReview': costReview, '../lib/productMergeCostPreview': costPreview,
     '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
@@ -130,6 +138,7 @@ async function main() {
         unit TEXT,unit_normalized TEXT,image_path TEXT,is_active INTEGER,is_group INTEGER,updated_at TEXT,
         stock_quantity REAL,rfid_confirmed_qty REAL,cost_price_usd REAL,cost_price_khr REAL,selling_price_usd REAL,selling_price_khr REAL,
         wholesale_price_usd REAL,wholesale_price_khr REAL);
+      CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL, cost_usd REAL NOT NULL, cost_khr REAL, source TEXT NOT NULL, user_id INTEGER, user_name TEXT, baseline_batch_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
       CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,lot_code TEXT,expiry_date TEXT,received_at TEXT,is_active INTEGER,notes TEXT,
         synthetic INTEGER,created_at TEXT,updated_at TEXT,batch_number TEXT,unit_cost_usd REAL,received_quantity REAL,received_branch_id INTEGER, received_branch_name TEXT,

@@ -54,17 +54,25 @@ async function main() {
       }
     }
     await native.prepare("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1)").run()
+    const seeds = []
     for (const [id, name, barcode, category, brand, unit, stock, cost, retail, wholesale] of [
       [4101, 'Native keeper', '000880001', 'A', 'One', 'pcs', 2, 4, 8, 7],
       [4102, 'Native member 1', '0880001', 'B', 'Two', 'box', 3, 6, 9, 8],
       [4103, 'Native member 2', '880001', 'C', 'Three', 'pack', 4, 8, 10, 9],
     ]) {
-      await native.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,
+      seeds.push(native.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,
         cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,updated_at)
         VALUES(?,?,?,?,?,?,?,1,0,?,?,0,?,0,?,0,'2026-09-08 01:00:00')`)
-        .bind(id, name, name.toLowerCase(), barcode, category, brand, unit, stock, cost, retail, wholesale).run()
-      await native.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, 1, stock).run()
+        .bind(id, name, name.toLowerCase(), barcode, category, brand, unit, stock, cost, retail, wholesale))
+      seeds.push(native.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, 1, stock))
     }
+    await native.batch([
+      native.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+      ...seeds,
+      native.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+    ])
+    assert.equal((await native.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+    await assert.rejects(native.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=4101').run(), /stock_transaction_required/)
     const { app, controls, db } = loadRoute(native, true)
     const group = { group_key: 'barcode:880001', member_ids: [4101, 4102, 4103] }
     const preview = await app.posts.get('/possible-duplicates/merge-batch/preview')({
@@ -83,7 +91,7 @@ async function main() {
       }) },
       json: (body, status = 200) => ({ body, status }),
     })
-    assert.equal(finalized.status, 200)
+    assert.equal(finalized.status, 200, JSON.stringify(finalized.body))
     const finalizeBounds = assertBounds(controls, 'native finalize')
     const applyBody = { review_id: preview.body.review_id, manifest_digest: finalized.body.manifest_digest, client_request_id: preview.body.review_id }
     const callApply = async () => app.posts.get('/possible-duplicates/merge-batch')({
@@ -109,7 +117,7 @@ async function main() {
     const keeper = await db.prepare(`SELECT barcode,category,brand,unit,stock_quantity,cost_price_usd,selling_price_usd,wholesale_price_usd
       FROM products WHERE id=4101`).get()
     assert.deepEqual({ ...keeper }, { barcode: '880001', category: 'C', brand: 'Two', unit: 'pack', stock_quantity: 9,
-      cost_price_usd: 6, selling_price_usd: 10, wholesale_price_usd: 9 })
+      cost_price_usd: 4, selling_price_usd: 10, wholesale_price_usd: 9 })
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get()).n, 1)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.merge.group.child' AND status='applied'").get()).n, 2)
     console.log('product conflict action apply native D1 passed ' + JSON.stringify({ finalizeBounds, firstBounds, secondBounds }))
