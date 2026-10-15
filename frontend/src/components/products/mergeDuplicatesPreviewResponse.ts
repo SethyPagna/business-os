@@ -139,7 +139,7 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
     const raw = expectRecord(root.costReview, 'costReview')
     expectOnlyKeys(raw, new Set(['version','reviewed_digest','groups']), 'costReview')
     if (raw.version !== 1 || typeof raw.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(raw.reviewed_digest) || !Array.isArray(raw.groups)) invalid('costReview identity')
-    costReview = { version:1, reviewed_digest:raw.reviewed_digest as string, groups:raw.groups.map((value,index)=>{
+    costReview = { version:1, reviewed_digest:raw.reviewed_digest as string, groups:raw.groups.map((value)=>{
       const g=expectRecord(value,'costReview.groups')
       expectOnlyKeys(g,new Set(['keeper_id','member_ids','reviewed_digest']),'costReview.groups')
       if(!Array.isArray(g.member_ids) || typeof g.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(g.reviewed_digest)) invalid('costReview group identity')

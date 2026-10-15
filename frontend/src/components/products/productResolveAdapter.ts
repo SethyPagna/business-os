@@ -473,7 +473,7 @@ function localizedRefusal(error: unknown, t: Translate, partial: boolean): unkno
 type Plan = { ctx: Context; rows: ResolveRow[]; choices: ProductResolveChoices | null; final: ProductResolveFinal; absorbed: string[] }
 
 function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: ProductResolveOptions): Plan {
-  const { t, canViewCosts, canEditCosts } = options
+  const { t, canViewCosts } = options
   const canEditProducts = options.canEditProducts === true
   const canOverridePrices = options.canOverridePrices ?? canEditProducts
   const ctx = contextOf(data, draft)

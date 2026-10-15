@@ -10,7 +10,7 @@
 //       adapter over a fake Worker: the grid renders the product rows (no
 //       "Product kept" row), the confirm shows before -> after, apply shows
 //       the after.
-//   N4  the cost row is editable for a cost editor and locked for a viewer.
+//   N4  both cost roles review the same read-only server authority.
 //
 // Run: node tests/productConflictRowLayout.test.ts
 import assert from 'node:assert/strict'
@@ -52,6 +52,7 @@ const fixtureSource = String.raw`
   ] }
   window.__previewed = []
   window.__merges = []
+  window.__quotes = []
   const api = {
     async preview(keepId, mergeId) {
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -64,9 +65,13 @@ const fixtureSource = String.raw`
         groupProducts: cluster.products,
       }
     },
-    async merge(keepId, mergeId, stock, keep) {
-      window.__merges.push({ keepId, mergeId, stock, keep })
-      return { keeper: { id: 10, name: LONG, barcode: '8801111111111', cost_price_usd: keep.cost_price_usd ?? 6, selling_price_usd: 15, stock_quantity: 5, branch_stock: [{ branchId: 1, branchName: 'shop', quantity: 4 }, { branchId: 2, branchName: 'warehouse', quantity: 1 }], absorbed_barcodes: ['8802222222222'] } }
+    async costPreview(plan) {
+      window.__quotes.push(plan)
+      return { ...plan, success: true, costReview: { version: 1, reviewed_digest: 'b'.repeat(64) }, costAuthority: { version: 1, keeperId: plan.keepId, cost_price_usd: 7.1234, cost_price_khr: null, needsReview: true, source: 'manual' } }
+    },
+    async merge(keepId, mergeId, stock, keep, costReview) {
+      window.__merges.push({ keepId, mergeId, stock, keep, costReview })
+      return { keeper: { id: 10, name: LONG, barcode: '8801111111111', cost_price_usd: 7.1234, selling_price_usd: 15, stock_quantity: 5, branch_stock: [{ branchId: 1, branchName: 'shop', quantity: 4 }, { branchId: 2, branchName: 'warehouse', quantity: 1 }], absorbed_barcodes: ['8802222222222'] } }
     },
   }
 
@@ -215,12 +220,14 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
   assert.doesNotMatch(text, /Product kept|Record kept/, 'the surviving record is implicit')
   assert.match(text, /Barcode/)
   assert.match(text, /Select the details you want to keep; review the final result./)
-  assert.match(text, /\$6/, 'the rule cost is the default Final')
+  assert.match(text, /\$7\.1234/, 'Final shows the server-issued precise manual authority instead of the old mean')
+  const costControls = await evaluate(`(() => { const row = [...document.querySelectorAll('tr')].find(row => row.querySelector('th')?.textContent.trim() === 'Cost'); return row ? { found: true, editable: row.querySelectorAll('input,select,[data-clickable="true"]').length } : { found: false, editable: -1 } })()`)
+  assert.deepEqual(costControls, { found: true, editable: 0 }, 'the actual cost row exists and has no selectable or editable override')
   await clickButton('^Resolve$')
   await waitFor('confirm', async () => (/Merge .* into/.test(await dialogText()) ? true : null))
   await shot('confirm-1280-en')
   const confirm = await dialogText()
-  assert.match(confirm, /\$5[\s\S]{0,40}\$6/, 'cost before -> after')
+  assert.match(confirm, /\$5[\s\S]{0,80}\$7\.1234/, 'cost before -> authoritative after')
   assert.match(confirm, /3 pcs[\s\S]{0,40}5 pcs/, 'stock before -> after')
   assert.match(confirm, /8802222222222/, 'the barcode that stays on the merged record is named')
   await clickButton('^(Confirm|Resolve|Merge)$')
@@ -231,11 +238,13 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
   assert.deepEqual(merges[0], {
     keepId: 10, mergeId: 11, stock: 'merge',
     keep: { resolve: { requestId: keep.resolve.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 11, stock: 'merge' }] } },
+    costReview: { version: 1, reviewed_digest: 'b'.repeat(64) },
   }, 'the server applies the reviewed group rule; default cost is not a client override')
 
-  // Cost viewer: the cost row is locked, nothing is sent for cost.
+  // A viewer receives the same authority without an editing control.
   await open(375, 'mode=grid&lang=en&perm=viewer', `document.querySelector('[role="dialog"] table')`)
-  const locked = await evaluate<boolean>(`[...document.querySelectorAll('[role="dialog"] [title], [role="dialog"] [aria-label]')].some((el) => /cost edit permission/.test(el.getAttribute('title') || el.getAttribute('aria-label') || '')) || /cost edit permission/.test(document.querySelector('[role="dialog"]').innerHTML)`)
-  assert.equal(locked, true, 'a cost viewer sees why the cost cannot change')
+  const viewer = await dialogText()
+  assert.match(viewer, /\$7\.1234/, 'a cost viewer sees the same server-issued authority')
+  assert.doesNotMatch(viewer, /cost edit permission/, 'read-only authority does not imply a cost editing choice')
   await pause(10)
 })
