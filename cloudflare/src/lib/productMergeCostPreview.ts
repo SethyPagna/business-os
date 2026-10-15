@@ -87,7 +87,9 @@ const PREVIEW_SQL = `WITH products AS (
   SELECT json_extract(value,'$.id') id,json_extract(value,'$.variant_product_id') variant_product_id,json_extract(value,'$.is_active') is_active,
     json_extract(value,'$.unit_cost_usd') unit_cost_usd,json_extract(value,'$.received_at') received_at FROM json_each(@graph,'$.batches')
 ), branch_batch_stock AS (
-  SELECT json_extract(value,'$.batch_id') batch_id,json_extract(value,'$.quantity') quantity FROM json_each(@graph,'$.batchStock')
+  SELECT json_extract(value,'$.batch_id') batch_id,
+    CASE WHEN json_type(value,'$.quantity') IN ('integer','real') THEN CAST(json_extract(value,'$.quantity') AS REAL)
+      ELSE json_extract(value,'$.quantity') END quantity FROM json_each(@graph,'$.batchStock')
 ), product_cost_entries AS (
   SELECT json_extract(value,'$.id') id,json_extract(value,'$.product_id') product_id,json_extract(value,'$.cost_usd') cost_usd,
     json_extract(value,'$.baseline_batch_id') baseline_batch_id FROM json_each(@graph,'$.currentCostEntries')
