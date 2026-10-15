@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // P10-4 (owner ruling, 2026-09-16, verbatim): "check and make sure all the
 // actions add, edit, remove, set, etc... sessions, make sure if different
 // costs it adds and divide by number of different costs (excluding zero and
@@ -34,6 +35,7 @@ function wrapDb() {
       const statement = sqlite.prepare(sql)
       return Object.fromEntries(['get', 'all', 'run'].map((method) => [method, async (params) => Array.isArray(params) ? statement[method](...params) : statement[method](params || {})]))
     },
+    async batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       return sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))()
     },
@@ -75,7 +77,8 @@ function fresh() {
   const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter((file) => file.endsWith('.sql')).sort()
   for (const file of migrations) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   sqlite.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)")
-  sqlite.exec("INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(1,'Widget',0,0,0)")
+  seedStockFixture(sqlite, () => sqlite.exec("INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(1,'Widget',0,0,0)"))
+  assert.throws(() => sqlite.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
   waits = []
   user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 }
@@ -152,8 +155,10 @@ async function main() {
     await request(addBody({ unitCostUsd: 5, receivedDate: '02/09/2026' }))
     assert.deepEqual(catalogCost(), { usd: 4, khr: 0 })
     const revertedBatchId = sqlite.prepare('SELECT id FROM product_batches WHERE unit_cost_usd=5').get().id
-    sqlite.exec(`UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=${revertedBatchId}`)
-    sqlite.exec(`UPDATE product_batches SET is_active=0 WHERE id=${revertedBatchId}`)
+    seedStockFixture(sqlite, () => {
+      sqlite.exec(`UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=${revertedBatchId}`)
+      sqlite.exec(`UPDATE product_batches SET is_active=0 WHERE id=${revertedBatchId}`)
+    })
     const third = await request(addBody({ unitCostUsd: 3, receivedDate: '03/09/2026' }))
     assert.equal(third.status, 200, JSON.stringify(third))
     // Recomputed against the now-active lots only (3, 3, and the fresh
@@ -191,7 +196,7 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get(lot.id).quantity,2)
     assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,3)
     assert.equal(sqlite.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,3)
-    sqlite.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) SELECT 1,10,MAX(id),'manual' FROM product_batches; UPDATE products SET cost_price_usd=10,purchase_price_usd=10 WHERE id=1")
+    seedStockFixture(sqlite, () => sqlite.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) SELECT 1,10,MAX(id),'manual' FROM product_batches; UPDATE products SET cost_price_usd=10,purchase_price_usd=10 WHERE id=1"))
     const overrideBefore=sqlite.prepare('SELECT * FROM product_cost_entries').all()
     assert.equal((await request(correction)).status,200)
     assert.equal(catalogCost().usd,10,'a correction to a pre-override lot cannot reset the manual catalog decision')

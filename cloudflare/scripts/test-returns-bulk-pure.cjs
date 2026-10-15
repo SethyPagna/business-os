@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual return bulk kernel + D1 adapter + real SQLite transactions. No SQL mocks.
@@ -72,7 +79,7 @@ function fixture() {
 }
 
 function seed(f) {
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO products(id,name,stock_quantity) VALUES(1,'Customer product',12),(2,'Supplier product',17);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,12),(2,1,17);
@@ -91,7 +98,7 @@ function seed(f) {
     INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity)
       VALUES(1,1,1,2),(3,2,1,3);
     UPDATE returns SET total_refund_usd=8,total_refund_khr=0 WHERE id=1;
-  `)
+  `))
 }
 
 function refundSnapshot(before, quantity, calculated, sold = 1, entitlement = 10, payoutCap = 10) {
@@ -154,7 +161,7 @@ async function run() {
     const id=scope==='customer'?1:3, batch=scope==='customer'?1:2, quantity=scope==='customer'?2:3
     const source=(scope==='customer')===restoringFirst?'cancelled':'completed'
     const target=source==='cancelled'?'completed':'cancelled'
-    f.sql.exec(`UPDATE returns SET sale_id=NULL,status='${source}' WHERE id=${id};
+    seedFixture(f.sql, () => f.sql.exec(`UPDATE returns SET sale_id=NULL,status='${source}' WHERE id=${id};
       UPDATE branch_batch_stock SET quantity=${restoringFirst?0:quantity} WHERE batch_id=${batch};
       UPDATE product_batches SET is_active=${restoringFirst?inactiveSql:1},received_at='2026-09-03' WHERE id=${batch};
       CREATE TRIGGER test_active_lot_insert BEFORE INSERT ON branch_batch_stock WHEN NEW.quantity>0
@@ -162,7 +169,7 @@ async function run() {
         BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;
       CREATE TRIGGER test_active_lot_update BEFORE UPDATE OF quantity ON branch_batch_stock WHEN NEW.quantity>0
         AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
-        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`))
     const metadata=()=>{const {is_active,...row}=f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(batch);return row}
     const originalMetadata=metadata(), allocations=f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all()
     const req=request(f,[id],'status',source,target,`archived-${scope}-${restoringFirst}`)
@@ -172,7 +179,7 @@ async function run() {
     f.fail(null)
     const applied=await helper.applyReturnBulkAction(f.env,user,req)
     for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
-      if(positive) f.sql.prepare(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=?`).run(batch)
+      if(positive) seedFixture(f.sql, () => f.sql.prepare(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=?`).run(batch))
       const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
       await assert.rejects(()=>replay(f,applied.actionHistoryId,direction,generation),/injected failure/)
       assert.equal(snapshot(f),beforeReplay,'failed replay must roll back activation, quantities, history and audit')
@@ -391,7 +398,7 @@ async function run() {
   console.log('PASS cancelled parent sale blocks ambiguous return stock reconciliation')
 
   f = fixture(); seed(f)
-  f.sql.exec(`
+  seedFixture(f.sql, () => f.sql.exec(`
     INSERT INTO products(id,name,stock_quantity) VALUES(3,'Damaged product',0);
     INSERT INTO sales(id,receipt_number,sale_status,status_before_return,updated_at) VALUES(3,'SALE-3','returned','completed','sale-v3');
     INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id) VALUES(3,3,3,'Damaged product',5,1);
@@ -400,7 +407,7 @@ async function run() {
       VALUES(4,4,3,'Damaged product',2,4,0,'damaged',1),(5,4,3,'Damaged product',3,6,0,'damaged',1);
     INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,quantity,quantity_remaining)
       VALUES(4,3,'Damaged product',1,4,2,2),(5,3,'Damaged product',1,4,3,3);
-  `)
+  `))
   const damaged = await helper.applyReturnBulkAction(f.env, user, request(f, [4], 'status', 'completed', 'cancelled', 'damaged-lines-001'))
   assert.deepEqual(f.sql.prepare('SELECT id,quantity_remaining FROM damaged_stock_lots WHERE return_id=4 ORDER BY id').all(), [{ id: 4, quantity_remaining: 0 }, { id: 5, quantity_remaining: 0 }])
   assert.equal(f.sql.prepare("SELECT COALESCE(SUM(quantity),0) quantity FROM inventory_movements WHERE reference_id=4 AND movement_type='damage_reversal'").get().quantity, -5)

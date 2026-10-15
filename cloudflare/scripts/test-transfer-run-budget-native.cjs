@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -29,19 +36,21 @@ function fixture(input) {
   raw.exec('PRAGMA foreign_keys=OFF')
   for (const file of migrations) raw.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   raw.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0)")
-  const products = raw.prepare('INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(?,?,?,1,2.5,10000)')
-  for (const id of [1, 2, 3, 4]) products.run(id, `Product ${id}`, `P-${id}`)
-  const lot = raw.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,?,?,1)')
-  const stock = raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)')
-  for (const [index, count] of input.lots.entries()) {
-    const product = index * 2 + 1
-    for (let n = 1; n <= count; n++) {
-      const id = product * 1000 + n
-      lot.run(id, product, `lot-${id}`, `lot-${id}`, '2026-01-01', n, 1 + n / 100)
-      stock.run(id)
-      if (input.matched && n === 1) lot.run(id + 5000, product + 1, `lot-${id}`, `lot-${id}`, '2026-01-01', n, 1 + n / 100)
+  seedFixture(raw, () => {
+    const products = raw.prepare('INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(?,?,?,1,2.5,10000)')
+    for (const id of [1, 2, 3, 4]) products.run(id, `Product ${id}`, `P-${id}`)
+    const lot = raw.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,?,?,1)')
+    const stock = raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)')
+    for (const [index, count] of input.lots.entries()) {
+      const product = index * 2 + 1
+      for (let n = 1; n <= count; n++) {
+        const id = product * 1000 + n
+        lot.run(id, product, `lot-${id}`, `lot-${id}`, '2026-01-01', n, 1 + n / 100)
+        stock.run(id)
+        if (input.matched && n === 1) lot.run(id + 5000, product + 1, `lot-${id}`, `lot-${id}`, '2026-01-01', n, 1 + n / 100)
+      }
     }
-  }
+  })
   const stats = { reads: 0, maxBindings: 0 }
   function prepared(sql, values = []) {
     return {

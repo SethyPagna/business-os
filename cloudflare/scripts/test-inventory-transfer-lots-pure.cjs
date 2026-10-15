@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real-SQLite test of the Part-77 CRITICAL (x3 audits) fix: inventory's
 // POST /transfer used to move only the plain branch_stock total between
@@ -37,6 +44,7 @@ function loadModule(relPath, requireShim, transform) {
   return module.exports
 }
 
+const { executeStockTransaction } = loadModule('lib/stockTransaction.ts', require)
 const batchCode = loadModule('lib/batchCode.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
@@ -222,15 +230,17 @@ function freshDb() {
   for (const name of fs.readdirSync(path.join(__dirname,'../migrations')).filter(name => name.endsWith('.sql')).sort()) {
     db.exec(fs.readFileSync(path.join(__dirname,'../migrations',name),'utf8'))
   }
-  db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
-  db.prepare("INSERT INTO products(id,name,stock_quantity) VALUES (1,'Transfer product',12)").run()
-  // Product 1 at branch 1: lot A (older, 6 units), lot B (newer, 4 units),
-  // branch_stock 12 -- 2 units of legacy stock the lot ledger never tracked.
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (101, 1, 'A', 'A', '2026-08-01', 1)`).run()
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (102, 1, 'B', 'B', '2026-08-20', 2)`).run()
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101, 1, 6)`).run()
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
+  seedFixture(db, () => {
+    db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
+    db.prepare("INSERT INTO products(id,name,stock_quantity) VALUES (1,'Transfer product',12)").run()
+    // Product 1 at branch 1: lot A (older, 6 units), lot B (newer, 4 units),
+    // branch_stock 12 -- 2 units of legacy stock the lot ledger never tracked.
+    db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (101, 1, 'A', 'A', '2026-08-01', 1)`).run()
+    db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (102, 1, 'B', 'B', '2026-08-20', 2)`).run()
+    db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101, 1, 6)`).run()
+    db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
+    db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
+  })
   return db
 }
 
@@ -296,7 +306,12 @@ await check('a transfer spanning two lots moves each lot FIFO, atomically, keepi
   const { statements, takes, uncovered } = await composeTransferStatements(db, 8)
   assert.deepStrictEqual(takes.map((t) => [t.batchId, t.quantity]), [[101, 6], [102, 2]], 'oldest lot drains first')
   assert.strictEqual(uncovered, 0)
-  await wrapDb(db).batch(statements)
+  await assert.rejects(() => wrapDb(db).batch(statements), /stock_transaction_required/)
+  assert.strictEqual(lotQty(db, 101, 1), 6)
+  assert.strictEqual(lotQty(db, 102, 1), 4)
+  assert.strictEqual(stockQty(db, 1), 12)
+  await executeStockTransaction(wrapDb(db), statements, 'retry')
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   assert.strictEqual(lotQty(db, 101, 1), 0)
   assert.strictEqual(lotQty(db, 102, 1), 2)
   assert.strictEqual(lotQty(db, 101, 2), 6, 'the SAME batch row holds the moved units at the destination')
@@ -310,7 +325,8 @@ await check('legacy stock the lot ledger never tracked moves on branch_stock alo
   const { statements, takes, uncovered } = await composeTransferStatements(db, 12)
   assert.strictEqual(takes.reduce((sum, t) => sum + t.quantity, 0), 10)
   assert.strictEqual(uncovered, 2)
-  await wrapDb(db).batch(statements)
+  await executeStockTransaction(wrapDb(db), statements, 'retry')
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   // Source: 0 stock, 0 in lots. Destination: 12 stock, 10 in lots -- the
   // SAME 2-unit legacy gap that existed at the source, nothing new.
   assert.strictEqual(stockQty(db, 1), 0)
@@ -323,9 +339,9 @@ await check('a concurrent consumer aborts the WHOLE batch (strict decrement + CH
   const db = freshDb()
   const { statements } = await composeTransferStatements(db, 8)
   // Between the availability read and the batch, a sale drains lot A to 3.
-  db.prepare('UPDATE branch_batch_stock SET quantity = 3 WHERE batch_id = 101 AND branch_id = 1').run()
-  db.prepare('UPDATE branch_stock SET quantity = 9 WHERE product_id = 1 AND branch_id = 1').run()
-  await assert.rejects(() => wrapDb(db).batch(statements), /CHECK|constraint/i)
+  seedFixture(db, () => db.prepare('UPDATE branch_batch_stock SET quantity = 3 WHERE batch_id = 101 AND branch_id = 1').run())
+  seedFixture(db, () => db.prepare('UPDATE branch_stock SET quantity = 9 WHERE product_id = 1 AND branch_id = 1').run())
+  await assert.rejects(() => executeStockTransaction(wrapDb(db), statements, 'retry'), /CHECK|constraint/i)
   // Fully rolled back: source untouched, destination gained nothing.
   assert.strictEqual(lotQty(db, 101, 1), 3)
   assert.strictEqual(lotQty(db, 102, 1), 4)
@@ -422,8 +438,8 @@ await check('real route reads FIFO only once and Telegram matches committed allo
   ]) {
     routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
     routeWaits = []; telegramInputs = []; queryReads = []
-    if (scenario.removeB) routeDb.exec('DELETE FROM branch_batch_stock WHERE batch_id=102')
-    if (scenario.removeAll) routeDb.exec('DELETE FROM branch_batch_stock')
+    if (scenario.removeB) seedFixture(routeDb, () => routeDb.exec('DELETE FROM branch_batch_stock WHERE batch_id=102'))
+    if (scenario.removeAll) seedFixture(routeDb, () => routeDb.exec('DELETE FROM branch_batch_stock'))
     const result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2,
       quantity: scenario.quantity, reason: scenario.name, client_request_id: `metadata-${scenario.name}` })
     assert.strictEqual(result.status, 200, JSON.stringify(result.json))
@@ -479,7 +495,7 @@ ${marker}`)
 await check('real route race rolls back without Telegram; same request retries a fresh guarded plan once', async () => {
   routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
   routeWaits = []; telegramInputs = []
-  beforeBatch = db => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1; UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1')
+  beforeBatch = db => seedFixture(db, () => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1; UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1'))
   const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'race retry', client_request_id: 'metadata-race-retry' }
   const failed = await routeRequest(body)
   assert.strictEqual(failed.status, 409, JSON.stringify(failed.json))

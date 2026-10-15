@@ -6,7 +6,10 @@ const harnessBase = fs.readFileSync(path.join(__dirname, 'test-product-resolve-k
 if (!harnessBase.includes('const merge = (body)')) throw new Error('the harness anchors moved')
 const checks = `
 const keeperCost = (id = 10) => one('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = ?', id)
-const setCosts = (id, usd, khr) => state.native.db.prepare('UPDATE products SET cost_price_usd = ?, cost_price_khr = ? WHERE id = ?').run(usd, khr, id)
+const setCosts = (id, usd, khr) => {
+  fixtureWrite(() => state.native.db.prepare('UPDATE products SET cost_price_usd = ?, cost_price_khr = ? WHERE id = ?').run(usd, khr, id))
+  assert.throws(() => state.native.db.prepare('UPDATE products SET cost_price_usd=cost_price_usd WHERE id=?').run(id), /stock_transaction_required/)
+}
 const lastHistory = () => one("SELECT id, undo_payload, redo_payload FROM action_history WHERE status = 'undoable' ORDER BY id DESC LIMIT 1")
 const runHistory = async (history, direction) => {
   const current = one('SELECT id,undo_payload,redo_payload FROM action_history WHERE id=?', history.id)
@@ -72,7 +75,7 @@ async function main() {
 
   await check('current unknown keeper derives from received lot cost rather than loser catalog', async () => {
     fresh();setCosts(10,null,null)
-    state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(900,11,'known-receipt',1,8);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,1),(900,2,1)")
+    fixtureWrite(() => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(900,11,'known-receipt',1,8);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,1),(900,2,1)"))
     assert.equal((await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})).status,200)
     assert.deepEqual(keeperCost(),{cost_price_usd:8,cost_price_khr:null})
     assert.equal(one('SELECT cost_review_key FROM products WHERE id=10').cost_review_key,null)
@@ -170,7 +173,7 @@ async function main() {
 
   await check('Resolve authority preserves unknown independently from legacy group mean metadata', async () => {
     fresh()
-    state.native.db.exec("INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, is_active) VALUES (60, 'Lip Oil', '600001', NULL, NULL, 10, 1), (61, 'Lip Oil', '600002', NULL, NULL, 10, 1), (62, 'Lip Oil', '600003', NULL, NULL, 10, 1)")
+    fixtureWrite(() => state.native.db.exec("INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, is_active) VALUES (60, 'Lip Oil', '600001', NULL, NULL, 10, 1), (61, 'Lip Oil', '600002', NULL, NULL, 10, 1), (62, 'Lip Oil', '600003', NULL, NULL, 10, 1)"))
     const unknown = await preview(60, 61, '&groupIds=60,61,62')
     assert.equal(unknown.status, 200, JSON.stringify(unknown.body))
     assert.deepEqual(unknown.body.groupCost, { cost_price_usd: null, cost_price_khr: null })
