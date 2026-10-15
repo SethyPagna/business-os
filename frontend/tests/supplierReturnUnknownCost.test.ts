@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
-import { knownCost, partialCostNote } from '../src/utils/costDisplay.ts'
+import { knownCost, formatSupplierCostTotal } from '../src/utils/costDisplay.ts'
 import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -64,18 +64,18 @@ function capture(node: ts.Node) {
 }
 capture(returnsAst)
 const cardsBody = ts.transpileModule(`const supplierMoney=${callbacks.supplierMoney};return (${callbacks.stripCards})();`, { fileName: 'cards.tsx', compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText
-const actualCards = new Function('React', 'partialCostNote', 'stripData', 'canViewCosts', 't', 'tr', 'fmtUSD', 'scope', 'SUPPLIER_SCOPE', cardsBody)
+const actualCards = new Function('React', 'formatSupplierCostTotal', 'stripData', 'canViewCosts', 't', 'tr', 'fmtUSD', 'scope', 'SUPPLIER_SCOPE', cardsBody)
 const statsRow = { count: 2, compensation_usd: 5.1234, compensation_khr: 5.1244, compensation_usd_unknown_count: 1, compensation_khr_unknown_count: 1, loss_usd: -1.1234, loss_khr: 0 }
 for (const language of ['en', 'km']) {
   const labels = JSON.parse(fs.readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
   const t = (key: string) => labels[key] || key
   const data = { totals: statsRow, by_reason: [{ ...statsRow, reason: 'Synthetic' }] }
-  const cards = actualCards(React, partialCostNote, data, true, t, t, (n: number) => `$${n.toFixed(2)}`, 'supplier', 'supplier')
+  const cards = actualCards(React, formatSupplierCostTotal, data, true, t, t, (n: number) => `$${n.toFixed(2)}`, 'supplier', 'supplier')
   const value = renderToStaticMarkup(cards[1].details[0].value)
   assert.ok(value.includes('5.1234') && value.includes('5.1244') && value.includes('white-space:normal') && value.includes('overflow-wrap:anywhere') && value.includes('55vw'), `${language}: actual supplier detail value preserves both currencies and bounded wrapping`)
   assert.ok(renderToStaticMarkup(cards[2].value).includes('-1.1234'))
-  assert.equal(actualCards(React, partialCostNote, data, false, t, t, () => '', 'supplier', 'supplier').length, 1)
-  const customer = actualCards(React, partialCostNote, { totals: { count: 1, refund_usd: 5.1244 } }, false, t, t, (n: number) => `$${n.toFixed(2)}`, 'customer', 'supplier')
+  assert.equal(actualCards(React, formatSupplierCostTotal, data, false, t, t, () => '', 'supplier', 'supplier').length, 1)
+  const customer = actualCards(React, formatSupplierCostTotal, { totals: { count: 1, refund_usd: 5.1244 } }, false, t, t, (n: number) => `$${n.toFixed(2)}`, 'customer', 'supplier')
   assert.equal(customer[1].value, '$5.12')
 }
 console.log('PASS actual supplier stats callbacks wrap bounded values, retain signed4dp/permission and customer cents EN/KM')

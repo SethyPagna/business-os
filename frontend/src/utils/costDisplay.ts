@@ -44,6 +44,16 @@ export function partialCostNote(count: number, t: Translate): string | null {
   return count > 0 ? fill(t('cost_partial_count') || 'Partial — {count} unknown cost', count) : null
 }
 
+export function formatSupplierCostTotal(value: unknown, currency: 'usd' | 'khr', unknown: number, t: Translate): string {
+  if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '' || !Number.isFinite(Number(value))) {
+    const label = t('unknown')
+    return label && label !== 'unknown' ? label : 'Unknown'
+  }
+  const amount = Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
+  const note = partialCostNote(unknown, t)
+  return `${currency === 'usd' ? `$${amount}` : `${amount}៛`}${note ? ` · ${note}` : ''}`
+}
+
 export function allUnknownCostNote(count: number, t: Translate): string {
   return fill(t('cost_all_unknown') || 'Unknown — no cost recorded on {count}', count)
 }

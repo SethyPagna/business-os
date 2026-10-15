@@ -11,6 +11,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { formatSupplierCostTotal } from '../../utils/costDisplay.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
@@ -370,7 +371,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // questions server-side for exactly the picked range, agreeing with the
   // Dashboard and Reports for the same dates.
   type InventoryStripKernel = { totals?: Record<string, number> }
-  type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
+  type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number | null; loss_usd?: number | null; loss_khr?: number | null; loss_usd_unknown_count?: number; loss_khr_unknown_count?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
   const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const stripRange = dateRange ?? localStripRange
   const handleStripRangeChange = onDateRangeChange ?? setLocalStripRange
@@ -1727,7 +1728,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const stripRefunded = Number(custReturnTotals.refund_usd) || 0
   const stripRestocked = Number((stripCustomerReturns?.by_type || []).find((row) => String(row.return_type || 'restock') === 'restock')?.count) || 0
   const stripSupplierReturnCount = Number(suppReturnTotals.count) || 0
-  const stripSupplierLoss = Number(suppReturnTotals.loss_usd) || 0
+  const stripSupplierLoss = suppReturnTotals.loss_usd ?? null
   const stripCards: StatCardDef[] = [
     {
       key: 'products',
@@ -1846,7 +1847,12 @@ ${inventoryFeesFormulaText}`,
         { label: tr('customer_returns', 'Customer returns'), value: stripCustomerReturnCount },
         { label: String(inventoryStatLabels.refunded), value: fmtUSD(stripRefunded), tone: stripRefunded > 0 ? 'crit' : undefined },
         { label: t('restocked_to_inventory') || 'Restocked', value: stripRestocked },
-        ...(canViewCosts ? [{ label: `${t('supplier_returns') || 'Supplier returns'} (${stripSupplierReturnCount})`, value: fmtUSD(stripSupplierLoss), tone: stripSupplierLoss > 0 ? 'crit' as const : undefined }] : []),
+        ...(canViewCosts ? [{ label: `${t('supplier_returns') || 'Supplier returns'} (${stripSupplierReturnCount})`, value: (
+          <span style={{ display: 'block', maxWidth: 'min(270px, 55vw)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            <span style={{ display: 'block' }}>{formatSupplierCostTotal(stripSupplierLoss, 'usd', Number(suppReturnTotals.loss_usd_unknown_count) || 0, t)}</span>
+            <span style={{ display: 'block' }}>{formatSupplierCostTotal(suppReturnTotals.loss_khr, 'khr', Number(suppReturnTotals.loss_khr_unknown_count) || 0, t)}</span>
+          </span>
+        ), tone: stripSupplierLoss !== null && stripSupplierLoss > 0 ? 'crit' as const : undefined }] : []),
       ],
     },
   )
@@ -1937,7 +1943,7 @@ ${inventoryFeesFormulaText}`,
     ] : [null, null, null]) as Array<Record<string, any> | null>
     const totals = (kernel?.totals || {}) as Record<string, number>
     const cust = (customer?.totals || {}) as Record<string, number>
-    const supp = (supplier?.totals || {}) as Record<string, number>
+    const supp = (supplier?.totals || {}) as Record<string, number | null>
     const { downloadCSV } = await import('../../utils/csv.ts')
     downloadCSV(`inventory-stats-${startDate || 'all'}-${endDate || 'all'}.csv`, [
       { metric: 'range_start', value: startDate || 'all' },
@@ -1961,8 +1967,13 @@ ${inventoryFeesFormulaText}`,
       { metric: 'customer_returns', value: Number(cust.count) || 0 },
       { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
       { metric: 'supplier_returns', value: Number(supp.count) || 0 },
-      { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
-    ].filter((row) => canViewCosts || !['stock_value_usd_current', 'cogs_usd', 'profit_usd', 'supplier_loss_usd'].includes(row.metric)).map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
+      { metric: 'supplier_loss_usd', value: supp.loss_usd ?? '' },
+      { metric: 'supplier_loss_usd_known_count', value: Number(supp.loss_usd_known_count) || 0 },
+      { metric: 'supplier_loss_usd_unknown_count', value: Number(supp.loss_usd_unknown_count) || 0 },
+      { metric: 'supplier_loss_khr', value: supp.loss_khr ?? '' },
+      { metric: 'supplier_loss_khr_known_count', value: Number(supp.loss_khr_known_count) || 0 },
+      { metric: 'supplier_loss_khr_unknown_count', value: Number(supp.loss_khr_unknown_count) || 0 },
+    ].filter((row) => canViewCosts || (!row.metric.startsWith('supplier_loss_') && !['stock_value_usd_current', 'cogs_usd', 'profit_usd'].includes(row.metric))).map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
       ? { ...row, value: '—' } : row))
   }, [canViewCosts, inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
 

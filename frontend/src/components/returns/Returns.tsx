@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
-import { partialCostNote } from '../../utils/costDisplay.ts'
+import { formatSupplierCostTotal } from '../../utils/costDisplay.ts'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -383,12 +383,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
-  const supplierMoney = useCallback((value: unknown, currency: 'usd' | 'khr', unknown = 0): string => {
-    if (value == null || String(value).trim() === '' || !Number.isFinite(Number(value))) return tr('unknown', 'Unknown')
-    const amount = Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
-    const note = partialCostNote(unknown, key => t(key))
-    return `${currency === 'usd' ? `$${amount}` : `${amount}៛`}${note ? ` · ${note}` : ''}`
-  }, [t, tr])
+  const supplierMoney = useCallback((value: unknown, currency: 'usd' | 'khr', unknown = 0): string => formatSupplierCostTotal(value, currency, unknown, t), [t])
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const confirmDiscardRetry = (message: string) => askToConfirm({
     title: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
