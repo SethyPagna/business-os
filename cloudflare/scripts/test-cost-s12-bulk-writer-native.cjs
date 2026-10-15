@@ -11,7 +11,7 @@ async function check(name, fn) {
 }
 const entries = id => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(id)
 const overrides = id => raw.prepare("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id=? ORDER BY id").all(String(id))
-const make = (name, usd, khr) => Number(raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,10,1,NULL)').run(name, usd, khr).lastInsertRowid)
+const make = (name, usd, khr) => Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,10,1,NULL)').run(name, usd, khr)).lastInsertRowid)
 const apply = (id, updates, user = admin) => request(products, 'PUT', '/' + id, frontendWriter.buildProductBulkUpdatePayload(updates, row(id), user), user)
 ;(async () => {
   for (const [field, own, initial] of [['purchase_price_usd','cost_price_usd',5], ['purchase_price_khr','cost_price_khr',20000]]) {
@@ -92,7 +92,7 @@ const apply = (id, updates, user = admin) => request(products, 'PUT', '/' + id, 
   await check('real snapshot undo keeps exact internal/historical cost and redacted undo cannot clear cost; recreate retains four decimals', async () => {
     for (const value of [2.3456,2.345678]) {
       const id = make('S12 Snapshot ' + value,value,value)
-      raw.prepare('UPDATE products SET purchase_price_usd=?,purchase_price_khr=? WHERE id=?').run(value,value,id)
+      seedFixture(raw, () => raw.prepare('UPDATE products SET purchase_price_usd=?,purchase_price_khr=? WHERE id=?').run(value,value,id))
       const before = row(id)
       const count = await frontendWriter.restoreProductSnapshotFields([before],{
         fetchProductsByIds:async()=>[row(id)],buildPayload:frontendWriter.buildProductWritePayload,

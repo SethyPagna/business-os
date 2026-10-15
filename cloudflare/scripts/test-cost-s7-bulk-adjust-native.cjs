@@ -17,7 +17,7 @@ async function check(name, fn) {
 }
 const entries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(id)
 const costs = (id) => { const r = row(id); return { usd: r.cost_price_usd, khr: r.cost_price_khr } }
-const seedCosted = (name, usd, khr = null) => Number(raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,5,1,NULL)').run(name, usd, khr).lastInsertRowid)
+const seedCosted = (name, usd, khr = null) => Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,5,1,NULL)').run(name, usd, khr)).lastInsertRowid)
 
 ;(async () => {
   // --------------------------------------------------------- bulk adjust
@@ -51,7 +51,7 @@ const seedCosted = (name, usd, khr = null) => Number(raw.prepare('INSERT INTO pr
   })
 
   await check('bulk price adjust: a selling price still treats a missing price as 0 (the cost rule does not leak into prices)', async () => {
-    const noPrice = Number(raw.prepare('INSERT INTO products(name,selling_price_usd,is_active) VALUES(?,NULL,1)').run('S7 Bulk No Price').lastInsertRowid)
+    const noPrice = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,selling_price_usd,is_active) VALUES(?,NULL,1)').run('S7 Bulk No Price')).lastInsertRowid)
     const applied = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 2, fields: ['selling_price_usd'], client_request_id: 's7-bulk-selling-1' })
     assert.equal(applied.status, 200, JSON.stringify(applied))
     assert.equal(row(noPrice).selling_price_usd, 2)

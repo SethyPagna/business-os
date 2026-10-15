@@ -24,7 +24,7 @@ async function check(name, fn) {
 const entries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(id)
 const overrideAudit = (id) => raw.prepare("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id=? ORDER BY id").all(String(id))
 const costs = (id) => { const r = row(id); return { usd: r.cost_price_usd, khr: r.cost_price_khr } }
-const seedCosted = (name, usd, khr = null) => Number(raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,5,1,NULL)').run(name, usd, khr).lastInsertRowid)
+const seedCosted = (name, usd, khr = null) => Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,is_active,updated_at) VALUES(?,?,?,5,1,NULL)').run(name, usd, khr)).lastInsertRowid)
 const productColumns = () => new Set(raw.prepare('PRAGMA table_info(products)').all().map((column) => column.name))
 
 ;(async () => {
@@ -103,10 +103,12 @@ const productColumns = () => new Set(raw.prepare('PRAGMA table_info(products)').
 
   await check('PUT clearing the cost of a product whose on-hand lot has a cost: no entry, and the catalog re-derives from the lot exactly as the next stock movement would', async () => {
     const id = seedCosted('S7 Clear With Lot', 9, null)
-    raw.prepare("INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'S7 Shop',1)").run()
-    const lot = Number(raw.prepare('INSERT INTO product_batches(variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(?,?,1,3.25)').run(id, 's7-clear-lot').lastInsertRowid)
-    raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,2)').run(lot)
-    raw.prepare('UPDATE products SET cost_price_usd = 9, purchase_price_usd = 9 WHERE id = ?').run(id)
+    seedFixture(raw, () => {
+      raw.prepare("INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'S7 Shop',1)").run()
+      const lot = Number(raw.prepare('INSERT INTO product_batches(variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(?,?,1,3.25)').run(id, 's7-clear-lot').lastInsertRowid)
+      raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,2)').run(lot)
+      raw.prepare('UPDATE products SET cost_price_usd = 9, purchase_price_usd = 9 WHERE id = ?').run(id)
+    })
     assert.equal((await request(products, 'PUT', '/' + id, { cost_price_usd: null })).status, 200)
     assert.equal(costs(id).usd, 3.25, 'the lot gives the formula a cost, so the cleared field is not left unknown')
     assert.equal(entries(id).length, 0, 'base wrote a $0 override entry here')
@@ -131,7 +133,7 @@ const productColumns = () => new Set(raw.prepare('PRAGMA table_info(products)').
 
   // ---------------------------------------------------------------- folds
   await check('create-fold: a typed $0 onto an unknown-cost twin records $0 with its entry; no cost or a blank cost changes nothing (base: ignored)', async () => {
-    const twin = Number(raw.prepare("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES('S7 Fold Twin','9807000000103',NULL,NULL,5,1)").run().lastInsertRowid)
+    const twin = Number(seedFixture(raw, () => raw.prepare("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES('S7 Fold Twin','9807000000103',NULL,NULL,5,1)").run()).lastInsertRowid)
     const untouched = await request(products, 'POST', '/', { name: 'S7 Fold Twin', barcode: '9807000000103', selling_price_usd: 5 })
     assert.equal(untouched.status, 200, JSON.stringify(untouched))
     assert.equal(untouched.body.folded_into, twin)
@@ -147,7 +149,7 @@ const productColumns = () => new Set(raw.prepare('PRAGMA table_info(products)').
   })
 
   await check('create-fold: a real cost still averages into a costed twin and a typed 0 does not drag it down (control, green on base)', async () => {
-    const twin = Number(raw.prepare("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES('S7 Fold Costed','9807000000110',4,16000,5,1)").run().lastInsertRowid)
+    const twin = Number(seedFixture(raw, () => raw.prepare("INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES('S7 Fold Costed','9807000000110',4,16000,5,1)").run()).lastInsertRowid)
     assert.equal((await request(products, 'POST', '/', { name: 'S7 Fold Costed', barcode: '9807000000110', cost_price_usd: 6, selling_price_usd: 5 })).body.folded_into, twin)
     assert.equal(costs(twin).usd, 5, 'mean of the distinct costs 4 and 6')
     assert.equal((await request(products, 'POST', '/', { name: 'S7 Fold Costed', barcode: '9807000000110', cost_price_usd: 0, selling_price_usd: 5 })).body.folded_into, twin)

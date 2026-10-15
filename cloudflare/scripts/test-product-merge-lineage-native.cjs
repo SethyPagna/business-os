@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),Module=require('node:module')
 const file=path.join(__dirname,'test-sale-create-atomic-pure.cjs'),source=fs.readFileSync(file,'utf8'),boundary=source.indexOf(';(async () => {')
 const harness=new Module(file,module);harness.filename=file;harness.paths=module.paths
@@ -18,8 +19,11 @@ const h=harness.exports
  assert.equal(created.status,200,JSON.stringify(created.body))
  const saleId=created.body.id,read=()=>({sale:f.raw.prepare('SELECT * FROM sales WHERE id=?').get([saleId]),lines:f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all([saleId])})
  const original=read(),saved=original.lines[0].pricing_snapshot_json
+ seedStockFixture(f.raw.db, () => {
  f.raw.prepare("INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(20,'Powder','POWDER',0,9.5,38000,4,16000,1)").run()
  f.raw.prepare("UPDATE products SET barcode='123456' WHERE id IN(10,20)").run()
+ })
+ assert.throws(()=>f.raw.prepare("INSERT INTO products(name) VALUES('unadmitted fixture probe')").run(),/stock_transaction_required/)
  const products=h.load('routes/products.ts')
  await products.foldDuplicateProductInto({DB:f.route},f.route,{...h.USER,permissions:'{"all":true}'},{id:20,name:'Powder'},{id:10,name:'Powder'},new Map([[1,'Shop']]),'lineage-native','merge',undefined,{operationId:crypto.randomUUID()})
  const merged=read();assert.equal(merged.lines[0].product_id,20);assert.equal(merged.lines[0].pricing_snapshot_json,saved)
@@ -58,7 +62,7 @@ const h=harness.exports
  assert.throws(()=>f.raw.prepare(assertion).get(context.params),'new duplicate proof invalidates atomic evidence set')
  f.raw.prepare('DELETE FROM undo_snapshots WHERE id=?').run([duplicateId])
  await assert.rejects(()=>lineage.resolveProductMergeLineage(f.route,saleId,[{...merged.lines[0],id:999999}]),'product alias without exact row evidence refuses')
- f.raw.prepare("INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(30,'Powder','POWDER','123456',0,9.5,38000,4,16000,1)").run()
+ seedStockFixture(f.raw.db, () => f.raw.prepare("INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(30,'Powder','POWDER','123456',0,9.5,38000,4,16000,1)").run())
  await products.foldDuplicateProductInto({DB:f.route},f.route,{...h.USER,permissions:'{"all":true}'},{id:30,name:'Powder'},{id:20,name:'Powder'},new Map([[1,'Shop']]),'lineage-second','merge',undefined,{operationId:crypto.randomUUID()})
  const chained=read(),chain=await lineage.resolveProductMergeLineage(f.route,saleId,chained.lines)
  assert.equal(chain.bindings[0].captured_product_id,10);assert.equal(chain.bindings[0].current_product_id,30)
