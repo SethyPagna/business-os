@@ -117,3 +117,18 @@ expectInvalid('unexpected root fields are rejected', (value) => { value.previewV
 expectInvalid('unexpected member fields are rejected', (value) => { value.groups[0].duplicates[0].secret = 'extra' })
 
 console.log('PASS merge duplicate preview response validation')
+
+const authorityPreview=structuredClone(fullPreview) as any
+for(const g of authorityPreview.groups) if(g.mergeable) g.costAuthority={version:1,keeperId:g.canonicalId,cost_price_usd:null,cost_price_khr:0,needsReview:true,source:'keeper_fallback'}
+authorityPreview.costReview={version:1,reviewed_digest:'a'.repeat(64),groups:authorityPreview.groups.filter((g:any)=>g.mergeable).map((g:any)=>({keeper_id:g.canonicalId,member_ids:[g.canonicalId,...g.duplicates.map((d:any)=>d.id)].sort((a:number,b:number)=>a-b),reviewed_digest:'b'.repeat(64)})).sort((a:any,b:any)=>a.keeper_id-b.keeper_id)}
+assert.deepEqual(validateMergeDuplicatesPreviewResponse(authorityPreview).costReview,authorityPreview.costReview)
+for(const mutate of [
+ (r:any)=>{r.groups[0].member_ids[0]=999},
+ (r:any)=>{r.groups.push({...r.groups[0],keeper_id:999})},
+ (r:any)=>{r.groups.push(structuredClone(r.groups[0]))},
+ (r:any)=>{r.groups[0].member_ids.reverse()},
+ (r:any)=>{r.groups[0].member_ids.push(r.groups[0].member_ids[0])},
+ (r:any)=>{r.groups=[]},
+]){const bad=structuredClone(authorityPreview);mutate(bad.costReview);assert.throws(()=>validateMergeDuplicatesPreviewResponse(bad),'cost approval must match exact displayed group/member scope')}
+for(const cost of [null,0,5.1244]){const value=structuredClone(authorityPreview);value.groups[0].costAuthority.cost_price_usd=cost;assert.equal(validateMergeDuplicatesPreviewResponse(value).groups[0].costAuthority?.cost_price_usd,cost)}
+console.log('PASS exact displayed group approval scope, nullable authority and malformed/extra/duplicate/order controls')

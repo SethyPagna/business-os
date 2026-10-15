@@ -8,7 +8,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
-import { formatMergeCost } from '../../utils/mergeCostPreview.ts'
+import { formatMergeCost, mergeCostReviewMatches } from '../../utils/mergeCostPreview.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
@@ -170,7 +170,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
   const blockedGroupCount = preview?.blockedGroupCount || 0
   const costRefusalCount = preview?.costRefusalCount || 0
-  const costReady = !canViewCosts || Boolean(preview?.costReview && preview.groups.every(group => group.mergeable === false || group.costAuthority))
+  const costReady = !canViewCosts || Boolean(preview && mergeCostReviewMatches(preview.costReview, preview.groups) && preview.groups.every(group => group.mergeable === false || group.costAuthority))
   const canMerge = costReady && !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   useEffect(() => {
@@ -226,8 +226,8 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           </h3>
           <p>
             {T(
-              'merge_duplicates_what_counts_body',
-              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost is reconciled, not used as identity: one mean is taken from the whole group\u2019s distinct valid non-zero costs. The highest retail and wholesale prices are kept.',
+              'merge_duplicates_authority_body',
+              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost follows the received-cost calculation shown for each group; an empty cost needs review. The highest retail and wholesale prices are kept.',
             )}
           </p>
         </section>

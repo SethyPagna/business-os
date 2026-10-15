@@ -12,30 +12,6 @@ import type { ResolveAdapter, ResolveAfterItem, ResolveChange, ResolveDraft } fr
 
 export type { ProductResolveChoices } from '../../api/productWriteTransport.ts'
 
-// The products side of the one conflict resolver. Every product of a group
-// opens in the shared ResolveModal; Resolve merges the others into one of
-// them, one server fold per product (POST .../possible-duplicates/merge with
-// keep:true), each in History with its own Undo.
-//
-// The surviving record is implicit (owner, 30 Sep 2026: "no need product
-// kept"): the lowest included id. It never changes when a field is picked, so
-// picking never re-reads the server; only Merge in / Keep separate does.
-//
-// Rows (UI-CONFLICTS 3.4), each a choice the server applies as sent
-// (`choices`, frozen with the plan) when the preview says choicesSupported:
-//   Name, Brand, Category, Unit  the survivor's value, else the first record
-//                                that has one; Final can be typed.
-//   Barcode                      a real barcode over an empty or broken one:
-//                                the survivor's, else the first real one. The
-//                                others stay on their merged records.
-//   Cost                         the group average (server economics), a
-//                                record's or a typed one; cost permissions.
-//   Selling, Wholesale           the highest; a record's or a typed one.
-//   Image                        the survivor's, else the first record's.
-//   Stock                        Carry or Write off per merged product.
-// An older server that cannot apply choices gets today's computed rows: name
-// and barcode follow the survivor, selling is the highest.
-
 type Translate = (key: string) => string | undefined
 
 // resolveCellKey (ResolveGrid.tsx): the grid's key for a per-record choice.
@@ -62,7 +38,6 @@ export type ProductResolvePreview = {
   needsStockChoice: boolean
   blocked: { code: string; operationId?: string } | null
   keeperStock: StockImpact | null
-  groupCost: { cost_price_usd?: number | null; cost_price_khr?: number | null } | null
   /** Stock-in sessions whose Undo this merge closes (operation ids). */
   closesStockSessions: string[]
   choicesSupported: boolean
@@ -94,8 +69,6 @@ export type ProductResolveToken = {
 }
 
 type MergeKeep = {
-  cost_price_usd?: number | null
-  cost_price_khr?: number | null
   resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
   choices?: ProductResolveChoices
 }
@@ -175,7 +148,6 @@ function readImpact(value: unknown): StockImpact {
 function readPreview(value: unknown): ProductResolvePreview {
   const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
   const blocked = raw.blocked && typeof raw.blocked === 'object' ? raw.blocked as { code?: unknown; operationId?: unknown } : null
-  const groupCost = raw.groupCost && typeof raw.groupCost === 'object' ? raw.groupCost as Record<string, unknown> : null
   return {
     reviewedDigest: String(raw.reviewedDigest ?? ''),
     groupProducts: Array.isArray(raw.groupProducts) ? raw.groupProducts as ProductResolveRecord[] : [],
@@ -184,9 +156,6 @@ function readPreview(value: unknown): ProductResolvePreview {
     blocked: blocked ? { code: String(blocked.code ?? ''), ...(blocked.operationId ? { operationId: String(blocked.operationId) } : {}) } : null,
     keeperStock: raw.keeperStock ? readImpact(raw.keeperStock) : null,
     closesStockSessions: Array.isArray(raw.closesStockSessions) ? raw.closesStockSessions.map(String) : [],
-    groupCost: groupCost && 'cost_price_usd' in groupCost
-      ? { cost_price_usd: knownCost(groupCost.cost_price_usd), ...(Object.hasOwn(groupCost, 'cost_price_khr') ? { cost_price_khr: knownCost(groupCost.cost_price_khr) } : {}) }
-      : null,
     choicesSupported: raw.choicesSupported === true,
   }
 }

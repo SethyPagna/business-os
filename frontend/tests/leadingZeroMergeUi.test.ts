@@ -218,4 +218,21 @@ function callbackHarness(writeReply: () => Promise<any>, refreshReply = async ()
  assert.equal(missing.requests.length,0,'no modern bulk write without reviewed approval')
 }
 
+{
+ let chunks=0,refreshes=0
+ const pending=structuredClone(validPreview) as any
+ pending.groups[0].canonicalId=6;pending.groups[0].duplicates[0].id=5;pending.groups[0].caseKeys=['6:5']
+ pending.applyManifest.groups=[{keeper_id:6,member_ids:[5,6]}]
+ const h=callbackHarness(async()=>{chunks++;return {success:true,mergedGroups:1,mergedProducts:1}},async()=>++refreshes===1?pending:{...pending,groups:[],applyManifest:{...pending.applyManifest,groups:[]}})
+ h.deps.leadingZeroConfirmedGroupsRef.current=new Map([[2,'1,2'],[6,'5,6']])
+ h.deps.leadingZeroManifestRef.current={...validPreview.applyManifest,groups:[{keeper_id:2,member_ids:[1,2]},{keeper_id:6,member_ids:[5,6]}]}
+ const frozen={version:1,reviewed_digest:'a'.repeat(64),groups:[{keeper_id:2,member_ids:[1,2],reviewed_digest:'b'.repeat(64)},{keeper_id:6,member_ids:[5,6],reviewed_digest:'c'.repeat(64)}]}
+ h.deps.mergeCostReviewRef.current=frozen
+ await h.handler()
+ assert.equal(chunks,2)
+ assert.deepEqual(h.requests.map(r=>r.costReview),[frozen,frozen],'progressive manifest cannot replace original pending-group approval')
+ assert.equal(h.requests[0].manifest.groups.length,2)
+ assert.equal(h.requests[1].manifest.groups.length,1)
+}
+
 console.log('leadingZeroMergeUi: all checks passed')

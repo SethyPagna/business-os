@@ -470,12 +470,7 @@ export function mergePossiblySameProducts(
   keepId: number | string,
   mergeId: number | string,
   stock?: 'merge' | 'write_off',
-  // The Resolve grid's Keep merge: a chosen cost (sent only by a user with the
-  // cost edit permission; the Worker refuses it otherwise) replaces the
-  // averaged one, and `choices` set the survivor's other fields.
   keep?: {
-    cost_price_usd?: number | null
-    cost_price_khr?: number | null
     resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
     choices?: ProductResolveChoices
   },
@@ -486,8 +481,6 @@ export function mergePossiblySameProducts(
   if (keep) {
     body.keep = true
     if (keep.resolve) body.resolve = keep.resolve
-    if (keep.cost_price_usd !== undefined) body.cost_price_usd = keep.cost_price_usd
-    if (keep.cost_price_khr !== undefined) body.cost_price_khr = keep.cost_price_khr
     // The Worker refuses choices without a reviewed plan (400 invalid_resolve_choices).
     if (keep.resolve && keep.choices && Object.keys(keep.choices).length) body.choices = keep.choices
   }

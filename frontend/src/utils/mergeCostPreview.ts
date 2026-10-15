@@ -18,3 +18,13 @@ export function formatMergeCost(value: number | null, currency: 'usd' | 'khr'): 
   const amount = value.toLocaleString('en-US', { maximumFractionDigits: 4 })
   return currency === 'usd' ? '$' + amount : amount + '៛'
 }
+
+export function mergeCostReviewMatches(review: MergeCostReview | undefined, groups: ReadonlyArray<{canonicalId:number; duplicates: ReadonlyArray<{id:number}>; mergeable?:boolean}>): boolean {
+  if (!review || review.version !== 1 || !/^[a-f0-9]{64}$/.test(review.reviewed_digest) || !Array.isArray(review.groups)) return false
+  const expected = groups.filter(g => g.mergeable !== false).map(g => ({keeper:g.canonicalId, ids:[g.canonicalId,...g.duplicates.map(d=>d.id)].sort((a,b)=>a-b)})).sort((a,b)=>a.keeper-b.keeper)
+  if (review.groups.length !== expected.length) return false
+  return review.groups.every((g,index) => {
+    const target=expected[index]
+    return g.keeper_id === target.keeper && (index===0 || g.keeper_id>review.groups![index-1].keeper_id) && /^[a-f0-9]{64}$/.test(g.reviewed_digest) && Array.isArray(g.member_ids) && g.member_ids.length>=2 && g.member_ids.length<=12 && g.member_ids.length===target.ids.length && g.member_ids.every((id,i)=>Number.isSafeInteger(id) && id>0 && (i===0 || id>g.member_ids[i-1]) && id===target.ids[i])
+  })
+}

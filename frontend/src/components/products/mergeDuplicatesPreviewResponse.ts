@@ -1,4 +1,4 @@
-import { readMergeCostAuthority, type MergeCostAuthority, type MergeCostReview } from '../../utils/mergeCostPreview.ts'
+import { readMergeCostAuthority, mergeCostReviewMatches, type MergeCostAuthority, type MergeCostReview } from '../../utils/mergeCostPreview.ts'
 export type ValidatedMergeDuplicatesPreviewGroup = {
   caseKeys: string[]
   canonicalId: number
@@ -281,6 +281,7 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
     }
   })
 
+  if (costReview && !mergeCostReviewMatches(costReview, groups)) invalid('costReview does not match the displayed mergeable groups')
   if (duplicateProductCount !== derivedDuplicateProductCount) {
     invalid('duplicateProductCount does not match group members')
   }

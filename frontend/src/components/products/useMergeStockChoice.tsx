@@ -116,8 +116,6 @@ export function useMergeStockChoice(t: TranslateFn) {
       identity = preview?.identity ?? null
       needsChoice = Boolean(preview?.needsStockChoice)
     } catch {
-      // Preview unavailable -- fall through to the server's own refusal below
-      // rather than assuming either answer.
       needsChoice = null
     }
 
@@ -127,7 +125,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       if (!choice) return 'cancelled'
       setWorking(true)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id, needsChoice ? choice : undefined, undefined, { version: 1, reviewed_digest: reviewedDigest })
+        await mergePossiblySameProducts(keeper.id, other.id, choice, undefined, { version: 1, reviewed_digest: reviewedDigest })
         return 'merged'
       } catch (error) {
         throw localizeRefusal(t, error)

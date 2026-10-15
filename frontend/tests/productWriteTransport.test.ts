@@ -137,11 +137,11 @@ globalThis.fetch = (async (_input, init) => {
 }) as typeof fetch
 try {
   for (const cost of [{}, { cost_price_usd: null, cost_price_khr: null }, { cost_price_usd: 0, cost_price_khr: 0 }, { cost_price_usd: 4.1234 }, { cost_price_usd: 4.1234, cost_price_khr: null }]) {
-    await mergePossiblySameProducts(10, 11, 'merge', cost)
-    assert.deepEqual(mergeCalls.at(-1), { keepId: 10, mergeId: 11, stock: 'merge', keep: true, ...cost })
+    await mergePossiblySameProducts(10, 11, 'merge', cost as any)
+    assert.deepEqual(mergeCalls.at(-1), { keepId: 10, mergeId: 11, stock: 'merge', keep: true })
   }
 } finally { globalThis.fetch = originalFetch; setSyncServerUrl('') }
-console.log('PASS chosen-cost JSON preserves NULL, zero and absent currencies')
+console.log('PASS stale cost override fields are never serialized by the modern merge transport')
 
 const {getMergeCostPreview}=await import('../src/api/productWriteTransport.ts')
 const plan={keepId:10,reviewedDigest:'a'.repeat(64),steps:[{mergeId:11,stock:'merge' as const}]}
