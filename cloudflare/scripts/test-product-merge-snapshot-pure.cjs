@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -34,7 +35,8 @@ function countedAdapter(d1) {
 
 async function main() {
   const d1 = openDb(loadAll())
-  d1.db.exec(`
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+  seedStockFixture(d1.db, () => d1.db.exec(`
     INSERT INTO products(id,name,barcode,image_path,is_active,updated_at,cost_price_usd,selling_price_usd)
       VALUES(9001,'Tea','123456',NULL,1,'2026-09-07 10:00:00',4,5),
             (9002,'Tea','0123456','/uploads/tea.webp',1,'2026-09-07 10:00:00',6,7);
@@ -51,7 +53,7 @@ async function main() {
       VALUES(1,9102,1);
     INSERT INTO return_item_batch_allocations(return_item_id,batch_id,quantity)
       VALUES(1,9102,1);
-  `)
+  `))
   const { readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } = loadSnapshotModule()
   const { adapter, batches } = countedAdapter(d1)
   const reparent = [

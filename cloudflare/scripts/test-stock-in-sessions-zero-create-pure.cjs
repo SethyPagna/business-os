@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // N29 (2026-09-06): "i see that the create products did not show in stock in".
 //
 // The Stock-in Sessions list was built from inventory_movements alone. The
@@ -52,8 +53,9 @@ const kernel = require(path.join(tmp, 'stockInSessionsQuery.js'))
 const migrations = loadAll()
 assert.ok(migrations.some((sql) => /0128|idx_stock_session_members_movement/.test(sql)), 'the schema under test must include prepared migration 0128')
 const db = openDb(migrations)
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
-db.exec(`
+seedStockFixture(db, () => db.exec(`
   INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1), (2,'Warehouse',1);
   INSERT INTO users (id,username,name,password) VALUES (7,'za','Za Sokha','x'), (8,'dara','Dara','x');
   INSERT INTO suppliers (id,name) VALUES (1,'Bong Long'), (2,'Sok Trading');
@@ -63,7 +65,7 @@ db.exec(`
     (3,'Hydrating Serum With A Deliberately Long Product Name 30ml','3003','pcs','Glow','Skin',NULL,25,12,1),
     (4,'Night Cream','4004','pcs','Glow','Skin',NULL,30,15,1),
     (5,'Toner','5005','pcs','Glow','Skin',NULL,10,4,1);
-`)
+`))
 
 // ---------------------------------------------------------------------------
 // (a) a create-products session whose two items were both created at zero.
@@ -86,10 +88,10 @@ const zeroRowid = db.prepare(`SELECT rowid AS rowid FROM stock_session_operation
 // ---------------------------------------------------------------------------
 // (b) a create-products session with ONE received line and ONE zero line.
 // ---------------------------------------------------------------------------
-db.exec(`
+seedStockFixture(db, () => db.exec(`
   INSERT INTO product_batches (id,variant_product_id,batch_key,lot_code,received_at,is_active,supplier_id,supplier_name,payment_status,unit_cost_usd,received_cost_usd,updated_at) VALUES
     (10,1,'09042026','09042026','2026-09-04',1,1,'Bong Long','paid',9,45,'2026-09-04 09:00:00');
-`)
+`))
 const mixedRequest = JSON.stringify({
   client_request_id: 'stockin_mixed', mode: 'stock_in', items: [
     { line_id: 'create_5', kind: 'create_receive', product_id: null, product: { name: 'Toner' }, batch_id: null, branch_id: 1, quantity: 0, supplier_id: 1, supplier_name: 'Bong Long', received_date: '2026-09-04', expiry_date: null, notes: null, unit_cost_usd: 4, free_goods: false, payment_status: null, credit_due_date: null },
@@ -110,14 +112,14 @@ db.exec(`
 // (c) a fast stock-in session: two POST /batches receipts sharing a
 //     sessionId (Date.now()) as reference_id; no operations row at all.
 // ---------------------------------------------------------------------------
-db.exec(`
+seedStockFixture(db, () => db.exec(`
   INSERT INTO product_batches (id,variant_product_id,batch_key,lot_code,received_at,is_active,supplier_id,supplier_name,payment_status,credit_due_date,unit_cost_usd,received_cost_usd,updated_at) VALUES
     (11,1,'09032026','09032026','2026-09-03',1,1,'Bong Long','credit','2026-09-20',9,27,'2026-09-03 10:00:00'),
     (12,2,'09032026','09032026','2026-09-03',1,1,'Bong Long','credit','2026-09-20',8,16,'2026-09-03 10:00:00');
   INSERT INTO inventory_movements (id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reference_id,user_id,user_name,created_at,batch_id) VALUES
     (200,1,'Lip Oil A',1,'Shop','add',3,9,27,1757000000000,7,'Za','2026-09-03 10:00:00',11),
     (201,2,'Lip Oil B',1,'Shop','add',2,8,16,1757000000000,7,'Za','2026-09-03 10:00:01',12);
-`)
+`))
 
 const list = kernel.buildStockInSessionListQuery('')
 const groups = db.prepare(`${list.groupedSql} ORDER BY created_at DESC`).bind(list.params).all()
@@ -219,10 +221,10 @@ for (const term of ['serum', '4004', 'sok trading', 'dara']) {
 
 // A zero member whose operation LATER received stock through a retry (the
 // member gets a movement) must not be listed twice: the movement side owns it.
-db.exec(`
+seedStockFixture(db, () => db.exec(`
   INSERT INTO product_batches (id,variant_product_id,batch_key,lot_code,received_at,is_active,supplier_id,supplier_name,payment_status,unit_cost_usd,received_cost_usd,updated_at) VALUES
     (13,5,'09042026','09042026','2026-09-04',1,1,'Bong Long','paid',4,8,'2026-09-04 09:05:00');
-`)
+`))
 db.prepare(`INSERT INTO inventory_movements (id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reference_id,user_id,user_name,created_at,batch_id) VALUES
   (101,5,'Toner',1,'Shop','add',2,4,8,@ref,7,'Za','2026-09-04 09:05:00',13)`).run({ ref: mixedRowid })
 db.exec(`UPDATE stock_session_members SET movement_id=101, batch_id=13, quantity=2 WHERE operation_id='op-mixed' AND line_id='create_5'`)

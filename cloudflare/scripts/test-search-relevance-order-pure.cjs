@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // THE ORDERING TEST for the one shared product-search ranking.
 //
 // The report this lane exists for: "the search functions of transfer, stock
@@ -103,6 +104,7 @@ async function checkAsync(name, fn) {
 // --- fixture -----------------------------------------------------------
 
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
 // The scanned code and its zero-padded twin, the exact production shape:
 // one product stored as the bare EAN-13 a scanner emits, its duplicate
@@ -150,14 +152,14 @@ const stock = raw.prepare('INSERT INTO branch_stock (product_id, branch_id, quan
 for (const [id, name, barcode, sku] of FIXTURE) {
   // name_normalized is written in JS by lib/productWrites.ts's insertRow in
   // production; use the REAL fold here so the tier comparison is honest.
-  insert.run(id, name, sku, barcode, normalizeSearchText(name))
-  stock.run(id)
+  seedStockFixture(raw, () => insert.run(id, name, sku, barcode, normalizeSearchText(name)))
+  seedStockFixture(raw, () => stock.run(id))
 }
 
 // name_key is what FAMILY_ROOT_KEY_SQL groups on. Production maintains it
 // by trigger (migration 0010); fill it for rows this raw INSERT created in
 // case the trigger did not fire on this build, so families are real.
-raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''")
+seedStockFixture(raw, () => raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''"))
 
 const seeded = raw.prepare('SELECT COUNT(*) AS n FROM products').get().n
 assert.equal(seeded, FIXTURE.length, 'fixture must be fully seeded before any ordering assertion runs')

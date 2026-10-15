@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const { execSync } = require('node:child_process')
 const fs = require('node:fs')
@@ -17,8 +18,9 @@ const ignore = /^Version\s+(?:[6-9]|\d{2,})\./.test(version) ? ' --ignoreConfig'
 execSync(`npx tsc "${path.join(tmp, 'stockInSessionsQuery.ts')}" "${path.join(tmp, 'movementActorName.ts')}" --outDir "${tmp}" --module commonjs --target es2022 --strict --skipLibCheck${ignore}`, { cwd: root })
 const kernel = require(path.join(tmp, 'stockInSessionsQuery.js'))
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
-db.exec(`
+seedStockFixture(db, () => db.exec(`
   -- N13: user 7's account is 'james'; the rows below were written before the
   -- username rule and snapshot the FULL name, which is the whole point of
   -- resolving the actor through user_id. Users 8 and 99 have no account row at
@@ -54,7 +56,7 @@ db.exec(`
     -- Nobody recorded what this cost. Not recorded, and not free.
     (11,1,'Lip Oil A',1,'Shop','add',6,NULL,NULL,105,7,'Za','2026-09-04 03:00:00',1),
     (12,2,'Lip Oil B',1,'Shop','add',2,8,16,105,7,'Za','2026-09-04 03:00:01',2);
-`)
+`))
 
 // The unified "Add products" session (POST /api/inventory/sessions, migration
 // 0124) wrote its movement rows as movement_type='stock_in' -- its session

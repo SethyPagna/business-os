@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -26,7 +27,8 @@ assert.doesNotMatch(query, /\$\{/, 'every template expression was expanded')
 assert.match(query, /AS batch_received_at/)
 const db = new Database(':memory:')
 for (const migration of loadAll()) db.exec(migration)
-db.exec(`
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+seedStockFixture(db, () => db.exec(`
   INSERT INTO branches(id,name) VALUES(1,'Shop');
   INSERT INTO products(id,name) VALUES(1,'A'),(2,'B');
   INSERT INTO sales(id,branch_id) VALUES(1,1);
@@ -36,7 +38,7 @@ db.exec(`
     (1,1,1,2,11),(2,1,1,2,NULL),(3,1,1,2,NULL),(4,1,1,2,NULL),(5,1,1,2,NULL),(6,1,1,2,13);
   INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity,released_quantity) VALUES
     (2,11,2,0),(3,11,1,0),(3,12,1,0),(4,11,1,0),(5,11,2,2);
-`)
+`))
 const rows = db.prepare(query).all(1)
 assert.equal(rows.length, 6, 'lot joins never multiply sale lines')
 const byId = new Map(rows.map((row) => [row.id, row]))

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // I4-1: the product-search bm25 rank is computed ONCE per statement.
 //
 // It used to be a correlated scalar subquery
@@ -59,6 +60,7 @@ async function check(name, fn) {
 
 // --- fixture: many products sharing words, so bm25 genuinely differs ----
 const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const raw = db.db
 raw.exec("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)")
 const insert = raw.prepare(`INSERT INTO products
@@ -72,13 +74,13 @@ for (let i = 0; i < 120; i += 1) {
   const a = words[i % words.length], b = words[(i * 3 + 1) % words.length]
   const name = `${a} ${b} ${i % 4 === 0 ? a : ''} Item ${Math.floor(i / 2)}`.replace(/\s+/g, ' ')
   const brand = i % 5 === 0 ? 'GlowCo' : 'Other'
-  insert.run(id, name, `SKU-${id}`, `88000000${String(id).padStart(5, '0')}`, brand, i % 2 ? 'Face' : 'Lip', normalizeSearchText(name))
+  seedStockFixture(raw, () => insert.run(id, name, `SKU-${id}`, `88000000${String(id).padStart(5, '0')}`, brand, i % 2 ? 'Face' : 'Lip', normalizeSearchText(name)))
   id += 1
 }
 // A trigram-only hit (fused token): matches "glow" by substring, not by FTS
 // word, so its rank must COALESCE to 0 in both forms.
-insert.run(id, 'Superglowx Balm', 'SKU-X', '8800000099999', 'Other', 'Face', normalizeSearchText('Superglowx Balm'))
-raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''")
+seedStockFixture(raw, () => insert.run(id, 'Superglowx Balm', 'SKU-X', '8800000099999', 'Other', 'Face', normalizeSearchText('Superglowx Balm')))
+seedStockFixture(raw, () => raw.exec("UPDATE products SET name_key = lower(trim(name)) WHERE COALESCE(name_key, '') = ''"))
 
 const OLD_RANK = (prefix = '') => `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @${prefix}ftsQuery), 0)`
 

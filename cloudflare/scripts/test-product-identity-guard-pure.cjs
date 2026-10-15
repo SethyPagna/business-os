@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // The ONE product identity rule on the MANUAL path: same normalized name +
 // barcode is the SAME product, so POST / and PUT /:id must refuse to mint a
 // twin -- the import path already merges such rows.
@@ -82,14 +83,15 @@ assert.ok(!/ROUND\(COALESCE\(cost_price_usd/.test(sqlMatch[1]),
 
 const sqlite = new Database(':memory:')
 for (const migration of loadAll()) sqlite.exec(migration)
-sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
+assert.throws(() => sqlite.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
   (1, 'Dior Lip Glow 001', '3348901', 5.25, 0, 1),
   (2, 'Dior Lip Glow 001', '9999999', 5.25, 0, 1),
   (3, 'Retired Twin', '3348901', 5.25, 0, 0),
   (4, 'No  Barcode', NULL, 2, 0, 1),
   (5, 'Zero Twin', '3614274226546', 5, 0, 1),
   (6, 'Short Code', '0012', 1, 0, 1),
-  (7, 'Placeholder', '0', 1, 0, 1)`).run()
+  (7, 'Placeholder', '0', 1, 0, 1)`).run())
 
 // Exactly what the route does: narrow in SQL, compare with the shared fold.
 const run = (name, barcode, excludeId) => pickSameIdentityRow(
@@ -142,11 +144,11 @@ assert.equal(run('No Barcode', '', null)?.id, 4, 'blank barcode is still an exac
 //
 // The rows below are a real twin pair (same name, '0601'/'601') and a real
 // cost-forked pair (same name, same barcode, different cost).
-sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
+seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
   (10, 'Mac Lipstick 601', '0601', 6, 0, 1),
   (11, 'Mac Lipstick 601', '601', 9, 0, 1),
   (12, 'Fork Cost', '778899', 3, 0, 1),
-  (13, 'Fork Cost', '778899', 12, 0, 1)`).run()
+  (13, 'Fork Cost', '778899', 12, 0, 1)`).run())
 
 // The route, reproduced exactly: resolve the edit, and only look for a twin
 // when the resolution says the identity moved.
