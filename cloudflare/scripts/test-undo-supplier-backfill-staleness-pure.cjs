@@ -1,3 +1,5 @@
+const { executeStockTransaction } = require('../src/lib/stockTransaction.ts')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // FX-undo applier audit: supplier.backfill had the same gap as branch.update.
 // Its undo rewrote every lot's (supplier_id, supplier_name) back to the prior
 // attribution, and its redo rewrote them to the supplier, with no check that
@@ -23,14 +25,15 @@ const LOTS = [5000, 5001]
 
 function freshWorld() {
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const { undoAppliers } = loadUndoAppliers(d1)
   const run = (sql, params) => d1.db.prepare(sql).run(params == null ? {} : params)
   run(`INSERT INTO suppliers (id, name) VALUES (7, 'Acme Co'), (9, 'Gamma Ltd')`)
-  run(`INSERT INTO products (id, name, is_active) VALUES (100, 'ProdA', 1)`)
+  seedStockFixture(d1.db, () => run(`INSERT INTO products (id, name, is_active) VALUES (100, 'ProdA', 1)`))
   // One blank lot and one name-only lot (supplier_id NULL), both backfillable.
-  run(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active, supplier_id, supplier_name) VALUES
+  seedStockFixture(d1.db, () => run(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active, supplier_id, supplier_name) VALUES
     (5000, 100, 'A1', 1, 1, NULL, NULL),
-    (5001, 100, 'A2', 2, 1, NULL, 'Acme Co')`)
+    (5001, 100, 'A2', 2, 1, NULL, 'Acme Co')`))
   return { d1, undoAppliers, run }
 }
 
@@ -41,8 +44,7 @@ async function backfill(world, supplier) {
     'SELECT id, supplier_id, supplier_name FROM product_batches WHERE variant_product_id = 100 AND is_active = 1 AND supplier_id IS NULL ORDER BY id',
   ).all()
   const ids = targets.map((t) => Number(t.id))
-  d1.db.prepare(`UPDATE product_batches SET supplier_id = @sid, supplier_name = @name, updated_at = CURRENT_TIMESTAMP WHERE id IN (${ids.join(',')})`)
-    .run({ sid: supplier.id, name: supplier.name })
+  await executeStockTransaction(d1, [{ sql: `UPDATE product_batches SET supplier_id = @sid, supplier_name = @name, updated_at = CURRENT_TIMESTAMP WHERE id IN (${ids.join(',')})`, params: { sid: supplier.id, name: supplier.name } }], 'retry')
   const rec = await undoAppliers.recordSupplierBackfillSnapshot({}, USER, {
     productId: 100, supplierId: supplier.id, supplierName: supplier.name,
     lots: targets.map((t) => ({ id: Number(t.id), prevSupplierId: t.supplier_id == null ? null : Number(t.supplier_id), prevSupplierName: t.supplier_name ?? null })),
@@ -107,7 +109,7 @@ async function main() {
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
     // routes/contacts.ts supplier rename cascade.
     world.run("UPDATE suppliers SET name = 'Acme Corporation' WHERE id = 7")
-    world.run("UPDATE product_batches SET supplier_name = 'Acme Corporation' WHERE supplier_id = 7")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_name = 'Acme Corporation' WHERE supplier_id = 7"))
     await replay(world, snap, 'undo')
     assert.deepEqual(lots(world), [
       { id: 5000, supplier_id: null, supplier_name: null },
@@ -122,7 +124,7 @@ async function main() {
   await check('DISCRIMINATING (C8): undo refuses when only a backfilled lot\'s supplier name was edited after the backfill', async () => {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
-    world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001"))
     await assertConflict(replay(world, snap, 'undo'), /1 lot was re-attributed after this change/)
     assert.deepEqual(lots(world), [
       { id: 5000, supplier_id: 7, supplier_name: 'Acme Co' },
@@ -145,7 +147,7 @@ async function main() {
   await check('control: the name is compared as the redo compares it (case and outer spaces aside)', async () => {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
-    world.run("UPDATE product_batches SET supplier_name = ' ACME CO ' WHERE id = 5000")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_name = ' ACME CO ' WHERE id = 5000"))
     await replay(world, snap, 'undo')
     assert.deepEqual(lots(world)[0], { id: 5000, supplier_id: null, supplier_name: null })
   })
@@ -169,7 +171,7 @@ async function main() {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
     // routes/batches.ts lot edit sets supplier_name + supplier_id.
-    world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001"))
     await assertConflict(replay(world, snap, 'undo'), /1 lot was re-attributed after this change/)
     assert.deepEqual(lots(world), [
       { id: 5000, supplier_id: 7, supplier_name: 'Acme Co' },
@@ -182,7 +184,7 @@ async function main() {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
     await replay(world, snap, 'undo')
-    world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5000")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5000"))
     await assertConflict(replay(world, snap, 'redo'), /re-attributed after this change, so it can no longer be redone/)
     assert.deepEqual(lots(world), [
       { id: 5000, supplier_id: 9, supplier_name: 'Gamma Ltd' },
@@ -195,7 +197,7 @@ async function main() {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
     await replay(world, snap, 'undo')
-    world.run("UPDATE product_batches SET supplier_name = 'Local Market' WHERE id = 5001")
+    seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_name = 'Local Market' WHERE id = 5001"))
     await assertConflict(replay(world, snap, 'redo'), /re-attributed/)
     assert.equal(lots(world)[1].supplier_name, 'Local Market')
   })
@@ -206,7 +208,7 @@ async function main() {
     const batch = world.d1.batch.bind(world.d1)
     world.d1.batch = async (statements) => {
       world.d1.batch = batch
-      world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001")
+      seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_id = 9, supplier_name = 'Gamma Ltd' WHERE id = 5001"))
       return batch(statements)
     }
     await assertConflict(replay(world, snap, 'undo'), /re-attributed while this change was being undone/)
@@ -222,7 +224,7 @@ async function main() {
     const batch = world.d1.batch.bind(world.d1)
     world.d1.batch = async (statements) => {
       world.d1.batch = batch
-      world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001")
+      seedStockFixture(world.d1.db, () => world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001"))
       return batch(statements)
     }
     await assertConflict(replay(world, snap, 'undo'), /re-attributed while this change was being undone/)

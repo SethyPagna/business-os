@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Pins the barcode half of the 2026-09-03 "Change stock picker ignores the
 // scanned barcode" fix, against REAL migrations and the REAL current
 // lib/searchMatch.ts (transpiled, not a hand-copied replica) using
@@ -86,10 +92,10 @@ const insert = db.prepare(`INSERT INTO products
   (id, name, sku, barcode, brand, category, supplier, description, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active)
   VALUES (@id, @name, @sku, @barcode, @brand, @category, @supplier, @description, @unit, 50, 10, 0, 1)`)
 
-const row = (id, name, barcode, sku) => insert.run({
+const row = (id, name, barcode, sku) => seedFixture(db, () => insert.run({
   id, name, barcode, sku: sku || null,
   brand: '', category: '', supplier: '', description: '', unit: 'pcs',
-})
+}))
 
 const SCANNED = '3348901770569'
 const TWIN = '03348901770569'

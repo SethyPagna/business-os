@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Regression coverage for Library image references owned by promotions.
 //
 // Runs the real files route against real SQLite/migrations. Promotion paths
@@ -123,7 +129,7 @@ async function request(pathname, init = {}, requestUser = user) {
 function reset() {
   deletedKeys.length = 0
   promotionReferenceQueries.length = 0
-  db.exec('DELETE FROM promotions; DELETE FROM product_images; DELETE FROM products; DELETE FROM users; DELETE FROM settings; DELETE FROM file_assets;')
+  seedFixture(db, () => db.exec('DELETE FROM promotions; DELETE FROM product_images; DELETE FROM products; DELETE FROM users; DELETE FROM settings; DELETE FROM file_assets;'))
 }
 
 function asset(id, storedName, publicPath) {
@@ -177,7 +183,7 @@ async function main() {
 
   reset()
   asset(2, 'product-cover.png', '/uploads/product-cover.png')
-  db.prepare("INSERT INTO products (id, name, image_path, is_active) VALUES (2, 'Existing product', '/uploads/product-cover.png', 1)").run()
+  seedFixture(db, () => db.prepare("INSERT INTO products (id, name, image_path, is_active) VALUES (2, 'Existing product', '/uploads/product-cover.png', 1)").run())
   const productListed = await request('/')
   const productAsset = findItem(productListed.json, 2)
   assert.deepEqual(productAsset.usage, { products: 1, gallery: 0, avatars: 0, promotions: 0, settings: 0 })

@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Cost-unknown slice S8 (owner, 14 Oct 2026): "if cost is 0$ then it is 0 for loss. if it is none, it should also be unknown."
 //
 // The imports used to turn "the file states no cost" into 0 (a blank products-CSV cell, a missing cost column) or
@@ -209,13 +215,13 @@ const UNKNOWN = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null
   const sqlite = freshDb()
   sqlite.prepare("INSERT INTO branches (id, name, is_active, is_default, role, canonical_key) VALUES (1, 'Shop', 1, 1, 'shop', 'shop')").run()
   const addProduct = (id, name, catalogCost) => {
-    sqlite.prepare('INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd, cost_price_khr) VALUES (?, ?, ?, 10, ?, ?)').run(id, name, `SKU-${id}`, catalogCost, catalogCost == null ? null : catalogCost * 4100)
-    sqlite.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 10)').run(id)
+    seedFixture(sqlite, () => sqlite.prepare('INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd, cost_price_khr) VALUES (?, ?, ?, 10, ?, ?)').run(id, name, `SKU-${id}`, catalogCost, catalogCost == null ? null : catalogCost * 4100))
+    seedFixture(sqlite, () => sqlite.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 10)').run(id))
   }
   const addLot = (id, productId, qty, unitCost) => {
-    sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd, received_quantity)
-      VALUES (?, ?, ?, ?, '2026-08-01', 1, 1, ?, ?)`).run(id, productId, `lot-${id}`, `LOT-${id}`, unitCost, qty)
-    sqlite.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, ?)').run(id, qty)
+    seedFixture(sqlite, () => sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd, received_quantity)
+      VALUES (?, ?, ?, ?, '2026-08-01', 1, 1, ?, ?)`).run(id, productId, `lot-${id}`, `LOT-${id}`, unitCost, qty))
+    seedFixture(sqlite, () => sqlite.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, ?)').run(id, qty))
   }
   // The catalog cost is 9 everywhere, so a catalog-priced removal is visible as 9.
   addProduct(101, 'Lot unknown', 9); addLot(1101, 101, 10, null)
@@ -237,7 +243,8 @@ const UNKNOWN = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null
     // A second removal of product 105 would drain the NULL lot after the costed lot is spent; keep the first five.
     const planned = await engine.planInventoryImportStockGroups(d1(sqlite), rows.slice(0, 5), (rowNumber) => ({ sql: 'SELECT 1 WHERE ? IS NOT NULL', params: [rowNumber] }), '2026-10-15T00:00:00.000Z')
     assert.equal(planned.refused.length, 0, JSON.stringify(planned.refused))
-    sqlite.transaction(() => { for (const group of planned.groups) for (const { sql, params } of group) sqlite.prepare(sql).run(Array.isArray(params) ? params : Object.fromEntries([...sql.matchAll(/@(\w+)/g)].map((m) => [m[1], params?.[m[1]] ?? null]))) })()
+    await engine.runD1BatchGroupsInChunks(d1(sqlite), planned.groups, undefined, true)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     const byProduct = new Map(movementRows().map((row) => [row.product_id, row]))
     const cost = (row) => ({ unit_cost_usd: row.unit_cost_usd, unit_cost_khr: row.unit_cost_khr, total_cost_usd: row.total_cost_usd, total_cost_khr: row.total_cost_khr })
     assert.deepEqual(cost(byProduct.get(101)), UNKNOWN, 'removal of a NULL-cost lot is unknown (old: the catalog 9)')
@@ -300,8 +307,8 @@ const UNKNOWN = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null
     const run = async (index, itemCosts) => {
       const sqliteDb = freshDb()
       sqliteDb.prepare("INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)").run()
-      sqliteDb.prepare("INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 9)").run()
-      sqliteDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)').run()
+      seedFixture(sqliteDb, () => sqliteDb.prepare("INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 9)").run())
+      seedFixture(sqliteDb, () => sqliteDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)').run())
       const data = {
         receipt_number: `R-${index}`, cashier_id: null, cashier_name: 'Admin', branch_id: 1, branch_name: 'Shop', customer_id: null, customer_name: 'Dara', customer_phone: '012345678',
         customer_address: null, payment_method: 'Cash', payment_currency: 'USD', exchange_rate: 4100, notes: null, subtotal_usd: 15, subtotal_khr: 61500, discount_usd: 0, discount_khr: 0,

@@ -19,6 +19,7 @@ function loadRealLib(relName) {
     if (id === './sqlBinding') return loadRealLib('sqlBinding')
     if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
     if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
+    if (id === './stockTransaction') return loadRealLib('stockTransaction')
     if (id === './productStockGuard') return loadRealLib('productStockGuard')
     if (id === './db') return { getDb: () => { throw new Error('unused') } }
     if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('unused') } }

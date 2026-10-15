@@ -12,6 +12,12 @@
 //
 // Run (from cloudflare/): node scripts/test-rename-impact-route-kinds-pure.cjs
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -86,11 +92,11 @@ async function main() {
   }
 
   await check('a unit preview reaches the real engine: counts products by unit and sees the target unit', async () => {
-    h.raw.exec('DELETE FROM products; DELETE FROM units;')
-    h.raw.exec(`INSERT INTO products (id, name, unit, is_active) VALUES
+    seedFixture(h.raw.db, () => h.raw.exec('DELETE FROM products; DELETE FROM units;'))
+    seedFixture(h.raw.db, () => h.raw.exec(`INSERT INTO products (id, name, unit, is_active) VALUES
       (1, 'Rose Serum', 'Bottle', 1),
       (2, 'Lip Balm', ' bottle ', 1),
-      (3, 'Night Cream', 'Box', 1)`)
+      (3, 'Night Cream', 'Box', 1)`))
     h.raw.exec("INSERT INTO units (name) VALUES ('Btl')")
     const res = await impact('unit', 'Bottle', 'Btl')
     assert.equal(res.status, 200, JSON.stringify(res.json))

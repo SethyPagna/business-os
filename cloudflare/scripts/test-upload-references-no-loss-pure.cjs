@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // U-profile3 (27 Sep 2026), refuter findings X1/X2. Owner rule: nothing may
 // be lost and everything must be recoverable.
 //
@@ -49,6 +50,7 @@ function load(rel, overrides = {}) {
 
 function freshDb() {
   const d1 = openDb(loadAll())
+assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   // lib/db.ts run() answers { changes, lastInsertRowid }; the harness fills meta only.
   const prepare = d1.prepare.bind(d1)
   d1.prepare = (sql) => {
@@ -127,7 +129,9 @@ const RESET_TABLES = [
 ]
 function reset() {
   db = db || freshDb()
-  for (const table of RESET_TABLES) db.prepare(`DELETE FROM ${table}`).run({})
+  seedStockFixture(db.db, () => {
+    for (const table of RESET_TABLES) db.prepare(`DELETE FROM ${table}`).run({})
+  })
   r2 ={ deletes: [], async put() {}, async delete(key) { this.deletes.push(key) } }
   env = { DB: db, ASSETS: r2 }
   audits = []
@@ -163,7 +167,7 @@ async function call(app, method, url, body) {
 // The reference forms the refuter found deleted (D3-D17, RP2-RP12), plus the
 // encoded / JSON-escaped / variant forms the one rule also normalises.
 const promo = (v) => db.prepare("INSERT INTO promotions(title,image_path) VALUES ('promo',@v)").run({ v })
-const prod = (v) => db.prepare('INSERT INTO products(name,image_path,is_active) VALUES (@n,@v,1)').run({ n: `P${nextId++}`, v })
+const prod = (v) => seedStockFixture(db.db, () => db.prepare('INSERT INTO products(name,image_path,is_active) VALUES (@n,@v,1)').run({ n: `P${nextId++}`, v }))
 const setting = (v) => db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (@k,@v)').run({ k: `k_${nextId++}`, v })
 const manager = (v) => db.prepare('UPDATE users SET avatar_path = @v WHERE id = 3').run({ v })
 const REFERENCE_FORMS = [
@@ -172,7 +176,7 @@ const REFERENCE_FORMS = [
   ['another user, absolute URL', (a) => manager(`https://admin.leangbeauty.com${a.p}`)],
   ['another user, relative uploads/NAME', (a) => manager(a.p.slice(1))],
   ['product cover exact', (a) => prod(a.p)],
-  ['product cover on an INACTIVE product', (a) => db.prepare('INSERT INTO products(name,image_path,is_active) VALUES (@n,@v,0)').run({ n: `Pi${nextId++}`, v: a.p })],
+  ['product cover on an INACTIVE product', (a) => seedStockFixture(db.db, () => db.prepare('INSERT INTO products(name,image_path,is_active) VALUES (@n,@v,0)').run({ n: `Pi${nextId++}`, v: a.p }))],
   ['product cover relative', (a) => prod(a.p.slice(1))],
   ['product gallery row', (a) => { const r = prod('/uploads/other.png'); db.prepare('INSERT INTO product_images(product_id,image_path) VALUES (@pid,@v)').run({ pid: Number(r.meta.last_row_id), v: a.p }) }],
   ['promotion exact', (a) => promo(a.p)],
@@ -189,7 +193,7 @@ const REFERENCE_FORMS = [
   ['image variant URL', (a) => setting(`/uploads/_v/w320/${a.name}`)],
   ['pending import match (D15/RP12)', (a) => db.prepare("INSERT INTO import_job_image_matches(job_id,row_number,image_path) VALUES ('job-1',@r,@v)").run({ r: nextId++, v: a.p })],
   ['customer share screenshots (D16)', (a) => db.prepare("INSERT INTO customer_share_submissions(customer_name,screenshots_json) VALUES ('c',@v)").run({ v: JSON.stringify([a.p]) })],
-  ['product description mentions it (D17)', (a) => db.prepare('INSERT INTO products(name,description,is_active) VALUES (@n,@d,1)').run({ n: `Pd${nextId++}`, d: `see ${a.p}` })],
+  ['product description mentions it (D17)', (a) => seedStockFixture(db.db, () => db.prepare('INSERT INTO products(name,description,is_active) VALUES (@n,@d,1)').run({ n: `Pd${nextId++}`, d: `see ${a.p}` }))],
 ]
 
 let failures = 0

@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const { executeStockTransaction } = require('../src/lib/stockTransaction.ts')
 // Drives POST /api/sales against the real route and fully migrated SQLite.
 // It proves two checkout invariants that a planner-only test cannot:
 //   1. an explicit batch belongs to the line's product + Shop branch, and
@@ -103,6 +105,7 @@ function routeDb(db, hooks = {}) {
         },
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch: async (statements) => {
       if (hooks.beforeBatch) await hooks.beforeBatch({ rawDb: db, statements })
       return db.batch(statements)
@@ -162,6 +165,7 @@ function fixture({ legacyThrough0153 = false } = {}) {
   // database whose schema does not change mid-lifetime).
   load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
   const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
+  const seed = () => {
   run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
            VALUES(10,'Serum','SERUM',10,5,20000,2,8000,1)`)
@@ -178,6 +182,14 @@ function fixture({ legacyThrough0153 = false } = {}) {
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)`)
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,5)`)
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)`)
+  }
+  if (legacyThrough0153) {
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+    seed()
+  } else {
+    assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
+    seedStockFixture(db.db, seed)
+  }
   return db
 }
 
@@ -242,7 +254,7 @@ function counts(db) {
       [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
       'batch-owner-race',
       {},
-      { beforeBatch: ({ rawDb }) => run(rawDb, 'UPDATE product_batches SET variant_product_id=11 WHERE id=500') },
+      { beforeBatch: ({ rawDb }) => seedStockFixture(rawDb.db, () => run(rawDb, 'UPDATE product_batches SET variant_product_id=11 WHERE id=500')) },
     )
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'sale_identity_conflict')
@@ -260,8 +272,8 @@ function counts(db) {
       'batch-metadata-race',
       {},
       {
-        beforeBatch: ({ rawDb }) => run(rawDb, `UPDATE product_batches
-          SET lot_code='SERUM-CURRENT', expiry_date='2030-12-31' WHERE id=500`),
+        beforeBatch: ({ rawDb }) => seedStockFixture(rawDb.db, () => run(rawDb, `UPDATE product_batches
+          SET lot_code='SERUM-CURRENT', expiry_date='2030-12-31' WHERE id=500`)),
       },
     )
     assert.equal(result.status, 200, JSON.stringify(result.body))
@@ -331,8 +343,8 @@ function counts(db) {
   {
     const db = fixture()
     const before = counts(db)
-    assert.throws(
-      () => run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500'),
+    await assert.rejects(
+      () => executeStockTransaction(db, [{ sql: 'UPDATE product_batches SET is_active=0 WHERE id=500' }], 'retry'),
       /Cannot deactivate a received lot with positive branch stock/,
     )
     assert.equal(get(db, 'SELECT is_active FROM product_batches WHERE id=500').is_active, 1)
@@ -358,8 +370,8 @@ function counts(db) {
   {
     const db = fixture()
     run(db, "INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)")
-    run(db, 'DELETE FROM branch_batch_stock WHERE branch_id=1 AND batch_id IN (500,502)')
-    run(db, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,7)')
+    seedStockFixture(db.db, () => run(db, 'DELETE FROM branch_batch_stock WHERE branch_id=1 AND batch_id IN (500,502)'))
+    seedStockFixture(db.db, () => run(db, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,7)'))
     const result = await postSale(db, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-warehouse-only')
     assert.equal(result.status, 200, JSON.stringify(result.body))
   }
@@ -369,7 +381,7 @@ function counts(db) {
   // cart lines, full tracked Shop stock, and no Shop stock.
   {
     const zeroLot = fixture()
-    run(zeroLot, 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (500,502) AND branch_id=1')
+    seedStockFixture(zeroLot.db, () => run(zeroLot, 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (500,502) AND branch_id=1'))
     const zeroResult = await postSale(zeroLot, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-zero-shop-lots')
     assert.equal(zeroResult.status, 200, JSON.stringify(zeroResult.body))
 
@@ -383,14 +395,14 @@ function counts(db) {
     assert.deepEqual(counts(repeated), repeatedBefore)
 
     const fullTracked = fixture()
-    run(fullTracked, 'UPDATE branch_stock SET quantity=7 WHERE product_id=10 AND branch_id=1')
+    seedStockFixture(fullTracked.db, () => run(fullTracked, 'UPDATE branch_stock SET quantity=7 WHERE product_id=10 AND branch_id=1'))
     const fullTrackedBefore = counts(fullTracked)
     const fullTrackedResult = await postSale(fullTracked, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-full-tracked')
     assert.equal(fullTrackedResult.status, 409, JSON.stringify(fullTrackedResult.body))
     assert.deepEqual(counts(fullTracked), fullTrackedBefore)
 
     const noShop = fixture()
-    run(noShop, 'UPDATE branch_stock SET quantity=0 WHERE product_id=10 AND branch_id=1')
+    seedStockFixture(noShop.db, () => run(noShop, 'UPDATE branch_stock SET quantity=0 WHERE product_id=10 AND branch_id=1'))
     const noShopBefore = counts(noShop)
     const noShopResult = await postSale(noShop, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-no-shop-stock')
     assert.equal(noShopResult.status, 409, JSON.stringify(noShopResult.body))
@@ -402,7 +414,7 @@ function counts(db) {
   // remainder and rolls back the sale instead of consuming that known lot.
   {
     const db = fixture()
-    run(db, 'DELETE FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1')
+    seedStockFixture(db.db, () => run(db, 'DELETE FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1'))
     const before = {
       sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
       items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
@@ -416,7 +428,7 @@ function counts(db) {
       [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }],
       'unlotted-attribution-race',
       {},
-      { beforeBatch: ({ rawDb }) => run(rawDb, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)') },
+      { beforeBatch: ({ rawDb }) => seedStockFixture(rawDb.db, () => run(rawDb, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)')) },
     )
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'stock_conflict')

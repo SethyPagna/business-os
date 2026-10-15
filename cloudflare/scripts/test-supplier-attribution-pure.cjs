@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // D5a: supplier-on-batch through the MANUAL add/receive surfaces. Both
 // receive wires (POST /inventory/adjust camelCase supplierId/supplierName,
@@ -25,6 +27,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
+assert.throws(() => rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
@@ -37,6 +40,7 @@ const db = {
       },
     }
   },
+  batchOnce(items) { return this.batch(items) },
   async batch(items) {
     const results = []
     for (const item of items) {
@@ -64,6 +68,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
@@ -304,9 +309,9 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;')
+  seedStockFixture(rawDb, () => rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;'))
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
-  rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, 'Widget', 'B123', 1, 0)").run()
+  seedStockFixture(rawDb, () => rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, 'Widget', 'B123', 1, 0)").run())
   rawDb.prepare("INSERT INTO suppliers (id, name) VALUES (7, 'Acme Beauty Co')").run()
 }
 
@@ -391,7 +396,7 @@ async function main() {
     assert.strictEqual(refused.json?.code, 'supplier_required')
     await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
     const lotId = batchRows()[0].id
-    rawDb.prepare('UPDATE product_batches SET supplier_id = NULL, supplier_name = NULL WHERE id = @id').run({ id: lotId })
+    seedStockFixture(rawDb, () => rawDb.prepare('UPDATE product_batches SET supplier_id = NULL, supplier_name = NULL WHERE id = @id').run({ id: lotId }))
     assert.strictEqual(batchRows()[0].supplier_name, null, 'precondition: lot starts unattributed')
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'add', unitCostUsd: 2, quantity: 2, reason: 'top-up', branchId: 1,

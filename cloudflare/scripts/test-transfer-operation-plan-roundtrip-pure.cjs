@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const stockTransaction = require('../src/lib/stockTransaction.ts')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // P4-4a: planTransferOperation (lib/transferOperation.ts) used to await 3-5
 // D1 reads PER LINE inside its planning loop -- source product, destination
@@ -51,6 +53,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -231,32 +234,32 @@ function seed(rawDb) {
   rawDb.prepare(`INSERT INTO branches (id, name) VALUES (1,'Main'),(2,'Branch B')`).run({})
   // Product 1: two lots (multi-take allocation), transferred to itself at
   // branch 2 (same-product line).
-  rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES (1,'Widget','W-1',1,2.5,10000,@createdAt)`).run({ createdAt: CREATED_AT })
-  rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES (1,'Widget','W-1',1,2.5,10000,@createdAt)`).run({ createdAt: CREATED_AT }))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
     (101,1,'0101','0101','2026-01-01',1,1,2.0),
-    (102,1,'0102','0102','2026-01-02',1,2,3.0)`).run({})
-  rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101,1,4),(102,1,4)`).run({})
-  rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1,1,8)`).run({})
+    (102,1,'0102','0102','2026-01-02',1,2,3.0)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101,1,4),(102,1,4)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1,1,8)`).run({}))
 
   // Product 2 -> Product 3: cross-product transfer where the destination
   // ALREADY has a matching lot (by lot_code), so the plan must reuse it, not
   // create a new one.
-  rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES
-    (2,'Source Product','W-2',1,1.0,4000,@createdAt), (3,'Dest Product Existing','W-3',1,1.5,6000,@createdAt)`).run({ createdAt: CREATED_AT })
-  rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES
+    (2,'Source Product','W-2',1,1.0,4000,@createdAt), (3,'Dest Product Existing','W-3',1,1.5,6000,@createdAt)`).run({ createdAt: CREATED_AT }))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
     (201,2,'0201','0201','2026-02-01',1,1,1.0),
-    (301,3,'0201','0201','2026-02-01',1,1,1.5)`).run({})
-  rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (201,1,5)`).run({})
-  rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2,1,5)`).run({})
+    (301,3,'0201','0201','2026-02-01',1,1,1.5)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (201,1,5)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2,1,5)`).run({}))
 
   // Product 4 -> Product 5: cross-product transfer where the destination has
   // NO matching lot -- the plan must queue a new product_batches INSERT.
-  rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES
-    (4,'Source Product 2','W-4',1,2.0,8000,@createdAt), (5,'Dest Product New','W-5',1,2.2,8800,@createdAt)`).run({ createdAt: CREATED_AT })
-  rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
-    (401,4,'0301','0301','2026-03-01',1,1,2.0)`).run({})
-  rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (401,1,6)`).run({})
-  rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (4,1,6)`).run({})
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO products (id, name, sku, is_active, cost_price_usd, cost_price_khr, created_at) VALUES
+    (4,'Source Product 2','W-4',1,2.0,8000,@createdAt), (5,'Dest Product New','W-5',1,2.2,8800,@createdAt)`).run({ createdAt: CREATED_AT }))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, unit_cost_usd) VALUES
+    (401,4,'0301','0301','2026-03-01',1,1,2.0)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (401,1,6)`).run({}))
+  seedStockFixture(rawDb, () => rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (4,1,6)`).run({}))
 }
 
 const USER = { id: 1, username: 'tester', name: 'Test User' }
@@ -272,12 +275,14 @@ const BASE_ARGS = {
 
 async function main() {
   const oldRawDb = openDb(MIGRATION_SQLS)
+assert.throws(() => oldRawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   seed(oldRawDb)
   const oldCounter = countingDb(oldRawDb)
   const oldResult = await withDeterministicUuid(() => oldPlanTransferOperation(oldCounter.db, BASE_ARGS))
   const oldStats = oldCounter.stats()
 
   const newRawDb = openDb(MIGRATION_SQLS)
+assert.throws(() => newRawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   seed(newRawDb)
   const newCounter = countingDb(newRawDb)
   const newResult = await withDeterministicUuid(() => transferOperation.planTransferOperation(newCounter.db, BASE_ARGS))

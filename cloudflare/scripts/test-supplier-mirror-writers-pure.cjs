@@ -1,3 +1,5 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const ts = require('typescript')
 // P3-L1: stock-in <-> supplier mirror. Every writer that receives, reverts,
 // undoes or deactivates a lot must leave product_batches' supplier-facing
 // columns (received_quantity 0067, received_cost_usd 0080, payment_status/
@@ -81,6 +83,7 @@ try {
 const stockRevert = require(path.join(tmpDir, 'stockRevert.js'))
 const productBatches = require(path.join(tmpDir, 'productBatches.js'))
 const stockActionCommit = require(path.join(tmpDir, 'stockActionCommit.js'))
+const { executeStockTransaction } = require(path.join(tmpDir, 'stockTransaction.js'))
 ok(typeof stockRevert.applyMovementRevert === 'function' && typeof productBatches.receiveBatchStock === 'function'
   && typeof stockActionCommit.applyUnifiedStockAdd === 'function', 'real writers compiled')
 
@@ -103,9 +106,35 @@ const creditMatch = creditSection.match(/db\.prepare\(`([\s\S]*?)`\)\.all</)
 assert.ok(creditMatch, 'notifications.ts still defines the supplier credit reminder query')
 const CREDIT_REMINDER_SQL = creditMatch[1]
 const batchesSource = readSource('routes/batches.ts')
-const deactivateMatch = batchesSource.match(/const deactivated = await db\.prepare\(`([\s\S]*?)`\)\.run/)
-assert.ok(deactivateMatch, 'batches.ts still defines the DELETE deactivation update')
-const DEACTIVATE_SQL = deactivateMatch[1]
+function deactivationSql(source) {
+  const ast = ts.createSourceFile('batches.ts', source, ts.ScriptTarget.Latest, true)
+  let call
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && ts.isArrayBindingPattern(node.name)
+      && node.name.elements.some(item => item.name?.text === 'deactivated')) {
+      assert.ok(ts.isAwaitExpression(node.initializer))
+      call = node.initializer.expression
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.ok(call && ts.isCallExpression(call) && call.expression.getText(ast) === 'executeStockTransaction')
+  assert.equal(call.arguments[0].getText(ast), 'db')
+  assert.equal(call.arguments[2]?.text, 'retry')
+  const statements = call.arguments[1]
+  assert.ok(ts.isArrayLiteralExpression(statements) && statements.elements.length === 1)
+  const properties = statements.elements[0].properties
+  const sql = properties.find(property => property.name?.getText(ast) === 'sql')?.initializer
+  const params = properties.find(property => property.name?.getText(ast) === 'params')?.initializer
+  assert.ok(sql && ts.isStringLiteralLike(sql))
+  assert.equal(params?.getText(ast).replace(/\s/g, ''), '{id}')
+  assert.match(sql.text, /AND NOT EXISTS\s*\(\s*SELECT 1 FROM branch_batch_stock\s*WHERE batch_id = @id AND quantity > 0\s*\)/)
+  return sql.text
+}
+const DEACTIVATE_SQL = deactivationSql(batchesSource)
+assert.throws(() => deactivationSql(batchesSource.replace('const [deactivated] = await executeStockTransaction', 'const [deactivated] = await rawBatch')))
+assert.throws(() => deactivationSql(batchesSource.replace("}], 'retry')\n  if (Number(deactivated", "}], false)\n  if (Number(deactivated")))
+assert.throws(() => deactivationSql(batchesSource.replace(DEACTIVATE_SQL, DEACTIVATE_SQL.replace('AND NOT EXISTS', 'AND EXISTS'))))
 ok(true, 'real reader SQL extracted from routes/contacts.ts, routes/notifications.ts, routes/batches.ts')
 
 // Readers over any sqlite handle exposing prepare(sql).get/all(params) that
@@ -157,6 +186,7 @@ function readers(sql) {
 
   // ---- W3 / W4 / W5 / W6 / W7 on the node:sqlite harness -------------------
   const db = openDb(loadAll())
+  assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   const raw = { prepare: (s) => ({ get: (p) => ({ ...db.prepare(s).get(p) }), all: (p) => db.prepare(s).all(p).map((r) => ({ ...r })) }) }
   const read = readers(raw)
   db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({})
@@ -180,7 +210,7 @@ function readers(sql) {
   const movementById = (id) => db.prepare('SELECT * FROM inventory_movements WHERE id = @id').get({ id })
 
   // W3: manual receive on credit.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (501, 'Toner', 'T-1', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (501, 'Toner', 'T-1', 'pcs', 0, 1)`).run({}))
   const w3 = await productBatches.receiveBatchStock(db, {
     productId: 501, branchId: 1, quantity: 10, receivedDate: '2026-09-01',
     supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-01',
@@ -226,7 +256,7 @@ function readers(sql) {
   // lot's attribution is not "sticky" once fully reverted (received_quantity
   // 0 AND is_active 0); only a still-live lot keeps first-attribution-sticks
   // (control block right after this one).
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (506, 'Toner Refill', 'T-2', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (506, 'Toner Refill', 'T-2', 'pcs', 0, 1)`).run({}))
   const w4n = await productBatches.receiveBatchStock(db, {
     productId: 506, branchId: 1, quantity: 5, receivedDate: '2026-09-01', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 3,
   })
@@ -258,7 +288,7 @@ function readers(sql) {
   // Control: the SAME no-supplier top-up shape, but on a LIVE lot (never
   // zeroed) -- first attribution must still stick, proving the zeroed-only
   // carve-out above does not leak into ordinary top-ups.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (507, 'Toner Spare', 'T-3', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (507, 'Toner Spare', 'T-3', 'pcs', 0, 1)`).run({}))
   const w4c1 = await productBatches.receiveBatchStock(db, {
     productId: 507, branchId: 1, quantity: 5, receivedDate: '2026-09-01', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 3,
   })
@@ -281,7 +311,7 @@ function readers(sql) {
   assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4c1Movement), actor)).ok, true)
 
   // W5: two same-day, same-price receipts share one lot; reverting one leaves the other.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (502, 'Mask', 'M-1', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (502, 'Mask', 'M-1', 'pcs', 0, 1)`).run({}))
   const a = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 10, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-03' })
   const aMovement = recordReceiptMovement(502, a.batchId, 10, 4)
   const b = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 5, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4 })
@@ -301,7 +331,7 @@ function readers(sql) {
   ok(true, 'W5 shared lot: reverting one receipt removes only its own share; reverting the other empties the supplier')
 
   // W6: the unified stock import's add writer, then its revert.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (503, 'Serum', 'S-1', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (503, 'Serum', 'S-1', 'pcs', 0, 1)`).run({}))
   await stockActionCommit.applyUnifiedStockAdd(db, {
     jobId: 'job-mirror', rowNumber: 2, productId: 503, productName: 'Serum', branchId: 1, branchName: 'Main Store',
     quantity: 6, date: '2026-09-04', batchLabel: '', supplierName: SUPPLIER.name, supplierId: SUPPLIER.id, costPriceUsd: 5,
@@ -318,13 +348,13 @@ function readers(sql) {
   ok(true, 'W6 unified import add + revert: the purchase appears and then leaves the supplier')
 
   // W7: DELETE /api/batches/:id deactivates a SOLD-OUT lot; the purchase stays.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (504, 'Balm', 'B-1', 'pcs', 0, 1)`).run({})
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (504, 'Balm', 'B-1', 'pcs', 0, 1)`).run({}))
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
       supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
-    VALUES (8504, 504, '08012026', '08012026', '2026-01-08', 1, 1, @id, @name, 5, 'paid', 100, 1, 500)`).run(SUPPLIER)
-  db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8504, 1, 0)`).run({})
+    VALUES (8504, 504, '08012026', '08012026', '2026-01-08', 1, 1, @id, @name, 5, 'paid', 100, 1, 500)`).run(SUPPLIER))
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (8504, 1, 0)`).run({}))
   assert.deepEqual(read.totals(), { batches: 1, units: 100, cost: 500, creditOpen: 0, creditBatches: 0 })
-  const deactivated = db.prepare(DEACTIVATE_SQL).run({ id: 8504 })
+  const [deactivated] = await executeStockTransaction(db, [{ sql: DEACTIVATE_SQL, params: { id: 8504 } }], 'retry')
   assert.equal(deactivated.meta.changes, 1, 'an empty lot can be deactivated')
   assert.equal(lotOf(8504).is_active, 0)
   assert.deepEqual(read.totals(), { batches: 1, units: 100, cost: 500, creditOpen: 0, creditBatches: 0 }, 'W7: the 100 units bought and sold are still a purchase')
@@ -354,7 +384,7 @@ function readers(sql) {
     invoice: [...gone.invoice, { key: `id:${SUPPLIER.id}`, qty: 10, cost: 40 }],
     detail: [{ key: `id:${SUPPLIER.id}`, lots: 1 }],
   }
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (505, 'Cream', 'C-1', 'pcs', 0, 1)`).run({})
+  seedStockFixture(db.db, () => db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (505, 'Cream', 'C-1', 'pcs', 0, 1)`).run({}))
   const w8 = await productBatches.receiveBatchStock(db, {
     productId: 505, branchId: 1, quantity: 10, receivedDate: '2026-09-05',
     supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-05',
