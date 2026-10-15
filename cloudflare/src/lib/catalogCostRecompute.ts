@@ -26,10 +26,9 @@ function weightedCatalogCost(terms: Array<{ cost: number; quantity: number }>): 
 }
 
 // ---------------------------------------------------------------------------
-// THE catalog-cost formula, as ONE SQL scalar expression. Every writer
-// evaluates this exact text inside `UPDATE products ...` (via
-// catalogCostRecomputeStatement / recomputeCatalogCost), so `products.id`
-// below is the row being updated (a correlated reference). The pure breakdown
+// Current writers share the validated scalar; historical migration generators
+// select legacy input admission explicitly. `products.id` is the correlated
+// row being updated. The pure breakdown
 // (buildCatalogCostBreakdown) restates it in JS so each row can say why it
 // counted; test-catalog-cost-on-hand-pure.cjs proves the two agree on a real
 // migrated SQLite.
@@ -62,10 +61,6 @@ const LATEST_MANUAL_ENTRY_ID_SQL = '(SELECT id FROM product_cost_entries WHERE p
 // product_batches.id that existed when the override was recorded; only lots
 // ABOVE it count again. NULL (no manual entry) means every lot is eligible.
 const LATEST_MANUAL_BASELINE_SQL = '(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)'
-const ELIGIBLE_LOT_SQL = `pb.variant_product_id = products.id AND pb.is_active = 1
-        AND pb.unit_cost_usd IS NOT NULL AND pb.unit_cost_usd > 0
-        AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
-export const CATALOG_COST_HAS_RECORDED_LOT_SQL = `EXISTS(SELECT 1 FROM product_batches pb WHERE ${ELIGIBLE_LOT_SQL})`
 const LOT_ON_HAND_QTY_SQL = '(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)'
 const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs
             JOIN product_batches ob ON ob.id = bbs.batch_id
@@ -80,20 +75,48 @@ const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_
 // far above double error and far above the nudge.
 const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
 
-export const CATALOG_COST_DERIVE_SQL = `COALESCE(
+export type CatalogCostInputPolicy = 'legacy' | 'validated'
+
+function positiveCostSql(value: string, inputPolicy: CatalogCostInputPolicy): string {
+  return inputPolicy === 'legacy'
+    ? `${value} IS NOT NULL AND ${value} > 0`
+    : `typeof(${value}) IN ('integer','real') AND ${value} > 0 AND ${value} <= 1.7976931348623157e308`
+}
+
+function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readonly<{ derive: string; hasRecordedLot: string }> {
+  const eligibleLot = `pb.variant_product_id = products.id AND pb.is_active = 1
+        AND ${positiveCostSql('pb.unit_cost_usd', inputPolicy)}
+        AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
+  return { hasRecordedLot: `EXISTS(SELECT 1 FROM product_batches pb WHERE ${eligibleLot})`, derive: `COALESCE(
     (SELECT CASE WHEN SUM(qty) > 0 THEN ${HALF_UP_4DP('SUM(qty * cost) / SUM(qty)')} END
       FROM (SELECT pb.unit_cost_usd AS cost, ${LOT_ON_HAND_QTY_SQL} AS qty FROM product_batches pb
-        WHERE ${ELIGIBLE_LOT_SQL}
+        WHERE ${eligibleLot}
         UNION ALL
         SELECT pce.cost_usd AS cost, ${OVERRIDDEN_ON_HAND_QTY_SQL} AS qty FROM product_cost_entries pce
         WHERE pce.id = ${LATEST_MANUAL_ENTRY_ID_SQL}
-          AND pce.cost_usd IS NOT NULL AND pce.cost_usd > 0)),
+          AND ${positiveCostSql('pce.cost_usd', inputPolicy)})),
     (SELECT pb.unit_cost_usd FROM product_batches pb
-      WHERE ${ELIGIBLE_LOT_SQL}
-      ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1))`
+      WHERE ${eligibleLot}
+      ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1))` }
+}
 
-const CATALOG_COST_SET_SQL = `cost_price_usd = COALESCE(${CATALOG_COST_DERIVE_SQL}, cost_price_usd),
-        purchase_price_usd = COALESCE(${CATALOG_COST_DERIVE_SQL}, purchase_price_usd)`
+const CATALOG_COST_FORMULAS = {
+  legacy: Object.freeze(buildCatalogCostFormulaSql('legacy')),
+  validated: Object.freeze(buildCatalogCostFormulaSql('validated')),
+}
+
+export function catalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy = 'validated'): Readonly<{ derive: string; hasRecordedLot: string }> {
+  return CATALOG_COST_FORMULAS[inputPolicy]
+}
+
+export const CATALOG_COST_DERIVE_SQL = catalogCostFormulaSql().derive
+export const CATALOG_COST_HAS_RECORDED_LOT_SQL = catalogCostFormulaSql().hasRecordedLot
+
+function buildCatalogCostSetSql(inputPolicy: CatalogCostInputPolicy = 'validated'): string {
+  const derive = catalogCostFormulaSql(inputPolicy).derive
+  return `cost_price_usd = COALESCE(${derive}, cost_price_usd),
+        purchase_price_usd = COALESCE(${derive}, purchase_price_usd)`
+}
 
 /**
  * True only when the formula would move EITHER stored column; NULL keeps both.
@@ -101,14 +124,22 @@ const CATALOG_COST_SET_SQL = `cost_price_usd = COALESCE(${CATALOG_COST_DERIVE_SQ
  * cost_price_usd (merge undo's keeper restore) must not leave the mirror on a
  * figure a trigger wrote in between. The derivation is evaluated once.
  */
-const CATALOG_COST_CHANGED_SQL = `EXISTS (SELECT 1 FROM (SELECT ${CATALOG_COST_DERIVE_SQL} AS derived) d
+function buildCatalogCostChangedSql(inputPolicy: CatalogCostInputPolicy): string {
+  return `EXISTS (SELECT 1 FROM (SELECT ${catalogCostFormulaSql(inputPolicy).derive} AS derived) d
         WHERE d.derived IS NOT NULL
           AND (products.cost_price_usd IS NOT d.derived OR products.purchase_price_usd IS NOT d.derived))`
+}
+
+const CATALOG_COST_WRITES = {
+  legacy: Object.freeze({ set: buildCatalogCostSetSql('legacy'), changed: buildCatalogCostChangedSql('legacy') }),
+  validated: Object.freeze({ set: buildCatalogCostSetSql('validated'), changed: buildCatalogCostChangedSql('validated') }),
+}
 
 /**
  * The write-only-when-it-moves recompute, with `products.id` constrained by
  * `idPredicateSql` (e.g. `id = @productId`). ONE text shared by the JS entry
- * point, the undo paths, the 0195 triggers and the 0195 one-time repair, so an
+ * point and undo paths. Historical migration generators select their original
+ * input policy explicitly, so an
  * unchanged figure never bumps a product revision or updated_at on any path.
  *
  * `stampUpdatedAt: false` (the triggers and the repair) writes ONLY the two
@@ -118,11 +149,11 @@ const CATALOG_COST_CHANGED_SQL = `EXISTS (SELECT 1 FROM (SELECT ${CATALOG_COST_D
  * concurrency conflict for an editor open on the product; the 0124 revision
  * trigger still fires on the UPDATE, so sessions and caches see the change.
  */
-export function catalogCostRecomputeIfChangedSql(idPredicateSql: string, { stampUpdatedAt = true }: { stampUpdatedAt?: boolean } = {}): string {
+export function catalogCostRecomputeIfChangedSql(idPredicateSql: string, { stampUpdatedAt = true, inputPolicy = 'validated' }: { stampUpdatedAt?: boolean; inputPolicy?: CatalogCostInputPolicy } = {}): string {
   return `UPDATE products SET
-        ${CATALOG_COST_SET_SQL}${stampUpdatedAt ? `,
+        ${CATALOG_COST_WRITES[inputPolicy].set}${stampUpdatedAt ? `,
         updated_at = CURRENT_TIMESTAMP` : ''}
-      WHERE ${idPredicateSql} AND ${CATALOG_COST_CHANGED_SQL}`
+      WHERE ${idPredicateSql} AND ${CATALOG_COST_WRITES[inputPolicy].changed}`
 }
 
 /** Statement form of the guarded recompute, for a caller's atomic batch. */
@@ -152,14 +183,14 @@ const RESTORE_MODE_OFF_SQL = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key =
  * triggers.
  * test-migration-0195-on-hand-cost-pure.cjs pins the migration text to this.
  */
-export function catalogCostOnHandTriggerSql({ reviewMarker = false }: { reviewMarker?: boolean } = {}): string {
+export function catalogCostOnHandTriggerSql({ reviewMarker = false, inputPolicy = 'validated' }: { reviewMarker?: boolean; inputPolicy?: CatalogCostInputPolicy } = {}): string {
   const lotProducts = (ids: string) => `is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (${ids}))`
   const trigger = (name: string, event: string, when: string, idPredicate: string) => `CREATE TRIGGER ${name}
 ${event}
 WHEN ${when}
  AND ${RESTORE_MODE_OFF_SQL}
 BEGIN
-  ${catalogCostRecomputeIfChangedSql(idPredicate, { stampUpdatedAt: false })};${reviewMarker ? `\n  ${catalogCostReviewClearSql(idPredicate)};` : ''}
+  ${catalogCostRecomputeIfChangedSql(idPredicate, { stampUpdatedAt: false, inputPolicy })};${reviewMarker ? `\n  ${catalogCostReviewClearSql(idPredicate, inputPolicy)};` : ''}
 END;
 `
   return [
@@ -177,26 +208,27 @@ END;
   ].join('\n')
 }
 
-export function catalogCostReviewClearSql(idPredicateSql: string): string {
+export function catalogCostReviewClearSql(idPredicateSql: string, inputPolicy: CatalogCostInputPolicy = 'validated'): string {
+  const formula = catalogCostFormulaSql(inputPolicy)
   return `UPDATE products SET cost_review_key=NULL WHERE ${idPredicateSql} AND cost_review_key IS NOT NULL
-    AND ${CATALOG_COST_HAS_RECORDED_LOT_SQL} AND cost_price_usd IS (${CATALOG_COST_DERIVE_SQL})`
+    AND ${formula.hasRecordedLot} AND cost_price_usd IS (${formula.derive})`
 }
 
-export function catalogCostReviewTriggersSql(): string {
-  return catalogCostOnHandTriggerSql({ reviewMarker: true }) + `
+export function catalogCostReviewTriggersSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
+  return catalogCostOnHandTriggerSql({ reviewMarker: true, inputPolicy }) + `
 CREATE TRIGGER catalog_cost_review_lot_update_0255
 AFTER UPDATE OF unit_cost_usd,is_active,variant_product_id,received_at ON product_batches
 WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
 BEGIN
-  ${catalogCostRecomputeIfChangedSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', { stampUpdatedAt: false })};
-  ${catalogCostReviewClearSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)')};
+  ${catalogCostRecomputeIfChangedSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', { stampUpdatedAt: false, inputPolicy })};
+  ${catalogCostReviewClearSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', inputPolicy)};
 END;
 `
 }
 
 /** The 0195 one-time repair: every ACTIVE product whose stored figure the formula moves. */
-export function catalogCostRepairAllSql(): string {
-  return `${catalogCostRecomputeIfChangedSql('is_active = 1', { stampUpdatedAt: false })};\n`
+export function catalogCostRepairAllSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
+  return `${catalogCostRecomputeIfChangedSql('is_active = 1', { stampUpdatedAt: false, inputPolicy })};\n`
 }
 
 export type CatalogCostRecomputeResult = {
@@ -264,7 +296,7 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
 export function catalogCostRecomputeStatement(productId: number): { sql: string; params: Record<string, unknown> } {
   return {
     sql: `UPDATE products SET
-        ${CATALOG_COST_SET_SQL}
+        ${CATALOG_COST_WRITES.validated.set}
       WHERE id = @productId`,
     params: { productId },
   }
@@ -369,8 +401,13 @@ function costBreakdownManualLabel(entry: CostBreakdownManualInput): string {
   return entry.user_name ? `Manual · ${entry.user_name}` : 'Manual'
 }
 
-function positiveCost(value: number | null | undefined): number | null {
-  return value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null
+function numericCost(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function positiveCost(value: unknown): number | null {
+  const cost = numericCost(value)
+  return cost !== null && cost > 0 ? cost : null
 }
 
 /** Same order as CATALOG_COST_DERIVE_SQL's fallback: received_at, then id. */
@@ -443,7 +480,7 @@ export function buildCatalogCostBreakdown(
   const inputs: CostBreakdownInputRow[] = combined.map((row) => {
     if (row.kind === 'lot') {
       const lot = row.lot
-      const cost = lot.unit_cost_usd != null && Number.isFinite(Number(lot.unit_cost_usd)) ? Number(lot.unit_cost_usd) : null
+      const cost = numericCost(lot.unit_cost_usd)
       const base = {
         source: 'lot' as const, label: costBreakdownLotLabel(lot), cost_usd: cost, cost_khr: null,
         lot_code: lot.lot_code ?? null, batch_number: lot.batch_number != null ? Number(lot.batch_number) || null : null,
@@ -461,7 +498,7 @@ export function buildCatalogCostBreakdown(
       return { ...base, weight_quantity: quantity, share: shareOf(quantity), excluded: null }
     }
     const entry = row.entry
-    const cost = entry.cost_usd != null && Number.isFinite(Number(entry.cost_usd)) ? Number(entry.cost_usd) : null
+    const cost = numericCost(entry.cost_usd)
     const base = {
       source: 'manual' as const, label: costBreakdownManualLabel(entry), cost_usd: cost, cost_khr: entry.cost_khr ?? null,
       previous_cost_usd: entry.previous_cost_usd ?? null,

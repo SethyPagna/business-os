@@ -1,4 +1,4 @@
-import { CATALOG_COST_DERIVE_SQL, CATALOG_COST_HAS_RECORDED_LOT_SQL } from './catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, CATALOG_COST_HAS_RECORDED_LOT_SQL, catalogCostFormulaSql, type CatalogCostInputPolicy } from './catalogCostRecompute'
 
 export type MergeCostFallback = { usd: number | null; khr: number | null }
 export type MergeCostOutcome = {
@@ -73,15 +73,20 @@ export function mergeCostUndoStatements(outcome: MergeCostOutcome, context: { hi
   { sql: `UPDATE products SET cost_review_key=${afterKey} WHERE id=@productId`, params }]
 }
 
-export function productCostReviewGuardSql(): string {
-  const event = "CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END"
+export function productCostReviewGuardSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
   return `CREATE TRIGGER product_cost_review_insert_guard_0255 BEFORE INSERT ON products
 WHEN NEW.cost_review_key IS NOT NULL
 BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
-CREATE TRIGGER product_cost_review_update_guard_0255 BEFORE UPDATE OF cost_review_key ON products
+${productCostReviewUpdateGuardSql({ inputPolicy })}`
+}
+
+export function productCostReviewUpdateGuardSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
+  const formula = catalogCostFormulaSql(inputPolicy)
+  const event = "CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END"
+  return `CREATE TRIGGER product_cost_review_update_guard_0255 BEFORE UPDATE OF cost_review_key ON products
 WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
-  AND NOT (NEW.cost_review_key IS NULL AND EXISTS(SELECT 1 FROM products WHERE id=OLD.id AND ${CATALOG_COST_HAS_RECORDED_LOT_SQL}
-    AND NEW.cost_price_usd IS (${CATALOG_COST_DERIVE_SQL})))
+  AND NOT (NEW.cost_review_key IS NULL AND EXISTS(SELECT 1 FROM products WHERE id=OLD.id AND ${formula.hasRecordedLot}
+    AND NEW.cost_price_usd IS (${formula.derive})))
   AND NOT EXISTS(SELECT 1 FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(OLD.id AS TEXT)
     AND json_extract(${event},'$.cost_review.version')=1 AND json_extract(${event},'$.cost_review.kind') IN ('merge','merge_undo','merge_redo')
     AND json_extract(${event},'$.cost_review.before_key') IS OLD.cost_review_key
