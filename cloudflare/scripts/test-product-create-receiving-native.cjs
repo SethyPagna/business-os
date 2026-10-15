@@ -1,5 +1,6 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -78,8 +79,22 @@ function load(relative) {
   cache.set(relative, mod.exports); return mod.exports
 }
 
-const products=load('routes/products.ts').default
-const reviews=load('routes/reviewQueue.ts').default
+const workerTree = ts.createSourceFile('index.ts', fs.readFileSync(path.join(src, 'index.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
+const workerError = workerTree.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(workerTree) === 'app.onError')
+assert.ok(workerError)
+const errorStatements = workerError.expression.arguments[0].body.statements
+assert.match(errorStatements[0].getText(workerTree), /stockTransactionRefusal/)
+assert.match(errorStatements[1].getText(workerTree), /transactionRefusal/)
+const errorCode = ts.transpileModule('(' + '(error, c) => {' + errorStatements.slice(0, 2).map(node => node.getText(workerTree)).join('\n') + '; return c.json({ error: String(error) }, 500) })', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const transaction = withProductStockGuard(() => { throw new Error('Unexpected stock dependency') })('./stockTransaction')
+function mounted(route) {
+  const app = new Hono()
+  app.onError(new Function('stockTransactionRefusal', 'return ' + errorCode)(transaction.stockTransactionRefusal))
+  app.route('/', route)
+  return app
+}
+const products=mounted(load('routes/products.ts').default)
+const reviews=mounted(load('routes/reviewQueue.ts').default)
 const admin={id:1,username:'admin',name:'Admin',role_code:'admin',tier:'full'}
 const context={waitUntil:p=>Promise.resolve(p).catch(()=>{}),passThroughOnException:()=>{}}
 async function request(app,method,url,body,user=admin){const response=await app.request(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},{...env,TEST_USER:user},context);const text=await response.text();let result;try{result=JSON.parse(text)}catch{result={raw:text}}return {status:response.status,body:result}}
@@ -156,8 +171,8 @@ async function run(){
  pending=await queue('Approval branch race');beforeBatch=()=>{raw.exec('UPDATE branches SET is_active=0 WHERE id=2');expected=snapshot()}
  res=await request(reviews,'POST',`/${pending}/approve`,{});assert.equal(res.status,409,JSON.stringify(res));assert.equal(snapshot(),expected);raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
  pass('approval retirement race rolls back pending approved mark too')
- beforeBatch=()=>{raw.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')");expected=snapshot()}
- res=await request(products,'POST','/',{name:'Maintenance race',branch_id:2,stock_quantity:1});assert.equal(res.status,500);assert.equal(snapshot(),expected);assert.notEqual(res.body.code,'product_create_outcome_unknown');raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
+ beforeBatch=()=>{seedStockFixture(raw, () => raw.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')"));expected=snapshot()}
+ res=await request(products,'POST','/',{name:'Maintenance race',branch_id:2,stock_quantity:1});assert.equal(res.status,503);assert.equal(res.body.code,'stock_schema_unavailable');assert.equal(res.body.action,'reload_required');assert.equal(snapshot(),expected);assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value,'{}');assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0);assert.notEqual(res.body.code,'product_create_outcome_unknown');raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
  pass('maintenance assertion rolls back whole batch and is not mislabeled uncertain')
  raw.exec("CREATE TRIGGER fixture_gallery_refusal BEFORE INSERT ON product_images BEGIN SELECT RAISE(ABORT,'CHECK constraint failed: fixture_gallery'); END")
  expected=snapshot();res=await request(products,'POST','/',{name:'Gallery refusal',branch_id:2,stock_quantity:2,image_gallery:['https://example.invalid/refuse']});assert.equal(res.status,500);assert.equal(snapshot(),expected);assert.notEqual(res.body.code,'product_create_outcome_unknown');raw.exec('DROP TRIGGER fixture_gallery_refusal')

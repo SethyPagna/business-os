@@ -24,6 +24,7 @@ function load(relativePath, stubs = {}) {
   const originalLoad = Module._load
   Module._load = function(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (request === './productCostReview' || request === '../lib/productCostReview') return load('lib/productCostReview.ts', { './catalogCostRecompute': load('lib/catalogCostRecompute.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }) })
     return originalLoad.call(this, request, parent, isMain)
   }
   try {

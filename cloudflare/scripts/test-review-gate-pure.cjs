@@ -110,6 +110,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === './productCostReview' || request === '../lib/productCostReview') return loadReal('lib/productCostReview.ts', { './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }) })
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
