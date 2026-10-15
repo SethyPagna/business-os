@@ -146,9 +146,14 @@ const undo = (f, id, generation) => send(f, 'POST', `/api/action-history/${id}/u
 const redo = (f, id, generation) => send(f, 'POST', `/api/action-history/${id}/redo`, { expected_generation: generation, require_applied: true })
 // "Sell" units out of a lot the way a sale's stock effect lands: lot, branch and product together.
 function sell(f, batchId, quantity) {
-  f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-? WHERE batch_id=? AND branch_id=1').run(quantity, batchId)
-  f.sql.prepare('UPDATE branch_stock SET quantity=quantity-? WHERE product_id=1 AND branch_id=1').run(quantity)
-  f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity-? WHERE id=1').run(quantity)
+  f.sql.transaction(() => {
+    f.sql.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+    f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-? WHERE batch_id=? AND branch_id=1').run(quantity, batchId)
+    f.sql.prepare('UPDATE branch_stock SET quantity=quantity-? WHERE product_id=1 AND branch_id=1').run(quantity)
+    f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity-? WHERE id=1').run(quantity)
+    f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+  })()
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 }
 
 const failures = []
@@ -250,6 +255,65 @@ async function main() {
     const removed = await edit(f, movementId, { quantity: 0, expected_quantity: 12, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) })
     assert.equal(removed.status, 200, JSON.stringify(removed.json))
     assert.deepEqual(totals(f), { branch: 0, product: 0, lots: 0 })
+  })
+
+  await check('a committed short-result edit recovers its receipt and refuses a changed retry', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'short-result-receive-01', quantity: 10 })
+    const body = { client_request_id: 'short-result-edit-01', quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) }
+    const batch = f.env.DB.batch.bind(f.env.DB)
+    let truncated = 0
+    f.env.DB.batch = async statements => {
+      f.env.DB.batch = batch
+      const results = await batch(statements)
+      truncated++
+      return results.slice(0, -1)
+    }
+    const first = await edit(f, movementId, body)
+    assert.equal(truncated, 1)
+    assert.equal(first.status, 200, JSON.stringify(first.json))
+    assert.equal(first.json.replayed, true)
+    assert.deepEqual(totals(f), { branch: 12, product: 12, lots: 12 })
+    assert.equal(editRows(f, movementId).length, 1)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_lot_adjustment_operations').get().n, 1)
+    const snapshot = writeSnapshot(f)
+    const retry = await edit(f, movementId, body)
+    assert.equal(retry.status, 200, JSON.stringify(retry.json))
+    assert.equal(retry.json.replayed, true)
+    assert.equal(writeSnapshot(f), snapshot)
+    const changed = await edit(f, movementId, { ...body, quantity: 13 })
+    assert.equal(changed.status, 409)
+    assert.equal(changed.json.code, 'idempotency_conflict')
+    assert.equal(writeSnapshot(f), snapshot)
+  })
+
+  await check('committed short-result undo and redo recover their generations without repeating stock', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'short-replay-receive-01', quantity: 10 })
+    const edited = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) })
+    assert.equal(edited.status, 200, JSON.stringify(edited.json))
+    const history = historyOf(f, edited.json.operation_id)
+    for (const [action, generation, quantity, state] of [[undo, 0, 10, 'reversed'], [redo, 1, 12, 'applied']]) {
+      const batch = f.env.DB.batch.bind(f.env.DB)
+      let truncated = 0
+      f.env.DB.batch = async statements => {
+        f.env.DB.batch = batch
+        const results = await batch(statements)
+        truncated++
+        return results.slice(0, -1)
+      }
+      const result = await action(f, history.id, generation)
+      assert.equal(truncated, 1)
+      assert.equal(result.status, 200, JSON.stringify(result.json))
+      assert.deepEqual(totals(f), { branch: quantity, product: quantity, lots: quantity })
+      assert.equal(lot(f, batchId).received_cost_usd, quantity * 2)
+      const operation = f.sql.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=?').get(edited.json.operation_id)
+      assert.deepEqual({ ...operation }, { generation: generation + 1, state })
+      const snapshot = writeSnapshot(f)
+      const retry = await action(f, history.id, generation)
+      assert.equal(retry.status, 200, JSON.stringify(retry.json))
+      assert.equal(writeSnapshot(f), snapshot)
+    }
   })
 
   await check('quantity parser accepts decimal and upper-bound values and rejects out-of-range or non-numeric values', async () => {
@@ -629,10 +693,14 @@ async function main() {
     const res = await edit(f, movementId, { quantity: 10, unit_cost_usd: 3, expected_quantity: 10, expected_batch_id: batchId })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     // A later delivery at the same date and cost lands on the same lot.
-    f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity+5 WHERE batch_id=${batchId} AND branch_id=1;
+    f.sql.transaction(() => f.sql.exec(`
+      INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch';
+      UPDATE branch_batch_stock SET quantity=quantity+5 WHERE batch_id=${batchId} AND branch_id=1;
       UPDATE branch_stock SET quantity=quantity+5 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity+5 WHERE id=1;
       UPDATE product_batches SET received_quantity=received_quantity+5, received_cost_usd=received_cost_usd+15 WHERE id=${batchId};
-      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,batch_id,reference_id) VALUES(1,1,'add',5,3,15,${batchId},'later-delivery');`)
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,batch_id,reference_id) VALUES(1,1,'add',5,3,15,${batchId},'later-delivery');
+      DELETE FROM system_flags WHERE key='stock_transaction_permit';`))()
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     const before = writeSnapshot(f)
     const refused = await undo(f, historyOf(f, res.json.operation_id).id, 0)
     assert.equal(refused.status, 409, JSON.stringify(refused.json))
