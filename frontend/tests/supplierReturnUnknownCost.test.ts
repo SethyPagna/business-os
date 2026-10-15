@@ -50,5 +50,8 @@ for (const language of ['en', 'km']) {
     const denied = renderToStaticMarkup(React.createElement(detail.exports.default, props))
     assert.ok(!denied.includes(labels.supplier_compensation) && !denied.includes('5.1244'), `${language}: detail costs absent when denied`)
   }
+  fixture.__supplierContext = { user: { permissions: { returns: true } }, t: (key: string) => labels[key] || key }
+  const customer = renderToStaticMarkup(React.createElement(detail.exports.default, { ret: { id: 901, return_scope: 'customer', total_refund_usd: 5.1244, items: [{ product_name: 'Customer control', quantity: 1, total_usd: 5.1244 }] }, onClose() {}, fmtUSD: (n: unknown) => `$${Number(n).toFixed(2)}`, fmtKHR: (n: unknown) => `${Math.round(Number(n))}៛` }))
+  assert.ok(customer.includes('$5.12') && !customer.includes('5.1244'), `${language}: ordinary customer refund remains cents and visible without cost grants`)
 }
 console.log('PASS actual supplier detail NULL/zero/signed4dp/permission EN/KM; modal shell substituted')
