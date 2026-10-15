@@ -345,20 +345,24 @@ async function main() {
   setting('loyalty_points_enabled', 'true')
   setting('notifications_loyalty_threshold', 100)
   await cacheModule.bumpVersion(env, 'settings')
-  for (let id = 5101; id <= 5107; id += 1) raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Loyalty customer ${id}`)
+  for (let id = 5101; id <= 5109; id += 1) raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Loyalty customer ${id}`)
   raw.db.exec(`
     INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5101,125),(5102,900);
     UPDATE loyalty_point_adjustments SET voided_at='2026-01-01' WHERE customer_id=5102;
-    INSERT INTO customer_share_submissions(id,customer_id,status,reward_points,reward_points_voided_at)
-      VALUES (5103,5103,'approved',150,NULL),(5104,5104,'pending',1000,NULL),(5105,5105,'approved',1000,'2026-01-01');
+    INSERT INTO customer_share_submissions(id,customer_id,status,reward_points,reward_points_voided_at,loyalty_eligible)
+      VALUES (5103,5103,'approved',150,NULL,1),(5104,5104,'pending',1000,NULL,1),(5105,5105,'approved',1000,'2026-01-01',1),
+        (5108,5108,'approved',1000,NULL,0),(5100,5109,'approved',1000,NULL,1);
+    UPDATE system_flags SET value=json_set(value,'$.submissions',5100) WHERE key='loyalty_points_reset';
   `)
   await resetLoyaltyCache()
-  await loyaltyCheck('loyalty includes manual and reward-only customers without a sale, excluding voided and pending awards', async () => {
+  await loyaltyCheck('loyalty includes manual and reward-only customers, excluding voided, pending, ineligible and pre-reset awards', async () => {
     const value = await loyalty()
     assert.equal(value?.count, 2)
     assert.equal(pointsOf(value, 5101), 125)
     assert.equal(pointsOf(value, 5103), 150)
-    assert.ok(!value.items.some(item => ['loyalty-5102', 'loyalty-5104', 'loyalty-5105'].includes(item.id)))
+    assert.ok(!value.items.some(item => ['loyalty-5102', 'loyalty-5104', 'loyalty-5105', 'loyalty-5108', 'loyalty-5109'].includes(item.id)))
+    assert.equal(raw.db.prepare('SELECT loyalty_eligible FROM customer_share_submissions WHERE id=5108').get().loyalty_eligible, 0)
+    assert.equal(raw.db.prepare("SELECT json_extract(value,'$.submissions') AS checkpoint FROM system_flags WHERE key='loyalty_points_reset'").get().checkpoint, 5100)
   })
 
   raw.db.exec(`
@@ -372,7 +376,7 @@ async function main() {
       ('LOY-SUPPLIER',5106,'completed','supplier',700,700000),
       ('LOY-VOIDRETURN',5106,'cancelled','customer',700,700000);
     INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5106,20.126);
-    INSERT INTO customer_share_submissions(customer_id,status,reward_points) VALUES (5106,'approved',5);
+    INSERT INTO customer_share_submissions(customer_id,status,reward_points,loyalty_eligible) VALUES (5106,'approved',5,1);
   `)
   setting('customer_portal_points_basis', 'usd')
   setting('customer_portal_points_per_usd', 2)

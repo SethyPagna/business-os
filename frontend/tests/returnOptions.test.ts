@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { loyaltyAccrualSql } from '../../cloudflare/src/lib/loyaltyEligibility.ts'
 import './returnMoneyV1Flow.test.ts'
 import './returnMoneyV1Transport.test.ts'
 import { readFileSync } from 'node:fs'
@@ -269,7 +270,8 @@ runTest('a replacement is recorded as an ordinary sale, not a settlement', () =>
   assert.doesNotMatch(routeSource, /'Return Exchange'/)
   // ...and it earns loyalty exactly as any other sale does
   assert.match(routeSource, /loyalty_accrual,sale_status,notes,items,search_normalized/)
-  assert.match(routeSource, /0,0,0,0,0,0,1,'completed',@notes,@items,@search_normalized,/)
+  assert.ok(routeSource.includes(`0,0,0,0,0,0,\${loyaltyAccrualSql()},'completed',@notes,@items,@search_normalized,`))
+  assert.match(loyaltyAccrualSql(), /^CASE WHEN .*loyalty_points_enabled.*AND \(1\) = 1 THEN 1 ELSE 0 END$/)
   // the modal offers the shop's own methods
   assert.match(newReturnSource, /PAYMENT_METHODS\.map\(\(method\) => \(\{ value: method, label: method \}\)\)/)
   assert.match(newReturnSource, /replacement_payment_method: replacementPaymentMethod,/)
