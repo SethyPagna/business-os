@@ -305,7 +305,7 @@ function countActiveFlags(flags: boolean[] = []): number {
 // keys, so chooser and file can never disagree.
 export const RETURN_EXPORT_KEYS = [
   'Return_Number', 'Scope', 'Date', 'Receipt', 'Customer', 'Supplier', 'Reason',
-  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Business_Loss_USD', 'Status',
+  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
 ] as const
 
 function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts = false): Array<Record<string, unknown>> {
@@ -1712,7 +1712,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
             fileBaseName={exportDialog.baseName}
-            columns={RETURN_EXPORT_KEYS.map((key) => ({ key, label: exportColumnLabel(key) }))}
+            columns={RETURN_EXPORT_KEYS.filter(key => canViewCosts || !/^(Compensation|Business_Loss)_/.test(key)).map((key) => ({ key, label: exportColumnLabel(key) }))}
             rows={exportDialog.rows}
             rememberKey="returns"
             t={t}

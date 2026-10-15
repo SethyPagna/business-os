@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { createRequire } from 'node:module'
 import { returnRangeParams } from '../src/api/returnsReadTransport.ts'
 import { reportQueryParams, REPORT_VIEWS } from '../src/components/sales/reports/reportModel.ts'
+import { projectExportRows, exportColumnLabel } from '../src/utils/exportOptions.ts'
 
 const range = { startDate: '2026-09-20', endDate: '2026-09-21', startTime: '22:00', endTime: '02:00' }
 const exact = returnRangeParams(range)
@@ -109,4 +110,21 @@ assert.equal(permitted[0].Compensation_KHR, 0)
 assert.equal(permitted[0].Business_Loss_USD, -1.1234)
 assert.equal(permitted[1].Compensation_USD, 0)
 assert.ok(exporter(exportSamples, (key: string) => key, false).every((row: object) => !Object.hasOwn(row, 'Compensation_USD') && !Object.hasOwn(row, 'Business_Loss_USD')))
+const keys = evaluate(variable('RETURN_EXPORT_KEYS'), {})
+const columnNode = nodes(node => ts.isJsxAttribute(node) && node.name.getText(ast) === 'columns' && node.initializer?.getText(ast).includes('RETURN_EXPORT_KEYS'))[0] as ts.JsxAttribute
+const columnExpression = (columnNode.initializer as ts.JsxExpression).expression!.getText(ast)
+const actualColumns = (canViewCosts: boolean) => evaluate(columnExpression, { RETURN_EXPORT_KEYS: keys, canViewCosts, exportColumnLabel })
+const exportControls = exporter([...exportSamples, { return_scope: 'supplier', supplier_compensation_khr: 5.1244, supplier_loss_khr: -1.1234 }, { return_scope: 'customer', total_refund_usd: 5.1244, created_at: '2026-09-21 12:34:56' }], (key: string) => key, true)
+const allowedColumns = actualColumns(true)
+const projected = projectExportRows(exportControls, allowedColumns, new Set(allowedColumns.map((column: { key: string }) => column.key)))
+assert.equal(projected[0]['Compensation KHR'], 0)
+assert.equal(projected[0]['Compensation USD'], '')
+assert.equal(projected[1]['Compensation USD'], 0)
+assert.equal(projected[2]['Compensation KHR'], 5.1244)
+assert.equal(projected[2]['Business Loss KHR'], -1.1234)
+assert.equal(projected[3]['Refund USD'], 5.1244)
+assert.equal(projected[3].Date, '2026-09-21 12:34:56')
+const deniedColumns = actualColumns(false)
+assert.ok(deniedColumns.every((column: { key: string }) => !/^(Compensation|Business_Loss)_/.test(column.key)))
+assert.ok(projectExportRows(exportControls, deniedColumns, new Set(keys)).every(row => !Object.keys(row).some(key => /^(Compensation|Business Loss) /.test(key))))
 console.log('PASS Returns continuous times: Reports parity, cache identity, actual page request/reset/export flow, safe invalid drafts')
