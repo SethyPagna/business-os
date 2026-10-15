@@ -111,7 +111,7 @@ assert.equal(permitted[0].Business_Loss_USD, -1.1234)
 assert.equal(permitted[1].Compensation_USD, 0)
 assert.ok(exporter(exportSamples, (key: string) => key, false).every((row: object) => !Object.hasOwn(row, 'Compensation_USD') && !Object.hasOwn(row, 'Business_Loss_USD')))
 const keys = evaluate(variable('RETURN_EXPORT_KEYS'), {})
-const columnNode = nodes(node => ts.isJsxAttribute(node) && node.name.getText(ast) === 'columns' && node.initializer?.getText(ast).includes('RETURN_EXPORT_KEYS'))[0] as ts.JsxAttribute
+const columnNode = nodes(node => ts.isJsxAttribute(node) && node.name.getText(ast) === 'columns' && Boolean(node.initializer?.getText(ast).includes('RETURN_EXPORT_KEYS')))[0] as ts.JsxAttribute
 const columnExpression = (columnNode.initializer as ts.JsxExpression).expression!.getText(ast)
 const actualColumns = (canViewCosts: boolean) => evaluate(columnExpression, { RETURN_EXPORT_KEYS: keys, canViewCosts, exportColumnLabel })
 const exportControls = exporter([...exportSamples, { return_scope: 'supplier', supplier_compensation_khr: 5.1244, supplier_loss_khr: -1.1234 }, { return_scope: 'customer', total_refund_usd: 5.1244, created_at: '2026-09-21 12:34:56' }], (key: string) => key, true)
