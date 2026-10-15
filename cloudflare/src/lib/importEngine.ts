@@ -30,6 +30,7 @@ import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 import { planImportCountIncrease, planRemovalLotRecord, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
+import { explicitCostReviewWritePlan } from './productCostReview'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
 import { resolveMovementCostSnapshot, type MovementCostComponent, type MovementCostPair } from './movementCostSnapshot'
@@ -6913,12 +6914,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
       const lastReceiptRowIndex = new Map<number, number>()
       actionable.forEach((row, index) => { if (importRowReceives(row)) lastReceiptRowIndex.set(Number(row.existingId), index) })
+      const lastCostWriteRowIndex = new Map<number, number>()
+      actionable.forEach((row, index) => {
+        if (row.action !== 'update' || !row.existingId || row.plannedMode === 'merge_stock') return
+        if (productImportMode === 'replace_columns' && productReplaceColumns.length && !productReplaceColumns.includes('cost_price_usd')) return
+        if (row.plannedMode === 'override_add' && appliedRowGuards.has(`row:${row.rowNumber}`)) return
+        lastCostWriteRowIndex.set(Number(row.existingId), index)
+      })
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
         const targetId = Number(r.existingId || d.__importAssignedId)
         let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = productImportStockStatements(
           targetId, d.is_active, r.action === 'update')
+        let costConfirmation: ReturnType<typeof explicitCostReviewWritePlan> | null = null
         // U-cost: an imported cost must hold past the next stock movement,
         // which re-derives cost_price_usd (0195 triggers) and honours only a
         // cost with a product_cost_entries row -- the same row the product
@@ -6931,6 +6940,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         const pushImportedCostEntry = (productId: number, next: { usd?: unknown; khr?: unknown }) => {
           if (Number(d.__costPriceUsdProvided) !== 1 && Number(d.__costPriceKhrProvided) !== 1) return
           if ((lastReceiptRowIndex.get(productId) ?? -1) >= (importRowIndex.get(r) ?? 0)) return
+          if (Number(d.__costPriceUsdProvided) === 1 && typeof next.usd === 'number' && Number.isFinite(next.usd) && next.usd >= 0
+            && lastCostWriteRowIndex.get(productId) === importRowIndex.get(r)) {
+            costConfirmation = explicitCostReviewWritePlan({ whereSql: 'id=@importConfirmationProductId', nextUsdSql: '@importConfirmationUsd',
+              params: { importConfirmationProductId: productId, importConfirmationUsd: next.usd }, actor: importCostActor })
+            rowWriteGroup.push(...costConfirmation.before as Array<{ sql: string; params: Record<string, unknown> }>)
+          }
           const statement = typedCostEntryBeforeWriteStatement(productId, {
             ...('usd' in next ? { usd: (next.usd ?? null) as number | null } : {}),
             ...('khr' in next ? { khr: (next.khr ?? null) as number | null } : {}),
@@ -6956,6 +6971,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             })
           }
           // A row redirected from a disabled branch labels its movements (CUTOVER-LR); any other row is untouched.
+          if (costConfirmation) rowWriteGroup.push(...costConfirmation.after as Array<{ sql: string; params: Record<string, unknown> }>)
           rowWriteGroup = labelAddressedMovements(rowWriteGroup, d)
           if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)
         }

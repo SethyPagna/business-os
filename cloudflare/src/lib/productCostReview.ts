@@ -80,6 +80,38 @@ export function explicitCostReviewConfirmationStatements(productId: number, usd:
 export const MERGE_COST_LATEST_MANUAL_SQL = `(SELECT CASE WHEN typeof(cost_usd) IN ('integer','real') AND cost_usd>=0 AND cost_usd<=1.7976931348623157e308 THEN cost_usd END
     FROM product_cost_entries WHERE product_id=products.id ORDER BY id DESC LIMIT 1)`
 
+export function explicitCostReviewWritePlan(input: {
+  whereSql: string; nextUsdSql: string; params: Record<string, unknown>; actor: { id: number | null; name: string | null }
+}): { before: Statement[]; after: Statement[] } {
+  const nonce = crypto.randomUUID()
+  const params = { ...input.params, confirmationScope: `cost-review-edit:${nonce}:`, confirmationNonce: nonce,
+    confirmationActorId: input.actor.id, confirmationActorName: input.actor.name }
+  const capturedRows = `substr(f.key,1,length(@confirmationScope))=@confirmationScope
+    AND f.key=@confirmationScope||CAST(products.id AS TEXT)
+    AND json_extract(f.value,'$.review_key') IS products.cost_review_key
+    AND json_extract(f.value,'$.after_usd') IS products.cost_price_usd`
+  return {
+    before: [{ sql: `INSERT INTO system_flags(key,value)
+      SELECT @confirmationScope||CAST(id AS TEXT),json_object('review_key',cost_review_key,
+        'before_usd',${reviewMoneyJsonSql('cost_price_usd')},'after_usd',${reviewMoneyJsonSql(input.nextUsdSql)})
+      FROM products WHERE is_active=1 AND cost_review_key IS NOT NULL AND (${input.whereSql})
+        AND typeof(${input.nextUsdSql}) IN ('integer','real') AND (${input.nextUsdSql})>=0
+        AND (${input.nextUsdSql})<=1.7976931348623157e308 AND cost_price_usd IS NOT (${input.nextUsdSql})`, params }],
+    after: [{ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
+      SELECT @confirmationActorId,@confirmationActorName,'cost_override','product',CAST(products.id AS TEXT),
+        json_object('kind','product.cost-review-confirm','version',1,'source','explicit-cost-edit','claim_nonce',@confirmationNonce,
+          'cost_review',json_object('version',1,'kind','confirm','before_key',products.cost_review_key,'after_key',NULL,
+            'revision_before',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(products.id AS TEXT)),0),
+            'after_usd',${reviewMoneyJsonSql('products.cost_price_usd')},'after_khr',${reviewMoneyJsonSql('products.cost_price_khr')}))
+      FROM products JOIN system_flags f ON ${capturedRows}
+      WHERE products.is_active=1 AND products.cost_review_key IS NOT NULL`, params },
+    { sql: `UPDATE products SET cost_review_key=NULL WHERE EXISTS(SELECT 1 FROM audit_logs a
+      WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(products.id AS TEXT)
+        AND json_extract(CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END,'$.claim_nonce')=@confirmationNonce)`, params },
+    { sql: `DELETE FROM system_flags WHERE substr(key,1,length(@confirmationScope))=@confirmationScope`, params }],
+  }
+}
+
 export function mergeCostAuthorityUsdSql(fallbackSql: string): string {
   return `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN COALESCE(${CATALOG_COST_DERIVE_SQL},${fallbackSql})
     ELSE COALESCE(${MERGE_COST_LATEST_MANUAL_SQL},${fallbackSql}) END`

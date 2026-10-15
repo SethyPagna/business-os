@@ -204,4 +204,31 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
   assert.equal(snapshot(),legacyRollbackSnapshot)
   assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
   console.log('PASS legacy evidence failure rolls back original money update and leaves no permit')
+  const transaction=load(path.join(root,'lib/stockTransaction.ts'))
+  const compat=load(path.join(root,'lib/db.ts')).getDb({DB})
+  async function setCost(productId, usd, options={}) {
+    const plan=helper.explicitCostReviewWritePlan({whereSql:'id=@selectedId',nextUsdSql:'@selectedUsd',params:{selectedId:productId,selectedUsd:usd},actor:{id:1,name:'Admin'}})
+    const update={sql:'UPDATE products SET cost_price_usd=@usd WHERE id=@id',params:{id:productId,usd}}
+    return transaction.executeStockTransaction(compat,[...plan.before,...(options.between||[]),update,...plan.after],'once')
+  }
+  for(const [beforeUsd,usd] of [[7,9.123456789012345],[7,0],[null,0]]) {
+    const productId=seed(beforeUsd)
+    await setCost(productId,usd)
+    assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(productId).cost_review_key,null)
+    assert.equal(raw.prepare('SELECT cost_price_usd FROM products WHERE id=?').get(productId).cost_price_usd,usd)
+  }
+  for(const usd of [7,null]) {
+    const productId=seed(7)
+    await setCost(productId,usd)
+    assert.equal(raw.prepare('SELECT cost_review_key FROM products WHERE id=?').get(productId).cost_review_key,'a'.repeat(32))
+  }
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE 'cost-review-edit:%'").get().n,0)
+  console.log('PASS captured explicit SQL edits confirm exact raw precision and zero; echoes and NULL retain review')
+  const capturedId=seed(7),capturedBefore=snapshot()
+  raw.exec(`CREATE TRIGGER fixture_fail_captured_cost BEFORE INSERT ON audit_logs WHEN json_extract(CASE WHEN json_valid(NEW.details) THEN NEW.details ELSE '{}' END,'$.source')='explicit-cost-edit' BEGIN SELECT RAISE(ABORT,'fixture captured failure'); END;`)
+  await assert.rejects(setCost(capturedId,9),/fixture captured failure/)
+  raw.exec('DROP TRIGGER fixture_fail_captured_cost')
+  assert.equal(snapshot(),capturedBefore)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE 'cost-review-edit:%' OR key='stock_transaction_permit'").get().n,0)
+  console.log('PASS captured confirmation failure rolls back cost, review, audit and ephemeral capture together')
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => raw.close())
