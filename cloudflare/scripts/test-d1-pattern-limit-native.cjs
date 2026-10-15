@@ -201,7 +201,11 @@ async function verifyRealSettlementRoute(migration) {
   const { sales, fixture, seed, request, load, settlementAction } = new Function('require','__dirname', source + '\nreturn { sales, fixture, seed, request, load, settlementAction };')(require,__dirname)
   const fees = load('routes/fees.ts').default
   const returns = load('routes/returns.ts').default
-  const f = fixture(); seed(f)
+  const f = fixture()
+  f.sql.exec("BEGIN IMMEDIATE; INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+  try { seed(f); f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT") }
+  catch (error) { f.sql.exec('ROLLBACK'); throw error }
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   // Historical migration0098 seeds 4,240 unrelated fees. This isolated route
   // fixture starts with no expenses so one request has an exact cardinality.
   f.sql.exec('DELETE FROM fees')
@@ -209,6 +213,7 @@ async function verifyRealSettlementRoute(migration) {
   const original = oldSchema()
   // The fee writers stamp fees.branch_name (0236, applied after this historical schema), so the route fixture carries it.
   if (!original.prepare("PRAGMA table_info(fees)").all().some(column => column.name === 'branch_name')) original.exec('ALTER TABLE fees ADD COLUMN branch_name TEXT')
+  original.exec('ALTER TABLE products ADD COLUMN cost_review_key TEXT DEFAULT NULL')
   const required = new Set([...tables,'sales','sale_items','users','returns','return_items','settings','sale_item_batch_allocations','sale_write_revisions','sale_mutation_receipts','sale_mutation_guards','sale_bulk_guards','action_history','audit_logs','system_flags','products','branches','branch_stock','inventory_movements','fees','delivery_contacts','return_write_revisions','return_bulk_guards','return_item_batch_allocations','return_replacement_items','damaged_stock_lots','product_batches','branch_batch_stock','transfer_operation_receipts'])
   required.add('customers')
   required.add('pending_actions')

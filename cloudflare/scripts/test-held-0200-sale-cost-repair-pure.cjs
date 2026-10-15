@@ -826,6 +826,43 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
   const backfills = chain.filter(file => identityBackfillUnread(chainText(file), migrationText, schemaTables))
   const revisionTriggers = chain.filter(file => revisionTriggerUnread(chainText(file), migrationText))
+  const costReviewDdlOnly = text => {
+    let remaining = sqlCode(text).trim()
+    const triggers = new Map(fresh.prepare("SELECT name,tbl_name FROM sqlite_master WHERE type='trigger'").all().map(row => [row.name, row.tbl_name]))
+    while (remaining) {
+      const column = /^ALTER TABLE (\w+) ADD COLUMN (\w+) [\s\S]*?;\s*/i.exec(remaining)
+      const index = /^CREATE(?: UNIQUE)? INDEX \w+ ON (\w+)[\s\S]*?;\s*/i.exec(remaining)
+      const create = /^CREATE TRIGGER (\w+)\s+(?:BEFORE|AFTER)\s+(?:INSERT|DELETE|UPDATE(?: OF [\w,\s]+)?)\s+ON (\w+)\s+[\s\S]*?\bBEGIN\b[\s\S]*?\bEND\s*;\s*/i.exec(remaining)
+      const drop = /^DROP TRIGGER (\w+);\s*/i.exec(remaining)
+      const metadata = /^(?:INSERT INTO system_flags\(key,value,updated_at\)\s+SELECT|SELECT CASE WHEN)[\s\S]*?;\s*/i.exec(remaining)
+      if (column) {
+        if (column[1] !== 'products' || column[2] !== 'cost_review_key' || namedIn(migrationText)(column[2]) || flagContext.indirectWrites.has(column[1])) return false
+        remaining = remaining.slice(column[0].length)
+      } else if (index) {
+        if (flagContext.indirectWrites.has(index[1])) return false
+        remaining = remaining.slice(index[0].length)
+      } else if (create) {
+        if (flagContext.indirectWrites.has(create[2])) return false
+        triggers.set(create[1], create[2])
+        remaining = remaining.slice(create[0].length)
+      } else if (drop) {
+        if (!triggers.has(drop[1]) || flagContext.indirectWrites.has(triggers.get(drop[1]))) return false
+        remaining = remaining.slice(drop[0].length)
+      } else if (metadata) {
+        if (namedIn(migrationText)('system_flags') || repairWrites(metadata[0]).some(table => table !== 'system_flags')
+          || [...flagContext.indirectWrites].some(namedIn(metadata[0]))) return false
+        remaining = remaining.slice(metadata[0].length)
+      } else return false
+      remaining = remaining.trim()
+    }
+    return true
+  }
+  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql']
+  for (const file of costReviewDdl) {
+    assert.equal(costReviewDdlOnly(chainText(file)), true, `${file} changes only unread metadata and triggers on tables the repair never writes`)
+    assert.equal(costReviewDdlOnly(chainText(file) + '\nUPDATE sale_items SET cost_price_usd=123;'), false)
+    assert.equal(costReviewDdlOnly(chainText(file) + "\nCREATE TRIGGER bad_cost BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT,'bad'); END;"), false)
+  }
   const stockGuardOnly = text => {
     const statements = text.replace(/--[^\n]*/g, '').trim().split(/END\s*;/i).filter(v=>v.trim())
     return statements.length === 12 && statements.every(statement => /^CREATE TRIGGER [a-z_]+_0242\s+BEFORE (?:UPDATE(?: OF [a-z_,]+)?|INSERT|DELETE) ON (?:products|branch_stock|branch_batch_stock|product_batches|damaged_stock_lots)\s/i.test(statement.trim())
@@ -847,7 +884,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
   assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')

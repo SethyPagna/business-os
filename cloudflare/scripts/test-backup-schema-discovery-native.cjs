@@ -22,9 +22,9 @@ async function main() {
       const raw = input.mode === 'graph' ? bindings.DB : bindings.SMALL;
       const calls = [], events = [];
       const env = {DB:{prepare(sql){calls.push(sql);events.push(sql);return raw.prepare(sql)},batch:items=>raw.batch(items)}};
-      if(input.mode === 'graph') {
+      if(input.mode === 'graph' || input.mode === 'small-graph') {
         const schema = await discoverRestoreSchema(env);
-        return Response.json({tables:[...schema.tables],references:schema.references,calls,backupTables:BACKUP_TABLES,bundle:SALE_REPLAY_RESTORE_BUNDLE,
+        return Response.json({tables:[...schema.tables],references:schema.references,hasCostReview:schema.hasCostReview,calls,backupTables:BACKUP_TABLES,bundle:SALE_REPLAY_RESTORE_BUNDLE,
           decisions:input.documents.map(names=>restoreDependencyError(schema,new Set(names)))});
       }
       const key='backups/cloudflare/probe.json';
@@ -49,7 +49,7 @@ async function main() {
         return {key:object.key,etag:object.etag,version:object.version,size:object.size,customMetadata:object.customMetadata,body};
       }};
       let error=null,result=null;
-      try { result=await restoreCloudflareBackup(env,key,async p=>events.push('progress-'+p.phase)) } catch(e){error=e.message}
+      try { result=await restoreCloudflareBackup(env,key,async p=>events.push('progress-'+p.phase),input.restoreToken ?? 'schema-discovery-fixture') } catch(e){error=e.message}
       return Response.json({calls,events,reads,error,result});
     }}
   ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], plugins: [{ name: 'private-discovery-test-access', setup(b) {
@@ -60,6 +60,11 @@ async function main() {
     d1Databases: ['DB', 'SMALL'], r2Buckets: ['ASSETS'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB'), small = await mf.getD1Database('SMALL')
+    await small.prepare('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)').run()
+    await small.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1'),('maintenance',?)").bind(JSON.stringify({
+      mode:'restore',token:'schema-discovery-fixture',backupKey:'backups/cloudflare/probe.json',phase:'deleting',
+      startedAt:'2026-10-15T00:00:00Z',updatedAt:'2026-10-15T00:00:00Z',startedBy:'fixture',
+    })).run()
     const migrationDir = path.join(root, 'migrations')
     const migrations = fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()
     for (const name of migrations) {
@@ -91,7 +96,9 @@ async function main() {
     const documents = [[], ['settings'], ['customers'], ['fees'], ['products'], names]
     const graph = await request({ mode: 'graph', documents })
     assert.deepEqual(graph.tables.slice().sort(), names.slice().sort(), 'complete relevant live set, including no-FK and custom_tables metadata')
-    assert.deepEqual(sort(graph.references), sort(oldRows), 'exact old per-table graph including composite FK components')
+    assert.deepEqual(sort(graph.references.map(({has_cost_review, ...reference}) => reference)), sort(oldRows), 'exact old per-table graph including composite FK components')
+    assert.equal(graph.hasCostReview, true)
+    assert(graph.references.every(row => row.has_cost_review === 1))
     assert(graph.references.some(r => r.fk_seq > 0), 'fully migrated schema exercises a real composite FK')
     assert(!graph.tables.includes('ct_child'), 'custom namespace and internal tables are never restore targets')
     assert.equal(graph.calls.length, 1)
@@ -112,6 +119,9 @@ async function main() {
       for (const name of ['fees','custom_tables','settings','d1_migrations','ct_ignore']) await small.prepare('DROP TABLE IF EXISTS "' + name + '"').run()
       await small.prepare('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)').run()
       await small.prepare("INSERT INTO settings VALUES('proof','LIVE')").run()
+      const oldSchema = await request({ mode: 'small-graph', documents: [] })
+      assert.equal(oldSchema.hasCostReview, false)
+      assert(oldSchema.references.every(row => row.has_cost_review === 0))
       let tables = { settings: { columns: ['key','value'], rows: [{ key: 'proof', value: 'RESTORED' }] } }
       if (mode === 'unknown') {
         await small.prepare('CREATE TABLE ct_ignore(id INTEGER PRIMARY KEY)').run()
@@ -142,7 +152,8 @@ async function main() {
         assert(output.events.indexOf(discoveries[0]) < output.events.indexOf('progress-deleting'))
         assert(output.events.indexOf('source-read-2') < output.events.indexOf('progress-deleting'), 'source pin preserved')
         assert.equal(output.result.tables, 1, 'unknown and duplicate headers must not expand restore targets')
-        assert.equal(output.calls.filter(sql => sql.startsWith('DELETE')).length, 1)
+        assert.equal(output.calls.filter(sql => sql.startsWith('DELETE') && !sql.includes('system_flags')).length, 1)
+        assert.equal((await small.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
         if (mode === 'unknown') assert.equal((await small.prepare('SELECT id FROM ct_ignore').first()).id, 7)
       } else {
         assert.match(output.error, mode === 'migration' ? /newer database schema/ : mode === 'custom-invalid' ? /Invalid custom table metadata/ : /missing dependency/)
@@ -150,6 +161,10 @@ async function main() {
         assert.equal((await small.prepare("SELECT value FROM settings WHERE key='proof'").first()).value, 'LIVE')
       }
     }
+    const refused = await request({ mode:'wrong-token', restoreToken:'another-owner', tables:{settings:{columns:['key','value'],rows:[{key:'proof',value:'WRONG'}]}} })
+    assert.match(refused.error, /restore is already in progress/)
+    assert(!refused.calls.some(sql => /^(DELETE|INSERT)/.test(sql)))
+    assert.equal((await small.prepare("SELECT value FROM settings WHERE key='proof'").first()).value, 'LIVE')
     console.log('PASS native D1 full migrated graph equivalence (' + migrations.length + ' migrations, ' + names.length + ' tables, ' + oldRows.length + ' graph rows); 8 actual restore snapshot cases; bounded overflow refusal')
   } finally { await mf.dispose() }
 }
