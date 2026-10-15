@@ -24,6 +24,7 @@ function compileSubject() {
   let saleMoneyPrecision
   const localRequire = (request) => {
     if (request === './db') return {}
+    if (request === './loyaltyEligibility') return compileLib('loyaltyEligibility',localRequire)
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)

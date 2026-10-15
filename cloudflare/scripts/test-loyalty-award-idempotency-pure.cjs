@@ -42,6 +42,7 @@ const OTHER_ADMIN = { id: 2, username: 'manager', name: 'Manager', role_code: 'a
 
 function freshDb() {
   const db = openDb(loadAll())
+  db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
   db.prepare("INSERT INTO users (id, username, name, password) VALUES (1, 'owner', 'Owner Full Name', 'x'), (2, 'manager', 'Manager', 'x')").run()
   db.prepare("INSERT INTO customers (id, name, phone, membership_number, is_anonymous) VALUES (5, 'Dara', '012', 'LC-5', 0), (6, 'Walk-in', NULL, NULL, 1)").run()
   return db
@@ -70,6 +71,7 @@ const contactsApp = load('routes/contacts.ts', {
   '../lib/db': { getDb: () => routeDb },
   '../lib/audit': load('lib/audit.ts', { './db': { getDb: () => routeDb } }),
   '../lib/permissions': permissions,
+  '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
   '../lib/actorSnapshot': load('lib/actorSnapshot.ts'),
   '../lib/anonymousCustomer': load('lib/anonymousCustomer.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -202,6 +204,25 @@ async function runTest(name, fn) {
     assert.equal((await award(6, { points: 25, client_request_id: ID_A })).status, 409)
     assert.equal(ledgerRows(6).length, 0)
     assert.equal(receipts().length, 0)
+  })
+
+  await runTest('OFF refuses fresh awards atomically while committed receipts replay', async () => {
+    const first = await award(5,{points:25,client_request_id:ID_A})
+    assert.equal(first.status,201)
+    db.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
+    for(const body of [{points:4,client_request_id:ID_B},{points:4}]){
+      const denied=await award(5,body)
+      assert.equal(denied.status,400,JSON.stringify(denied.body))
+      assert.equal(denied.body.code,'loyalty_points_disabled')
+    }
+    const replay=await award(5,{points:25,client_request_id:ID_A})
+    assert.equal(replay.status,200);assert.equal(replay.body.replayed,true)
+    hidePrecheck=1
+    assert.equal((await award(5,{points:25,client_request_id:ID_A})).status,200,'racing replay works OFF')
+    assert.equal(ledgerRows().length,1);assert.equal(receipts().length,1)
+    db.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+    assert.equal((await award(5,{points:4,client_request_id:ID_B})).status,201)
+    assert.equal(ledgerRows().length,2)
   })
 
   if (failed) {

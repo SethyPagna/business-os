@@ -73,7 +73,7 @@ async function main() {
 
   customer(9998); sale(9998, 30); sale(9998, 90, { accrual: 0, redeemed: 1.125 }); sale(9998, 99, { status: 'awaiting_payment', redeemed: 2.125 }); sale(9998, 999, { status: 'cancelled', redeemed: 999 })
   raw.db.exec(`INSERT INTO returns(return_number,customer_id,status,return_scope,total_refund_usd,total_refund_khr) VALUES('PARITY-RET',9998,'completed','customer',0.01,40),('PARITY-VOIDRET',9998,'cancelled','customer',999,999);
-    INSERT INTO customer_share_submissions(customer_id,status,reward_points,reward_points_voided_at) VALUES(9998,'approved',0.125,NULL),(9998,'pending',999,NULL),(9998,'approved',999,'2026-10-09');
+    INSERT INTO customer_share_submissions(customer_id,status,reward_points,reward_points_voided_at,loyalty_eligible) VALUES(9998,'approved',0.125,NULL,1),(9998,'pending',999,NULL,1),(9998,'approved',999,'2026-10-09',1);
     INSERT INTO loyalty_point_adjustments(customer_id,points,voided_at) VALUES(9998,0.125,NULL),(9998,0.01,NULL),(9998,999,'2026-10-09');`)
   for (const basis of ['usd', 'khr']) {
     set('customer_portal_points_basis', basis); set('customer_portal_points_per_khr', 0.0015)

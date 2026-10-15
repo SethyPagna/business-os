@@ -29,6 +29,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const subject = compile('stockActionCommit.ts', {
+  './loyaltyEligibility': compile('loyaltyEligibility.ts'),
   './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
@@ -57,7 +58,8 @@ function setup() {
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
-    CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
+    CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);
+    CREATE TABLE sales (loyalty_accrual INTEGER DEFAULT 1,id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,
       cashier_name TEXT, branch_id INTEGER, branch_name TEXT, payment_method TEXT, payment_currency TEXT,
       subtotal_usd REAL, total_usd REAL, amount_paid_usd REAL, sale_status TEXT, notes TEXT,
       items TEXT, creation_snapshot_json TEXT, created_at TEXT, updated_at TEXT);

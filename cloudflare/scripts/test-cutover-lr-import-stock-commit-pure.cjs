@@ -137,7 +137,15 @@ async function main() {
     assert.equal(guards.length, 1)
     assert.equal(addNow.filter(text => /product_has_stock/.test(text)).length, 1, 'one product admission guard')
     assert.deepEqual(addNow.filter((text) => !/landing_branch_guard|product_has_stock/.test(text)), addThen, 'add: otherwise byte-identical')
-    assert.deepEqual(saleNow, saleThen, 'sale: byte-identical')
+    const normalizeLoyalty = text => {
+      const item = JSON.parse(text)
+      if(/INSERT INTO sales \(/.test(item.sql)){
+        item.sql=item.sql.replace('loyalty_accrual, sale_status, notes, items','sale_status, notes, items')
+          .replace(/CASE WHEN \(lower\(trim\(COALESCE\(\(SELECT value FROM settings WHERE key = 'loyalty_points_enabled'\), ''\)\)\) IN \('1','true','yes','on'\)\) AND \(1\) = 1 THEN 1 ELSE 0 END, /,'')
+      }
+      return JSON.stringify(item)
+    }
+    assert.deepEqual(saleNow.map(normalizeLoyalty), saleThen, 'sale: only commit-time loyalty snapshot differs')
   })
 
   await check('a column redirected from Old Shop onto LC Store: the add movement is labelled; Old Shop re-enabled before the write aborts it', async () => {
