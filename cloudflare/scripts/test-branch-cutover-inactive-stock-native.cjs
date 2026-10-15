@@ -1,19 +1,70 @@
 // Branch cutover, rehearsal F3 (owner ruling 7 Oct 2026): an inactive product that holds stock is folded into its one active twin with the REAL
 // product merge (routes/products.ts foldDuplicateProductInto), never reactivated; a product with only a drifted cache gets the cache recomputed;
 // anything else is listed for the owner. The orchestration around the fold is covered in test-branch-cutover-parent-e2e-native.cjs with a stub;
-// this file runs the real fold on the sale-create harness database (every migration) and checks what the merge really does to the ledgers.
+// Historical source and migrations are pinned together; current guards are tested separately below.
 //
 // Run (from cloudflare/): node scripts/test-branch-cutover-inactive-stock-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs'), source = fs.readFileSync(file, 'utf8'), boundary = source.indexOf(';(async () => {')
-const harness = new Module(file, module); harness.filename = file; harness.paths = module.paths
-harness._compile(source.slice(0, boundary).replace('openDb(loadAll())', "openDb(require('./harness/historical_product_stock.cjs').historicalMigrations())").replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },") + '\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};', file)
-const h = harness.exports
+const { execFileSync } = require('node:child_process')
+const HISTORICAL_CUTOVER_REV = '59fd36e2da5019a8e7817953464e9731055f243f'
+const repositoryRoot = path.join(__dirname, '../..')
+const historicalFiles = new Map()
+function historicalText(relative) {
+  if (!historicalFiles.has(relative)) historicalFiles.set(relative, execFileSync('git', ['show', `${HISTORICAL_CUTOVER_REV}:${relative}`], { cwd: repositoryRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }))
+  return historicalFiles.get(relative)
+}
+const historicalMigrationFiles = execFileSync('git', ['ls-tree', '-r', '--name-only', HISTORICAL_CUTOVER_REV, 'cloudflare/migrations'], { cwd: repositoryRoot, encoding: 'utf8' }).trim().split(/\r?\n/).filter(file => file.endsWith('.sql')).sort()
+assert.equal(historicalMigrationFiles.at(-1), 'cloudflare/migrations/0240_stock_revision_ignores_batch_label.sql')
+function createHarness(historical) {
+  const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs')
+  const source = historical ? historicalText('cloudflare/scripts/test-sale-create-atomic-pure.cjs') : fs.readFileSync(file, 'utf8')
+  const boundary = source.indexOf(';(async () => {')
+  assert.ok(boundary > 0)
+  let borrowed = source.slice(0, boundary)
+  if (!historical) {
+    const setupCall = 'seedStockFixture(db.db, () => {'
+    const rawRefusal = "  assert.throws(() => db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10').run(), /stock_transaction_required/)"
+    assert.equal(borrowed.split(setupCall).length, 2)
+    assert.equal(borrowed.split(rawRefusal).length, 2)
+    borrowed = borrowed.replace('openDb(loadAll())', "openDb(require('./harness/historical_product_stock.cjs').historicalMigrations())")
+      .replace(setupCall, 'seedHistoricalFixture(db.db, () => {').replace(rawRefusal, '')
+    borrowed += `
+function seedHistoricalFixture(raw, seed) {
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+  const result = seed()
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return result
+}
+`
+  }
+  const harness = new Module(file, module)
+  harness.filename = file
+  harness.paths = module.paths
+  if (historical) {
+    harness.require = name => {
+      if (name === 'node:fs') return { ...fs, readFileSync(sourcePath, encoding) {
+        const relative = path.relative(repositoryRoot, sourcePath).replace(/\\/g, '/')
+        return relative.startsWith('cloudflare/src/') ? historicalText(relative) : fs.readFileSync(sourcePath, encoding)
+      } }
+      if (name === './harness/load_migrations.cjs') return { loadAll: () => historicalMigrationFiles.map(historicalText) }
+      return module.require(name)
+    }
+  }
+  harness._compile(borrowed.replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },") + '\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};', file)
+  return harness.exports
+}
+const h = createHarness(true)
 let checks = 0
-async function check(name, run) { await run(); console.log('PASS ' + name); checks++ }
+const openWorlds = new Set()
+async function check(name, run) {
+  try { await run(); console.log('PASS ' + name); checks++ } finally {
+    for (const raw of openWorlds) raw.db.close()
+    openWorlds.clear()
+  }
+}
 
 ;(async () => {
   h.setUser({ ...h.USER, permissions: '{"all":true}' })
@@ -21,8 +72,9 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
   const products = h.load('routes/products.ts')
   const actor = { ...h.USER, permissions: '{"all":true}' }
 
-  const world = () => {
-    const f = h.fixture()
+  const world = (harness = h) => {
+    const f = harness.fixture()
+    openWorlds.add(f.raw)
     const one = (sql, ...values) => f.raw.prepare(sql).get(values)
     f.raw.prepare("UPDATE products SET barcode='123456' WHERE id=10").run()
     f.raw.exec(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
@@ -33,9 +85,15 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,2)`)
     return { f, one }
   }
-  const fold = (f) => async (dup, keeper, approved) => {
+  const installGuards = (f) => {
     require('./harness/historical_product_stock.cjs').installCurrentStockGuards(f.raw)
-    await products.foldDuplicateProductInto({ DB: f.route }, f.route, actor, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
+    assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 1)
+    assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.throws(() => f.raw.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10').run(), /stock_transaction_required/)
+  }
+  const fold = (f, mergeProducts = products, guarded = false) => async (dup, keeper, approved) => {
+    if (guarded) installGuards(f)
+    await mergeProducts.foldDuplicateProductInto({ DB: f.route }, f.route, actor, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
       new Map([[1, 'Shop']]), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() }, approved ? { follows: true } : undefined)
     f.raw.prepare('UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=@id),0) WHERE id=@id').run({ id: keeper.id })
   }
@@ -186,7 +244,7 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
   })
 
   // ---- F2: the post-check excuses exactly the lots this run's folds re-pointed (REAL fold) -------------------------------------------------------
-  const postChecks = fs.readFileSync(path.join(__dirname, '..', '..', 'ops', 'queries', 'branch-cutover-post-checks.sql'), 'utf8')
+  const postChecks = historicalText('ops/queries/branch-cutover-post-checks.sql')
   const batchesChangedOff = (f) => {
     const row = f.raw.prepare(postChecks).get([])
     return row ? row.batches_changed_off : null
@@ -230,6 +288,40 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
     const plan = await inactive.readInactiveStockPlan(f.route)
     assert.deepEqual(plan.refuse.filter(r => r.id === 50).map(r => r.reason), ['inactive_group_product_holds_stock'])
     assert.equal(f.raw.prepare(`SELECT ${inactive.INACTIVE_STOCKED_ANYWHERE_SQL} AS g`).get().g, 1, 'the guard sees the same product')
+  })
+
+  const current = createHarness(false)
+  current.setUser({ ...current.USER, permissions: '{"all":true}' })
+  const currentInactive = current.load('lib/branchCutoverInactiveStock.ts')
+  const currentProducts = current.load('routes/products.ts')
+  await check('current guards refuse raw cache repair and cache-only cutover without changing stock or leaking admission', async () => {
+    const { f, one } = world(current)
+    const plan = await currentInactive.readInactiveStockPlan(f.route)
+    installGuards(f)
+    const before = JSON.stringify(f.raw.prepare('SELECT id,stock_quantity FROM products ORDER BY id').all([]))
+    assert.throws(() => f.raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=31').run([]), /stock_transaction_required/)
+    await assert.rejects(currentInactive.applyInactiveStockPlan(f.route, { ...plan, fold: [], refuse: [] }, { operationId: 'current-cache-refusal', actorId: 7, actorName: 'operator' }, async () => { throw new Error('Unexpected fold') }), /stock_transaction_required/)
+    assert.equal(JSON.stringify(f.raw.prepare('SELECT id,stock_quantity FROM products ORDER BY id').all([])), before)
+    assert.equal(one("SELECT COUNT(*) n FROM audit_logs WHERE action='recompute_stock_cache'").n, 0)
+    assert.equal(one("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
+  })
+  await check('current post-fold cache refusal exposes a committed merge, not an atomic cutover success', async () => {
+    const { f, one } = world(current)
+    const plan = await currentInactive.readInactiveStockPlan(f.route)
+    const keeperBefore = one('SELECT quantity q FROM branch_stock WHERE product_id=10 AND branch_id=1').q
+    await assert.rejects(currentInactive.applyInactiveStockPlan(f.route, plan, { operationId: 'current-partial-fold', actorId: 7, actorName: 'operator' }, fold(f, currentProducts, true)), /stock_transaction_required/)
+    assert.equal(one('SELECT is_active a FROM products WHERE id=30').a, 0)
+    assert.equal(one('SELECT COALESCE(SUM(quantity),0) q FROM branch_stock WHERE product_id=30').q, 0)
+    assert.equal(one('SELECT quantity q FROM branch_stock WHERE product_id=10 AND branch_id=1').q, keeperBefore + 2)
+    assert.equal(one('SELECT variant_product_id id FROM product_batches WHERE id=900').id, 10)
+    assert.ok(one("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.merge'").n > 0)
+    const journal = f.raw.prepare("SELECT details FROM audit_logs WHERE action='branch_cutover_inactive_fold'").all([])
+    assert.equal(journal.length, 1)
+    assert.deepEqual(JSON.parse(journal[0].details).batchIds, [900])
+    assert.equal(JSON.parse(journal[0].details).operationId, 'current-partial-fold')
+    assert.equal(one("SELECT COUNT(*) n FROM audit_logs WHERE action='branch_cutover_inactive_stock'").n, 0)
+    assert.equal(one('SELECT stock_quantity q FROM products WHERE id=31').q, 8)
+    assert.equal(one("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
   })
 
   console.log(`${checks} branch cutover inactive-stock native checks passed`)
