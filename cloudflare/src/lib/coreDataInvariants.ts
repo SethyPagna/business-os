@@ -470,6 +470,7 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   // first successful run for a given product.
   const activeDefaultBranch = await db.prepare(`
     SELECT id FROM branches WHERE is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance')
       AND EXISTS (SELECT 1 FROM products p WHERE p.is_active = 1
         AND p.id NOT IN (SELECT product_id FROM branch_stock))
       ORDER BY is_default DESC, id ASC LIMIT 1

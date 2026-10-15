@@ -23,6 +23,7 @@
 // Run (from cloudflare/): node scripts/test-cutover-lr-import-jobs-pure.cjs
 
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 function withoutProductAdmission(value) {
   const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
   const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
@@ -108,9 +109,20 @@ function makeWorld(oracleSha = null) {
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', 'src', rel)
-    const text = oracleSha && ORACLE_FILES.has(rel)
+    let text = oracleSha && ORACLE_FILES.has(rel)
       ? execFileSync('git', ['show', `${oracleSha}:cloudflare/src/${rel}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
       : fs.readFileSync(sourcePath, 'utf8')
+    if (oracleSha && ['lib/stockActionCommit.ts', 'lib/salesImportCommit.ts'].includes(rel)) {
+      assert.equal(text.split('await db.batch(').length - 1, rel === 'lib/stockActionCommit.ts' ? 2 : 1)
+      text = text.replaceAll('await db.batch(', 'await executeHistoricalStockTransaction(db, ')
+    }
+    if (oracleSha && rel === 'lib/importEngine.ts') {
+      for (const [call, receiver, count] of [['runD1BatchGroupsInChunks', 'importWriteDb', 2], ['runD1BatchInChunks', 'importWriteDb', 1], ['runD1BatchGroupsInChunks', 'guardedDb', 1]]) {
+        const prefix = call + '(' + receiver + ','
+        assert.equal(text.split(prefix).length - 1, count)
+        text = text.replaceAll(prefix, call + '(historicalStockDb(' + receiver + '),')
+      }
+    }
     const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText
     const mod = { exports: {} }
     cache.set(rel, mod)
@@ -119,7 +131,9 @@ function makeWorld(oracleSha = null) {
       const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
       return load(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
     }
-    new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+    new Function('require', 'module', 'exports', 'executeHistoricalStockTransaction', 'historicalStockDb', output)(localRequire, mod, mod.exports,
+      (db, statements) => load('lib/stockTransaction.ts').executeStockTransaction(db, statements, 'retry'),
+      db => Object.assign(Object.create(db), { batch: statements => load('lib/stockTransaction.ts').executeStockTransaction(db, statements, 'retry') }))
     if (partial[rel]) mod.exports = Object.assign({}, mod.exports, partial[rel])
     return mod.exports
   }
@@ -208,6 +222,7 @@ function seed(sql, state) {
     sql.prepare("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key,successor_branch_id) VALUES(2,'Old Shop',0,0,'shop','shop',1)").run()
   }
   sql.prepare("INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(71,'owner','Owner','x',?,1)").run(JSON.stringify({ all: true }))
+  seedStockFixture(sql, () => {
   sql.prepare(`INSERT INTO products(id,name,name_normalized,barcode,sku,unit,selling_price_usd,cost_price_usd,stock_quantity,is_active)
     VALUES(10,'Serum','serum','ABC','SER-1','pcs',12,4,?,1)`).run(state === 'before' ? 8 : 8)
   sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,supplier_name,received_quantity)
@@ -221,6 +236,8 @@ function seed(sql, state) {
     sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,8),(10,2,0)').run()
     sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,8)').run()
   }
+  })
+  assert.throws(() => sql.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=10'), /stock_transaction_required/)
 }
 
 const CSV = {
@@ -337,7 +354,7 @@ async function main() {
         assert.equal(approved.status, 200, JSON.stringify(approved.body))
         await w.drain()
         const job = w.sql.prepare('SELECT status, policy_json, last_error FROM import_jobs WHERE id = ?').get(`job-before-${type}`)
-        assert.match(job.status, /^completed/, `${type} applies (${job.last_error || ''})`)
+        assert.match(job.status, /^completed/, `${type} applies (oracle=${oracle}; ${job.last_error || ''})`)
         assert.ok(!/branch_redirect/.test(job.policy_json), 'no redirect key is ever recorded while every branch is active (the header was even sent)')
         results.push({ writes: businessWrites(w.capture.slice(mark)), rows: businessRows(w.sql) })
       }

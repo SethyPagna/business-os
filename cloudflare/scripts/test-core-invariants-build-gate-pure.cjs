@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // G39 efficiency item 3: the core-data invariants' stock-coverage scan runs
 // once per deployed build, not once per cold isolate -- and still heals.
 //
@@ -32,6 +33,7 @@ function load(rel, overrides = {}) {
 }
 const dbModule = load('lib/db.ts', { './importMaintenanceFence': {} })
 const deps = () => ({
+  './stockTransaction': load('lib/stockTransaction.ts'),
   './productStockGuard': load('lib/productStockGuard.ts'),
   './db': dbModule,
   './sqlBinding': load('lib/sqlBinding.ts'),
@@ -58,7 +60,15 @@ function world() {
   raw.limits.exprDepth = 100
   const log = []
   const control = { failOn: null, gate: null }
-  const DB = { prepare(sql) {
+  const DB = { async batch(statements) {
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      const results = []
+      for (const statement of statements) results.push(await statement.run())
+      raw.exec('COMMIT')
+      return results
+    } catch (error) { raw.exec('ROLLBACK'); throw error }
+  }, prepare(sql) {
     return { bind(...values) {
       const enter = async (kind) => {
         log.push({ kind, sql })
@@ -81,9 +91,10 @@ function world() {
 async function seeded() {
   const w = world()
   await isolate().ensureCoreDataInvariants(w.env)
-  w.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Covered',1,7),(101,'Inactive',0,0),(102,'Covered too',1,3);
+  seedStockFixture(w.raw, () => w.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Covered',1,7),(101,'Inactive',0,0),(102,'Covered too',1,3);
     INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 100,id,7 FROM branches WHERE is_default=1;
-    INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 102,id,3 FROM branches WHERE is_default=1;`)
+    INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 102,id,3 FROM branches WHERE is_default=1;`))
+  assert.throws(() => w.raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=100'), /stock_transaction_required/)
   w.log.length = 0
   return w
 }
@@ -159,13 +170,13 @@ async function main() {
     const w = await seeded()
     assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'checked')
     // datedStockCountDecisions.ts-style create: active product, no stock row.
-    w.raw.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(200,'New uncovered',1,4)")
+    seedStockFixture(w.raw, () => w.raw.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(200,'New uncovered',1,4)"))
     w.log.length = 0
     assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'repaired')
     assert.equal(stockRows(w, 200), 1, 'backfilled exactly as the per-isolate check did')
     assert.equal(flag(w).status, 'verified', 'the build stays verified; its watermark is still true')
     // Positive control for the bounded probe: a NEW product WITH stock costs no repair.
-    w.raw.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(201,'New covered',1,2); INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 201,id,2 FROM branches WHERE is_default=1")
+    seedStockFixture(w.raw, () => w.raw.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(201,'New covered',1,2); INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 201,id,2 FROM branches WHERE is_default=1"))
     w.log.length = 0
     assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'verified')
     assert.equal(writes(w), 0)
@@ -193,7 +204,7 @@ async function main() {
   await check('coverage lost another way is healed once the verification ages out (bounded, documented)', async () => {
     const w = await seeded()
     await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts())
-    w.raw.exec('DELETE FROM branch_stock WHERE product_id=100')
+    seedStockFixture(w.raw, () => w.raw.exec('DELETE FROM branch_stock WHERE product_id=100'))
     assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'verified', 'within the lifetime it is not re-scanned')
     assert.equal(stockRows(w, 100), 0)
     clockMs += 25 * HOUR
@@ -213,7 +224,7 @@ async function main() {
 
   await check('a violation at build start is repaired and NOT recorded as verified', async () => {
     const w = await seeded()
-    w.raw.exec('DELETE FROM branch_stock WHERE product_id=102')
+    seedStockFixture(w.raw, () => w.raw.exec('DELETE FROM branch_stock WHERE product_id=102'))
     assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'repaired')
     assert.equal(stockRows(w, 102), 1)
     assert.equal(flag(w), null)
@@ -221,7 +232,7 @@ async function main() {
 
   await check('repair fenced by maintenance stays uncertified, so later isolates keep checking', async () => {
     const w = await seeded()
-    w.raw.exec(`DELETE FROM branch_stock WHERE product_id=102; INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore","token":"t"}')`)
+    seedStockFixture(w.raw, () => w.raw.exec(`DELETE FROM branch_stock WHERE product_id=102; INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore","token":"t"}')`))
     for (let i = 0; i < 3; i++) assert.equal(await isolate().ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'repaired')
     assert.equal(stockRows(w, 102), 0, 'the backfill honours the fence')
     assert.equal(flag(w), null, 'never certified while the violation stands')

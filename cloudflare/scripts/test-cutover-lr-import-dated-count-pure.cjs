@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // CUTOVER-LR dated stock count (owner ruling 6 Oct 2026): a count addressed to the disabled "Old Shop" is never
 // silently moved to its successor. The REAL lib/datedStockCountResolve.ts (POST /dated-stock-count/resolve),
 // lib/datedStockCountRoute.ts (/preview and /apply build the plan) and lib/datedStockCountApply.ts (the one atomic
@@ -65,9 +66,13 @@ function makeWorld(oracleSha = null) {
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', 'src', rel)
-    const text = oracleSha && ORACLE_FILES.has(rel)
+    let text = oracleSha && ORACLE_FILES.has(rel)
       ? execFileSync('git', ['show', `${oracleSha}:cloudflare/src/${rel}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
       : fs.readFileSync(sourcePath, 'utf8')
+    if (oracleSha && rel === 'lib/datedStockCountApply.ts') {
+      assert.equal(text.split('await guardedDb.batch(').length - 1, 1)
+      text = text.replaceAll('await guardedDb.batch(', 'await executeHistoricalStockTransaction(guardedDb, ')
+    }
     const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText
     const mod = { exports: {} }
     cache.set(rel, mod)
@@ -76,7 +81,8 @@ function makeWorld(oracleSha = null) {
       const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
       return load(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
     }
-    new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+    new Function('require', 'module', 'exports', 'executeHistoricalStockTransaction', output)(localRequire, mod, mod.exports,
+      (db, statements) => load('lib/stockTransaction.ts').executeStockTransaction(db, statements, 'retry'))
     return mod.exports
   }
   return {
@@ -100,6 +106,7 @@ function world(state) {
     raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key) VALUES(1,'LC Store',1,1,'shop','warehouse')")
     raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key,successor_branch_id) VALUES(2,'Old Shop',0,0,'shop','shop',1)")
   }
+  seedStockFixture(raw, () => {
   raw.exec("INSERT INTO products(id,name,name_normalized,barcode,sku,unit,selling_price_usd,cost_price_usd,stock_quantity,is_active) VALUES(10,'Serum','serum','ABC','SER-1','pcs',12,4,8,1)")
   raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,received_quantity) VALUES(600,10,'lot-a','LOT-A','2026-08-01',1,1,4,5)")
   if (state === 'before') {
@@ -110,13 +117,17 @@ function world(state) {
     raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,8),(10,2,0)')
     raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,8)')
   }
+  })
+  assert.throws(() => raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=10'), /stock_transaction_required/)
   const capture = []
   const batch = db.batch.bind(db)
   let beforeBatch = null
   db.batch = async (statements) => {
     capture.push(statements.map((statement) => JSON.stringify({ sql: statement.sql, params: statement.params })))
     if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(raw) }
-    return batch(statements)
+    const results = await batch(statements)
+    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    return results
   }
   return { db, raw, capture, setBeforeBatch(hook) { beforeBatch = hook } }
 }
