@@ -17,6 +17,12 @@
 //
 // Run (from cloudflare/): node scripts/test-product-search-index-native.cjs
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
@@ -41,10 +47,10 @@ function fixture() {
   h.raw.db.exec("INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1)")
   const insert = h.raw.db.prepare(`INSERT INTO products(id, name, brand, category, barcode, sku, cost_price_usd, selling_price_usd, stock_quantity, is_active)
     VALUES (?, ?, ?, ?, ?, ?, 2, 5, 0, 1)`)
-  for (const row of rows) insert.run(row.id, row.name, row.brand, row.category, row.barcode, row.sku)
+  for (const row of rows) seedFixture(h.raw.db, () => insert.run(row.id, row.name, row.brand, row.category, row.barcode, row.sku))
   // One inactive row inside page 0, one row far away in page 3.
-  h.raw.db.exec(`INSERT INTO products(id, name, brand, is_active, cost_price_usd, selling_price_usd) VALUES (1999, 'Retired Blush Palette', 'Hourglass', 0, 1, 2);
-    INSERT INTO products(id, name, brand, is_active, cost_price_usd, selling_price_usd) VALUES (7001, 'Far Away Blush Palette', 'Hourglass', 1, 1, 2);`)
+  seedFixture(h.raw.db, () => h.raw.db.exec(`INSERT INTO products(id, name, brand, is_active, cost_price_usd, selling_price_usd) VALUES (1999, 'Retired Blush Palette', 'Hourglass', 0, 1, 2);
+    INSERT INTO products(id, name, brand, is_active, cost_price_usd, selling_price_usd) VALUES (7001, 'Far Away Blush Palette', 'Hourglass', 1, 1, 2);`))
   return h
 }
 

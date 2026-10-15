@@ -1,4 +1,10 @@
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Cost-unknown lane, slice S3 (owner, 14 Oct 2026): "if cost is 0$ then it is 0
 // for loss. if it is none, it should also be unknown. flag it."
 //
@@ -70,7 +76,7 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
 
   async function sell(key, unitCostUsd) {
     const khr = unitCostUsd == null ? null : unitCostUsd * 4000
-    f.raw.prepare('UPDATE products SET cost_price_usd=?, cost_price_khr=? WHERE id=10').run([unitCostUsd, khr])
+    seedFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET cost_price_usd=?, cost_price_khr=? WHERE id=10').run([unitCostUsd, khr]))
     const posted = await h.postSale(f.route, { ...h.request(key), money_precision_version: 1, amount_paid_usd: 9.5 })
     assert.equal(posted.status, 200, JSON.stringify(posted.body))
     f.raw.prepare("UPDATE sales SET created_at='2026-09-13 01:00:00' WHERE id=?").run([posted.body.id])
@@ -300,9 +306,9 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
   })
 
   // ---- damaged-lot writers --------------------------------------------------
-  f.raw.prepare('UPDATE products SET cost_price_usd=9, cost_price_khr=36000 WHERE id=10').run()
-  f.raw.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(600,10,'Powder',1,5,5,3)").run()
-  f.raw.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(601,10,'Powder',1,5,5,NULL)").run()
+  seedFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET cost_price_usd=9, cost_price_khr=36000 WHERE id=10').run())
+  seedFixture(f.raw.db, () => f.raw.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(600,10,'Powder',1,5,5,3)").run())
+  seedFixture(f.raw.db, () => f.raw.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(601,10,'Powder',1,5,5,NULL)").run())
   async function sellDamaged(key, lotId, quantity = 1) {
     const base = h.request(key)
     const item = { product_id: 10, quantity, branch_id: 1, damaged_lot_id: lotId, applied_price_usd: 9.5, client_line_key: key, pricing_source: 'selling',

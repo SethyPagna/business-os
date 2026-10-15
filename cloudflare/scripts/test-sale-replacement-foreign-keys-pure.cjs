@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -30,10 +36,10 @@ function snapshot(db) {
   h.setUser({ ...h.USER, permissions: JSON.stringify({ all: true }) })
   const f = h.fixture(), errors = []
   f.raw.prepare("INSERT INTO users(id,username,name,password,is_active) VALUES(71,'sale_cashier','Sale Cashier','disposable-fixture',1)").run()
-  f.raw.prepare("INSERT INTO products(id,name,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(20,'Balm',10,3,12000,1.2345,4938,1)").run()
-  f.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(20,1,10)').run()
-  f.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(600,20,'balm-lot','BALM-LOT','2026-09-01',1,1)").run()
-  f.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,10)').run()
+  seedFixture(f.raw.db, () => f.raw.prepare("INSERT INTO products(id,name,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(20,'Balm',10,3,12000,1.2345,4938,1)").run())
+  seedFixture(f.raw.db, () => f.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(20,1,10)').run())
+  seedFixture(f.raw.db, () => f.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(600,20,'balm-lot','BALM-LOT','2026-09-01',1,1)").run())
+  seedFixture(f.raw.db, () => f.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,10)').run())
   f.raw.exec('PRAGMA foreign_keys=ON')
   assert.equal(f.raw.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
   assert.deepEqual(f.raw.prepare('PRAGMA foreign_key_check').all(), [])

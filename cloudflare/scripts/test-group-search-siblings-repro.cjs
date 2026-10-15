@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Regression test for the reported bug: searching a barcode/term that only
 // matches ONE row of a grouped product silently drops that group's sibling
 // rows (different branch/price/barcode) from the response entirely, so the
@@ -83,17 +89,17 @@ const insert = db.prepare(`INSERT INTO products
 // Three rows of the "same" product at different branches, each with its
 // own barcode/price -- exactly the reported scenario ("different
 // branches/prices/barcodes").
-insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-A', barcode: '6001000000011', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 5, parent_id: null })
-insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-B', barcode: '6001000000022', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 8, parent_id: null })
-insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-C', barcode: '6001000000033', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 2, parent_id: null })
+seedFixture(db, () => insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-A', barcode: '6001000000011', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 5, parent_id: null }))
+seedFixture(db, () => insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-B', barcode: '6001000000022', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 8, parent_id: null }))
+seedFixture(db, () => insert.run({ name: 'Blue Polo Shirt', sku: 'BPS-C', barcode: '6001000000033', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 2, parent_id: null }))
 
 // --- Case 2: explicit parent_id-linked family -------------------------
-const parentId = insert.run({ name: 'Red Sneaker', sku: 'RSN-P', barcode: '6002000000011', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 10, parent_id: null }).lastInsertRowid
-insert.run({ name: 'Red Sneaker', sku: 'RSN-42', barcode: '6002000000042', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 4, parent_id: parentId })
-insert.run({ name: 'Red Sneaker', sku: 'RSN-43', barcode: '6002000000043', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 6, parent_id: parentId })
+const parentId = seedFixture(db, () => insert.run({ name: 'Red Sneaker', sku: 'RSN-P', barcode: '6002000000011', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 10, parent_id: null })).lastInsertRowid
+seedFixture(db, () => insert.run({ name: 'Red Sneaker', sku: 'RSN-42', barcode: '6002000000042', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 4, parent_id: parentId }))
+seedFixture(db, () => insert.run({ name: 'Red Sneaker', sku: 'RSN-43', barcode: '6002000000043', brand: 'Nike', category: 'Footwear', supplier: 'Acme', unit: 'pcs', stock_quantity: 6, parent_id: parentId }))
 
 // --- Control: unrelated standalone product, must never be pulled in ---
-insert.run({ name: 'Green Hat', sku: 'GHT-1', barcode: '6003000000099', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 3, parent_id: null })
+seedFixture(db, () => insert.run({ name: 'Green Hat', sku: 'GHT-1', barcode: '6003000000099', brand: 'Acme', category: 'Apparel', supplier: 'Acme', unit: 'pcs', stock_quantity: 3, parent_id: null }))
 
 let passed = 0
 let failed = 0

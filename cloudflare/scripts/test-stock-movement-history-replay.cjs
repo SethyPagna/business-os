@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
 const tables = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'inventory_movements', 'stock_session_operations', 'stock_session_members', 'stock_session_revisions', 'stock_lot_adjustment_operations', 'action_history', 'undo_snapshots', 'audit_logs']
@@ -157,7 +163,7 @@ async function main() {
     const newest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     const again = (await preview(s, newest)).body.revert
     assert.deepEqual([again.direction, again.expectedGeneration], ['redo', 3])
-    s.sql.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run(batchId)
+    seedFixture(s.sql, () => s.sql.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run(batchId))
     const changed = state(s)
     assert.equal((await replay(s, again)).status, 409)
     assert.deepEqual(state(s), changed, 'a change that took the units the replay needs refuses it with no write')

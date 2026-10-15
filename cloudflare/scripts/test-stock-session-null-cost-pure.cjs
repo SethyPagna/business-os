@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // One meaning of NULL on every writer of inventory_movements.
 //
 // A NULL unit cost means "nobody recorded what this cost". Zero means "this
@@ -47,7 +53,7 @@ function fixture() {
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
-  sql.exec(`
+  seedFixture(sql, () => sql.exec(`
     INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1);
     INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1);
     INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json,generation)
@@ -60,7 +66,7 @@ function fixture() {
       VALUES('op-1','never-recorded','receive',1,0,1,100,3,NULL),
              ('op-1','declared-free','receive',1,0,1,101,2,0),
              ('op-1','legacy-snapshot','receive',1,0,1,102,4,1.234567);
-  `)
+  `))
   return sql
 }
 

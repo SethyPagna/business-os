@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
 const kernel = loadStockSession('lib/stockRevert.ts')
@@ -6,10 +12,10 @@ const actor = { userId: user.id, userName: user.name }
 const latest = f => f.sql.prepare('SELECT * FROM inventory_movements ORDER BY id DESC LIMIT 1').get()
 const state = f => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','inventory_movements'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 function seed(f, type = 'add') {
-  f.sql.exec(`UPDATE products SET stock_quantity=10 WHERE id=1; UPDATE branch_stock SET quantity=10 WHERE product_id=1 AND branch_id=1;
+  seedFixture(f.sql, () => f.sql.exec(`UPDATE products SET stock_quantity=10 WHERE id=1; UPDATE branch_stock SET quantity=10 WHERE product_id=1 AND branch_id=1;
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,payment_status,received_quantity,received_branch_id,received_cost_usd)
       VALUES(7001,1,'20260930-chain','fixture-chain','2026-09-30',1,1,4,'paid',10,1,40);
-    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(7001,1,10)`)
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(7001,1,10)`))
   return Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id)
     VALUES(1,1,?,10,4,40,'Synthetic direct stock action',7001)`).run(type).lastInsertRowid)
 }
