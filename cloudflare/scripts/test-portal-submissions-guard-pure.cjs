@@ -318,12 +318,13 @@ async function run() {
 
   let firstId = 0
   await check('a signed-in submission is attributed from the SESSION, not the body', async () => {
+    rawDb.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
     // The body names a DIFFERENT membership number. Under the old route that
     // string chose the customer; now it must be ignored entirely.
     const res = await request('/submissions', {
       method: 'POST',
       headers: { ...JSON_HEADERS, cookie: alice.cookie },
-      body: submissionBody({ membershipNumber: 'LC-90002' }),
+      body: submissionBody({ membershipNumber: 'LC-90002', loyalty_eligible: 0 }),
     })
     const body = await res.json()
     assert.strictEqual(res.status, 200, `submission failed: ${JSON.stringify(body)}`)
@@ -332,6 +333,8 @@ async function run() {
     assert.strictEqual(row.customer_id, alice.customerId, 'the submission was filed against the wrong customer')
     assert.strictEqual(row.membership_number, 'LC-90001', 'a membership number from the request body reached the row')
     assert.strictEqual(row.customer_name, 'Alice')
+    assert.strictEqual(rawDb.prepare('SELECT loyalty_eligible FROM customer_share_submissions WHERE id=?').get([firstId]).loyalty_eligible,1,'ON-created submission captures earning eligibility')
+    rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
   })
 
   await check('the image lands under the private prefix and the row holds a key, not a URL', async () => {
@@ -361,8 +364,11 @@ async function run() {
   await check('the fourth submission in 24 hours is refused', async () => {
     // One is already stored; two more reach the cap, the fourth must not.
     for (let i = 0; i < 2; i += 1) {
-      const ok = await request('/submissions', { method: 'POST', headers: { ...JSON_HEADERS, cookie: alice.cookie }, body: submissionBody() })
-      assert.strictEqual(ok.status, 200, `submission ${i + 2} failed: ${JSON.stringify(await ok.json())}`)
+      if(i===1)rawDb.prepare("DELETE FROM settings WHERE key='loyalty_points_enabled'").run()
+      const ok = await request('/submissions', { method: 'POST', headers: { ...JSON_HEADERS, cookie: alice.cookie }, body: submissionBody({loyalty_eligible:1}) })
+      assert.strictEqual(ok.status, 200, `submission ${i + 2} failed: ${JSON.stringify(await ok.clone().json())}`)
+      const inserted=await ok.json()
+      assert.strictEqual(rawDb.prepare('SELECT loyalty_eligible FROM customer_share_submissions WHERE id=?').get([inserted.id]).loyalty_eligible,0,'OFF-created submission stays ineligible')
     }
     const capped = await request('/submissions', { method: 'POST', headers: { ...JSON_HEADERS, cookie: alice.cookie }, body: submissionBody() })
     assert.strictEqual(capped.status, 429, 'the per-customer daily cap did not fire')
@@ -371,6 +377,29 @@ async function run() {
     assert.ok(capped.headers.get('retry-after'), 'a 429 must say when to come back')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n, 3)
     assert.strictEqual(bucket.objects.size, 3, 'a capped submission still uploaded its image')
+  })
+
+  await check('real submission and approval routes keep ON, OFF and absent birth authority', async () => {
+    staffUser={id:1,name:'Staff',username:'reviewer',role_code:'manager',permissions:JSON.stringify({customer_portal:true})}
+    rawDb.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'").run()
+    try{
+      const submissions=rawDb.prepare('SELECT id,loyalty_eligible FROM customer_share_submissions ORDER BY id').all()
+      assert.deepStrictEqual(submissions.map(row=>row.loyalty_eligible),[1,0,0],'client flags cannot override ON, OFF or absent switch')
+      for(const row of submissions){
+        const res=await request('/submissions/'+row.id+'/review',{method:'PATCH',headers:{...JSON_HEADERS,cookie:'bos_session=staff'},body:JSON.stringify({status:'approved',reward_points:5})})
+        const payload=await res.json()
+        assert.strictEqual(res.status,row.loyalty_eligible===1?200:400,JSON.stringify(payload))
+        const stored=rawDb.prepare('SELECT status,reward_points,loyalty_eligible FROM customer_share_submissions WHERE id=?').get([row.id])
+        if(row.loyalty_eligible===1)assert.deepStrictEqual({...stored},{status:'approved',reward_points:5,loyalty_eligible:1})
+        else{
+          assert.strictEqual(payload.code,'loyalty_points_disabled')
+          assert.deepStrictEqual({...stored},{status:'pending',reward_points:0,loyalty_eligible:0})
+        }
+      }
+    }finally{
+      staffUser=null
+      rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run()
+    }
   })
 
   await check('the review queue hands staff a positional URL, never the object key', async () => {
@@ -418,10 +447,14 @@ async function run() {
   await check('retention deletes reviewed images but keeps the row and its points', async () => {
     const keyBefore = JSON.parse(rawDb.prepare('SELECT screenshots_json FROM customer_share_submissions WHERE id = ?').get([firstId]).screenshots_json)[0]
     assert.ok(bucket.objects.has(keyBefore))
-    // Reviewed and approved, long ago.
-    rawDb.prepare(
-      "UPDATE customer_share_submissions SET status = 'approved', reward_points = 5, reviewed_at = @t WHERE id = @id",
-    ).run({ id: firstId, t: '2000-01-01 00:00:00' })
+    rawDb.prepare("UPDATE settings SET value='true' WHERE key='loyalty_points_enabled'").run()
+    try {
+      // Reviewed and approved, long ago.
+      rawDb.prepare(
+        "UPDATE customer_share_submissions SET status = 'approved', reward_points = 5, reviewed_at = @t WHERE id = @id",
+      ).run({ id: firstId, t: '2000-01-01 00:00:00' })
+
+    } finally { rawDb.prepare("UPDATE settings SET value='false' WHERE key='loyalty_points_enabled'").run() }
 
     await retention.maybeRunScheduledEphemeralRetention(env)
 
