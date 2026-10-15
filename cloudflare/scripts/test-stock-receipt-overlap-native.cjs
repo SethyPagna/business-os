@@ -115,9 +115,16 @@ async function main() {
     const f = await setup('correction')
     const db = f.load('lib/db.ts').getDb(f.env)
     const { withStockMutationReceipt } = f.load('lib/stockMutationReceipt.ts')
+    const { executeStockTransaction } = f.load('lib/stockTransaction.ts')
+    assert.throws(() => f.sql.exec('UPDATE branch_stock SET quantity=quantity+3'), /stock_transaction_required/)
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
     const send = () => withStockMutationReceipt(() => db, 1, 'adjust', { client_request_id: 'legacy-overlap-fixture', quantity: 3 }, json,
-      async mark => { await mark(); f.sql.exec('UPDATE branch_stock SET quantity=quantity+3'); return json({ success: true }) },
+      async mark => {
+        await mark()
+        await executeStockTransaction(db, [{ sql: 'UPDATE branch_stock SET quantity=quantity+3' }], 'retry')
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+        return json({ success: true })
+      },
       { requireReceipt: true })
     const firstClaim = pauseAfter(f, /INSERT INTO stock_mutation_receipts/, 'all')
     const original = send()
