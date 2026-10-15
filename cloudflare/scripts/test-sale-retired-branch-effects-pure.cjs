@@ -42,9 +42,8 @@ const Database = require('better-sqlite3')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-// OLD and BEFORE_FEES retain the original stock and expense defects; PRE_LR/POST_LR isolate inert statement parity.
+// OLD retains the original stock and expense defects; PRE_LR/POST_LR isolate inert statement parity.
 const ORACLE_OLD = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
-const ORACLE_BEFORE_FEES = '5e7a011a4ad7b7f8cd8a9581ab705283eedc92ec'
 const PRE_LR = '2ace6458d24383969ec10c403f7dd4e7c5075f29'
 const POST_LR = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
 const USER = { id: 71, username: 'owner', name: 'Owner', permissions: JSON.stringify({ all: true }) }
@@ -105,7 +104,6 @@ function makeWorld(oracleSha) {
 }
 const fresh = makeWorld(null)
 const old = makeWorld(ORACLE_OLD)
-const beforeFees = makeWorld(ORACLE_BEFORE_FEES)
 const historicalBefore = makeWorld(PRE_LR)
 const historicalCurrent = makeWorld(POST_LR)
 
