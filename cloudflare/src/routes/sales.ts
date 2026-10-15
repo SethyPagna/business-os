@@ -1383,9 +1383,6 @@ app.post('/', async (c) => {
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
       exchange_rate: exchangeRate,
-      // An explicit per-sale boolean wins in either direction. Missing or
-      // non-boolean values inherit the current setting. Persist that choice
-      // so a later default change cannot retroactively change this sale.
       loyalty_accrual: body.loyalty_accrual === false ? 0 : 1,
       subtotal_usd: subtotalUsd,
       subtotal_khr: multiplyMoney4(subtotalUsd,exchangeRate),

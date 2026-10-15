@@ -125,6 +125,8 @@ assert.throws(() => verifySwitchHint('Default points earning for each new order;
 assert.throws(() => verifySwitchHint('អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។', 'km'), 'old Khmer hint must fail the same contract')
 assert.match(localeCopy.en.behavior3, /before the reset or while loyalty was off/)
 assert.match(localeCopy.km.behavior3, /មុនការកំណត់ពិន្ទុឡើងវិញ.*ពិន្ទុសមាជិកបិទ/)
+assert.match(localeCopy.en.behavior3, /Paying while loyalty is off permanently skips earning/)
+assert.match(localeCopy.km.behavior3, /ការបង់ប្រាក់ពេលពិន្ទុសមាជិកបិទ.*ជាអចិន្ត្រៃយ៍/)
 const guidanceKeys = new Set(['membershipPointsEnabledHint', 'membershipPointsOff', 'behavior1', 'behavior2', 'behavior3', 'behavior4', 'attachHint'])
 const renderedGuidance = new Set<string>()
 function verifyFallbacks(node: ts.Node): void {

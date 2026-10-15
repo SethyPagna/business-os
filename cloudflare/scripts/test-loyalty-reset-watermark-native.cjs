@@ -25,7 +25,7 @@ await Promise.allSettled(pending);globalThis.caches=saved;return Response.json({
 async function main(){
 const bundle=await build({stdin:{resolveDir:root,loader:'ts',contents:script},bundle:true,write:false,platform:'browser',format:'esm',target:'es2022',external:['node:*','cloudflare:workers'],logLevel:'silent'})
 const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-08-01',compatibilityFlags:['nodejs_compat'],port:0,d1Databases:['DB'],kvNamespaces:['CACHE'],bindings:{PLAN_TIER:process.env.LOYALTY_TEST_TIER||'free',BUSINESS_OS_ADMIN_URL:'https://admin.scope.example'},log:new Log(LogLevel.ERROR)})
-const call=async input=>(await mf.dispatchFetch('http://local/',{method:'POST',body:JSON.stringify(input)})).json()
+const call=async input=>{const response=await mf.dispatchFetch('http://local/',{method:'POST',body:JSON.stringify(input)});const text=await response.text();try{return JSON.parse(text)}catch{throw new Error(input.op+': '+text)}}
 const seed=async statements=>{const r=await call({op:'seed',statements});assert.equal(r.ok,true,JSON.stringify(r))}
 try{
 const files=fs.readdirSync(path.join(root,'migrations')).filter(n=>n.endsWith('.sql')).sort()
@@ -66,11 +66,25 @@ assert.ok(/^WITH\b/i.test(checkSql)&&!/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE
 const opsCheck=async()=>(await call({op:"read",sql:checkSql}))[0]
 assert.equal((await request('/api/settings')).body.loyalty_points_enabled,'true','pre-reset settings read is primed ON')
 assert.equal((await request('/api/auth/bootstrap')).body.settings.loyalty_points_enabled,'true','pre-reset bootstrap read is primed ON')
+await seed([{sql:"INSERT INTO audit_logs(action,entity,entity_id,details,old_value,new_value) VALUES('update','sales',9002,'{\"synthetic_history\":true}','{\"sale_status\":\"completed\"}','{\"sale_status\":\"awaiting_payment\"}')"}])
+const historyBeforeReset={}
+for(const table of ['sales','returns','customer_share_submissions','loyalty_point_adjustments','audit_logs']){
+ const rows=await call({op:'read',sql:'SELECT * FROM '+table+' ORDER BY id'})
+ assert.ok(rows.length,'history preservation has a nonempty '+table+' witness')
+ historyBeforeReset[table]=rows
+}
 const resetStatements=split(fs.readFileSync(path.join(root,'migrations',files.find(isReset)),'utf8'))
 const failedReset=await call({op:'migrate',name:files.find(isReset),statements:[...resetStatements, 'SELECT * FROM synthetic_missing_reset_table']});assert.ok(failedReset.error,'failure control must refuse the migration')
 assert.equal((await call({op:'read',sql:"SELECT COUNT(*) n FROM system_flags WHERE key='loyalty_points_reset'"}))[0].n,0,'failed migration rolls back checkpoint')
 assert.equal((await call({op:'read',sql:"SELECT COUNT(*) n FROM pragma_table_info('customer_share_submissions') WHERE name='loyalty_eligible'"}))[0].n,0,'failed migration rolls back ALTER and triggers')
 assert.equal((await call({op:'migrate',name:files.find(isReset),statements:resetStatements})).ok,true)
+for(const [table,before] of Object.entries(historyBeforeReset)){
+ const columns=Object.keys(before[0]).join(',')
+ const after=await call({op:'read',sql:'SELECT '+columns+' FROM '+table+' WHERE id IN ('+before.map(row=>row.id).join(',')+') ORDER BY id'})
+ assert.deepEqual(after,before,'reset preserves every original '+table+' field')
+ const count=(await call({op:'read',sql:'SELECT COUNT(*) n FROM '+table}))[0].n
+ assert.equal(count,before.length+(table==='audit_logs'?1:0),'reset adds only its audit event; no business history is added or removed')
+}
 const mark=(await call({op:'read',sql:"SELECT value FROM system_flags WHERE key='loyalty_points_reset'"}))[0]
 assert.ok(mark && JSON.parse(mark.value).sales === 9002, 'reset captures immutable sales identity')
 assert.equal((await call({op:'read',sql:"SELECT value FROM settings WHERE key='loyalty_points_enabled'"}))[0].value,'false','reset defaults loyalty off')
@@ -205,6 +219,28 @@ await switchTo('true')
 await seed([{sql:"INSERT INTO sales(receipt_number,customer_id,total_usd,sale_status) VALUES('BLANK-IDENTITY',9904,2,'awaiting_payment')"}])
 await switchTo('false')
 await seed([{sql:"UPDATE sales SET sale_status='completed' WHERE receipt_number='BLANK-IDENTITY'"}]);assert.equal(await call({op:'pointsRaw',customerId:9904}),0,'blank identity cannot inherit any earned decision')
+await switchTo('true')
+await seed([{sql:"INSERT INTO customers(id,name,membership_number) VALUES(9905,'Synthetic identity encoding','LC-9905')"},{sql:"INSERT INTO sales(receipt_number,client_request_id,customer_id,total_usd,sale_status,loyalty_accrual) VALUES('NUL-IDENTITY',?,9905,2,'awaiting_payment',1)",params:['prefix\0A']}])
+const nulIdentity=(await call({op:'read',sql:"SELECT * FROM sales WHERE receipt_number='NUL-IDENTITY'"}))[0]
+await seed([{sql:'UPDATE sales SET sale_status=? WHERE id=?',params:['completed',nulIdentity.id]}]);assert.equal(await call({op:'pointsRaw',customerId:9905}),3)
+await switchTo('false');await restoreSale({...nulIdentity,client_request_id:'prefix\0B'})
+await seed([{sql:'UPDATE sales SET sale_status=? WHERE id=?',params:['completed',nulIdentity.id]}])
+assert.equal(await call({op:'pointsRaw',customerId:9905}),0,'different full identities sharing a NUL prefix cannot inherit an earned decision')
+await seed([{sql:"INSERT INTO customers(id,name,membership_number) VALUES(9906,'Synthetic payment endpoint','LC-9906')"}])
+await switchTo('true')
+const pendingRoute=await request('/api/sales',{...ownCheckout(true,'birth-first-payment-off-route'),customer_id:9906,sale_status:'awaiting_payment',amount_paid_usd:0});assert.equal(pendingRoute.status,200,JSON.stringify(pendingRoute.body))
+const routeUnpaid=(await call({op:'read',sql:"SELECT * FROM sales WHERE client_request_id='birth-first-payment-off-route'"}))[0]
+await switchTo('false')
+const paymentBody={client_request_id:'loyalty-route-first-payment-off',sale_status:'completed',expected_exchange_rate:4000,payment_details:[{method:'Cash',amount_usd:9.5,amount_khr:0}]}
+const paidOff=await request('/api/sales/'+routeUnpaid.id+'/status',paymentBody,'PATCH');assert.equal(paidOff.status,200,JSON.stringify(paidOff.body))
+const paymentState=async()=>({sale:await call({op:'read',sql:'SELECT * FROM sales WHERE id='+routeUnpaid.id}),decision:await call({op:'read',sql:"SELECT value FROM system_flags WHERE key=printf('loyalty_sale_earning:%d:%s',"+routeUnpaid.id+",hex('birth-first-payment-off-route'))"}),audit:await call({op:'read',sql:'SELECT * FROM audit_logs WHERE entity_id='+routeUnpaid.id+' ORDER BY id'})})
+const paidOffState=await paymentState();assert.deepEqual(paidOffState.decision,[{value:'skipped'}],'payment saves a terminal skip against the creation identity')
+assert.ok(paidOffState.audit.length,'actual settlement writes audit history');assert.equal(paidOffState.sale[0].amount_paid_usd,9.5)
+const paidOffRetry=await request('/api/sales/'+routeUnpaid.id+'/status',paymentBody,'PATCH');assert.equal(paidOffRetry.status,200,JSON.stringify(paidOffRetry.body))
+assert.deepEqual(await paymentState(),paidOffState,'repeating settlement preserves the sale, terminal decision and payment history')
+await parity(0,'actual payment while OFF never earns',9906)
+await switchTo('true');await parity(0,'actual payment remains skipped after enabling',9906)
+await switchTo('false')
 const portal=await request('/api/portal/membership/LC-9903');assert.equal(portal.status,403,'public membership stays disabled')
 console.log('PASS loyalty reset: immutable identity, future/same-second history, reward re-review, preserved returns/redemption, reader parity, default off, first-payment OFF permanence, restore identity and idempotent audited migration')
 }finally{await mf.dispose()}

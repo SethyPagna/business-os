@@ -630,9 +630,6 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // showing a balance the shop has switched off -- which is exactly the
     // Part-77 defect: POS displayed a balance and checkout then refused it.
     //
-    // Defaults to ON. A shop that has never touched this setting must accrue
-    // exactly as it did before the switch existed; only an explicit off
-    // changes anything.
     loyaltyPointsEnabled: loyaltyPointsEnabled(settings.loyalty_points_enabled),
     pointsBasis,
     pointsPerUsd,

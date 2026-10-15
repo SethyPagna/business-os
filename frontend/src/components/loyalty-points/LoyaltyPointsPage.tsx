@@ -147,7 +147,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'How points move',
     behavior1: 'Eligible completed sales earn points based on the active earning basis.',
     behavior2: 'Returns reverse points only for sales that earned them.',
-    behavior3: 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points.',
+    behavior3: 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points. Paying while loyalty is off permanently skips earning, even if it was on when the sale was created.',
     behavior4: 'Attaching a customer later adds points only for an eligible sale.',
     attachHint: 'Use Sales > sale details > attach customer to link an eligible anonymous sale to a member.',
     pointsPreview: 'Current policy preview',
@@ -208,7 +208,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'របៀបផ្លាស់ប្តូរពិន្ទុ',
     behavior1: 'ការលក់ដែលបានបញ្ចប់ និងមានសិទ្ធិ ទទួលបានពិន្ទុតាមគោលការណ៍ដែលបានជ្រើស។',
     behavior2: 'ការបង្វិលទំនិញកាត់ពិន្ទុតែពីការលក់ដែលបានទទួលពិន្ទុប៉ុណ្ណោះ។',
-    behavior3: 'ការលក់មិនទាន់បង់ប្រាក់ និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុទេ។ ការបញ្ចប់ការលក់ដែលបង្កើតមុនការកំណត់ពិន្ទុឡើងវិញ ឬពេលពិន្ទុសមាជិកបិទ មិនបន្ថែមពិន្ទុទេ។',
+    behavior3: 'ការលក់មិនទាន់បង់ប្រាក់ និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុទេ។ ការបញ្ចប់ការលក់ដែលបង្កើតមុនការកំណត់ពិន្ទុឡើងវិញ ឬពេលពិន្ទុសមាជិកបិទ មិនបន្ថែមពិន្ទុទេ។ ការបង់ប្រាក់ពេលពិន្ទុសមាជិកបិទ នឹងមិនទទួលបានពិន្ទុជាអចិន្ត្រៃយ៍ ទោះបីបានបើកពេលបង្កើតការលក់ក៏ដោយ។',
     behavior4: 'ការភ្ជាប់អតិថិជនពេលក្រោយ បន្ថែមពិន្ទុតែសម្រាប់ការលក់ដែលមានសិទ្ធិប៉ុណ្ណោះ។',
     attachHint: 'ប្រើ Sales > sale details > attach customer ដើម្បីភ្ជាប់ការលក់អនាមិកដែលមានសិទ្ធិទៅសមាជិក។',
     pointsPreview: 'ការមើលជាមុននៃច្បាប់បច្ចុប្បន្ន',
@@ -816,7 +816,7 @@ export default function LoyaltyPointsPage() {
                   <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     <li>{copy('behavior1', 'Eligible completed sales earn points based on the active earning basis.')}</li>
                     <li>{copy('behavior2', 'Returns reverse points only for sales that earned them.')}</li>
-                    <li>{copy('behavior3', 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points.')}</li>
+                    <li>{copy('behavior3', 'Not Paid and cancelled sales do not earn points. Completing a sale created before the reset or while loyalty was off does not add points. Paying while loyalty is off permanently skips earning, even if it was on when the sale was created.')}</li>
                     <li>{copy('behavior4', 'Attaching a customer later adds points only for an eligible sale.')}</li>
                   </ul>
                   <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{copy('attachHint', 'Use Sales > sale details > attach customer to link an eligible anonymous sale to a member.')}</p>

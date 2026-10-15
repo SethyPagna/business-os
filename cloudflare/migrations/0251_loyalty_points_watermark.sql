@@ -2,13 +2,13 @@ ALTER TABLE customer_share_submissions ADD COLUMN loyalty_eligible INTEGER NOT N
 
 -- Restore preserves captured birth flags; normal writes remain fenced while the old Worker serves traffic.
 CREATE TRIGGER loyalty_sale_birth_off AFTER INSERT ON sales
-WHEN (NOT (lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on')) AND NOT (EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'))) OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id) AND value = 'skipped')
+WHEN (NOT (lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on')) AND NOT (EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'))) OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)) AND value = 'skipped')
 BEGIN
   UPDATE sales SET loyalty_accrual = 0 WHERE id = NEW.id;
 END;
 
 CREATE TRIGGER loyalty_sale_birth_immutable BEFORE UPDATE OF loyalty_accrual ON sales
-WHEN COALESCE(NEW.loyalty_accrual,1) <> 0 AND (COALESCE(OLD.loyalty_accrual,1) = 0 OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id) AND value = 'skipped'))
+WHEN COALESCE(NEW.loyalty_accrual,1) <> 0 AND (COALESCE(OLD.loyalty_accrual,1) = 0 OR EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)) AND value = 'skipped'))
 BEGIN
   SELECT RAISE(ABORT, 'loyalty_creation_eligibility_immutable');
 END;
@@ -22,10 +22,10 @@ END;
 CREATE TRIGGER loyalty_sale_earning_on_insert AFTER INSERT ON sales
 WHEN NEW.loyalty_accrual = 1 AND NULLIF(NEW.client_request_id,'') IS NOT NULL
   AND COALESCE(NULLIF(NEW.sale_status,''),'completed') NOT IN ('awaiting_payment','cancelled')
-  AND ((lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on')) OR EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')) AND NOT (EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id) AND value = 'skipped'))
+  AND ((lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on')) OR EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')) AND NOT (EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)) AND value = 'skipped'))
 BEGIN
   INSERT OR IGNORE INTO system_flags(key,value,updated_at)
-    VALUES(printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id),'earned',CURRENT_TIMESTAMP);
+    VALUES(printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)),'earned',CURRENT_TIMESTAMP);
 END;
 
 -- The first earning decision survives restoring an older unpaid sale snapshot.
@@ -33,9 +33,9 @@ CREATE TRIGGER loyalty_sale_first_earning AFTER UPDATE OF sale_status ON sales
 WHEN NEW.loyalty_accrual = 1 AND COALESCE(NULLIF(NEW.sale_status,''),'completed') NOT IN ('awaiting_payment','cancelled') AND NOT (EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'))
 BEGIN
   INSERT OR IGNORE INTO system_flags(key,value,updated_at)
-    SELECT printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id),CASE WHEN lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on') THEN 'earned' ELSE 'skipped' END,CURRENT_TIMESTAMP
+    SELECT printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)),CASE WHEN lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on') THEN 'earned' ELSE 'skipped' END,CURRENT_TIMESTAMP
     WHERE NULLIF(NEW.client_request_id,'') IS NOT NULL OR NOT (lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1','true','yes','on'));
-  UPDATE sales SET loyalty_accrual = 0 WHERE id = NEW.id AND EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,NEW.client_request_id) AND value = 'skipped');
+  UPDATE sales SET loyalty_accrual = 0 WHERE id = NEW.id AND EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',NEW.id,hex(NEW.client_request_id)) AND value = 'skipped');
 END;
 
 CREATE TRIGGER loyalty_submission_birth_off AFTER INSERT ON customer_share_submissions
