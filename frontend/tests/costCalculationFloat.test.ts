@@ -57,6 +57,16 @@ await runTest('formatCostFormula reads the catalog mean even for widely separate
   assert.equal(formatCostFormula([2, 200], 101), '(2.00 + 200.00) / 2 = 101.00')
 })
 
+await runTest('cost formulas preserve four decimal places and keep exact cents familiar', () => {
+  for (const [cost, text] of [[5.1234, '5.1234'], [5.123, '5.123'], [5.12, '5.12'], [5, '5.00'], [0, '0.00']] as const) {
+    assert.equal(formatCostFormula([cost], cost), `(${text}) / 1 = ${text}`)
+    assert.equal(costBreakdownFormat.formatWeightedCostFormula([{ cost_usd: cost, quantity: 3 }], 3, cost), `(3 × ${text}) / 3 = ${text}`)
+  }
+  assert.equal(formatCostFormula([1.2345, 5.1234], 3.1789), '(1.2345 + 5.1234) / 2 = 3.1789')
+  assert.equal(formatCostFormula([5], null), '')
+  assert.equal(costBreakdownFormat.formatWeightedCostFormula([{ cost_usd: 5.1234, quantity: 0 }], 0, 5.1234), '')
+})
+
 // ---------------------------------------------------------------------------
 // Exclusion labelling -- every reason the breakdown can report gets its own
 // i18n key, and an included input (excluded: null) gets none.
@@ -202,6 +212,19 @@ function renderBreakdown(payload: unknown, canViewCosts = true): string {
     fmtUSD: (value: number) => `$${value.toFixed(2)}`, fmtKHR: (value: number) => `${value} KHR`,
   }))
 }
+
+await runTest('actual cost float keeps four-decimal weighted and legacy formula values', () => {
+  const payload = {
+    product_id: 42,
+    inputs: [{ source: 'lot', label: 'Precise receipt', cost_usd: 5.1234, weight_quantity: 3 }],
+    distinct_usd: [5.1234], mean_usd: 5.1234, result_usd: 5.1234,
+  }
+  const legacy = renderBreakdown(payload)
+  assert.ok(legacy.includes('(5.1234) / 1 = 5.1234'))
+  const weighted = { ...payload, weighted_terms: [{ cost_usd: 5.1234, quantity: 3 }], weighted_quantity: 3 }
+  assert.ok(renderBreakdown(weighted).includes('(3 × 5.1234) / 3 = 5.1234'))
+  assert.equal(renderBreakdown(weighted, false), '')
+})
 
 await runTest('manual cost history preserves exact previous values and renders compact old-to-new without inventing zero', () => {
   const payload = {

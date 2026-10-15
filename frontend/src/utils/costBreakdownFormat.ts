@@ -69,9 +69,8 @@ export type CostBreakdown = {
   result_khr: number | null
 }
 
-/** Fixed 2dp, matching the owner's own example ("3.00 + 5.00) / 2 = 4.00") -- the stored figure keeps 4dp precision, only the reading is trimmed. */
-function fixed2(value: number): string {
-  return (Number.isFinite(value) ? value : 0).toFixed(2)
+function formulaCostText(value: number): string {
+  return (Number.isFinite(value) ? value : 0).toFixed(4).replace(/(\.\d{2}\d*?)0+$/, '$1')
 }
 
 /**
@@ -80,8 +79,8 @@ function fixed2(value: number): string {
  */
 export function formatCostFormula(distinctUsd: number[], meanUsd: number | null): string {
   if (!distinctUsd.length || meanUsd == null) return ''
-  const sum = distinctUsd.map(fixed2).join(' + ')
-  return `(${sum}) / ${distinctUsd.length} = ${fixed2(meanUsd)}`
+  const sum = distinctUsd.map(formulaCostText).join(' + ')
+  return `(${sum}) / ${distinctUsd.length} = ${formulaCostText(meanUsd)}`
 }
 
 /** A quantity as the shelf counts it: whole units bare, fractions to at most 3dp. */
@@ -95,8 +94,8 @@ function quantityText(value: number): string {
  */
 export function formatWeightedCostFormula(terms: Array<{ cost_usd: number; quantity: number }>, totalQuantity: number, resultUsd: number | null): string {
   if (!terms.length || !(totalQuantity > 0) || resultUsd == null) return ''
-  const sum = terms.map((term) => `${quantityText(term.quantity)} × ${fixed2(term.cost_usd)}`).join(' + ')
-  return `(${sum}) / ${quantityText(totalQuantity)} = ${fixed2(resultUsd)}`
+  const sum = terms.map((term) => `${quantityText(term.quantity)} × ${formulaCostText(term.cost_usd)}`).join(' + ')
+  return `(${sum}) / ${quantityText(totalQuantity)} = ${formulaCostText(resultUsd)}`
 }
 
 /** The formula line for any payload: weighted when the Worker sent terms, the legacy distinct mean otherwise. */

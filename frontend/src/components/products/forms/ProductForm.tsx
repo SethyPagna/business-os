@@ -1322,7 +1322,7 @@ function ProductFormContent({
       return
     }
     if (canEditCosts && [canViewCosts ? form.cost_price_usd : blindCostInputs.usd, canViewCosts ? form.cost_price_khr : blindCostInputs.khr].some(value => !isValidCostInput(value))) {
-      alert(tr('cost_input_invalid', 'Enter a valid cost from 0 to 100,000,000,000, or leave it blank for unknown.'))
+      notify(tr('cost_input_invalid', 'Enter a valid cost from 0 to 100,000,000,000, or leave it blank for unknown.'), 'error')
       return
     }
     saveInFlightRef.current = true
