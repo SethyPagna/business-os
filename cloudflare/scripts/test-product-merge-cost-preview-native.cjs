@@ -84,6 +84,17 @@ async function main(){
   assert.equal(stale.status,409)
   assert.equal((await merge({keepId:20,mergeId:21,keep:true,stock:'merge'})).status,200)
  })
+ for(const phase of ['none','between_reads','before_fold'])await check('modern pair atomic PCE race '+phase,async()=>{
+  const {seen}=await quote(),before=rows('SELECT * FROM products ORDER BY id'),events=rows('SELECT * FROM audit_logs ORDER BY id')
+  const insert=()=>state.native.db.exec("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(20,42,'manual',0)")
+  const batch=adapter.batch
+  if(phase==='before_fold')state.beforeFold=insert
+  else if(phase==='between_reads')adapter.batch=statements=>{const result=batch(statements);if(statements.some(s=>s.sql.includes('FROM product_cost_entries WHERE product_id IN'))){adapter.batch=batch;insert()}return result}
+  try{
+   const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge',cost_review:{version:1,reviewed_digest:seen.body.reviewedDigest}})
+   assert.equal(done.status,phase==='none'?200:409,JSON.stringify(done.body));if(phase!=='none'){assert.deepEqual(rows('SELECT * FROM products ORDER BY id'),before);assert.deepEqual(rows('SELECT * FROM audit_logs ORDER BY id'),events)}
+  }finally{adapter.batch=batch}
+ })
  console.log('Merge cost preview '+count+' groups passed')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

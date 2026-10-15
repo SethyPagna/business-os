@@ -9084,7 +9084,9 @@ app.post('/possible-duplicates/merge', async (c) => {
       || !/^[a-f0-9]{64}$/.test(review.reviewed_digest)) return c.json({ code: 'invalid_resolve_plan' }, 400)
     const current = await readResolveProductGroup(db, [keepId, mergeId], keepId)
     if (current.reviewedDigest !== review.reviewed_digest) return c.json({ code: 'merge_state_conflict' }, 409)
-    await resolveProductFingerprint(db, [keepId, mergeId], resolveGuards, true)
+    if (await resolveProductFingerprint(db, [keepId, mergeId], resolveGuards, true) !== current.fingerprints[[keepId, mergeId].sort((a,b)=>a-b).join(',')]) {
+      return c.json({ code: 'merge_state_conflict' }, 409)
+    }
   }
   if (resolve !== undefined) {
     if (!keepMode || !resolve || typeof resolve.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(resolve.requestId)
@@ -9241,11 +9243,11 @@ app.post('/possible-duplicates/merge', async (c) => {
       keepMode ? 'resolve grid keep merge' : 'possible-duplicates review merge',
       stockChoice ?? 'merge',
       undefined,
-      { operationId, costAuthorityVersion: 3,
+      { operationId, costAuthorityVersion: 3, preStatements: resolveGuards,
         ...(resolvePlan ? { costFallback: {
           usd: costOrNull(resolvePlan.rows.find(row => Number(row.id) === keepId)?.cost_price_usd),
           khr: costOrNull(resolvePlan.rows.find(row => Number(row.id) === keepId)?.cost_price_khr),
-        }, preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
+        }, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
       keepMode ? { follows: true, requiresProductEdit: resolveChoicesTypeValues({ choices }), ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {
