@@ -1,4 +1,3 @@
-const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // PROD-PERM follow-up (loophole review N6): POST /products/bulk-price-adjust is a RELATIVE change ("add 1.00 to every
 // price"), so a retry after a lost response used to apply it a second time. The apply now carries a client request id;
 // the receipt is the route's own audit row, claimed in the same D1 batch as the price writes. Real routes/products.ts
@@ -7,6 +6,7 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 //
 // Run (from cloudflare/): node scripts/test-products-bulk-price-adjust-idempotency-native.cjs
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 

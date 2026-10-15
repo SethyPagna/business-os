@@ -1,5 +1,5 @@
-const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 'use strict'
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 

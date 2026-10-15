@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -32,6 +33,16 @@ if (process.argv.includes('--wrong-guard')) receiving.receivingBranchAssertion =
 const { D1Compat } = load('lib/db.ts')
 const lot = load('lib/stockLotAdjustment.ts')
 const app = new Hono()
+const workerTree = ts.createSourceFile('index.ts', fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
+const workerErrorStatement = workerTree.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
+  && node.expression.expression.getText(workerTree) === 'app.onError')
+assert.ok(workerErrorStatement, 'the real Worker global error handler exists')
+const errorDependencies = { app, ...load('lib/stockTransaction.ts'), ...load('lib/productStockGuard.ts'),
+  ...load('lib/reportMoneyPrecision.ts'), ...load('lib/errorReporting.ts') }
+const workerErrorCode = ts.transpileModule(workerErrorStatement.getText(workerTree), { compilerOptions: {
+  module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+} }).outputText
+new Function(...Object.keys(errorDependencies), workerErrorCode)(...Object.values(errorDependencies))
 app.route('/api/inventory', load('routes/inventory.ts').default)
 app.route('/api/batches', load('routes/batches.ts').default)
 function world({ operations = true, active = true } = {}) {
@@ -42,15 +53,16 @@ function world({ operations = true, active = true } = {}) {
   assert.equal(raw.limits.exprDepth, 100)
   raw.exec('PRAGMA foreign_keys=OFF')
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(file => file.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
-  raw.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,${active ? 1 : 0});
+  seedStockFixture(raw, () => raw.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,${active ? 1 : 0});
     INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(1,'Serum','SER',2,0,10,1);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active)
       VALUES(10,1,'OLD','OLD','2026-09-02',1,3,1),(11,1,'NEW','NEW','2026-09-09',2,5,1);
-    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(10,1,3),(11,1,7);`)
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(10,1,3),(11,1,7);`))
+  assert.throws(() => raw.prepare('UPDATE branch_stock SET quantity=quantity WHERE product_id=1').run(), /stock_transaction_required/)
   raw.exec('PRAGMA foreign_keys=ON')
   if (!operations) raw.exec('DROP TABLE stock_lot_adjustment_operations')
-  const control = { before: null, failAfter: false, batches: 0, barrier: 0 }
+  const control = { before: null, beforeMatch: null, failAfter: false, batches: 0, barrier: 0 }
   function prepared(sql, values = []) {
     const execute = () => {
       assert(values.length <= 100, 'D1 bind limit')
@@ -67,7 +79,7 @@ function world({ operations = true, active = true } = {}) {
   }
   const env = { DB: { prepare: prepared, batch: async statements => {
     control.batches++
-    if (control.before) { const action = control.before; control.before = null; action(raw) }
+    if (control.before && (!control.beforeMatch || control.beforeMatch(statements))) { const action = control.before; control.before = null; action(raw, statements) }
     raw.exec('BEGIN IMMEDIATE')
     try {
       const results = statements.map(statement => statement.execute())
@@ -165,15 +177,32 @@ async function main() {
     assert.deepEqual(quantities(f), [1,8,8])
   })
   await check('state CAS and maintenance race remain atomic', async () => {
-    for (const maintenance of [false,true]) {
-      const f = world(); let before
-      f.control.before = raw => {
-        raw.exec(maintenance ? `INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')` : 'UPDATE branch_stock SET quantity=11 WHERE product_id=1')
+    function arrange(f, maintenance) {
+      let before
+      f.control.beforeMatch = statements => statements.some(statement => /^\s*(INSERT INTO|UPDATE) branch_stock\b/i.test(statement.sql))
+      f.control.before = (raw, statements) => {
+        assert.ok(f.control.beforeMatch(statements), 'the race happens at the prepared physical batch')
+        seedStockFixture(raw, () => raw.exec(maintenance ? `INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')` : 'UPDATE branch_stock SET quantity=11 WHERE product_id=1'))
+        assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+        if (maintenance) assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, '{"mode":"restore"}')
+        else assert.equal(raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 11)
         before = snapshot(f)
       }
-      const result = await apply(f)
-      assert.equal(result.status, maintenance ? 503 : 409); assert.equal(snapshot(f), before)
+      return () => { assert.equal(typeof before, 'string', 'the competing write actually ran'); return before }
     }
+    const changed = world(), changedBefore = arrange(changed, false)
+    const conflict = await apply(changed)
+    assert.equal(conflict.status, 409); assert.equal(snapshot(changed), changedBefore())
+    const held = world(), heldBefore = arrange(held, true)
+    await assert.rejects(() => apply(held), error => error instanceof load('lib/stockTransaction.ts').StockTransactionUnavailableError
+      && error.code === 'stock_schema_unavailable')
+    assert.equal(snapshot(held), heldBefore())
+    const routed = world(), beforeHttp = snapshot(routed), routedBefore = arrange(routed, true)
+    const response = await http(routed, 'adjust')
+    assert.equal(response.status, 503, JSON.stringify(response.body)); assert.equal(response.body.code, 'stock_schema_unavailable')
+    const interimClaims = JSON.parse(routedBefore()).find(([table]) => table === 'stock_mutation_receipts')[1]
+    assert.equal(interimClaims.length, 1); assert.equal(interimClaims[0].written, 0)
+    assert.equal(snapshot(routed), beforeHttp, 'refused HTTP removes its unwritten claim and preserves every business/history table')
   })
   await check('positive receiving guard also covers missing operation schema', async () => {
     for (const active of [false,true]) {
