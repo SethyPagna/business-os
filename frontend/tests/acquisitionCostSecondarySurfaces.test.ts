@@ -58,6 +58,19 @@ for (const language of ['en', 'km']) {
   }))
   assert.ok(renderFill(null).includes(`line-through opacity-60">${labels.cost_unknown}</span>`), `${language}: real cost-fill component shows unknown keeper`)
   assert.ok(renderFill(0).includes('line-through opacity-60">$0</span>'), `${language}: recorded zero remains numeric`)
+  for (const field of ['cost_price_usd', 'cost_price_khr']) {
+    const renderCost = (value: number, average: boolean) => renderToStaticMarkup(React.createElement(Dialog, {
+      ...props, t: (key: string) => labels[key] || key,
+      identity: { same: true, differs: [], costVerdict: average ? 'differs' : 'missing', costBefore: { [field]: average ? 5.1234 : null }, costAfter: { [field]: value }, costFill: average ? [] : [{ field, value }] },
+      pricing: { before: {}, after: {}, changes: [{ field: 'selling_price_usd', from: 12.34, to: 13.45 }, { field: 'wholesale_price_usd', from: 8.76, to: 9.87 }] },
+    }))
+    for (const value of [5.1234, 5.1244]) {
+      assert.ok(renderCost(value, false).includes(String(value)), `${language} ${field}: distinct cost source ${value}`)
+    }
+    const average = renderCost(5.1244, true)
+    assert.ok(average.includes('5.1234') && average.includes('5.1244'), `${language} ${field}: both average endpoints retain precision`)
+    for (const price of ['$12.34', '$13.45', '$8.76', '$9.87']) assert.ok(average.includes(price), `ordinary price remains ${price}`)
+  }
 }
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')

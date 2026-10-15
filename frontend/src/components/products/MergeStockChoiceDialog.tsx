@@ -110,6 +110,10 @@ const IDENTITY_FIELD_LABEL: Record<string, [string, string]> = {
 
 function formatPrice(field: string, value: number): string {
   const amount = Number(value) || 0
+  if (field.startsWith('cost_price_')) {
+    const cost = amount.toLocaleString('en-US', { maximumFractionDigits: 4 })
+    return field.endsWith('_khr') ? `${cost}៛` : `$${cost}`
+  }
   return field.endsWith('_khr')
     ? `${Math.round(amount).toLocaleString('en-US')}៛`
     : `$${amount % 1 === 0 ? amount : amount.toFixed(2)}`
