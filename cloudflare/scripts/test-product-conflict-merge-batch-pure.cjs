@@ -88,13 +88,14 @@ for (const [rows, code] of [
   [[row(1, '123400', 0, { name: '  ' }), row(2, '123400', 0, { name: '' })], 'incompatible_product_identity'],
   [[row(1, '123400'), row(2, '123400', 0, { name: 'Other' })], 'incompatible_product_identity'],
   [[row(1, '123400'), row(2, '567800')], 'incompatible_product_identity'],
-  [[row(1, '123400'), row(2, '123400', 0, { cost_price_usd: 400 })], 'cost_outlier_review'],
   [[row(1, '123400'), row(2, '123400', 0, { selling_price_usd: -1 })], 'invalid_merge_numeric'],
 ]) {
   const refusal = selected.chooseProductConflictMergePair(rows)
   assert.equal(refusal.eligible, false)
   assert.equal(refusal.code, code)
 }
+
+assert.equal(selected.chooseProductConflictMergePair([row(1, '123400'), row(2, '123400', 0, { cost_price_usd: 400 })]).eligible, true, 'catalog cost spread does not override received/manual/keeper authority')
 
 async function main() {
   const a = await selected.productConflictSha256({ z: 1, a: [{ b: 2, a: 1 }] })

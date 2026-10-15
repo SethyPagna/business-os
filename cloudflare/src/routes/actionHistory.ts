@@ -431,7 +431,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const branchClosure = branchCutoverClosureRefusal(existing)
     if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
     const mergeCostReplay = parseJson(existing.undo_payload)?.applier === 'product.merge' && parseJson(existing.undo_payload)?.merge_version === 3
-    if (!Number(existing.reversible || 0) && !(mergeCostReplay && existing.status === 'recorded')) {
+    const pendingGroupPointer = parseJson(existing.redo_payload)
+    const groupReceiptRetry = direction === 'redo' && pendingGroupPointer?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
+      && pendingGroupPointer?.merge_version === 3 && Object.keys(pendingGroupPointer).sort().join(',') === 'applier,generation,group_key,merge_version,operation_id,review_id,snapshot_id'
+    if (!Number(existing.reversible || 0) && !((mergeCostReplay || groupReceiptRetry) && existing.status === 'recorded')) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }
     const currentStatus = String(existing.status || '').toLowerCase()
