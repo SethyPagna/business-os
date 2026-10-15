@@ -7223,7 +7223,7 @@
   "selected_conflict_keeper": "ទំនិញដែលត្រូវរក្សាទុក",
   "selected_conflict_choose_source": "ជ្រើសទំនិញប្រភព",
   "selected_conflict_source_only_note": "ជ្រើសទំនិញដែលមានស្រាប់ជាប្រភពសម្រាប់វាលនីមួយៗ។ ការកែបាកូដដោយដៃមិនមែនជាផ្នែកនៃការពិនិត្យនេះទេ។",
-  "selected_conflict_group_cost_rule": "ថ្លៃដើមប្រើមធ្យមភាគនៃតម្លៃខុសៗគ្នាដែលមិនមែនសូន្យពីក្រុមដើម ហើយតម្លៃលក់ប្រើតម្លៃអតិបរមាពីក្រុមដើម។",
+  "selected_conflict_group_cost_rule": "តម្លៃលក់ និងតម្លៃលក់ដុំប្រើតម្លៃខ្ពស់បំផុតនៃក្រុមដើម។",
   "selected_conflict_no_stock_rows": "គ្មានស្តុកតាមសាខា",
   "selected_conflict_projected_quantity": "បរិមាណដែលបានគ្រោង",
   "selected_conflict_empty_page": "មិនមានសកម្មភាពនៅលើទំព័រនេះទេ។",
@@ -7552,4 +7552,12 @@
   "cost_review_confirm_failed": "មិនអាចបញ្ជាក់តម្លៃដើមបានទេ។ សូមព្យាយាមបញ្ជាក់ដដែលម្ដងទៀត។"
 ,
   "cost_review_changed": "ផលិតផលត្រូវការពិនិត្យតម្លៃដើមថ្មី។ សូមបិទ ហើយបើកការគណនារបស់វាម្ដងទៀត។"
+,
+  "selected_conflict_cost_after_finalize": "តម្លៃដើមត្រូវបានគណនាបន្ទាប់ពីជម្រើសត្រូវបានកំណត់រួច។"
+,
+  "merge_cost_source_received_lot": "តម្លៃដើមទទួលដែលបានគណនា"
+,
+  "merge_cost_source_manual": "តម្លៃដើមកំណត់ដោយដៃដែលបានរក្សាទុក"
+,
+  "merge_cost_source_keeper_fallback": "តម្លៃដើមផលិតផលដែលបានរក្សាទុក"
 }

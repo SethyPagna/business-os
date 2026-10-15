@@ -11,6 +11,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
+import { formatMergeCost, readGroupCostAuthorities, type MergeCostAuthority } from '../../utils/mergeCostPreview.ts'
 import type {
   SelectedConflictGroupReviewGroup,
   SelectedConflictGroupReviewResult,
@@ -57,7 +58,15 @@ function optionalMoney(value: unknown, format: (value: unknown) => string, unkno
   return format(Number(value))
 }
 
-function GroupMoneyRows({ group, t }: { group: SelectedConflictGroupReviewGroup; t: Translate }) {
+function GroupCostRow({ authority, frozen, t }: { authority: MergeCostAuthority | null; frozen: boolean; t: Translate }) {
+  const tr = (key: string, fallback: string) => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
+  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" role="status"><span>{tr('cost_price', 'Cost')}</span>{authority ? <><strong>{formatMergeCost(authority.cost_price_usd, 'usd')}</strong>{authority.cost_price_khr !== null ? <span>{formatMergeCost(authority.cost_price_khr, 'khr')}</span> : null}{authority.needsReview ? <span>{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}<span className="text-gray-500 dark:text-gray-400">{tr(`merge_cost_source_${authority.source}`, authority.source === 'manual' ? 'Saved manual cost' : authority.source === 'keeper_fallback' ? 'Saved product cost' : 'Calculated received cost')}</span></> : <span>{frozen ? tr('merge_cost_preview_unavailable', 'Cost preview unavailable') : tr('selected_conflict_cost_after_finalize', 'Cost is calculated after choices are frozen.')}</span>}</div>
+}
+
+function GroupMoneyRows({ group, authority, frozen, t }: { group: SelectedConflictGroupReviewGroup; authority: MergeCostAuthority | null; frozen: boolean; t: Translate }) {
   const { fmtUSD, fmtKHR, user } = useApp()
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string) => {
@@ -67,11 +76,11 @@ function GroupMoneyRows({ group, t }: { group: SelectedConflictGroupReviewGroup;
   const merged = group.economics.merged
   return (
     <div className="space-y-1 text-xs">
-      {canViewCosts ? <div className="flex justify-between gap-2"><span>{tr('cost_price', 'Cost')}</span><span>{optionalMoney(merged.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div> : null}
+      {canViewCosts ? <GroupCostRow authority={authority} frozen={frozen} t={t} /> : null}
       <div className="flex justify-between gap-2"><span>{tr('selling_price', 'Selling price')}</span><span>{optionalMoney(merged.selling_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.selling_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div>
       <div className="flex justify-between gap-2"><span>{tr('wholesale_price', 'Wholesale price')}</span><span>{optionalMoney(merged.wholesale_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.wholesale_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400">
-        {tr('selected_conflict_group_cost_rule', 'Cost uses the mean of distinct non-zero values from the original group; prices use the original group maximum.')}
+        {tr('selected_conflict_group_cost_rule', 'Selling and wholesale prices use the original group maximum.')}
       </p>
     </div>
   )
@@ -175,10 +184,11 @@ function GroupBarcodeSelect({ group, choice, disabled, onChoice, t }: {
   )
 }
 
-function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
+function GroupReviewCard({ group, choice, choicesFrozen, authority, onChoice, t }: {
   group: SelectedConflictGroupReviewGroup
   choice: SelectedConflictGroupResolutionChoice | undefined
   choicesFrozen: boolean
+  authority: MergeCostAuthority | null
   onChoice: (patch: Partial<SelectedConflictGroupResolutionChoice>) => void
   t: Translate
 }) {
@@ -263,7 +273,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
             <GroupSourceSelect label={tr('unit', 'Unit')} field="unit_source_id" ids={group.options.unit_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
           </div>
           <p className="text-[11px] text-blue-800 dark:text-blue-200">{tr('selected_conflict_source_only_note', 'Choose an existing product as the source for each field. Manual barcode editing is not part of this review.')}</p>
-          <GroupMoneyRows group={group} t={t} />
+          <GroupMoneyRows group={group} authority={authority} frozen={choicesFrozen} t={t} />
           <div className="space-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
             {group.stock.projected_by_branch.map((row) => <div key={row.branch_id}>{row.branch_name || `#${row.branch_id}`}: {row.quantity}</div>)}
             <div>{group.lots.count} {tr('selected_conflict_lots', 'received dates')} · {tr('selected_conflict_projected_quantity', 'projected quantity')} {group.lots.projected_quantity}</div>
@@ -322,6 +332,8 @@ export function SelectedConflictGroupReviewModal({
   applyError, unknownOutcome, onChoice, onPreviousPage, onNextPage, onFinalize, onApply, onResume, onClose, t,
 }: GroupReviewProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const { user } = useApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
   const review = pages[pageIndex]
   if (!review) return null
   const tr = (key: string, fallback: string) => {
@@ -345,10 +357,12 @@ export function SelectedConflictGroupReviewModal({
     review.counts.actionable_groups + review.counts.blocked_groups + review.counts.requested_removals,
   )
   const allGroups = pages.flatMap((item) => item.page.groups)
+  const costAuthorities = finalized ? readGroupCostAuthorities(review.review_id, allGroups, choices, finalized) : null
+  const costReady = !canViewCosts || Boolean(finalized && costAuthorities)
   const allChoicesComplete = selectedConflictGroupChoicesComplete(allGroups, choices)
   const canGoNext = pageIndex < pages.length - 1 || review.page.next_cursor != null
   const canFinalize = progress.complete && allChoicesComplete && !working && !finalized
-  const canResume = Boolean(finalized) && !working && applyError?.code !== 'review_reversed'
+  const canResume = Boolean(finalized) && costReady && !working && applyError?.code !== 'review_reversed'
     && (unknownOutcome || (!applyError && Boolean(applyResult?.continuation_required)))
   const processed = applyResult
     ? applyResult.counts.committed_folds + applyResult.counts.completed_removals + applyResult.counts.approval_pending_removals
@@ -408,7 +422,7 @@ export function SelectedConflictGroupReviewModal({
             </div>
           ) : null}
 
-          {review.page.groups.map((group) => <GroupReviewCard key={`${review.review_id}-${group.ordinal}`} group={group} choice={choices[group.group_key]} choicesFrozen={Boolean(finalized)} onChoice={(patch) => onChoice(group.group_key, patch)} t={t} />)}
+          {review.page.groups.map((group) => <GroupReviewCard key={`${review.review_id}-${group.ordinal}`} group={group} choice={choices[group.group_key]} authority={costAuthorities?.get(group.group_key) ?? null} choicesFrozen={Boolean(finalized)} onChoice={(patch) => onChoice(group.group_key, patch)} t={t} />)}
           {review.page.removals.map((removal) => <RemovalReviewCard key={`${review.review_id}-remove-${removal.action_ordinal}`} removal={removal} t={t} />)}
           {!review.page.groups.length && !review.page.removals.length ? <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-zinc-900 dark:text-gray-400">{tr('selected_conflict_empty_page', 'No actions are on this page.')}</p> : null}
 
@@ -442,7 +456,7 @@ export function SelectedConflictGroupReviewModal({
               </ModalCloseContext.Consumer>
               {canResume ? <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={onResume}>{tr('selected_conflict_resume_same_review', 'Resume same review')}</button> : null}
               {!applyResult || applyResult.continuation_required ? (
-                <button type="button" className="btn-primary px-3 py-2 text-sm disabled:opacity-40" disabled={working || (!finalized && !canFinalize)} onClick={() => { void prepareConfirmation() }}>
+                <button type="button" className="btn-primary px-3 py-2 text-sm disabled:opacity-40" disabled={working || (finalized ? !costReady : !canFinalize)} onClick={() => { void prepareConfirmation() }}>
                   {working ? tr('saving', 'Saving...') : finalized ? tr('selected_conflict_group_apply_button', 'Apply reviewed actions') : tr('selected_conflict_continue_confirmation', 'Continue to confirmation')}
                 </button>
               ) : null}
@@ -463,10 +477,13 @@ export function SelectedConflictGroupReviewModal({
           ]}
           note={tr('selected_conflict_group_confirm_note', 'Every committed merge or removal has a stable receipt and an Undo path; approval-pending removals remain unchanged.')}
           confirmLabel={tr('selected_conflict_group_apply_button', 'Apply reviewed actions')}
-          onConfirm={() => { setConfirmOpen(false); onApply() }}
+          confirmDisabled={working || !costReady}
+          onConfirm={() => { if (!costReady || working) return; setConfirmOpen(false); onApply() }}
           onClose={() => setConfirmOpen(false)}
           t={t}
-        />
+        >
+          {canViewCosts ? <div className="space-y-2">{allGroups.filter(group => !group.blocked).map(group => <div key={group.group_key} className="min-w-0 rounded border border-gray-200 p-2 dark:border-gray-700"><div className="mb-1 break-words text-xs font-medium">{group.members.find(member => member.id === choices[group.group_key]?.keeper_id)?.name || group.group_key}</div><GroupCostRow authority={costAuthorities?.get(group.group_key) ?? null} frozen t={t} /></div>)}</div> : null}
+        </ConfirmDialog>
       ) : null}
     </>
   )

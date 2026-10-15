@@ -7223,7 +7223,7 @@
   "selected_conflict_keeper": "Kept product",
   "selected_conflict_choose_source": "Choose source product",
   "selected_conflict_source_only_note": "Choose an existing product as the source for each field. Manual barcode editing is not part of this review.",
-  "selected_conflict_group_cost_rule": "Cost uses the mean of distinct non-zero values from the original group; prices use the original group maximum.",
+  "selected_conflict_group_cost_rule": "Selling and wholesale prices use the original group maximum.",
   "selected_conflict_no_stock_rows": "No branch stock",
   "selected_conflict_projected_quantity": "projected quantity",
   "selected_conflict_empty_page": "No actions are on this page.",
@@ -7552,4 +7552,12 @@
   "cost_review_confirm_failed": "Could not confirm the cost. Retry the original confirmation."
 ,
   "cost_review_changed": "The product needs a new cost review. Close and reopen its calculation."
+,
+  "selected_conflict_cost_after_finalize": "Cost is calculated after choices are frozen."
+,
+  "merge_cost_source_received_lot": "Calculated received cost"
+,
+  "merge_cost_source_manual": "Saved manual cost"
+,
+  "merge_cost_source_keeper_fallback": "Saved product cost"
 }

@@ -31,6 +31,29 @@ export function mergeCostReviewMatches(review: MergeCostReview | undefined, grou
 
 export type MergeCostQuotation = {costAuthority:MergeCostAuthority; costReview:MergeCostReview}
 
+export function readGroupCostAuthorities(
+  reviewId: string,
+  groups: readonly { group_key: string; member_ids: number[]; blocked: unknown }[],
+  choices: Readonly<Record<string, { keeper_id?: number } | undefined>>,
+  finalized: { review_id: string; manifest_digest: string; counts: { ready_groups: number }; costAuthorities?: unknown },
+): Map<string, MergeCostAuthority> | null {
+  if (finalized.review_id !== reviewId || !/^[a-f0-9]{64}$/.test(finalized.manifest_digest) || !Array.isArray(finalized.costAuthorities)
+    || new Set(groups.map(group => group.group_key)).size !== groups.length) return null
+  const ready = groups.filter(group => !group.blocked)
+  if (finalized.counts.ready_groups !== ready.length || finalized.costAuthorities.length !== ready.length) return null
+  const expected = new Map(ready.map(group => [group.group_key, group]))
+  const result = new Map<string, MergeCostAuthority>()
+  try {
+    for (const entry of finalized.costAuthorities) {
+      if (!entry || typeof entry !== 'object' || typeof entry.group_key !== 'string' || result.has(entry.group_key)) return null
+      const group = expected.get(entry.group_key), keeper = choices[entry.group_key]?.keeper_id
+      if (!group || !Number.isSafeInteger(keeper) || !group.member_ids.includes(Number(keeper))) return null
+      result.set(entry.group_key, readMergeCostAuthority(entry.costAuthority, Number(keeper)))
+    }
+    return result
+  } catch { return null }
+}
+
 export function readMergeCostQuotation(value: unknown, keeperId: number): MergeCostQuotation {
   const raw=value as {costAuthority?:unknown;costReview?:Partial<MergeCostReview>} | null
   const review=raw?.costReview
