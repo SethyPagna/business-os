@@ -15,7 +15,7 @@ rate AS (
 ledger AS (
   SELECT s.customer_id AS customer_id,
     (CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') <> 'awaiting_payment' AND COALESCE(s.loyalty_accrual, 1) = 1
-      AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',s.id,s.client_request_id) AND value = 'skipped')
+      AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',s.id,hex(s.client_request_id)) AND value = 'skipped')
       THEN CASE WHEN r.basis = 'khr' THEN COALESCE(s.total_khr, 0) * r.per_khr ELSE COALESCE(s.total_usd, 0) * r.per_usd END ELSE 0 END
      - COALESCE(s.membership_points_redeemed, 0)) AS points,
     CASE WHEN s.id > COALESCE(json_extract(r.since, '$.sales'), 0) THEN 1 ELSE 0 END AS since_ok
@@ -29,7 +29,7 @@ ledger AS (
   FROM returns rt CROSS JOIN rate r LEFT JOIN sales rs ON rs.id = rt.sale_id
   WHERE rt.customer_id IS NOT NULL AND COALESCE(NULLIF(rt.status, ''), 'completed') <> 'cancelled'
     AND COALESCE(rt.return_scope, 'customer') <> 'supplier' AND COALESCE(rs.loyalty_accrual, 1) <> 0
-    AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',rs.id,rs.client_request_id) AND value = 'skipped')
+    AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = printf('loyalty_sale_earning:%d:%s',rs.id,hex(rs.client_request_id)) AND value = 'skipped')
   UNION ALL
   SELECT cs.customer_id, COALESCE(cs.reward_points, 0),
     CASE WHEN cs.id > COALESCE(json_extract(r.since, '$.submissions'), 0) AND cs.loyalty_eligible = 1 THEN 1 ELSE 0 END
