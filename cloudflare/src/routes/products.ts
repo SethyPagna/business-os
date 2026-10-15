@@ -1,4 +1,4 @@
-import { mergeCostContinuationGuard } from '../lib/undoAppliers'
+import { mergeCostContinuationGuard, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
 import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
@@ -62,6 +62,8 @@ import {
   PRODUCT_CONFLICT_ACTION_PAGE_MAX,
   PRODUCT_CONFLICT_ACTION_READ_CHUNK,
   PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS,
+  PRODUCT_CONFLICT_ACTION_MAX_GROUPS,
+  PRODUCT_CONFLICT_ACTION_MAX_MEMBERS,
   PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES,
   PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES,
   PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP,
@@ -5151,12 +5153,59 @@ function parseLeadingZeroManifestGroups(value: unknown): LeadingZeroMergeManifes
   return groups.sort((a, b) => a.keeper_id - b.keeper_id)
 }
 
+type BulkCostReviewGroup = { keeper_id: number; member_ids: number[]; reviewed_digest: string }
+type BulkCostReview = { version: 1; reviewed_digest: string; groups: BulkCostReviewGroup[] }
+
+async function bulkCostReviewDigest(groups: BulkCostReviewGroup[]): Promise<string> {
+  return resolveProductDigest({ domain: 'product_merge_bulk_cost_review', version: 1, groups })
+}
+
+async function parseBulkCostReview(value: unknown): Promise<BulkCostReview | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const review = value as BulkCostReview
+  if (Object.keys(value).some(key => !['version','reviewed_digest','groups'].includes(key)) || review.version !== 1
+    || typeof review.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(review.reviewed_digest)
+    || !Array.isArray(review.groups) || review.groups.length > PRODUCT_CONFLICT_ACTION_MAX_GROUPS) return null
+  const seen = new Set<number>()
+  for (const [index, group] of review.groups.entries()) {
+    if (!group || typeof group !== 'object' || Object.keys(group).some(key => !['keeper_id','member_ids','reviewed_digest'].includes(key))
+      || !Number.isSafeInteger(group.keeper_id) || group.keeper_id <= 0 || (index > 0 && group.keeper_id <= review.groups[index-1].keeper_id)
+      || typeof group.reviewed_digest !== 'string' || !/^[a-f0-9]{64}$/.test(group.reviewed_digest)
+      || !Array.isArray(group.member_ids) || group.member_ids.length < 2 || group.member_ids.length > 12 || !group.member_ids.includes(group.keeper_id)) return null
+    for (const [i,id] of group.member_ids.entries()) {
+      if (!Number.isSafeInteger(id) || id <= 0 || seen.has(id) || (i > 0 && id <= group.member_ids[i-1])) return null
+      seen.add(id)
+    }
+  }
+  if (seen.size > PRODUCT_CONFLICT_ACTION_MAX_MEMBERS || await bulkCostReviewDigest(review.groups) !== review.reviewed_digest) return null
+  return review
+}
+
+async function readBulkCostReviews(db: ReturnType<typeof getDb>, groups: DuplicateProductGroup[]) {
+  const ids = groups.map(group => [group.canonical.id,...group.duplicates.map(row=>row.id)].sort((a,b)=>a-b))
+  if (groups.length > PRODUCT_CONFLICT_ACTION_MAX_GROUPS || new Set(ids.flat()).size > PRODUCT_CONFLICT_ACTION_MAX_MEMBERS) throw new MergeCostPreviewUnavailableError()
+  const snapshots = await readMergeReviewGroups(db, ids)
+  let bytes = 0, lots = 0
+  for (const snapshot of snapshots) {
+    const groupBytes = new TextEncoder().encode(JSON.stringify(snapshot.graph)).length
+    const groupLots = (snapshot.graph.batches as unknown[]).length
+    bytes += groupBytes; lots += groupLots
+    if (groupBytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES || groupLots > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP) throw new MergeCostPreviewUnavailableError()
+  }
+  if (bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES || lots > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW) throw new MergeCostPreviewUnavailableError()
+  return Promise.all(groups.map(async (group,index) => ({ ...snapshots[index],
+    approval: { keeper_id: group.canonical.id, member_ids: ids[index], reviewed_digest: (await mergeCostReviewQuote(
+      await resolveProductDigest(snapshots[index].graph), group.canonical.id,
+      group.duplicates.map(row=>({mergeId:row.id,stock:'merge' as const})).sort((a,b)=>a.mergeId-b.mergeId))).reviewed_digest },
+  })))
+}
+
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const db = getDb(c.env)
+  const counted = createCountedProductMergeDb(getDb(c.env)), db = counted.db
   const rawScope = c.req?.query?.('scope')
   if (rawScope !== undefined && rawScope !== LEADING_ZERO_MERGE_SCOPE) {
     return c.json({ success: false, error: 'Unsupported duplicate merge scope.' }, 400)
@@ -5204,9 +5253,6 @@ app.get('/merge-duplicates/preview', async (c) => {
         batchCount: previewCatalog.activeBatchCountByProductId.get(dup.id) || 0,
       }))
 
-      // WHAT THIS RUN WILL DO TO THE COST, which no preview said before.
-      // A merge takes one mean over the whole cluster's distinct valid
-      // non-zero costs. It never averages an already-averaged keeper again.
       const costRows = [group.canonical.id, ...duplicateIds]
         .map((id) => previewCatalog.moneyByProductId.get(id))
         .filter((row): row is Record<string, unknown> => !!row)
@@ -5306,6 +5352,32 @@ app.get('/merge-duplicates/preview', async (c) => {
     })),
   } : undefined
 
+  let costReview: BulkCostReview | undefined
+  let costAuthorityUnavailable: { code: string } | undefined
+  if (canViewAcquisitionCosts(user)) {
+    const quotedGroups = (scope ? manifestGroups : groups.filter(group => previewGroups.find(row=>row.canonicalId===group.canonical.id)?.mergeable))
+      .sort((a,b)=>a.canonical.id-b.canonical.id)
+    const members = new Set(quotedGroups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
+    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100 || counted.statementCount() + Math.ceil(members.size/80)*8 + 1 > getPlanLimits(c.env).d1QueriesPerInvocation) {
+      costAuthorityUnavailable = { code: 'resolve_plan_budget' }
+    } else if (quotedGroups.length) {
+      try {
+        const reviews = await readBulkCostReviews(db, quotedGroups)
+        const graph = Object.fromEntries(['products','batches','batchStock','currentCostEntries'].map(key=>[key,reviews.flatMap(row=>row.graph[key] as Record<string,unknown>[])])) as MergeCostPreviewGraph
+        const authorities = await previewMergeCosts(db, graph, quotedGroups.map(group=>({keepId:group.canonical.id,
+          steps:group.duplicates.map(row=>({mergeId:row.id,stock:'merge' as const})).sort((a,b)=>a.mergeId-b.mergeId)})))
+        for (const authority of authorities) {
+          const row = previewGroups.find(group=>group.canonicalId===authority.keeperId)!
+          Object.assign(row,{costAuthority:authority,costAfter:{cost_price_usd:authority.cost_price_usd,cost_price_khr:authority.cost_price_khr}})
+        }
+        const approved = reviews.map(row=>row.approval)
+        costReview = { version:1,reviewed_digest:await bulkCostReviewDigest(approved),groups:approved }
+      } catch (error) {
+        if (!(error instanceof MergeCostPreviewUnavailableError)) throw error
+        costAuthorityUnavailable = { code:error.code }
+      }
+    }
+  }
   return c.json({
     success: true,
     ...(scope ? { scope } : {}),
@@ -5317,6 +5389,8 @@ app.get('/merge-duplicates/preview', async (c) => {
     costRefusalCount: previewGroups.reduce((sum, g) => sum + g.costRefusals.length, 0),
     batchLimit: 25,
     ...(scope ? { applyManifest } : {}),
+    ...(costReview ? { costReview } : {}),
+    ...(costAuthorityUnavailable ? { costAuthorityUnavailable } : {}),
   })
 })
 
@@ -5452,6 +5526,10 @@ app.post('/merge-duplicates', async (c) => {
   const countedDb = createCountedProductMergeDb(getDb(c.env))
   const db = countedDb.db
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const modernCostReview = Object.hasOwn(requestBody, 'cost_review')
+  const approvedCostReview = modernCostReview ? await parseBulkCostReview(requestBody.cost_review) : null
+  if (modernCostReview && !approvedCostReview) return c.json({ code:'invalid_resolve_plan' },400)
+  if (modernCostReview && getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({ code:'resolve_plan_budget' },409)
   const rawScope = requestBody.scope
   if (rawScope !== undefined && rawScope !== LEADING_ZERO_MERGE_SCOPE) {
     return c.json({ success: false, error: 'Unsupported duplicate merge scope.' }, 400)
@@ -5460,7 +5538,7 @@ app.post('/merge-duplicates', async (c) => {
   let scopedManifestGroups: LeadingZeroMergeManifestGroup[] | null = null
   let scopedManifestDigest: string | null = null
   if (scope) {
-    const allowedKeys = new Set(['scope', 'manifest_version', 'manifest_digest', 'groups', 'client_request_id'])
+    const allowedKeys = new Set(['scope', 'manifest_version', 'manifest_digest', 'groups', 'client_request_id', 'cost_review'])
     const unknownKeys = Object.keys(requestBody).filter((key) => !allowedKeys.has(key))
     scopedManifestGroups = parseLeadingZeroManifestGroups(requestBody.groups)
     scopedManifestDigest = typeof requestBody.manifest_digest === 'string' ? requestBody.manifest_digest : null
@@ -5473,12 +5551,23 @@ app.post('/merge-duplicates', async (c) => {
   const requestId = rawRequestId && rawRequestId.length <= 120 ? rawRequestId : null
   const requestStartedAt = Date.now()
   const detectedGroups = await findDuplicateProductGroups(db)
-  let groups = detectedGroups
+  if (approvedCostReview?.groups.length) {
+    const activeRows = await db.prepare('SELECT id,is_active FROM products WHERE id IN (SELECT value FROM json_each(@ids))')
+      .all<{id:number;is_active:number}>({ids:JSON.stringify(approvedCostReview.groups.flatMap(group=>group.member_ids))})
+    const active = new Map(activeRows.map(row=>[row.id,Number(row.is_active)]))
+    for (const approved of approvedCostReview.groups) {
+      if (!detectedGroups.some(group=>group.canonical.id===approved.keeper_id)
+        && (active.get(approved.keeper_id)!==1 || approved.member_ids.some(id=>id!==approved.keeper_id && active.get(id)!==0))) {
+        return c.json({code:'merge_state_conflict',error:'The approved group changed. Review it before continuing.'},409)
+      }
+    }
+  }
+  let groups = approvedCostReview ? detectedGroups.filter(group=>approvedCostReview.groups.some(approved=>approved.keeper_id===group.canonical.id)) : detectedGroups
   const scopedApprovedGraphs = new Map<number, LeadingZeroApprovedGraph>()
   const scopedApprovedPlans = new Map<number, { plan: ProductMergeClusterPlan; resumed: boolean }>()
   let scopedCatalogForAtomic: DuplicatePreviewCatalog | null = null
   if (scope) {
-    const leadingZeroGroups = detectedGroups.filter(isLeadingZeroDuplicateGroup)
+    const leadingZeroGroups = groups.filter(isLeadingZeroDuplicateGroup)
     const byKeeperId = new Map(leadingZeroGroups.map((group) => [group.canonical.id, group]))
     const requestedGroups: DuplicateProductGroup[] = []
     for (const manifestGroup of scopedManifestGroups!) {
@@ -5525,6 +5614,29 @@ app.post('/merge-duplicates', async (c) => {
     }
     groups = requestedGroups
   }
+  const costReviewedGroups = new Map<number, Awaited<ReturnType<typeof readBulkCostReviews>>[number]>()
+  if (approvedCostReview && groups.length) {
+    for (const group of groups) {
+      const approved = approvedCostReview.groups.find(row=>row.keeper_id===group.canonical.id)
+      const members = [group.canonical.id,...group.duplicates.map(row=>row.id)].sort((a,b)=>a-b)
+      if (!approved || members.length!==approved.member_ids.length || members.some((id,index)=>id!==approved.member_ids[index])) {
+        return c.json({ code:'merge_state_conflict', error:'This group changed or was partly merged. Review the remaining group before continuing.' },409)
+      }
+      group.duplicates.sort((a,b)=>a.id-b.id)
+    }
+    const members = new Set(groups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
+    if (countedDb.statementCount()+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
+    try {
+      const reviews = await readBulkCostReviews(db,groups)
+      for (const review of reviews) {
+        if (review.approval.reviewed_digest!==approvedCostReview.groups.find(row=>row.keeper_id===review.approval.keeper_id)?.reviewed_digest) return c.json({ code:'merge_state_conflict' },409)
+        costReviewedGroups.set(review.approval.keeper_id,review)
+      }
+    } catch (error) {
+      if (error instanceof MergeCostPreviewUnavailableError) return c.json({ code:error.code },409)
+      throw error
+    }
+  }
   const remainingProductsBefore = groups.reduce((sum, group) => sum + group.duplicates.length, 0)
   if (!groups.length) {
     return c.json({
@@ -5566,8 +5678,6 @@ app.post('/merge-duplicates', async (c) => {
   // stock-in session must not have that session broken underneath it.
   const refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }> = []
   // Bounded, resumable work: each request commits at most this many products.
-  // The next request simply re-scans the remaining active identities. A whole
-  // identity cluster is never split, preserving one global DISTINCT cost mean.
   mergeGroups: try {
     for (const group of groups) {
       if (mergedProductsCount > 0 && mergedProductsCount + group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
@@ -5587,10 +5697,6 @@ app.post('/merge-duplicates', async (c) => {
       const mergedIds: number[] = []
       const mergedNames: (string | null)[] = []
 
-    // Never split one identity cluster across requests: doing so would feed a
-    // previously averaged keeper back into the next mean. A cluster larger
-    // than the transaction budget is quarantined for a dedicated manifest
-    // workflow instead of issuing an unbounded D1 batch.
     if (group.duplicates.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER) {
       for (const dup of group.duplicates) {
         refusals.push({
@@ -5709,9 +5815,22 @@ app.post('/merge-duplicates', async (c) => {
     // successful case's atomic snapshot. If a later case fails after an
     // earlier one committed, the next request recovers the original raw
     // DISTINCT costs instead of averaging the synthetic keeper again.
+    let priorCostOperation: string | null = null
     for (const dup of group.duplicates) {
       let stopAfterCommittedCase = false
       try {
+        const costGuards: AtomicMergeStatement[] = []
+        const costReviewed = costReviewedGroups.get(canonicalId)
+        if (costReviewed) {
+          if (priorCostOperation) {
+            const saved = await db.prepare(`SELECT id,status,payload_json FROM undo_snapshots WHERE kind='product.merge'
+              AND json_extract(payload_json,'$.operationId')=@operationId ORDER BY id DESC LIMIT 1`)
+              .get<{id:number;status:string;payload_json:string}>({operationId:priorCostOperation})
+            if (!saved || saved.status!=='applied') throw new Error('merge_state_conflict')
+            costGuards.push(await mergeCostContinuationGuard(db,JSON.parse(saved.payload_json) as MergeReversal,saved.id,saved.payload_json))
+            costGuards.push(...mergeReviewGroupGuards(costReviewed.graph,group.duplicates.slice(mergedIds.length).map(row=>row.id)))
+          } else costGuards.push(...mergeReviewGroupGuards(costReviewed.graph,ids))
+        }
         const operationId = crypto.randomUUID()
         const result = await foldDuplicateProductInto(
           c.env, db, user,
@@ -5725,17 +5844,17 @@ app.post('/merge-duplicates', async (c) => {
             operationId,
             bulkClusterPlan: clusterPlan,
             resumedCluster: resumedCluster || mergedIds.length > 0,
+            preStatements: [...costGuards,...(scope && scopedApprovedGraphs.has(canonicalId)
+              ? leadingZeroScopeAtomicAssertions(group,scopedApprovedGraphs.get(canonicalId)!,scopedCatalogForAtomic!.cachedStockByProductId) : [])],
             ...(scope ? {
               preparedSnapshot: scopedApprovedGraphs.get(canonicalId)?.snapshot,
               preparedDependentLotSnapshots: scopedApprovedGraphs.get(canonicalId)?.dependentLots,
-              preStatements: scopedApprovedGraphs.has(canonicalId)
-                ? leadingZeroScopeAtomicAssertions(group, scopedApprovedGraphs.get(canonicalId)!, scopedCatalogForAtomic!.cachedStockByProductId)
-                : [],
             } : {}),
           },
         )
         if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
         if (result.operationId) mergeOperationIds.push(result.operationId)
+        priorCostOperation = result.operationId
         if (!result.undoReady) {
           undoPendingCount += 1
           if (result.operationId) undoPendingOperationIds.push(result.operationId)
@@ -5791,11 +5910,14 @@ app.post('/merge-duplicates', async (c) => {
     interruptionCode = 'merge_infrastructure_interrupted'
   }
 
+  if (approvedCostReview && mergedProductsCount===0 && refusals.some(row=>row.code==='merge_state_conflict')) {
+    return c.json({ success:false,code:'merge_state_conflict',refusals },409)
+  }
   let remainingGroups: Awaited<ReturnType<typeof findDuplicateProductGroups>> | null = null
   if (!interruptionCode) {
     try {
       const refreshedGroups = await findDuplicateProductGroups(db)
-      remainingGroups = scope
+      remainingGroups = scope || approvedCostReview
         ? refreshedGroups.filter((group) => groups.some((selected) => selected.canonical.id === group.canonical.id))
         : refreshedGroups
     } catch (error) {
@@ -5834,13 +5956,6 @@ app.post('/merge-duplicates', async (c) => {
     remainingProductsBefore,
     remainingProducts,
     remainingGroupCount: remainingGroups?.length ?? null,
-    // Because a cluster is never split, the exact conservative request bound
-    // is one remaining group per call rather than ceil(products / 25).
-    // A normal budget yield can continue under the same operator confirmation.
-    // The groups seen at this call's initial scan are a conservative ceiling:
-    // every successful continuation must complete at least one whole group.
-    // Infrastructure failures keep this null because they require a fresh
-    // reconciliation instead of automatic retries.
     maxAdditionalRequests: interruptionCode === 'merge_budget_reached'
       ? groups.length
       : remainingGroups?.length ?? null,
@@ -8864,6 +8979,11 @@ async function resolveProductDigest(value: unknown): Promise<string> {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function mergeCostReviewQuote(graphDigest: string, keeperId: number, steps: ResolveProductStep[]) {
+  return { version: 1 as const, reviewed_digest: await resolveProductDigest({ domain: 'product_merge_cost_review', version: 1,
+    graphDigest, keeperId, steps: steps.map(step => ({ mergeId: step.mergeId, stock: step.stock ?? 'merge' })) }) }
+}
+
 async function resolveProductFingerprint(db: ReturnType<typeof getDb>, ids: number[], guards?: AtomicMergeStatement[], currentCostEntries = false) {
   // The existing graph fingerprint also supplies transaction guards for stock,
   // lots, images and links. Never expose its unredacted JSON to the browser.
@@ -8917,7 +9037,8 @@ app.post('/resolve/cost-preview', async (c) => {
   if (group.reviewedDigest !== body.reviewedDigest) return c.json({ code: 'merge_state_conflict' }, 409)
   try {
     const [costAuthority] = await previewMergeCosts(db, group.graph, [{ keepId, steps }])
-    return c.json({ success: true, reviewedDigest: group.reviewedDigest, keepId, steps, costAuthority })
+    return c.json({ success: true, reviewedDigest: group.reviewedDigest, keepId, steps, costAuthority,
+      costReview: await mergeCostReviewQuote(group.reviewedDigest, keepId, steps) })
   } catch (error) {
     if (error instanceof MergeCostPreviewUnavailableError) return c.json({ success: true, blocked: { code: error.code } })
     throw error
@@ -8985,13 +9106,16 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   const previewSteps: MergeCostStep[] = (keepMode ? groupIds : [keepId, mergeId]).filter(id => id !== keepId).sort((a,b) => a-b)
     .map(mergeId => ({ mergeId, stock: c.req.query('stock') === 'write_off' ? 'write_off' : 'merge' }))
   let costAuthority
-  if (canViewAcquisitionCosts(user)) {
+  if (canViewAcquisitionCosts(user) && getPlanLimits(c.env).d1QueriesPerInvocation >= 100) {
     try { [costAuthority] = await previewMergeCosts(db, reviewed.graph, [{ keepId, steps: previewSteps }]) }
     catch (error) { if (!(error instanceof MergeCostPreviewUnavailableError)) throw error }
   }
   return c.json({
     success: true,
     ...(costAuthority ? { costAuthority } : {}),
+    ...(canViewAcquisitionCosts(user) && getPlanLimits(c.env).d1QueriesPerInvocation >= 100
+      ? { costReview: await mergeCostReviewQuote(reviewed.reviewedDigest, keepId, previewSteps) }
+      : canViewAcquisitionCosts(user) ? { costAuthorityUnavailable: { code:'resolve_plan_budget' } } : {}),
     reviewedDigest: reviewed.reviewedDigest,
     keepId,
     mergeId,
@@ -9080,12 +9204,19 @@ app.post('/possible-duplicates/merge', async (c) => {
   let resolveReplay = false
   if (Object.hasOwn(body, 'cost_review')) {
     const review = body.cost_review as { version?: unknown; reviewed_digest?: unknown } | null
-    if (!review || typeof review !== 'object' || Array.isArray(review) || review.version !== 1 || typeof review.reviewed_digest !== 'string'
+    if (!review || typeof review !== 'object' || Array.isArray(review) || Object.keys(review).some(key => !['version','reviewed_digest'].includes(key)) || review.version !== 1 || typeof review.reviewed_digest !== 'string'
       || !/^[a-f0-9]{64}$/.test(review.reviewed_digest)) return c.json({ code: 'invalid_resolve_plan' }, 400)
-    const current = await readResolveProductGroup(db, [keepId, mergeId], keepId)
-    if (current.reviewedDigest !== review.reviewed_digest) return c.json({ code: 'merge_state_conflict' }, 409)
-    if (await resolveProductFingerprint(db, [keepId, mergeId], resolveGuards, true) !== current.fingerprints[[keepId, mergeId].sort((a,b)=>a-b).join(',')]) {
-      return c.json({ code: 'merge_state_conflict' }, 409)
+    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({code:'resolve_plan_budget'},409)
+    if (resolve !== undefined) {
+      if (!resolve || typeof resolve.reviewedDigest !== 'string' || !Array.isArray(resolve.steps)
+        || resolve.steps.some(step => !step || !Number.isSafeInteger(step.mergeId) || (step.stock !== undefined && !['merge','write_off'].includes(step.stock)))) return c.json({ code: 'invalid_resolve_plan' }, 400)
+      if ((await mergeCostReviewQuote(resolve.reviewedDigest, keepId, resolve.steps)).reviewed_digest !== review.reviewed_digest) return c.json({ code: 'merge_state_conflict' }, 409)
+    } else {
+      const current = await readResolveProductGroup(db, [keepId, mergeId], keepId)
+      if ((await mergeCostReviewQuote(current.reviewedDigest, keepId, [{ mergeId, stock: stockChoice ?? 'merge' }])).reviewed_digest !== review.reviewed_digest) return c.json({ code: 'merge_state_conflict' }, 409)
+      if (await resolveProductFingerprint(db, [keepId, mergeId], resolveGuards, true) !== current.fingerprints[[keepId, mergeId].sort((a,b)=>a-b).join(',')]) {
+        return c.json({ code: 'merge_state_conflict' }, 409)
+      }
     }
   }
   if (resolve !== undefined) {

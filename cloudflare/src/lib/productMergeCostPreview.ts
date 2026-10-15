@@ -1,7 +1,7 @@
 import type { D1Compat } from './db'
 import { CATALOG_COST_HAS_RECORDED_LOT_SQL } from './catalogCostRecompute'
 import { MERGE_COST_LATEST_MANUAL_SQL, mergeCostAuthorityUsdSql } from './productCostReview'
-import { PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
+import { PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
 
 type Row = Record<string, unknown>
 export type MergeCostStep = { mergeId: number; stock: 'merge' | 'write_off' }
@@ -78,7 +78,7 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
     if (new TextEncoder().encode(JSON.stringify(group)).length > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES) throw new MergeCostPreviewUnavailableError()
     result.products.push(...group.products); result.batches.push(...batches); result.batchStock.push(...stock); result.currentCostEntries.push(...entries)
   }
-  if (new TextEncoder().encode(JSON.stringify(result)).length > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) throw new MergeCostPreviewUnavailableError()
+  if (result.batches.length > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW || new TextEncoder().encode(JSON.stringify(result)).length > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) throw new MergeCostPreviewUnavailableError()
   return result
 }
 const PREVIEW_SQL = `WITH products AS (
