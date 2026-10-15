@@ -2,10 +2,10 @@ const assert=require('node:assert/strict')
 const {startWorker,budgetLine}=require('./harness/al_money_native.cjs')
 
 async function main(){
- const fault=process.argv.includes('--lost-ack-undo')?'undo':process.argv.includes('--lost-ack-redo')?'redo':process.argv.includes('--rollback')?'rollback':process.argv.includes('--finalize-once')?'finalize':process.argv.includes('--finalize-race')?'race':(process.argv.includes('--gallery-before-read')||process.argv.includes('--gallery-aba'))?'gallery':process.argv.includes('--stock-before-read')?'stock':process.argv.includes('--entry-before-read')?'entry':null
+ const fault=process.argv.includes('--lost-ack-undo')?'undo':process.argv.includes('--lost-ack-redo')?'redo':process.argv.includes('--rollback')?'rollback':process.argv.includes('--finalize-once')?'finalize':process.argv.includes('--finalize-race')?'race':(process.argv.includes('--gallery-before-read')||process.argv.includes('--gallery-aba'))?'gallery':process.argv.includes('--stock-before-read')?'stock':process.argv.includes('--entry-before-read')?'entry':process.argv.includes('--entry-after-finalize')?'lateEntry':process.argv.includes('--receipt-real-before-read')?'real':null
  const patches=fault?[{name:'actual D1 batch '+fault,file:'src/lib/db.ts',
   from:'return metered(() => this.d1.batch(prepared), metasOf, statements.length)',
-  to:`const target=statements.some(s=>s.sql.includes('merge_cost_replay_guard') && (s.params as any)?.fromStatus==='${['redo','gallery','stock','entry'].includes(fault)?'redoable':'undoable'}');
+  to:`const target=statements.some(s=>s.sql.includes('merge_cost_replay_guard') && (s.params as any)?.fromStatus==='${['redo','gallery','stock','entry','real'].includes(fault)?'redoable':'undoable'}');
     const finalizing=statements.some(s=>s.sql.includes('merge_cost_fingerprint_guard'));
     if(finalizing && '${fault}'==='finalize' && !(globalThis as any).__mergeFinalizeFault){(globalThis as any).__mergeFinalizeFault=true;throw new Error('fixture_finalize_unavailable')}
     if(finalizing && '${fault}'==='race' && !(globalThis as any).__mergeFinalizeFault){(globalThis as any).__mergeFinalizeFault=true;await this.d1.prepare("UPDATE products SET name='Concurrent edit' WHERE id=60000").run()}
@@ -14,6 +14,7 @@ async function main(){
     if(target && '${fault}'==='gallery' && !(globalThis as any).__mergeGalleryFault){(globalThis as any).__mergeGalleryFault=true;await this.d1.prepare("UPDATE product_images SET sort_order=77 WHERE product_id=60000 AND image_path='fixture-moved-gallery'").run();${process.argv.includes('--gallery-aba')?`await this.d1.prepare("UPDATE product_images SET sort_order=2 WHERE product_id=60000 AND image_path='fixture-moved-gallery'").run();`:''}}
     if(target && '${fault}'==='stock' && !(globalThis as any).__mergeStockFault){(globalThis as any).__mergeStockFault=true;await this.d1.prepare("UPDATE branch_stock SET quantity=quantity+1,rfid_confirmed_qty=rfid_confirmed_qty+1 WHERE product_id=60000").run()}
     if(target && '${fault}'==='entry' && !(globalThis as any).__mergeEntryFault){(globalThis as any).__mergeEntryFault=true;await this.d1.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)").run()}
+    if(target && '${fault}'==='real' && !(globalThis as any).__mergeRealFault){(globalThis as any).__mergeRealFault=true;await this.d1.prepare("UPDATE branch_stock SET quantity=7.000000000000002 WHERE product_id=60000").run()}
     if(target && ['undo','redo'].includes('${fault}') && !(globalThis as any).__mergeAckLost){(globalThis as any).__mergeAckLost=true;throw new Error('fixture_merge_ack_lost_after_commit')}
     return result` }]:[]
  const h=await startWorker({patches})
@@ -22,8 +23,9 @@ async function main(){
   if(process.argv.includes('--precision'))await h.db.prepare('UPDATE products SET cost_price_usd=?,cost_price_khr=? WHERE id=60000').bind(5.123456789012345,20500.12345678901).run()
   if(process.argv.includes('--null'))await h.db.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=60000').run()
   if(process.argv.includes('--zero'))await h.db.prepare('UPDATE products SET cost_price_usd=0,cost_price_khr=0 WHERE id=60000').run()
-  if(fault==='gallery'||process.argv.includes('--gallery-control'))await h.db.prepare("INSERT INTO product_images(product_id,image_path,sort_order) VALUES(60001,'fixture-moved-gallery',2)").run()
-  if(fault==='stock')await h.db.prepare("INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(60000,1,5,0),(60001,1,2,0)").run()
+  if(fault==='gallery'||process.argv.includes('--gallery-control')||process.argv.includes('--gallery-fraction'))await h.db.prepare("INSERT INTO product_images(product_id,image_path,sort_order) VALUES(60001,'fixture-moved-gallery',2)").run()
+  if(process.argv.includes('--gallery-fraction'))await h.db.prepare("UPDATE product_images SET sort_order=7.000000000000002 WHERE image_path='fixture-moved-gallery'").run()
+  if(fault==='stock'||fault==='real')await h.db.prepare("INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(60000,1,5,0),(60001,1,2,0)").run()
   const read=()=>h.one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=60000')
   const before=await read(),applied=await h.call('POST','/api/products/possible-duplicates/merge',{keepId:60000,mergeId:60001,keep:true,stock:'merge'},'new v3 merge')
   assert.equal(applied.status,200,JSON.stringify(applied.body))
@@ -61,18 +63,24 @@ async function main(){
   assert.equal(redone.cost_price_usd,before.cost_price_usd);assert.equal(redone.cost_price_khr,before.cost_price_khr)
   assert.match(redone.cost_review_key,/^[a-f0-9]{32}$/);assert.notEqual(redone.cost_review_key,merged.cost_review_key)
   const replayState=JSON.parse((await h.one('SELECT payload_json FROM undo_snapshots WHERE id=?',payload.snapshot_id)).payload_json).costReviewState
-  assert.equal(replayState.graph_version,1);assert.equal(typeof replayState.graph_state,'string')
+  assert.equal(replayState.graph_version,2);assert.equal(typeof replayState.graph_state,'string')
   const receiptRows=JSON.parse(replayState.graph_state)
   console.log('GRAPH_RECEIPT '+JSON.stringify({bytes:Buffer.byteLength(replayState.graph_state),scopes:Object.fromEntries(Object.entries(receiptRows).map(([key,value])=>[key,value[1].length]))}))
-  if(fault==='entry'){
+  if(fault==='entry'||fault==='lateEntry'){
+   if(fault==='lateEntry')await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)").run()
    const entries=await h.all('SELECT * FROM product_cost_entries ORDER BY id'),events=await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id")
-   const laterUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},'undo after new manual entry before first fingerprint read')
+   const laterUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},fault==='lateEntry'?'undo after new manual entry after finalized redo':'undo after new manual entry before first fingerprint read')
    assert.equal(laterUndo.status,409,JSON.stringify(laterUndo.body));assert.deepEqual(await h.all('SELECT * FROM product_cost_entries ORDER BY id'),entries)
    assert.deepEqual(await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"),events)
-   console.log('PASS new current-keeper manual entry after redo commit is covered beyond the saved FK row IDs')
+   if(fault==='lateEntry'){
+    const repeatRedo=await h.call('POST','/api/action-history/'+history.id+'/redo',{require_applied:true,expected_generation:1},'committed redo retry after later manual entry')
+    assert.equal(repeatRedo.status,200,JSON.stringify(repeatRedo.body));assert.deepEqual(await h.all('SELECT * FROM product_cost_entries ORDER BY id'),entries)
+    assert.deepEqual(await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"),events)
+   }
+   console.log('PASS new current-keeper manual entry '+(fault==='lateEntry'?'after finalized redo':'before first fingerprint read')+' is protected beyond saved FK row IDs; exact committed retry does not replay')
    return
   }
-  if(fault==='stock'){
+  if(fault==='stock'||fault==='real'){
    const graphBefore=await h.all('SELECT * FROM branch_stock WHERE product_id IN (60000,60001) ORDER BY product_id,branch_id'),eventsBefore=await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id")
    const laterUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},'undo after unchanged-cost stock edit before first fingerprint read')
    console.log('STOCK_BEFORE_READ '+JSON.stringify({before:graphBefore,after:await h.all('SELECT * FROM branch_stock WHERE product_id IN (60000,60001) ORDER BY product_id,branch_id'),status:laterUndo.status}))
@@ -81,11 +89,11 @@ async function main(){
    console.log('PASS non-product stock quantity/RFID edit between redo commit and first fingerprint read is preserved')
    return
   }
-  if(process.argv.includes('--gallery-control')){
+  if(process.argv.includes('--gallery-control')||process.argv.includes('--gallery-fraction')){
    const latestUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},'no-edit gallery undo after finalized redo')
    assert.equal(latestUndo.status,200,JSON.stringify(latestUndo.body))
    const restored=await h.one("SELECT product_id,sort_order FROM product_images WHERE image_path='fixture-moved-gallery'")
-   assert.equal(restored.product_id,60001);assert.equal(restored.sort_order,2)
+   assert.equal(restored.product_id,60001);assert.equal(restored.sort_order,process.argv.includes('--gallery-fraction')?7.000000000000002:2)
    console.log('PASS actual no-edit gallery redo and next undo restore the original image identity and order')
    return
   }
