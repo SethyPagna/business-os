@@ -16,6 +16,7 @@
 // Run (from cloudflare/): node scripts/test-merge-closes-stock-session-native.cjs
 'use strict'
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 
 const MARKER = 'undo_closed:products_merged'
@@ -32,7 +33,7 @@ async function check(name, fn) {
 function fixture() {
   const h = createProductsRouteHarness({ user: ADMIN })
   h.setUser(ADMIN)
-  h.raw.db.exec(`
+  seedStockFixture(h.raw.db, () => h.raw.db.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1), (2, 'Warehouse', 0, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active) VALUES
       (1, 'Gloss One', '8850000000011', 2, 5, 0, 1),
@@ -40,7 +41,8 @@ function fixture() {
       (3, 'Serum Other', '8850000000033', 4, 9, 0, 1),
       (4, 'Tint Solo', '8850000000044', 1, 4, 0, 1),
       (5, 'Tint Solo', '8850000000044', 1, 4, 0, 1);
-  `)
+  `))
+  assert.throws(() => h.raw.db.prepare("INSERT INTO products(name) VALUES('unadmitted fixture probe')").run(), /stock_transaction_required/)
   const sessions = h.load('lib/stockSession.ts')
   const env = { DB: h.raw }
   let counter = 0
@@ -327,8 +329,8 @@ async function main() {
 
   await check("OWNER-ACCEPTED: a product edit that folds a twin closes another user's stock-in Undo without inventory rights, and the audit row names who and which session", async () => {
     const f = fixture()
-    f.h.raw.db.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active)
-      VALUES(6, 'Gloss Renamed', '8850000000066', 2, 5, 0, 1)`)
+    seedStockFixture(f.h.raw.db, () => f.h.raw.db.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active)
+      VALUES(6, 'Gloss Renamed', '8850000000066', 2, 5, 0, 1)`))
     const others = await f.receive([{ product_id: 6, quantity: 4 }])
     const EDITOR = { id: 12, username: 'editor', name: 'Edith Editor', role_code: 'staff', permissions: '{}' }
     assert.notEqual(EDITOR.id, ADMIN.id, 'the session belongs to somebody else')
