@@ -1238,9 +1238,9 @@ export default function FastStockInModal({
   const canPreview = currentStep === 'review' && canViewCosts && !saving && !signInChanged && !destinationInvalid
     && isActorWriteIdentityCurrent(receivingIdentity) && isActorReadScopeCurrent(previewScope)
   const productCounts = new Map<number, number>()
-  for (const line of pendingLines) if (line.mode === 'add') productCounts.set(Number(line.product.id), (productCounts.get(Number(line.product.id)) || 0) + 1)
+  for (const line of pendingLines) productCounts.set(Number(line.product.id), (productCounts.get(Number(line.product.id)) || 0) + 1)
   const previewRequests: ReceivingCostPreviewLine[] = canPreview ? pendingLines.flatMap(line => {
-    if (line.mode !== 'add' || !(Number(line.product.id) > 0) || line.createdProduct || line.createPayload || lineNeedsCreate(line) || line.needsRemoval || productCounts.get(Number(line.product.id)) !== 1) return []
+    if (line.mode !== 'add' || submissionsRef.current.requests[line.key] || !(Number(line.product.id) > 0) || line.createdProduct || line.createPayload || lineNeedsCreate(line) || line.needsRemoval || productCounts.get(Number(line.product.id)) !== 1) return []
     try { return [buildLineRequest(line)] } catch { return [] }
   }) : []
   const previewBatches = receivingCostPreviewBatches(previewRequests)

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { reviewStockLine, buildStockLineRequest, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
+import { reviewStockLine, buildStockLineRequest, emptyStockSessionDraft, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 
 function line(product: StockSessionLine['product'], changes: Partial<StockSessionLine> = {}): StockSessionLine {
   return { key: 'preview-a', requestId: 'synthetic-preview-a', product, productName: 'Synthetic receiving', mode: 'add', quantity: 5, freeQuantity: 0, unitCost: '8', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: 'new', batchLabel: '', reason: '', conditionTag: '', createdProduct: false, status: 'queued', detail: '', ...changes }
@@ -115,5 +115,37 @@ try {
   assert.equal(calls.length, beforeDuplicates + 1)
   assert.deepEqual(calls.at(-1)!.lines.map(row => row.body.productId), [2], 'globally duplicated product rows are unavailable, while a unique valid peer is still previewed')
   assert.ok(duplicateSurface.text().includes('Estimate unavailable'))
+  await duplicateSurface.unmount()
+  for (const mode of ['remove', 'set'] as const) {
+    window.localStorage.clear()
+    window.localStorage.setItem('businessos_user', JSON.stringify(actor))
+    window.localStorage.setItem('businessos_read_session', 'synthetic-preview-session')
+    const mixedProps = { ...props, initialLines: [{ ...props.initialLines[0], mode, quantity: 2 }, ...props.initialLines, { ...props.initialLines[0], product: { ...props.initialLines[0].product, id: 2, name: 'Synthetic peer' } }] }
+    const mixed = await harness.mount({ component: 'components/inventory/FastStockInModal.tsx', props: mixedProps, app, doubles: { 'api/batchesTransport.ts': { getReceivingCostPreview: ((lines: any[], signal: AbortSignal) => new Promise(resolve => calls.push({ lines, signal, resolve }))) as any, getProductBatches: (async () => ({ batches: [] })) as any } } })
+    const before = calls.length
+    await mixed.click(mixed.button(/^Next$/))
+    await mixed.click(mixed.button(/^Next$/))
+    assert.equal(calls.length, before + 1)
+    assert.deepEqual(calls.at(-1)!.lines.map(row => row.body.productId), [2], `${mode}+add for the same product is unavailable; a fresh unique peer is still previewed`)
+    assert.ok(mixed.text().includes('Estimate unavailable'))
+    console.log(`PASS actual mounted ${mode}+add exclusion and fresh unique peer`)
+    await mixed.unmount()
+  }
+  window.localStorage.clear()
+  window.localStorage.setItem('businessos_user', JSON.stringify(actor))
+  window.localStorage.setItem('businessos_read_session', 'synthetic-preview-session')
+  const { scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
+  const seed = emptyStockSessionDraft({ sessionId: 123, mode: 'add', branchId: '1', receivedDate: '2026-10-15', supplier: props.initialHeader.supplier })
+  const attempted = line(props.initialLines[0].product, { key: 'attempted', requestId: 'synthetic-attempted-abcdefgh', status: 'error', detail: 'Outcome unknown' })
+  const peer = line({ ...props.initialLines[0].product, id: 2 }, { key: 'fresh-peer', requestId: 'synthetic-peer-abcdefgh' })
+  const frozenRequest = buildStockLineRequest(attempted, { ...wireContext, branchId: '1', receivedDate: seed.receivedDate, supplier: seed.supplier })
+  window.localStorage.setItem(scopedWorkDraftKey('fast_stockin'), JSON.stringify({ at: Date.now(), data: { ...seed, step: 'review', lines: [attempted, peer], receivingSubmissions: { requests: { [attempted.key]: frozenRequest }, products: {}, productOutcomes: {}, unknown: [] } } }))
+  const beforeFrozen = calls.length
+  const frozen = await harness.mount({ component: 'components/inventory/FastStockInModal.tsx', props: { ...props, initialLines: [] }, app, doubles: { 'api/batchesTransport.ts': { getReceivingCostPreview: ((lines: any[], signal: AbortSignal) => new Promise(resolve => calls.push({ lines, signal, resolve }))) as any, getProductBatches: (async () => ({ batches: [] })) as any } } })
+  assert.equal(calls.length, beforeFrozen + 1)
+  assert.deepEqual(calls.at(-1)!.lines.map(row => row.body.productId), [2], 'restored frozen retry is unavailable; it cannot be forecast as another addition')
+  assert.ok(frozen.text().includes('Estimate unavailable'))
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(scopedWorkDraftKey('fast_stockin'))!).data.receivingSubmissions.requests.attempted, frozenRequest, 'advisory eligibility leaves the frozen writer request unchanged')
+  console.log('PASS actual mounted restored frozen-error exclusion, fresh peer and unchanged retry request')
   console.log('PASS actual mounted review final-wire, delayed A/B, exit, permission-revocation and no-cost-write controls')
 } finally { await harness.close() }
