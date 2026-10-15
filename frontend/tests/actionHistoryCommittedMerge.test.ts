@@ -13,7 +13,7 @@ export function ReceiptHost(props: Record<string, any>) {
   const history = useActionHistory({ scope:'products',user:props.user,notify:props.notify })
   const button=(name:string,action:()=>unknown)=>createElement('button',{'aria-label':name,onClick:action},name)
   return createElement('div',null,button('load',history.requestServerItems),button('push',()=>history.pushAction(props.entry)),
-    button('undo',()=>history.undo()),button('redo',()=>history.redo()),button('check',()=>history.checkReceipt(91)),
+    button('undo',()=>history.undo()),button('redo',()=>history.redo()),button('redo-recorded',()=>history.redoServer(91)),button('check',()=>history.checkReceipt(91)),
     createElement('output',{'data-state':''},JSON.stringify({undo:history.canUndo,redo:history.canRedo,busy:history.busy,items:history.serverItems})))
 }
 
@@ -39,17 +39,16 @@ if (!ssr) {
     undoActionHistory:async()=>({success:true,applied:false}),
     redoActionHistory:async(...args:unknown[])=>{calls.redo.push(args);if(phase===0){phase=1;throw refusal()}phase=2;return {success:true,applied:true,processed_children:0,item:row()}},
   }}
-  const entry={label:'Group',undo:()=>{},redo:()=>{mutations++},redo_payload:pointer,undo_payload:pointer}
+  const entry={label:'Generic local action',undo:()=>{},redo:()=>{mutations++}}
   const mount=()=>harness.mount({component:'../tests/actionHistoryCommittedMerge.test.ts',exportName:'ReceiptHost',props:{user,entry,notify:(s:string)=>notices.push(s)},app:{page:'products'},doubles})
   const press=(surface:any,name:string)=>surface.click(surface.find((node:MemoryNode)=>node.tagName==='BUTTON'&&node.getAttribute('aria-label')===name,name))
   const state=(surface:any)=>JSON.parse(surface.find((node:MemoryNode)=>node.getAttribute('data-state')!==null,'state').textContent)
   async function check(name:string,run:()=>Promise<void>){try{await run();console.log(`PASS ${name}`)}catch(error){failures++;console.error(`FAIL ${name}`,error)}}
   try {
-    await check('committed live redo never marks failed or invokes closure; exact receipt survives reload',async()=>{
+    await check('production recorded redo keeps committed state and exact receipt across reload',async()=>{
       let surface=await mount()
-      await press(surface,'load');await press(surface,'push');await surface.waitFor(()=>state(surface).undo,'push')
-      await press(surface,'undo');await surface.waitFor(()=>state(surface).redo,'undo')
-      await press(surface,'redo');await surface.waitFor(()=>state(surface).items.some((item:any)=>item.pending_redo),'committed descriptor')
+      await press(surface,'load');await surface.waitFor(()=>state(surface).items.length===1,'recorded action')
+      await press(surface,'redo-recorded');await surface.waitFor(()=>state(surface).items.some((item:any)=>item.pending_redo),'committed descriptor')
       assert.deepEqual(calls.updates,[]);assert.equal(mutations,0);assert.equal(state(surface).redo,false)
       assert.deepEqual(calls.redo[0],[91,{require_applied:true,expected_generation:1}])
       await surface.unmount();surface=await mount();await press(surface,'load')
@@ -57,6 +56,16 @@ if (!ssr) {
       await press(surface,'check');await surface.waitFor(()=>state(surface).items.some((item:any)=>item.status==='undoable'),'receipt checked')
       assert.deepEqual(calls.redo[1],[91,{require_applied:true,expected_generation:1}]);assert.equal(mutations,0);assert.deepEqual(calls.updates,[])
       await surface.unmount()
+    })
+    await check('generic live committed-error defense never writes failed or invokes redo closure',async()=>{
+      phase=0;calls.redo.length=0
+      const surface=await mount()
+      try {
+        await press(surface,'push');await surface.waitFor(()=>state(surface).undo,'push')
+        await press(surface,'undo');await surface.waitFor(()=>state(surface).redo,'local undo')
+        await press(surface,'redo');await surface.waitFor(()=>state(surface).items.some((item:any)=>item.pending_redo),'committed refusal')
+        assert.deepEqual(calls.updates,[]);assert.equal(mutations,0);assert.deepEqual(calls.redo[0],[91]);assert.equal(state(surface).redo,false)
+      } finally {await surface.unmount()}
     })
     await check('malformed or foreign descriptors cannot become receipt requests',async()=>{
       for(const changed of [{...descriptor,history_id:92},{...descriptor,expected_generation:-1},{...descriptor,version:2},{...descriptor,extra:true}])assert.equal(pendingGroupRedo(changed,91),null)

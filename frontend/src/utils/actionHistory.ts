@@ -66,8 +66,6 @@ type ActionHistoryEntry = {
   scope: string
   entity: unknown | null
   entity_id: unknown | null
-  undoPayload?: Record<string, unknown>
-  redoPayload?: Record<string, unknown>
 }
 
 type ServerHistoryItem = {
@@ -216,8 +214,6 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
     scope: String(entry.scope || 'global'),
     entity: entry.entity || null,
     entity_id: entry.entity_id || entry.entityId || null,
-    undoPayload: entry.undo_payload && typeof entry.undo_payload === 'object' ? entry.undo_payload as Record<string, unknown> : undefined,
-    redoPayload: entry.redo_payload && typeof entry.redo_payload === 'object' ? entry.redo_payload as Record<string, unknown> : undefined,
   }
 }
 
@@ -434,11 +430,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (entry.serverId) {
         const api = await loadActionHistoryTransport()
         if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
-        const payload = direction === 'undo' ? entry.undoPayload : entry.redoPayload
-        const request = payload?.applier === 'product.merge.group' ? buildServerReplayRequest(payload) : undefined
         const response = direction === 'undo'
-          ? await (request ? api.undoActionHistory(entry.serverId, request) : api.undoActionHistory(entry.serverId))
-          : await (request ? api.redoActionHistory(entry.serverId, request) : api.redoActionHistory(entry.serverId))
+          ? await api.undoActionHistory(entry.serverId)
+          : await api.redoActionHistory(entry.serverId)
         if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
         serverTransitioned = true
         // applied:true means the Worker replayed the reversal itself (K1) --
@@ -466,7 +460,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (direction === 'redo' && isCommittedGroupRedo(error)) {
         setUndoStack(current => current.filter(item => item.id !== entry.id))
         setRedoStack(current => current.filter(item => item.id !== entry.id))
-        if (committed && (entry.redoPayload?.generation == null || committed.expected_generation === entry.redoPayload.generation)) {
+        if (committed) {
           setServerItems(current => [{ id: committed.history_id, label: entry.label, status: 'recorded', reversible: false, pending_redo: committed },
             ...current.filter(item => String(item.id) !== String(committed.history_id))])
         }
