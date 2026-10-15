@@ -972,11 +972,11 @@ async function runResolveChoiceUndo() {
   const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: rec.snapshotId })
 
   await check('a chosen cover counts as an image effect; the same cover does not', async () => {
-    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: rec.snapshotId }, 'undo'), false,
+    assert.equal((await undo.mergeReplayPermissionEffects({}, { applier: 'product.merge', snapshot_id: rec.snapshotId }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, false,
       'choosing the survivor\'s own cover changes no image')
     const moved = { ...reversal, keeperChoice: { follows: true, fields: { ...values, image_path: 'products/glow-72.jpg' } } }
     const other = d1.db.prepare("INSERT INTO undo_snapshots (kind, status, payload_json) VALUES ('product.merge','applied',?)").run(JSON.stringify(moved))
-    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: Number(other.lastInsertRowid) }, 'undo'), true)
+    assert.equal((await undo.mergeReplayPermissionEffects({}, { applier: 'product.merge', snapshot_id: Number(other.lastInsertRowid) }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, true)
     run1('DELETE FROM undo_snapshots WHERE id = ?', Number(other.lastInsertRowid))
   })
 

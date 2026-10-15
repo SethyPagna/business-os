@@ -238,7 +238,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   }
   return require(id)
 })
-const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayPermissionEffects, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
+const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayPermissionEffects, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
 
 let passed = 0
 async function check(name, fn) {
@@ -729,27 +729,27 @@ await check('merge replay image authority is required only for saved cover/galle
     dupImagesBefore: [], imagesMovedToKeeper: [],
   }
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(1,?,?)').run('product.merge', JSON.stringify(base))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 1 }, 'undo'), false)
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge', snapshot_id: 1 }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, false)
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(2,?,?)').run('product.merge', JSON.stringify({
     ...base, dupImagesBefore: [{ image_path: '/uploads/a.png', sort_order: 0 }], imagesMovedToKeeper: ['/uploads/a.png'],
   }))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 2 }, 'undo'), true)
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge', snapshot_id: 2 }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, true)
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(3,?,?)').run('product.merge', JSON.stringify({
     ...base, dupImagePathBefore: '/uploads/primary.png',
   }))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: 3 }, 'redo'), true)
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge', snapshot_id: 3 }, { id: 1, role_code: 'admin' }, 'redo')).changesProductImages, true)
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(4,?,?)').run('product.merge.bulk', JSON.stringify({ reversals: [base, {
     ...base, keeperId: 3, dupId: 4, dupImagesBefore: [{ image_path: '/uploads/b.png', sort_order: 0 }],
   }] }))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.bulk', snapshot_id: 4 }, 'redo'), true)
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge.bulk', snapshot_id: 4 }, { id: 1, role_code: 'admin' }, 'redo')).changesProductImages, true)
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(5,?,?)').run('product.merge.group.child', JSON.stringify(base))
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(6,?,?)').run('product.merge.group.child', JSON.stringify({
     ...base, keeperId: 3, dupId: 4, dupImagesBefore: [{ image_path: '/uploads/group.png', sort_order: 0 }],
   }))
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(7,?,?)').run('product.merge.group', JSON.stringify({ child_snapshot_ids: [5, 6] }))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.group', snapshot_id: 7 }, 'undo'), true)
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge.group', snapshot_id: 7 }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, true)
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(8,?,?)').run('product.merge.group', JSON.stringify({ child_snapshot_ids: [5, 999] }))
-  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.group', snapshot_id: 8 }, 'undo'), true, 'missing child fails closed')
+  assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge.group', snapshot_id: 8 }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, true, 'missing child fails closed')
   sharedDb = null
 })
 

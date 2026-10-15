@@ -344,15 +344,6 @@ async function readMergeReplayPermissionSnapshot(env: Env, payload: Record<strin
     .get<{ payload_json: string }>([snapshotId, kind])
 }
 
-export async function mergeReplayChoicePermissionError(env: Env, payload: Record<string, unknown>, user: SessionUser): Promise<string | null> {
-  if (!['product.merge', 'product.merge.bulk'].includes(String(payload.applier || ''))) return null
-  return mergeReplayChoicePermissionFromSnapshot(payload, user, await readMergeReplayPermissionSnapshot(env, payload))
-}
-
-export async function mergeReplayChangesProductImages(env: Env, payload: Record<string, unknown>, direction: 'undo' | 'redo'): Promise<boolean> {
-  return mergeReplayImagesFromSnapshot(env, payload, direction, await readMergeReplayPermissionSnapshot(env, payload))
-}
-
 export async function mergeReplayPermissionEffects(env: Env, payload: Record<string, unknown>, user: SessionUser, direction: 'undo' | 'redo'): Promise<{ changesProductImages: boolean; choicePermissionError: string | null }> {
   const snap = await readMergeReplayPermissionSnapshot(env, payload)
   return {
