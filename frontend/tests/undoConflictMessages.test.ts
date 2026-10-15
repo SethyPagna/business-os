@@ -240,6 +240,23 @@ await runCase('a refusal without a refusal code, or with another code, keeps the
   }
 })
 
+for (const language of ['en', 'km'] as const) {
+  await runCase(language + ': a committed merge redo is never described as refused or unchanged', async () => {
+    uiLanguage = language
+    nextRefusal = { status: 409, error: 'Saved receipt pending.', code: 'merge_group_redo_committed' }
+    const error = await rejection(transport.redoActionHistory(29))
+    const pack = language === 'en' ? EN : KM
+    assert.equal(error.message, pack.merge_group_redo_committed)
+    assert.notEqual(error.message, pack.redo_refused_record_changed)
+    assert.equal(error.code, 'merge_group_redo_committed')
+    assert.equal(error.status, 409)
+    if (language === 'en') {
+      assert.match(error.message, /Redo was saved/)
+      assert.doesNotMatch(error.message, /Nothing was changed|Redo was refused/)
+    } else assert.match(error.message, /[ក-៿]/)
+  })
+}
+
 await runCase('an applied replay still resolves with the Worker response', async () => {
   uiLanguage = 'km'
   assert.deepEqual(await transport.undoActionHistory(5), { success: true, applied: true })

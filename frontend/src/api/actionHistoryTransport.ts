@@ -102,6 +102,7 @@ export function updateActionHistory(id: string | number, payload: ActionHistoryP
 // the pack cannot be loaded. tests/undoConflictMessages.test.ts pins these
 // codes to the Worker's.
 const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string }>> = {
+  merge_group_redo_committed: { undo: 'merge_group_redo_committed', redo: 'merge_group_redo_committed' },
   undo_record_changed: { undo: 'undo_refused_record_changed', redo: 'redo_refused_record_changed' },
   undo_no_default_branch: { undo: 'undo_refused_no_default_branch', redo: 'redo_refused_no_default_branch' },
   undo_history_stale: { undo: 'undo_refused_history_stale', redo: 'redo_refused_history_stale' },

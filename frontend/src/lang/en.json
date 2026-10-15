@@ -4452,6 +4452,7 @@
   "redo_refused_history_unusable": "The saved details of this action cannot be checked safely, so Redo was refused. Change the record directly instead. Nothing was changed.",
   "redo_refused_needs_original_tab": "This action can only be redone from the tab that performed it. Nothing was changed.",
   "redo_refused_no_default_branch": "Redo was refused: it would leave no default branch. Nothing was changed.",
+  "merge_group_redo_committed": "Redo was saved, but its history receipt is not ready. Newer changes are protected. Do not repeat the merge.",
   "redo_refused_record_changed": "Someone changed this record after this action, so Redo was refused to protect the newer data.",
   "reference": "Reference",
   "refresh": "Refresh",
