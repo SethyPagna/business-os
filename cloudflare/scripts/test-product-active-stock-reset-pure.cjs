@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const fixture = require('./test-product-active-stock-products-route.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { rawDb, db, seed } = fixture
 db.staging = db
 const originalPrepare = db.prepare.bind(db)
@@ -13,17 +14,20 @@ db.prepare = sql => {
 }
 const guard = require('./harness/product_stock_guard.cjs')
 let actor, backupFails = false, backupCalls = 0
+let stockTransaction
 function load(name, dependencies = {}) {
   const file = path.join(__dirname, '../src', name)
   const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const mod = { exports: {} }
   new Function('module', 'exports', 'require', output)(mod, mod.exports, id => {
     if (Object.hasOwn(dependencies, id)) return dependencies[id]
+    if (id === './stockTransaction' || id === '../lib/stockTransaction') return stockTransaction
     if (!id.startsWith('.')) return require(id)
     throw new Error(`Unmapped reset dependency ${id}`)
   })
   return mod.exports
 }
+stockTransaction = load('lib/stockTransaction.ts')
 const core = load('lib/coreDataInvariants.ts', {
  './db': {getDb:()=>db}, './productStockGuard':guard,
  './customTableName':load('lib/customTableName.ts'), './sqlBinding':load('lib/sqlBinding.ts'), './passwordHash':{hashPassword:async()=> 'test-hash'}, './passwordPolicy':load('lib/passwordPolicy.ts'),
@@ -51,8 +55,10 @@ function setup() {
  rawDb.exec("INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{\"all\":true}'),(902,'Other admin','admin',0,'{\"all\":true}'),(903,'Manager','manager',1,'{\"all\":true}')")
  rawDb.exec('UPDATE roles SET is_system=1 WHERE id=901')
  rawDb.exec("DELETE FROM users WHERE id IN(901,902,903); INSERT INTO users(id,username,name,password,role_id,is_active,permissions) VALUES(901,'admin','Default admin','current-hash',901,1,'{}'),(902,'owner','Other admin','hash',901,1,'{}'),(903,'manager','All grants','hash',903,1,'{\"all\":true}')")
- rawDb.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Guard fixture',1,3,3,'test','damaged','return')").run()
- rawDb.prepare('UPDATE products SET stock_quantity=5 WHERE id=1').run()
+ seedStockFixture(rawDb, () => {
+  rawDb.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Guard fixture',1,3,3,'test','damaged','return')").run()
+  rawDb.prepare('UPDATE products SET stock_quantity=5 WHERE id=1').run()
+ })
  rawDb.exec("DELETE FROM inventory_movements; INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity) VALUES(1,'Historical name',1,'stock_in',5)")
  actor={id:901,username:'cached-owner',role_code:'manager',permissions:JSON.stringify({backup_restore:true})}
  backupFails=false;backupCalls=0
@@ -81,7 +87,12 @@ async function main() {
    setup();const before=snapshot();const result=await post(mode,patch);assert.equal(result.status,400,JSON.stringify(result));assert.equal(snapshot(),before);assert.equal(backupCalls,0)
   }
   setup();backupFails=true;let before=snapshot();let result=await post(mode);assert.equal(result.status,500,JSON.stringify(result));assert.equal(snapshot(),before)
-  setup();assert.throws(()=>rawDb.prepare('DELETE FROM products WHERE id=1').run(),/product_has_stock/);rawDb.exec("UPDATE users SET username=' ADMIN ' WHERE id=901"); result=await post(mode);assert.equal(result.status,200,JSON.stringify(result));assert.equal(backupCalls,1)
+  setup();assert.throws(()=>rawDb.prepare('DELETE FROM products WHERE id=1').run(),/stock_transaction_required/)
+  before=snapshot()
+  await assert.rejects(()=>stockTransaction.executeStockTransaction(db,[{sql:'DELETE FROM products WHERE id=1'}],'once'),/product_has_stock/)
+  assert.equal(snapshot(),before)
+  assert.equal(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+  rawDb.exec("UPDATE users SET username=' ADMIN ' WHERE id=901"); result=await post(mode);assert.equal(result.status,200,JSON.stringify(result));assert.equal(backupCalls,1)
   assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM damaged_stock_lots').get().n,0)
   if(mode==='sales') assert.equal(rawDb.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,0)
   else assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM products').get().n,0)

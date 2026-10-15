@@ -2,6 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const header = fs.readFileSync(path.join(__dirname, 'test-stock-session-route-budget-native.cjs'), 'utf8').split('const metrics=')[0]
 const load = new Function('require', '__dirname', header + ';return load;')(require, __dirname)
 globalThis.__WORKER_BUILD_REVISION__ = 'intake-budget-fixture'
@@ -30,7 +31,7 @@ async function world(tier, mode, verified, options = {}) {
   const lot = await load('lib/productBatches.ts').receiveBatchStock(load('lib/db.ts').getDb(f.env), {
     productId: 1, branchId: 1, quantity: 5, receivedDate: '2026-09-05', unitCostUsd: 2, supplierName: 'Fixture Supplier',
   })
-  if (mode === 'zero') f.sql.exec('UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0; UPDATE products SET stock_quantity=0')
+  if (mode === 'zero') seedStockFixture(f.sql, () => f.sql.exec('UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0; UPDATE products SET stock_quantity=0'))
   const token = 'intake-budget-cookie'
   f.sql.prepare('INSERT INTO user_sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(7,?,?,?,NULL)').run(
     createHash('sha256').update(token).digest('hex'), new Date(Date.now() - 29 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString())
