@@ -331,7 +331,7 @@ export default function LoyaltyPointsPage() {
     customer_portal_show_point_value: true,
     customer_portal_membership_info_text: '',
     customer_portal_submission_reward_points: '5',
-    loyalty_points_enabled: true,
+    loyalty_points_enabled: false,
   })
   const [saving, setSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
@@ -381,11 +381,8 @@ export default function LoyaltyPointsPage() {
       customer_portal_show_point_value: String(settings.customer_portal_show_point_value ?? 'true') === 'true',
       customer_portal_membership_info_text: String(settings.customer_portal_membership_info_text || ''),
       customer_portal_submission_reward_points: String(settings.customer_portal_submission_reward_points || '5'),
-      // Absent reads as ON, so a shop that has never touched this switch is
-      // unchanged. Only the four explicit off-spellings turn it off, matching
-      // the Worker's own read of the same key.
-      loyalty_points_enabled: !['0', 'false', 'no', 'off'].includes(
-        String(settings.loyalty_points_enabled ?? 'true').trim().toLowerCase(),
+      loyalty_points_enabled: ['1', 'true', 'yes', 'on'].includes(
+        String(settings.loyalty_points_enabled ?? 'false').trim().toLowerCase(),
       ),
     })
   }, [settings])
