@@ -21,12 +21,14 @@ const Module = require('node:module')
 // caller passes through, so expose the module as well.
 const harnessBase = fs.readFileSync(path.join(__dirname, 'test-product-resolve-choices-native.cjs'), 'utf8').split('async function main() {')[0].split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
 const harness = harnessBase
-  .replace("const products = load('routes/products.ts', {", "const productsModule = load('routes/products.ts', {")
+  .replace("const undoAppliers = load('lib/undoAppliers.ts', {", "const stockTransaction = load('lib/stockTransaction.ts')\nconst undoAppliers = load('lib/undoAppliers.ts', {\n  './stockTransaction': stockTransaction,")
+  .replace("const products = load('routes/products.ts', {", "const productsModule = load('routes/products.ts', {\n  '../lib/stockTransaction': stockTransaction,")
   .replace("}).default\nconst app = new Hono()", "})\nconst products = productsModule.default\nconst app = new Hono()")
 if (!harness.includes('productsModule.default')) throw new Error('the harness route anchors moved')
 const checks = `
 async function main() {
   const historyRoutes = load('routes/actionHistory.ts', {
+    '../lib/stockTransaction': stockTransaction,
     '../lib/db': { getDb: () => adapter },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
@@ -164,6 +166,20 @@ async function main() {
     assert.equal((await merge({ keepId: KEEP, mergeId: M2, keep: true })).status, 403)
   })
 
+  await check('History shares the real stock refusal class with merge replay', async () => {
+    fresh(); state.user = EDITOR
+    assert.equal((await pairMerge(M2, undefined, 'maintenance-replay')).status, 200)
+    const history = one("SELECT * FROM action_history WHERE entity='product' AND status='undoable' ORDER BY id DESC LIMIT 1")
+    const payload = JSON.parse(history.undo_payload)
+    require('./harness/seed-stock-fixture.cjs').seedStockFixture(state.native.db, () => state.native.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','1')").run())
+    const before = dump()
+    const result = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true, expected_generation: payload.generation })
+    assert.equal(result.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'stock_schema_unavailable')
+    assert.equal(result.body.action, 'reload_required')
+    assert.equal(dump(), before)
+    assert.equal(one("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
+  })
   await check('OVERRIDE: undo of an override merge needs the grant; a snapshot without the flag (an automatic or older merge) replays as before', async () => {
     const demoted = { ...EDITOR, permissions: JSON.stringify({ products: true, 'products:edit': false }) }
     fresh(); state.user = EDITOR

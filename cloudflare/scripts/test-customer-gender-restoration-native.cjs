@@ -22,6 +22,7 @@ function load(file, overrides = {}) {
 }
 const permissions = load('lib/permissions.ts')
 const actor = load('lib/actorSnapshot.ts')
+const stockTransaction = load('lib/stockTransaction.ts')
 // Administrator control comes from the role, not the name (FX-sec).
 const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', role_code: 'admin', permissions: '{}' }
 const OTHER = { ...ADMIN, id: 8 }
@@ -55,10 +56,12 @@ async function fixture() {
     './cache': { bumpVersion: async () => {} }, '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
   const appliers = load('lib/undoAppliers.ts', {
+    './stockTransaction': stockTransaction,
     './customerGenderRestoration': restoration, './permissions': permissions, './actorSnapshot': actor,
     './db': { getDb: () => db },
   })
   const common = {
+    '../lib/stockTransaction': stockTransaction,
     '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissions }),
     '../lib/db': { getDb: () => db }, '../lib/permissions': permissions, '../lib/actorSnapshot': actor,
     '../lib/customerGenderRestoration': restoration,
@@ -149,6 +152,19 @@ async function main() {
   concurrent.hook(async()=>{competing=await concurrent.request('POST',endpoint+'apply',concurrent.manifest)})
   const winner=await concurrent.request('POST',endpoint+'apply',concurrent.manifest)
   assert.equal(competing.status,200);assert.equal(winner.status,200);assert.equal(winner.body.history_id,competing.body.history_id);assert.deepEqual(concurrent.counts(),[1,1,1])
+  for (const ErrorType of [stockTransaction.StockTransactionUnavailableError, stockTransaction.StockTransactionOutcomeUnknownError]) {
+    const t=await fixture()
+    const applied=await t.request('POST',endpoint+'apply',t.manifest)
+    assert.equal(applied.status,200)
+    const before=t.state(), history=t.raw.prepare('SELECT * FROM action_history WHERE id=?').get(applied.body.history_id)
+    t.hook(()=>{throw new ErrorType()})
+    const result=await t.request('POST',`/api/action-history/${applied.body.history_id}/undo`,{expected_generation:0})
+    assert.equal(result.status,503,JSON.stringify(result))
+    assert.equal(result.body.code,new ErrorType().code)
+    assert.equal(result.body.action,ErrorType===stockTransaction.StockTransactionUnavailableError?'reload_required':'retry_same_request')
+    assert.equal(t.state(),before)
+    assert.deepEqual(t.raw.prepare('SELECT * FROM action_history WHERE id=?').get(applied.body.history_id),history)
+  }
   const changed=await fixture();const first=await changed.request('POST',endpoint+'apply',changed.manifest)
   changed.raw.prepare("UPDATE customers SET gender='other' WHERE id=1").run()
   const current=changed.state()

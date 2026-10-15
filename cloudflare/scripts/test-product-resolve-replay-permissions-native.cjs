@@ -2,12 +2,13 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const harness = fs.readFileSync(path.join(__dirname, 'test-product-resolve-choices-native.cjs'), 'utf8').replaceAll('\r\n','\n').split('async function main() {')[0]
-  .replace("const undoAppliers = load('lib/undoAppliers.ts', {", "const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })\nconst undoAppliers = load('lib/undoAppliers.ts', {\n  './productCostReview': costReview,")
-  .replace("const products = load('routes/products.ts', {", "const productModule = load('routes/products.ts', {\n  '../lib/productCostReview': costReview,")
+  .replace("const undoAppliers = load('lib/undoAppliers.ts', {", "const stockTransaction = load('lib/stockTransaction.ts')\nconst costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })\nconst undoAppliers = load('lib/undoAppliers.ts', {\n  './stockTransaction': stockTransaction,\n  './productCostReview': costReview,")
+  .replace("const products = load('routes/products.ts', {", "const productModule = load('routes/products.ts', {\n  '../lib/stockTransaction': stockTransaction,\n  '../lib/productCostReview': costReview,")
   .replace("}).default\nconst app = new Hono()", "})\nconst products = productModule.default\nconst app = new Hono()")
 const checks = `
 async function main() {
   const historyRoutes = load('routes/actionHistory.ts', {
+    '../lib/stockTransaction': stockTransaction,
     '../lib/db': { getDb: () => adapter },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
     '../lib/acquisitionCostAccess': { acquisitionCostResponses: async (_c, next) => next(), hasAcquisitionCostInput: () => false },
@@ -15,7 +16,7 @@ async function main() {
     '../lib/undoAppliers': undoAppliers,
     '../lib/audit': noAudit,
     '../lib/actorSnapshot': actorSnapshot,
-    '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: [] },
+    '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: new Set() },
   }).default
   app.route('/api/action-history', historyRoutes)
   const sameOwner = { ...EDITOR, id: 3, permissions: JSON.stringify({ products: true, product_cost_edit: true }) }
@@ -100,6 +101,18 @@ async function main() {
     const before = dump()
     await assert.rejects(replay(history, 'undo', demoted), (error) => error.code === 'product_edit_permission_required')
     assert.equal(dump(), before)
+  })
+  await check('History preserves stock maintenance refusal across the real replay modules', async () => {
+    const history = await merged({ name: { source_id: M1 } })
+    const payload = JSON.parse(history.undo_payload)
+    require('./harness/seed-stock-fixture.cjs').seedStockFixture(state.native.db, () => state.native.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','1')").run())
+    const before = dump()
+    const result = await request('POST', '/api/action-history/' + history.id + '/undo', { require_applied: true, expected_generation: payload.generation })
+    assert.equal(result.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'stock_schema_unavailable')
+    assert.equal(result.body.action, 'reload_required')
+    assert.equal(dump(), before)
+    assert.equal(one("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
   })
   await check('combined permission snapshot keeps actor decisions and separate current phases with one root read', async () => {
     const history=await merged({category:{custom:'Face Care'}})
