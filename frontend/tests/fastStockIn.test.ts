@@ -139,8 +139,8 @@ runTest('known zero catalog cost is prefetched and the two read surfaces agree o
   // against real rows: cloudflare/scripts/test-stock-in-sessions-pure.cjs.
   // What belongs here is the pair that can silently split: the desktop table
   // cell and the phone card render the same figure.
-  assert.equal((sessionsSource.match(/unitCost == null \?/g) || []).length, 2,
-    'the table cell and the card must both test for null only')
+  assert.equal((sessionsSource.match(/<CostValue value=\{row\.unit_cost_usd\} fmt=\{formatCostUsd\} t=\{t\} \/>/g) || []).length, 2,
+    'the table cell and the card use the same nullable receipt cost renderer')
   assert.equal((sessionsSource.match(/unitCost == null \|\| Number\(unitCost\) <= 0/g) || []).length, 0,
     'a recorded $0.00 unit cost is a cost, on both surfaces')
 })
@@ -196,14 +196,14 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
 })
 
 runTest('stock-in sessions reuse linked report data and preserve per-receipt costs', () => {
-  assert.match(batchRouteSource, /unit_cost_usd, total_cost_usd, reason, reference_id/)
+  assert.match(batchRouteSource, /unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id/)
   assert.match(batchRouteSource, /unitCostUsd = nullableMoney4\(body\.unit_cost_usd\)/)
   // Since free units (UI-STOCK-1): the supplier is owed for the paid units only.
   assert.match(batchRouteSource, /totalCostUsd = unitCostUsd == null \? null : multiplyMoney4\(unitCostUsd, paidQuantity\)/)
   assert.ok(batchRouteSource.indexOf('totalCostUsd = unitCostUsd') < batchRouteSource.indexOf('received = await receiveBatchStock'),
     'receipt cost must be calculated and range-checked before stock mutation')
   assert.match(stockImportSource, /totalCostUsd = costPriceUsd == null \? null : multiplyMoney4\(costPriceUsd, quantity\)/)
-  assert.match(stockImportSource, /@costPriceUsd,\s*@totalCostUsd,/,
+  assert.match(stockImportSource, /@costPriceUsd, NULL,\s*@totalCostUsd, NULL,/,
     'stock-history imports bind the exact per-event snapshot into the movement')
   assert.equal(nullableMoney4(null), null, 'unknown cost is not zero')
   assert.equal(nullableMoney4(0), 0, 'explicit zero remains known')
