@@ -39,6 +39,7 @@ import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
+import { mergeCostOutcome, mergeCostReviewStatements, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -3688,6 +3689,8 @@ export async function foldDuplicateProductInto(
   economicsOverride?: ProductMergeEconomics,
   atomicHistory?: {
     operationId: string
+    costAuthorityVersion?: 3
+    costFallback?: MergeCostFallback
     bulkClusterPlan?: ProductMergeClusterPlan
     resumedCluster?: boolean
     preStatements?: Array<{ sql: string; params?: Record<string, unknown> }>
@@ -3864,6 +3867,12 @@ export async function foldDuplicateProductInto(
   // edit permission) replaces the averaged cost; KHR follows the chosen record,
   // else the average's own KHR.
   const chosenCost = keeperChoice?.cost
+  const costPlan = atomicHistory?.bulkClusterPlan
+  const newCostAuthority = !chosenCost && (costPlan?.version === 3 || atomicHistory?.costAuthorityVersion === 3)
+  const costOutcome = newCostAuthority ? mergeCostOutcome(canonicalId,
+    costPlan?.version === 3 ? costPlan.keeperCost! : atomicHistory?.costFallback ?? {
+      usd: costOrNull(canonicalBefore.cost_price_usd), khr: costOrNull(canonicalBefore.cost_price_khr),
+    }) : null
   const mergedEconomics = chosenCost
     ? {
       ...foldEconomics,
@@ -3875,15 +3884,6 @@ export async function foldDuplicateProductInto(
     }
     : foldEconomics
   if (mergedEconomics.issues.length) throw new Error(`merge_numeric_invalid:${productMergeNumericError(mergedEconomics.issues)}`)
-  // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
-  // reconcile the two costs rather than silently keeping the keeper's: the
-  // survivor carries the mean of the distinct costs, rounded up to 4dp.
-  //
-  // Detail form, not the plain resolveMergedCost: the rule refuses to average
-  // two costs more than COST_OUTLIER_RATIO apart (it keeps the higher one
-  // instead of inventing a mean nobody paid), and a merge that rewrote a cost
-  // on that basis must say so. `costOutliers` rides out through the audit
-  // entry and both merge responses.
   const mergedPricing = mergedEconomics.merged
   const mergedCost = mergedEconomics.merged
   const costOutliers: MergedCostOutlier[] = []
@@ -4086,8 +4086,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
       wholesaleUsd: mergedPricing.wholesale_price_usd ?? canonicalBefore?.wholesale_price_usd ?? 0,
       wholesaleKhr: mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0,
-      costUsd: chosenCost?.cost_price_usd !== undefined ? chosenCost.cost_price_usd : mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? null,
-      costKhr: chosenCost?.cost_price_khr !== undefined ? chosenCost.cost_price_khr : mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? null,
+      costUsd: costOutcome ? costOutcome.original.usd : chosenCost?.cost_price_usd !== undefined ? chosenCost.cost_price_usd : mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? null,
+      costKhr: costOutcome ? costOutcome.original.khr : chosenCost?.cost_price_khr !== undefined ? chosenCost.cost_price_khr : mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? null,
       barcode: canonicalBarcode,
       reviewed: reviewedAuthorityValid ? 1 : 0,
       category: reviewedAuthorityValid ? reviewedPlan.selected.category.value : null,
@@ -4384,7 +4384,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     ...(choiceFields ? { choicesApplied: choiceFields } : {}),
     ...(atomicHistory?.auditContext || {}),
   }
-  const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
+  const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown>; costReviewOutcome?: MergeCostOutcome } = {
+    ...(costOutcome ? { costReviewOutcome: costOutcome } : {}),
     keeperId: canonicalId,
     keeperName: canonicalName,
     dupId: dup.id,
@@ -4457,6 +4458,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     // the next stock movement. No-op when nothing is derivable.
     { sql: catalogCostRecomputeIfChangedSql('id = @id', { stampUpdatedAt: false }), params: { id: canonicalId } },
   )
+  if (costOutcome) statements.push(...mergeCostReviewStatements(costOutcome, { id: user?.id ?? null, name: actorSnapshot(user) }))
   // A merge makes every stock-in session that touches either product unreplayable,
   // so its Undo is closed here, in the same batch, with the reason on record.
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
@@ -9104,6 +9106,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     const merged = await db.prepare('SELECT barcode FROM products WHERE id=@id').get<{ barcode: string | null }>({ id: mergeId })
     return c.json({ success: true, replayed: true, keptId: keepId, mergedId: mergeId, keeper: { ...row, stock_quantity: stock.totalQuantity, branch_stock: stock.branches, absorbed_barcodes: absorbedBarcodes(row?.barcode, merged) } })
   }
+  if (chosenCost) return c.json({ success: false, code: 'invalid_merge_cost', error: 'Merge cost follows recorded stock. Keep the existing value when no recorded cost is available and review it afterward.' }, 400)
   if (!keeper.is_active || !dup.is_active) return c.json({ code: 'product_merge_inactive', error: 'Both products must be active — one of them was already merged or deleted' }, 409)
   let choiceFields: ResolveChoiceValues | undefined
   if (resolvePlan?.choices && Object.keys(resolvePlan.choices).length) {
@@ -9181,7 +9184,11 @@ app.post('/possible-duplicates/merge', async (c) => {
       keepMode ? 'resolve grid keep merge' : 'possible-duplicates review merge',
       stockChoice ?? 'merge',
       undefined,
-      { operationId, ...(resolvePlan ? { preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
+      { operationId, costAuthorityVersion: 3,
+        ...(resolvePlan ? { costFallback: {
+          usd: costOrNull(resolvePlan.rows.find(row => Number(row.id) === keepId)?.cost_price_usd),
+          khr: costOrNull(resolvePlan.rows.find(row => Number(row.id) === keepId)?.cost_price_khr),
+        }, preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
       keepMode ? { follows: true, requiresProductEdit: resolveChoicesTypeValues({ choices }), ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {

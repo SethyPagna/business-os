@@ -103,6 +103,7 @@ const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissi
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
 const broadcastHub = { broadcast: async () => {} }
 const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
+const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
@@ -124,6 +125,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
 const products = load('routes/products.ts', {
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
+  '../lib/productCostReview': costReview,
   '../lib/db': { getDb: () => adapter },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,

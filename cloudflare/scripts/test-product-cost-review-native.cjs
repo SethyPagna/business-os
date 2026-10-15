@@ -82,6 +82,54 @@ async function mergeCases(){
   assert.match(one('SELECT cost_review_key value FROM products WHERE id=10').value,/^[a-f0-9]{32}$/)
   console.log('PASS actual no-lot merge retains original keeper canonical currencies and assigns review identity')
  }finally{state.native.db.close()}
+ for(const usd of [null,0,5.123456]){
+  fresh()
+  try{
+   state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=NULL,purchase_price_khr=999 WHERE id=10').run(usd)
+   state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',19,1)")
+   const seen=await preview(10,11,'&groupIds=10,11,12')
+   assert.equal(seen.status,200,JSON.stringify(seen.body))
+   const resolve={requestId:'authority-'+String(usd).replace('.','_'),reviewedDigest:seen.body.reviewedDigest,steps:[{mergeId:11,stock:'merge'},{mergeId:12}]}
+   for(const mergeId of [11,12]){
+    const body={keepId:10,mergeId,keep:true,...(mergeId===11?{stock:'merge'}:{}),resolve}
+    const done=await merge(body)
+    assert.equal(done.status,200,JSON.stringify(done.body))
+    assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr,purchase_price_usd,purchase_price_khr FROM products WHERE id=10'),{cost_price_usd:usd,cost_price_khr:null,purchase_price_usd:usd,purchase_price_khr:null})
+    const audit=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
+    assert.equal(audit.after_usd,usd);assert.equal(audit.after_khr,null);assert.equal(audit.fallback_usd,usd)
+    const before=JSON.stringify(rows('SELECT * FROM audit_logs ORDER BY id'))
+    const retry=await merge(body)
+    assert.equal(retry.status,200,JSON.stringify(retry.body));assert.equal(retry.body.replayed,true)
+    assert.equal(JSON.stringify(rows('SELECT * FROM audit_logs ORDER BY id')),before)
+   }
+   console.log('PASS actual three-product continuation and receipted retry retain original canonical '+String(usd)+' over stale purchase mirrors and preserve exact audit values')
+  }finally{state.native.db.close()}
+ }
+ fresh()
+ try{
+  state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'keeper-known',1,5.1234,3),(901,11,'discarded-known',1,9.1234,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3),(901,1,1)")
+  const entries=one('SELECT COUNT(*) n FROM product_cost_entries').n
+  const done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
+  assert.equal(done.status,200,JSON.stringify(done.body))
+  assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=10'),{cost_price_usd:6.1234,cost_price_khr:20500,cost_review_key:null})
+  const audit=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
+  assert.equal(audit.after_usd,6.1234);assert.equal(audit.after_khr,20500);assert.equal(audit.after_key,null);assert.equal(audit.recorded_lot,1)
+  assert.equal(one('SELECT COUNT(*) n FROM product_cost_entries').n,entries)
+  const snapshot=JSON.parse(one('SELECT payload_json FROM undo_snapshots ORDER BY id DESC LIMIT 1').payload_json)
+  const fingerprint=JSON.parse(snapshot.mergedStateFingerprint).products.find(row=>row.id===10)
+  assert.equal(snapshot.fingerprintPending,false)
+  assert.equal(fingerprint.cost_price_usd,6.1234);assert.equal(fingerprint.cost_price_khr,20500);assert.equal(fingerprint.cost_review_key,null)
+  console.log('PASS actual positive-lot merge uses authoritative weighted value with matching final audit and no artificial manual cost entry')
+ }finally{state.native.db.close()}
+ fresh()
+ try{
+  state.tier='free'
+  const snapshot=()=>JSON.stringify(['products','audit_logs','action_history','product_cost_entries'].map(table=>rows('SELECT * FROM '+table+' ORDER BY rowid')))
+  const before=snapshot(),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
+  assert.equal(done.status,409,JSON.stringify(done.body));assert.equal(done.body.code,'resolve_plan_budget');assert.equal(snapshot(),before)
+  assert.ok(done.queries+20<=50)
+  console.log('PASS actual Free merge refuses before business writes; measured route statements='+done.queries+' plus reserved20 auth overhead')
+ }finally{state.native.db.close()}
 }
 async function backupCases(){
  fresh()

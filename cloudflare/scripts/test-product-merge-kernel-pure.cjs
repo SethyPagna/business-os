@@ -56,12 +56,12 @@ const plannedRows = [
   { id: 2, updated_at: 'u2', cost_price_usd: 5, cost_price_khr: 5000 },
   { id: 3, updated_at: 'u3', cost_price_usd: 6, cost_price_khr: 6000 },
 ]
-const clusterPlan = createProductMergeClusterPlan('["tea","123"]', 1, plannedRows)
+const clusterPlan = createProductMergeClusterPlan('["tea","123"]', 1, plannedRows, 2)
 assert.equal(clusterPlan.version, 2)
 const fractionalRows = [1, 1.0001, 1.0003].map((value, i) => ({ id: i + 1, cost_price_usd: value }))
 const legacyPlan = createProductMergeClusterPlan('legacy', 1, fractionalRows, 1)
 assert.equal(resolveProductMergeClusterPlanEconomics(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(legacyPlan)))).merged.cost_price_usd, 1.0002, 'v1 persisted plans retain upward rounding')
-assert.equal(resolveProductMergeClusterPlanEconomics(createProductMergeClusterPlan('new', 1, fractionalRows)).merged.cost_price_usd, 1.0001, 'new v2 plans use nearest4')
+assert.equal(resolveProductMergeClusterPlanEconomics(createProductMergeClusterPlan('new', 1, fractionalRows, 2)).merged.cost_price_usd, 1.0001, 'persisted v2 plans use nearest4')
 assert.deepEqual(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(clusterPlan))), clusterPlan)
 assert.equal(resolveProductMergeClusterPlanEconomics(clusterPlan).merged.cost_price_usd, 5)
 const retryKeeper = { id: 1, updated_at: 'after-first-fold', cost_price_usd: 5, cost_price_khr: 5000 }
@@ -70,6 +70,14 @@ assert.equal(productMergePlanSourceMemberMatches(clusterPlan, plannedRows[2]), t
 assert.equal(resolveProductMergeEconomics([retryKeeper, plannedRows[2]]).merged.cost_price_usd, 5.5, 'a fresh pairwise retry would drift')
 assert.equal(resolveProductMergeClusterPlanEconomics(clusterPlan).merged.cost_price_usd, 5, 'the durable source plan preserves the original whole-cluster mean')
 assert.equal(productMergePlanSourceMemberMatches(clusterPlan, { ...plannedRows[2], cost_price_usd: 7 }), false, 'a changed remaining member quarantines the plan')
+for (const usd of [null, 0, 5.123456]) {
+  const plan=createProductMergeClusterPlan('v3',1,[{id:1,cost_price_usd:usd,cost_price_khr:null},{id:2,cost_price_usd:9,cost_price_khr:36000}])
+  assert.equal(plan.version,3)
+  assert.deepEqual(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(plan))),plan)
+  assert.equal(resolveProductMergeClusterPlanEconomics(plan).merged.cost_price_usd,usd)
+  assert.equal(resolveProductMergeClusterPlanEconomics(plan).merged.cost_price_khr,null)
+  assert.equal(parseProductMergeClusterPlan({...plan,keeperCost:{usd:9,khr:null}}),null)
+}
 
 const guard = productMergeCasAssertion([
   { id: 1, name: 'A', barcode: '0123', is_active: 1, updated_at: 'u1' },
