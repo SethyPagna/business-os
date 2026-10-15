@@ -41,9 +41,10 @@ function reviewMoneyJsonSql(value: string): string {
 export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id: number | null; name: string | null }, operationId: string | null = null, generation = 0): Statement[] {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid merge cost generation')
   const afterKey = `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN NULL ELSE @reviewKey END`
-  const usd = `COALESCE(${CATALOG_COST_DERIVE_SQL},
-    (SELECT CASE WHEN typeof(cost_usd) IN ('integer','real') AND cost_usd>=0 AND cost_usd<=1.7976931348623157e308 THEN cost_usd END
-      FROM product_cost_entries WHERE product_id=products.id ORDER BY id DESC LIMIT 1),@fallbackUsd)`
+  const manual = `(SELECT CASE WHEN typeof(cost_usd) IN ('integer','real') AND cost_usd>=0 AND cost_usd<=1.7976931348623157e308 THEN cost_usd END
+    FROM product_cost_entries WHERE product_id=products.id ORDER BY id DESC LIMIT 1)`
+  const usd = `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN COALESCE(${CATALOG_COST_DERIVE_SQL},@fallbackUsd)
+    ELSE COALESCE(${manual},@fallbackUsd) END`
   const params = { productId: outcome.keeperId, reviewKey: outcome.reviewKey, fallbackUsd: outcome.original.usd,
     fallbackKhr: outcome.original.khr, actorId: actor.id, actorName: actor.name, beforeKey: outcome.beforeKey, rootKey: outcome.rootKey,
     operationId, costGeneration: generation, eventKind: outcome.rootKey === outcome.reviewKey ? 'merge' : 'merge_redo' }
