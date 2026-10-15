@@ -54,6 +54,8 @@ export type CostBreakdownInput = {
 }
 
 export type CostBreakdown = {
+  cost_needs_review?: boolean
+  costConfirmation?: { version: 1; reviewed_digest: string; usd: number }
   product_id: number
   inputs: CostBreakdownInput[]
   /** SUM(quantity x cost_usd) / SUM(quantity); empty on an older payload. */
@@ -193,6 +195,13 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     excluded: typeof entry.excluded === 'string' && EXCLUSION_REASONS.has(entry.excluded) ? entry.excluded as CostBreakdownExclusionReason : null,
   }))
   return {
+    ...(raw.cost_needs_review === true ? { cost_needs_review: true } : {}),
+    ...(() => {
+      const quote = raw.costConfirmation as Record<string, unknown> | undefined
+      return quote?.version === 1 && typeof quote.reviewed_digest === 'string' && /^[a-f0-9]{64}$/.test(quote.reviewed_digest)
+        && typeof quote.usd === 'number' && Number.isFinite(quote.usd) && quote.usd >= 0
+        ? { costConfirmation: { version: 1 as const, reviewed_digest: quote.reviewed_digest, usd: quote.usd } } : {}
+    })(),
     product_id: Number(raw.product_id) || 0,
     inputs,
     weighted_terms: Array.isArray(raw.weighted_terms)

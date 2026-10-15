@@ -7,6 +7,12 @@ import { captureActorReadScope, assertActorReadScope, assertActorWriteIdentity }
 import type { ActorWriteIdentity } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
+export async function confirmProductCostReview(productId: number | string, body: { client_request_id: string; reviewed_digest: string; value: number }): Promise<unknown> {
+  const result = await apiFetch('POST', `/api/products/${encodeURIComponent(String(productId))}/cost-review/confirm`, body)
+  cacheInvalidate('products')
+  return result
+}
+
 type ProductPayload = Record<string, unknown>
 
 export type MergeDuplicateProductsChunkResult = {
