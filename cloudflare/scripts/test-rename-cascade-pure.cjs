@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // D6: the rename-cascade engine (lib/renameCascade.ts) against a REAL
 // sqlite database with the REAL migrations -- name_key is maintained by
 // migration 0010's triggers, so a hand-built fixture would test this
@@ -13,7 +14,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const ts = require(path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'typescript'))
+const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -63,20 +64,21 @@ async function seed(db) {
     { name: 'Twin Cream', barcode: 'd2', category: 'Skincare', categories: '', brand: 'Chanel', supplier: '' },
   ]
   for (const row of rows) {
-    await db.prepare(`
+    await seedStockFixture(db, () => db.prepare(`
       INSERT INTO products (name, barcode, category, categories, brand, supplier, is_active, stock_quantity, out_of_stock_threshold)
       VALUES (@name, @barcode, @category, @categories, @brand, @supplier, 1, 5, 0)
-    `).run(row)
+    `).run(row))
   }
   const productId = (await db.prepare(`SELECT id FROM products WHERE barcode = 'a1'`).get()).id
-  await db.prepare(`
+  await seedStockFixture(db, () => db.prepare(`
     INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_name)
     VALUES (@id, 'k1', '08282026', '2026-08-28', 1, 1, 'Old Trading')
-  `).run({ id: productId })
+  `).run({ id: productId }))
 }
 
 async function run() {
   const db = openDb(MIGRATION_SQLS)
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   await seed(db)
 
   await check('impact splits primary vs multi-value membership, and flags an existing target', async () => {
@@ -113,7 +115,7 @@ async function run() {
   })
 
   await check('unit carry uses exact normalized equality', async () => {
-    await db.prepare(`UPDATE products SET unit = 'Bottle' WHERE barcode IN ('a1','b1')`).run()
+    await seedStockFixture(db, () => db.prepare(`UPDATE products SET unit = 'Bottle' WHERE barcode IN ('a1','b1')`).run())
     const impact = await engine.computeRenameImpact(db, 'unit', ' bottle ', 'Piece')
     assert.equal(impact.products_primary, 2)
     const changed = await engine.applyRenameCarry(db, 'unit', 'BOTTLE', 'Piece', '2026-08-28T10:00:00Z')
@@ -133,9 +135,9 @@ async function run() {
   })
 
   await check('category removal clears primary and secondary memberships without touching near-matches', async () => {
-    await db.prepare(`UPDATE products SET category='Lips', categories='Lips||Gift Set' WHERE barcode='a1'`).run()
-    await db.prepare(`UPDATE products SET category='Skincare', categories='Skincare||Lips' WHERE barcode='b1'`).run()
-    await db.prepare(`UPDATE products SET category='Lipstick', categories='Lipstick' WHERE barcode='c1'`).run()
+    await seedStockFixture(db, () => db.prepare(`UPDATE products SET category='Lips', categories='Lips||Gift Set' WHERE barcode='a1'`).run())
+    await seedStockFixture(db, () => db.prepare(`UPDATE products SET category='Skincare', categories='Skincare||Lips' WHERE barcode='b1'`).run())
+    await seedStockFixture(db, () => db.prepare(`UPDATE products SET category='Lipstick', categories='Lipstick' WHERE barcode='c1'`).run())
     const changed = await engine.removeLiveLookupValue(db, 'category', ' lips ', '2026-08-28T11:00:00Z')
     assert.equal(changed.products, 2)
     const a = await db.prepare(`SELECT category, categories FROM products WHERE barcode='a1'`).get()

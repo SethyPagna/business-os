@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),Module=require('node:module')
 const file=path.join(__dirname,'test-product-resolve-keep-merge-native.cjs'),source=fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),boundary=source.indexOf('\nasync function main() {')
 assert.ok(boundary>0)
@@ -23,7 +29,7 @@ async function storageCases(){
   await assert.rejects(()=>oldWriter.updateRow(env,'products',10,{cost_review_key:'a'.repeat(32)}),/product_cost_review_write_refused/)
   console.log('PASS actual dynamic generic writer with old skip list cannot install protected review identity')
   const review=real('productCostReview'),outcome=review.mergeCostOutcome(10,{usd:5.1234,khr:20500})
-  await adapter.batch(review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}))
+  await real('stockTransaction').executeStockTransaction(adapter, review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}), 'retry')
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
   await assert.rejects(()=>oldWriter.updateRow(env,'products',10,{cost_review_key:null}),/product_cost_review_write_refused/)
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
@@ -33,16 +39,16 @@ async function storageCases(){
   assert.equal(JSON.stringify(rows('SELECT * FROM products ORDER BY id')),before)
   console.log('PASS protected marker refusal rolls back preceding writes in the same native batch')
   const entries=one('SELECT COUNT(*) n FROM product_cost_entries').n
-  state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'known',1,5.1234,1)")
+  seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'known',1,5.1234,1)"))
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
   assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5.1234)
   assert.equal(one('SELECT COUNT(*) n FROM product_cost_entries').n,entries)
   console.log('PASS valid same-cost recorded lot clears only marker without inserting manual baseline or changing money')
-  state.native.db.exec('DELETE FROM product_batches WHERE id=900')
+  seedFixture(state.native.db, () => state.native.db.exec('DELETE FROM product_batches WHERE id=900'))
   const next=review.mergeCostOutcome(10,{usd:5.1234,khr:20500})
-  await adapter.batch(review.mergeCostReviewStatements(next,{id:1,name:'Fixture'}))
+  await real('stockTransaction').executeStockTransaction(adapter, review.mergeCostReviewStatements(next,{id:1,name:'Fixture'}), 'retry')
   await assert.rejects(()=>oldWriter.updateRow(env,'products',10,{cost_review_key:outcome.reviewKey}),/product_cost_review_write_refused/)
-  state.native.db.exec('DELETE FROM branch_stock WHERE product_id=10;UPDATE products SET stock_quantity=0 WHERE id=10;DELETE FROM products WHERE id=10;INSERT INTO products(id,name,cost_price_usd) VALUES(10,\'Fresh same number\',5.1234)')
+  seedFixture(state.native.db, () => state.native.db.exec('DELETE FROM branch_stock WHERE product_id=10;UPDATE products SET stock_quantity=0 WHERE id=10;DELETE FROM products WHERE id=10;INSERT INTO products(id,name,cost_price_usd) VALUES(10,\'Fresh same number\',5.1234)'))
   await assert.rejects(()=>oldWriter.updateRow(env,'products',10,{cost_review_key:next.reviewKey}),/product_cost_review_write_refused/)
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
   console.log('PASS old receipt cannot install stale marker or inherit authority after delete/reinsert same numeric ID')
@@ -55,16 +61,16 @@ async function storageCases(){
  fresh()
  try{
   const review=real('productCostReview')
-  state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown',1,NULL,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3);INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,5,'manual',900)")
+  seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown',1,NULL,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3);INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,5,'manual',900)"))
   const outcome=review.mergeCostOutcome(10,{usd:5,khr:20500})
-  await adapter.batch(review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}))
+  await real('stockTransaction').executeStockTransaction(adapter, review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}), 'retry')
   assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5)
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
   await adapter.batch([catalogCost.catalogCostRecomputeIfChangedStatement(10)])
-  state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(901,10,'free',1,0,1)")
+  seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(901,10,'free',1,0,1)"))
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
   console.log('PASS positive manual-only derivation over unknown lot and free-only receipt do not certify recorded lot evidence or clear review')
-  state.native.db.exec('UPDATE product_batches SET unit_cost_usd=5 WHERE id=901')
+  seedFixture(state.native.db, () => state.native.db.exec('UPDATE product_batches SET unit_cost_usd=5 WHERE id=901'))
   assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
   console.log('PASS real lot cost becoming known clears review at unchanged derived value')
  }finally{state.native.db.close()}
@@ -73,10 +79,10 @@ async function storageCases(){
   try{
    state.native.db.exec('PRAGMA recursive_triggers='+recursive)
    const review=real('productCostReview'),outcome=review.mergeCostOutcome(10,{usd:5.1234,khr:null})
-   await adapter.batch(review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}))
+   await real('stockTransaction').executeStockTransaction(adapter, review.mergeCostReviewStatements(outcome,{id:1,name:'Fixture'}), 'retry')
    assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,outcome.reviewKey)
    assert.throws(()=>state.native.db.exec('UPDATE products SET cost_review_key=NULL WHERE id=10'),/product_cost_review_write_refused/)
-   state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'recursion',1,5.1234,1)")
+   seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'recursion',1,5.1234,1)"))
    assert.equal(one('SELECT cost_review_key value FROM products WHERE id=10').value,null)
    assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5.1234)
    console.log('PASS review admission/refusal and same-value valid-lot clearing with recursive_triggers='+recursive)
@@ -86,7 +92,7 @@ async function storageCases(){
 async function mergeCases(){
  fresh()
  try{
-  state.native.db.exec('UPDATE products SET cost_price_usd=5.1234 WHERE id=10;UPDATE products SET cost_price_usd=9 WHERE id=11')
+  seedFixture(state.native.db, () => state.native.db.exec('UPDATE products SET cost_price_usd=5.1234 WHERE id=10;UPDATE products SET cost_price_usd=9 WHERE id=11'))
   const done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
   assert.equal(done.status,200,JSON.stringify(done.body))
   const actual=one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10')
@@ -99,8 +105,8 @@ async function mergeCases(){
  for(const usd of [null,0,5.123456]){
   fresh()
   try{
-   state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=NULL,purchase_price_khr=999 WHERE id=10').run(usd)
-   state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',19,1)")
+   seedFixture(state.native.db, () => state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=NULL,purchase_price_khr=999 WHERE id=10').run(usd))
+   seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(12,'Rose Toner 100ml','8803333333333',19,1)"))
    const seen=await preview(10,11,'&groupIds=10,11,12')
    assert.equal(seen.status,200,JSON.stringify(seen.body))
    const resolve={requestId:'authority-'+String(usd).replace('.','_'),reviewedDigest:seen.body.reviewedDigest,steps:[{mergeId:11,stock:'merge'},{mergeId:12}]}
@@ -121,7 +127,7 @@ async function mergeCases(){
  }
  fresh()
  try{
-  state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'keeper-known',1,5.1234,3),(901,11,'discarded-known',1,9.1234,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3),(901,1,1)")
+  seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'keeper-known',1,5.1234,3),(901,11,'discarded-known',1,9.1234,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3),(901,1,1)"))
   const entries=one('SELECT COUNT(*) n FROM product_cost_entries').n
   const done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
   assert.equal(done.status,200,JSON.stringify(done.body))
@@ -140,12 +146,12 @@ async function mergeCases(){
    for(const fallback of [5,null]){
     fresh()
     try{
-     state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99 WHERE id=10').run(fallback)
-     state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown-manual',1,NULL,3)")
-     state.native.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,?)').run(quantity??0)
-     state.native.db.exec("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',900)")
-     state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',900)").run(manual)
-     if(quantity===null)state.native.db.exec('DELETE FROM branch_batch_stock WHERE batch_id=900;DELETE FROM product_batches WHERE id=900')
+     seedFixture(state.native.db, () => state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99 WHERE id=10').run(fallback))
+     seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity) VALUES(900,10,'unknown-manual',1,NULL,3)"))
+     seedFixture(state.native.db, () => state.native.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,?)').run(quantity??0))
+     seedFixture(state.native.db, () => state.native.db.exec("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',900)"))
+     seedFixture(state.native.db, () => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',900)").run(manual))
+     if(quantity===null)seedFixture(state.native.db, () => state.native.db.exec('DELETE FROM branch_batch_stock WHERE batch_id=900;DELETE FROM product_batches WHERE id=900'))
      const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
      assert.equal(done.status,200,JSON.stringify(done.body))
      const expected=typeof manual==='number'&&manual>=0?manual:fallback
@@ -162,8 +168,8 @@ async function mergeCases(){
  for(const manual of [0,-1,'malformed']){
   fresh()
   try{
-   state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',0)")
-   state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',0)").run(manual)
+   seedFixture(state.native.db, () => state.native.db.exec("UPDATE products SET cost_price_usd=5 WHERE id=10;INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',0)"))
+   seedFixture(state.native.db, () => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',0)").run(manual))
    const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
    assert.equal(done.status,200,JSON.stringify(done.body))
    const stored=one('SELECT cost_price_usd,cost_review_key FROM products WHERE id=10')
@@ -194,7 +200,7 @@ async function forwardRetryCases(){
     const result=await originalBatch(statements)
     if(race&&!changed&&statements.some(statement=>statement.sql.includes('INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)'))){
      changed=true
-     state.native.db.exec('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10')
+     seedFixture(state.native.db, () => state.native.db.exec('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10'))
     }
     return result
    }
@@ -230,15 +236,15 @@ async function backupCases(){
  try{
   state.native.db.exec('DELETE FROM fees')
   const review=real('productCostReview'),backup=real('backup')
-  await adapter.batch(review.mergeCostReviewStatements(review.mergeCostOutcome(10,{usd:5,khr:20500}),{id:1,name:'Fixture'}))
+  await real('stockTransaction').executeStockTransaction(adapter, review.mergeCostReviewStatements(review.mergeCostOutcome(10,{usd:5,khr:20500}),{id:1,name:'Fixture'}), 'retry')
   const tables=backup.BACKUP_TABLES.filter(table=>one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table))
   const doc={format:'business-os-cloudflare-backup',formatVersion:1,tables:Object.fromEntries(tables.map(table=>[table,{columns:rows('PRAGMA table_info("'+table+'")').map(row=>row.name),rows:rows('SELECT * FROM "'+table+'"')}]))}
   const before=JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')]))
   let text=JSON.stringify(doc)
   const env={DB:binding(),ASSETS:{async get(key){return {key,etag:'fixed-source',version:'fixture',size:Buffer.byteLength(text),body:new Blob([text]).stream()}}}}
-  state.native.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')")
+  seedFixture(state.native.db, () => state.native.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({mode:'restore',token:'review-fixture',backupKey:'fixture.json',startedAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z',startedBy:'fixture',phase:'deleting'})))
   let error
-  try{await backup.restoreCloudflareBackup(env,'fixture.json')}catch(failure){error=failure}
+  try{await backup.restoreCloudflareBackup(env,'fixture.json',undefined,'review-fixture')}catch(failure){error=failure}
   console.log('BACKUP_PROBE '+JSON.stringify({error:error?.message??null,businessChanged:JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')]))!==before}))
   assert.match(error?.message??'',/merge cost review.*validated restore/i)
   assert.equal(JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')])),before)
@@ -246,20 +252,20 @@ async function backupCases(){
   doc.tables.products.rows.forEach(row=>{row.cost_review_key=null})
   doc.tables.audit_logs.rows=doc.tables.audit_logs.rows.filter(row=>!JSON.parse(row.details||'{}').cost_review)
   text=JSON.stringify(doc)
-  await assert.rejects(()=>backup.restoreCloudflareBackup(env,'fixture.json'),/merge cost review.*validated restore/i)
+  await assert.rejects(()=>backup.restoreCloudflareBackup(env,'fixture.json',undefined,'review-fixture'),/merge cost review.*validated restore/i)
   assert.equal(JSON.stringify(tables.map(table=>[table,rows('SELECT * FROM "'+table+'" ORDER BY rowid')])),before)
   console.log('PASS unflagged older snapshot cannot erase live review marker or its admitted history before DELETE')
  }finally{state.native.db.close()}
  fresh();state.native.db.close()
  state.native=require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll({through:254}))
  try{
-  state.native.db.exec("DELETE FROM fees;INSERT INTO products(id,name,cost_price_usd) VALUES(10,'Legacy fixture',5.1234)")
+  seedFixture(state.native.db, () => state.native.db.exec("DELETE FROM fees;INSERT INTO products(id,name,cost_price_usd) VALUES(10,'Legacy fixture',5.1234)"))
   assert.equal(rows('PRAGMA table_info(products)').some(row=>row.name==='cost_review_key'),false)
   const backup=real('backup'),tables=backup.BACKUP_TABLES.filter(table=>one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table))
   const doc={format:'business-os-cloudflare-backup',formatVersion:1,tables:Object.fromEntries(tables.map(table=>[table,{columns:rows('PRAGMA table_info("'+table+'")').map(row=>row.name),rows:rows('SELECT * FROM "'+table+'"')}]))}
   const text=JSON.stringify(doc),env={DB:binding(),ASSETS:{async get(key){return key===backup.CLOUDFLARE_BACKUP_PREFIX+'legacy.json'?{key,etag:'legacy-source',version:'fixture',size:Buffer.byteLength(text),body:new Blob([text]).stream()}:null}}}
-  state.native.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')")
-  await backup.restoreCloudflareBackup(env,'legacy.json')
+  seedFixture(state.native.db, () => state.native.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({mode:'restore',token:'review-fixture',backupKey:'legacy.json',startedAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z',startedBy:'fixture',phase:'deleting'})))
+  await backup.restoreCloudflareBackup(env,'legacy.json',undefined,'review-fixture')
   assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=10').value,5.1234)
   console.log('PASS actual full small unflagged restore on pre0255 live schema does not reference the absent review column')
  }finally{state.native.db.close()}

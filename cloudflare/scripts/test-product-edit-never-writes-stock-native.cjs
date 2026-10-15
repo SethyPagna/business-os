@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // RET-B F2 sibling writer (5 Oct 2026): a product EDIT never writes stock.
 //
 // ProductForm sends the stock figure it loaded (read-only in edit mode) with
@@ -159,11 +165,11 @@ const app = productsRoute.default
 assert.ok(app && typeof app.request === 'function', 'routes/products.ts must export the Hono app as default')
 
 function seedBranch() {
-  rawDb.exec(`UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0;
+  seedFixture(rawDb.db, () => rawDb.exec(`UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0;
     UPDATE damaged_stock_lots SET quantity_remaining=0; UPDATE products SET stock_quantity=0;
     DELETE FROM damaged_stock_lots;DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; DELETE FROM inventory_movements; DELETE FROM product_images;
-    DELETE FROM products; DELETE FROM branches;`)
+    DELETE FROM products; DELETE FROM branches;`))
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
 }
 
@@ -195,12 +201,12 @@ const onHand = (id) => rawDb.prepare('SELECT COALESCE(SUM(quantity),0) AS q FROM
 async function main() {
   await check('edit opened at 10, sell 3, save a price change: stock stays 7 in both ledgers', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, selling_price_usd, stock_quantity)
-      VALUES (1, 'Rouge', '880001', 1, 2, 5, 10)`).run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, selling_price_usd, stock_quantity)
+      VALUES (1, 'Rouge', '880001', 1, 2, 5, 10)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run())
     // A sale between opening the form and saving it.
-    rawDb.prepare('UPDATE branch_stock SET quantity = quantity - 3 WHERE product_id = 1').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id = 1').run()
+    seedFixture(rawDb.db, () => rawDb.prepare('UPDATE branch_stock SET quantity = quantity - 3 WHERE product_id = 1').run())
+    seedFixture(rawDb.db, () => rawDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id = 1').run())
     const res = await put('/1', { name: 'Rouge', barcode: '880001', selling_price_usd: 6, stock_quantity: 10 })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.equal(rawDb.prepare('SELECT selling_price_usd AS p FROM products WHERE id = 1').get().p, 6, 'the field edit landed')
@@ -223,12 +229,12 @@ async function main() {
 
   await check('an edit that folds into a same-name twin carries no stale figure onto the survivor', async () => {
     seedBranch()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (1, 'Fold Keeper', '777000', 1, 5, 2)`).run()
-    rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
-      VALUES (2, 'Fold Dup', '00777000', 1, 5, 3)`).run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 2)').run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 3)').run()
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (1, 'Fold Keeper', '777000', 1, 5, 2)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, stock_quantity)
+      VALUES (2, 'Fold Dup', '00777000', 1, 5, 3)`).run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 2)').run())
+    seedFixture(rawDb.db, () => rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 3)').run())
     const res = await put('/2', { name: 'Fold Keeper', barcode: '777000', stock_quantity: 40 })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.equal(onHand(1), 5, 'the fold moved 3 onto 2')

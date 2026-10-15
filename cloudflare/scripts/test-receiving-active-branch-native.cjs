@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 
 const fs = require('fs')
@@ -32,6 +38,7 @@ function loadReal(relPath, overrides = {}) {
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
     if (request in overrides) return overrides[request]
+    if (request === '../lib/stockTransaction') return loadReal('lib/stockTransaction.ts')
     if (request.startsWith('.')) {
       if (relPath.startsWith('lib/')) return loadReal(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + '.ts')
       return autoStub()
@@ -69,6 +76,7 @@ function wrapFlat(rawDb) {
         },
       }
     },
+    async batchOnce(items) { return this.batch(items) },
     async batch(items) {
       return rawDb.batch(items)
     },
@@ -176,7 +184,7 @@ assert.equal(typeof runAdjustAction, 'function', 'routes/inventory.ts exports ru
 assert.equal(typeof batchesMod.runReceiveBatchAction, 'function', 'routes/batches.ts exports runReceiveBatchAction (P4-B extraction)')
 function freshDb() {
   const rawDb = openDb(loadAll())
-  rawDb.exec(`
+  seedFixture(rawDb.db, () => rawDb.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1),(2, 'Warehouse', 0, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
@@ -184,7 +192,7 @@ function freshDb() {
       VALUES(2, 'Toner', 'TON-1', 3, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(2, 1, 0);
-  `)
+  `))
   return wrapFlat(rawDb)
 }
 const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
@@ -371,10 +379,10 @@ async function run() {
   {
     const db=freshDb(), before=snapshot(db)
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
-    await assert.rejects(db.batch([
+    await assert.rejects(loadReal('lib/stockTransaction.ts').executeStockTransaction(db, [
       {sql:'UPDATE products SET cost_price_usd=19 WHERE id=1',params:{}},
       receivingBranchMod.receivingBranchAssertion(1),
-    ]),receivingBranchMod.isReceivingBranchError)
+    ], 'retry'),receivingBranchMod.isReceivingBranchError)
     assert.deepEqual(snapshot(db),before)
   }
   console.log('PASS actual assertion abort rolls back earlier batch writes despite another active branch')

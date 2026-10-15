@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -41,7 +47,7 @@ function fixture(plan, total) {
   for (const sql of loadAll()) raw.exec(sql)
   const ids = Array.from({ length: total }, (_, i) => 10000 + i)
   const insert = raw.prepare('INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(?,?,?,1,0)')
-  for (const id of ids) insert.run(id, `fixture ${id}`, `BUDGET${id}`)
+  for (const id of ids) seedFixture(raw, () => insert.run(id, `fixture ${id}`, `BUDGET${id}`))
   raw.prepare("INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('budget','products','pending','fixture',?,?)").run(JSON.stringify(ids), total)
   const state = { statements: 0, ceiling: plan === 'free' ? 50 : 1000, beforeBatch: null, afterBatch: null, queued: [], failOnce: new Set(), faults: [], failKvPut: false }
   const count = n => { state.statements += n; if (state.statements > state.ceiling) throw new Error('fixture invocation query budget exceeded') }
@@ -89,7 +95,7 @@ async function terminalRecovery() {
       const cap = plan === 'free' ? 125 : 500
       const f = fixture(plan, outcome === 'completed' ? 2 : cap + 3)
       f.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
-      if (outcome !== 'completed') f.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(f.ids[0])
+      if (outcome !== 'completed') seedFixture(f.raw, () => f.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(f.ids[0]))
       f.kv.set('v2:products', '9')
       const tasks = []
       const request = new Request('https://fixture.test/api/products/search-index?page=5&format=1')
@@ -171,7 +177,7 @@ async function terminalRecovery() {
     assert.equal(pending.kv.size, 0)
     pending.raw.close()
     const absent = fixture('free', 2)
-    absent.raw.exec('UPDATE products SET is_active=0')
+    seedFixture(absent.raw, () => absent.raw.exec('UPDATE products SET is_active=0'))
     await absent.run()
     await absent.run()
     assert.equal(absent.audits(), 0, 'already absent ids never gain fabricated business effects')
@@ -227,13 +233,13 @@ async function main() {
   for (const ledger of ['cache', 'branch', 'batch', 'damaged']) {
     const g = fixture('free', 2)
     const id = g.ids[0]
-    if (ledger === 'cache') g.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(id)
-    if (ledger === 'branch') g.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id)
+    if (ledger === 'cache') seedFixture(g.raw, () => g.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(id))
+    if (ledger === 'branch') seedFixture(g.raw, () => g.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id))
     if (ledger === 'batch') {
-      g.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active) VALUES(9000,?,'budget','budget',1)").run(id)
-      g.raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9000,1,1)')
+      seedFixture(g.raw, () => g.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active) VALUES(9000,?,'budget','budget',1)").run(id))
+      seedFixture(g.raw, () => g.raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9000,1,1)'))
     }
-    if (ledger === 'damaged') g.raw.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(?,1,1,1,'damaged')").run(id)
+    if (ledger === 'damaged') seedFixture(g.raw, () => g.raw.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(?,1,1,1,'damaged')").run(id))
     await g.run()
     assert.equal(g.job().status, 'completed')
     assert.equal(g.job().failed_count, 1)
@@ -250,7 +256,7 @@ async function main() {
   console.log('PASS each ledger alone refuses stocked product; empty sibling and per-product audit preserved')
   const race = fixture('free', 2)
   race.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
-  race.state.beforeBatch = () => race.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(race.ids[0])
+  race.state.beforeBatch = () => seedFixture(race.raw, () => race.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(race.ids[0]))
   await assert.rejects(race.run(), /product_has_stock/)
   assert.equal(race.job().processed_count, 0)
   assert.equal(race.audits(), 0)

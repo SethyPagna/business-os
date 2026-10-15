@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -19,9 +25,13 @@ function loadTs(rel, stubs = {}) {
     apply: () => undefined, construct: () => ({}),
   })
   const original = Module._load
-  Module._load = (request, parent, isMain) => Object.prototype.hasOwnProperty.call(stubs, request)
-    ? stubs[request]
-    : (request.startsWith('.') || request === 'hono' ? permissive() : original.call(Module, request, parent, isMain))
+  Module._load = (request, parent, isMain) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    const helper = request.split('/').pop()
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
+    return request.startsWith('.') || request === 'hono' ? permissive() : original.call(Module, request, parent, isMain)
+  }
+
   const mod = { exports: {} }
   try {
     new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
@@ -51,6 +61,7 @@ function countedAdapter(d1) {
         },
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch(statements) {
       counters.batches += 1
       counters.statementsInBatches += statements.length
@@ -108,19 +119,19 @@ function loadRealModules(adapter) {
 
 async function main() {
   const d1 = openDb(loadAll())
-  d1.db.exec('BEGIN')
-  const insert = d1.db.prepare(`INSERT INTO products
-    (id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,is_active)
-    VALUES(?,?,?,?,?,?,?,?,?,1)`)
-  for (let pair = 1; pair <= 1600; pair += 1) {
-    const keeper = pair * 2 - 1
-    const duplicate = pair * 2
-    const name = `Benchmark item ${String(pair).padStart(4, '0')}`
-    const barcode = String(100000 + pair)
-    insert.run(keeper, name, barcode, 4, 0, 5, 20000, 3, 12000)
-    insert.run(duplicate, name, `0${barcode}`, 6, 0, 7, 24000, 4, 16000)
-  }
-  d1.db.exec('COMMIT')
+  seedFixture(d1.db, () => {
+    const insert = d1.db.prepare(`INSERT INTO products
+      (id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,is_active)
+      VALUES(?,?,?,?,?,?,?,?,?,1)`)
+    for (let pair = 1; pair <= 1600; pair += 1) {
+      const keeper = pair * 2 - 1
+      const duplicate = pair * 2
+      const name = `Benchmark item ${String(pair).padStart(4, '0')}`
+      const barcode = String(100000 + pair)
+      insert.run(keeper, name, barcode, 4, 0, 5, 20000, 3, 12000)
+      insert.run(duplicate, name, `0${barcode}`, 6, 0, 7, 24000, 4, 16000)
+    }
+  })
 
   const { adapter, counters } = countedAdapter(d1)
   const { identity, route } = loadRealModules(adapter)
@@ -182,14 +193,14 @@ async function main() {
     // 21 -> 22 (round 2): the discarded-product-unmoved guard joined the write
     // batch, so it is now as long as the 22-statement batch and the set folds them.
     // The four-ledger conservation assertion adds one atomic statement per fold.
-    [3, 8, 22, 23],
+    [3, 8, 22, loadTs('lib/stockTransaction.ts').stockTransactionStatementCount(23)],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [23, 22, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [...new Set(foldBatchSizes)].sort((a, b) => b - a),
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

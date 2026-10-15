@@ -1,8 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const ts = require(path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'typescript'))
+const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -46,6 +47,7 @@ async function run() {
   const lookupUniqueIndex = migrationNames.indexOf('0102_lookup_normalized_unique.sql')
   assert.ok(historicalCostIndex >= 0 && lookupUniqueIndex === historicalCostIndex + 1, '0102 must follow 0101 in the full migration chain')
   const db = openDb(loadAll())
+assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
 
   await check('full migration chain applies 0101 then 0102 and creates both unique indexes', async () => {
     const indexes = await db.prepare(`
@@ -70,11 +72,11 @@ async function run() {
   })
 
   await db.prepare(`INSERT INTO categories (name) VALUES ('Lips')`).run()
-  await db.prepare(`
+  await seedStockFixture(db, () => db.prepare(`
     INSERT INTO products (name, barcode, category, categories, brand, brands, unit, cost_price_usd, is_active)
     VALUES ('Rouge A','ra','Lips','Lips||Gift Set','KIKO','KIKO||Luxury','pcs',7.25,1),
            ('Rouge B','rb','Skincare','Skincare||Lips','Other','Other','pcs',8.50,1)
-  `).run()
+  `).run())
 
   await check('a failed lookup batch rolls back lookup, primary and secondary product writes', async () => {
     const plan = await cascade.buildLiveLookupMutationPlan(db, 'category', ['Lips'], 'Lip Care', '2026-09-02T00:00:00Z')

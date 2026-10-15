@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Drives the real multi-invocation stock_actions ANALYZE path from a ranged
 // R2 CSV read through persisted review rows and the final conflict seal.
 // This is deliberately broader than the resolver/seal unit tests: Screen 2
@@ -164,10 +170,10 @@ async function drainAnalyze(env, jobId) {
   // realness floor): stockActionCatalog.ts's readCatalogProducts prefilters
   // by the CLASS-folded barcode (which nulls out broken codes on purpose) and
   // relies on name_normalized to still surface this candidate.
-  await db.prepare(`INSERT INTO products
+  seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO products
       (id, name, name_normalized, barcode, selling_price_usd, cost_price_usd, stock_quantity, is_active)
-    VALUES (10, 'Anchor Serum', 'anchor serum', 'ANCHOR', 12, 4, 0, 1)`).run({})
-  await db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 0), (10, 2, 0)`).run({})
+    VALUES (10, 'Anchor Serum', 'anchor serum', 'ANCHOR', 12, 4, 0, 1)`).run({}))
+  seedFixture(rawDb.db, () => rawDb.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 0), (10, 2, 0)`).run({}))
   await seedJob(db, 'analyze-e2e', Buffer.byteLength(csv))
 
   const invocations = await drainAnalyze(env, 'analyze-e2e')

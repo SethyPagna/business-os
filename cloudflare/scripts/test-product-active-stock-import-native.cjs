@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -44,8 +50,8 @@ function fixture() {
   return { raw, db }
 }
 function product(raw, id, quantity = 0) {
-  raw.prepare('INSERT INTO products(id,name,is_active,stock_quantity,updated_at) VALUES(@id,@name,1,@qty,@stamp)')
-    .run({ id, name: `Probe ${id}`, qty: quantity, stamp: '2026-01-01' })
+  seedFixture(raw.db, () => raw.prepare('INSERT INTO products(id,name,is_active,stock_quantity,updated_at) VALUES(@id,@name,1,@qty,@stamp)')
+    .run({ id, name: `Probe ${id}`, qty: quantity, stamp: '2026-01-01' }))
 }
 function materializedJob(raw, id, row, policy = {}) {
   raw.prepare("INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(91,'operator','Operator','hash','{\"all\":true}',1)").run()
@@ -58,7 +64,7 @@ function materializedJob(raw, id, row, policy = {}) {
 async function main() {
   for (const mode of ['merge','replace_all','replace_columns','fill_blank']) {
     const {raw,db}=fixture(); product(raw,81)
-    raw.prepare('UPDATE products SET is_active=0 WHERE id=81').run()
+    seedFixture(raw.db, () => raw.prepare('UPDATE products SET is_active=0 WHERE id=81').run())
     materializedJob(raw,`removed-${mode}`,{name:'Probe 81',is_active:'1',description:'must not write',_action:'override_replace'},
       {import_mode:mode,replace_columns:['description','is_active']})
     const run=()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},`removed-${mode}`)
@@ -141,7 +147,7 @@ async function main() {
     const batch=db.batch; let injected=false
     db.batch=items=>{
       if(!injected && items.some(x=>x.sql.includes('product_has_stock'))) {
-        injected=true; raw.prepare('UPDATE products SET is_active=0 WHERE id=97').run()
+        injected=true; seedFixture(raw.db, () => raw.prepare('UPDATE products SET is_active=0 WHERE id=97').run())
       }
       return batch(items)
     }
@@ -155,13 +161,13 @@ async function main() {
   console.log('PASS product removal race refuses zero-inbound metadata import before journal or catalog effects')
   for (const ledger of ['rollup', 'branch', 'lot', 'damaged']) {
     const { raw, db } = fixture(); product(raw, 61)
-    if (ledger === 'rollup') raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=61').run()
-    if (ledger === 'branch') raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(61,991,1)').run()
+    if (ledger === 'rollup') seedFixture(raw.db, () => raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=61').run())
+    if (ledger === 'branch') seedFixture(raw.db, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(61,991,1)').run())
     if (ledger === 'lot') {
-      raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(61,61,'probe',1,'2026-10-01')").run()
-      raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(61,991,1)').run()
+      seedFixture(raw.db, () => raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(61,61,'probe',1,'2026-10-01')").run())
+      seedFixture(raw.db, () => raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(61,991,1)').run())
     }
-    if (ledger === 'damaged') raw.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(61,991,1)').run()
+    if (ledger === 'damaged') seedFixture(raw.db, () => raw.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(61,991,1)').run())
     materializedJob(raw, `row-${ledger}`, { name: 'Probe 61', is_active: '0', stock_quantity: '0', _action: 'override_replace' })
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, `row-${ledger}`)
     const row = raw.prepare("SELECT action,result_json FROM import_job_rows WHERE phase='apply'").get()
@@ -185,7 +191,7 @@ async function main() {
   }
   for (const existing of [false, true]) {
     const { raw, db } = fixture()
-    if (existing) { product(raw, 61); raw.prepare('UPDATE products SET is_active=0 WHERE id=61').run() }
+    if (existing) { product(raw, 61); seedFixture(raw.db, () => raw.prepare('UPDATE products SET is_active=0 WHERE id=61').run()) }
     materializedJob(raw, 'incoming', { name: 'Probe 61', is_active: existing ? '1' : '0',
       stock_quantity: '2', branch: 'shop', supplier: 'Supplier', cost_price_usd: '2', _action: 'override_add' })
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, 'incoming')
@@ -203,7 +209,7 @@ async function main() {
     const batch = db.batch; let raced = false
     db.batch = items => {
       if (!raced && items.some(item => item.sql.includes('product_has_stock'))) {
-        raced = true; raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=72').run()
+        raced = true; seedFixture(raw.db, () => raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=72').run())
       }
       return batch(items)
     }
@@ -237,7 +243,7 @@ async function main() {
     const { raw, db } = fixture(); product(raw, 21, 1); product(raw, 22)
     await assert.rejects(() => engine.finalizeProductReplacement(db, '2026-10-08'), error => error.code === 'product_has_stock' && error.status === 409)
     assert.deepEqual(raw.prepare('SELECT is_active FROM products ORDER BY id').all().map(p => p.is_active), [1, 1])
-    raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=21').run()
+    seedFixture(raw.db, () => raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=21').run())
     assert.equal(await engine.finalizeProductReplacement(db, '2026-10-08'), 2)
     assert.equal(await engine.finalizeProductReplacement(db, '2026-10-08'), 0)
     console.log('PASS replacement refuses entire phase and retries cleanly')
@@ -246,7 +252,7 @@ async function main() {
     const { raw, db } = fixture(); product(raw, 31); product(raw, 32)
     const batch = db.batch; let injected = false
     db.batch = items => {
-      if (!injected) { injected = true; raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=32').run() }
+      if (!injected) { injected = true; seedFixture(raw.db, () => raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=32').run()) }
       return batch(items)
     }
     await assert.rejects(() => engine.finalizeProductReplacement(db, '2026-10-08'), error => error.code === 'product_has_stock' && error.status === 409)
@@ -255,7 +261,7 @@ async function main() {
   }
   {
     const { raw, db } = fixture(); product(raw, 41)
-    raw.prepare('UPDATE products SET is_active=0 WHERE id=41').run()
+    seedFixture(raw.db, () => raw.prepare('UPDATE products SET is_active=0 WHERE id=41').run())
     await assert.rejects(() => commits.applyUnifiedStockAdd(db, {
       jobId: 'inactive', rowNumber: 1, productId: 41, productName: 'Probe 41', branchId: 991,
       branchName: 'Probe', quantity: 1, date: '2026-10-01', supplierName: 'Supplier', costPriceUsd: 2,
@@ -267,7 +273,7 @@ async function main() {
   {
     const { raw, db } = fixture(); product(raw, 42)
     const batch = db.batch
-    db.batch = items => { raw.prepare('UPDATE products SET is_active=0 WHERE id=42').run(); return batch(items) }
+    db.batch = items => { seedFixture(raw.db, () => raw.prepare('UPDATE products SET is_active=0 WHERE id=42').run()); return batch(items) }
     await assert.rejects(() => commits.applyUnifiedStockAdd(db, {
       jobId: 'raced-inactive', rowNumber: 1, productId: 42, productName: 'Probe 42', branchId: 991,
       branchName: 'Probe', quantity: 1, date: '2026-10-01', supplierName: 'Supplier', costPriceUsd: 2,
@@ -294,7 +300,7 @@ async function main() {
     assert.equal(job.chunk_cursor, 1); assert.equal(JSON.parse(job.summary_json).replacement_refused.committedRows, 1)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=52').get().is_active, 1)
     assert.equal(raw.prepare('SELECT stock_quantity FROM products WHERE id=53').get().stock_quantity, 3)
-    raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=51').run()
+    seedFixture(raw.db, () => raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=51').run())
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, 'replacement')
     assert.equal(raw.prepare('SELECT stock_quantity FROM products WHERE id=53').get().stock_quantity, 3)
     assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id='replacement' AND phase='apply'").get().n, 1)

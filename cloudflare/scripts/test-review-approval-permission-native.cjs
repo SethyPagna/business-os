@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Finding H on main (6.0.36-6.0.40): a review approval replays a write with the reviewer's authority, so every
 // applier effect must be checked against the CURRENT reviewer's grant for that exact action and effect, and every
 // product discount write must store the same canonical value the price gate compared (OPUS-H-1/H-2/H-3).
@@ -660,10 +666,10 @@ async function main() {
   await group('Edit fold: a no-price editor moving a row onto a twin cannot rewrite the survivor price or discount; the grant can', async w => {
     const t = cases()
     const twin = (barcode, extra = '') => {
-      w.raw.prepare(`INSERT INTO products(name, barcode, selling_price_usd, wholesale_price_usd, discount_enabled, discount_type, discount_percent, is_active)
-        VALUES('Fold twin', ?, 9, 8, 1, 'percent', 50, 1)`).run(barcode)
+      seedFixture(w.raw, () => w.raw.prepare(`INSERT INTO products(name, barcode, selling_price_usd, wholesale_price_usd, discount_enabled, discount_type, discount_percent, is_active)
+        VALUES('Fold twin', ?, 9, 8, 1, 'percent', 50, 1)`).run(barcode))
       const id = w.raw.prepare('SELECT id FROM products WHERE barcode=?').get(barcode).id
-      w.raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(?,1,0),(?,2,0)').run(id, id)
+      seedFixture(w.raw, () => w.raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(?,1,0),(?,2,0)').run(id, id))
       return id
     }
     const pick = id => w.raw.prepare('SELECT selling_price_usd s, wholesale_price_usd ws, discount_enabled e, discount_percent p, is_active a FROM products WHERE id=?').get(id)

@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // A sale write opens with pricingSourceGuard: a SELECT that aborts the batch when the product rows (and the active
 // promotion rules) it read before the write are no longer exactly what is stored. It compares EVERY column of the product
 // rows, so a stock movement that lands in the write window (a Remove, another till's sale: stock_quantity, updated_at)
@@ -24,10 +25,11 @@ async function main() {
 
   const sqlite = new Database(':memory:')
   for (const migration of loadAll()) sqlite.exec(migration)
+assert.throws(() => sqlite.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   // The slice of D1Compat the classifier uses: prepare(sql).get(params), rejecting with SQLite's own error text.
   let prepared = 0
   const db = { prepare: (sql) => { prepared += 1; return { get: async (params) => sqlite.prepare(sql).get(params || {}) } } }
-  const seedProduct = (id, name, sku, stock, price, khr, cost) => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).run(id, name, sku, stock, price, khr, cost)
+  const seedProduct = (id, name, sku, stock, price, khr, cost) => seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).run(id, name, sku, stock, price, khr, cost))
   seedProduct(1, 'Powder', 'P-1', 10, 9.5, 38000, 4)
   seedProduct(2, 'Toner', 'P-2', 5, 5, 20000, 2)
   const readProducts = () => sqlite.prepare('SELECT * FROM products WHERE id IN (1,2) ORDER BY id').all()
@@ -43,16 +45,16 @@ async function main() {
 
   assert.equal(await classify(() => {}), null, 'no change: the failure came from some other guard, so null')
   // The reason this exists: a stock Remove / another till's sale moves only stock_quantity and updated_at.
-  assert.equal(await classify(run("UPDATE products SET stock_quantity=stock_quantity-3, updated_at='2026-10-13 10:00:00' WHERE id=1"), run('UPDATE products SET stock_quantity=10 WHERE id=1')), 'stock', 'a stock movement alone: stock')
-  assert.equal(await classify(run("UPDATE products SET updated_at='2026-10-13 11:00:00' WHERE id=2")), 'stock', 'a bare updated_at touch: stock')
-  assert.equal(await classify(run("UPDATE products SET name='Powder 2' WHERE id=1"), run("UPDATE products SET name='Powder' WHERE id=1")), 'stock', 'a non-pricing column (name): not a pricing change')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run("UPDATE products SET stock_quantity=stock_quantity-3, updated_at='2026-10-13 10:00:00' WHERE id=1")()), () => seedStockFixture(sqlite, () => run('UPDATE products SET stock_quantity=10 WHERE id=1')())), 'stock', 'a stock movement alone: stock')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run("UPDATE products SET updated_at='2026-10-13 11:00:00' WHERE id=2")())), 'stock', 'a bare updated_at touch: stock')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run("UPDATE products SET name='Powder 2' WHERE id=1")()), () => seedStockFixture(sqlite, () => run("UPDATE products SET name='Powder' WHERE id=1")())), 'stock', 'a non-pricing column (name): not a pricing change')
   // Pricing changes stay pricing, alone or together with a stock movement.
-  assert.equal(await classify(run('UPDATE products SET selling_price_usd=10 WHERE id=1'), run('UPDATE products SET selling_price_usd=9.5 WHERE id=1')), 'pricing', 'a selling price change: pricing')
-  assert.equal(await classify(run("UPDATE products SET discount_enabled=1, discount_type='percent', discount_percent=10 WHERE id=2"),
-    run('UPDATE products SET discount_enabled=0, discount_type=NULL, discount_percent=NULL WHERE id=2')), 'pricing', 'a product discount switched on: pricing')
-  assert.equal(await classify(run('UPDATE products SET stock_quantity=1, selling_price_usd=11 WHERE id=1'), run('UPDATE products SET stock_quantity=10, selling_price_usd=9.5 WHERE id=1')), 'pricing',
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run('UPDATE products SET selling_price_usd=10 WHERE id=1')()), () => seedStockFixture(sqlite, () => run('UPDATE products SET selling_price_usd=9.5 WHERE id=1')())), 'pricing', 'a selling price change: pricing')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run("UPDATE products SET discount_enabled=1, discount_type='percent', discount_percent=10 WHERE id=2")()),
+    () => seedStockFixture(sqlite, () => run('UPDATE products SET discount_enabled=0, discount_type=NULL, discount_percent=NULL WHERE id=2')())), 'pricing', 'a product discount switched on: pricing')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => run('UPDATE products SET stock_quantity=1, selling_price_usd=11 WHERE id=1')()), () => seedStockFixture(sqlite, () => run('UPDATE products SET stock_quantity=10, selling_price_usd=9.5 WHERE id=1')())), 'pricing',
     'price AND stock moved: pricing wins (the cashier must re-review the quote)')
-  assert.equal(await classify(() => sqlite.exec('UPDATE products SET stock_quantity=0 WHERE id=2; DELETE FROM products WHERE id=2')), 'pricing', 'a captured product that no longer exists: pricing (the line cannot be priced)')
+  assert.equal(await classify(() => seedStockFixture(sqlite, () => sqlite.exec('UPDATE products SET stock_quantity=0 WHERE id=2; DELETE FROM products WHERE id=2'))), 'pricing', 'a captured product that no longer exists: pricing (the line cannot be priced)')
   seedProduct(2, 'Toner', 'P-2', 5, 5, 20000, 2)
   // An active promotion rule switched off in the window changes what the line costs.
   sqlite.prepare("INSERT INTO promotion_rules (title, rule_type, percent_off, scope_type, product_ids, is_active) VALUES ('Weekend 10%', 'percent_off', 10, 'products', '[1]', 1)").run()

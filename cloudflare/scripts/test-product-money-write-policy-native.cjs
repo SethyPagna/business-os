@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Actual Hono routes, shared writer, pending queue and review applier on the
 // migrated SQLite schema. Authentication/image/cache services are fixture-only.
@@ -50,6 +56,10 @@ real.add('productDiscountGate')
 // 6.0.132: the products route folds a create through lib/createFold.ts, which writes its request receipt.
 real.add('createFold')
 real.add('stockMutationReceipt')
+real.add('stockTransaction')
+real.add('productCostReview')
+real.add('productMergeCostPreview')
+real.add('productConflictActionGroups')
 const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}
 const services = {
@@ -114,7 +124,7 @@ async function request(app, method, url, body, user = admin) {
 }
 const row = id => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 function seed(name = 'Existing') {
-  return Number(raw.prepare(`INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,purchase_price_usd,purchase_price_khr,updated_at) VALUES(?,1.2345,5000.1234,1.234567,5000,1.1,4500,2.345678,9000.123456,NULL)`).run(name).lastInsertRowid)
+  return Number(seedFixture(raw, () => raw.prepare(`INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,purchase_price_usd,purchase_price_khr,updated_at) VALUES(?,1.2345,5000.1234,1.234567,5000,1.1,4500,2.345678,9000.123456,NULL)`).run(name)).lastInsertRowid)
 }
 ;(async () => {
   const created = await request(products, 'POST', '/', { name: 'Direct New', cost_price_usd: 1.2345, purchase_price_usd: '2.34565', purchase_price_khr: '9000.12345', selling_price_usd: '1.23004', selling_price_khr: 4321.1234 })
@@ -139,10 +149,10 @@ function seed(name = 'Existing') {
   assert.equal(row(id).selling_price_usd, 1.234567)
   assert.equal(row(id).cost_price_usd, 1.2345)
   const historic = seed('Historical precision')
-  raw.prepare('UPDATE products SET cost_price_usd=1.234567 WHERE id=?').run(historic)
+  seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=1.234567 WHERE id=?').run(historic))
   assert.equal((await request(products, 'PUT', `/${historic}`, { cost_price_usd: '1.2345670' })).status, 200)
   assert.equal(row(historic).cost_price_usd, 1.234567)
-  raw.prepare('UPDATE products SET purchase_price_usd=2.345678 WHERE id=?').run(historic)
+  seedFixture(raw, () => raw.prepare('UPDATE products SET purchase_price_usd=2.345678 WHERE id=?').run(historic))
   assert.equal((await request(products, 'PUT', `/${historic}`, { purchase_price_usd: '2.3456780' })).status, 200)
   assert.equal(row(historic).purchase_price_usd, 2.345678, 'no-op text does not reprice an authoritative historical purchase cost')
   const composedUnchanged = frontendWriter.buildProductBulkPricingUpdates({ purchase_price_usd: '2.345678' })
@@ -160,7 +170,7 @@ function seed(name = 'Existing') {
   assert.equal(row(nullable).cost_price_khr, null)
   const directRace = seed('Direct race')
   const directBefore = row(directRace)
-  beforeProductUpdate = () => raw.prepare("UPDATE products SET updated_at='concurrent revision' WHERE id=?").run(directRace)
+  beforeProductUpdate = () => seedFixture(raw, () => raw.prepare("UPDATE products SET updated_at='concurrent revision' WHERE id=?").run(directRace))
   const directConflict = await request(products, 'PUT', `/${directRace}`, { cost_price_usd: 4, description: 'must not apply' })
   assert.equal(directConflict.body.code, 'product_money_state_conflict')
   assert.deepEqual({ ...row(directRace) }, { ...directBefore, updated_at: 'concurrent revision' }, 'whole direct UPDATE is rejected, not only its cost column')
@@ -212,30 +222,30 @@ function seed(name = 'Existing') {
   assert.equal(row(id).cost_price_usd, textBefore.cost_price_usd)
   assert.equal(row(id).selling_price_usd, textBefore.selling_price_usd)
   const expectedId = seed('Expected revision')
-  raw.prepare("UPDATE products SET updated_at='editor revision' WHERE id=?").run(expectedId)
+  seedFixture(raw, () => raw.prepare("UPDATE products SET updated_at='editor revision' WHERE id=?").run(expectedId))
   afterRead = sql => {
     // The PUT pre-read (routes/products.ts) -- since 22 Sep 2026 it also
     // returns id/name/barcode so the 409 can name the product.
     if (!/^SELECT id, name, barcode, updated_at FROM products/.test(sql)) return
     afterRead = null
-    raw.prepare("UPDATE products SET cost_price_usd=99, updated_at='newer revision' WHERE id=?").run(expectedId)
+    seedFixture(raw, () => raw.prepare("UPDATE products SET cost_price_usd=99, updated_at='newer revision' WHERE id=?").run(expectedId))
   }
   const expectedRace = await request(products, 'PUT', `/${expectedId}`, { expectedUpdatedAt: 'editor revision', cost_price_usd: 2 })
   assert.equal(expectedRace.status, 409)
   assert.equal(row(expectedId).cost_price_usd, 99, 'snapshot may not adopt a newer revision than the supplied editor token')
   const stale = await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, requester)
-  raw.prepare('UPDATE products SET cost_price_usd=7 WHERE id=?').run(id)
+  seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=7 WHERE id=?').run(id))
   const staleRow = row(id)
   assert.equal((await request(reviews, 'POST', `/${stale.body.pendingActionId}/approve`, {})).body.code, 'product_money_state_conflict')
   assert.deepEqual(row(id), staleRow)
   const stalePurchase = await request(products, 'PUT', `/${id}`, { purchase_price_usd: '3.45675' }, requester)
-  raw.prepare('UPDATE products SET purchase_price_usd=8.765432 WHERE id=?').run(id)
+  seedFixture(raw, () => raw.prepare('UPDATE products SET purchase_price_usd=8.765432 WHERE id=?').run(id))
   const stalePurchaseRow = row(id)
   const stalePurchaseResult = await request(reviews, 'POST', `/${stalePurchase.body.pendingActionId}/approve`, {})
   assert.equal(stalePurchaseResult.body.code, 'product_money_state_conflict')
   assert.deepEqual(row(id), stalePurchaseRow, 'purchase-only concurrent change is covered by the v2 before-image CAS')
   const race = await request(products, 'PUT', `/${id}`, { cost_price_usd: 3 }, requester)
-  beforeProductUpdate = () => raw.prepare('UPDATE products SET selling_price_usd=9 WHERE id=?').run(id)
+  beforeProductUpdate = () => seedFixture(raw, () => raw.prepare('UPDATE products SET selling_price_usd=9 WHERE id=?').run(id))
   assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/approve`, {})).body.code, 'product_money_state_conflict')
   assert.equal(row(id).cost_price_usd, 7)
   assert.equal(row(id).selling_price_usd, 9)
@@ -286,7 +296,7 @@ function seed(name = 'Existing') {
   afterRead = sql => {
     if (!/SELECT cost_price_usd,cost_price_khr/.test(sql)) return
     afterRead = null
-    raw.prepare("UPDATE products SET name='Race Concurrent' WHERE id=?").run(groupRaceId)
+    seedFixture(raw, () => raw.prepare("UPDATE products SET name='Race Concurrent' WHERE id=?").run(groupRaceId))
     groupRaceSiblingBefore = row(groupRaceSibling) // include only the concurrent writer's real trigger effects
   }
   const groupRace = await request(products, 'PUT', `/${groupRaceId}`, { name: 'Race Initial', __rename_scope: 'group', cost_price_usd: 2 })
@@ -297,7 +307,7 @@ function seed(name = 'Existing') {
   assert.equal(auditCount, groupRaceAudit, 'late identity read cannot publish a new group rename before rejected money CAS')
   const atomicGroupId = seed('Atomic Group'), atomicSibling = seed('Atomic Group')
   const atomicSiblingBefore = row(atomicSibling), atomicAudit = auditCount
-  beforeBatch = () => raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(atomicGroupId)
+  beforeBatch = () => seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(atomicGroupId))
   const atomicGroupRace = await request(products, 'PUT', `/${atomicGroupId}`, { name: 'Atomic Renamed', __rename_scope: 'group', cost_price_usd: 1.2345 })
   assert.equal(atomicGroupRace.status, 409)
   assert.equal(row(atomicGroupId).name, 'Atomic Group')
@@ -314,15 +324,15 @@ function seed(name = 'Existing') {
     // exercise the money-write-policy race guard, not the (correct,
     // separate) same-identity duplicate guard, so both sides need real,
     // differing barcodes to stay genuinely distinct identities.
-    raw.prepare('UPDATE products SET barcode=? WHERE id IN (?,?)').run(`900${leader}00`, leader, sibling)
-    raw.prepare('UPDATE products SET barcode=? WHERE id=?').run(`901${destination}00`, destination)
+    seedFixture(raw, () => raw.prepare('UPDATE products SET barcode=? WHERE id IN (?,?)').run(`900${leader}00`, leader, sibling))
+    seedFixture(raw, () => raw.prepare('UPDATE products SET barcode=? WHERE id=?').run(`901${destination}00`, destination))
     let expectedLeader, expectedSibling, expectedDestination, expectedCount
     const auditAtStart = auditCount
     beforeBatch = () => {
-      if (mutation === 'cost') raw.prepare('UPDATE products SET cost_price_usd=44 WHERE id=?').run(sibling)
-      if (mutation === 'description') raw.prepare("UPDATE products SET description='concurrent' WHERE id=?").run(sibling)
+      if (mutation === 'cost') seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=44 WHERE id=?').run(sibling))
+      if (mutation === 'description') seedFixture(raw, () => raw.prepare("UPDATE products SET description='concurrent' WHERE id=?").run(sibling))
       if (mutation === 'membership') seed(`Group ${mutation}`)
-      if (mutation === 'destination_cost') raw.prepare('UPDATE products SET cost_price_usd=88 WHERE id=?').run(destination)
+      if (mutation === 'destination_cost') seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=88 WHERE id=?').run(destination))
       if (mutation === 'destination_membership') seed(`Renamed ${mutation}`)
       expectedLeader = row(leader); expectedSibling = row(sibling)
       expectedDestination = row(destination)
@@ -345,7 +355,7 @@ function seed(name = 'Existing') {
   assert.equal(row(atomicGroupId).name, 'Reviewed Group')
   assert.equal(row(atomicSibling).name, 'Reviewed Group')
   const oversized = seed('Oversized guarded group')
-  raw.prepare('UPDATE products SET description=? WHERE id=?').run('x'.repeat(500_001), oversized)
+  seedFixture(raw, () => raw.prepare('UPDATE products SET description=? WHERE id=?').run('x'.repeat(500_001), oversized))
   const oversizedBefore = row(oversized), oversizedAudit = auditCount
   const oversizedResponse = await request(products, 'PUT', `/${oversized}`, { name: 'Oversized renamed', __rename_scope: 'group' })
   assert.equal(oversizedResponse.body.code, 'product_group_plan_too_large')

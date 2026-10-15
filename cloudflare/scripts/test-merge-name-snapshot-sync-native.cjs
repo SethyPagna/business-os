@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Native route regression for Task C part 2: a live merge must keep the
 // denormalized product_name snapshot columns (sale_items, inventory_movements,
 // return_items, stock_transfers, damaged_stock_lots, return_replacement_items,
@@ -39,6 +45,8 @@ function loadTs(relPath, stubs = {}) {
   Module._load = (request, parent, isMain) => {
     if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return original.call(Module, path.join(SRC, 'lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    const helper = request.split('/').pop()
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
   }
@@ -80,6 +88,7 @@ function adapter(d1) {
         },
       }
     },
+    async batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       return d1.batch(statements)
     },
@@ -121,10 +130,10 @@ function loadRoute(db) {
 }
 
 function addProduct(raw, id, name, barcode, stock = 0, cost = 4) {
-  raw.prepare(`INSERT INTO products(
+  seedFixture(raw, () => raw.prepare(`INSERT INTO products(
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
     wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`).run(id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock)
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`).run(id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock))
 }
 
 function context({ scope, body } = {}) {
@@ -149,8 +158,8 @@ async function main() {
   // production); the merge must be identity-eligible on today's name.
   addProduct(raw, 301, 'Serum Clean Spelling', '00812345', 0, 5)
   addProduct(raw, 302, 'Serum Clean Spelling', '812345', 1, 5)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(301, 1, 0)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(302, 2, 1)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(301, 1, 0))
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(302, 2, 1))
 
   // Seed history rows carrying the DUP's product_id but a name captured
   // BEFORE the earlier rename to the current spelling was ever synced onto

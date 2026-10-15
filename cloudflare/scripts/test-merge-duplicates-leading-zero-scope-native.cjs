@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Native route regression for the bounded leading-zero duplicate manifest.
 // It mounts the real products route and duplicate detector over the full D1
 // migration chain. No production database or network is used.
@@ -30,6 +36,8 @@ function loadTs(relPath, stubs = {}) {
   Module._load = (request, parent, isMain) => {
     if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return original.call(Module, path.join(SRC, 'lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    const helper = request.split('/').pop()
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
   }
@@ -72,6 +80,7 @@ function adapter(d1, beforeMutationBatch) {
         },
       }
     },
+    async batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) {
@@ -131,9 +140,9 @@ function seed() {
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
     wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
   ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`)
-  const add = (id, name, barcode, stock = 0, cost = 4) => insert.run(
+  const add = (id, name, barcode, stock = 0, cost = 4) => seedFixture(raw, () => insert.run(
     id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock,
-  )
+  ))
   // Every barcode below is REAL (all-digit, >=MIN_REAL_BARCODE_DIGITS=6) --
   // this scope/manifest feature is specifically the "two REAL barcodes
   // differing only by leading zeros" case, and a SHORT/broken code (below
@@ -143,14 +152,14 @@ function seed() {
   // own coverage in test-merge-rules-pure.cjs.
   add(1, 'Clean Pair', '0123456', 3, 4)
   add(2, 'Clean Pair', '123456', 2, 6)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(1, 1, 3)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(2, 1, 2)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(1, 1, 3))
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(2, 1, 2))
   add(3, 'Exact Raw', '777777')
   add(4, 'Exact Raw', '777777')
   add(5, 'Mismatch Pair', '0888888', 9)
   add(6, 'Mismatch Pair', '888888', 1)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(5, 1, 7)
-  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(6, 1, 1)
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(5, 1, 7))
+  seedFixture(raw, () => raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(6, 1, 1))
   add(7, 'Collision Pair', '0099999')
   add(8, 'Collision Pair', '099999')
   // Distinct RAW spelling from both Collision Pair rows (extra leading
@@ -214,14 +223,14 @@ async function main() {
   } }))
   assert.equal(malformed.status, 400)
 
-  raw.prepare('UPDATE products SET stock_quantity=4 WHERE id=1').run()
+  seedFixture(raw, () => raw.prepare('UPDATE products SET stock_quantity=4 WHERE id=1').run())
   const stockChanged = await apply(context({ body: {
     scope: 'leading_zero', manifest_version: 1, manifest_digest: result.body.applyManifest.manifest_digest,
     groups: result.body.applyManifest.groups,
   } }))
   assert.equal(stockChanged.status, 409)
   assert.match(stockChanged.body.error, /stock/i)
-  raw.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
+  seedFixture(raw, () => raw.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run())
 
   const collisionPreview = await preview(context({ scope: 'leading_zero' }))
   // Folds (leading zeros stripped) to '123456', the Clean Pair manifest
@@ -233,7 +242,7 @@ async function main() {
   } }))
   assert.equal(newCollision.status, 409)
   assert.match(newCollision.body.error, /more than one exact product name/i)
-  raw.prepare('DELETE FROM products WHERE id=10').run()
+  seedFixture(raw, () => raw.prepare('DELETE FROM products WHERE id=10').run())
 
   const pricePreview = await preview(context({ scope: 'leading_zero' }))
   raw.prepare('UPDATE products SET selling_price_usd=11 WHERE id=1').run()
@@ -293,8 +302,8 @@ async function main() {
   await concurrentGuard('received-date metadata', (rawDb) => {
     rawDb.prepare("UPDATE product_batches SET expiry_date='2031-01-01' WHERE id=100").run()
   }, (rawDb) => {
-    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,batch_number,received_at,expiry_date,is_active)
-      VALUES(100,1,'lot-100','L100',1,'2026-01-01','2030-01-01',1)`).run()
+    seedFixture(rawDb, () => rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,batch_number,received_at,expiry_date,is_active)
+      VALUES(100,1,'lot-100','L100',1,'2026-01-01','2030-01-01',1)`).run())
   })
 
   await boundedPreviewCohorts()
@@ -304,13 +313,13 @@ async function main() {
 
 async function boundedPreviewCohorts() {
   const { d1, raw } = seed()
-  raw.exec('DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products;')
+  seedFixture(raw, () => raw.exec('DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products;'))
   for (let i = 0; i < 12; i++) for (let member = 0; member < 2; member++) {
-    raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
+    seedFixture(raw, () => raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
       VALUES(?,?,?,1,0,0,4,16000,10,40000,8,32000)`).run(
       100 + i * 2 + member, `Cohort ${String(i).padStart(3, '0')}`, `${member ? '0' : ''}${100000 + i}`,
-    )
+    ))
   }
   const base = adapter(d1)
   let calls = 0
@@ -376,7 +385,7 @@ async function boundedPreviewCohorts() {
 
 async function concurrentGuard(label, mutate, prepare = () => {}) {
   const fixture = seed()
-  fixture.raw.prepare('DELETE FROM products WHERE id IN (11,12,13,14)').run()
+  seedFixture(fixture.raw, () => fixture.raw.prepare('DELETE FROM products WHERE id IN (11,12,13,14)').run())
   prepare(fixture.raw)
   const guardedAdapter = adapter(fixture.d1, () => mutate(fixture.raw))
   const app = loadRoute(guardedAdapter)
@@ -392,10 +401,10 @@ async function concurrentGuard(label, mutate, prepare = () => {}) {
 }
 
 function addOutsider(raw, name, barcode) {
-  raw.prepare(`INSERT INTO products(
+  seedFixture(raw, () => raw.prepare(`INSERT INTO products(
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
     wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
-  ) VALUES(10,?,?,4,16000,10,40000,8,32000,0,1,0)`).run(name, barcode)
+  ) VALUES(10,?,?,4,16000,10,40000,8,32000,0,1,0)`).run(name, barcode))
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
