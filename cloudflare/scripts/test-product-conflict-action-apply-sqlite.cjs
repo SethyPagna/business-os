@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
@@ -5,10 +11,10 @@ const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-actio
 const user = { id: 900, username: 'reviewer' }
 function emptyRemovalFixture(d1, ids) {
   const selected = JSON.stringify(ids)
-  d1.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
-  d1.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (SELECT value FROM json_each(?)))').run(selected)
-  d1.db.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
-  d1.db.prepare('UPDATE products SET stock_quantity=0 WHERE id IN (SELECT value FROM json_each(?))').run(selected)
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (SELECT value FROM json_each(?)))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected))
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE products SET stock_quantity=0 WHERE id IN (SELECT value FROM json_each(?))').run(selected))
 }
 
 function loadReviewApply(fixture) {
@@ -49,19 +55,19 @@ async function apply(app, review, digest, actor = user) {
 async function prepareThreeMemberReview(parentChain = false) {
   const { d1, groups } = seed(1)
   const auditRows = captureAuditBaseline(d1.db)
-  d1.db.prepare(`INSERT INTO products
+  seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO products
     (id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,
      selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,updated_at)
-    VALUES(10002,'Third','third','000700000','C','Three','pack',1,0,4,8,0,10,0,9,0,'2026-09-08 01:00:00')`).run()
-  d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10002,1,4)').run()
-  d1.db.prepare(`INSERT INTO product_batches
+    VALUES(10002,'Third','third','000700000','C','Three','pack',1,0,4,8,0,10,0,9,0,'2026-09-08 01:00:00')`).run())
+  seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10002,1,4)').run())
+  seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches
     (id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,notes,batch_number,supplier_id,supplier_name,
      unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_cost_usd)
-    VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run()
-  d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99003,1,4)').run()
+    VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run())
+  seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99003,1,4)').run())
   groups[0].member_ids = [10000, 10001, 10002]
   if(parentChain) {
-    d1.db.exec(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,
+    seedFixture(d1.db, () => d1.db.exec(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,
       selling_price_usd,wholesale_price_usd,updated_at,parent_id)
       VALUES(10003,'Fourth','fourth','000700000','D','Four','pack',1,0,1,8,10,9,'2026-09-08 01:00:00',10002);
       UPDATE products SET parent_id=10001 WHERE id=10002;
@@ -69,7 +75,7 @@ async function prepareThreeMemberReview(parentChain = false) {
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10003,1,1);
       INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,unit_cost_usd,received_quantity,received_cost_usd)
       VALUES(99004,10003,'fourth-lot','2026-09-04',1,8,1,8);
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,1);`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,1);`))
     if(parentChain==='shared') d1.db.exec('UPDATE products SET parent_id=10001 WHERE id=10003')
     d1.db.exec(`INSERT INTO sales(id,branch_id) VALUES(17000,1);
       INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) VALUES(17001,17000,10002,1,1);
@@ -156,7 +162,8 @@ async function main() {
     ['foreign operation certificate',"UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.operationId','foreign-operation') WHERE kind='product.merge.group.child'"],
   ]) {
     const fixture=await prepareThreeMemberReview(true);await interruptChain(fixture)
-    fixture.d1.db.exec(mutation)
+    if (label === 'stock') seedFixture(fixture.d1.db, () => fixture.d1.db.exec(mutation))
+    else fixture.d1.db.exec(mutation)
     const before=chainState(fixture.d1)
     const result=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
     assert.equal(result.status,409,label+JSON.stringify(result.body))
@@ -245,7 +252,7 @@ async function main() {
     let injected = false
     loaded.controls.beforeWriteBatch = (statements) => {
       if (!injected && statements.some((statement) => Number(statement.params?.member) === 10002)) {
-        d1.db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10002 AND branch_id=1').run()
+        seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10002 AND branch_id=1').run())
         injected = true
       }
     }
@@ -264,7 +271,7 @@ async function main() {
 
   for (const [label, mutate, verify] of [
     ['second-fold keeper lot quantity',
-      (db) => db.prepare('UPDATE branch_batch_stock SET quantity=20 WHERE batch_id=99002 AND branch_id=1').run(),
+      (db) => seedFixture(db, () => db.prepare('UPDATE branch_batch_stock SET quantity=20 WHERE batch_id=99002 AND branch_id=1').run()),
       (db) => assert.equal(db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=99002 AND branch_id=1').get().quantity, 20)],
     ['second-fold keeper lot key',
       (db) => db.prepare("UPDATE product_batches SET batch_key='concurrent-key' WHERE id=99002").run(),
@@ -290,6 +297,25 @@ async function main() {
   {
     const fixture = await prepareThreeMemberReview()
     const before = catalogState(fixture.d1)
+    const addedControlCaps = { prefixUndo: 53, reversedApply: 8, prefixRedo: 98,
+      applyDuringUndo: 4, applyAfterUndo: 4, applyDuringRedo: 4 }
+    const addedControlCounts = {}
+    const measureAddedControl = async (name, action) => {
+      assert.ok(Object.hasOwn(addedControlCaps, name))
+      assert.ok(!Object.hasOwn(addedControlCounts, name))
+      const start = fixture.controls.statements
+      const result = await action()
+      addedControlCounts[name] = fixture.controls.statements - start
+      assert.ok(addedControlCounts[name] <= addedControlCaps[name], `${name}: ${addedControlCounts[name]}`)
+      return result
+    }
+    const admissionPairs = []
+    const realBatch = fixture.db.batch
+    fixture.db.batch = async (statements) => {
+      const admission = statements.filter(({ sql }) => sql.includes("'stock_transaction_permit'"))
+      if (admission.length) admissionPairs.push(admission.map(({ sql }) => sql))
+      return realBatch(statements)
+    }
     const realNow = Date.now
     const baseNow = realNow()
     let firstFoldCommitted = false
@@ -308,13 +334,13 @@ async function main() {
     const prefixHistory = fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get()
     const prefixPayload = JSON.parse(prefixHistory.undo_payload)
     const prefixApplier = fixture.undo.resolveUndoApplier(prefixPayload)
-    const prefixUndo = await prefixApplier.run(prefixPayload, { env: {}, user, direction: 'undo', historyId: prefixHistory.id, generation: 0 })
+    const prefixUndo = await measureAddedControl('prefixUndo', () => prefixApplier.run(prefixPayload, { env: {}, user, direction: 'undo', historyId: prefixHistory.id, generation: 0 }))
     assert.equal(prefixUndo.complete, true, 'the one-child committed prefix reverses as one safe child transaction')
-    const reversedApply = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    const reversedApply = await measureAddedControl('reversedApply', () => apply(fixture.app, fixture.review, fixture.finalized.manifest_digest))
     assert.equal(reversedApply.status, 409)
     assert.equal(reversedApply.body.code, 'review_reversed')
     const prefixRedoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(prefixHistory.id).redo_payload)
-    const prefixRedo = await prefixApplier.run(prefixRedoPayload, { env: {}, user, direction: 'redo', historyId: prefixHistory.id, generation: 1 })
+    const prefixRedo = await measureAddedControl('prefixRedo', () => prefixApplier.run(prefixRedoPayload, { env: {}, user, direction: 'redo', historyId: prefixHistory.id, generation: 1 }))
     assert.equal(prefixRedo.complete, true)
     assert.equal(fixture.d1.db.prepare('SELECT status FROM product_conflict_action_groups WHERE review_id=?').get(fixture.review.review_id).status, 'partial',
       'redo of a partial prefix restores partial so the untouched member can continue')
@@ -351,20 +377,20 @@ async function main() {
     const applier = fixture.undo.resolveUndoApplier(payload)
     const undoOne = await applier.run(payload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 2 })
     assert.equal(undoOne.continuation_required, true)
-    const applyDuringUndo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    const applyDuringUndo = await measureAddedControl('applyDuringUndo', () => apply(fixture.app, fixture.review, fixture.finalized.manifest_digest))
     assert.equal(applyDuringUndo.status, 409)
     assert.equal(applyDuringUndo.body.code, 'review_reversed',
       'a completed review must not use its success fast path after the first child Undo')
     const undoTwo = await applier.run(payload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 2 })
     assert.equal(undoTwo.complete, true)
     assert.deepEqual(catalogState(fixture.d1), before, 'two-child Undo restores exact catalog, stock and lot provenance')
-    const applyAfterUndo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    const applyAfterUndo = await measureAddedControl('applyAfterUndo', () => apply(fixture.app, fixture.review, fixture.finalized.manifest_digest))
     assert.equal(applyAfterUndo.status, 409)
     assert.equal(applyAfterUndo.body.code, 'review_reversed')
     const redoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
     const redoOne = await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 3 })
     assert.equal(redoOne.continuation_required, true)
-    const applyDuringRedo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    const applyDuringRedo = await measureAddedControl('applyDuringRedo', () => apply(fixture.app, fixture.review, fixture.finalized.manifest_digest))
     assert.equal(applyDuringRedo.status, 409)
     assert.equal(applyDuringRedo.body.code, 'review_reversed')
     const redoTwo = await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 3 })
@@ -374,7 +400,19 @@ async function main() {
     assert.equal(replay.status, 200)
     assert.equal(replay.body.groups.length, 0)
     assert.equal(replay.body.continuation_required, false)
-    assert.ok(fixture.controls.statements <= 700)
+    assert.deepEqual(Object.keys(addedControlCounts), Object.keys(addedControlCaps))
+    const addedStatements = Object.values(addedControlCounts).reduce((sum, count) => sum + count, 0)
+    assert.ok(addedStatements <= 171)
+    assert.ok(fixture.controls.statements - addedStatements <= 700)
+    assert.ok(fixture.controls.statements <= 871)
+    assert.equal(admissionPairs.length, 8)
+    assert.equal(admissionPairs.flat().length, 16)
+    for (const pair of admissionPairs) {
+      assert.equal(pair.length, 2)
+      assert.match(pair[0], /^INSERT INTO system_flags \(key,value,updated_at\)/)
+      assert.match(pair[1], /^DELETE FROM system_flags/)
+    }
+    assert.ok(fixture.controls.maxBatchStatements <= 100)
     assert.ok(fixture.controls.maxBindings <= 100)
     assert.ok(fixture.controls.maxCompoundTerms <= 5)
   }
@@ -401,16 +439,16 @@ async function main() {
 
   {
     const races = [
-      ['keeper branch quantity', (db) => db.prepare('UPDATE branch_stock SET quantity=20 WHERE product_id=10000 AND branch_id=1').run()],
-      ['keeper RFID quantity', (db) => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10000 AND branch_id=1').run()],
-      ['branch quantity', (db) => db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run()],
-      ['member RFID quantity', (db) => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10001 AND branch_id=1').run()],
-      ['lot quantity', (db) => db.prepare('UPDATE branch_batch_stock SET quantity=30 WHERE batch_id=99002 AND branch_id=1').run()],
-      ['added lot', (db) => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active)
-        VALUES(99004,10001,'concurrent-lot','2026-09-08',1)`).run()],
+      ['keeper branch quantity', (db) => seedFixture(db, () => db.prepare('UPDATE branch_stock SET quantity=20 WHERE product_id=10000 AND branch_id=1').run())],
+      ['keeper RFID quantity', (db) => seedFixture(db, () => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10000 AND branch_id=1').run())],
+      ['branch quantity', (db) => seedFixture(db, () => db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run())],
+      ['member RFID quantity', (db) => seedFixture(db, () => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10001 AND branch_id=1').run())],
+      ['lot quantity', (db) => seedFixture(db, () => db.prepare('UPDATE branch_batch_stock SET quantity=30 WHERE batch_id=99002 AND branch_id=1').run())],
+      ['added lot', (db) => seedFixture(db, () => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active)
+        VALUES(99004,10001,'concurrent-lot','2026-09-08',1)`).run())],
       ['removed lot', (db) => {
-        db.prepare('DELETE FROM branch_batch_stock WHERE batch_id=99002').run()
-        db.prepare('DELETE FROM product_batches WHERE id=99002').run()
+        seedFixture(db, () => db.prepare('DELETE FROM branch_batch_stock WHERE batch_id=99002').run())
+        seedFixture(db, () => db.prepare('DELETE FROM product_batches WHERE id=99002').run())
       }],
       ['supplier', (db) => db.prepare("UPDATE product_batches SET supplier_name='Concurrent supplier' WHERE id=99002").run()],
       ['received date', (db) => db.prepare("UPDATE product_batches SET received_at='2026-09-09' WHERE id=99002").run()],
