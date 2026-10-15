@@ -35,7 +35,14 @@ function compileTs(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (request.startsWith('.')) {
+      const dependency = path.resolve(path.dirname(sourcePath), request.endsWith('.ts') ? request : `${request}.ts`)
+      return compileTs(path.relative(path.join(cloudflareRoot, 'src', 'lib'), dependency), stubs)
+    }
+    return require(request)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
@@ -58,8 +65,21 @@ const FREE_GOODS_NOTE = 'Free goods (no cost)'
 const actor = { userId: 7, userName: 'tester' }
 const redirectNone = () => null
 
+function beginStockSeed(db) {
+  db.exec('BEGIN IMMEDIATE')
+  db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+}
+
+function finishStockSeed(db) {
+  db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+  db.exec('COMMIT')
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get({}).n, 0)
+  assert.throws(() => db.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1').run({}), /stock_transaction_required/)
+}
+
 function revertFixture() {
   const db = openDb(loadAll())
+  beginStockSeed(db)
   db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({})
   db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (1, 'Sample Balm', 'SB-1', 'pcs', 5, 1)`).run({})
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 5)`).run({})
@@ -67,6 +87,7 @@ function revertFixture() {
 }
 const lotCosts = (db, id) => ({ ...db.prepare('SELECT unit_cost_usd, received_cost_usd, received_quantity, is_active FROM product_batches WHERE id = @id').get({ id }) })
 async function revertTwice(db, movementId) {
+  finishStockSeed(db)
   const first = await revert.applyMovementRevert(db, await db.prepare('SELECT * FROM inventory_movements WHERE id = @id').get({ id: movementId }), actor, redirectNone)
   assert.equal(first.ok, true, first.error)
   const counter = await db.prepare('SELECT * FROM inventory_movements WHERE reference_id = @ref').get({ ref: `revert:${movementId}` })
@@ -186,6 +207,7 @@ async function main() {
   })
 
   async function importAdd(db, commit, productId, extra) {
+    finishStockSeed(db)
     return commit.applyUnifiedStockAdd(db, {
       jobId: 'job-s5-add', rowNumber: 2 + Math.floor(Math.random() * 1e6), productId, productName: 'Balm', branchId: 1, branchName: 'Main Store',
       quantity: 3, date: '10/05/2026', supplierName: 'Acme Supply', sellingPriceUsd: 9, costPriceUsd: 4, sheetCostPriceUsd: 4, ...extra,
@@ -193,6 +215,7 @@ async function main() {
   }
   const addFixture = () => {
     const db = openDb(loadAll())
+    beginStockSeed(db)
     db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({})
     db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active, cost_price_usd) VALUES (1, 'Balm', 'B-1', 'pcs', 0, 1, 9)`).run({})
     db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 0)`).run({})

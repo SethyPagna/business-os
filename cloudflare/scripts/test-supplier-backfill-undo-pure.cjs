@@ -146,6 +146,9 @@ function loadUndoAppliers(d1) {
   stubs['./promotionRules'] = loadDependency(path.join(LIB_DIR, 'promotionRules.ts'))
   stubs['./saleItemPricing'] = loadDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   stubs['./catalogCostRecompute'] = loadDependency(path.join(LIB_DIR, 'catalogCostRecompute.ts'))
+  for (const name of ['stockTransaction', 'productCostReview']) {
+    stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
+  }
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -198,6 +201,8 @@ async function run() {
   const undo = loadUndoAppliers(d1)
   const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
 
+  d1.db.exec('BEGIN IMMEDIATE')
+  d1.db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
   run1(`INSERT INTO suppliers (id, name) VALUES (7,'Acme Co'),(8,'Beta Supply'),(9,'Gamma Ltd')`)
   run1(`INSERT INTO products (id, name, is_active) VALUES (100,'ProdA',1),(200,'ProdB',1)`)
   // ProdA lots: blank (no supplier at all), name-only (Acme Co, but id NULL),
@@ -209,6 +214,10 @@ async function run() {
   // ProdB lots: two blank, for the supplier-deleted-before-redo scenario.
   run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active, supplier_id, supplier_name) VALUES
     (6000,200,'B1',1,1,NULL,NULL),(6001,200,'B2',2,1,NULL,NULL)`)
+  d1.db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+  d1.db.exec('COMMIT')
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => run1('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=100'), /stock_transaction_required/)
 
   const A_IDS = [5000, 5001, 5002]
   const F0 = lotFingerprint(d1, A_IDS)

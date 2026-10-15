@@ -47,7 +47,14 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (request.startsWith('.')) {
+      const dependency = path.resolve(path.dirname(sourcePath), request.endsWith('.ts') ? request : `${request}.ts`)
+      return compile(path.relative(path.join(__dirname, '..', 'src', 'lib'), dependency), stubs)
+    }
+    return require(request)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
