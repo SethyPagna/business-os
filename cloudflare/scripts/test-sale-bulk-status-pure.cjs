@@ -1,4 +1,5 @@
 const productStockGuard = require('./harness/product_stock_guard.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual Hono routes + actual D1 adapter + real SQLite transactions. No SQL mocks.
 const fs = require('node:fs')
@@ -10,7 +11,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['acquisitionCostAccess','courierCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','branchEffect','conflictControl','searchMatch'])
+const actual = new Set(['stockTransaction','acquisitionCostAccess','courierCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','branchEffect','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -42,7 +43,15 @@ function fixture(migrate = true) {
   const sql=new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
   for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
-  sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
+  const seedCurrentStock = () => sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
+  if (migrate) {
+    seedStockFixture(sql, seedCurrentStock)
+    assert.throws(() => sql.prepare('UPDATE branch_stock SET quantity=quantity WHERE product_id=1').run(), /stock_transaction_required/)
+    assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  } else {
+    assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
+    seedCurrentStock()
+  }
   let failAt=null, beforeBatch=null, batches=0, reads=0
   const readRows=[]
   const env={DB:{
@@ -59,7 +68,7 @@ function fixture(migrate = true) {
     }
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
-  const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);const text=await response.text();let parsed;try{parsed=JSON.parse(text)}catch{parsed={error:text}}return {status:response.status,body:parsed}}
+  const call=async(app,url,body,method='POST')=>{assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0);const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);const text=await response.text();let parsed;try{parsed=JSON.parse(text)}catch{parsed={error:text}}return {status:response.status,body:parsed}}
   return {sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads,readRows})}
 }
 function seed(f,count=9) {
@@ -80,7 +89,7 @@ async function run() {
     const f = fixture(); seed(f, 1)
     const input = request(f, 'completed', 'maintenance-status-0001')
     const before = snapshot(f)
-    f.barrier(() => f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(marker))
+    f.barrier(() => seedStockFixture(f.sql, () => f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(marker)))
     const refused = await f.call(sales, '/bulk-status', input)
     assert.notEqual(refused.status, 200, 'maintenance arriving after HTTP precheck must refuse commit')
     assert.equal(snapshot(f), before, 'refusal must leave stock, audit, receipt and history untouched')
@@ -108,21 +117,21 @@ async function run() {
       assert.deepEqual(costRows(f), [{ movement_type: 'return', quantity: 2, ...expected }, { movement_type: 'sale', quantity: -2, ...expected }], label + ': the exact inverse repeats the saved cost (a NULL survives the saved snapshot)')
     }
     const held = fixture(); seed(held, 1)
-    held.sql.exec(`UPDATE products SET cost_price_usd=9 WHERE id=1;
+    seedStockFixture(held.sql, () => held.sql.exec(`UPDATE products SET cost_price_usd=9 WHERE id=1;
       INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(1,1,'A',1,5,3,3);
-      UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9, cost_price_khr=NULL WHERE id=1`)
+      UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9, cost_price_khr=NULL WHERE id=1`))
     const heldApplied = await held.call(sales, '/bulk-status', request(held, 'cancelled', 'cost-held-lot'))
     assert.equal(heldApplied.status, 200, JSON.stringify(heldApplied))
     assert.deepEqual(costRows(held), [{ movement_type: 'damage_in', quantity: 2, unit_cost_usd: 3, unit_cost_khr: null, total_cost_usd: 6, total_cost_khr: null }], 'a held lot returns to the lot at its OWN cost 3 (old: literal 0; catalog is 9)')
-    const heldNull = fixture(); heldNull.sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(1,1,'A',1,5,3,NULL);`); seed(heldNull, 1)
-    heldNull.sql.exec('UPDATE products SET cost_price_usd=9 WHERE id=1; UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9 WHERE id=1')
+    const heldNull = fixture(); seedStockFixture(heldNull.sql, () => heldNull.sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(1,1,'A',1,5,3,NULL);`)); seed(heldNull, 1)
+    seedStockFixture(heldNull.sql, () => heldNull.sql.exec('UPDATE products SET cost_price_usd=9 WHERE id=1; UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9 WHERE id=1'))
     assert.equal((await heldNull.call(sales, '/bulk-status', request(heldNull, 'cancelled', 'cost-held-null'))).status, 200)
     assert.deepEqual(costRows(heldNull), [{ movement_type: 'damage_in', quantity: 2, ...NULLS }], 'a held lot with no recorded cost stays unknown, it is not priced at the catalog cost')
     console.log('PASS grouped sale status movements keep NULL / $0 / held-lot cost, and undo repeats them')
   }
   for (const inactiveSql of ['0', 'NULL']) for (const restoringFirst of [true, false]) {
     const f=fixture();seed(f,1)
-    f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;
+    seedStockFixture(f.sql, () => f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(1,1,'archived-lot','2026-09-03',${restoringFirst?inactiveSql:1});
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,${restoringFirst?0:2});
       UPDATE sale_items SET batch_id=1,cost_price_usd=4 WHERE id=1;
@@ -133,7 +142,7 @@ async function run() {
         BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;
       CREATE TRIGGER test_active_lot_update BEFORE UPDATE OF quantity ON branch_batch_stock WHEN NEW.quantity>0
         AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
-        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`))
     const metadata=()=>{const {is_active,...row}=f.sql.prepare('SELECT * FROM product_batches WHERE id=1').get();return row}
     const originalMetadata=metadata()
     const originalAllocation=f.sql.prepare('SELECT * FROM sale_item_batch_allocations').all()
@@ -145,7 +154,7 @@ async function run() {
     const applied=await f.call(sales,'/bulk-status',req)
     assert.equal(applied.status,200,JSON.stringify(applied))
     for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
-      if(positive) f.sql.exec(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=1`)
+      if(positive) seedStockFixture(f.sql, () => f.sql.exec(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=1`))
       const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
       const historyRow=f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(applied.body.actionHistoryId)
       const payload=JSON.parse(historyRow[direction==='undo'?'undo_payload':'redo_payload'])
@@ -187,13 +196,13 @@ async function run() {
   // cleared HERE, under the same restore flag, and the clearing is itself an
   // assertion -- if the flag did not suppress, deleting these rows would
   // immediately write more.
-  legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}') ON CONFLICT(key) DO UPDATE SET value='{"mode":"restore"}'; DELETE FROM sale_write_revisions;`)
+  seedStockFixture(legacy.sql, () => legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}') ON CONFLICT(key) DO UPDATE SET value='{"mode":"restore"}'; DELETE FROM sale_write_revisions;`))
   legacy.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
   assert.equal(legacy.sql.prepare('SELECT COUNT(*) n FROM sale_write_revisions').get().n,0,
     'restore mode must suppress the revision triggers, so clearing the baseline stays cleared')
   assert.equal((await legacy.call(sales,'/bulk-status',request(legacy))).status,200)
   const savedRevisions=legacy.sql.prepare('SELECT * FROM sale_write_revisions ORDER BY sale_id').all()
-  legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}'); DELETE FROM sale_write_revisions; DELETE FROM sale_items; DELETE FROM sales;`)
+  seedStockFixture(legacy.sql, () => legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}'); DELETE FROM sale_write_revisions; DELETE FROM sale_items; DELETE FROM sales;`))
   for(const row of domain) {const keys=Object.keys(row);legacy.sql.prepare(`INSERT INTO sales(${keys}) VALUES(${keys.map(()=>'?')})`).run(...keys.map(k=>row[k]))}
   assert.equal(legacy.sql.prepare('SELECT COUNT(*) n FROM sale_write_revisions').get().n,0)
   for(const row of savedRevisions) legacy.sql.prepare('INSERT INTO sale_write_revisions(sale_id,revision) VALUES(?,?)').run(row.sale_id,row.revision)
@@ -362,7 +371,7 @@ async function run() {
   console.log('PASS permission refusal and sticky skip in both directions')
 
   f=fixture();seed(f,4)
-  f.sql.exec(`
+  seedStockFixture(f.sql, () => f.sql.exec(`
     UPDATE sale_items SET quantity=5 WHERE id=1;
     UPDATE sales SET sale_status='partial_return' WHERE id=1;
     UPDATE sale_items SET branch_id=2,batch_id=3 WHERE id=2;
@@ -374,7 +383,7 @@ async function run() {
     INSERT INTO damaged_stock_lots(id,product_id,branch_id,quantity,quantity_remaining) VALUES(1,1,1,5,3);
     UPDATE sale_items SET damaged_lot_id=1 WHERE id=3;
     UPDATE sales SET stock_skipped=1 WHERE id=4;
-  `)
+  `))
   const allocBefore=f.sql.prepare('SELECT * FROM sale_item_batch_allocations ORDER BY id').all()
   const mixed=await f.call(sales,'/bulk-status',request(f,'cancelled'))
   assert.equal(mixed.status,200,JSON.stringify(mixed))
@@ -407,7 +416,7 @@ async function run() {
   // A consumer takes the shared last units after replay planning. Final
   // member must fail and roll back the first member's deduction as well.
   let afterConsumer
-  f.barrier(()=>{f.sql.exec('UPDATE branch_stock SET quantity=3 WHERE product_id=1 AND branch_id=1');afterConsumer=snapshot(f)})
+  f.barrier(()=>{seedStockFixture(f.sql, () => f.sql.exec('UPDATE branch_stock SET quantity=3 WHERE product_id=1 AND branch_id=1'));afterConsumer=snapshot(f)})
   assert.equal((await replay(f,h)).status,409);assert.equal(snapshot(f),afterConsumer)
   console.log('PASS commit-time status/line/return/amendment interleavings and shared-stock atomic shortage')
 
