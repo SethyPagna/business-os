@@ -42,7 +42,7 @@ import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
-import { mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
+import { explicitCostReviewWritePlan, mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -1984,6 +1984,10 @@ app.post('/bulk-price-adjust', async (c) => {
   const claimNonce = crypto.randomUUID()
   const ownClaim = `EXISTS (SELECT 1 FROM audit_logs al WHERE al.entity = 'product' AND al.entity_id = 'bulk-price-adjust'
     AND CASE WHEN json_valid(al.details) THEN json_extract(al.details, '$.claim_nonce') END = @claimNonce)`
+  const costConfirmation = fields.includes('cost_price_usd') ? explicitCostReviewWritePlan({
+    whereSql: `(${fieldCondition('cost_price_usd')}) AND ${ownClaim}`, nextUsdSql: nextValueSql('cost_price_usd'),
+    params: { delta, claimNonce }, actor: { id: actorId(user), name: actorSnapshot(user) },
+  }) : null
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
     sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
           WHERE is_active = 1 AND (${fieldCondition(field)}) AND ${ownClaim}`,
@@ -2022,7 +2026,8 @@ app.post('/bulk-price-adjust', async (c) => {
   claim.sql += ` WHERE NOT EXISTS (SELECT 1 FROM audit_logs prior WHERE prior.entity = 'product' AND prior.entity_id = 'bulk-price-adjust'
     AND prior.user_id = @user_id AND CASE WHEN json_valid(prior.details) THEN json_extract(prior.details, '$.client_request_id') END = @priorRequestId)`
   claim.params.priorRequestId = requestId
-  statements.unshift(claim)
+  statements.unshift(claim, ...(costConfirmation?.before ?? []))
+  statements.push(...(costConfirmation?.after ?? []))
   statements.push({
     sql: `UPDATE audit_logs SET new_value = json_set(${totalsSql}, '$.rows_touched', json_extract(details, '$.rowsTouched'))
       WHERE entity = 'product' AND entity_id = 'bulk-price-adjust' AND CASE WHEN json_valid(details) THEN json_extract(details, '$.claim_nonce') END = @claimNonce`,
