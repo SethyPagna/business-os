@@ -64,7 +64,10 @@ async function main() {
   assert.equal(firstPlan.selected.category.value, 'B')
   assert.equal(firstPlan.selected.brand.value, 'One')
   assert.equal(firstPlan.selected.unit.value, 'box')
-  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 5)
+  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 4)
+  assert.equal(firstPlan.projected_result.costAuthority.keeperId, 10000)
+  assert.equal(firstPlan.projected_result.costAuthority.source, 'received_lot')
+  assert.equal(firstPlan.projected_result.costAuthority.needsReview, false)
   assert.equal(firstPlan.projected_result.economics.selling_price_usd, 9)
   assert.equal(firstPlan.projected_result.economics.wholesale_price_usd, 8)
   assert.deepEqual(firstPlan.projected_result.lot_dispositions.map((row) => ({
@@ -89,6 +92,25 @@ async function main() {
   const mismatch = await finalize(app, review.review_id, request, undefined, '123e4567-e89b-42d3-a456-426614174000')
   assert.equal(mismatch.status, 400)
   assert.equal(mismatch.body.code, 'review_id_mismatch')
+
+  {
+    const { d1: distinctDb, groups: distinctGroups } = seed(1)
+    const { app: distinctApp } = loadRoute(distinctDb)
+    const distinctReview = await createReview(distinctApp, distinctGroups, 'finalize_distinct_lots_001')
+    const distinct = await finalize(distinctApp, distinctReview.review_id, {
+      manifest_version: 1, resolution_version: 2, review_id: distinctReview.review_id, draft_digest: distinctReview.draft_digest,
+      resolutions: [resolution(distinctGroups[0], { keeper_id: 10000 })],
+    })
+    assert.equal(distinct.status, 200, JSON.stringify(distinct.body))
+    const plan = JSON.parse(distinctDb.db.prepare('SELECT final_plan_json FROM product_conflict_action_groups WHERE review_id=?').get(distinctReview.review_id).final_plan_json)
+    assert.equal(plan.projected_result.economics.cost_price_usd, 5.2)
+    assert.equal(plan.projected_result.costAuthority.keeperId, 10000)
+    assert.equal(plan.projected_result.costAuthority.source, 'received_lot')
+    assert.equal(plan.projected_result.costAuthority.needsReview, false)
+    assert.equal(plan.projected_result.lot_dispositions[0].collision, 'reparent')
+    assert.deepEqual(distinctDb.db.prepare('SELECT id,unit_cost_usd FROM product_batches ORDER BY id').all().map(row => ({ ...row })),
+      [{ id: 99001, unit_cost_usd: 4 }, { id: 99002, unit_cost_usd: 6 }])
+  }
 
   {
     const { d1: staleDb, groups: staleGroups } = seed(1)

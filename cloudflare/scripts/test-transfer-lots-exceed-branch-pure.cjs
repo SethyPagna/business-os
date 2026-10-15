@@ -1,3 +1,9 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 // Real Hono transfer routes + action-history undo/redo on production
 // migrations: lots that exceed branch stock no longer block a transfer, and
 // every transfer refusal is a 4xx with a bilingual code/message (U-transfer2,
@@ -137,7 +143,7 @@ async function main() {
   for (const [app, route] of ROUTES) for (const chosen of [false, true]) {
     await check(`${app}${route}: lots 12 > branch 10, ${chosen ? 'chosen lot' : 'lot-less'} q=5 moves 5 on both ledgers, once; undo/redo exact`, async () => {
       h.fresh(1, S)
-      sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id=1 AND branch_id=${S}`)
+      seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id=1 AND branch_id=${S}`))
       await cycle(app, route, body(route, `exceed_${tag(app, route)}_${chosen ? 'lot' : 'fifo'}`, [{ productId: 1, quantity: 5, ...(chosen ? { batchId: 1 } : {}) }]),
         { 1: { S: [5, 7], D: [5, 5] } })
       assert.deepEqual(members().map((row) => row.untracked_quantity), [0])
@@ -149,7 +155,7 @@ async function main() {
   for (const [app, route] of ROUTES) for (const chosen of [false, true]) {
     await check(`${app}${route}: q=11 over branch 10 is refused with zero effects even though ${chosen ? 'the chosen lot' : 'the lots'} hold 12`, async () => {
       h.fresh(1, S)
-      sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id=1 AND branch_id=${S}`)
+      seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id=1 AND branch_id=${S}`))
       const result = await refused(app, route, body(route, `over_${tag(app, route)}_${chosen ? 'lot' : 'fifo'}`, [{ productId: 1, quantity: 11, ...(chosen ? { batchId: 1 } : {}) }]), 400)
       assert.match(result.body.error, /Insufficient stock/)
     })
@@ -158,7 +164,7 @@ async function main() {
   for (const [app, route] of ROUTES) for (const [quantity, after, untracked] of [[7, { S: [3, 0], D: [7, 4] }, 3], [10, { S: [0, 0], D: [10, 4] }, 6]]) {
     await check(`${app}${route}: lots 4 < branch 10, lot-less q=${quantity} takes 4 from lots and ${untracked} untracked, as before; undo/redo exact`, async () => {
       h.fresh(1, S)
-      sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`)
+      seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`))
       await cycle(app, route, body(route, `under_${tag(app, route)}_${quantity}`, [{ productId: 1, quantity }]), { 1: after })
       assert.deepEqual(members().map((row) => row.untracked_quantity), [untracked])
       const untrackedLegs = sql().prepare("SELECT movement_type,quantity FROM inventory_movements WHERE batch_id IS NULL AND reason='Restock' ORDER BY id").all()
@@ -168,8 +174,8 @@ async function main() {
 
   await check('bulk: a lot-less row over-lotted, a chosen lot over-lotted and a lot-short row in ONE request move together; undo/redo exact', async () => {
     h.fresh(3, S)
-    sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id IN (1,2) AND branch_id=${S};
-      UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=3 AND branch_id=${S}`)
+    seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=12 WHERE batch_id IN (1,2) AND branch_id=${S};
+      UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=3 AND branch_id=${S}`))
     await cycle('branches', '/transfer-bulk', body('/transfer-bulk', 'bulk_mix_0001', [
       { productId: 1, quantity: 5 }, { productId: 2, quantity: 5, batchId: 2 }, { productId: 3, quantity: 7 },
     ]), { 1: { S: [5, 7], D: [5, 5] }, 2: { S: [5, 7], D: [5, 5] }, 3: { S: [3, 0], D: [7, 4] } })
@@ -182,9 +188,9 @@ async function main() {
   for (const [app, route] of ROUTES) {
     await check(`${app}${route}: an untracked part over max(branch - lots, 0) at commit time is refused 409 transfer_stock_changed, zero effects`, async () => {
       h.fresh(1, S)
-      sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`)
+      seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`))
       const result = await refused(app, route, body(route, `short_${tag(app, route)}`, [{ productId: 1, quantity: 7 }]), 409, 'transfer_stock_changed',
-        () => sql().exec(`UPDATE branch_batch_stock SET quantity=9 WHERE batch_id=1 AND branch_id=${S}`))
+        () => seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=9 WHERE batch_id=1 AND branch_id=${S}`)))
       assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_stock_changed)
     })
   }
@@ -192,10 +198,10 @@ async function main() {
   for (const [app, route] of ROUTES) {
     await check(`${app}${route}: float residue -- 0.8 from lots 0.5 + 0.3 with branch 0.8 moves, with no phantom untracked row; undo exact`, async () => {
       h.fresh(1, S)
-      sql().exec(`UPDATE branch_stock SET quantity=0.8 WHERE product_id=1 AND branch_id=${S}; UPDATE products SET stock_quantity=0.8 WHERE id=1;
+      seedFixture(sql(), () => sql().exec(`UPDATE branch_stock SET quantity=0.8 WHERE product_id=1 AND branch_id=${S}; UPDATE products SET stock_quantity=0.8 WHERE id=1;
         UPDATE branch_batch_stock SET quantity=0.5 WHERE batch_id=1 AND branch_id=${S};
         INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES (61,1,'newer','newer','2026-09-02',1);
-        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES (61,${S},0.3)`)
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES (61,${S},0.3)`))
       await cycle(app, route, body(route, `float_${tag(app, route)}`, [{ productId: 1, quantity: 0.8 }]), { 1: { S: [0, 0], D: [0.8, 0.8] } })
       assert.deepEqual(members().map((row) => row.untracked_quantity), [0])
       assert.equal(sql().prepare('SELECT COUNT(*) n FROM inventory_movements WHERE batch_id IS NULL').get().n, 0, 'float noise is not an untracked movement')
@@ -204,10 +210,10 @@ async function main() {
 
   await check('undo edge: an untracked part cannot return from a destination whose lots now claim all its stock (409, zero effects)', async () => {
     h.fresh(1, S)
-    sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`)
+    seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`))
     const result = await h.request('branches', '/transfer-bulk', body('/transfer-bulk', 'undo_edge_001', [{ productId: 1, quantity: 7 }]))
     assert.equal(result.status, 200, JSON.stringify(result.body))
-    sql().exec(`UPDATE branch_batch_stock SET quantity=quantity+10 WHERE batch_id=1 AND branch_id=${D}`)
+    seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=quantity+10 WHERE batch_id=1 AND branch_id=${D}`))
     const before = snapshot()
     const undo = await reverse(result.body.action_history_id, 'undo', 0)
     assert.equal(undo.status, 409, JSON.stringify(undo.body))
@@ -219,7 +225,7 @@ async function main() {
       // A concurrent sale drained the source between the route's check and the batch.
       h.fresh(1, S)
       let result = await refused(app, route, body(route, `race_${tag(app, route)}`, [{ productId: 1, quantity: 2 }]), 409, 'transfer_stock_changed',
-        () => sql().exec(`UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=${S}`))
+        () => seedFixture(sql(), () => sql().exec(`UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=${S}`)))
       assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_stock_changed)
       // Recreate a historical removed-stock product before0242, then test the guarded planner.
       h.fresh(1, S, '0242')
@@ -231,9 +237,20 @@ async function main() {
       assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_stock_changed)
       // Maintenance arriving after admission: the house 503, never a 500.
       h.fresh(1, S)
-      result = await refused(app, route, body(route, `maint_${tag(app, route)}`, [{ productId: 1, quantity: 2 }]), 503, 'maintenance_active',
-        () => sql().prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode: 'restore' })))
-      assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_maintenance_active)
+      result = await refused(app, route, body(route, `maint_${tag(app, route)}`, [{ productId: 1, quantity: 2 }]), 503, 'stock_schema_unavailable',
+        () => {
+          seedFixture(sql(), () => sql().prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode: 'restore' })))
+          assert.equal(sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+          assert.equal(sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+        })
+      assert.equal(result.body.error, new (h.load('lib/stockTransaction.ts').StockTransactionUnavailableError)().message)
+      if (app === 'inventory') {
+        assert.deepEqual(result.body, { error: new (h.load('lib/stockTransaction.ts').StockTransactionUnavailableError)().message, code: 'stock_schema_unavailable' })
+      } else {
+        assert.equal(result.body.action, 'reload_required')
+      }
+      assert.equal(sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+      assert.equal(sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       // Control: a genuine write failure is not dressed up as a refusal.
       h.fresh(1, S)
       h.failAt('INSERT INTO stock_transfers')
@@ -243,7 +260,7 @@ async function main() {
 
   await check('inventory/transfer: a chosen lot short of q is the planner refusal 409 transfer_selected_lot_short', async () => {
     h.fresh(1, S)
-    sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`)
+    seedFixture(sql(), () => sql().exec(`UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=1 AND branch_id=${S}`))
     const result = await refused('inventory', '/transfer', body('/transfer', 'lot_short_inventory', [{ productId: 1, quantity: 7, batchId: 1 }]), 409, 'transfer_selected_lot_short')
     assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_selected_lot_short)
   })

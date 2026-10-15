@@ -1,10 +1,16 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
 const { loadRoute, loadTs, seed } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
 function reset(controls) {
   Object.assign(controls, { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0,
-    writeBatches: 0, beforeNextWriteBatch: null, beforeWriteBatch: null })
+    writeBatches: 0, beforeNextWriteBatch: null, beforeWriteBatch: null, stockAdmissionPairs: [] })
 }
 
 async function remove(app, productId, body, user = { id: 900, username: 'owner' }) {
@@ -21,14 +27,20 @@ function setup() {
   d1.db.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active)
     VALUES(902,'requester','Requester','x','{}',1),(903,'reviewer','Reviewer','x','{}',1)`).run()
   d1.db.prepare('UPDATE products SET rfid_confirmed_qty=1 WHERE id=10000').run()
-  d1.db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=1 WHERE product_id=10000 AND branch_id=1').run()
-  d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(10000,2,0,0)').run()
-  d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,notes,supplier_id,supplier_name)
-    VALUES(99004,10000,'old-inactive','2026-08-01',0,'preserve inactive',55,'Old Supplier')`).run()
-  d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,0)').run()
-  d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;')
+  seedFixture(d1.db, () => d1.db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=1 WHERE product_id=10000 AND branch_id=1').run())
+  seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(10000,2,0,0)').run())
+  seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,notes,supplier_id,supplier_name)
+    VALUES(99004,10000,'old-inactive','2026-08-01',0,'preserve inactive',55,'Old Supplier')`).run())
+  seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,0)').run())
+  seedFixture(d1.db, () => d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;'))
   const loaded = loadRoute(d1, true)
   reset(loaded.controls)
+  const batch = loaded.db.batch
+  loaded.db.batch = async statements => {
+    const admission = statements.filter(({ sql }) => sql.includes("'stock_transaction_permit'"))
+    if (admission.length) loaded.controls.stockAdmissionPairs.push(admission.map(({ sql }) => sql))
+    return batch(statements)
+  }
   return { d1, ...loaded, auditRows: captureAuditBaseline(d1.db) }
 }
 
@@ -56,21 +68,21 @@ async function main() {
   {
     const fixture = setup()
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name='positive_lot_require_active_update_0154'").get().n,1)
-    fixture.d1.db.exec(`UPDATE branch_stock SET quantity=3 WHERE product_id=10000 AND branch_id=2;
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec(`UPDATE branch_stock SET quantity=3 WHERE product_id=10000 AND branch_id=2;
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99001,2,3);
       UPDATE products SET stock_quantity=5 WHERE id=10000;
       UPDATE product_batches SET received_at='2026-08-17',expiry_date='2028-08-17',unit_cost_usd=4.25,
         received_quantity=5,received_cost_usd=21.25 WHERE id=99001;
       -- U-cost 0195: the lot-cost editors re-derive the catalog cost; keep the
       -- seeded product consistent with its on-hand lot, as the app would.
-      UPDATE products SET cost_price_usd=4.25,purchase_price_usd=4.25 WHERE id=10000;`)
+      UPDATE products SET cost_price_usd=4.25,purchase_price_usd=4.25 WHERE id=10000;`))
     const source = productGraph(fixture.d1)
-    fixture.d1.db.exec("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(10000,2,3,3,'damaged')")
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(10000,2,3,3,'damaged')"))
     source.damagedLots = productGraph(fixture.d1).damagedLots
     const refused = await remove(fixture.app,10000,{reason:'Stock refusal',client_request_id:'refuse_historical_stock'})
     assert.equal(refused.status,409);assert.equal(refused.body.code,'product_has_stock')
     assert.deepEqual(productGraph(fixture.d1),source)
-    fixture.d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id=10000; UPDATE products SET stock_quantity=0 WHERE id=10000;')
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id=10000; UPDATE products SET stock_quantity=0 WHERE id=10000;'))
     const removed = await remove(fixture.app,10000,{reason:'Historical fixture',client_request_id:'historical_fixture'})
     const op=fixture.d1.db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=?').get(removed.body.operation_id)
     const saved=JSON.parse(fixture.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.undo_snapshot_id).payload_json)
@@ -153,7 +165,17 @@ async function main() {
       { is_active: 0, stock_quantity: 0, rfid_confirmed_qty: 0 })
     assert.deepEqual({ ...fixture.d1.db.prepare('SELECT status,generation FROM product_remove_operations WHERE operation_id=?').get(first.body.operation_id) },
       { status: 'undo_ready', generation: 2 })
-    assert.ok(fixture.controls.statements <= 80)
+    assert.equal(fixture.controls.writeBatches, 3)
+    assert.equal(fixture.controls.stockAdmissionPairs.length, 3)
+    for (const pair of fixture.controls.stockAdmissionPairs) {
+      assert.equal(pair.length, 2)
+      assert.match(pair[0], /^INSERT INTO system_flags \(key,value,updated_at\)/)
+      assert.match(pair[1], /^DELETE FROM system_flags/)
+    }
+    const admissionStatements = fixture.controls.stockAdmissionPairs.flat().length
+    assert.equal(admissionStatements, 6)
+    assert.ok(fixture.controls.statements - admissionStatements <= 80, `business statements: ${fixture.controls.statements - admissionStatements}`)
+    assert.ok(fixture.controls.statements <= 86, `total statements across six operations: ${fixture.controls.statements}`)
     assert.ok(fixture.controls.maxBindings <= 100)
     assert.ok(fixture.controls.maxCompoundTerms <= 5)
     assert.ok(fixture.controls.maxBatchStatements <= 100)
