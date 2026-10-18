@@ -16,7 +16,8 @@ function load(source, dependencies = {}) {
   }, module, module.exports)
   return module.exports
 }
-const maintenance = load(read('src/lib/maintenance.ts'))
+const stockTransaction = load(read('src/lib/stockTransaction.ts'))
+const maintenance = load(read('src/lib/maintenance.ts'), { './stockTransaction': stockTransaction })
 const wire = {
   mode: 'branch-cutover', operationId: '10000000-0000-4000-8000-000000000001',
   token: '20000000-0000-4000-8000-000000000002', actorId: 7, organizationId: 'organization-1',
@@ -26,18 +27,33 @@ function world() {
   const raw = new DatabaseSync(':memory:')
   raw.limits.exprDepth = 100
   raw.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT); CREATE TABLE import_jobs(status TEXT,lease_expires_at TEXT); CREATE TABLE bulk_delete_jobs(status TEXT)')
+  raw.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?)").run(stockTransaction.STOCK_SCHEMA_EPOCH)
   const control = { beforeWrite: null }
+  function beforeWrite(sql) {
+    if (control.beforeWrite) { const run = control.beforeWrite; control.beforeWrite = null; run(sql) }
+  }
   function prepare(sql, values = []) {
-    return { bind: (...next) => prepare(sql, next),
+    const execute = () => {
+      const statement = raw.prepare(sql)
+      if (/^\s*(SELECT|WITH|PRAGMA)/i.test(sql)) return { success: true, results: statement.all(...values), meta: { changes: 0 } }
+      const result = statement.run(...values)
+      return { success: true, results: [], meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
+    }
+    return { sql, execute, bind: (...next) => prepare(sql, next),
       first: async () => raw.prepare(sql).get(...values) ?? null,
       all: async () => ({ results: raw.prepare(sql).all(...values) }),
-      run: async () => {
-        if (control.beforeWrite) { const run = control.beforeWrite; control.beforeWrite = null; run(sql) }
-        const result = raw.prepare(sql).run(...values)
-        return { meta: { changes: Number(result.changes) } }
-      } }
+      run: async () => { beforeWrite(sql); return execute() } }
   }
-  return { raw, control, env: { DB: { prepare } },
+  const batch = async statements => {
+    beforeWrite(statements[0].sql)
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      const results = statements.map(statement => statement.execute())
+      raw.exec('COMMIT')
+      return results
+    } catch (error) { raw.exec('ROLLBACK'); throw error }
+  }
+  return { raw, control, env: { DB: { prepare, batch } },
     set: value => raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance',?)").run(typeof value === 'string' ? value : JSON.stringify(value)),
     value: () => raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get()?.value }
 }
@@ -116,7 +132,7 @@ async function main() {
           assert.equal((await handler({ req: { method, path: endpoint }, env: w.env }, async () => ({ status: 204 }))).status, 204)
         }
       }
-      w.raw.exec("DELETE FROM system_flags")
+      w.raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
       await maintenance.beginMaintenance(w.env, { backupKey: 'backup', startedBy: 'owner' })
       assert.equal((await handler({ req: { method: 'POST', path: '/api/backups/maintenance/clear' }, env: w.env }, async () => ({ status: 204 }))).status, 204)
       assert.equal(maintenance.isMaintenanceGatedRequest('POST', '/api/backups-other'), true)
@@ -153,7 +169,7 @@ async function main() {
       assert.equal(await maintenance.endMaintenance(w.env, 'wrong'), false)
       w.control.beforeWrite = () => w.set(wire)
       assert.equal(await maintenance.endMaintenance(w.env, state.token), false); assert.equal(w.value(), JSON.stringify(wire))
-      w.raw.exec('DELETE FROM system_flags')
+      w.raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
       const next = await maintenance.beginMaintenance(w.env, { backupKey: 'backup', startedBy: 'owner' })
       assert.equal(await maintenance.endMaintenance(w.env, next.token), true)
       w.raw.exec('DROP TABLE system_flags'); assert.equal(await maintenance.getMaintenance(w.env), null)
@@ -167,9 +183,10 @@ async function main() {
         const state = await maintenance.beginMaintenance(w.env, { backupKey: 'backup', startedBy: 'owner' })
         if (action === 'corrupt-force') w.set('{"mode":"restore","token":null}')
         w.control.beforeWrite = () => w.set(wire)
-        if (action === 'progress') await maintenance.updateMaintenance(w.env, state.token, { phase: 'failed' })
+        if (action === 'progress') await assert.rejects(maintenance.updateMaintenance(w.env, state.token, { phase: 'failed' }), error => error instanceof stockTransaction.StockTransactionUnavailableError)
         else assert.equal(await maintenance.endMaintenance(w.env, state.token, { force: action !== 'end' }), false)
         assert.equal(w.value(), JSON.stringify(wire), action)
+        assert.equal(w.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       } finally { w.raw.close() }
     }
   })
