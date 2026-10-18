@@ -23,17 +23,15 @@ const native = new Function('require', '__dirname', fixture + `
 async function main() {
   const { sqlite, db } = native.makeDb()
   try {
-    sqlite.exec(`CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
-      CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT);
+    sqlite.exec(`CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT);
       CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT);
       INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Admin',1,1,'{}',1,NULL);
       ALTER TABLE import_jobs ADD COLUMN last_error TEXT;
       CREATE TABLE product_damaged_stock(product_id INTEGER,batch_id INTEGER,branch_id INTEGER,remaining_quantity REAL);
       CREATE TABLE import_job_files(job_id TEXT,kind TEXT,status TEXT);
       CREATE TABLE import_job_row_signatures(job_id TEXT);`)
-    const prepare = db.prepare.bind(db), batch = db.batch.bind(db)
+    const prepare = db.prepare.bind(db)
     db.prepare = sql => { const p = prepare(sql); return {...p,getOnce:p.get,allOnce:p.all} }
-    db.batch = async statements => (await batch(statements)).map(result => ({meta:{changes:result.changes,last_row_id:Number(result.lastInsertRowid)}}))
     db.batchOnce = db.batch
     native.seedProduct(sqlite, {id:50,name:'Budget',barcode:'B50',shop:0})
     native.seedJob(sqlite, 'queue', [{_rowNumber:2,name:'Budget',barcode:'B50',shop:'1',date:'2026-01-01',action:'add',cost_price:'4',supplier:'Supplier',batch:'B1'}], {stock_action_mode:'direct',apply_authorized_by_id:61})
