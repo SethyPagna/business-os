@@ -2,6 +2,7 @@
 // No Hono route, network, remote D1 binding, or production data is available.
 
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -244,7 +245,9 @@ async function testValidationAndConflictingStates() {
   exec('UPDATE customers SET is_anonymous=1 WHERE id=24969')
   await assert.rejects(() => preview(), (error) => error instanceof repair.GeneralCustomerRepairConflictError)
   newDb()
-  exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+  seedStockFixture(db.db, () => exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`))
+  assert.equal(row("SELECT value FROM system_flags WHERE key='maintenance'").value, '{"mode":"restore"}')
+  assert.equal(row("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").n, 0)
   await assert.rejects(() => preview(), (error) => error instanceof repair.GeneralCustomerRepairConflictError)
   pass('request allowlist, actor, digest, identity, unreceipted marker and maintenance checks fail closed')
 }

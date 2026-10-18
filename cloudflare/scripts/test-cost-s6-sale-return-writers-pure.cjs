@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Cost-unknown slice S6 (owner, 14 Oct 2026): "if cost is 0$ then it is 0 for loss. if it is none,
 // it should also be unknown."
 //
@@ -22,6 +23,7 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const currentAdmission = withProductStockGuard(require)('./stockTransaction')
 
 const root = process.env.COST_S6_SRC_ROOT ? path.resolve(process.env.COST_S6_SRC_ROOT) : path.join(__dirname, '..')
 const REAL = new Set([
@@ -68,8 +70,8 @@ let checks = 0
 const failures = []
 const ok = (label) => { checks++; console.log(`PASS ${label}`) }
 // Each section reports on its own so a red run names every writer that still invents a cost, not just the first.
-function section(name, body) {
-  try { body() } catch (error) {
+async function section(name, body) {
+  try { await body() } catch (error) {
     failures.push(name)
     console.log(`FAIL ${name}: ${String(error.message).split(String.fromCharCode(10))[0]}`)
   }
@@ -81,7 +83,8 @@ const ZERO = { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost
 // ---------------------------------------------------------------------------
 // 1. saleTransitions: cancel (stock comes back) and re-activate (stock leaves again)
 // ---------------------------------------------------------------------------
-section("saleTransitions cancel/reactivate", () => {
+;(async () => {
+await section("saleTransitions cancel/reactivate", () => {
   const { planSaleStockTransition } = load('lib/saleTransitions.ts')
   const item = (cost) => ({ id: 11, product_id: 10, product_name: 'Serum', quantity: 5, cost_price_usd: cost.usd, cost_price_khr: cost.khr, branch_id: 1, batch_id: null })
   const transition = (oldStatus, newStatus, cost) => planSaleStockTransition({
@@ -105,7 +108,7 @@ section("saleTransitions cancel/reactivate", () => {
 // ---------------------------------------------------------------------------
 // 2. saleAmendments: decrease (units back to the shelf) and increase (units off the shelf)
 // ---------------------------------------------------------------------------
-section("saleAmendments decrease/increase", () => {
+await section("saleAmendments decrease/increase", () => {
   const { planLineQuantityDecrease, planLineQuantityIncrease } = load('lib/saleAmendments.ts')
   const sale = { id: 77, sale_status: 'completed', branch_id: 1, exchange_rate: 4100, subtotal_usd: 6, total_usd: 6, stock_skipped: 0 }
   const line = (usd, khr) => ({ id: 1, product_id: 10, product_name: 'Serum', quantity: 2, applied_price_usd: 3, cost_price_usd: usd, cost_price_khr: khr, branch_id: 1 })
@@ -134,7 +137,7 @@ section("saleAmendments decrease/increase", () => {
 // ---------------------------------------------------------------------------
 // 3. saleLineAddition: a line added to a sale, and the undo that removes it again
 // ---------------------------------------------------------------------------
-section("saleLineAddition add/remove", () => {
+await section("saleLineAddition add/remove", () => {
   const { allocateNewSaleLines, planSaleLineAddition, planSaleLineRemoval } = load('lib/saleLineAddition.ts')
   const lots = () => new Map([['10:1', [{ batchId: 501, lotCode: 'L-501', expiryDate: null, available: 8 }]]])
   const newLine = (usd, khr) => ({ productId: 10, productName: 'Serum', quantity: 3, branchId: 1, unitPriceUsd: 3, costPriceUsd: usd, costPriceKhr: khr, batchId: null, batchLabel: null, batchExpiryDate: null })
@@ -160,7 +163,7 @@ section("saleLineAddition add/remove", () => {
 // ---------------------------------------------------------------------------
 // 4. returnsStock: the damaged-return movements and the replacement hand-out
 // ---------------------------------------------------------------------------
-section("returnsStock damaged-return and replacement", () => {
+await section("returnsStock damaged-return and replacement", () => {
   const { planDamagedReturnLine, planReplacementStock } = load('lib/returnsStock.ts')
   const damaged = (usd, khr, disposition) => planDamagedReturnLine({
     productId: 10, productName: 'Serum', branchId: 1, batchId: null, returnIdSql: '(SELECT 123)', quantity: 2, reason: 'broken',
@@ -195,7 +198,7 @@ section("returnsStock damaged-return and replacement", () => {
 // ---------------------------------------------------------------------------
 // 5. productDelete: the restore of a removed product's sellable stock
 // ---------------------------------------------------------------------------
-section("productDelete sellable restore", () => {
+await section("productDelete sellable restore", () => {
   const { productRemoveReplayStatements } = load('lib/productDelete.ts')
   const plan = (batchCost, extraLot) => ({
     version: 1, product_id: 10, reason: 'cost test', product: { id: 10, name: 'Serum', is_active: 1 },
@@ -227,31 +230,36 @@ section("productDelete sellable restore", () => {
 // ---------------------------------------------------------------------------
 // 6. received_cost_usd running sums: an unknown earlier receipt never becomes known money
 // ---------------------------------------------------------------------------
-section("received_cost_usd running sums", () => {
+await section("received_cost_usd running sums", async () => {
   const { planReceiveBatchStock } = load('lib/productBatches.ts')
   function lotFixture(receivedCost) {
+    seedStockFixture(db, () => {
     db.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity = 0; DELETE FROM products; DELETE FROM branches; DELETE FROM stock_session_guards')
     db.prepare("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1)").run()
     db.prepare("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(10,'Serum',1,0)").run()
     db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,received_quantity,received_cost_usd) VALUES(501,10,'2026-09-01','L-501','2026-09-01',1,3,?)").run(receivedCost)
+    })
+    assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted fixture probe')").run(), /stock_transaction_required/)
   }
   const receive = (preimageCost, unitCost = 2) => planReceiveBatchStock({
     productId: 10, branchId: 1, quantity: 5, receivedDate: '2026-09-01', batchId: 501, unitCostUsd: unitCost,
     receiptCostPreimage: { batchExists: true, receivedCostUsd: preimageCost },
   }).statements
   const receivedCostAfter = () => db.prepare('SELECT received_cost_usd, received_quantity FROM product_batches WHERE id=501').get()
+  const receiveDb = { batch: async statements => run(statements) }
+  const runReceivePlan = statements => currentAdmission.executeStockTransaction(receiveDb, statements, 'retry')
 
   lotFixture(null)
-  run(receive(null))
+  await runReceivePlan(receive(null))
   assert.deepEqual(receivedCostAfter(), { received_cost_usd: null, received_quantity: 8 }, 'a lot whose first receipt had no recorded money stays unknown when 5 known units are added (old: 0 + 5 x 2 = 10)')
   lotFixture(0)
-  run(receive(0))
+  await runReceivePlan(receive(0))
   assert.deepEqual(receivedCostAfter(), { received_cost_usd: 10, received_quantity: 8 }, 'a lot recorded at $0 is a known zero: the known receipt adds to it')
   lotFixture(6)
-  run(receive(6))
+  await runReceivePlan(receive(6))
   assert.deepEqual(receivedCostAfter(), { received_cost_usd: 16, received_quantity: 8 }, 'known + known sums')
   lotFixture(6)
-  run(receive(6, 0))
+  await runReceivePlan(receive(6, 0))
   assert.deepEqual(receivedCostAfter(), { received_cost_usd: 6, received_quantity: 8 }, 'a free receipt ($0 unit) added to a known lot adds 0, and the total stays known')
 
   // The two other running-sum writers apply a signed change to the stored total.
@@ -278,7 +286,7 @@ section("received_cost_usd running sums", () => {
 // 7. Source locks for the writers that need a database flow to execute (covered by the route tests
 //    named here): no cost-inventing coercion is left on a cost field in the slice's files.
 // ---------------------------------------------------------------------------
-section("no cost-inventing coercion in source", () => {
+await section("no cost-inventing coercion in source", () => {
   const strip = (text) => text.replace(/\r\n/g, '\n')
   const read = (rel) => strip(fs.readFileSync(path.join(root, 'src', rel), 'utf8'))
   const bad = []
@@ -308,3 +316,5 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(`OK - ${checks} checks passed`)
+
+})().catch(error => { console.error(error); process.exitCode = 1 })

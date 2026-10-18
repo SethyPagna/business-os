@@ -1,3 +1,10 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function seedFixture(raw, seed) {
+  const value = seedStockFixture(raw, seed)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.throws(() => raw.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
+  return value
+}
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -41,13 +48,15 @@ async function fixture(allocations) {
   sale.items[0].batch_id = null
   sale.items[0].pricing_quote = { ...sale.items[0].pricing_quote, gross_usd: 9.5 * allocations, total_usd: 9.5 * allocations, total_khr: 38000 * allocations }
   sale.amount_paid_usd = 9.5 * allocations
-  f.raw.prepare('UPDATE products SET stock_quantity=@a WHERE id=10').run({ a: allocations })
-  f.raw.prepare('UPDATE branch_stock SET quantity=@a WHERE product_id=10').run({ a: allocations })
-  f.raw.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=500').run()
-  for (let i = 1; i < allocations; i++) {
-    f.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(@id,10,@key,'2026-09-01',1)").run({ id: 500 + i, key: `lot-${i}` })
-    f.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@id,1,1)').run({ id: 500 + i })
-  }
+  seedFixture(f.raw.db, () => {
+    f.raw.prepare('UPDATE products SET stock_quantity=@a WHERE id=10').run({ a: allocations })
+    f.raw.prepare('UPDATE branch_stock SET quantity=@a WHERE product_id=10').run({ a: allocations })
+    f.raw.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=500').run()
+    for (let i = 1; i < allocations; i++) {
+      f.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(@id,10,@key,'2026-09-01',1)").run({ id: 500 + i, key: `lot-${i}` })
+      f.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@id,1,1)').run({ id: 500 + i })
+    }
+  })
   const saved = await h.postSale(f.route, sale)
   assert.equal(saved.status, 200)
   const saleItemId = f.raw.prepare('SELECT id FROM sale_items WHERE sale_id=@id').get({ id: saved.body.id }).id
@@ -192,10 +201,12 @@ async function main() {
       delete enabled.body.money_precision_version
       delete enabled.body.expected_quote
       enabled.body.items[0].product_id = 10
-      enabled.raw.prepare("INSERT INTO products(id,name,stock_quantity,selling_price_usd,cost_price_usd,is_active) VALUES(11,'Replacement',1,9.5,4,1)").run()
-      enabled.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,1)').run()
-      enabled.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(501,11,'replacement','2026-09-01',1)").run()
-      enabled.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,1)').run()
+      seedFixture(enabled.raw.db, () => {
+        enabled.raw.prepare("INSERT INTO products(id,name,stock_quantity,selling_price_usd,cost_price_usd,is_active) VALUES(11,'Replacement',1,9.5,4,1)").run()
+        enabled.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,1)').run()
+        enabled.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(501,11,'replacement','2026-09-01',1)").run()
+        enabled.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,1)').run()
+      })
       enabled.body.replacement_items = [{ product_id: 11, branch_id: 1, batch_id: 501, quantity: 1, applied_price_usd: 9.5 }]
     }
     const beforeSends = sends

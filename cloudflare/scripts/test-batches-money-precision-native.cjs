@@ -5,13 +5,21 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const SQLite = require('better-sqlite3')
-const raw = new SQLite(':memory:')
-raw.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
-  CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
-  CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
-  CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL);
-  INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345,NULL);
-  INSERT INTO branch_batch_stock VALUES(1,1,1,3)`)
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+function stockFixture() {
+  const raw = new SQLite(':memory:')
+  const migrations = path.resolve(__dirname, '../migrations')
+  for (const file of fs.readdirSync(migrations).filter(file => file.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(migrations, file), 'utf8'))
+  seedStockFixture(raw, () => raw.exec(`
+    INSERT INTO branches(id,name,is_active) VALUES(1,'Fixture branch',1);
+    INSERT INTO products(id,name,cost_price_usd,purchase_price_usd) VALUES(1,'Fixture product',1.2345,1.2345);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,updated_at,unit_cost_usd,received_at) VALUES(1,1,'fixture-batch',1,NULL,1.2345,NULL);
+    INSERT INTO branch_batch_stock(id,batch_id,branch_id,quantity) VALUES(1,1,1,3)`))
+  assert.throws(() => raw.prepare('UPDATE product_batches SET unit_cost_usd=unit_cost_usd WHERE id=1').run(), /stock_transaction_required/)
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  return raw
+}
+const raw = stockFixture()
 const db = { prepare(sql) {
   const statement = raw.prepare(sql)
   const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
@@ -75,13 +83,7 @@ async function request(method, cost, extra = {}) {
   // actually invokes the deferred promise and tracks whether it rejected,
   // so a future regression that awaited audit() before responding (turning
   // its rejection into a 500) would be caught here.
-  const raw2 = new SQLite(':memory:')
-  raw2.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
-    CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
-    CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL);
-    INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345,NULL);
-    INSERT INTO branch_batch_stock VALUES(1,1,1,3)`)
+  const raw2 = stockFixture()
   const db2 = { prepare(sql) {
     const statement = raw2.prepare(sql)
     const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
