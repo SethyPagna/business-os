@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // Rate-at-time regression for the Worker's money writers.
 //
 // Owner rule (24 Sep 2026): "a change to the exchange rate applies only from
@@ -98,13 +99,17 @@ function fixture() {
     const response = await app.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, { DB }, ctx)
     return { status: response.status, body: await response.json() }
   }
-  sql.exec(`
+  seedStockFixture(sql, () => sql.exec(`
     INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES
       ('exchange_rate','4200','s1'),('change_exchange_rate','4200','s1'),('pos_payment_methods','["ABA Bank","Cash"]','s1');
     INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1);
     INSERT INTO products(id,name,is_active,stock_quantity,selling_price_usd) VALUES(1,'Serum',1,10,NULL),(2,'Toner',1,10,10);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10),(2,1,10);
-  `)
+  `))
+  const stockState = () => Object.fromEntries(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(table => [table,sql.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()]))
+  const beforeRawMutation = stockState()
+  assert.throws(() => sql.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+  assert.deepEqual(stockState(),beforeRawMutation,'raw stock writes cannot change seeded ledgers or flags')
   return { sql, sales: call(salesApp), returns: call(returnsApp) }
 }
 

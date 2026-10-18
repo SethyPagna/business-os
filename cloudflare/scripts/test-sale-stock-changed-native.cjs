@@ -340,15 +340,31 @@ const PATCHES = {
 const SELL = 1 // the seeded Shop, given the shop role below: the active selling branch
 let seq = 0
 const QUOTE_FIELDS = ['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr']
+let stockKernelPromise
+function stockKernel() {
+  return stockKernelPromise ||= require('esbuild').build({ stdin: { contents: "export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' }).then(bundle => {
+    const mod = { exports: {} }
+    new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
+    return mod.exports
+  })
+}
+
 async function product(H, { stock = 20, price = 10 } = {}) {
+  const { executeRawStockTransaction } = await stockKernel()
   const n = ++seq, id = 700 + n, lot = id * 10 + 1
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare('INSERT INTO products(id,name,barcode,sku,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,?,4,0,?,?,?,1)')
       .bind(id, 'SS Powder ' + id, '88700' + String(id).padStart(8, '0'), 'SS-' + id, price, price * 4000, stock),
     H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, SELL, stock),
     H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,'2026-09-02',1,4,1)").bind(lot, id, 'SS' + id, 'SS' + id),
     H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(lot, SELL, stock),
   ])
+  assert.deepEqual(await H.q("SELECT value FROM system_flags WHERE key='stock_transaction_permit'"),[],'product fixture releases its stock permit')
+  const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,await H.q('SELECT * FROM '+table+' ORDER BY rowid')])))
+  const beforeRawMutation = await stockState()
+  await assert.rejects(H.db.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=?').bind(id).run(), /stock_transaction_required/)
+  assert.deepEqual(await stockState(),beforeRawMutation,'raw mutation stays refused before any actual competing business request')
   return { id, lot, price }
 }
 
