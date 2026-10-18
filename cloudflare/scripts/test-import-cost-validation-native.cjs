@@ -33,7 +33,15 @@ async function apply(h, id, statuses = ['completed', 'completed_with_errors']) {
   assert.ok(statuses.includes(job.status), JSON.stringify(job))
   return job
 }
-async function seed(h, name, cost = 7) { await h.db.prepare('INSERT INTO products(name,cost_price_usd,stock_quantity,is_active) VALUES(?,?,0,1)').bind(name, cost).run() }
+async function seed(h, name, cost = 7) {
+  assert.equal((await h.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+  await h.db.batch([
+    h.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+    h.db.prepare('INSERT INTO products(name,cost_price_usd,stock_quantity,is_active) VALUES(?,?,0,1)').bind(name, cost),
+    h.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+  ])
+  assert.equal((await h.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+}
 async function product(h, name) { return h.q1('SELECT id,name,cost_price_usd,cost_price_khr,stock_quantity,is_active FROM products WHERE name=?', name) }
 ;(async () => {
   for (const plan of (process.env.IMPORT_COST_PLANS || 'free,paid').split(',')) {

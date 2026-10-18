@@ -53,7 +53,9 @@ async function main() {
         }
       }
     }
+    assert.equal((await native.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
     await native.batch([
+      native.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
       native.prepare("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1)"),
       native.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,rfid_confirmed_qty,
         cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,updated_at)
@@ -63,8 +65,17 @@ async function main() {
         VALUES(95201,5201,'native-active','LOT-A','2026-09-01',1,'active receipt',81,'Supplier Active','paid',5,1,20),
           (95202,5201,'native-inactive','LOT-Z','2026-08-01',0,'inactive receipt',82,'Supplier Inactive','credit',0,1,0)`),
       native.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(95201,1,5),(95202,1,0)'),
+      native.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
     ])
-    await native.batch([native.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=5201'),native.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (95201,95202)'),native.prepare('UPDATE products SET stock_quantity=0 WHERE id=5201')])
+    assert.equal((await native.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+    await native.batch([
+      native.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+      native.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=5201'),
+      native.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (95201,95202)'),
+      native.prepare('UPDATE products SET stock_quantity=0 WHERE id=5201'),
+      native.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+    ])
+    assert.equal((await native.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
     const { app, controls, db, undo, productDelete } = loadRoute(native, true)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name='positive_lot_require_active_update_0154'").get()).n,1)
     const graph = async () => ({
