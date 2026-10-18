@@ -18,8 +18,31 @@ function restoreEnv(f, text) {
     return { ...metadata, body: new Blob([text]).stream(), customMetadata: { format: 'business-os-cloudflare-backup' } }
   } } }
 }
-const maintenance = f => f.sql.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
-const open = f => f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+const maintenance = loadStockSession('lib/maintenance.ts')
+const { executeRawStockTransaction } = loadStockSession('lib/stockTransaction.ts')
+
+function restoreState(f) {
+  return JSON.stringify(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all().map(({ name }) => [name, f.sql.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()]))
+}
+
+async function restoreOwned(f, text) {
+  const env = restoreEnv(f, text)
+  const ownership = await maintenance.beginMaintenance(env, { backupKey: 'fixture.json', startedBy: 'session restore fixture' })
+  const before = restoreState(f)
+  let progressed = 0
+  for (const token of [undefined, 'different-restore-owner']) {
+    await assert.rejects(backup.restoreCloudflareBackup(env, 'fixture.json', async () => { progressed++ }, token),
+      error => error.name === 'MaintenanceAdmissionConflictError')
+    assert.equal(restoreState(f), before)
+    assert.equal(progressed, 0)
+  }
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  await backup.restoreCloudflareBackup(env, 'fixture.json', undefined, ownership.token)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.equal(await maintenance.endMaintenance(env, ownership.token), true)
+}
 
 async function main() {
   const api = loadStockSession()
@@ -32,9 +55,7 @@ async function main() {
     const saved = state(f)
     const doc = document(f)
     await api.commitStockSession(f.env, user, receiveRequest('later-receipt-1', 8))
-    maintenance(f)
-    await backup.restoreCloudflareBackup(restoreEnv(f, doc), 'fixture.json')
-    open(f)
+    await restoreOwned(f, doc)
     assert.deepEqual(state(f), saved, 'full restore preserves exact receipts/snapshots/revisions')
     assert.equal(f.sql.pragma('foreign_key_check').length, 0)
     await api.replayStockSession(f.env, user, undoFirst ? 'redo' : 'undo', r.actionHistoryId, undoFirst ? 1 : 0, payload(f, r))
@@ -45,7 +66,7 @@ async function main() {
     const f = fixture()
     await api.commitStockSession(f.env, user, createRequest())
     const saved = state(f)
-    await backup.restoreCloudflareBackup(restoreEnv(f, document(f, ['settings'])), 'fixture.json')
+    await restoreOwned(f, document(f, ['settings']))
     assert.deepEqual(state(f), saved)
     const omissions = ['stock_session_revisions', 'stock_session_members', 'stock_session_operations', 'undo_snapshots', 'return_write_revisions', 'sale_bulk_members', 'file_assets', 'suppliers']
     for (const omitted of omissions) {
@@ -56,7 +77,7 @@ async function main() {
     }
     await assert.rejects(backup.restoreCloudflareBackup(restoreEnv(f, document(f, [...backup.BACKUP_TABLES].reverse())), 'fixture.json'), /dependency order/)
     assert.deepEqual(state(f), saved)
-    await assert.rejects(backup.restoreCloudflareBackup(restoreEnv(f, document(f)), 'fixture.json'), /maintenance mode/)
+    await assert.rejects(backup.restoreCloudflareBackup(restoreEnv(f, document(f)), 'fixture.json'), error => error.name === 'MaintenanceAdmissionConflictError')
     assert.deepEqual(state(f), saved)
     console.log('PASS settings-scoped restore leaves stock intact; dependency gaps/order/maintenance refuse before mutation')
   }
@@ -65,10 +86,12 @@ async function main() {
     await api.commitStockSession(f.env, user, createRequest())
     const { PRODUCTS_RESET_TABLES } = loadStockSession('lib/coreDataInvariants.ts')
     const revision = f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key='1'").get().revision
-    for (const table of PRODUCTS_RESET_TABLES) {
-      if (table === 'products') f.sql.exec('UPDATE products SET stock_quantity=0')
-      f.sql.exec(`DELETE FROM ${table}`)
-    }
+    const resetStatements = PRODUCTS_RESET_TABLES.flatMap(table => [
+      ...(table === 'products' ? [f.env.DB.prepare('UPDATE products SET stock_quantity=0')] : []),
+      f.env.DB.prepare(`DELETE FROM ${table}`),
+    ])
+    await executeRawStockTransaction(f.env.DB, resetStatements)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 0)
     assert(f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key='1'").get().revision > revision)
     assert.equal(f.sql.pragma('foreign_key_check').length, 0)
