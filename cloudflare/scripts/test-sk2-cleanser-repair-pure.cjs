@@ -21,7 +21,11 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
-const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { fixture: currentFixture } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const { createArchivedRepairWorld } = require('./harness/archived-repair-world.cjs')
+const archive = createArchivedRepairWorld()
+const { fixture, user } = archive
 
 const root = path.join(__dirname, '..')
 function loader() {
@@ -30,7 +34,7 @@ function loader() {
     const normalized = relativeFile.replaceAll('\\', '/')
     if (cache.has(normalized)) return cache.get(normalized).exports
     const file = path.join(root, 'src', normalized)
-    const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    const output = ts.transpileModule(archive.read('cloudflare/src/' + normalized), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
     }).outputText
     const mod = { exports: {} }
@@ -53,6 +57,7 @@ const load = loader()
 const lotSet = load('lib/stockLotAdjustment.ts')
 const losses = load('lib/removalLosses.ts')
 const repair = load('lib/sk2CleanserRepair.ts')
+assert.equal(archive.read('cloudflare/src/lib/sk2CleanserRepair.ts').replace(/\r\n/g, '\n'), fs.readFileSync(path.join(root, 'src/lib/sk2CleanserRepair.ts'), 'utf8').replace(/\r\n/g, '\n'), 'repair module bytes match the pinned archive')
 const operator = load('lib/branchCutoverOperator.ts')
 const { getDb } = load('lib/db.ts')
 const app = new Hono()
@@ -66,9 +71,10 @@ async function send(f, method, url, body) {
 
 const OP = 'c7b78789-d9ec-45fa-ace6-8bb6612c290a'
 // The production rows (prod copy 7 Oct 2026), lot 56725's cost aside (see the header).
-function production() {
+function production(currentSchema = false) {
   lotSet.resetStockLotSetSchemaProbe()
-  const f = fixture()
+  const f = currentSchema ? currentFixture() : fixture()
+  const arrange = () => {
   const before = { productId: 5357, branchId: 2, batchId: 56725, lotQuantity: 3, branchQuantity: 33, lotExists: 1, branchExists: 1 }
   const after = { ...before, lotQuantity: 30, branchQuantity: 60 }
   const request = { productId: 5357, branchId: 2, batchId: 56725, quantity: 30, setScope: 'lot', reason: 'wrong stock', conditionTag: null, expectedLotQuantity: 3 }
@@ -101,6 +107,9 @@ function production() {
     VALUES(?, ?, 'req-1', ?, 'digest', '{}', ?, ?, ?, 1318, 0, 'applied')`)
     .run(OP, user.id, JSON.stringify(request), JSON.stringify(before), JSON.stringify(after), JSON.stringify({ generation: 0, unitCostUsd: 7 }))
   f.sql.prepare(`UPDATE branch_batch_stock SET quantity=quantity WHERE batch_id=56725 AND branch_id=2`).run()
+  }
+  if (currentSchema) seedStockFixture(f.sql, arrange)
+  else arrange()
   return f
 }
 
@@ -132,12 +141,23 @@ const END_ROWS = [
   { movement_type: 'remove', quantity: 3, batch_id: 56725, unit_cost_usd: 5, total_cost_usd: 15, reference_id: null, user_id: 5, user_name: 'sethyka' },
 ]
 
+const fullState = f => Object.fromEntries(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({ name }) => [name, JSON.stringify(f.sql.prepare('SELECT * FROM "' + name.replaceAll('"', '""') + '"').all().map(row => JSON.stringify(row)).sort())]))
+const changedTables = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(name => before[name] !== after[name])
+
 const failures = []
 async function check(name, fn) {
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failures.push(name); console.error(`FAIL ${name}\n`, error) }
 }
 
 async function main() {
+  await check('current full schema refuses the actual archived repair batch with no partial effects or permit', async () => {
+    const f = production(true)
+    const before = fullState(f)
+    await assert.rejects(repair.runSk2Repair(getDb(f.env), { actorUserId: 5 }), /stock_transaction_required/)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.deepEqual(changedTables(before, fullState(f)), [])
+  })
+
   await check('the operator offers repair-sk2 and the fixture reads as production did', async () => {
     assert.ok(operator.BRANCH_CUTOVER_OPERATOR_ACTIONS.includes('repair-sk2'))
     const f = production()
@@ -291,9 +311,8 @@ async function main() {
   })
 
   await check('ops path end to end: repair-sk2-check then repair-sk2 through the operator loop against the fixture; a re-run is done; refusals stop with a fixed code', async () => {
-    const { pathToFileURL } = require('node:url')
-    const script = await import(pathToFileURL(path.join(root, '..', 'ops', 'scripts', 'ops-branch-cutover.mjs')).href)
-    const loop = await import(pathToFileURL(path.join(root, '..', 'ops', 'scripts', 'branch-cutover-loop.mjs')).href)
+    const script = await archive.esm('ops/scripts/ops-branch-cutover.mjs')
+    const loop = await archive.esm('ops/scripts/branch-cutover-loop.mjs')
     assert.deepEqual(script.MODES.slice(0, 5), ['inspect', 'bookmark', 'repair-sk2-check', 'repair-sk2', 'start'], 'runbook order: the repair just before start')
     const quiet = process.stdout.write
     process.stdout.write = () => true
@@ -356,4 +375,4 @@ async function main() {
   console.log('test-sk2-cleanser-repair-pure: all checks passed')
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+main().catch((error) => { console.error(error); process.exitCode = 1 }).finally(() => archive.cleanup())
