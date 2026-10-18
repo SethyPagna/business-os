@@ -4,11 +4,19 @@
 // identity is unchanged) but the extra units now weigh in the mean.
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const api = loadStockSession()
 const costs = loadStockSession('lib/catalogCostRecompute.ts')
 const { getDb } = loadStockSession('lib/db.ts')
 const batches = loadStockSession('lib/productBatches.ts')
+const { executeStockTransaction } = loadStockSession('lib/stockTransaction.ts')
+async function manualCost(db, before, body) {
+  const entry = costs.planManualCostEntry(1, before, body, { id: 7, name: 'Fixture' })
+  assert.ok(entry)
+  await executeStockTransaction(db, [entry, costs.catalogCostRecomputeStatement(1)], 'once')
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get()).n, 0)
+}
 function request(key, cost, extra = {}) {
   const body = receiveRequest(key, 1)
   Object.assign(body.items[0], { unit_cost_usd: cost, ...extra })
@@ -60,8 +68,11 @@ async function main() {
 
   const oldLots = lotRows(f)
   const historyBeforeOverride = snapshots(f)
-  await costs.recordManualCostEntry(getDb(f.env), 1, {cost_price_usd:4,cost_price_khr:0}, {cost_price_usd:10}, {id:7,name:'Fixture'})
-  await costs.recomputeCatalogCost(getDb(f.env), 1)
+  const beforeUnadmittedCost = productCost(f)
+  await assert.rejects(costs.recordManualCostEntry(getDb(f.env), 1, {cost_price_usd:4,cost_price_khr:0}, {cost_price_usd:10}, {id:7,name:'Fixture'}), /stock_transaction_required/)
+  assert.equal(productCost(f), beforeUnadmittedCost)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n, 0)
+  await manualCost(getDb(f.env), {cost_price_usd:4,cost_price_khr:0}, {cost_price_usd:10})
   assert.equal(productCost(f), 10)
   assert.equal(snapshots(f), historyBeforeOverride, 'manual catalog override leaves historical money records unchanged')
   const afterOverride = await api.commitStockSession(f.env, user, request('receipt-after-override', 3))
@@ -99,7 +110,7 @@ async function main() {
   assert.equal((await batches.receiveBatchStock(getDb(legacy.env),input)).batchId,a.batchId)
   await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,unitCostUsd:5}), /Selected received-date price/)
   const replayBaseline = Math.max(...lotRows(legacy).map(row=>row.id))
-  legacy.sql.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,10,?,'manual')").run(replayBaseline)
+  seedStockFixture(legacy.sql, () => legacy.sql.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,10,?,'manual')").run(replayBaseline))
   await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId}), /Selected received-date price/)
   assert.equal((await batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,historicalReceiptReplay:true,preserveHistoricalUnitCost:true})).batchId,a.batchId)
   console.log('PASS shared manual/batch helper uses same guarded price identity')
@@ -111,14 +122,15 @@ async function main() {
   const reservedPlan = batches.planReceiveBatchStock({...reservedInput,receiptLotTarget:reservedTarget,reservedBatchId:100})
   const repeatedPlan = batches.planReceiveBatchStock({...reservedInput,
     receiptLotTarget:{...reservedTarget,existingBatchId:100},receiptCostPreimage:{batchExists:true,receivedCostUsd:3}})
-  await getDb(reserved.env).batch([...reservedPlan.statements,...repeatedPlan.statements,{sql:'DELETE FROM stock_session_guards'}])
+  await executeStockTransaction(getDb(reserved.env), [...reservedPlan.statements,...repeatedPlan.statements,{sql:'DELETE FROM stock_session_guards'}], 'once')
   assert.equal(lotRows(reserved)[0].id,100)
   assert.equal(lotRows(reserved)[0].received_quantity,2)
   assert.equal(lotRows(reserved)[0].received_cost_usd,6)
   const reservedBefore = JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()})
   const otherTarget = batches.resolveReceiptLotTarget(lotRows(reserved),'2026-09-05',5,0)
   const collision = batches.planReceiveBatchStock({...reservedInput,unitCostUsd:5,receiptLotTarget:otherTarget,reservedBatchId:100})
-  await assert.rejects(getDb(reserved.env).batch([...collision.statements,{sql:'DELETE FROM stock_session_guards'}]))
+  await assert.rejects(executeStockTransaction(getDb(reserved.env), [...collision.statements,{sql:'DELETE FROM stock_session_guards'}], 'once'))
+  assert.equal(reserved.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   assert.equal(JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()}),reservedBefore)
   for (const extra of [{reservedBatchId:0},{reservedBatchId:1.5},{reservedBatchId:101,receiptLotTarget:{...reservedTarget,existingBatchId:100}},
     {reservedBatchId:101,receiptLotTarget:{...reservedTarget,baselineBatchId:101}}, {reservedBatchId:101,batchId:100}]) {
@@ -128,15 +140,21 @@ async function main() {
 
   const raced = fixture()
   const emptyHistory = snapshots(raced)
-  raced.beforeCommit(sql => sql.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,7,99,'manual')"))
+  let competitorRan = false
+  raced.beforeCommit(sql => {
+    seedStockFixture(sql, () => sql.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,7,99,'manual')"))
+    competitorRan = true
+  })
   await assert.rejects(api.commitStockSession(raced.env,user,request('baseline-race-cost',3)),e=>e.code==='stale_state')
+  assert.equal(competitorRan, true)
+  assert.equal(raced.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   assert.equal(lotRows(raced).length,0)
   assert.equal(snapshots(raced),emptyHistory)
   console.log('PASS concurrent override baseline change refuses the entire receipt without durable stock/history')
 
-  wide.sql.exec(`INSERT INTO sales(id) VALUES(1);
+  seedStockFixture(wide.sql, () => wide.sql.exec(`INSERT INTO sales(id) VALUES(1);
     INSERT INTO sale_items(id,sale_id,product_id,quantity,cost_price_usd,cost_price_khr) VALUES(1,1,1,1,10,0);
-    INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity) VALUES(1,2,1)`)
+    INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity) VALUES(1,2,1)`))
   const historyBeforePatch = snapshots(wide)
   const receivedBefore = wide.sql.prepare('SELECT id,received_quantity,received_cost_usd FROM product_batches ORDER BY id').all()
   const route = loadStockSession('routes/batches.ts') .default
@@ -190,11 +208,15 @@ async function nativeD1() {
         .filter(sql=>!(name==='0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())))
       for (let i=0;i<statements.length;i+=50) await db.batch(statements.slice(i,i+50).map(sql=>db.prepare(sql)))
     }
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
     await db.batch([
+      db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
       db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)"),
       db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1)"),
       db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0)'),
+      db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
     ])
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
     const readCost = async()=> (await db.prepare('SELECT cost_price_usd c FROM products WHERE id=1').first()).c
     const a = await api.commitStockSession(env,user,request('native-cost-three',3))
     const b = await api.commitStockSession(env,user,request('native-cost-five',5))
@@ -207,8 +229,7 @@ async function nativeD1() {
     assert.equal(await readCost(),4)
     assert.equal((await api.commitStockSession(env,user,request('native-cost-repeat',3))).items[0].batchId,a.items[0].batchId)
     assert.equal(await readCost(),3.6667,'(2 x 3 + 1 x 5) / 3')
-    await costs.recordManualCostEntry(getDb(env),1,{cost_price_usd:4,cost_price_khr:0},{cost_price_usd:10},{id:7,name:'Fixture'})
-    await costs.recomputeCatalogCost(getDb(env),1)
+    await manualCost(getDb(env), {cost_price_usd:4,cost_price_khr:0}, {cost_price_usd:10})
     const c = await api.commitStockSession(env,user,request('native-override-new',2))
     assert.notEqual(c.items[0].batchId,a.items[0].batchId)
     assert.equal(await readCost(),8,'(3 x 10 + 1 x 2) / 4: the override prices the 3 units it covered')
