@@ -201,6 +201,16 @@ async function migrate(db) {
 const LC = 1   // LC Store: the only active branch
 const OLD = 2  // Old Shop: inactive, successor = LC Store
 
+let stockKernelPromise
+function stockKernel() {
+  return stockKernelPromise ||= require('esbuild').build({ stdin: { contents: "export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' }).then(bundle => {
+    const mod = { exports: {} }
+    new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
+    return mod.exports
+  })
+}
+
 async function world({ patches = [], plan = 'paid' } = {}) {
   const { Miniflare, Log, LogLevel } = require('miniflare')
   const script = await bundle(patches)
@@ -223,6 +233,13 @@ async function world({ patches = [], plan = 'paid' } = {}) {
     db.prepare("UPDATE branches SET name='LC Store',role='warehouse',canonical_key='warehouse',is_default=1,is_active=1 WHERE id=1"),
   ])
   const H = { mf, db, kv, frames: [], tokens: {}, sockets: [] }
+  H.seedStock = async statements => {
+    const { executeRawStockTransaction } = await stockKernel()
+    const results = await executeRawStockTransaction(db, statements)
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic arrangement releases its stock permit')
+    return results
+  }
+
 
   H.addUser = async (id, username, permissions, extra = {}) => {
     await db.prepare(`INSERT INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,organization_group_id)
@@ -462,7 +479,7 @@ async function seed(H, { lots = [5, 5], undated = 0 } = {}) {
   const name = 'ML Probe ' + p, barcode = '88700' + String(p).padStart(8, '0')
   const ids = lots.map((_, i) => p * 100 + i + 1)
   const total = lots.reduce((a, b) => a + b, 0) + undated
-  await H.db.batch([
+  await H.seedStock([
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,2,0,10,40000,?,1)').bind(p, name, barcode, total),
     H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, LC, total),
     ...ids.flatMap((id, i) => [
@@ -471,6 +488,13 @@ async function seed(H, { lots = [5, 5], undated = 0 } = {}) {
       H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(id, LC, lots[i]),
     ]),
   ])
+  if (!H.stockGuardChecked) {
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,await H.q('SELECT * FROM '+table+' ORDER BY rowid')])))
+    const before = await stockState()
+    await assert.rejects(H.db.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=?').bind(p).run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), before, 'ordinary stock writes remain refused without changing any ledger or flag')
+    H.stockGuardChecked = true
+  }
   return { p, ids, name, barcode, total }
 }
 
@@ -655,8 +679,8 @@ async function main() {
       // Exactly what the pre-fix writers left behind: lots and branch already drained, one batch-less 'remove' movement, no share rows,
       // written (2026-09-20) after the product's lots existed unless `lotsExistedBefore` is false. `watermark`: 'covers' = the mark sits
       // at this movement (written before removals recorded), 'absent' = a database without the mark, or a number = the mark itself.
-      if (lotsExistedBefore && s.ids.length) await H.db.prepare('UPDATE product_batches SET created_at=? WHERE id IN (' + s.ids.join(',') + ')').bind(lotCreatedAt).run()
-      await H.db.batch([
+      if (lotsExistedBefore && s.ids.length) await H.seedStock([H.db.prepare('UPDATE product_batches SET created_at=? WHERE id IN (' + s.ids.join(',') + ')').bind(lotCreatedAt)])
+      await H.seedStock([
         ...s.ids.map((id, i) => H.db.prepare('UPDATE branch_batch_stock SET quantity=? WHERE batch_id=? AND branch_id=?').bind(lotsNow[i], id, LC)),
         H.db.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?').bind(branchNow, s.p, LC),
         H.db.prepare('UPDATE products SET stock_quantity=? WHERE id=?').bind(branchNow, s.p),
@@ -732,7 +756,7 @@ async function main() {
 
     await check('M6f', 'the way back the refusal names works: a scoped lot Set puts each lot back, moves branch_stock with it, and books no purchase', 'high', async (t) => {
       const s = await seed(H, { lots: [5, 5] })
-      await H.db.batch(s.ids.map((id, i) => H.db.prepare('UPDATE product_batches SET received_quantity=5, received_cost_usd=? WHERE id=?').bind(15 + 5 * i, id)))
+      await H.seedStock(s.ids.map((id, i) => H.db.prepare('UPDATE product_batches SET received_quantity=5, received_cost_usd=? WHERE id=?').bind(15 + 5 * i, id)))
       const old = await oldRemoval(s, [0, 3], 3)
       const refused = await revert(H, old.id)
       t.eq('the Revert is refused', [refused.status, refused.body && refused.body.code], [400, 'revert_lots_not_recorded'])
@@ -804,7 +828,7 @@ async function main() {
     // no lot wrote no record (it had none to record against), and after the merge "a lot existed before it" is true by time alone.
     const duplicateOf = async (k, { lotUnits = 0, undated = 0 } = {}) => {
       const d = 7000 + k.p, lot = d * 10 + 1
-      await H.db.batch([
+      await H.seedStock([
         H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,2,0,10,40000,?,1)').bind(d, k.name, k.barcode, lotUnits + undated),
         H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(d, LC, lotUnits + undated),
         ...(lotUnits ? [
@@ -837,7 +861,7 @@ async function main() {
     })
     await check('M16c', 'a NEW removal on the DUPLICATE (no lot) before the merge, whose movement moves to a keeper that has older lots: Revert puts its units back', 'high', async (t) => {
       const k = await seed(H, { lots: [5], undated: 0 })
-      await H.db.prepare("UPDATE product_batches SET created_at='2026-08-01 00:00:00' WHERE id=?").bind(k.ids[0]).run()
+      await H.seedStock([H.db.prepare("UPDATE product_batches SET created_at='2026-08-01 00:00:00' WHERE id=?").bind(k.ids[0])])
       const d = await duplicateOf(k, { undated: 4 })
       await setWatermark(await maxMovementId())
       const removed = await adjustRemove(H, d, 2, 'q2c')
@@ -870,8 +894,8 @@ async function main() {
     // ONLY thing that lets the Revert through is the zero record: not a same-second tie, not the mark.
     const deadLot = async (s) => {
       const id = s.p * 100 + 50
-      await H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,?,1,3,0,'2026-08-01 00:00:00')")
-        .bind(id, s.p, 'dead' + id, 'dead' + id, '2026-08-01').run()
+      await H.seedStock([H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,?,1,3,0,'2026-08-01 00:00:00')")
+        .bind(id, s.p, 'dead' + id, 'dead' + id, '2026-08-01')])
       return id
     }
     await check('M12', '/adjust Remove 3 of 10 units under no lot (the product only has a dead lot): the removal records that it drew nothing from lots; Revert / Redo / Revert restore the aggregate exactly', 'high', async (t) => {
@@ -913,7 +937,7 @@ async function main() {
       const other = await seed(H, { lots: [], undated: 1 })
       const removed = await adjustRemove(H, s, 3, 'a')
       t.eq('Remove answered with its zero record', [removed.status, (await snap(H, s)).shares.map(x => [x.b, x.q])], [200, [[dead, 0]]])
-      await H.db.prepare('UPDATE product_batches SET variant_product_id=? WHERE id=?').bind(other.p, dead).run()
+      await H.seedStock([H.db.prepare('UPDATE product_batches SET variant_product_id=? WHERE id=?').bind(other.p, dead)])
       const r = await revert(H, (await snap(H, s)).movements[0].id)
       t.eq('Revert answered 200 and put the 3 undated units back', [r.status, await branchQty(s.p)], [200, 10])
     })
@@ -925,7 +949,7 @@ async function main() {
       t.eq('Remove answered, and there was no lot to record against', [removed.status, a1.shares], [200, []])
       // The first lot of the product arrives later: 4 units received at the branch, dated after the removal.
       const late = s.p * 100 + 60
-      await H.db.batch([
+      await H.seedStock([
         H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,'2026-10-10',1,3,1,'2099-01-01 00:00:00')").bind(late, s.p, 'late', 'late'),
         H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,4)').bind(late, LC),
         H.db.prepare('UPDATE branch_stock SET quantity=quantity+4 WHERE product_id=? AND branch_id=?').bind(s.p, LC),
@@ -1121,7 +1145,7 @@ async function main() {
     })
     await check('M13', 'a damaged hold over lots 5+5 where lot A has no unit cost: its held row carries NO cost (never the product cost), the hold and its later Dispose are an unknown cost, and a catalog price change moves nothing', 'high', async (t) => {
       const s = await seed(H, { lots: [5, 5] })
-      await H.db.prepare('UPDATE product_batches SET unit_cost_usd=NULL WHERE id=?').bind(s.ids[0]).run()
+      await H.seedStock([H.db.prepare('UPDATE product_batches SET unit_cost_usd=NULL WHERE id=?').bind(s.ids[0])])
       const catalogCost = (await H.q1('SELECT cost_price_usd c FROM products WHERE id=?', s.p)).c
       const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
       const h = await held(H, s)
@@ -1130,21 +1154,21 @@ async function main() {
       t.eq('lot A (no cost) is held with NO cost, lot B at its own (4)', h.map(r => [r.b, r.q, r.c]), [[s.ids[0], 5, null], [s.ids[1], 2, 4]])
       const costs = async () => (await H.q('SELECT movement_type t, unit_cost_usd u, total_cost_usd c FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)).map(r => [r.t, r.u, r.c == null ? null : Math.round(Number(r.c) * 10000) / 10000])
       t.eq('the hold spans an unknown lot, so the movement is an unknown cost, not a blend', (await costs()).filter(r => r[0] === 'damage_out'), [['damage_out', null, null]])
-      await H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p).run()
+      await H.seedStock([H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p)])
       const disposed = await taggedAction(H, s, 'dispose', 7, 'd')
       t.eq('Dispose answered', disposed.status, 200)
       t.eq('the loss is unknown: neither the old catalog cost nor the new one (9 a unit) is booked', (await costs()).filter(r => r[0] === 'write_off'), [['write_off', null, null]])
     })
     await check('M13b', 'control: a damaged hold over lots 5+5 where lot A has a RECORDED $0 cost: its held row is $0, the hold and its Dispose are known (2 x 4), and a catalog price change moves nothing', 'control', async (t) => {
       const s = await seed(H, { lots: [5, 5] })
-      await H.db.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=?').bind(s.ids[0]).run()
+      await H.seedStock([H.db.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=?').bind(s.ids[0])])
       const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
       const h = await held(H, s)
       t.eq('tagged Remove answered', tagged.status, 200)
       t.eq('lot A is held at its recorded $0, lot B at 4', h.map(r => [r.b, r.q, r.c]), [[s.ids[0], 5, 0], [s.ids[1], 2, 4]])
       const costs = async () => (await H.q('SELECT movement_type t, total_cost_usd c FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)).map(r => [r.t, r.c == null ? null : Math.round(Number(r.c) * 10000) / 10000])
       t.eq('the hold books 5 x $0 + 2 x 4 = 8', (await costs()).filter(r => r[0] === 'damage_out'), [['damage_out', 8]])
-      await H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p).run()
+      await H.seedStock([H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p)])
       const disposed = await taggedAction(H, s, 'dispose', 7, 'd')
       t.eq('Dispose answered', disposed.status, 200)
       t.eq('the loss is what the goods cost (8), not at the new catalog cost (9 a unit)', (await costs()).filter(r => r[0] === 'write_off'), [['write_off', 8]])
@@ -1172,12 +1196,11 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ M10 (R2 review F8): a named lot that is not active
-    // Last in this world: it drops migration 0154's "cannot deactivate a lot that holds stock" trigger to build the state the
-    // removal batch's guard (pb.is_active = 1) was written for, which the trigger otherwise makes unreachable.
+    // Historical inactive lots can retain units even though migration0154 prevents creating that state now.
     await check('M10', 'F8: Remove from a NAMED lot that is not active is answered "only 0 available" (400, nothing written), not as a "refresh and try again" 409', 'medium', async (t) => {
       const emptied = await seed(H, { lots: [5, 5] })
       // The ordinary way a picker goes stale: the lot was emptied and left the pickers (inactive, nothing in it).
-      await H.db.batch([
+      await H.seedStock([
         H.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=? AND branch_id=?').bind(emptied.ids[1], LC),
         H.db.prepare('UPDATE branch_stock SET quantity=5 WHERE product_id=? AND branch_id=?').bind(emptied.p, LC),
         H.db.prepare('UPDATE products SET stock_quantity=5 WHERE id=?').bind(emptied.p),
@@ -1187,8 +1210,14 @@ async function main() {
       t.eq('an emptied inactive lot: 400 with the shortage answer', [stale.status, stale.body && stale.body.error], [400, 'Only 0 available under this received date at this branch'])
 
       const s = await seed(H, { lots: [5, 5] })
-      await H.db.exec('DROP TRIGGER positive_lot_reject_inactive_update_0154')
-      await H.db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').bind(s.ids[1]).run()
+      const trigger = await H.q1("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='positive_lot_reject_inactive_update_0154'")
+      assert.ok(trigger?.sql, 'the original positive-lot trigger must exist before historical setup')
+      await H.seedStock([
+        H.db.prepare('DROP TRIGGER positive_lot_reject_inactive_update_0154'),
+        H.db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').bind(s.ids[1]),
+        H.db.prepare(trigger.sql),
+      ])
+      assert.deepEqual(await H.q1("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='positive_lot_reject_inactive_update_0154'"), trigger, 'restore the exact positive-lot guard before actual requests')
       const before = await snap(H, s)
       const r = await adjustRemove(H, s, 2, 'b', { batchId: s.ids[1] })
       const after = await snap(H, s)
