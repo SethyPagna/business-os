@@ -48,6 +48,8 @@ const subject = compile('stockActionCommit.ts', {
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0,
       cost_price_usd REAL DEFAULT 0, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1, role TEXT, canonical_key TEXT,
@@ -100,7 +102,10 @@ function setup() {
       }
     },
     batch(statements) {
-      const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params)))
+      const run = sqlite.transaction(() => statements.map(({ sql, params }) => {
+        const result = sqlite.prepare(sql).run(params || {})
+        return { success: true, results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+      }))
       return Promise.resolve(run())
     },
   }

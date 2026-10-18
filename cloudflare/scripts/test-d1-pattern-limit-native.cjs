@@ -202,9 +202,7 @@ async function verifyRealSettlementRoute(migration) {
   const fees = load('routes/fees.ts').default
   const returns = load('routes/returns.ts').default
   const f = fixture()
-  f.sql.exec("BEGIN IMMEDIATE; INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
-  try { seed(f); f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT") }
-  catch (error) { f.sql.exec('ROLLBACK'); throw error }
+  seed(f)
   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   // Historical migration0098 seeds 4,240 unrelated fees. This isolated route
   // fixture starts with no expenses so one request has an exact cardinality.

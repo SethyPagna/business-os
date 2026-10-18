@@ -40,7 +40,7 @@ function loadReal(relPath, overrides = {}) {
     return originalLoad.call(this, request, parent, isMain)
   }
   const mod = { exports: {} }
-  const localRequire = (request) => patched.call(Module, request, module, false)
+  const localRequire = require('./harness/product_stock_guard.cjs').withProductStockGuard((request) => patched.call(Module, request, module, false))
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
     mod.exports, localRequire, mod, sourcePath, path.dirname(sourcePath),
   )
@@ -52,6 +52,7 @@ const SCHEMA = `
   CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,is_system INTEGER);
   CREATE TABLE sales (id INTEGER PRIMARY KEY, total REAL);
   CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+  INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
   CREATE TABLE import_job_rows (id INTEGER PRIMARY KEY);
   CREATE TABLE import_job_source_rows (id INTEGER PRIMARY KEY);
 `

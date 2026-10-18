@@ -31,6 +31,7 @@ async function main() {
     }
     await db.batch([
       db.prepare('ALTER TABLE products ADD COLUMN name_key TEXT'),
+      db.prepare('ALTER TABLE products ADD COLUMN cost_review_key TEXT'),
       db.prepare('ALTER TABLE products ADD COLUMN wholesale_price_usd REAL DEFAULT 0'),
       db.prepare('ALTER TABLE products ADD COLUMN wholesale_price_khr REAL DEFAULT 0'),
       db.prepare('ALTER TABLE products ADD COLUMN auto_merged_count INTEGER DEFAULT 0'),

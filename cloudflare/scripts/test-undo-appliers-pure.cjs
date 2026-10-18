@@ -39,7 +39,7 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => request.endsWith('/productStockGuard') ? productStockGuard : ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, productStockGuard.withProductStockGuard((request) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request)), module)
   return module.exports
 }
 
@@ -105,6 +105,7 @@ function wrapDb(sqlite) {
       })
       return Promise.resolve(tx(statements))
     },
+    batchOnce(statements) { return this.batch(statements) },
   }
 }
 
@@ -283,7 +284,8 @@ function atomicSaleItemsFixture() {
     CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL);
     CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER);
     CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL);
-    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
     CREATE TABLE sales(id INTEGER PRIMARY KEY,sale_status TEXT,total_usd REAL);
     CREATE TABLE sale_items(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_id INTEGER,product_id INTEGER,product_name TEXT,quantity REAL,total_usd REAL);
     CREATE TABLE sale_item_batch_allocations(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_item_id INTEGER,quantity REAL CHECK(quantity>0));
@@ -340,6 +342,8 @@ function atomicSaleItemsFixture() {
 async function productMergeGroupFixture() {
   const db = new Database(':memory:')
   db.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
     CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
       category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL,
       cost_price_usd REAL,purchase_price_usd REAL); -- U-cost: the merge undo re-derives the catalog cost
@@ -351,10 +355,10 @@ async function productMergeGroupFixture() {
     CREATE TABLE stock_session_members(operation_id TEXT,product_id INTEGER);
     CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY,product_id INTEGER,movement_type TEXT,reason TEXT);
     CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,created_by_id INTEGER,updated_at TEXT);
-    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,created_by_id INTEGER,updated_at TEXT);
+    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,created_by_id INTEGER,updated_at TEXT,reversible INTEGER DEFAULT 1);
     CREATE TABLE product_conflict_action_reviews(id TEXT PRIMARY KEY,actor_id INTEGER);
-    CREATE TABLE product_conflict_action_groups(review_id TEXT,ordinal INTEGER,group_key TEXT,status TEXT,reversal_generation INTEGER,action_history_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,ordinal));
-    CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
+    CREATE TABLE product_conflict_action_groups(review_id TEXT,ordinal INTEGER,group_key TEXT,status TEXT,reversal_generation INTEGER,action_history_id INTEGER,updated_at TEXT,operation_id TEXT,PRIMARY KEY(review_id,ordinal));
+    CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,operation_id TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
     CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
   `)
   db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0,NULL,NULL)").run()
@@ -388,12 +392,12 @@ async function productMergeGroupFixture() {
   }
   db.prepare("INSERT INTO undo_snapshots VALUES(10,'product.merge.group','applied',?,7,NULL)").run(JSON.stringify(groupSnapshot))
   const pointer = { applier: 'product.merge.group', snapshot_id: 10, review_id: 'review-1', group_key: 'group-1', generation: 0 }
-  db.prepare("INSERT INTO action_history VALUES(41,'undoable',?,?,NULL,7,NULL)").run(JSON.stringify(pointer), JSON.stringify(pointer))
+  db.prepare("INSERT INTO action_history(id,status,undo_payload,redo_payload,last_error,created_by_id,updated_at) VALUES(41,'undoable',?,?,NULL,7,NULL)").run(JSON.stringify(pointer), JSON.stringify(pointer))
   db.prepare("INSERT INTO product_conflict_action_reviews VALUES('review-1',7)").run()
-  db.prepare("INSERT INTO product_conflict_action_groups VALUES('review-1',0,'group-1','completed',0,41,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,0,1,'keeper','undo_ready',NULL,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,1,2,'merged','undo_ready',11,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,2,3,'merged','undo_ready',12,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_groups(review_id,ordinal,group_key,status,reversal_generation,action_history_id,updated_at) VALUES('review-1',0,'group-1','completed',0,41,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at) VALUES('review-1',0,0,1,'keeper','undo_ready',NULL,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at) VALUES('review-1',0,1,2,'merged','undo_ready',11,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at) VALUES('review-1',0,2,3,'merged','undo_ready',12,NULL)").run()
   return { db, pointer }
 }
 

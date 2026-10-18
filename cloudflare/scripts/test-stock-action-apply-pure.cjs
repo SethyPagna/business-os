@@ -132,6 +132,8 @@ assert.ok(Number.isInteger(STOCK_ACTION_MAX_UNITS) && STOCK_ACTION_MAX_UNITS > 0
 function makeDb() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
     CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, category TEXT, brand TEXT,
       selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       cost_price_khr REAL DEFAULT 0, purchase_price_usd REAL DEFAULT 0, purchase_price_khr REAL DEFAULT 0,
@@ -192,7 +194,10 @@ function makeDb() {
       }
     },
     batch(statements) {
-      const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
+      const run = sqlite.transaction(() => statements.map(({ sql, params }) => {
+        const result = sqlite.prepare(sql).run(params || {})
+        return { success: true, results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+      }))
       return Promise.resolve(run())
     },
   }
