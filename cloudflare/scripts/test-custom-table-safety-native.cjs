@@ -9,21 +9,24 @@ const cache = new Map()
 function load(file) {
   file = path.resolve(__dirname, '..', 'src', file)
   if (cache.has(file)) return cache.get(file)
-  if (file.endsWith(path.sep + 'db.ts')) return { getDb: env => env.legacyDb }
   const mod = { exports: {} }; cache.set(file, mod.exports)
   const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'exports', 'module', code)(name => name.startsWith('.') ? load(path.resolve(path.dirname(file), name + '.ts')) : require(name), mod.exports, mod)
   return mod.exports
 }
 const backup = load('lib/backup.ts')
+const { beginMaintenance, endMaintenance } = load('lib/maintenance.ts')
 const { dropAllCustomTables } = load('lib/coreDataInvariants.ts')
 const { assertCustomTableName } = load('lib/customTableName.ts')
 function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
   const sql = new DatabaseSync(':memory:')
   sql.exec(`CREATE TABLE custom_tables(id INTEGER PRIMARY KEY, name TEXT NOT NULL);
     INSERT INTO custom_tables VALUES(99,'ct_existing');
-    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
-    INSERT INTO system_flags VALUES('dataset_generation','permanent-generation');
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
+    CREATE TABLE import_jobs(status TEXT,lease_expires_at TEXT);
+    CREATE TABLE bulk_delete_jobs(status TEXT);
+    INSERT INTO system_flags(key,value) VALUES('dataset_generation','permanent-generation');
     CREATE TABLE transfer_operation_receipts(id TEXT PRIMARY KEY);
     INSERT INTO transfer_operation_receipts VALUES('permanent-retry-id');
     CREATE TABLE transfer_run_retirements(id TEXT PRIMARY KEY);
@@ -32,10 +35,10 @@ function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
     INSERT INTO ct_safe VALUES(7);`)
   const writes = []
   function prepared(text, values = []) {
-    return { bind: (...p) => prepared(text, p),
+    return { text, values, bind: (...p) => prepared(text, p),
       first: async () => sql.prepare(text).get(...values) || null,
       all: async () => ({ results: sql.prepare(text).all(...values) }),
-      run: async () => { writes.push(text); sql.prepare(text).run(...values); return { success: true } },
+      run: async () => { writes.push(text); const result=sql.prepare(text).run(...values); return { success: true, meta: { changes: result.changes } } },
     }
   }
   const document = JSON.stringify({ format: 'business-os-cloudflare-backup', formatVersion: 1,
@@ -47,7 +50,13 @@ function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
     for (let i = 0; i < bytes.length; i += chunkSize) controller.enqueue(bytes.slice(i, i + chunkSize))
     controller.close()
   } })
-  const env = { DB: { prepare: prepared, batch: async stmts => { for (const s of stmts) await s.run() } },
+  const env = { DB: { prepare: prepared, batch: async stmts => {
+      sql.exec('BEGIN IMMEDIATE')
+      try {
+        const results=stmts.map(s=>{writes.push(s.text);const result=sql.prepare(s.text).run(...s.values);return {success:true,meta:{changes:result.changes}}})
+        sql.exec('COMMIT');return results
+      } catch(error) { sql.exec('ROLLBACK');throw error }
+    } },
     ASSETS: { get: async (key, options) => {
       if (key !== 'backups/cloudflare/probe.json') return null
       const metadata = { key, etag: require('node:crypto').createHash('sha256').update(document).digest('hex'), version: 'fixture-upload', size: Buffer.byteLength(document) }
@@ -59,10 +68,16 @@ function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
   return { sql, writes, env, body }
 }
 function preserved(f) {
-  assert.equal(f.sql.prepare('SELECT value FROM system_flags').get().value, 'permanent-generation')
+  assert.equal(f.sql.prepare("SELECT value FROM system_flags WHERE key='dataset_generation'").get().value, 'permanent-generation')
   assert.equal(f.sql.prepare('SELECT id FROM transfer_operation_receipts').get().id, 'permanent-retry-id')
   assert.equal(f.sql.prepare('SELECT id FROM transfer_run_retirements').get().id, 'permanent-retirement-id')
   assert.equal(f.sql.prepare('SELECT id FROM ct_safe').get().id, 7)
+}
+async function restoreOwned(f) {
+  const state=await beginMaintenance(f.env,{backupKey:'probe.json',startedBy:'fixture'})
+  await backup.restoreCloudflareBackup(f.env,'probe.json',undefined,state.token)
+  assert.equal(await endMaintenance(f.env,state.token),true)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
 }
 async function run() {
   assert.ok(backup.BACKUP_TABLES.includes('custom_tables'))
@@ -73,7 +88,7 @@ async function run() {
     assert.doesNotThrow(() => assertCustomTableName(name))
     const f = fixture([name], 1)
     await backup.validateCloudflareBackup(f.env, 'probe.json')
-    await backup.restoreCloudflareBackup(f.env, 'probe.json')
+    await restoreOwned(f)
     assert.equal(f.sql.prepare('SELECT name FROM custom_tables').get().name, name)
     // CREATE only synthetic names validated above, never an input system name.
     f.sql.exec(`CREATE TABLE IF NOT EXISTS "${name}"(id INTEGER PRIMARY KEY)`)
@@ -115,7 +130,7 @@ async function run() {
   }
   {
     const f = fixture(['ct_safe', 'ct_safe'])
-    await backup.restoreCloudflareBackup(f.env, 'probe.json')
+    await restoreOwned(f)
     assert.deepEqual(await dropAllCustomTables(f.env), ['ct_safe', 'ct_safe'], 'duplicate valid metadata remains idempotent with IF EXISTS')
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM custom_tables').get().n, 0)
     assert.ok(f.sql.prepare('SELECT * FROM system_flags').get()); f.sql.close(); cases++

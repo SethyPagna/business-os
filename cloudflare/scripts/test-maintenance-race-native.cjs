@@ -8,9 +8,11 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 async function main() {
   const bundle = await build({ stdin: { resolveDir: path.resolve(__dirname, '..'), loader: 'ts', contents: `
     import { beginMaintenance, getMaintenance, updateMaintenance, endMaintenance } from './src/lib/maintenance.ts';
+    import { StockTransactionUnavailableError } from './src/lib/stockTransaction.ts';
     export default { async fetch(request, env) {
       const input = await request.json(); const db = env.DB;
-      await db.prepare('DELETE FROM system_flags').run();
+      await db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run();
+      if((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n!==0)throw new Error('leaked permit');
       const begin = () => beginMaintenance(env, {backupKey:'test',startedBy:'admin'});
       if(input.mode === 'begin-race') {
         const results = await Promise.allSettled([begin(),begin(),begin()]);
@@ -22,29 +24,38 @@ async function main() {
         try{await begin()}catch{refusal=true}
         await updateMaintenance(env,'old',{phase:'assets'});
         const ended=await endMaintenance(env,null);
-        const raw=(await db.prepare('SELECT value FROM system_flags').first()).value;
+        const raw=(await db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").first()).value;
         const cleared=await endMaintenance(env,null,{force:true});
         return Response.json({current,refusal,ended,raw,cleared});
       }
       const old = await begin(); let replacement=null, intercepted=false;
-      if(input.mode==='corrupt-force-race')await db.prepare('UPDATE system_flags SET value=?').bind('{"mode":"restore","token":null}').run();
-      const wrapped = {DB:{prepare(sql){const statement=db.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return {
-        first:()=>bound.first(),
-        run:async()=>{
-          if(!intercepted && ((input.mode==='progress-race' && sql.startsWith('UPDATE')) || (input.mode!=='progress-race' && sql.startsWith('DELETE')))) {
+      if(input.mode==='corrupt-force-race')await db.prepare("UPDATE system_flags SET value=? WHERE key='maintenance'").bind('{"mode":"restore","token":null}').run();
+      const wrapped = {DB:{prepare(sql){
+        const wrap=statement=>({native:statement,bind:(...args)=>wrap(statement.bind(...args)),first:()=>statement.first(),run:async()=>{
+          if(!intercepted && input.mode!=='progress-race' && sql.startsWith('DELETE')) {
             intercepted=true;
             await endMaintenance(env,old.token,{force:input.mode==='corrupt-force-race'});
-            if(input.mode !== 'progress-after-clear') replacement=await begin();
+            replacement=await begin();
           }
-          return bound.run();
+          return statement.run();
+        }});
+        return wrap(db.prepare(sql));
+      },async batch(statements){
+        if(!intercepted && input.mode==='progress-race') {
+          intercepted=true;await endMaintenance(env,old.token);replacement=await begin();
         }
-      }}}}}};
+        return db.batch(statements.map(statement=>statement.native));
+      }}};
       let result=null;
-      if(input.mode==='progress-race')await updateMaintenance(wrapped,old.token,{phase:'assets',rowsDone:999});
+      if(input.mode==='progress-race') {
+        try { await updateMaintenance(wrapped,old.token,{phase:'assets',rowsDone:999}); }
+        catch(error) { if(!(error instanceof StockTransactionUnavailableError))throw error;result=error.code; }
+      }
       else if(input.mode==='progress-after-clear'){
         await endMaintenance(env,old.token);await updateMaintenance(env,old.token,{phase:'assets'});
       }else result=await endMaintenance(wrapped,old.token,{force:input.mode==='force-end-race'||input.mode==='corrupt-force-race'});
-      return Response.json({result,old,replacement,current:await getMaintenance(env)});
+      return Response.json({result,old,replacement,intercepted,current:await getMaintenance(env),
+        permits:(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n});
     }}
   ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'] })
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
@@ -53,6 +64,7 @@ async function main() {
     await db.prepare('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT)').run()
     await db.prepare('CREATE TABLE import_jobs(status TEXT,lease_token TEXT,lease_expires_at TEXT)').run()
     await db.prepare('CREATE TABLE bulk_delete_jobs(status TEXT)').run()
+    await db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
     const call = async input => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify(input) })
       assert.equal(response.status, 200, await response.clone().text())
@@ -66,7 +78,9 @@ async function main() {
       assert.equal(result.current.token, result.replacement.token, mode)
       assert.notEqual(result.current.token, result.old.token, mode)
       assert.equal(result.current.phase, 'deleting', mode)
-      if (mode !== 'progress-race') assert.equal(result.result, false, mode)
+      assert.equal(result.intercepted,true,mode)
+      assert.equal(result.permits,0,mode)
+      assert.equal(result.result,mode==='progress-race'?'stock_schema_unavailable':false,mode)
       console.log('PASS', mode)
     }
     assert.equal((await call({ mode: 'progress-after-clear' })).current, null)

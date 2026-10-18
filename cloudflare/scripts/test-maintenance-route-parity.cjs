@@ -16,7 +16,7 @@ async function main() {
     acquisitionCostAccess: `export const canViewAcquisitionCosts=()=>true;export const canEditAcquisitionCosts=()=>true`,
     backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};
       export const storeSystemJob=async(env,job)=>{env.events.push({kind:'job',job});return job};
-      export const restoreCloudflareBackup=async(env,key,progress)=>{env.restoreCalls++;await progress({phase:'assets'});if(env.replaceAfterRestore)env.replace();return {key}};`,
+      export const restoreCloudflareBackup=async(env,key,progress,token)=>{env.restoreCalls++;const held=await env.DB.prepare("SELECT value FROM system_flags WHERE key='maintenance'").first();if(!held)throw new Error('missing fixture restore');const owner=JSON.parse(held.value);if(owner.mode!=='restore'||owner.token!==token||owner.backupKey!==key)throw new Error('unowned fixture restore');await progress({phase:'assets'});if(env.replaceAfterRestore)env.replace();return {key}};`,
   }
   const bundle = await build({ entryPoints: [path.join(root, 'src/routes/backups.ts')], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['hono'], plugins: [{ name: 'route-boundaries', setup(b) {
     b.onResolve({ filter: /\/lib\/(auth|audit|permissions|acquisitionCostAccess|backup|destructiveStepUp)$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }))
@@ -33,10 +33,11 @@ async function main() {
     const state = { mode: 'restore', token: 'original', phase: 'failed', backupKey: 'backup', startedBy: 'admin', startedAt: '2026-09-21T00:00:00Z', updatedAt: '2026-09-21T00:00:00Z' }
     const original = JSON.stringify(state)
     if (scenario.startsWith('clear') || scenario.startsWith('corrupt')) db.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('maintenance', scenario.startsWith('corrupt') ? '{broken' : original)
-    let reads = 0
+    db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
+    let reads = 0, raceFired = false
     const replacement = JSON.stringify({ ...state, token: 'replacement', phase: 'deleting' })
-    const env = { events: [], restoreCalls: 0, auditDown: scenario === 'restore-audit-failed', replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare('UPDATE system_flags SET value=?').run(replacement) }, DB: { prepare(sql) {
-      const bind = params => ({ first: async () => {
+    const env = { events: [], restoreCalls: 0, auditDown: scenario === 'restore-audit-failed', replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare("UPDATE system_flags SET value=? WHERE key='maintenance'").run(replacement) }, DB: { prepare(sql) {
+      const bind = params => ({ sql, params, first: async () => {
         if (sql.includes('FROM import_jobs')) {
           if (scenario === 'restore-import-error') throw new Error('D1 unavailable')
           if (scenario === 'restore-import-missing') return null
@@ -49,14 +50,17 @@ async function main() {
         if (sql.startsWith('SELECT value') && ++reads === 1 && scenario.endsWith('replaced')) env.replace()
         return row
       }, run: async () => {
-        if (sql.startsWith('INSERT INTO system_flags') && scenario.startsWith('restore-race-')) {
-          if (scenario === 'restore-race-import') db.prepare("INSERT INTO import_jobs(status) VALUES('queued')").run()
-          if (scenario === 'restore-race-bulk') db.prepare("INSERT INTO bulk_delete_jobs(status) VALUES('pending')").run()
-          if (scenario === 'restore-race-lease') db.prepare("INSERT INTO import_jobs(status,lease_token,lease_expires_at) VALUES('failed','held','2099-01-01T00:00:00.000Z')").run()
-        }
         return { meta: { changes: db.prepare(sql).run(...params).changes } }
       } })
       return { ...bind([]), bind: (...params) => bind(params) }
+    }, batch: async statements => {
+      if (!raceFired && scenario.startsWith('restore-race-')) {
+        raceFired=true
+        if (scenario==='restore-race-import') db.prepare("INSERT INTO import_jobs(status) VALUES('queued')").run()
+        if (scenario==='restore-race-bulk') db.prepare("INSERT INTO bulk_delete_jobs(status) VALUES('pending')").run()
+        if (scenario==='restore-race-lease') db.prepare("INSERT INTO import_jobs(status,lease_token,lease_expires_at) VALUES('failed','held','2099-01-01T00:00:00.000Z')").run()
+      }
+      return db.transaction(()=>statements.map(({sql,params})=>({success:true,meta:{changes:db.prepare(sql).run(...params).changes}})))()
     } } }
     const restore = scenario.startsWith('restore')
     const response = await app.request(restore ? '/' : '/maintenance/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(restore ? { type: 'import-folder', sourceDir: 'backups/cloudflare/test.json' } : { force: true }) }, env)
@@ -66,30 +70,31 @@ async function main() {
       if (scenario !== 'restore-import-active') assert.equal(result.code, 'import_status_unavailable')
       assert.equal(env.restoreCalls, 0, 'uncertain or active imports must never enter restore')
       assert.equal(env.events.length, 0, 'rejected admission must not create a success job/audit')
-      assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined, 'rejected admission must not acquire maintenance')
+      assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined, 'rejected admission must not acquire maintenance')
     } else if (scenario.startsWith('restore-race-')) {
+      assert.equal(raceFired,true)
       assert.equal(response.status, 409)
       assert.equal(result.code, 'maintenance_admission_conflict')
       assert.equal(env.restoreCalls, 0)
       assert.equal(env.events.length, 0, 'raced admission must not record job or audit')
-      assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
+      assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined)
     } else if (scenario === 'corrupt-clear-replaced') {
       assert.equal(response.status, 503); assert.equal(result.cleared, false)
       assert.equal(result.code, 'maintenance_active')
       assert.equal(reads, 1)
       assert.equal(env.events.length, 0, 'corrupt hold must not claim a successful clear')
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else if (scenario.endsWith('replaced')) {
       assert.equal(response.status, 409); assert.equal(result.cleared, false)
       assert.equal(reads, 2)
       assert.equal(env.events.length, 0, 'failed clear must not claim success in audit')
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else if (scenario === 'restore-audit-failed') {
       // K10b: data restored but unrecorded is not success; maintenance stays held (phase failed) for an operator.
       assert.equal(response.status, 503); assert.equal(result.data_restored, true)
       assert.equal(result.code, 'restore_audit_not_recorded'); assert.equal(result.item.status, 'failed')
       assert.equal(env.events.filter(e => e.kind === 'audit').length, 0)
-      const held = JSON.parse(db.prepare('SELECT value FROM system_flags').get().value)
+      const held = JSON.parse(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value)
       assert.equal(held.mode, 'restore'); assert.equal(held.phase, 'failed')
     } else if (scenario === 'restore-release-failed') {
       assert.equal(response.status, 409); assert.equal(result.data_restored, true)
@@ -97,11 +102,13 @@ async function main() {
       // The restore is recorded first (while maintenance holds); the failed release is recorded too.
       assert.equal(env.events.filter(e => e.kind === 'audit')[0].args[2], 'restore')
       assert.ok(env.events.filter(e => e.kind === 'audit').some(e => e.args.at(-1).maintenance_released === false))
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else {
-      assert.equal(response.status, 200); assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
+      assert.equal(response.status, 200); assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined)
       assert.equal(env.events.filter(e => e.kind === 'audit').length, 1)
     }
+    assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value,'legacy-separate-pool-v1')
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
     db.close(); console.log('PASS actual backup route', scenario)
   }
 }
