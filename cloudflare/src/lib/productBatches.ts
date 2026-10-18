@@ -390,7 +390,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedAt,
     params,
     statements: [
-      { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=${productIdSql} AND is_active IS NOT 1)
+      { sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=${productIdSql} AND is_active IS 1)
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params },
       ...(reservedBatchId !== undefined ? [{
         sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN NOT EXISTS(

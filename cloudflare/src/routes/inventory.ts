@@ -2125,7 +2125,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // instead of being set ahead of it. A guard that refuses the write rolls the
   // mark back with it and the claim is released.
   const atomicRemoval = !correctionLot && type === 'remove' && (Boolean(conditionTag) || useBatchLedger)
-  if (conditionTag && delta !== 0) {
+  const atomicTaggedReceipt = !correctionLot && useBatchLedger && type === 'add' && Boolean(conditionTag)
+  if (conditionTag && delta !== 0 && !atomicTaggedReceipt) {
     try { await assertProductsActive(db, [targetProductId]) }
     catch (error) {
       const stockGuard = productStockGuardError(error)
@@ -2133,7 +2134,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       throw error
     }
   }
-  const atomicTaggedReceipt = !correctionLot && useBatchLedger && type === 'add' && Boolean(conditionTag)
   const atomicIntake = type === 'add' && (Boolean(correctionLot) || useBatchLedger)
   if (!atomicRemoval && !atomicTaggedReceipt && !atomicIntake) await markWritten()
 

@@ -241,6 +241,88 @@ async function main() {
     assert.equal((await f.send({ ...f.body, productId: 2, batchId: 'new', attribution: undefined, unitCostUsd: 2, supplierName: 'Fixture Supplier' })).status, 409)
     assert.equal(f.state(), removed)
   })
+  for (const [mode, type, expectedReads] of [
+    ['add-tagged', 'add', 0], ['correction-tagged', 'add', 1], ['add-tagged', 'remove', 1], ['add', 'add', 0],
+  ]) await check(`${mode}/${type} uses the required active-product read boundary`, async () => {
+    const f = await setup(mode)
+    let activeReads = 0
+    let batchSql = []
+    const prepare = f.env.DB.prepare
+    const batch = f.env.DB.batch
+    f.env.DB.prepare = sql => {
+      if (/SELECT p\.id FROM products p/.test(sql) && /p\.is_active IS NOT 1/.test(sql)) activeReads++
+      return prepare(sql)
+    }
+    f.env.DB.batch = statements => {
+      batchSql = statements.map(statement => statement.text)
+      return batch(statements)
+    }
+    try {
+      const result = await f.send({ ...f.body, type })
+      assert.equal(result.status, 200, JSON.stringify(result))
+      assert.equal(activeReads, expectedReads)
+      if (mode === 'add-tagged' && type === 'add') {
+        assert.ok(batchSql.filter(sql => /product_has_stock/.test(sql)).length >= 2)
+        assert.ok(batchSql.findIndex(sql => /product_has_stock/.test(sql)) < batchSql.findIndex(sql => /(?:INSERT INTO|UPDATE)\s+(?:product_batches|branch_batch_stock|branch_stock|products)/.test(sql)))
+      }
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    } finally { f.sql.close() }
+  })
+  for (const condition of ['inactive', 'deleted']) for (const timing of ['before', 'race']) {
+    await check(`atomic tagged receipt refuses ${condition} product ${timing} without effects`, async () => {
+      const f = await setup('add-tagged')
+      seedStockFixture(f.sql, () => f.sql.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,'Receipt target',1,0)"))
+      let competingState
+      let competitorRan = false
+      const mutate = () => {
+        seedStockFixture(f.sql, () => f.sql.exec(condition === 'inactive'
+          ? 'UPDATE products SET is_active=0 WHERE id=2' : 'DELETE FROM products WHERE id=2'))
+        competitorRan = true
+        competingState = f.state()
+      }
+      if (timing === 'before') mutate()
+      else f.beforeCommit(mutate)
+      try {
+        const result = await f.send({ ...f.body, productId: 2, batchId: 'new', client_request_id: `receipt-${condition}-${timing}` })
+        assert.equal(competitorRan, true)
+        assert.equal(result.status, condition === 'inactive' || timing === 'race' ? 409 : 404, JSON.stringify(result))
+        if (condition === 'inactive' || timing === 'race') assert.equal(result.body.code, 'product_has_stock')
+        assert.equal(f.state(), competingState)
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE actor_id=? AND request_id=?').get(user.id, `receipt-${condition}-${timing}`).n, 0)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+        assert.equal(f.sql.prepare('SELECT is_active FROM products WHERE id=2').get()?.is_active ?? null, condition === 'inactive' ? 0 : null)
+      } finally { f.sql.close() }
+    })
+  }
+  await check('receipt plans resolve an active product created earlier in the same transaction', async () => {
+    const f = await setup('add')
+    try {
+      const { planReceiveBatchStock } = f.load('lib/productBatches.ts')
+      const { executeStockTransaction } = f.load('lib/stockTransaction.ts')
+      const db = f.load('lib/db.ts').getDb(f.env)
+      const plan = planReceiveBatchStock({ productClientRequestId: 'receipt-created-product', branchId: 1, quantity: 3, receivedDate: '2026-10-18' })
+      await executeStockTransaction(db, [{
+        sql: "INSERT INTO products(id,name,is_active,stock_quantity,client_request_id) VALUES(2,'Atomic target',1,0,'receipt-created-product')",
+      }, ...plan.statements], 'once')
+      assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=2').get().stock_quantity, 3)
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 3)
+      assert.equal(f.sql.prepare('SELECT SUM(bbs.quantity) n FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=2').get().n, 3)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    } finally { f.sql.close() }
+  })
+  for (const target of [{ productId: 999 }, { productClientRequestId: 'receipt-unresolved-product' }]) {
+    await check(`receipt plan refuses absent target ${JSON.stringify(target)} before writes`, async () => {
+      const f = await setup('add')
+      try {
+        const before = f.state()
+        const plan = f.load('lib/productBatches.ts').planReceiveBatchStock({ ...target, branchId: 1, quantity: 3, receivedDate: '2026-10-18' })
+        await assert.rejects(f.load('lib/stockTransaction.ts').executeStockTransaction(f.load('lib/db.ts').getDb(f.env), plan.statements, 'once'),
+          error => f.load('lib/productStockGuard.ts').productStockGuardError(error)?.code === 'product_has_stock')
+        assert.equal(f.state(), before)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      } finally { f.sql.close() }
+    })
+  }
   console.log(JSON.stringify({ passed, failures, budgets }))
   if (failures) process.exitCode = 1
 }

@@ -122,14 +122,31 @@ console.log('PASS: historical finance and durable reversal backup coverage')
   // retirement guard this file asserts below is still exercised.
   const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
   for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) restored.exec(fs.readFileSync(path.join(heldDir,file),'utf8'))
-  restored.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+  const { loadStockSession } = require('./test-stock-session-atomic.cjs')
+  const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+  const maintenance = loadStockSession('lib/maintenance.ts')
+  const { executeRawRestoreStockTransaction } = loadStockSession('lib/stockTransaction.ts')
+  const prepare = (sql, params = []) => ({
+    sql, params,
+    bind: (...values) => prepare(sql, values),
+    async first() { return sqliteD1Call(restored.prepare(sql), 'get', params) || null },
+    async run() { return { meta: sqliteD1Call(restored.prepare(sql), 'run', params) } },
+  })
+  const env = { DB: { prepare, async batch(statements) {
+    return restored.transaction(() => statements.map(({ sql, params }) => ({
+      meta: sqliteD1Call(restored.prepare(sql), 'run', params),
+    })))()
+  } } }
+  const ownership = await maintenance.beginMaintenance(env, { backupKey: 'fixture.json', startedBy: 'replay restore fixture' })
   assert.match(source, /for \(const table of \[\.\.\.orderedTables\]\.reverse\(\)\)/)
-  for(const {table} of [...bundle].reverse()) restored.exec(`DELETE FROM "${table}"`)
+  const statements = [...bundle].reverse().map(({ table }) => prepare(`DELETE FROM "${table}"`))
   for(const {table,rows} of bundle) for(const row of rows) {
     const columns=Object.keys(row)
-    restored.prepare(`INSERT INTO ${table}(${columns.map(key=>`"${key}"`).join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).run(...columns.map(key=>row[key]))
+    statements.push(prepare(`INSERT INTO ${table}(${columns.map(key=>`"${key}"`).join(',')}) VALUES(${columns.map(()=>'?').join(',')})`, columns.map(key=>row[key])))
   }
-  restored.exec("DELETE FROM system_flags WHERE key='maintenance'")
+  await executeRawRestoreStockTransaction(env.DB, statements, await maintenance.restoreStockAuthority(env, ownership.token, 'fixture.json'))
+  assert.equal(restored.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  assert.equal(await maintenance.endMaintenance(env, ownership.token), true)
   for(const {table,rows} of bundle) assert.deepEqual(restored.prepare(`SELECT * FROM ${table}`).all(),rows,table)
   // 0188 requires permanent retirement evidence before member deletion. Assert
   // the current guard, then prove its refusal preserved the restored records.
