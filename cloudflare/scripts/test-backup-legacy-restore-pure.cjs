@@ -11,7 +11,7 @@ function fixturePrefix(name, boundary, expose) {
   return new Function('require', '__dirname', source.slice(0, end) + '\nreturn ' + expose)(require, __dirname)
 }
 const bulk = fixturePrefix('test-sale-bulk-status-pure.cjs', 'async function run() {', '{fixture,seed,request,replay,sales}')
-const { backup, makeFakeR2, makeFakeKV } = fixturePrefix('test-backup-pure.cjs', 'let passed = 0', '{backup:backupModuleObj.exports,makeFakeR2,makeFakeKV}')
+const { backup, makeFakeR2, makeFakeKV, maintenance, restoreOwned } = fixturePrefix('test-backup-pure.cjs', 'let passed = 0', '{backup:backupModuleObj.exports,makeFakeR2,makeFakeKV,maintenance,restoreOwned}')
 function binding(sql, writes) {
   function statement(text, params = []) {
     return {
@@ -166,8 +166,8 @@ async function main() {
       assert.equal(document.tables[table].rows.length, 1, `backup preserves the seeded ${table} receipt`)
     }
     assert.equal((await backup.validateCloudflareBackup(f.env, created.key)).restorable, true)
-    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
-    await backup.restoreCloudflareBackup(f.env, created.key)
+
+    await restoreOwned(f.env, created.key)
     assert.deepEqual(snap(backup.BACKUP_TABLES), before)
     assert.deepEqual(
       f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
@@ -200,7 +200,7 @@ async function main() {
       'full backup preserves immutable return-create request/response evidence byte-for-byte',
     )
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
-    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
@@ -211,9 +211,9 @@ async function main() {
     assert.deepEqual(Object.keys(scopedDocument.tables), replayBundleTables,
       'requesting any Sales replay table widens the generated section backup to the complete restorable bundle')
     assert.equal((await backup.validateCloudflareBackup(f.env, scopedCreated.key)).restorable, true)
-    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
-    await backup.restoreCloudflareBackup(f.env, scopedCreated.key)
-    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+
+    await restoreOwned(f.env, scopedCreated.key)
+
     assert.deepEqual(snap(replayBundleTables), replayBundleBefore)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_mutation_receipts').get().n, 1)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
@@ -234,17 +234,17 @@ async function main() {
     await f.env.ASSETS.put(pre0127Key, JSON.stringify(pre0127), { customMetadata: { format: document.format } })
     assert.equal((await backup.validateCloudflareBackup(f.env, pre0127Key)).restorable, true)
     f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=4200 WHERE id=1').run()
-    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
-    await backup.restoreCloudflareBackup(f.env, pre0127Key)
+
+    await restoreOwned(f.env, pre0127Key)
     assert.deepEqual(
       f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
       { change_is_actual: 0, change_exchange_rate: null },
       'legacy backup omits 0127 columns so schema defaults restore 0/NULL without inference',
     )
-    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+
     console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
 
-    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    const dependencyOwner = await maintenance.beginMaintenance(f.env, { backupKey: 'dependency-fixture.json', startedBy: 'legacy restore fixture' })
     async function variant(label, omit) {
       const legacy = structuredClone(document)
       for (const table of omit) delete legacy.tables[table]
@@ -282,7 +282,8 @@ async function main() {
     const scoped = await variant('settings-only', Object.keys(document.tables).filter(t => t !== 'settings'))
     assert.equal((await backup.validateCloudflareBackup(f.env, scoped)).restorable, true)
     const otherRows = snap(backup.BACKUP_TABLES.filter(t => t !== 'settings'))
-    await backup.restoreCloudflareBackup(f.env, scoped)
+    assert.equal(await maintenance.endMaintenance(f.env, dependencyOwner.token), true)
+    await restoreOwned(f.env, scoped)
     assert.deepEqual(snap(backup.BACKUP_TABLES.filter(t => t !== 'settings')), otherRows)
     console.log('PASS unrelated scoped settings restore remains usable')
   } finally { f.sql.close(); globalThis.fetch = originalFetch }

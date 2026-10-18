@@ -61,6 +61,18 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', uploadSe
   uploadSecurityModuleObj.exports, require, uploadSecurityModuleObj, uploadSecurity.sourcePath, path.dirname(uploadSecurity.sourcePath),
 )
 
+function loadAdmission(name, deps = {}) {
+  const compiled = transpile('lib/' + name + '.ts')
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', compiled.outputText)(mod.exports, id => {
+    if (Object.hasOwn(deps, id)) return deps[id]
+    throw new Error('Unmapped admission dependency: ' + id)
+  }, mod)
+  return mod.exports
+}
+const stockTransaction = loadAdmission('stockTransaction')
+const maintenance = loadAdmission('maintenance', { './stockTransaction': stockTransaction })
+
 const backup = transpile('lib/backup.ts')
 const customTableName = transpile('lib/customTableName.ts')
 const customTableNameModule = { exports: {} }
@@ -68,6 +80,8 @@ new Function('exports', customTableName.outputText)(customTableNameModule.export
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockTransaction') return stockTransaction
+  if (request === './maintenance') return maintenance
   if (request === './planTier') return planTierModuleObj.exports // real limit tables
   if (request === './customTableName') return customTableNameModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
@@ -202,6 +216,54 @@ function makeFakeD1(schema) {
       for (const statement of statements) statement._exec()
       return statements.map(statement => ({ success: true, ...statement._all() }))
     },
+  }
+}
+
+function makeRestoreD1(schema) {
+  const Database = require('better-sqlite3')
+  const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+  const sql = new Database(':memory:')
+  const quote = name => '"' + name.replaceAll('"', '""') + '"'
+  for (const [name, table] of Object.entries(schema)) {
+    sql.exec('CREATE TABLE ' + quote(name) + '(' + table.columns.map(quote).join(',') + ')')
+    const insert = sql.prepare('INSERT INTO ' + quote(name) + ' VALUES(' + table.columns.map(() => '?').join(',') + ')')
+    for (const row of table.rows) insert.run(...table.columns.map(column => row[column] ?? null))
+  }
+  sql.exec(`CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    CREATE TABLE import_jobs(id INTEGER PRIMARY KEY,status TEXT,lease_expires_at TEXT);
+    CREATE TABLE bulk_delete_jobs(id INTEGER PRIMARY KEY,status TEXT);`)
+  sql.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('stock_schema_epoch', stockTransaction.STOCK_SCHEMA_EPOCH)
+  const sync = () => {
+    for (const [name, table] of Object.entries(schema)) table.rows = sql.prepare('SELECT * FROM ' + quote(name)).all()
+  }
+  const statement = (text, params = []) => ({
+    bind: (...values) => statement(text, values),
+    async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+    _exec() {
+      const prepared = sql.prepare(text)
+      if (prepared.reader) return { success: true, results: sqliteD1Call(prepared, 'all', params) }
+      return { success: true, meta: sqliteD1Call(prepared, 'run', params) }
+    },
+    async run() { const result = this._exec(); sync(); return result },
+  })
+  return {
+    prepare: text => statement(text),
+    async batch(statements) {
+      const results = sql.transaction(() => statements.map(item => item._exec()))()
+      sync()
+      return results
+    },
+  }
+}
+
+async function restoreOwned(env, key, onProgress) {
+  const ownership = await maintenance.beginMaintenance(env, { backupKey: key, startedBy: 'backup restore fixture' })
+  try {
+    return await restoreCloudflareBackup(env, key, onProgress, ownership.token)
+  } finally {
+    assert.strictEqual((await env.DB.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+    assert.strictEqual(await maintenance.endMaintenance(env, ownership.token), true)
   }
 }
 
@@ -499,13 +561,14 @@ async function main() {
       branches: { columns: ['id', 'name'], rows: [{ id: 9, name: 'Stale Branch' }] },
     }
     const liveEnv = makeEnv({ schema: liveSchema, assets: {} })
+    liveEnv.DB = makeRestoreD1(liveSchema)
     // Restore reads the manifest by key from ASSETS -- reuse backupEnv's
     // stored manifest+copied-asset bytes by copying them into liveEnv's
     // fake R2 store first (stands in for both backups sharing one real
     // bucket in production).
     for (const [key, value] of backupEnv.ASSETS._store) liveEnv.ASSETS._store.set(key, value)
 
-    const restoreResult = await restoreCloudflareBackup(liveEnv, created.key)
+    const restoreResult = await restoreOwned(liveEnv, created.key)
     assert.strictEqual(restoreResult.tables, 2)
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'business_name', value: 'Acme' }])
     assert.deepStrictEqual(liveSchema.branches.rows, [{ id: 1, name: 'Main' }])
@@ -526,9 +589,10 @@ async function main() {
     // Live schema has dropped legacy_col.
     const liveSchema = { settings: { columns: ['key', 'value'], rows: [] } }
     const liveEnv = makeEnv({ schema: liveSchema, assets: {} })
+    liveEnv.DB = makeRestoreD1(liveSchema)
     for (const [key, value] of backupEnv.ASSETS._store) liveEnv.ASSETS._store.set(key, value)
 
-    await restoreCloudflareBackup(liveEnv, created.key)
+    await restoreOwned(liveEnv, created.key)
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'x', value: 'y' }], 'legacy_col should be silently dropped, not cause a failure')
   })
 

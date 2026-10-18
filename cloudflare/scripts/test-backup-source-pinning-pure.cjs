@@ -13,7 +13,7 @@ function fixture(sourceOverride) {
       ? sourceOverride : fs.readFileSync(file, ...args),
   } : require(name)
   return new Function('require', '__dirname', source.slice(0, source.indexOf('let passed = 0'))
-    + '\nreturn {backup:backupModuleObj.exports,makeFakeD1,makeFakeR2,makeFakeKV}')(load, __dirname)
+    + '\nreturn {backup:backupModuleObj.exports,makeRestoreD1,makeFakeR2,makeFakeKV,restoreOwned}')(load, __dirname)
 }
 const current = fixture()
 const key = 'backups/cloudflare/source-pinning.json'
@@ -25,7 +25,7 @@ const document = value => JSON.stringify({
 })
 async function run(options = {}, implementation = current) {
   const schema = { settings: { columns: ['key', 'value'], rows: [{ key: 'proof', value: 'LIVE' }] } }
-  const env = { DB: implementation.makeFakeD1(schema), ASSETS: implementation.makeFakeR2({
+  const env = { DB: implementation.makeRestoreD1(schema), ASSETS: implementation.makeFakeR2({
     [key]: { body: options.truncated ? document('VALIDATED').slice(0, -3) : document('VALIDATED') },
   }), CACHE: implementation.makeFakeKV() }
   let reads = 0, deletes = 0, cancelled = 0
@@ -33,8 +33,8 @@ async function run(options = {}, implementation = current) {
   const prepare = env.DB.prepare.bind(env.DB)
   env.DB.prepare = sql => {
     const stmt = prepare(sql)
-    if (sql.startsWith('DELETE ')) {
-      const exec = stmt.run; stmt.run = async () => { deletes++; return exec() }
+    if (/^DELETE FROM "settings"$/.test(sql)) {
+      const exec = stmt.run; stmt.run = async () => { deletes++; return exec.call(stmt) }
       const batchExec = stmt._exec; stmt._exec = () => { deletes++; return batchExec() }
     }
     return stmt
@@ -66,7 +66,7 @@ async function run(options = {}, implementation = current) {
   }
   let error
   try {
-    await implementation.backup.restoreCloudflareBackup(env, key, async event => {
+    await implementation.restoreOwned(env, key, async event => {
       progress.push(event.phase)
       if (event.phase === 'deleting') {
         if (options.heldOverwrite) await env.ASSETS.put(key, document('REPLACEMENT'))
