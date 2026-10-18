@@ -19,13 +19,14 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const ts = require('typescript')
 const harness = require('./branch-cutover-workerd-harness.cjs')
+const completedCutover = require('./harness/completed-cutover-world.cjs')
 function parentModule() {
   const cache = new Map()
   const load = (name) => {
     name = path.posix.normalize(name.endsWith('.ts') ? name : name + '.ts')
     if (cache.has(name)) return cache.get(name).exports
     const module = { exports: {} }; cache.set(name, module)
-    const js = ts.transpileModule(fs.readFileSync(path.join(root, 'cloudflare/src', name), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const js = ts.transpileModule(completedCutover.readSource(name), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', js)(request => request.startsWith('.') ? load(path.posix.join(path.posix.dirname(name), request)) : {}, module, module.exports)
     return module.exports
   }
@@ -44,7 +45,7 @@ async function main() {
   const POST = ['stock', 'labels', 'checks']
   const post = Object.fromEntries(POST.map(name => [name, guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/branch-cutover-post-' + name + '.sql'), 'utf8')).sql]))
   const p7 = {}
-  const { mf, call } = await harness.start()
+  const { mf, call } = await harness.start({ archive: completedCutover })
   let checks = 0
   const check = async (name, fn) => { await fn(); checks++; console.log('PASS ' + name) }
   try {

@@ -6,7 +6,6 @@
 // ordinary write refused by the fence during the run and accepted after, per-product totals conserved to the unit, the source
 // branch empty, the directory final, the journal completed with the maintenance flag released.
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { build } = require('esbuild')
@@ -14,13 +13,14 @@ const ts = require('typescript')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const fixture = require('./branch-cutover-scale-fixture.cjs')
+const completedCutover = require('./harness/completed-cutover-world.cjs')
 const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const TOKEN = 'workerd-operator-test-token-0123456789abcdef'
 const SCALE = Number(process.env.CUTOVER_SCALE || 0.02)
 
 function gateSource() {
-  const source = ts.createSourceFile('index.ts', fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const source = ts.createSourceFile('index.ts', completedCutover.readSource('index.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const statement = source.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
     && node.expression.expression.getText(source) === 'app.use' && node.expression.arguments[1]?.getText(source).includes('getMaintenance(c.env)'))
   assert.ok(statement)
@@ -38,7 +38,7 @@ async function main() {
     app.post('/api/probe/write', async (c) => { await c.env.DB.prepare('INSERT INTO probe_writes DEFAULT VALUES').run(); return c.json({ ok: true }) })
     app.route('/api/internal/branch-cutover', route)
     export default { fetch: (request, env, ctx) => app.fetch(request, env, ctx) }`
-  const bundle = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+  const bundle = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, plugins: [completedCutover.esbuildPlugin(path.join(root, 'src'))], bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
   const make = (bindings) => new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], bindings, log: new Log(LogLevel.ERROR) })
   const dark = make({})
   const mf = make({ BRANCH_CUTOVER_OPERATOR_TOKEN: TOKEN })
@@ -55,8 +55,8 @@ async function main() {
     const db = await mf.getD1Database('DB')
     const t0 = Date.now()
     const migrations = []
-    for (const name of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) {
-      for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
+    for (const { name, sql: migrationSql } of completedCutover.migrationEntries()) {
+      for (const sql of split(migrationSql)) {
         if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         migrations.push(db.prepare(sql))
       }

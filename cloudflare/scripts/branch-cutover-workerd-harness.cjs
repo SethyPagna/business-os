@@ -19,14 +19,21 @@ const IDS = { sourceBranchId: fixture.SHOP, targetBranchId: fixture.WAREHOUSE }
 const NAMES = { retiredName: 'Old Shop', successorName: 'LC Store' }
 const INCARNATION = '00000000-0000-4000-8000-000000000099'
 
-const WORKER = `
+const workerSource = archive => `
   import { inspectBranchCutover, beginBranchCutover, continueBranchCutover } from './src/lib/branchCutoverParent.ts';
   import { executePlannedBranchCutoverChild } from './src/lib/branchCutoverChild.ts';
   import { D1Compat } from './src/lib/db.ts';
+  ${archive ? '' : "import { executeRawStockTransaction } from './src/lib/stockTransaction.ts';"}
   const texts = new Map();
   function textId(sql, fresh) { let id = texts.get(sql); if (id === undefined) { id = texts.size; texts.set(sql, id); fresh[id] = sql } return id }
   export default { async fetch(request, env) {
     const input = await request.json();
+    ${archive ? '' : `if (input.op === 'seed') {
+      try {
+        await executeRawStockTransaction(env.DB, input.statements.map(s => env.DB.prepare(s.sql).bind(...(s.params || []))));
+        return Response.json({ ok: true });
+      } catch (e) { return Response.json({ ok: false, error: String(e && e.message) }); }
+    }`}
     if (input.op === 'exec') {
       for (const s of input.statements) {
         try { await env.DB.prepare(s.sql).bind(...(s.params || [])).run() } catch (e) { return Response.json({ ok: false, error: String(e && e.message), sql: s.sql.slice(0, 300) }) }
@@ -76,10 +83,12 @@ const WORKER = `
   } };
 `
 
-async function start() {
-  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: WORKER }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+const archiveByCall = new WeakMap()
+async function start({ archive } = {}) {
+  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: workerSource(archive) }, plugins: archive ? [archive.esbuildPlugin(path.join(root, 'src'))] : [], bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
   const call = async (body) => { const response = await mf.dispatchFetch('http://cutover.local/', { method: 'POST', body: JSON.stringify(body) }); return response.json() }
+  if (archive) archiveByCall.set(call, archive)
   return { mf, call }
 }
 
@@ -87,8 +96,10 @@ async function start() {
 async function seed(call, { scale = 1, tables } = {}) {
   const t0 = Date.now()
   const migrations = []
-  for (const name of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) {
-    for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
+  const archive = archiveByCall.get(call)
+  const entries = archive ? archive.migrationEntries() : fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort().map(name => ({ name, sql: fs.readFileSync(path.join(root, 'migrations', name), 'utf8') }))
+  for (const { name, sql: migrationSql } of entries) {
+    for (const sql of split(migrationSql)) {
       if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
       migrations.push({ sql })
     }
@@ -105,8 +116,15 @@ async function seed(call, { scale = 1, tables } = {}) {
   const data = { ...originalData, audit_logs: (originalData.audit_logs || []).map(row => ({ ...row, id: row.id + auditOffset })) }
   const statements = fixture.statements(data, 60000, 250)
   for (let i = 0; i < statements.length; i += 10) {
-    const r = await call({ op: 'exec', statements: statements.slice(i, i + 10) })
+    const r = await call({ op: archive ? 'exec' : 'seed', statements: statements.slice(i, i + 10) })
     if (!r.ok) throw new Error('seed failed: ' + r.error + ' ' + r.sql)
+  }
+  if (!archive) {
+    const refused = await call({ op: 'exec', statements: [{ sql: 'UPDATE products SET stock_quantity=stock_quantity' }] })
+    assert.equal(refused.ok, false)
+    assert.match(refused.error, /stock_transaction_required/)
+    const permit = await call({ op: 'query', sql: "SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'" })
+    assert.equal(permit.rows[0].n, 0)
   }
   const verifyAuditBaseline = async () => {
     const rows = (await call({ op: 'query', sql: 'SELECT * FROM audit_logs WHERE id<=? ORDER BY id', params: [auditOffset] })).rows

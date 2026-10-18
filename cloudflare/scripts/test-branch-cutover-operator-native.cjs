@@ -14,19 +14,19 @@
 //   6  abort before the first child releases the fence and a new run completes.
 // Controls (RED on purpose): a gate that lets every /api path through during the run.
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { build } = require('esbuild')
 const ts = require('typescript')
 const e2e = require('./test-branch-cutover-parent-e2e-native.cjs')
+const completedCutover = require('./harness/completed-cutover-world.cjs')
 const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const TOKEN = 'cutover-operator-test-token-0123456789abcdef'
 const ORIGIN = 'http://operator.test'
 
 function gateSource() {
-  const source = ts.createSourceFile('index.ts', fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const source = ts.createSourceFile('index.ts', completedCutover.readSource('index.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const statement = source.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
     && node.expression.expression.getText(source) === 'app.use' && node.expression.arguments[1]?.getText(source).includes('getMaintenance(c.env)'))
   assert.ok(statement, 'the maintenance gate is in index.ts')
@@ -44,7 +44,7 @@ async function bundleApp(transform = (text) => text) {
     app.post('/api/probe/write', async (c) => { await c.env.DB.prepare('INSERT INTO probe_writes DEFAULT VALUES').run(); return c.json({ ok: true }) })
     app.route('/api/internal/branch-cutover', route)
     export default app`
-  const out = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', target: 'node22', logLevel: 'silent' })
+  const out = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, plugins: [completedCutover.esbuildPlugin(path.join(root, 'src'))], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'node22', logLevel: 'silent' })
   const module = { exports: {} }
   new Function('module', 'exports', 'require', out.outputFiles[0].text)(module, module.exports, require)
   return module.exports.default

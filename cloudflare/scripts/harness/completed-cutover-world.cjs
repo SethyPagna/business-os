@@ -47,7 +47,23 @@ function archivedWorld(ref) {
     }
     return migrations
   }
-  return { ref, readSource, migrationEntries }
+  function esbuildPlugin(sourceRoot) {
+    const withinSource = file => {
+      const relative = path.relative(sourceRoot, file)
+      return relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+    }
+    return { name: 'archived-cutover-source', setup(build) {
+      build.onResolve({ filter: /^\./ }, args => {
+        if (withinSource(args.importer)) assert.ok(withinSource(path.resolve(args.resolveDir, args.path)), 'Archived application import escaped src')
+      })
+      build.onLoad({ filter: /.*/ }, args => {
+        if (!withinSource(args.path)) return
+        assert.equal(path.extname(args.path), '.ts')
+        return { contents: readSource(path.relative(sourceRoot, args.path).split(path.sep).join('/')), loader: 'ts', resolveDir: path.dirname(args.path) }
+      })
+    } }
+  }
+  return { ref, readSource, migrationEntries, esbuildPlugin }
 }
 
 module.exports = { COMPLETED_CUTOVER_REF, COST_PROVENANCE_REF, archivedWorld, ...archivedWorld(COMPLETED_CUTOVER_REF) }
