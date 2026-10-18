@@ -1,10 +1,33 @@
 const assert = require('node:assert/strict')
 const { startWorker, recorder, budgetLine, historyStep,seedProduct,createSale,addSaleItems } = require('./harness/al_money_native.cjs')
 
+async function arrangeStock(h, statement) {
+ const permitCount=async()=>(await h.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n
+ assert.equal(await permitCount(),0)
+ try {
+  const results=await h.db.batch([
+   h.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+   statement,
+   h.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+  ])
+  return results[1]
+ } finally {assert.equal(await permitCount(),0)}
+}
+
+function stockCompetitor(keeper) {
+ return `{
+   const permitCount=async()=>Number((await db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get<{n:number}>())?.n);
+   if(await permitCount()!==0)throw new Error('fixture_competitor_existing_permit');
+   const changed=await executeStockTransaction(db,[{sql:'UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=@id',params:{id:${keeper}}}],'once');
+   if(changed.length!==1||Number(changed[0].meta?.changes)!==1)throw new Error('fixture_competitor_missing_effect');
+   if(await permitCount()!==0)throw new Error('fixture_competitor_leaked_permit');
+ }`
+}
+
 async function main() {
   const initialRace=process.argv.includes('--group-initial-race'), redoRace=process.argv.includes('--group-redo-race'), postPce=process.argv.includes('--group-post-pce'), recovery=process.argv.includes('--group-recovery'), recoveryChanged=process.argv.includes('--group-recovery-changed'), partialRecovery=process.argv.includes('--group-partial-recovery'), lostAck=process.argv.includes('--group-finalizer-lostack')
   const racePatches=initialRace?[{name:'group initial committed stock edit before first fingerprint',file:'src/routes/products.ts',from:'  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }',to:`  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }
-  if (!await db.prepare("SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND status='planned' AND role='merged'").get({review:review.id,ordinal:group.ordinal})) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([reversal.keeperId])`}]:redoRace?[{name:'group redo committed stock edit before first fingerprint',file:'src/lib/undoAppliers.ts',from:'const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,',to:`    if (final) await db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').run([refreshedReversal.keeperId])
+  if (!await db.prepare("SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND status='planned' AND role='merged'").get({review:review.id,ordinal:group.ordinal})) ${stockCompetitor('reversal.keeperId')}`}]:redoRace?[{name:'group redo committed stock edit before first fingerprint',file:'src/lib/undoAppliers.ts',from:'const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,',to:`    if (final) ${stockCompetitor('refreshedReversal.keeperId')}
     const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,`}]:[]
   const interruptionPatches=lostAck?[{name:'lost acknowledgement after actual group finalizer batch',file:'src/lib/undoAppliers.ts',from:'params:{history:Number(association.action_history_id)}}]:[])]) } catch {',to:`params:{history:Number(association.action_history_id)}}]:[])])
     if(final && !(globalThis as any).__groupFinalizerAckLost){(globalThis as any).__groupFinalizerAckLost=true;throw new Error('Synthetic lost acknowledgement AFTER committed group finalizer batch')}
@@ -17,19 +40,19 @@ async function main() {
   const pair = async (kind, value, { echo = false, manual = null, lot = null } = {}) => {
     const keepId = nextId++, mergeId = nextId++, name = `Authority ${keepId}`, barcode = `84500${keepId}`
     for (const [id,cost,display,code] of [[keepId,value,name,barcode],[mergeId,9,kind==='identity'?`Incoming ${mergeId}`:name,kind==='identity'?`84500${mergeId}`:barcode]]) {
-      await h.db.prepare(`INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,purchase_price_usd,purchase_price_khr,selling_price_usd,is_active)
-        VALUES(?,?,?,?,?,?,?,?,10,1)`).bind(id,display,display.toLowerCase(),code,cost,cost===null?null:cost*4000,cost,cost===null?null:cost*4000).run()
+      await arrangeStock(h,h.db.prepare(`INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,purchase_price_usd,purchase_price_khr,selling_price_usd,is_active)
+        VALUES(?,?,?,?,?,?,?,?,10,1)`).bind(id,display,display.toLowerCase(),code,cost,cost===null?null:cost*4000,cost,cost===null?null:cost*4000))
     }
     if (kind==='selected') {
-      await h.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,2)').bind(keepId).run()
-      await h.db.prepare('UPDATE products SET stock_quantity=2 WHERE id=?').bind(keepId).run()
+      await arrangeStock(h,h.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,2)').bind(keepId))
+      await arrangeStock(h,h.db.prepare('UPDATE products SET stock_quantity=2 WHERE id=?').bind(keepId))
     }
-    if (manual !== null) await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,?,'manual',0)").bind(keepId,manual).run()
+    if (manual !== null) await arrangeStock(h,h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,?,'manual',0)").bind(keepId,manual))
     if (lot !== null) {
-      await h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(?,?,'actual-receipt',1,?,'2026-10-01')").bind(mergeId+100000,mergeId,lot).run()
-      await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').bind(mergeId+100000).run()
-      await h.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').bind(mergeId).run()
-      await h.db.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').bind(mergeId).run()
+      await arrangeStock(h,h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(?,?,'actual-receipt',1,?,'2026-10-01')").bind(mergeId+100000,mergeId,lot))
+      await arrangeStock(h,h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').bind(mergeId+100000))
+      await arrangeStock(h,h.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').bind(mergeId))
+      await arrangeStock(h,h.db.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').bind(mergeId))
     }
     return { keepId,mergeId,name,barcode,echo }
   }
@@ -99,8 +122,8 @@ async function main() {
       const preview = await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{cases:[{case_key:`barcode:${p.barcode}`,cluster_type:'barcode',cluster_value:p.barcode,product_ids:[p.keepId,p.mergeId]}]},`selected stale preview ${mutation}`)
       assert.equal(preview.status,200,JSON.stringify(preview.body))
       const quoted=preview.body.cases[0]
-      if(mutation==='append') await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(p.mergeId).run()
-      else await h.db.prepare(`UPDATE product_cost_entries SET ${mutation==='value'?'cost_usd=7.000000000000002':'baseline_batch_id=900000'} WHERE product_id=?`).bind(p.keepId).run()
+      if(mutation==='append') await arrangeStock(h,h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(p.mergeId))
+      else await arrangeStock(h,h.db.prepare(`UPDATE product_cost_entries SET ${mutation==='value'?'cost_usd=7.000000000000002':'baseline_batch_id=900000'} WHERE product_id=?`).bind(p.keepId))
       const before=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)
       const result=await h.call('POST','/api/products/possible-duplicates/merge-batch',{client_request_id:`stale-${p.keepId}`,manifest_version:1,manifest_digest:preview.body.manifest_digest,cases:[{ordinal:quoted.ordinal,case_key:quoted.case_key,keep_id:quoted.keep_id,merge_id:quoted.merge_id,state_digest:quoted.state_digest,stock:null}]},`selected stale ${mutation}`)
       const after=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)
@@ -134,7 +157,7 @@ async function main() {
     proof.check('normal hidden write response omits flag and internal key',()=>{assert.equal(hiddenUpdate.status,200,JSON.stringify(hiddenUpdate.body));assert.ok(!JSON.stringify(hiddenUpdate.body).includes('cost_needs_review'));assert.ok(!JSON.stringify(hiddenUpdate.body).includes('cost_review_key'))})
     const warm=await h.call('GET','/api/products/search?ids=71008',undefined,'normal cache stale warm')
     assert.equal(warm.status,200);normalRow(warm.body.items[0],true)
-    await h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(250001,71008,'normal-live-lot',1,8,'2026-10-15')").run()
+    await arrangeStock(h,h.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(250001,71008,'normal-live-lot',1,8,'2026-10-15')"))
     const live=await h.one('SELECT cost_review_key FROM products WHERE id=71008')
     assert.equal(live.cost_review_key,null,'real received-lot trigger clears the current marker without a cache-version bump')
     const refreshed=await h.call('GET','/api/products/search?ids=71008',undefined,'normal stale cached refresh')
@@ -152,7 +175,7 @@ async function main() {
     for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce||recovery||recoveryChanged||partialRecovery||lostAck?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]])) {
       const p=await pair('selected',value,{manual,lot})
       const third=nextId++
-      await h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode).run()
+      await arrangeStock(h,h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode))
       const preview=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{manifest_version:1,resolution_version:2,client_request_id:`held-${p.keepId}`,merge_groups:[{group_key:`barcode:${p.barcode}`,member_ids:[p.keepId,p.mergeId,third]}],remove_rows:[]},`held preview ${p.keepId}`)
       assert.equal(preview.status,200,JSON.stringify(preview.body))
       const group=preview.body.page.groups[0]
@@ -173,6 +196,7 @@ async function main() {
       const costChain=async()=> (await h.all('SELECT s.payload_json FROM undo_snapshots s JOIN product_conflict_action_group_members m ON m.undo_snapshot_id=s.id WHERE m.review_id=? ORDER BY m.member_ordinal',preview.body.review_id)).map(row=>JSON.parse(row.payload_json).costReviewOutcome)
       if(initialRace) {
         const before=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
+        assert.equal((await h.one("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'")).n,0)
         const undo=await historyStep(h,history.action_history_id,'undo',0,'group initial race undo')
         const admission=await h.one('SELECT reversible,status FROM action_history WHERE id=?',history.action_history_id)
         proof.check('group initial committed edit remains intact and nonreversible',()=>{assert.equal(admission.reversible,0,JSON.stringify(admission));assert.equal(admission.status,'recorded');assert.equal(undo.status,400,JSON.stringify(undo.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
@@ -180,7 +204,7 @@ async function main() {
         break
       }
       if(postPce) {
-        await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(third).run()
+        await arrangeStock(h,h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(third))
         const before=await h.all('SELECT * FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third), auditBefore=await h.one('SELECT COUNT(*) n FROM audit_logs')
         const undo=await historyStep(h,history.action_history_id,'undo',0,'group inactive loser new PCE undo')
         proof.check('group receipt rejects new entry in empty restored loser scope',()=>assert.equal(undo.status,409,JSON.stringify(undo.body)))
@@ -223,7 +247,7 @@ async function main() {
         proof.check('group interruption preserves actual committed finalization state',()=>{assert.equal(interruptedHistory.status,lostAck?'undoable':partialRecovery?'redoable':'recorded');assert.equal(interruptedHistory.reversible,lostAck||partialRecovery?1:0);assert.equal(JSON.parse(latestChild.payload_json).fingerprintPending,!lostAck)})
 
         const snapshot=()=>h.all('SELECT * FROM products WHERE id IN (?,?,?) ORDER BY id',p.keepId,p.mergeId,third)
-        if(recoveryChanged) await h.db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').bind(p.keepId).run()
+        if(recoveryChanged) await arrangeStock(h,h.db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=?').bind(p.keepId))
         const before=await snapshot(), audits=await h.one('SELECT COUNT(*) n FROM audit_logs')
         const stock=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
         if(recovery && !partialRecovery) {
@@ -252,6 +276,8 @@ async function main() {
       }
       if(redoRace) {
         const before=await h.all('SELECT * FROM branch_stock WHERE product_id IN (?,?,?) ORDER BY product_id,branch_id',p.keepId,p.mergeId,third)
+        assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)
+        assert.equal((await h.one("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'")).n,0)
         const refused=await historyStep(h,history.action_history_id,'undo',2,'group redo race next undo')
         const admission=await h.one('SELECT status,reversible FROM action_history WHERE id=?',history.action_history_id)
         proof.check('group redo committed edit remains intact and cannot be adopted',()=>{assert.equal(redo.status,409,JSON.stringify(redo.body));assert.equal(redo.body.code,'merge_group_redo_committed');assert.match(redo.body.error,/Redo was saved/);assert.equal(admission.status,'recorded');assert.equal(admission.reversible,0);assert.equal(refused.status,400,JSON.stringify(refused.body));assert.equal(before.find(row=>row.product_id===p.keepId).quantity,3)})
@@ -281,7 +307,7 @@ async function main() {
       const finalize=()=>h.call('POST',`/api/products/possible-duplicates/merge-batch/reviews/${review.body.review_id}/finalize`,{manifest_version:1,resolution_version:2,review_id:review.body.review_id,draft_digest:review.body.draft_digest,resolutions:[{group_key:group.group_key,keeper_id:p.keepId,barcode:{mode:'member',source_product_id:p.keepId},category_source_id:p.keepId,brand_source_id:p.keepId,unit_source_id:p.keepId}]},`held stale finalize ${phase}`)
       const final=phase==='final'?await finalize():null
       if(final)assert.equal(final.status,200,JSON.stringify(final.body))
-      await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(p.mergeId).run()
+      await arrangeStock(h,h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(?,42,'manual',0)").bind(p.mergeId))
       const before=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)
       const result=phase==='draft'?await finalize():await h.call('POST','/api/products/possible-duplicates/merge-batch',{review_id:review.body.review_id,manifest_digest:final.body.manifest_digest,client_request_id:review.body.review_id},'held stale apply')
       const after=await h.all('SELECT id,cost_price_usd,cost_review_key,is_active FROM products WHERE id IN (?,?) ORDER BY id',p.keepId,p.mergeId)

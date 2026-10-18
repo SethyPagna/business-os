@@ -1,33 +1,54 @@
 const assert=require('node:assert/strict')
 const {startWorker,budgetLine}=require('./harness/al_money_native.cjs')
 
+async function arrangeStock(h, statement) {
+ const permitCount=async()=>(await h.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n
+ assert.equal(await permitCount(),0)
+ try {
+  const results=await h.db.batch([
+   h.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+   statement,
+   h.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+  ])
+  return results[1]
+ } finally {assert.equal(await permitCount(),0)}
+}
+
 async function main(){
  const fault=process.argv.includes('--lost-ack-undo')?'undo':process.argv.includes('--lost-ack-redo')?'redo':process.argv.includes('--rollback')?'rollback':process.argv.includes('--finalize-once')?'finalize':process.argv.includes('--finalize-race')?'race':(process.argv.includes('--gallery-before-read')||process.argv.includes('--gallery-aba'))?'gallery':process.argv.includes('--stock-before-read')?'stock':process.argv.includes('--entry-before-read')?'entry':process.argv.includes('--entry-after-finalize')?'lateEntry':process.argv.includes('--receipt-real-before-read')?'real':process.argv.includes('--initial-stock-before-read')?'initial':null
  const patches=fault?[{name:'actual D1 batch '+fault,file:'src/lib/db.ts',
   from:'return metered(() => this.d1.batch(prepared), metasOf, statements.length)',
-  to:`const target=statements.some(s=>s.sql.includes('merge_cost_replay_guard') && (s.params as any)?.fromStatus==='${['redo','gallery','stock','entry','real'].includes(fault)?'redoable':'undoable'}');
+  to:`const compete=async(sql:string)=>{
+      const permitCount=async()=>Number((await this.d1.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first<{n:number}>())?.n);
+      if(await permitCount()!==0)throw new Error('fixture_competitor_existing_permit');
+      const {executeRawStockTransaction}=await import('./stockTransaction');
+      const changed=await executeRawStockTransaction(this.d1,[this.d1.prepare(sql)]);
+      if(changed.length!==1||Number(changed[0].meta?.changes)!==1)throw new Error('fixture_competitor_missing_effect');
+      if(await permitCount()!==0)throw new Error('fixture_competitor_leaked_permit');
+    };
+    const target=statements.some(s=>s.sql.includes('merge_cost_replay_guard') && (s.params as any)?.fromStatus==='${['redo','gallery','stock','entry','real'].includes(fault)?'redoable':'undoable'}');
     const initial=statements.some(s=>s.sql.includes("INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)"));
     const finalizing=statements.some(s=>s.sql.includes('merge_cost_fingerprint_guard'));
     if(finalizing && '${fault}'==='finalize' && !(globalThis as any).__mergeFinalizeFault){(globalThis as any).__mergeFinalizeFault=true;throw new Error('fixture_finalize_unavailable')}
-    if(finalizing && '${fault}'==='race' && !(globalThis as any).__mergeFinalizeFault){(globalThis as any).__mergeFinalizeFault=true;await this.d1.prepare("UPDATE products SET name='Concurrent edit' WHERE id=60000").run()}
+    if(finalizing && '${fault}'==='race' && !(globalThis as any).__mergeFinalizeFault){const changed=await this.d1.prepare("UPDATE products SET name='Concurrent edit' WHERE id=60000").run();if(Number(changed.meta?.changes)!==1)throw new Error('fixture_competitor_missing_effect');(globalThis as any).__mergeFinalizeFault=true}
     if(target && '${fault}'==='rollback') prepared.splice(4,0,this.d1.prepare("SELECT json_extract('', '$')"));
     const result=await metered(() => this.d1.batch(prepared), metasOf, statements.length);
     if(target && '${fault}'==='gallery' && !(globalThis as any).__mergeGalleryFault){(globalThis as any).__mergeGalleryFault=true;await this.d1.prepare("UPDATE product_images SET sort_order=77 WHERE product_id=60000 AND image_path='fixture-moved-gallery'").run();${process.argv.includes('--gallery-aba')?`await this.d1.prepare("UPDATE product_images SET sort_order=2 WHERE product_id=60000 AND image_path='fixture-moved-gallery'").run();`:''}}
-    if(target && '${fault}'==='stock' && !(globalThis as any).__mergeStockFault){(globalThis as any).__mergeStockFault=true;await this.d1.prepare("UPDATE branch_stock SET quantity=quantity+1,rfid_confirmed_qty=rfid_confirmed_qty+1 WHERE product_id=60000").run()}
-    if(target && '${fault}'==='entry' && !(globalThis as any).__mergeEntryFault){(globalThis as any).__mergeEntryFault=true;await this.d1.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)").run()}
-    if(target && '${fault}'==='real' && !(globalThis as any).__mergeRealFault){(globalThis as any).__mergeRealFault=true;await this.d1.prepare("UPDATE branch_stock SET quantity=7.000000000000002 WHERE product_id=60000").run()}
-    if(initial && '${fault}'==='initial' && !(globalThis as any).__mergeInitialFault){(globalThis as any).__mergeInitialFault=true;await this.d1.prepare("UPDATE branch_stock SET quantity=quantity+1,rfid_confirmed_qty=rfid_confirmed_qty+1 WHERE product_id=60000").run()}
+    if(target && '${fault}'==='stock' && !(globalThis as any).__mergeStockFault){await compete("UPDATE branch_stock SET quantity=quantity+1,rfid_confirmed_qty=rfid_confirmed_qty+1 WHERE product_id=60000");(globalThis as any).__mergeStockFault=true}
+    if(target && '${fault}'==='entry' && !(globalThis as any).__mergeEntryFault){await compete("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)");(globalThis as any).__mergeEntryFault=true}
+    if(target && '${fault}'==='real' && !(globalThis as any).__mergeRealFault){await compete("UPDATE branch_stock SET quantity=7.000000000000002 WHERE product_id=60000");(globalThis as any).__mergeRealFault=true}
+    if(initial && '${fault}'==='initial' && !(globalThis as any).__mergeInitialFault){await compete("UPDATE branch_stock SET quantity=quantity+1,rfid_confirmed_qty=rfid_confirmed_qty+1 WHERE product_id=60000");(globalThis as any).__mergeInitialFault=true}
     if(target && ['undo','redo'].includes('${fault}') && !(globalThis as any).__mergeAckLost){(globalThis as any).__mergeAckLost=true;throw new Error('fixture_merge_ack_lost_after_commit')}
     return result` }]:[]
  const h=await startWorker({patches})
  try{
-  await h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,is_active) VALUES(60000,'Review replay','6000001',5,20500,1),(60001,'Review replay','6000002',7,28700,1)").run()
-  if(process.argv.includes('--precision'))await h.db.prepare('UPDATE products SET cost_price_usd=?,cost_price_khr=? WHERE id=60000').bind(5.123456789012345,20500.12345678901).run()
-  if(process.argv.includes('--null'))await h.db.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=60000').run()
-  if(process.argv.includes('--zero'))await h.db.prepare('UPDATE products SET cost_price_usd=0,cost_price_khr=0 WHERE id=60000').run()
+  await arrangeStock(h,h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,is_active) VALUES(60000,'Review replay','6000001',5,20500,1),(60001,'Review replay','6000002',7,28700,1)"))
+  if(process.argv.includes('--precision'))await arrangeStock(h,h.db.prepare('UPDATE products SET cost_price_usd=?,cost_price_khr=? WHERE id=60000').bind(5.123456789012345,20500.12345678901))
+  if(process.argv.includes('--null'))await arrangeStock(h,h.db.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=60000'))
+  if(process.argv.includes('--zero'))await arrangeStock(h,h.db.prepare('UPDATE products SET cost_price_usd=0,cost_price_khr=0 WHERE id=60000'))
   if(fault==='gallery'||process.argv.includes('--gallery-control')||process.argv.includes('--gallery-fraction'))await h.db.prepare("INSERT INTO product_images(product_id,image_path,sort_order) VALUES(60001,'fixture-moved-gallery',2)").run()
   if(process.argv.includes('--gallery-fraction'))await h.db.prepare("UPDATE product_images SET sort_order=7.000000000000002 WHERE image_path='fixture-moved-gallery'").run()
-  if(fault==='stock'||fault==='real'||fault==='initial'||process.argv.includes('--initial-stock-control'))await h.db.prepare("INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(60000,1,5,0),(60001,1,2,0)").run()
+  if(fault==='stock'||fault==='real'||fault==='initial'||process.argv.includes('--initial-stock-control'))await arrangeStock(h,h.db.prepare("INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(60000,1,5,0),(60001,1,2,0)"))
   const read=()=>h.one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=60000')
   if(process.argv.includes('--receipt-byte-overflow')){
    const multibyte='ក'.repeat(44000)
@@ -97,8 +118,10 @@ async function main(){
   const receiptRows=JSON.parse(replayState.graph_state)
   console.log('GRAPH_RECEIPT '+JSON.stringify({bytes:Buffer.byteLength(replayState.graph_state),scopes:Object.fromEntries(Object.entries(receiptRows).map(([key,value])=>[key,value[1].length]))}))
   if(fault==='entry'||fault==='lateEntry'){
-   if(fault==='lateEntry')await h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)").run()
+   if(fault==='lateEntry')await arrangeStock(h,h.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(60000,42,'manual',0)"))
    const entries=await h.all('SELECT * FROM product_cost_entries ORDER BY id'),events=await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id")
+   assert.equal(entries.filter(row=>row.product_id===60000&&row.cost_usd===42&&row.source==='manual').length,1)
+   assert.equal((await h.one("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'")).n,0)
    const laterUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},fault==='lateEntry'?'undo after new manual entry after finalized redo':'undo after new manual entry before first fingerprint read')
    assert.equal(laterUndo.status,409,JSON.stringify(laterUndo.body));assert.deepEqual(await h.all('SELECT * FROM product_cost_entries ORDER BY id'),entries)
    assert.deepEqual(await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"),events)
@@ -112,6 +135,8 @@ async function main(){
   }
   if(fault==='stock'||fault==='real'){
    const graphBefore=await h.all('SELECT * FROM branch_stock WHERE product_id IN (60000,60001) ORDER BY product_id,branch_id'),eventsBefore=await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id")
+   assert.equal(graphBefore.find(row=>row.product_id===60000).quantity,fault==='real'?7.000000000000002:8)
+   assert.equal((await h.one("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'")).n,0)
    const laterUndo=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:2},'undo after unchanged-cost stock edit before first fingerprint read')
    console.log('STOCK_BEFORE_READ '+JSON.stringify({before:graphBefore,after:await h.all('SELECT * FROM branch_stock WHERE product_id IN (60000,60001) ORDER BY product_id,branch_id'),status:laterUndo.status}))
    assert.equal(laterUndo.status,409,JSON.stringify(laterUndo.body));assert.deepEqual(await h.all('SELECT * FROM branch_stock WHERE product_id IN (60000,60001) ORDER BY product_id,branch_id'),graphBefore)
@@ -152,7 +177,7 @@ async function main(){
   const stale=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:0},'stale undo after redo')
   assert.equal(stale.status,409,JSON.stringify(stale.body));assert.deepEqual(await read(),redone)
   console.log('PASS authenticated redo preserves original fallback with a fresh review identity; committed undo retries do not duplicate events and ABA generation refuses')
-  await h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(60002,'Review replay','6000003',9,1)").run()
+  await arrangeStock(h,h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(60002,'Review replay','6000003',9,1)"))
   const prior=await read(),next=await h.call('POST','/api/products/possible-duplicates/merge',{keepId:60000,mergeId:60002,keep:true},'merge with prior review identity')
   assert.equal(next.status,200,JSON.stringify(next.body))
   const second=await h.one("SELECT * FROM action_history WHERE entity='product' AND entity_id='60002' ORDER BY id DESC LIMIT 1")
@@ -168,7 +193,7 @@ async function main(){
   assert.equal(hiddenPreview.status,200,JSON.stringify(hiddenPreview.body));assert.equal(JSON.stringify(hiddenPreview.body).includes(prior.cost_review_key),false)
   console.log('PASS authenticated cost-hidden product and merge-preview readers do not expose protected review identity')
   if(process.argv.includes('--actor')){
-   await h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(61000,'Hidden actor merge','6100001',5,1),(61001,'Hidden actor merge','6100002',7,1)").run()
+   await arrangeStock(h,h.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES(61000,'Hidden actor merge','6100001',5,1),(61001,'Hidden actor merge','6100002',7,1)"))
    const own=await h.call('POST','/api/products/possible-duplicates/merge',{keepId:61000,mergeId:61001,keep:true},'cost-hidden actor merge',{cookie:deniedCookie})
    assert.equal(own.status,200,JSON.stringify(own.body))
    const ownHistory=await h.one("SELECT id FROM action_history WHERE entity_id='61001' ORDER BY id DESC LIMIT 1")
