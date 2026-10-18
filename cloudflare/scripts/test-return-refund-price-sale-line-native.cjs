@@ -52,7 +52,7 @@ async function workerBundle() {
 }
 
 async function kernel() {
-  const bundle = await build({ stdin: { contents: "export * from './src/lib/returnsStock'", resolveDir: root, loader: 'ts' },
+  const bundle = await build({ stdin: { contents: "export * from './src/lib/returnsStock'; export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
   const mod = { exports: {} }
   new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(mod, mod.exports, require)
@@ -107,19 +107,25 @@ function kernelChecks(k) {
 }
 
 async function main() {
-  kernelChecks(await kernel())
+  const stockKernel = await kernel()
+  kernelChecks(stockKernel)
   const bundle = await workerBundle()
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'],
     compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     await migrate(db)
-    await db.batch([
+    await stockKernel.executeRawStockTransaction(db, [
       db.prepare("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)"),
       db.prepare(`INSERT INTO products(id,name,is_active,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr)
         VALUES(3,'Legacy A',1,0,10.01,40040,1,4000),(4,'Legacy B',1,0,30.03,120120,1,4000)`),
       db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(3,1,0),(4,1,0)'),
     ])
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await stockState()
+    await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), beforeRawMutation, 'ordinary unadmitted stock writes remain refused without changing any ledger or flag')
     const seedSale = async (saleId, lines) => {
       await db.prepare(`INSERT INTO sales(id,receipt_number,branch_id,branch_name,exchange_rate,subtotal_usd,discount_usd,
         membership_discount_usd,tax_usd,calculated_total_usd,rounding_adjustment_usd,total_usd,money_precision_version,sale_status)

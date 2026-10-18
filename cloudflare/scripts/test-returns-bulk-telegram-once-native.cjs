@@ -45,7 +45,7 @@ const { unstable_splitSqlQuery: split } = require(path.join(root, 'node_modules'
 const slash = (value) => String(value).split(String.fromCharCode(92)).join('/')
 
 async function pricingKernel() {
-  const bundle = await build({ stdin: { contents: "export * from './src/lib/saleItemPricing'", resolveDir: root, loader: 'ts' },
+  const bundle = await build({ stdin: { contents: "export * from './src/lib/saleItemPricing'; export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
   const mod = { exports: {} }
   new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
@@ -127,11 +127,16 @@ async function main() {
   try {
     const db = await mf.getD1Database('DB')
     await migrate(db)
-    await db.batch([
+    await kernel.executeRawStockTransaction(db, [
       db.prepare("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)"),
       db.prepare("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(1,'Probe A',1,0)"),
       db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0)'),
     ])
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await stockState()
+    await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), beforeRawMutation, 'ordinary unadmitted stock writes remain refused without changing any ledger or flag')
     for (const [key, value] of Object.entries({ telegram_chat_id: '-1001111111111', telegram_language: 'both', telegram_topic_returns: '42' })) {
       await db.prepare('INSERT INTO settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)').bind(key, value).run()
     }
