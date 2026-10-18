@@ -14,21 +14,22 @@
 // one: the end cost is 7 (only the delivery on hand) and the loss 3 x 5 = 15;
 // a Remove from the delivery would read cost 6.8 and a loss of 21.
 //
-// STOCK_LOT_TEST_ROOT=<dir containing src/> runs the app's own steps against
-// another tree -- the live build 4ab47676 -- while the held file and the
-// migration chain stay this tree's.
-//
 // Run (from cloudflare/): node scripts/test-held-revert-set-repair-pure.cjs
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
-const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { fixture: currentFixture } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const { createArchivedRepairWorld } = require('./harness/archived-repair-world.cjs')
+const archive = createArchivedRepairWorld()
+const { fixture, user } = archive
 
-const root = process.env.STOCK_LOT_TEST_ROOT || path.join(__dirname, '..')
+const root = path.join(__dirname, '..')
 const heldFile = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', 'held', 'revert_set_sk2_cleanser_repair.sql')
-const repairSql = fs.readFileSync(heldFile, 'utf8')
+const repairSql = archive.read('ops/scripts/migration/held/revert_set_sk2_cleanser_repair.sql')
+assert.equal(repairSql, fs.readFileSync(heldFile, 'utf8'), 'held repair bytes match the pinned archive')
 
 function loader() {
   const cache = new Map()
@@ -36,7 +37,7 @@ function loader() {
     const normalized = relativeFile.replaceAll('\\', '/')
     if (cache.has(normalized)) return cache.get(normalized).exports
     const file = path.join(root, 'src', normalized)
-    const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    const output = ts.transpileModule(archive.read('cloudflare/src/' + normalized), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
     }).outputText
     const mod = { exports: {} }
@@ -77,9 +78,10 @@ const step3 = (f) => send(f, 'POST', '/api/inventory/adjust', { type: 'remove', 
 
 const OP = 'c7b78789-d9ec-45fa-ace6-8bb6612c290a'
 
-function production() {
+function production(currentSchema = false) {
   lotSet.resetStockLotSetSchemaProbe()
-  const f = fixture()
+  const f = currentSchema ? currentFixture() : fixture()
+  const arrange = () => {
   const before = { productId: 5357, branchId: 2, batchId: 56725, lotQuantity: 3, branchQuantity: 33, lotExists: 1, branchExists: 1 }
   const after = { ...before, lotQuantity: 30, branchQuantity: 60 }
   const request = { productId: 5357, branchId: 2, batchId: 56725, quantity: 30, setScope: 'lot', reason: 'wrong stock', conditionTag: null, expectedLotQuantity: 3 }
@@ -108,6 +110,9 @@ function production() {
     .run(OP, user.id, JSON.stringify(request), JSON.stringify(before), JSON.stringify(after), JSON.stringify({ generation: 0, unitCostUsd: 7 }))
   // The 0195 triggers derive the cost of the state as seeded.
   f.sql.prepare(`UPDATE branch_batch_stock SET quantity=quantity WHERE batch_id=56725 AND branch_id=2`).run()
+  }
+  if (currentSchema) seedStockFixture(f.sql, arrange)
+  else arrange()
   return f
 }
 
@@ -137,12 +142,62 @@ const END = { adj: 0, delivery: 30, branch: 30, product: 30, cost: 7 }
 const END_RECEIPT = { received_quantity: 30, received_cost_usd: 210, is_active: 1, supplier_name: 'Dane japan', payment_status: 'paid' }
 const END_LOSS = { removal_loss_usd: 15, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 }
 
+const fullState = f => Object.fromEntries(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({ name }) => [name, JSON.stringify(f.sql.prepare('SELECT * FROM "' + name.replaceAll('"', '""') + '"').all().map(row => JSON.stringify(row)).sort())]))
+const changedTables = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(name => before[name] !== after[name])
+
 const failures = []
 async function check(name, fn) {
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failures.push(name); console.error(`FAIL ${name}\n`, error) }
 }
 
 async function main() {
+  await check('unsafe excluded held SQL is refused on current schema after its exact partial writes, without a permit', async () => {
+    const f = production(true)
+    const before = fullState(f)
+    const startedAt = one(f, 'SELECT CURRENT_TIMESTAMP now').now
+    assert.throws(() => f.sql.exec(repairSql), /stock_transaction_required/)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    const after = fullState(f)
+    assert.deepEqual(changedTables(before, after), ['inventory_movements', 'stock_session_guards', 'revert_set_repair_20261006'])
+    const rows = (state, table) => JSON.parse(state[table]).map(row => JSON.parse(row))
+    const oldMovements = rows(before, 'inventory_movements')
+    const movements = rows(after, 'inventory_movements')
+    const added = movements.find(row => row.id === 48198)
+    assert.ok(added)
+    assert.deepEqual(movements.filter(row => row.id !== added.id), oldMovements)
+    const original = oldMovements.find(row => row.id === 48197)
+    assert.deepEqual(added, {
+      ...original, id: 48198, movement_type: 'add', quantity: 30,
+      reason: 'Revert of #48197: Revert of #48026: New arrival', reference_id: 'revert:48197',
+      user_id: null, user_name: 'REVERT-SET repair', created_at: added.created_at,
+    })
+    assert.deepEqual(rows(before, 'stock_session_guards'), [])
+    assert.deepEqual(rows(after, 'stock_session_guards'), [{ id: 1, guard_value: 1 }])
+    assert.equal(before.revert_set_repair_20261006, undefined)
+    const backups = [
+      ['products:5357', 'products', row => row.id === 5357, ['id', 'stock_quantity', 'cost_price_usd', 'purchase_price_usd', 'updated_at']],
+      ['branch_stock:5357:2', 'branch_stock', row => row.product_id === 5357 && row.branch_id === 2, ['product_id', 'branch_id', 'quantity']],
+      ...[56725, 61482].map(id => [`branch_batch_stock:${id}:2`, 'branch_batch_stock', row => row.batch_id === id && row.branch_id === 2, ['batch_id', 'branch_id', 'quantity', 'updated_at']]),
+      ...[56725, 61482].map(id => [`product_batches:${id}`, 'product_batches', row => row.id === id, ['id', 'is_active', 'received_quantity', 'received_cost_usd', 'supplier_id', 'supplier_name', 'payment_status', 'updated_at']]),
+      [`stock_lot_adjustment_operations:${OP}`, 'stock_lot_adjustment_operations', row => row.id === OP, ['id', 'generation', 'state', 'revision_json']],
+      ['action_history:1318', 'action_history', row => row.id === 1318, ['id', 'status', 'last_error', 'undo_payload', 'redo_payload', 'updated_at']],
+    ]
+    const repairRows = rows(after, 'revert_set_repair_20261006')
+    const expected = { apply_now: 1, apply_remove: 1 }
+    for (const [key, table, matches, fields] of backups) {
+      const row = rows(before, table).find(matches)
+      assert.ok(row)
+      expected['backup:' + key] = Object.fromEntries(fields.map(field => [field, row[field]]))
+    }
+    assert.equal(repairRows.length, 10)
+    assert.deepEqual(Object.fromEntries(repairRows.map(row => [row.key, JSON.parse(row.value)])), expected)
+    const endedAt = one(f, 'SELECT CURRENT_TIMESTAMP now').now
+    for (const timestamp of [added.created_at, ...repairRows.map(row => row.recorded_at)]) {
+      assert.match(timestamp, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+      assert.ok(timestamp >= startedAt && timestamp <= endedAt)
+    }
+  })
+
   await check('the held file is LF-only, held, and not in the migration chain', async () => {
     assert.ok(!repairSql.includes('\r'), 'LF-only')
     assert.ok(!fs.readdirSync(path.join(__dirname, '..', 'migrations')).some((name) => name.includes('revert_set')), 'never in cloudflare/migrations')
@@ -258,7 +313,7 @@ async function main() {
   })
 
   await check('the read-only dry run names the state and the planned loss in every case', async () => {
-    const dry = fs.readFileSync(path.join(__dirname, '..', '..', 'ops', 'queries', 'revert-set-repair-dryrun.sql'), 'utf8')
+    const dry = archive.read('ops/queries/revert-set-repair-dryrun.sql')
     const read = (f) => { const row = f.sql.prepare(dry).get(); return [row.state, row.planned_loss_usd] }
     const f = production()
     assert.deepEqual(read(f), ['pre', 15])
@@ -273,4 +328,4 @@ async function main() {
 
   if (failures.length) { console.error(`\n${failures.length} failed`); process.exitCode = 1 } else console.log('test-held-revert-set-repair-pure: all checks passed')
 }
-main()
+main().finally(() => archive.cleanup())
