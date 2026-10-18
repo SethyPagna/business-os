@@ -23,6 +23,7 @@
 // never touch a file on disk and fail loudly if their anchor text is missing.
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -379,7 +380,7 @@ let seq = 0
 async function seedProduct(H, { lc, old = 0, a, b, name }) {
   const n = ++seq, p = 400 + n, lotA = p * 10 + 1, lotB = p * 10 + 2
   const nm = name || 'AL Csv ' + p, bar = '88500' + String(p).padStart(8, '0')
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(?,?,?,2,0,?,1)').bind(p, nm, bar, lc + old),
     H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, LC, lc),
     ...(old ? [H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, OLD, old)] : []),

@@ -44,6 +44,7 @@
 //   --only=<ids>                  run only these case ids
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -473,8 +474,8 @@ async function seedFee(H, label, { amount = 12.35 } = {}) {
 }
 async function seedProduct(H, name, { barcode } = {}) {
   const code = barcode || '88500' + String(900000000 + (++seq))
-  const r = await H.db.prepare('INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,2.5,0,0,1,?,?)')
-    .bind(name, code, '2026-01-01 00:00:00', '2026-01-01 00:00:00').run()
+  const [r] = await executeRawStockTransaction(H.db, [H.db.prepare('INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,2.5,0,0,1,?,?)')
+    .bind(name, code, '2026-01-01 00:00:00', '2026-01-01 00:00:00')])
   return r.meta.last_row_id
 }
 const pendingOf = (H, id) => H.q1('SELECT * FROM pending_actions WHERE id = ?', id)

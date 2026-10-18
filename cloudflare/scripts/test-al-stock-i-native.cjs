@@ -23,6 +23,7 @@
 // never touch a file on disk and fail loudly if their anchor text is missing.
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -428,7 +429,7 @@ async function pair(H, { shape, xImage = '/uploads/al-x.jpg', xStock = 0 } = {})
   const nameX = 'AL Identity ' + n, nameY = shape === 'barcode' ? nameX : 'AL Identity ' + n + ' Large'
   const barX = '88500' + String(x).padStart(8, '0'), barY = shape === 'name' ? barX : '88500' + String(y).padStart(8, '0')
   const old = '2026-01-01 00:00:00'
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,?,?,?)').bind(x, nameX, barX, xImage, old, old),
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,?,?)').bind(y, nameY, barY, old, old),
   ])
@@ -440,8 +441,8 @@ async function pair(H, { shape, xImage = '/uploads/al-x.jpg', xStock = 0 } = {})
 async function existingForCreate(H) {
   const n = ++seq, id = 300 + n * 2
   const name = 'AL Create ' + n, clean = '88500' + String(id).padStart(8, '0')
-  await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')")
-    .bind(id, name, '00' + clean).run()
+  await executeRawStockTransaction(H.db, [H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')")
+    .bind(id, name, '00' + clean)])
   return { id, name, clean }
 }
 
@@ -562,7 +563,7 @@ async function main() {
     // this PUT. The 12 Oct check judged a null keeper cover and refused it (and only after writing the identity).
     await check('I-T1-keeper-cover', 'T1: an editor without image permission folds X (cover only) into Y (has a cover): no image changes, so the fold runs', 'high', async (t) => {
       const s = await pair(H, { shape: 'both' })
-      await H.db.prepare('UPDATE products SET image_path=? WHERE id=?').bind('/uploads/al-y.jpg', s.y).run()
+      await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE products SET image_path=? WHERE id=?').bind('/uploads/al-y.jpg', s.y)])
       const r = await H.api('PUT', '/api/products/' + s.x, { name: s.nameY, barcode: s.barY }, { as: 'editor' })
       await H.settle()
       t.eq('HTTP status', r.status, 200)
@@ -576,7 +577,7 @@ async function main() {
     // T2. X carries gallery rows: the fold would remove them from X, which is an image change whatever Y's cover is.
     await check('I-T2-gallery', 'T2: an editor without image permission, X has gallery rows and Y has a cover: 403 and nothing changed', 'high', async (t) => {
       const s = await pair(H, { shape: 'both' })
-      await H.db.batch([
+      await executeRawStockTransaction(H.db, [
         H.db.prepare('UPDATE products SET image_path=? WHERE id=?').bind('/uploads/al-y.jpg', s.y),
         H.db.prepare('INSERT INTO product_images(product_id,image_path,sort_order) VALUES(?,?,0)').bind(s.x, '/uploads/al-x.jpg'),
         H.db.prepare('INSERT INTO product_images(product_id,image_path,sort_order) VALUES(?,?,1)').bind(s.x, '/uploads/al-x-2.jpg'),
@@ -724,7 +725,7 @@ async function main() {
     // tier the plain edit path uses), and its approval refused like the bare identity move above.
     await check('I-T5-edit-whole-form', 'T5: a Review-Required whole-form identity edit (prices differ from the survivor) is queued (202), and its approval is refused (409)', 'high', async (t) => {
       const s = await pair(H, { shape: 'both', xImage: null })
-      await H.db.prepare('UPDATE products SET selling_price_usd=5, wholesale_price_usd=4 WHERE id=?').bind(s.y).run()
+      await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE products SET selling_price_usd=5, wholesale_price_usd=4 WHERE id=?').bind(s.y)])
       const before = await snap(H, s)
       const queued = await H.api('PUT', '/api/products/' + s.x, { name: s.nameY, barcode: s.barY, selling_price_usd: 0, selling_price_khr: 0,
         wholesale_price_usd: 0, wholesale_price_khr: 0, description: 'AL whole form ' + s.x }, { as: 'reviewtier' })
@@ -808,7 +809,7 @@ async function main() {
       // Y and a pre-existing twin T share one identity; a whole-form save of Y (same name and barcode) moves nothing.
       const twinId = s.y + 100000
       const y = await H.q1('SELECT name, barcode FROM products WHERE id=?', s.y)
-      await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2,0,0,1,'2026-01-01 00:00:00','2026-01-01 00:00:00')").bind(twinId, y.name, y.barcode).run()
+      await executeRawStockTransaction(H.db, [H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2,0,0,1,'2026-01-01 00:00:00','2026-01-01 00:00:00')").bind(twinId, y.name, y.barcode)])
       const wholeForm = await H.api('PUT', '/api/products/' + s.y, { name: y.name, barcode: y.barcode, description: 'AL approved edit' }, { as: 'reviewtier' })
       t.eq('whole-form edit queued', wholeForm.status, 202)
       const wholeApproved = await approve(wholeForm.body.pendingActionId)

@@ -1,4 +1,5 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // D1b: the Stock-In Invoice report -- proven against the REAL migrations
 // (0070 applies on top of the full chain) and the REAL writers
 // (productBatches.receiveBatchStock, stockActionCommit.applyUnifiedStockAdd
@@ -86,7 +87,10 @@ function freshDb() {
       }
     },
     batch(statements) {
-      const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params ?? {})))
+      const run = sqlite.transaction(() => statements.map(({ sql, params }) => {
+        const result = sqlite.prepare(sql).run(params ?? {})
+        return { success: true, results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+      }))
       return Promise.resolve(run())
     },
   }
@@ -146,7 +150,7 @@ const GROUPS_SQL = (where) => `
   // --- 2. receiveBatchStock stamps the receiving branch --------------------
   {
     const { sqlite, db } = freshDb()
-    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (101, 'Serum', 1)`).run()
+    seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (101, 'Serum', 1)`).run())
     await productBatches.receiveBatchStock(db, { productId: 101, branchId: 1, quantity: 10, receivedDate: '2026-08-20' })
     let row = sqlite.prepare('SELECT received_branch_id, received_quantity FROM product_batches').get()
     assert.strictEqual(row.received_branch_id, 1, 'a new lot records the branch it arrived at')
@@ -158,7 +162,7 @@ const GROUPS_SQL = (where) => `
     assert.strictEqual(row.received_branch_id, 1, 'first branch attribution sticks on top-ups')
     assert.strictEqual(row.received_quantity, 15, 'received_quantity still accumulates (0067 unchanged)')
     // A lot that predates 0070 (NULL branch) is FILLED by its next receipt.
-    sqlite.prepare('UPDATE product_batches SET received_branch_id = NULL').run()
+    seedStockFixture(sqlite, () => sqlite.prepare('UPDATE product_batches SET received_branch_id = NULL').run())
     await productBatches.receiveBatchStock(db, { productId: 101, branchId: 2, quantity: 1, receivedDate: '2026-08-20' })
     row = sqlite.prepare('SELECT received_branch_id FROM product_batches').get()
     assert.strictEqual(row.received_branch_id, 2, 'a NULL branch (pre-0070 lot) is filled, not left unknown forever')
@@ -168,7 +172,7 @@ const GROUPS_SQL = (where) => `
   // --- 3. the import add writer stamps it too ------------------------------
   {
     const { sqlite, db } = freshDb()
-    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run()
+    seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run())
     // Supplier + cost are on every row because N14-D's receipt gate now runs
     // on this wire too (test-stock-receipt-gate-pure.cjs owns that rule).
     const input = {
@@ -184,7 +188,7 @@ const GROUPS_SQL = (where) => `
     assert.strictEqual(retry.alreadyApplied, true)
     // A later add landing on the SAME lot from another branch fills only
     // where NULL -- simulate a pre-0070 lot, then top it up from branch 1.
-    sqlite.prepare('UPDATE product_batches SET received_branch_id = NULL').run()
+    seedStockFixture(sqlite, () => sqlite.prepare('UPDATE product_batches SET received_branch_id = NULL').run())
     await stockActionCommit.applyUnifiedStockAdd(db, { ...input, rowNumber: 3, branchId: 1, branchName: 'Shop' })
     row = sqlite.prepare('SELECT received_branch_id FROM product_batches').get()
     assert.strictEqual(row.received_branch_id, 1, 'NULL branch adopts the next add; a recorded one would have stuck')
@@ -201,7 +205,7 @@ const GROUPS_SQL = (where) => `
   // old system's own two agreeing sources.
   {
     const { sqlite, db } = freshDb()
-    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run()
+    seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run())
     const base = {
       jobId: 'job-cost', productId: 10, productName: 'Serum',
       branchId: 2, branchName: 'Shop', date: '08/19/2026', batchLabel: '',
@@ -236,7 +240,7 @@ const GROUPS_SQL = (where) => `
 
     // The manual receive path (Inventory / Receive Stock) follows the same
     // rule -- one model, not two.
-    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (11, 'Toner', 1)`).run()
+    seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (11, 'Toner', 1)`).run())
     await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 2, receivedDate: '2026-08-20', unitCostUsd: 7 })
     await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 3, receivedDate: '2026-08-20', unitCostUsd: 11 })
     row = sqlite.prepare('SELECT COUNT(*) AS lots,SUM(received_quantity) AS qty, SUM(unit_cost_usd) AS unit, SUM(received_cost_usd) AS money FROM product_batches WHERE variant_product_id = 11').get()
@@ -285,28 +289,30 @@ const GROUPS_SQL = (where) => `
   // --- 4. the report itself -------------------------------------------------
   {
     const { sqlite } = freshDb()
-    sqlite.prepare(`INSERT INTO products (id, name, barcode, is_active) VALUES (101, 'Serum', 'S1', 1), (102, 'Toner', 'T1', 1)`).run()
-    sqlite.prepare(`INSERT INTO suppliers (id, name) VALUES (7, 'Srey Now'), (9, 'Bong Long')`).run()
-    const insert = sqlite.prepare(`
-      INSERT INTO product_batches (id, variant_product_id, batch_key, received_at, is_active, supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
-      VALUES (@id, @productId, @batchKey, @receivedAt, 1, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @receivedQuantity, @receivedBranchId, @receivedCostUsd)
-    `)
-    // Same supplier twice on one day: once by id, once by free-typed name
-    // (different case) -- the report must read them as ONE invoice.
-    insert.run({ id: 1, productId: 101, batchKey: 'K1', receivedAt: '2026-08-20', supplierId: 7, supplierName: 'Srey Now', unitCostUsd: 2.5, paymentStatus: 'paid', receivedQuantity: 10, receivedBranchId: 1, receivedCostUsd: 25 })
-    insert.run({ id: 2, productId: 102, batchKey: 'K2', receivedAt: '2026-08-20', supplierId: null, supplierName: 'srey now', unitCostUsd: 1, paymentStatus: null, receivedQuantity: 4, receivedBranchId: 1, receivedCostUsd: 4 })
-    // Credit purchase with no recorded cost.
-    insert.run({ id: 3, productId: 101, batchKey: 'K3', receivedAt: '2026-08-21', supplierId: 9, supplierName: 'Bong Long', unitCostUsd: null, paymentStatus: 'credit', receivedQuantity: 5, receivedBranchId: 2, receivedCostUsd: null })
-    // No supplier, no qty/cost, no branch (a catalog-import style lot).
-    insert.run({ id: 4, productId: 102, batchKey: 'K4', receivedAt: '2026-08-22', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
-    // Attributed lot with NO received date (the no-date group).
-    insert.run({ id: 5, productId: 101, batchKey: 'K5', receivedAt: null, supplierId: 7, supplierName: 'Srey Now', unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
-    // Empty catalog placeholder: unlike K4's unknown-provenance lot, this
-    // exact import:* + all-null shape is not a receipt and must stay out of
-    // the invoice report.
-    insert.run({ id: 6, productId: 102, batchKey: 'import:102:2026-08-23T00:00:00.000Z', receivedAt: '2026-08-23', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
-    // Remaining stock for line 1: split across branches, sums to 7.
-    sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 6), (1, 2, 1)`).run()
+    seedStockFixture(sqlite, () => {
+      sqlite.prepare(`INSERT INTO products (id, name, barcode, is_active) VALUES (101, 'Serum', 'S1', 1), (102, 'Toner', 'T1', 1)`).run()
+      sqlite.prepare(`INSERT INTO suppliers (id, name) VALUES (7, 'Srey Now'), (9, 'Bong Long')`).run()
+      const insert = sqlite.prepare(`
+        INSERT INTO product_batches (id, variant_product_id, batch_key, received_at, is_active, supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
+        VALUES (@id, @productId, @batchKey, @receivedAt, 1, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @receivedQuantity, @receivedBranchId, @receivedCostUsd)
+      `)
+      // Same supplier twice on one day: once by id, once by free-typed name
+      // (different case) -- the report must read them as ONE invoice.
+      insert.run({ id: 1, productId: 101, batchKey: 'K1', receivedAt: '2026-08-20', supplierId: 7, supplierName: 'Srey Now', unitCostUsd: 2.5, paymentStatus: 'paid', receivedQuantity: 10, receivedBranchId: 1, receivedCostUsd: 25 })
+      insert.run({ id: 2, productId: 102, batchKey: 'K2', receivedAt: '2026-08-20', supplierId: null, supplierName: 'srey now', unitCostUsd: 1, paymentStatus: null, receivedQuantity: 4, receivedBranchId: 1, receivedCostUsd: 4 })
+      // Credit purchase with no recorded cost.
+      insert.run({ id: 3, productId: 101, batchKey: 'K3', receivedAt: '2026-08-21', supplierId: 9, supplierName: 'Bong Long', unitCostUsd: null, paymentStatus: 'credit', receivedQuantity: 5, receivedBranchId: 2, receivedCostUsd: null })
+      // No supplier, no qty/cost, no branch (a catalog-import style lot).
+      insert.run({ id: 4, productId: 102, batchKey: 'K4', receivedAt: '2026-08-22', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
+      // Attributed lot with NO received date (the no-date group).
+      insert.run({ id: 5, productId: 101, batchKey: 'K5', receivedAt: null, supplierId: 7, supplierName: 'Srey Now', unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
+      // Empty catalog placeholder: unlike K4's unknown-provenance lot, this
+      // exact import:* + all-null shape is not a receipt and must stay out of
+      // the invoice report.
+      insert.run({ id: 6, productId: 102, batchKey: 'import:102:2026-08-23T00:00:00.000Z', receivedAt: '2026-08-23', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
+      // Remaining stock for line 1: split across branches, sums to 7.
+      sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 6), (1, 2, 1)`).run()
+    })
 
     const groups = sqlite.prepare(GROUPS_SQL('')).all()
     assert.strictEqual(groups.length, 4, 'four invoice groups: merged supplier day, credit day, none day, no-date')

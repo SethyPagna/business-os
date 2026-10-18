@@ -1,5 +1,6 @@
 'use strict'
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 const role = grants => ({ id: 21, username: 'staff', name: 'Staff', role_code: 'staff', role_permissions: JSON.stringify(grants), permissions: '{}' })
 const admin = { id: 7, username: 'admin', name: 'Admin', role_code: 'admin', permissions: JSON.stringify({ all: true }) }
@@ -11,10 +12,10 @@ function fixture(user) {
     h.setActionTier((...args) => real.getActionTier(...args))
   }
   h.setUser(user)
-  h.raw.db.exec(`DELETE FROM bulk_delete_jobs; DELETE FROM audit_logs; DELETE FROM product_cost_entries; DELETE FROM products; DELETE FROM branches;
+  seedStockFixture(h.raw.db, () => h.raw.db.exec(`DELETE FROM bulk_delete_jobs; DELETE FROM audit_logs; DELETE FROM product_cost_entries; DELETE FROM products; DELETE FROM branches;
     INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1);
     INSERT INTO products(id,name,barcode,selling_price_usd,stock_quantity,is_active) VALUES(1,'Gloss','8850000000011',5,0,1);
-    INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('job-1','products','processing','x','[1]',1);`)
+    INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('job-1','products','processing','x','[1]',1);`))
   return h
 }
 const cancelFlag = () => Number(h.raw.prepare("SELECT cancel_requested AS v FROM bulk_delete_jobs WHERE id='job-1'").get([]).v)

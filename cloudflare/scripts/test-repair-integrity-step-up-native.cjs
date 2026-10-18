@@ -11,6 +11,7 @@
 //
 // Run (from cloudflare/): node scripts/test-repair-integrity-step-up-native.cjs
 const fs = require('node:fs')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const path = require('node:path')
 const { randomBytes } = require('node:crypto')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
@@ -29,7 +30,7 @@ async function main() {
     await world.account('settings_only', { roleCode: 'repair_settings_only', permissions: { settings: true }, passwordHash: world.adminPasswordHash })
     await world.account('operator', { roleCode: 'repair_operator', permissions: { backup_restore: true }, passwordHash: world.adminPasswordHash })
 
-    await world.run("INSERT INTO products (name, stock_quantity, is_active) VALUES ('Repair drift', 7, 1)")
+    await executeRawStockTransaction(world.db, [world.db.prepare("INSERT INTO products (name, stock_quantity, is_active) VALUES ('Repair drift', 7, 1)")])
     const productId = (await world.first("SELECT id FROM products WHERE name = 'Repair drift'")).id
     const cached = async () => (await world.first('SELECT stock_quantity AS n FROM products WHERE id = ?', productId)).n
     const repairRows = async () => (await world.first("SELECT COUNT(*) AS n FROM audit_logs WHERE entity = 'data-integrity' AND action = 'repair'")).n

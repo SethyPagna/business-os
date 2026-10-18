@@ -23,6 +23,7 @@
 // never touch a file on disk and fail loudly if their anchor text is missing.
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -356,7 +357,7 @@ let seq = 0
 // A fresh product per case (unique ids) so cases never see each other's rows; global tables are filtered by product.
 async function seed(H, { a = 5, b = 5, extra = [] } = {}) {
   const n = ++seq, p = 100 + n, lotA = p * 10 + 1, lotB = p * 10 + 2
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(?,?,?,2,0,?,1)").bind(p, 'AL Serum ' + p, '88500' + String(p).padStart(8, '0'), a + b),
     H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, LC, a + b),
     H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,1,3,1)").bind(lotA, p, 'A' + p, 'A' + p, '2026-09-02'),
