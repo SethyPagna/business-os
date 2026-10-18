@@ -74,7 +74,11 @@ function loadModule(file, deps = {}) {
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(loaded.exports, load, loaded, file, path.dirname(file))
   return loaded.exports
 }
+const stockTransaction = loadModule(path.join(SRC, 'stockTransaction.ts'))
+const maintenance = loadModule(path.join(SRC, 'maintenance.ts'), { './stockTransaction': stockTransaction })
 const backup = loadModule(BACKUP_TS, {
+  './stockTransaction': stockTransaction,
+  './maintenance': maintenance,
   './r2': loadModule(path.join(SRC, 'r2.ts')),
   './planTier': loadModule(path.join(SRC, 'planTier.ts')),
   './backupRestoreStream': loadModule(path.join(SRC, 'backupRestoreStream.ts')),
@@ -253,6 +257,10 @@ function makeWorld() {
 function makeDb() {
   const sql = new DatabaseSync(':memory:')
   sql.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  sql.exec(`CREATE TABLE system_flags(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+    CREATE TABLE import_jobs(id INTEGER PRIMARY KEY, status TEXT, lease_expires_at TEXT);
+    CREATE TABLE bulk_delete_jobs(id INTEGER PRIMARY KEY, status TEXT);`)
+  sql.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('stock_schema_epoch', stockTransaction.STOCK_SCHEMA_EPOCH)
   sql.exec("INSERT INTO settings (key, value) VALUES ('business_name', 'Live name')")
   const statement = (text, params = []) => ({
     text,
@@ -282,6 +290,16 @@ function makeDb() {
         }
       },
     },
+  }
+}
+
+async function restoreOwned(world, key) {
+  const ownership = await maintenance.beginMaintenance(world.env, { backupKey: key, startedBy: 'asset restore fixture' })
+  try {
+    return await backup.restoreCloudflareBackup(world.env, key, undefined, ownership.token)
+  } finally {
+    assert.equal(world.db.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.equal(await maintenance.endMaintenance(world.env, ownership.token), true)
   }
 }
 
@@ -388,7 +406,7 @@ async function main() {
     const key = seedBackup(world, { name: 'business-os-cloudflare-fixtures', entries })
     const backupBefore = snapshot(world, 'backups/')
     const started = world.requests.length
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     const requests = world.requests.slice(started)
     const puts = requests.filter((request) => request.op === 'put')
     const folder = quarantineFolderOf(puts)
@@ -479,7 +497,7 @@ async function main() {
       { key: 'uploads/d.html', bytes: F.html() },
     ]
     const key = seedBackup(world, { name: 'business-os-cloudflare-sidecar', entries, lifecycle: { copiedKeys: ['uploads/a.jpg', 'uploads/b.pdf'] } })
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     const folder = quarantineFolderOf(world.requests.filter((request) => request.op === 'put'))
     expect('the sidecar\'s copies are handled: the photo back, the PDF quarantined', () => {
       assert.equal(sha(world.objects.get('uploads/a.jpg').bytes), sha(entries[0].bytes))
@@ -511,7 +529,7 @@ async function main() {
     ]
     const key = seedBackup(world, { name: 'business-os-cloudflare-faults', entries })
     world.hooks.failPut = (target) => target === 'uploads/write-fails.jpg' || (target.startsWith('quarantine/') && target.endsWith('uploads/quarantine-fails.pdf'))
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     const folder = quarantineFolderOf(world.requests.filter((request) => request.op === 'put' && request.key.endsWith('uploads/doc.pdf')))
     expect('a copy that is gone, and a photo whose write failed, are missingAssets', () => assert.deepEqual([...(result.missingAssets || [])].sort(), ['uploads/gone.jpg', 'uploads/write-fails.jpg']))
     expect('the others are unaffected', () => {
@@ -548,7 +566,7 @@ async function main() {
     const liveBefore = snapshot(world, 'uploads/')
     const key = seedBackup(world, { name: 'business-os-cloudflare-live', entries })
     const started = world.requests.length
-    await backup.restoreCloudflareBackup(world.env, key)
+    await restoreOwned(world, key)
     const touched = world.requests.slice(started).filter((request) => request.op === 'put' || request.op === 'delete').map((request) => request.key)
     expect('a photo is put back as it was in the backup (the restore rolls back)', () => {
       assert.equal(sha(world.objects.get('uploads/photo.jpg').bytes), sha(oldPhoto))
@@ -586,7 +604,7 @@ async function main() {
     ]
     const key = seedBackup(world, { name: 'business-os-cloudflare-large', entries })
     const started = world.requests.length
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     const requests = world.requests.slice(started)
     const folder = quarantineFolderOf(requests.filter((request) => request.op === 'put'))
     const copyOf = (entry) => `${assetsFolderOf('business-os-cloudflare-large')}${entry.key.replace(/^uploads\//, '')}`
@@ -643,7 +661,7 @@ async function main() {
         world.store(copyKey, page, storedMetadataOf('uploads/long.mp4'))
       }
     }
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     expect('the copy was replaced during the restore', () => assert.equal(swapped, true))
     expect('the web page is never written under uploads/', () => {
       assert.ok(!world.requests.some((request) => request.op === 'put' && request.key === 'uploads/long.mp4'))
@@ -682,7 +700,7 @@ async function main() {
       if (request.key === copyOf('huge.pdf') && n === 2) return { at: 5 * CHUNK, mode: 'error' }
       return null
     }
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     expect('no partial file is written anywhere', () => {
       for (const entry of entries.slice(0, 5)) {
         if (entry.key === 'uploads/live.jpg') continue
@@ -725,7 +743,7 @@ async function main() {
       const name = `business-os-cloudflare-crafted-${index}`
       const key = seedBackup(world, { name, entries: [], copied: [copiedKey], assetsPrefix })
       const started = world.requests.length
-      const result = await backup.restoreCloudflareBackup(world.env, key)
+      const result = await restoreOwned(world, key)
       const requests = world.requests.slice(started)
       const label = `folder ${assetsPrefix}`
       expect(`${label}: nothing read outside the backup documents`, () => {
@@ -757,7 +775,7 @@ async function main() {
     const key = seedBackup(world, { name, entries: [{ key: 'uploads/real.jpg', bytes: photo }], copied: [...crafted, 42, null, 'uploads/real.jpg'] })
     const documentBefore = sha(world.objects.get(key).bytes)
     const started = world.requests.length
-    const result = await backup.restoreCloudflareBackup(world.env, key)
+    const result = await restoreOwned(world, key)
     const requests = world.requests.slice(started)
     expect('only the uploads/ key is read and written', () => {
       assert.deepEqual(requests.filter((r) => r.op === 'put' || r.op === 'delete').map((r) => r.key), ['uploads/real.jpg'])
@@ -793,7 +811,7 @@ async function main() {
     expect('the backup copied every file', () => assert.equal(created.summary.assetsBackedUp, live.length))
     for (const [liveKey] of live) world.objects.delete(liveKey)
     const started = world.requests.length
-    const result = await backup.restoreCloudflareBackup(world.env, created.key)
+    const result = await restoreOwned(world, created.key)
     const folder = quarantineFolderOf(world.requests.slice(started).filter((request) => request.op === 'put'))
     for (const [liveKey, bytes, , restoredType] of live) {
       if (restoredType) {
