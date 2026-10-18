@@ -6,6 +6,10 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import PendingReviewSync from '../shared/PendingReviewSync.tsx'
 import PendingReviewTag from '../shared/PendingReviewTag.tsx'
+import { productCost } from '../../utils/costDisplay.ts'
+import { useApp } from '../../app/AppContextCore.tsx'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
@@ -58,8 +62,11 @@ export function scopedProductQuantity(product: InventoryProductRow, branchFilter
 
 export function groupInventoryProducts(items: InventoryProductRow[]) {
   const effective = items.map((item) => ({ ...item, cost_price_usd: inventoryCost(item, 'usd'), cost_price_khr: inventoryCost(item, 'khr') }))
+  const reviewIds = new Set(items.filter((item) => item.cost_needs_review === true).map((item) => Number(item.id)))
   return buildProductGroups(effective, new Map(effective.map((item) => [Number(item.id), item])), { preserveInputOrder: true })
-    .map((group) => ({ ...group, label: group.name, items: group.items as InventoryProductRow[], rows: group.rows as InventoryProductRow[] }))
+    .map((group) => ({ ...group, label: group.name, items: group.items as InventoryProductRow[], rows: group.rows.map((row) => ({
+      ...row, cost_needs_review: row.__mergedProductIds.some((id) => reviewIds.has(id)),
+    })) as InventoryProductRow[] }))
 }
 
 export function inventoryMoney(value: unknown): number | null {
@@ -82,9 +89,7 @@ export function mergedInventoryMetric(product: InventoryProductRow, items: Inven
 }
 
 export function inventoryCost(product: InventoryProductRow, currency: 'usd' | 'khr'): number | null {
-  if (product.__mergedRowCount > 1) return inventoryMoney(product[`cost_price_${currency}`])
-  const purchase = inventoryMoney(product[`purchase_price_${currency}`])
-  return purchase ? purchase : inventoryMoney(product[`cost_price_${currency}`]) ?? purchase
+  return productCost(product, currency)
 }
 
 /** Value uses each real row's branch quantity/cost, never the merged display cost. */
@@ -126,6 +131,8 @@ export default function InventoryProductsSurface({
   onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, onAdjust, fmtUSD, fmtKHR,
   serverStats, statsLoading, statsError, t, active = true,
 }: Props) {
+  const { user } = useApp() as { user: PermissionUser }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   // P10-6: the cost float opens for whichever row's cost cell was clicked --
@@ -176,7 +183,7 @@ export default function InventoryProductsSurface({
   // P10-6: the same money() cell, but clickable -- opens the cost
   // calculation float. Stops propagation so it never also triggers the
   // row's own onOpenDetail.
-  const costCell = (product: InventoryProductRow) => (
+  const costCell = (product: InventoryProductRow) => canViewCosts ? (
     <button
       type="button"
       className="block w-full cursor-pointer decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
@@ -184,8 +191,9 @@ export default function InventoryProductsSurface({
       onClick={(event) => { event.stopPropagation(); setCostFloatProduct({ id: product.id as number | string, name: String(product.name || '') }) }}
     >
       {money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}
+      {product.cost_needs_review === true ? <span className="block text-right text-[11px] text-amber-700 dark:text-amber-400">{t('merge_cost_needs_review') || 'Cost needs review'}</span> : null}
     </button>
-  )
+  ) : <span className="block text-right">—</span>
   const priceTone = 'text-green-700 dark:text-green-400'
   const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
     .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
@@ -324,7 +332,7 @@ export default function InventoryProductsSurface({
       <div className="flex justify-center">
         <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={total} label={t('products') || 'products'} t={t} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />
       </div>
-      {costFloatProduct ? (
+      {canViewCosts && costFloatProduct ? (
         <CostCalculationFloat
           productId={costFloatProduct.id}
           productName={costFloatProduct.name}

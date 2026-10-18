@@ -251,6 +251,8 @@ function loadSurface(code = surfaceSource, tagApiCode?: string): Record<string, 
     if (id.includes('PendingReviewTag')) return tagApi
     if (id.includes('PendingReviewSync')) return { default: () => null, __esModule: true }
     if (id.includes('productGrouping')) return require('../src/utils/productGrouping.ts')
+    if (id.includes('costDisplay')) return require('../src/utils/costDisplay.ts')
+    if (id.includes('acquisitionCostAccess')) return require('../src/utils/acquisitionCostAccess.ts')
     return undefined
   })
 }

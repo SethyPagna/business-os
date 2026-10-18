@@ -16,6 +16,11 @@ export function isKnownCost(value: unknown): boolean {
   return knownCost(value) !== null
 }
 
+export function productCost(product: Record<string, unknown>, currency: 'usd' | 'khr'): number | null {
+  const canonical = product[`cost_price_${currency}`]
+  return knownCost(canonical !== undefined ? canonical : product[`purchase_price_${currency}`])
+}
+
 function fill(template: string, count: number): string {
   return template.replace('{count}', String(count))
 }

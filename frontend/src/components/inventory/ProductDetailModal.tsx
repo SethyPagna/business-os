@@ -25,6 +25,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { branchStockLinesWorthShowing } from '../../utils/branchScope.ts'
+import { productCost } from '../../utils/costDisplay.ts'
 
 // Loaded when the float is opened. The field history is a rare read behind a
 // permission tier; imported statically it joins this page's startup closure
@@ -149,19 +150,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   }, [lotReadKey])
   if (!p) return null
 
-  const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
-  const costPriceKhr = Number(p.purchase_price_khr || 0)
+  const costPriceUsd = productCost(p, 'usd')
+  const costPriceKhr = productCost(p, 'khr')
   const sellingPriceUsd = Number(p.selling_price_usd || 0)
   const sellingPriceKhr = Number(p.selling_price_khr || 0)
   const wholesalePriceUsd = Number(p.wholesale_price_usd || 0)
   const wholesalePriceKhr = Number(p.wholesale_price_khr || 0)
-  // The special_price_* ("VIP") tier is deleted by the 2026-09-04 ruling, so
-  // there is no longer a second tier that can override the shelf price here.
-  // "Active price" is therefore simply the selling price: wholesale is a tier
-  // the cashier picks per line at the POS, never the default price of a
-  // product, so it must not silently replace the selling price on this panel
-  // the way the old special price did.
-  const activePriceUsd = sellingPriceUsd
   const stockQuantity = Number(p.stock_quantity || 0)
   // Settings > Stock Alerts. This read used to fall back to 0 where every
   // other surface fell back to 10, so a product with no limit of its own was
@@ -177,9 +171,9 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       ? 'text-yellow-600'
       : 'text-green-600'
   const profit = Math.max(0, p.revenue_usd || 0) - Math.max(0, p.cogs_usd || 0)
-  const stockValueUsd = Math.max(0, stockQuantity) * costPriceUsd
-  const marginUsd = Math.max(0, activePriceUsd - costPriceUsd)
-  const marginPct = costPriceUsd > 0 ? ((marginUsd / costPriceUsd) * 100) : 0
+  const stockValueUsd = stockQuantity <= 0 ? 0 : costPriceUsd === null ? null : stockQuantity * costPriceUsd
+  const marginUsd = costPriceUsd === null || sellingPriceUsd <= 0 ? null : sellingPriceUsd - costPriceUsd
+  const marginPct = marginUsd === null ? null : (marginUsd / sellingPriceUsd) * 100
   // One active branch: its chip and the Branches tile would only repeat the
   // product quantity, so they go (branchScope.ts).
   const allBranchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
@@ -290,10 +284,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           </div>
 
           <div className="space-y-3">
-            {/* Fixed at two columns now that the third tile (the "Special
-                Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
-                grid used to widen to three whenever that tier had a value. */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="cost-wholesale">
+            <div className={`grid ${canViewCosts ? 'grid-cols-2' : 'grid-cols-1'} gap-2 sm:gap-3`} data-detail-price-row="cost-wholesale">
               {canViewCosts ? <button
                 type="button"
                 onClick={() => setCostFloatOpen(true)}
@@ -301,8 +292,9 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 title={T('cost_breakdown_title', 'Calculated cost price')}
               >
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
-                <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
-                {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
+                <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300">{costPriceUsd === null ? '—' : fmtUSD(costPriceUsd)}</div>
+                {costPriceKhr !== null ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
+                {p.cost_needs_review === true ? <div className="mt-1 text-xs font-normal text-amber-700 dark:text-amber-400">{T('merge_cost_needs_review', 'Cost needs review')}</div> : null}
               </button> : null}
               <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
                 <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
@@ -310,7 +302,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 {wholesalePriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(wholesalePriceKhr)}</div> : null}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="selling-margin">
+            <div className={`grid ${canViewCosts ? 'grid-cols-2' : 'grid-cols-1'} gap-2 sm:gap-3`} data-detail-price-row="selling-margin">
               <div className="rounded-xl bg-green-50 p-3 dark:bg-green-900/20">
                 <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling price')}</div>
                 <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
@@ -318,19 +310,17 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               </div>
               {canViewCosts ? <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
                 <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
-                <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                  {fmtUSD(marginUsd)}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
+                <div className={`text-sm font-semibold tabular-nums ${marginUsd !== null && marginUsd < 0 ? 'text-yellow-600' : 'text-blue-600 dark:text-blue-400'}`}>
+                  {marginUsd === null ? '—' : <>{fmtUSD(marginUsd)}<span className="ml-1 text-xs font-normal text-gray-400">{marginPct?.toFixed(1)}%</span></>}
                 </div>
               </div> : null}
             </div>
-            <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
+            <div className="flex flex-wrap gap-1.5 text-center sm:gap-2">
               {[
-                ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
-                { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-                ...(canViewCosts ? [{ label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }] : []),
+                ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: stockValueUsd === null ? '—' : fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
                 ...(branchesCollapsed ? [] : [{ label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' }]),
               ].map((item) => (
-                <div key={item.label} className={`${item.bg} rounded-xl px-2.5 py-2`}>
+                <div key={item.label} className={`${item.bg} min-w-0 flex-1 rounded-xl px-2.5 py-2`}>
                   <div className={`text-xs font-bold ${item.tone}`}>{item.value}</div>
                   <div className="mt-0.5 text-[10px] text-gray-500">{item.label}</div>
                 </div>
@@ -350,7 +340,6 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               // Brand + barcode now live in the header row next to the
               // category/unit line -- kept out of this list to avoid
               // showing them twice.
-              { label: T('label_sku', 'SKU'), value: p.sku },
               // Supplier is the one row here that is a copyable product
               // field; SKU is an identifier and description is prose.
               { label: T('label_supplier', 'Supplier'), value: p.supplier, copyable: true },
