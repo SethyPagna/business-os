@@ -13,6 +13,9 @@ const { createHash } = require('node:crypto')
 const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
+const { shiftClock } = require('./shift-clock-fixture.cjs')
+const clock = shiftClock()
+const Date = clock.Date
 
 const root = path.resolve(__dirname, '..')
 const ORIGIN = 'https://admin.shift-figures-formula.example'
@@ -20,7 +23,7 @@ const MIN = 60_000
 const stored = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 
 async function main() {
-  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: "import worker from './src/index.ts'; export default worker" },
+  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: clock.entry }, banner: { js: clock.prelude },
     bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:workers'], logLevel: 'silent' })
   const outbound = []
   const telegramSent = []
@@ -37,14 +40,20 @@ async function main() {
       return new Response('refused', { status: 503 })
     }, log: new Log(LogLevel.ERROR) })
   try {
-    const db = await mf.getD1Database('DB')
+    const rawDb = await mf.getD1Database('DB')
     for (const name of fs.readdirSync(path.join(root, 'migrations')).filter((file) => file.endsWith('.sql')).sort()) {
       for (const statement of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
         if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
-        await db.prepare(statement).run()
+        await rawDb.prepare(statement).run()
       }
     }
+    const db = clock.database(rawDb)
     const first = (sql, ...values) => db.prepare(sql).bind(...values).first()
+    const clockState = await (await mf.dispatchFetch(`${ORIGIN}/__fixture_clock`)).json()
+    assert.ok(Math.abs(clockState.now - Date.now()) < 1000, 'Worker and host use one advancing clock')
+    assert.equal(clockState.sql.business_date, '2026-10-18')
+    assert.equal((await first("SELECT date('now', '+7 hours') AS day")).day, clockState.sql.business_date)
+    assert.ok(Math.abs(Date.parse(clockState.sql.now.replace(' ', 'T') + 'Z') - Date.now()) < 2000)
     const roleId = async (code, permissions) => {
       await db.prepare('INSERT OR IGNORE INTO roles(code,name,permissions) VALUES(?,?,?)').bind(code, code, permissions).run()
       return (await first('SELECT id FROM roles WHERE code=?', code)).id
