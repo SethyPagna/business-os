@@ -1,13 +1,12 @@
 // CUTOVER-LC residual gap: the grouped return action (cancel / restore, with its undo and redo) for a return that was
 // recorded at a branch that has since been retired (Shop -> "Old Shop", successor "LC Store").
 //
-// Real returnBulkAction / branchEffect kernels against migrated SQLite and the raw D1 binding shape. An ORACLE is the same
-// kernel as it stood at b2b57f90b, run on the same fixtures: while both branches are active the new kernel writes
-// equal business statements apart from verified admission and ledgers (inert), and on the post-consolidation fixture the old kernel strands the units in
-// the retired branch (so the fixture tells the fix from the defect).
+// Historical SQL comparisons pin complete source and schema trees; current behavior uses every current migration.
+// The historical defect control must fail to route retired stock, without bypassing current stock admission.
 //
 // Run (from cloudflare/): node scripts/test-return-bulk-retired-branch-pure.cjs
 
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { legacyCostSql } = require('./harness/legacy_cost_sql.cjs')
 const { execFileSync } = require('node:child_process')
@@ -39,16 +38,22 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 
 const root = path.join(__dirname, '..')
-const ORACLE_SHA = 'b2b57f90b'
-const oracleSource = execFileSync('git', ['show', `${ORACLE_SHA}:cloudflare/src/lib/returnBulkAction.ts`], { cwd: path.join(root, '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+const ORACLE_SHA = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
+const FIX_SHA = '6114fc0e0235526e66777a270aea4cc336cd3df2'
+const archiveBytes = new Map()
+function gitText(ref, file) {
+  const key = ref + ':' + file
+  if (!archiveBytes.has(key)) archiveBytes.set(key, execFileSync('git', ['show', key], { cwd: path.join(root, '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
+  return archiveBytes.get(key)
+}
 
-function makeLoader(overrides) {
+function makeLoader(ref = null) {
   const cache = new Map()
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const mod = { exports: {} }
     cache.set(rel, mod)
-    const source = overrides[rel] ?? fs.readFileSync(path.join(root, 'src', rel), 'utf8')
+    const source = ref ? gitText(ref, 'cloudflare/src/' + rel) : fs.readFileSync(path.join(root, 'src', rel), 'utf8')
     const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     const req = (name) => {
       if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {} }
@@ -61,24 +66,28 @@ function makeLoader(overrides) {
   }
   return load
 }
-const fresh = makeLoader({})('lib/returnBulkAction.ts')
-const old = makeLoader({ 'lib/returnBulkAction.ts': oracleSource })('lib/returnBulkAction.ts')
+const fresh = makeLoader()('lib/returnBulkAction.ts')
+const old = makeLoader(ORACLE_SHA)('lib/returnBulkAction.ts')
+const fixed = makeLoader(FIX_SHA)('lib/returnBulkAction.ts')
 
 const admin = { id: 1, username: 'admin', role_code: 'admin', permissions: JSON.stringify({ all: true }) }
 const tables = ['returns', 'return_items', 'return_item_batch_allocations', 'sales', 'sale_items', 'products', 'product_batches', 'branch_stock',
   'branch_batch_stock', 'damaged_stock_lots', 'inventory_movements', 'undo_snapshots', 'action_history', 'return_bulk_operations',
   'return_bulk_members', 'return_bulk_guards', 'return_write_revisions', 'sale_write_revisions', 'audit_logs', 'sale_record_events']
 
-let migratedTemplate = null
-function migratedDb() {
-  if (!migratedTemplate) {
+const migratedTemplates = new Map()
+function migratedDb(ref = null) {
+  if (!migratedTemplates.has(ref)) {
     const seed = new Database(':memory:')
     seed.pragma('foreign_keys = OFF')
-    for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) seed.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
-    migratedTemplate = seed.serialize()
+    const files = ref
+      ? execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'cloudflare/migrations'], { cwd: path.join(root, '..'), encoding: 'utf8' }).trim().split(/\r?\n/).filter(name => name.endsWith('.sql')).sort()
+      : fs.readdirSync(path.join(root, 'migrations')).filter(name => name.endsWith('.sql')).sort()
+    for (const file of files) seed.exec(ref ? gitText(ref, file) : fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+    migratedTemplates.set(ref, seed.serialize())
     seed.close()
   }
-  const sql = new Database(migratedTemplate)
+  const sql = new Database(migratedTemplates.get(ref))
   sql.pragma('foreign_keys = OFF')
   return sql
 }
@@ -88,8 +97,9 @@ function migratedDb() {
 //   before  both branches active, NULL roles; lot 3 holds the 2 units at Shop
 //   after   consolidated: LC Store holds lot 1 with everything, Old Shop is empty and retired with successor LC Store
 //   orphan  as after, but Old Shop has no successor
-function fixture(state, { damaged = false } = {}) {
-  const sql = migratedDb()
+function fixture(state, { damaged = false, ref = null } = {}) {
+  const sql = migratedDb(ref)
+  const seed = fn => ref ? fn() : seedStockFixture(sql, fn)
   let batches = 0
   const capture = []
   const env = { DB: {
@@ -111,37 +121,39 @@ function fixture(state, { damaged = false } = {}) {
       }))()
     },
   } }
-  sql.exec('DELETE FROM branches')
-  if (state === 'before') {
-    sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Warehouse',1,0),(2,'Shop',1,1)")
-  } else {
-    sql.exec("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(1,'LC Store','shop','warehouse',1,1)")
-    sql.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default,successor_branch_id) VALUES(2,'Old Shop','shop','shop',0,0,?)").run(state === 'orphan' ? null : 1)
-  }
-  sql.exec(`INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',${state === 'before' ? 16 : 16});
-    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(1,1,'lot-a','LOT-A','2026-01-01',1,1),(3,1,'lot-c','LOT-C','2026-01-01',1,3);`)
-  if (state === 'before') {
-    sql.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,16); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,2,10),(3,2,6)')
-  } else {
-    sql.exec(`INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,16),(1,2,0);
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,16),(3,1,0),(1,2,0),(3,2,0)`)
-    sql.prepare("INSERT INTO audit_logs(user_name,action,entity,entity_id,details) VALUES('op','branch_cutover_lot_fold','product_batch','1',?)")
-      .run(JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 1, foldedBatchIds: [3], branchId: 1 }))
-  }
-  sql.exec(`INSERT INTO sales(id,receipt_number,sale_status,status_before_return,branch_id,branch_name,money_precision_version,calculated_total_usd,rounding_adjustment_usd,total_usd,updated_at)
-      VALUES(1,'SALE-OLD','partial_return','completed',2,'Shop',1,30,0,30,'sale-1');
-    INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,total_usd) VALUES(101,1,1,'A',5,2,10,50);`)
-  const snapshot = JSON.stringify({ version: 1, sale_id: 1, sale_item_id: 101, line_key: 'line-101', pool_key: 'sale-pool', source_sale_revision: 0,
-    source_pricing_snapshot_digest: 'a'.repeat(64), sold_quantity: 5, return_quantity: 2, returned_quantity_before: 0, returned_quantity_after: 2,
-    receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: 20 }, net_entitlement_usd: 20,
-    calculated_refund_before_usd: 0, calculated_refund_after_usd: 20, calculated_refund_usd: 20, calculated_refund_khr: 80000, exchange_rate: 4000,
-    sale_product_entitlement_usd: 50, sale_product_payout_cap_usd: 50 })
-  sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,branch_name,updated_at,money_precision_version,calculated_refund_usd,rounding_adjustment_usd,total_refund_usd,total_refund_khr)
-    VALUES(10,'RET-10',1,'customer','completed','refund',2,'Shop','return-10',0,NULL,0,20,80000)`).run()
-  sql.prepare(`INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,applied_price_usd,applied_price_khr,stock_action,return_to_stock,branch_id,batch_id,refund_snapshot_json)
-    VALUES(10,10,101,1,'A',2,20,80000,10,40000,?,?,2,3,?)`).run(damaged ? 'damaged' : 'restock', damaged ? 0 : 1, snapshot)
-  sql.prepare('INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity) VALUES(10,3,2,2)').run()
-  return { sql, env, capture, batches: () => batches }
+  seed(() => {
+    sql.exec('DELETE FROM branches')
+    if (state === 'before') {
+      sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Warehouse',1,0),(2,'Shop',1,1)")
+    } else {
+      sql.exec("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(1,'LC Store','shop','warehouse',1,1)")
+      sql.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default,successor_branch_id) VALUES(2,'Old Shop','shop','shop',0,0,?)").run(state === 'orphan' ? null : 1)
+    }
+    sql.exec(`INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',${state === 'before' ? 16 : 16});
+      INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(1,1,'lot-a','LOT-A','2026-01-01',1,1),(3,1,'lot-c','LOT-C','2026-01-01',1,3);`)
+    if (state === 'before') {
+      sql.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,16); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,2,10),(3,2,6)')
+    } else {
+      sql.exec(`INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,16),(1,2,0);
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,16),(3,1,0),(1,2,0),(3,2,0)`)
+      sql.prepare("INSERT INTO audit_logs(user_name,action,entity,entity_id,details) VALUES('op','branch_cutover_lot_fold','product_batch','1',?)")
+        .run(JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 1, foldedBatchIds: [3], branchId: 1 }))
+    }
+    sql.exec(`INSERT INTO sales(id,receipt_number,sale_status,status_before_return,branch_id,branch_name,money_precision_version,calculated_total_usd,rounding_adjustment_usd,total_usd,updated_at)
+        VALUES(1,'SALE-OLD','partial_return','completed',2,'Shop',1,30,0,30,'sale-1');
+      INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,total_usd) VALUES(101,1,1,'A',5,2,10,50);`)
+    const snapshot = JSON.stringify({ version: 1, sale_id: 1, sale_item_id: 101, line_key: 'line-101', pool_key: 'sale-pool', source_sale_revision: 0,
+      source_pricing_snapshot_digest: 'a'.repeat(64), sold_quantity: 5, return_quantity: 2, returned_quantity_before: 0, returned_quantity_after: 2,
+      receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: 20 }, net_entitlement_usd: 20,
+      calculated_refund_before_usd: 0, calculated_refund_after_usd: 20, calculated_refund_usd: 20, calculated_refund_khr: 80000, exchange_rate: 4000,
+      sale_product_entitlement_usd: 50, sale_product_payout_cap_usd: 50 })
+    sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,branch_name,updated_at,money_precision_version,calculated_refund_usd,rounding_adjustment_usd,total_refund_usd,total_refund_khr)
+      VALUES(10,'RET-10',1,'customer','completed','refund',2,'Shop','return-10',0,NULL,0,20,80000)`).run()
+    sql.prepare(`INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,applied_price_usd,applied_price_khr,stock_action,return_to_stock,branch_id,batch_id,refund_snapshot_json)
+      VALUES(10,10,101,1,'A',2,20,80000,10,40000,?,?,2,3,?)`).run(damaged ? 'damaged' : 'restock', damaged ? 0 : 1, snapshot)
+    sql.prepare('INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity) VALUES(10,3,2,2)').run()
+  })
+  return { sql, env, capture, seed, batches: () => batches }
 }
 
 const request = (f, source, target, key) => ({ client_request_id: key, field: 'status', source, target,
@@ -158,11 +170,7 @@ const stockOf = (f) => ({
 const state = (f) => JSON.stringify(tables.map((table) => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 const scrub = (text) => legacyCostSql(text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>'))
   .replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>').replace(/-\d{12,}/g, '<id>')
-// The ONE deliberate difference from the oracle (6.0.134): the sale-status derivation also counts the units a sales import
-// recorded as already returned (sale_items.returned_quantity), as the single return path does. On a sale with none (every
-// fixture here) it changes no row, so the INERT check compares the statements with exactly those two terms taken out of the
-// new kernel's -- and requires that they were there to take out, so a status statement that lost them still fails.
-// test-returns-bulk-imported-status-native.cjs pins what the terms do.
+// Current sale-status derivation must retain both imported returned-quantity terms (test-returns-bulk-imported-status-native.cjs).
 const IMPORTED_RETURNED_TERMS = [
   /(?:\\n|\s)*AND NOT EXISTS\(SELECT 1 FROM sale_items si WHERE si\.sale_id=[^ ]+ AND MAX\(COALESCE\(si\.returned_quantity, 0\), 0\) > 0\)/g,
   /(?:\\n|\s)*\+ MAX\(COALESCE\(si\.returned_quantity, 0\), 0\)/g,
@@ -194,15 +202,32 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
 
 ;(async () => {
   await check('CONTROL: the code before this change cannot cancel an old Shop return at all (it asks the empty retired branch for the units)', async () => {
-    const f = fixture('after')
+    const f = fixture('after', { ref: ORACLE_SHA })
     const before = state(f)
     await assert.rejects(old.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'old-cancel')), (error) => error instanceof old.ReturnBulkError && error.statusCode === 409)
     assert.equal(state(f), before)
-    const stocked = fixture('after')
+    const stocked = fixture('after', { ref: ORACLE_SHA })
     stocked.sql.exec('UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=3 AND branch_id=2; UPDATE branch_stock SET quantity=2 WHERE product_id=1 AND branch_id=2')
     const outcome = await old.applyReturnBulkActionOutcome(stocked.env, admin, request(stocked, 'completed', 'cancelled', 'old-cancel-2'))
     assert.equal(outcome.wrote, true)
     assert.equal(stockOf(stocked).lot1AtStore, 16, 'when the retired branch happens to hold stock the old code drains it instead of LC Store')
+  })
+
+  await check('OLD unadmitted business writes refuse on current full schema without changing state', async () => {
+    const f = fixture('before')
+    const before = state(f)
+    await assert.rejects(old.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'old-current')), /stock_transaction_required/)
+    assert.equal(state(f), before)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
+
+  await check('current bulk permission refusal preserves the full ledger', async () => {
+    const f = fixture('after')
+    const before = state(f)
+    const denied = { id: 2, username: 'reader', role_code: 'staff', permissions: '{}' }
+    await assert.rejects(fresh.applyReturnBulkActionOutcome(f.env, denied, request(f, 'completed', 'cancelled', 'denied'), 1), error => error instanceof fresh.ReturnBulkError && error.statusCode === 403)
+    assert.equal(state(f), before)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   })
 
   await check('cancel / undo / redo / restore of an old Shop return move the units at LC Store in the merged lot', async () => {
@@ -244,14 +269,14 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     const orphan = fixture('orphan')
     const askedOrphan = await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_redirect_required')
     assert.equal(askedOrphan.extra.redirect.successor_branch_id, null, 'no successor: asked with no default')
-    orphan.sql.exec("UPDATE branches SET is_active=0 WHERE id=1")
+    orphan.seed(() => orphan.sql.exec("UPDATE branches SET is_active=0 WHERE id=1"))
     await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_retired_no_successor', 1)
     const damaged = fixture('after', { damaged: true })
     await refused(fresh, damaged, request(damaged, 'completed', 'cancelled', 'damaged-1'), 409, 'branch_retired_damaged_stock', 1)
   })
 
   await check('F4 a held unit the cutover moved to LC Store: cancelling and restoring the old Shop damaged return succeeds and lands at LC Store; a held unit still at Old Shop keeps refusing', async () => {
-    const lotAt = (f, branch) => f.sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,quantity,quantity_remaining,reason) VALUES(1,1,'A',?,10,2,2,'damaged')").run(branch)
+    const lotAt = (f, branch) => f.seed(() => f.sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,quantity,quantity_remaining,reason) VALUES(1,1,'A',?,10,2,2,'damaged')").run(branch))
     const stillThere = fixture('after', { damaged: true }); lotAt(stillThere, 2)
     await refused(fresh, stillThere, request(stillThere, 'completed', 'cancelled', 'held-old'), 409, 'branch_retired_damaged_stock', 1)
     assert.equal(stillThere.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q, 2, 'nothing written')
@@ -276,15 +301,21 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
         return kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'cancelled', 'completed', 'inert-restore'))
       }],
     ]) {
-      const a = fixture('before'); const b = fixture('before')
-      await run(fresh, a); await run(old, b)
-      const statementsA = withoutImportedReturnedTerms(scrub(JSON.stringify(withoutProductAdmission(a.capture)))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
+      const a = fixture('before', { ref: FIX_SHA }); const b = fixture('before', { ref: ORACLE_SHA })
+      await run(fixed, a); await run(old, b)
+      const statementsA = scrub(JSON.stringify(withoutProductAdmission(a.capture))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
       let at = 0
       while (at < statementsA.length && statementsA[at] === statementsB[at]) at++
       assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)
       assert.equal(scrub(state(a)), scrub(state(b)), `${name}: identical ledgers`)
       assert.equal(a.sql.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL').get().n, 0, `${name}: no provenance label while both branches are active`)
       assert.equal(stockOf(a).lot3AtOld, name.startsWith('cancel') && !name.includes('restore') ? 4 : 6, `${name}: stock moves at the return's own branch and lot`)
+      const current = fixture('before')
+      await run(fresh, current)
+      withoutImportedReturnedTerms(scrub(JSON.stringify(withoutProductAdmission(current.capture))))
+      assert.deepEqual(stockOf(current), stockOf(a), name + ': current full-schema active-branch stock remains identical')
+      assert.deepEqual(movements(current), movements(a), name + ': current movement values and provenance remain identical')
+      assert.equal(current.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     }
   })
 
