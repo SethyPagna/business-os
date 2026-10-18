@@ -28,6 +28,14 @@ const { unstable_splitSqlQuery: split } = require('wrangler')
 
 const root = path.resolve(__dirname, '..')
 
+async function stockKernel() {
+  const bundle = await build({ stdin: { contents: "export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
+  const mod = { exports: {} }
+  new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
+  return mod.exports
+}
+
 async function workerBundle() {
   return build({ stdin: { contents: `import { Hono } from 'hono'; import returns from './src/routes/returns';
       const app=new Hono(); app.route('/api/returns',returns); export default app;`, resolveDir: root, loader: 'ts' },
@@ -64,6 +72,7 @@ async function migrate(db) {
 }
 
 async function main() {
+  const stockAdmission = await stockKernel()
   const bundle = await workerBundle()
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'],
     compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
@@ -71,7 +80,7 @@ async function main() {
     const db = await mf.getD1Database('DB')
     await migrate(db)
     // Lot L1 received 10, sold 2 (8 on hand), one legacy sale line of 2.
-    await db.batch([
+    await stockAdmission.executeRawStockTransaction(db, [
       "INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)",
       "INSERT INTO products(id,name,is_active,stock_quantity,cost_price_usd,selling_price_usd) VALUES(1,'Serum',1,8,2,5)",
       `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,received_quantity)
@@ -84,6 +93,11 @@ async function main() {
         VALUES(1,1,1,'Serum',2,1,5,10,2,1)`,
       'INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(1,1,1,2,0)',
     ].map(sql => db.prepare(sql)))
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await stockState()
+    await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), beforeRawMutation, 'ordinary unadmitted stock writes remain refused without changing any ledger or flag')
 
     const headers = { 'content-type': 'application/json', 'x-test-permissions': JSON.stringify({ all: true }) }
     const send = async (method, url, body) => {

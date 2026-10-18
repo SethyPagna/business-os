@@ -83,6 +83,14 @@ export default {
   },
 }`
 
+async function stockKernel() {
+  const bundle = await build({ stdin: { contents: "export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
+  const mod = { exports: {} }
+  new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
+  return mod.exports
+}
+
 async function workerBundle() {
   return build({ stdin: { contents: `import { Hono } from 'hono'; import returns from './src/routes/returns';
       const app=new Hono(); app.route('/api/returns',returns);${COUNTING_ENTRY}`, resolveDir: root, loader: 'ts' },
@@ -117,6 +125,7 @@ async function migrate(db) {
 }
 
 async function main() {
+  const stockAdmission = await stockKernel()
   const bundle = await workerBundle()
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], kvNamespaces: ['CACHE'],
     compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
@@ -125,7 +134,7 @@ async function main() {
     await migrate(db)
     // Two products, one lot each: 10 received, 2 sold (8 on hand). One legacy
     // (v0) sale of 2 + 2 at $5.
-    await db.batch([
+    await stockAdmission.executeRawStockTransaction(db, [
       "INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)",
       "INSERT INTO users(id,username,name,password,is_active) VALUES(7,'fixture','Fixture','x',1)",
       "INSERT INTO products(id,name,is_active,stock_quantity,cost_price_usd,selling_price_usd) VALUES(1,'Serum',1,8,2,5),(2,'Toner',1,8,2,5)",
@@ -139,6 +148,11 @@ async function main() {
         VALUES(1,1,1,'Serum',2,1,5,10,2,1),(2,1,2,'Toner',2,1,5,10,2,2)`,
       'INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(1,1,1,2,0),(2,2,1,2,0)',
     ].map(sql => db.prepare(sql)))
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await stockState()
+    await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), beforeRawMutation, 'ordinary unadmitted stock writes remain refused without changing any ledger or flag')
 
     const send = async (method, url, body, plan = 'free') => {
       const response = await mf.dispatchFetch(`http://local${url}`, { method, body: JSON.stringify(body), headers: {
