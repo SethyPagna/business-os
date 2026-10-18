@@ -61,7 +61,11 @@ function load(relPath, stubs = {}) {
 // backup.ts's runtime imports are ./r2 and ./backupRestoreStream; the writer
 // touches neither, so they are inert stubs here (test-backup-pure.cjs
 // exercises the real ones).
+const stockTransaction = load('lib/stockTransaction.ts')
+const maintenance = load('lib/maintenance.ts', { './stockTransaction': stockTransaction })
 const { R2StreamWriter, R2_PART_BYTES } = load('lib/backup.ts', {
+  './stockTransaction': stockTransaction,
+  './maintenance': maintenance,
   './customTableName': load('lib/customTableName.ts'),
   './r2': {},
   './backupRestoreStream': {},
