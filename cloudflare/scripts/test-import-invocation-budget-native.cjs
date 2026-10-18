@@ -257,7 +257,15 @@ async function seedProducts(H, n, { lots = 2, perLot = 50, cost = 2 } = {}) {
     }
     out.push({ p, name, barcode })
   }
-  for (let i = 0; i < stmts.length; i += 500) await H.db.batch(stmts.slice(i, i + 500))
+  assert.equal((await H.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+  for (let i = 0; i < stmts.length; i += 500) {
+    await H.db.batch([
+      H.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+      ...stmts.slice(i, i + 500),
+      H.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+    ])
+    assert.equal((await H.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+  }
   return out
 }
 
