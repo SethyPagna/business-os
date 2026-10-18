@@ -13,12 +13,14 @@ const { unstable_splitSqlQuery: split } = require('wrangler')
 const root = process.env.LOYALTY_SCOPE_BASELINE || path.resolve(__dirname, '..')
 const script = `
 import worker from './src/index.ts';
+import { executeRawStockTransaction } from './src/lib/stockTransaction.ts';
 let active=[],wrapped;
 const note=(sql,r)=>active.push({sql,rows:r.results?.length||0,meta:r.meta});
 function statement(sql,s){return {inner:s,sql,bind(...v){return statement(sql,s.bind(...v))},async all(){const r=await s.all();note(sql,r);return r},async run(){const r=await s.run();note(sql,r);return r},async first(c){const r=await this.all();return c?r.results[0]?.[c]??null:r.results[0]??null}}}
 export default {async fetch(request,env,ctx){
 const input=await request.json();
 if(input.op==='seed'){for(const s of input.statements){try{await env.DB.prepare(s.sql).bind(...(s.params||[])).run()}catch(e){return Response.json({error:String(e),sql:s.sql})}}return Response.json({ok:true})}
+if(input.op==='seedStock'){try{await executeRawStockTransaction(env.DB,input.statements.map(s=>env.DB.prepare(s.sql).bind(...(s.params||[]))));return Response.json({ok:true})}catch(error){return Response.json({error:String(error)})}}
 if(input.op==='read')return Response.json((await env.DB.prepare(input.sql).all()).results);
 if(!wrapped)wrapped={prepare:sql=>statement(sql,env.DB.prepare(sql)),async batch(items){const r=await env.DB.batch(items.map(x=>x.inner));r.forEach((v,i)=>note(items[i].sql,v));return r}};
 active=[];const pending=[],started=Date.now();const saved=globalThis.caches;globalThis.caches=undefined;
@@ -36,6 +38,15 @@ async function main() {
     const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], kvNamespaces: ['CACHE'], bindings: { PLAN_TIER: tier, BUSINESS_OS_ADMIN_URL: 'https://admin.scope.example' }, log: new Log(LogLevel.ERROR) })
     const call = async input => (await mf.dispatchFetch('http://local/', { method: 'POST', body: JSON.stringify(input) })).json()
     const seed = async statements => { const r = await call({ op: 'seed', statements }); assert.equal(r.ok, true, JSON.stringify(r)) }
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,await call({op:'read',sql:'SELECT * FROM '+table+' ORDER BY rowid'})])))
+    const seedStock = async statements => {
+      const result = await call({op:'seedStock',statements}); assert.equal(result.ok,true,JSON.stringify(result))
+      assert.deepEqual(await call({op:'read',sql:"SELECT value FROM system_flags WHERE key='stock_transaction_permit'"}),[],'synthetic stock seed releases its permit')
+      const before = await stockState()
+      const refused = await call({op:'seed',statements:[{sql:'UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=10'}]})
+      assert.match(refused.error,/stock_transaction_required/,'ordinary SQL still requires stock admission')
+      assert.deepEqual(await stockState(),before,'refused raw mutation preserves every stock row and system flag')
+    }
     try {
       const migrations = []
       for (const name of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
@@ -54,6 +65,8 @@ async function main() {
         // S1 earns 10 x 1.5 = 15. S2 is a migrated old-system receipt (loyalty_accrual = 0): it earns nothing.
         { sql: "INSERT INTO sales(id,receipt_number,customer_id,total_usd,total_khr,sale_status,loyalty_accrual) VALUES(7001,'NA-EARNED',9902,10,40000,'completed',1),(7002,'NA-HISTORICAL',9902,90,360000,'completed',0)" },
         { sql: "INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Synthetic shop','shop',1,1)" },
+    ])
+    await seedStock([
         { sql: "INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(10,'Powder','NA-PRODUCT',10,9.5,38000,4,16000,1)" },
         { sql: 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)' },
         { sql: "INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number) VALUES(500,10,'na-lot','NA-LOT','2027-06-01','2026-09-01',1,1)" },
