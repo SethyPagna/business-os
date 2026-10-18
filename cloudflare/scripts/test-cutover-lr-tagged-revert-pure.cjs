@@ -14,28 +14,29 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const inventory = (world) => world.load('routes/inventory.ts').default
 const OLD_SHOP_ZERO = [{ t: 'branch_batch_stock', k: 500, quantity: 0 }, { t: 'branch_stock', k: 10, quantity: 0 }]
 
 function withHeldLot(db, branchId) {
-  db.prepare(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,reason,condition_tag,source,unit_cost_usd)
-    VALUES(900,10,'Powder',?,500,3,3,'dropped','broken','remove',4)`).run([branchId])
+  W.seed(db, () => db.prepare(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,reason,condition_tag,source,unit_cost_usd)
+    VALUES(900,10,'Powder',?,500,3,3,'dropped','broken','remove',4)`).run([branchId]))
   return db
 }
 // A Shop-era receipt of 4 into lot 500 (recorded before the cutover, its units since moved to LC Store).
 function withShopReceipt(db) {
-  db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
-    VALUES(4000,10,'Powder',2,'Shop','add',4,4,16,'delivery',71,'Owner',500)`).run()
+  W.seed(db, () => db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
+    VALUES(4000,10,'Powder',2,'Shop','add',4,4,16,'delivery',71,'Owner',500)`).run())
   return db
 }
 const tagged = (extra = {}) => ({ productId: 10, branchId: 2, conditionTag: 'broken', quantity: 2, reason: 'checked', ...extra })
 
 async function main() {
-  await W.check('before: restore, dispose and revert write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('historical BEFORE/AFTER: restore, dispose and revert write byte-identical statements to the eb5dd0ba3 oracle', async () => {
     for (const [url, body, setup] of [['/tagged-lots/restore', tagged(), (db) => withHeldLot(db, 2)], ['/tagged-lots/dispose', tagged(), (db) => withHeldLot(db, 2)], ['/movements/4000/revert', {}, withShopReceipt]]) {
-      const dbNew = setup(W.build('before')); const dbOld = setup(W.build('before'))
+      const dbNew = setup(archivedAfter.build('before')); const dbOld = setup(oracle.build('before'))
       const capNew = []; const capOld = []
-      const a = await W.call(inventory(fresh), dbNew, 'POST', url, body, { capture: capNew, redirect: 1 })
+      const a = await W.call(inventory(archivedAfter), dbNew, 'POST', url, body, { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', url, body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), url)
@@ -45,8 +46,8 @@ async function main() {
   })
 
   await W.check('control: the oracle restores held units into the disabled branch and reverts a Shop receipt there', async () => {
-    const db = withShopReceipt(withHeldLot(W.build('after'), 2))
-    db.exec('UPDATE branch_stock SET quantity=4 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=4 WHERE branch_id=2 AND batch_id=500')
+    const db = withShopReceipt(withHeldLot(oracle.build('after'), 2))
+    W.seed(db, () => db.exec('UPDATE branch_stock SET quantity=4 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=4 WHERE branch_id=2 AND batch_id=500'))
     assert.equal((await W.call(inventory(oracle), db, 'POST', '/tagged-lots/restore', tagged())).status, 200)
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 10, 2), 6, 'sellable stock appeared at Old Shop')
   })
@@ -94,7 +95,7 @@ async function main() {
 
   await W.check('after: a Shop row that cannot be reverted keeps its own refusal (no redirect question first)', async () => {
     const db = W.build('after')
-    db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,reason) VALUES(4001,10,'Powder',2,'Shop','transfer_out',-1,'x')`).run()
+    W.seed(db, () => db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,reason) VALUES(4001,10,'Powder',2,'Shop','transfer_out',-1,'x')`).run())
     const res = await W.call(inventory(fresh), db, 'POST', '/movements/4001/revert', {})
     assert.equal(res.status, 400)
     assert.notEqual(res.body.code, 'branch_redirect_required')
@@ -103,10 +104,10 @@ async function main() {
   for (const [label, url, body, setup] of [['restore', '/tagged-lots/restore', tagged(), (db) => withHeldLot(db, 2)], ['revert', '/movements/4000/revert', {}, withShopReceipt]]) {
     await W.check(`race: ${label}: the target disabled between plan and commit aborts the batch, nothing written`, async () => {
       const db = setup(W.build('after'))
-      db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+      W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
       const before = W.ledger(db)
-      const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', url, body, 1)
-      db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+      const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', url, body, 1)
+      W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
       assert.equal(res.status, 409, JSON.stringify(res.body))
       assert.equal(res.body.code, 'branch_redirect_target_invalid')
       assert.equal(W.ledger(db), before)

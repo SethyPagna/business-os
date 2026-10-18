@@ -31,29 +31,30 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const inventory = (world) => world.load('routes/inventory.ts').default
 
 function withShopLine(db, state) {
-  db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,supplier_id,supplier_name,received_quantity,received_cost_usd,received_branch_id)
-    VALUES(701,20,'2026-08-20','CREAM-S','2026-08-20',1,2,3,5,'Acme',3,9,2)`).run()
+  W.seed(db, () => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,supplier_id,supplier_name,received_quantity,received_cost_usd,received_branch_id)
+    VALUES(701,20,'2026-08-20','CREAM-S','2026-08-20',1,2,3,5,'Acme',3,9,2)`).run())
   const at = state === 'before' ? 2 : 1
-  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(701,?,3)').run([at])
-  if (state === 'before') db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(20,2,3)').run()
-  else db.prepare('UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=20 AND branch_id=1').run()
-  db.prepare('UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=20').run()
-  db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
-    VALUES(4000,20,'Cream',2,'Shop','add',3,3,9,'delivery',71,'Owner',701)`).run()
+  W.seed(db, () => db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(701,?,3)').run([at]))
+  if (state === 'before') W.seed(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(20,2,3)').run())
+  else W.seed(db, () => db.prepare('UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=20 AND branch_id=1').run())
+  W.seed(db, () => db.prepare('UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=20').run())
+  W.seed(db, () => db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
+    VALUES(4000,20,'Cream',2,'Shop','add',3,3,9,'delivery',71,'Owner',701)`).run())
   return db
 }
 const revision = (db) => Number(db.prepare("SELECT COALESCE(MAX(revision),0) r FROM stock_session_revisions WHERE entity_type='batch' AND entity_key='701'").get()?.r ?? 0)
 const edit = (db, key, extra) => ({ client_request_id: key, quantity: 5, expected_quantity: 3, expected_batch_id: 701, expected_batch_revision: revision(db), reason: 'recount', ...extra })
 
 async function main() {
-  await W.check('before: a quantity edit and a cost edit write equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
+  await W.check('historical BEFORE/AFTER: a quantity edit and a cost edit write equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
     for (const extra of [{}, { quantity: 3, unit_cost_usd: 3.5 }, { quantity: 1 }]) {
-      const dbNew = withShopLine(W.build('before'), 'before'); const dbOld = withShopLine(W.build('before'), 'before')
+      const dbNew = withShopLine(archivedAfter.build('before'), 'before'); const dbOld = withShopLine(oracle.build('before'), 'before')
       const capNew = []; const capOld = []
-      const a = await W.call(inventory(fresh), dbNew, 'POST', '/stock-in-lines/4000/edit', edit(dbNew, 'edit-before-0001', extra), { capture: capNew, redirect: 1 })
+      const a = await W.call(inventory(archivedAfter), dbNew, 'POST', '/stock-in-lines/4000/edit', edit(dbNew, 'edit-before-0001', extra), { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', '/stock-in-lines/4000/edit', edit(dbOld, 'edit-before-0001', extra), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b))
@@ -63,7 +64,7 @@ async function main() {
   })
 
   await W.check('control: the oracle adds the edited units into the disabled branch', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = withShopLine(oracle.build('after'), 'after')
     const old = await W.call(inventory(oracle), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-oracle-0001'))
     assert.equal(old.status, 200, JSON.stringify(old.body))
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 20, 2), 2, 'two units appeared at Old Shop')
@@ -102,10 +103,10 @@ async function main() {
 
   await W.check('race: the target disabled between plan and commit aborts the edit, nothing written', async () => {
     const db = withShopLine(W.build('after'), 'after')
-    db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+    W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
     const before = W.ledger(db)
-    const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-race-0001'), 1)
-    db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+    const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-race-0001'), 1)
+    W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
     assert.equal(res.status, 409, JSON.stringify(res.body))
     assert.equal(res.body.code, 'branch_redirect_target_invalid')
     assert.equal(W.ledger(db), before)

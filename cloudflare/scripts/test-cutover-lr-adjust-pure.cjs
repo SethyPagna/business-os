@@ -15,6 +15,7 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const inventory = (world) => world.load('routes/inventory.ts').default
 const fastStockIn = (world) => world.load('routes/stockInCommit.ts').default
 
@@ -24,21 +25,59 @@ const scopedSet = (branchId, extra = {}) => ({ productId: 10, branchId, type: 's
 
 
 async function main() {
-  await W.check('before: every adjust kind preserves business statements and ledgers with atomic receipts to the eb5dd0ba3 oracle', async () => {
+  await W.check('old raw adjust refuses current protected schema without stock effects or a permit', async () => {
+    const db = W.build('before')
+    const before = W.ledger(db)
+    const raw = W.binding(db)
+    let refusal = null
+    const denied = { ...raw, async batch(statements) {
+      try { return await raw.batch(statements) }
+      catch (error) { refusal = String(error); throw error }
+    } }
+    const result = await W.callWith(inventory(oracle), denied, 'POST', '/adjust', remove(2, { quantity: 1 }), null)
+    assert.ok(result.status >= 400, JSON.stringify(result.body))
+    assert.match(refusal || JSON.stringify(result.body), /stock_transaction_required/)
+    assert.equal(W.ledger(db), before)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
+
+  await W.check('historical BEFORE/AFTER: every adjust kind preserves business statements and ledgers with atomic receipts to the eb5dd0ba3 oracle', async () => {
     // The explicit-lot remove has its own check below: AL-STOCK A changed its statements on purpose.
     const bodies = [
       add(2), remove(2), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
       scopedSet(2, { quantity: 4 }), remove(2, { quantity: 1, conditionTag: 'broken' }), add(1, { productId: 20 }),
     ]
     for (const body of bodies) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = archivedAfter.build('before'); const dbOld = oracle.build('before')
       const capNew = []; const capOld = []
-      const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
+      const a = await W.call(inventory(archivedAfter), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', '/adjust', body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised({ status: a.status, body: a.body }), W.normalised({ status: b.status, body: b.body }), `${JSON.stringify(body)}: same answer`)
       assert.ok(capNew.length > 0)
       W.assertComposedWrites(capNew, capOld, dbNew)
+      assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${JSON.stringify(body)}: same ledgers`)
+    }
+  })
+
+  await W.check('current adjust routes keep receipt, movement, guards and cost in the stock transaction', async () => {
+    // The explicit-lot remove has its own check below: AL-STOCK A changed its statements on purpose.
+    const bodies = [
+      add(2), remove(2), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
+      scopedSet(2, { quantity: 4 }), remove(2, { quantity: 1, conditionTag: 'broken' }), add(1, { productId: 20 }),
+    ]
+    for (const body of bodies) {
+      const dbNew = W.build('before')
+      const capNew = []
+      const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
+      assert.equal(a.status, 200, JSON.stringify(a.body))
+      assert.ok(capNew.length > 0)
+      const receipts = dbNew.prepare('SELECT written,completed_at,response_status FROM stock_mutation_receipts').all()
+      assert.equal(receipts.length, 1)
+      assert.deepEqual([receipts[0].written, receipts[0].response_status], [1, 200])
+      assert.ok(receipts[0].completed_at)
+      if (body.type === 'add' && body.unitCostUsd != null) assert.ok(capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)), 'priced intake records derived catalog cost')
+      W.assertComposedWrites(capNew, capNew, dbNew)
       if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
         for (const [label, pattern] of [
           ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1|DO UPDATE SET written=excluded\.written/],
@@ -47,20 +86,20 @@ async function main() {
           ['missing business guard', /INSERT INTO stock_session_guards/],
         ]) {
           const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
-          assert.throws(() => W.assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+          assert.throws(() => W.assertComposedWrites(mutant, capNew, dbNew), undefined, label)
         }
         const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
         separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
-        assert.throws(() => W.assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        assert.throws(() => W.assertComposedWrites(separated, capNew, dbNew), undefined, 'cost outside stock transaction')
         const movedGuard = capNew.map(rows => rows.slice())
         const stockIndex = movedGuard.findIndex(rows => rows.some(s => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
-        assert.match(movedGuard[stockIndex][0].sql.trim(), /^SELECT CASE/)
-        const [guard] = movedGuard[stockIndex].splice(0, 1)
-        movedGuard.splice(stockIndex, 0, [guard])
+        const guardIndex = movedGuard[stockIndex].findIndex(s => /^SELECT CASE/.test(s.sql.trim()))
+        assert.ok(guardIndex >= 0)
+        const prefix = movedGuard[stockIndex].splice(0, guardIndex + 1)
+        movedGuard.splice(stockIndex, 0, prefix)
         assert.deepEqual(movedGuard.flat(), capNew.flat(), 'moved-guard control preserves flattened business ordering')
-        assert.throws(() => W.assertComposedWrites(movedGuard, capOld, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
+        assert.throws(() => W.assertComposedWrites(movedGuard, capNew, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
       }
-      assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${JSON.stringify(body)}: same ledgers`)
     }
   })
 
@@ -68,15 +107,27 @@ async function main() {
   // lot, branch and product decrements in a batch of their own, the movement written after it -- so two concurrent
   // removals both answered 200 and a lost acknowledgement removed twice. The new statements differ on purpose; the
   // answer and the ledgers must not, and the whole effect is ONE transaction with guarded, unclamped decrements.
-  await W.check('before: the explicit-lot remove lands on the oracle answer and ledgers as one guarded, unclamped transaction', async () => {
+  await W.check('historical BEFORE/AFTER: the explicit-lot remove lands on the oracle answer and ledgers as one guarded, unclamped transaction', async () => {
     const body = remove(2, { batchId: 500 })
-    const dbNew = W.build('before'); const dbOld = W.build('before')
+    const dbNew = archivedAfter.build('before'); const dbOld = oracle.build('before')
     const capNew = []
-    const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
+    const a = await W.call(inventory(archivedAfter), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
     const b = await W.call(inventory(oracle), dbOld, 'POST', '/adjust', body)
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised({ status: a.status, body: a.body }), W.normalised({ status: b.status, body: b.body }), 'same answer')
     assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), 'same ledgers')
+
+  })
+
+  await W.check('current explicit-lot removal commits exact stock in one guarded, unclamped transaction', async () => {
+    const body = remove(2, { batchId: 500 })
+    const dbNew = W.build('before')
+    const capNew = []
+    const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
+    assert.equal(a.status, 200, JSON.stringify(a.body))
+    assert.equal(W.qty(dbNew, 'branch_stock', 'product_id', 10, 2), 7)
+    assert.equal(W.qty(dbNew, 'branch_batch_stock', 'batch_id', 500, 2), 7)
+    assert.equal(dbNew.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 12)
     const stockBatches = capNew.filter((rows) => rows.some((s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
     assert.equal(stockBatches.length, 1, 'one stock transaction')
     for (const [label, pattern] of [['lot guard', /allocation_guard/], ['branch guard', /branch_stock_guard/],
@@ -87,8 +138,8 @@ async function main() {
   })
 
   await W.check('control: on the post-cutover world the oracle writes a decrease into the disabled branch (the defect)', async () => {
-    const db = W.build('after')
-    db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500')
+    const db = oracle.build('after')
+    W.seed(db, () => db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500'))
     const old = await W.call(inventory(oracle), db, 'POST', '/adjust', remove(2, { quantity: 1 }))
     assert.equal(old.status, 200, 'the oracle accepted a removal at Old Shop')
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 10, 2), 2)
@@ -168,7 +219,7 @@ async function main() {
 
   await W.check('orphan: a disabled branch no active branch can take is refused branch_retired_no_successor', async () => {
     const db = W.build('orphan')
-    db.exec('UPDATE branches SET is_active=0 WHERE id=1')
+    W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))
     const before = W.ledger(db)
     const res = await W.call(inventory(fresh), db, 'POST', '/adjust', remove(2), { redirect: 1 })
     assert.deepEqual([res.status, res.body.code], [409, 'branch_retired_no_successor'])
@@ -178,10 +229,10 @@ async function main() {
   for (const [label, body] of [['auto FIFO remove', remove(2)], ['scoped lot Set', scopedSet(2)], ['tagged remove', remove(2, { quantity: 1, conditionTag: 'expired' })]]) {
     await W.check(`race: ${label}: the target disabled between plan and commit aborts the batch, nothing written`, async () => {
       const db = W.build('after')
-      db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+      W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
       const before = W.ledger(db)
-      const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/adjust', body, 1)
-      db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+      const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', '/adjust', body, 1)
+      W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
       assert.equal(res.status, 409, JSON.stringify(res.body))
       assert.equal(res.body.code, 'branch_redirect_target_invalid')
       assert.deepEqual(res.body.redirect.targets, [{ id: 3, name: 'Annex' }], 'the refusal offers the branches that are active now')

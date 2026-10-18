@@ -42,17 +42,18 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const inventory = (world) => world.load('routes/inventory.ts').default
 
 const line = (id, productId, branchId, extra = {}) => ({ line_id: id, kind: 'receive', product_id: productId, branch_id: branchId, quantity: 4, unit_cost_usd: 4, supplier_id: 5, supplier_name: 'Acme', received_date: '2026-10-03', ...extra })
 const session = (key, items) => ({ client_request_id: key, mode: 'stock_in', items })
 
 async function main() {
-  await W.check('before: a session preserves oracle business rows, receipts, history and undo snapshots across statement packing', async () => {
+  await W.check('historical BEFORE/AFTER: a session preserves oracle business rows, receipts, history and undo snapshots across statement packing', async () => {
     for (const body of [session('cutover-lr-session-before', [line('a', 10, 2), line('c', 20, 1)]), session('cutover-lr-session-before-2', [line('b', 10, 2, { batch_id: 500, supplier_name: null, supplier_id: null })])]) {
-    const dbNew = W.build('before'); const dbOld = W.build('before')
+    const dbNew = archivedAfter.build('before'); const dbOld = oracle.build('before')
     const capNew = []; const capOld = []
-    const a = await W.call(inventory(fresh), dbNew, 'POST', '/sessions', body, { capture: capNew, redirect: 1 })
+    const a = await W.call(inventory(archivedAfter), dbNew, 'POST', '/sessions', body, { capture: capNew, redirect: 1 })
     const b = await W.call(inventory(oracle), dbOld, 'POST', '/sessions', body, { capture: capOld })
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
@@ -91,10 +92,10 @@ async function main() {
 
   await W.check('race: the target disabled between plan and commit aborts the session, nothing written', async () => {
     const db = W.build('after')
-    db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+    W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
     const before = W.ledger(db)
-    const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/sessions', session('cutover-lr-session-race', [line('a', 10, 2)]), 1)
-    db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+    const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', '/sessions', session('cutover-lr-session-race', [line('a', 10, 2)]), 1)
+    W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
     assert.equal(res.status, 409, JSON.stringify(res.body))
     assert.equal(res.body.code, 'branch_redirect_target_invalid', JSON.stringify(res.body))
     assert.equal(W.ledger(db), before)
