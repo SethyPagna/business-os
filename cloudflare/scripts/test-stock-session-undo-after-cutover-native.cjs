@@ -21,6 +21,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const failures = []
 async function check(name, run) {
@@ -54,18 +55,25 @@ function cutoverTouchesBranchesAndLabels(f) {
 }
 // One consolidation transfer of product 1 from the retired branch (2) into the target (1).
 function cutoverMovesProduct(f) {
-  f.sql.exec(`
+  seedStockFixture(f.sql, () => f.sql.exec(`
     INSERT INTO action_history(id,scope,entity,entity_id,label,status,reversible,undo_payload,redo_payload,created_by_id,last_error)
       VALUES(9001,'branches','stock_transfer','move','Move','recorded',0,'{}','{}',7,'undo_closed:branch_cutover_move');
     INSERT INTO transfer_operation_receipts(id,actor_id,request_id,request_digest,request_json,status,operation_id,provenance_version,replay_state,generation,action_history_id)
       VALUES(9001,7,'bc_op_1','d','{}','committed','op-move',1,'applied',0,9001);
     INSERT INTO stock_transfers(product_id,product_name,from_branch_id,to_branch_id,quantity,receipt_id) VALUES(1,'Serum',2,1,4,9001);
-    UPDATE branch_stock SET quantity = quantity + 4 WHERE product_id=1 AND branch_id=1;`)
+    UPDATE branch_stock SET quantity = quantity + 4 WHERE product_id=1 AND branch_id=1;`))
 }
 const refusal = async (promise) => { try { await promise } catch (error) { return error }; assert.fail('expected a refusal') }
 
 async function main() {
   const api = loadStockSession()
+
+  await check('synthetic stock setup does not authorize later raw writes', () => {
+    const f = fixture()
+    assert.throws(() => f.sql.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id=1 AND branch_id=1').run(), /stock_transaction_required/)
+    assert.equal(qty(f), 0)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
 
   await check('untouched product: Undo and Redo succeed after the post-cutover branch and label state', async () => {
     const f = fixture()
@@ -111,7 +119,7 @@ async function main() {
     const f = fixture()
     const receipt = await recorded(f, api, 'e4-moved-out-001')
     cutoverTouchesBranchesAndLabels(f)
-    f.sql.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id=1 AND branch_id=1').run()
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id=1 AND branch_id=1').run())
     const error = await refusal(undo(f, api, receipt))
     assert.equal(error.statusCode, 409)
     assert.equal(error.code, 'revert_insufficient_branch_stock')
@@ -122,7 +130,7 @@ async function main() {
     const f = fixture()
     const receipt = await recorded(f, api, 'e4-plain-001')
     cutoverTouchesBranchesAndLabels(f)
-    f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run()
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run())
     const error = await refusal(undo(f, api, receipt))
     assert.equal(error.statusCode, 409)
     // REVERT-SET: a unit taken after the session leaves too few to reverse, which is now the named stock refusal.
@@ -143,7 +151,7 @@ async function main() {
     const f = fixture()
     const receipt = await recorded(f, api, 'e4-real-001')
     cutoverTouchesBranchesAndLabels(f)
-    f.sql.prepare('UPDATE product_batches SET unit_cost_usd = unit_cost_usd + 1').run()
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd = unit_cost_usd + 1').run())
     await refusal(undo(f, api, receipt))
     assert.equal(qty(f), 5)
   })
