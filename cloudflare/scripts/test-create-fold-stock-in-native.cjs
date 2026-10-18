@@ -23,6 +23,7 @@
 // never touch a file on disk and fail loudly if their anchor text is missing.
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -364,7 +365,7 @@ const NOW = '2026-01-01 00:00:00'
 async function existing(H, { stock = 3, lotCost = 2 } = {}) {
   const n = ++seq, id = 600 + n * 2
   const name = 'CF Serum ' + n, clean = '88600' + String(id).padStart(8, '0')
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,?,0,9,?,1,?,?)")
       .bind(id, name, '00' + clean, lotCost, stock, NOW, NOW),
     H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, LC, stock),
@@ -492,7 +493,7 @@ async function mainBody() {
 
     await check('F2c', 'the fold with no starting quantity: a typed $0 onto a twin with an unknown cost records a $0; a blank cost leaves it unknown (base: both ignored)', 'high', async (t) => {
       const e = await existing(H, { stock: 0, lotCost: 0 })
-      await H.db.batch([H.db.prepare('UPDATE products SET cost_price_usd=NULL, cost_price_khr=NULL WHERE id=?').bind(e.id)])
+      await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE products SET cost_price_usd=NULL, cost_price_khr=NULL WHERE id=?').bind(e.id)])
       const noQty = (extra) => ({ name: e.name, barcode: e.clean, client_request_id: requestId(), ...extra })
       await H.api('POST', '/api/products', noQty({}), { as: 'manager' })
       await H.settle()

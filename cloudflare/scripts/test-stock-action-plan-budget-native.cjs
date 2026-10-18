@@ -20,7 +20,7 @@ new Function('exports','require','module',native.transpile(queuePath))(queueModu
 
 async function measure(tier, units, shape = {}) {
   const {sqlite, db} = native.makeDb()
-  sqlite.exec(`CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT); CREATE TABLE import_job_row_signatures(job_id TEXT); CREATE TABLE quota_usage(resource TEXT,window_key TEXT,used INTEGER,updated_at TEXT,UNIQUE(resource,window_key)); CREATE TABLE cache_versions(namespace TEXT PRIMARY KEY,version INTEGER,updated_at TEXT); CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT); CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT); INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Administrator',1,1,'{}',1,NULL); ALTER TABLE import_jobs ADD COLUMN last_error TEXT;`)
+  sqlite.exec(`CREATE TABLE import_job_row_signatures(job_id TEXT); CREATE TABLE quota_usage(resource TEXT,window_key TEXT,used INTEGER,updated_at TEXT,UNIQUE(resource,window_key)); CREATE TABLE cache_versions(namespace TEXT PRIMARY KEY,version INTEGER,updated_at TEXT); CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT); CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT); INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Administrator',1,1,'{}',1,NULL); ALTER TABLE import_jobs ADD COLUMN last_error TEXT;`)
   if (!shape.create) native.seedProduct(sqlite,{id:50,name:'Budget',barcode:'B50',shop:shape.sale?units:0})
   if(shape.sale) native.seedBatch(sqlite,{id:1,productId:50,key:'source',lot:'source',received:'2026-01-01',qty:units})
   const rows = Array.from({length:units},(_,i)=>({_rowNumber:i+2,name:'Budget',barcode:'B50',shop:'1',warehouse:shape.twoBranches?'1':'',date:'2026-01-01',action:shape.sale?(shape.reconcileRefusal?'sale'+(i+1):'sale1'):shape.reconcile?'':'add',selling_price:shape.sale?'5':'',cost_price:'4',supplier:'Bong Long',batch:shape.sale?'':`B${i}`}))
@@ -30,7 +30,7 @@ async function measure(tier, units, shape = {}) {
   const instrument=adapter=>{
     const prepare=adapter.prepare.bind(adapter),batch=adapter.batch.bind(adapter)
     adapter.prepare=sql=>{const p=prepare(sql);const once=Object.fromEntries(['get','all','run'].map(method=>[method,async params=>{statements++;calls++;if(shape.finalizeFault&&!injected&&method==='run'&&/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(sql)){injected=true;throw new Error('Injected finalizer failure')}return p[method](params)}]));once.getOnce=once.get;once.allOnce=once.all;return once}
-    adapter.batch=async ss=>{statements+=ss.length;calls++;if(shape.finalizeFault&&!injected&&ss.some(s=>/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(s.sql))){injected=true;throw new Error('Injected finalizer failure')}const result=(await batch(ss)).map(r=>({meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}));if(shape.lostAck&&!injected&&ss.some(s=>/INSERT INTO inventory_movements/.test(s.sql))){injected=true;throw new Error('D1_ERROR: internal error lost acknowledgement')}return result}
+    adapter.batch=async ss=>{statements+=ss.length;calls++;if(shape.finalizeFault&&!injected&&ss.some(s=>/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(s.sql))){injected=true;throw new Error('Injected finalizer failure')}const result=await batch(ss);if(shape.lostAck&&!injected&&ss.some(s=>/INSERT INTO inventory_movements/.test(s.sql))){injected=true;throw new Error('D1_ERROR: internal error lost acknowledgement')}return result}
     adapter.batchOnce=adapter.batch
   }
   instrument(db)
@@ -52,6 +52,21 @@ async function measure(tier, units, shape = {}) {
   const resultsDb=separate?.sqlite||sqlite
   let firstSnapshot
   const physicalSnapshot=()=>JSON.stringify(['products','product_batches','branch_stock','branch_batch_stock','inventory_movements','sales','sale_items','sale_item_batch_allocations'].map(table=>sqlite.prepare(`SELECT * FROM ${table}`).all()))
+  if(shape.noFlag){
+    const before=physicalSnapshot()
+    await accounting.prepare('UPDATE import_jobs SET last_error = @error WHERE id = @id').run({error:'fence fallback probe',id:'budget'})
+    assert.strictEqual(sqlite.prepare("SELECT last_error FROM import_jobs WHERE id='budget'").get().last_error,'fence fallback probe')
+    await accounting.batch([{sql:"UPDATE import_jobs SET last_error = NULL WHERE id='budget'"}])
+    assert.strictEqual(sqlite.prepare("SELECT last_error FROM import_jobs WHERE id='budget'").get().last_error,null)
+    await assert.rejects(()=>native.loadReal('stockTransaction').executeStockTransaction(accounting,[
+      {sql:'UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=50'},
+    ],'once'),/no such table: system_flags/)
+    assert.strictEqual(physicalSnapshot(),before,'missing epoch refuses stock without changing any physical ledger')
+    sqlite.close()
+    separate?.sqlite.close()
+    console.log('PASS missing flags preserve ordinary fence fallback and refuse current stock writes')
+    return []
+  }
   if(shape.missingQueue){
     const checkpoint=sqlite.prepare('SELECT chunk_cursor,chunk_state_json FROM import_jobs').get()
     const before=physicalSnapshot();delete env.IMPORT_QUEUE
