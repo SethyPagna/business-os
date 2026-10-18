@@ -12,7 +12,7 @@
 // (the per-invocation assertion must go red there) and the uncut reference the cut runs are compared with.
 //
 // Heavy: several Miniflare worlds and ~1,500 receipts. Run alone, serially:
-//   NATIVE_TEST_TIMEOUT_MS=1500000 node scripts/test-import-invocation-budget-native.cjs
+//   node scripts/test-import-invocation-budget-native.cjs
 //   BUDGET_FULL=0 skips the 600-receipt cases (300 at most).
 //   BUDGET_CASES=sameday runs only the same-moment receipt numbering case ('sameday,budget' is the default).
 //   BUDGET_MUTANT=none runs the "uncut" world on the unmodified engine: against an engine without the budget the test
@@ -105,6 +105,15 @@ function record(entry) { control.invocations.push(entry); if (control.invocation
 
 async function handle(request, rawEnv, ctx) {
   const url = new URL(request.url)
+  if (url.pathname === '/__al/seed') {
+    const statements = await request.json()
+    await rawEnv.DB.batch([
+      rawEnv.DB.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+      ...statements.map(({ sql, values }) => rawEnv.DB.prepare(sql).bind(...values)),
+      rawEnv.DB.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+    ])
+    return Response.json({ success: true })
+  }
   if (url.pathname === '/__al/invocations') { const out = control.invocations; if (url.searchParams.get('clear')) control.invocations = []; return Response.json(out) }
   if (url.pathname === '/__al/fault') {
     const at = Number(url.searchParams.get('at'))
@@ -242,28 +251,28 @@ async function world({ plan, mutant }) {
 async function seedProducts(H, n, { lots = 2, perLot = 50, cost = 2 } = {}) {
   const out = []
   const stmts = []
+  const prepare = (sql) => ({ bind: (...values) => ({ sql, values }) })
   for (let i = 0; i < n; i++) {
     const p = ++H.nextProduct
     const name = `Budget Probe ${p}`
     const barcode = `8870${String(p).padStart(9, '0')}`
     const total = lots * perLot
-    stmts.push(H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,?,0,10,40000,?,1)').bind(p, name, barcode, cost, total))
-    stmts.push(H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, LC, total))
+    stmts.push(prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,?,0,10,40000,?,1)').bind(p, name, barcode, cost, total))
+    stmts.push(prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(p, LC, total))
     for (let l = 0; l < lots; l++) {
       const key = `BL${p}-${l + 1}`
-      stmts.push(H.db.prepare('INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,?,1)')
+      stmts.push(prepare('INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,?,1)')
         .bind(p, key, key, `2026-08-${String(l + 1).padStart(2, '0')}`, l + 1, cost))
-      stmts.push(H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,?,? FROM product_batches WHERE variant_product_id=? AND batch_key=?').bind(LC, perLot, p, key))
+      stmts.push(prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,?,? FROM product_batches WHERE variant_product_id=? AND batch_key=?').bind(LC, perLot, p, key))
     }
     out.push({ p, name, barcode })
   }
   assert.equal((await H.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
   for (let i = 0; i < stmts.length; i += 500) {
-    await H.db.batch([
-      H.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
-      ...stmts.slice(i, i + 500),
-      H.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
-    ])
+    const response = await H.mf.dispatchFetch('http://localhost/__al/seed', {
+      method: 'POST', body: JSON.stringify(stmts.slice(i, i + 500)),
+    })
+    assert.equal(response.status, 200, await response.text())
     assert.equal((await H.db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
   }
   return out
