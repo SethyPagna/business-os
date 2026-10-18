@@ -119,8 +119,12 @@ async function main() {
     const call = async mode => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify({ mode }) })
       assert.equal(response.status, 200, await response.clone().text())
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
       return response.json()
     }
+    assert.equal((await call('begin')).ok, false, 'missing schema epoch refuses maintenance admission')
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM system_flags').first()).n, 0)
+    await db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
     const held = await call('begin')
     assert.equal(held.ok, true)
     for (const mode of ['analyze', 'apply', 'bulk-create', 'product', 'chunk', 'once', 'branch-once']) {
@@ -155,7 +159,7 @@ async function main() {
     assert.equal((await call('stock-add')).code, 'import_maintenance_active', 'actual stock add transaction fenced')
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM import_stock_action_commits').first()).n, 0)
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM inventory_movements').first()).n, 0)
-    await db.prepare('DELETE FROM system_flags').run()
+    await db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
     const firstAdd = await call('stock-add')
     assert.equal(firstAdd.ok, true, JSON.stringify(firstAdd))
     assert.equal(firstAdd.value.alreadyApplied, false)
@@ -202,11 +206,12 @@ async function main() {
     const bulk = await db.prepare("SELECT status,processed_count,failed_count FROM bulk_delete_jobs WHERE id='bulk-1'").first()
     assert.deepEqual([bulk.status, bulk.processed_count, bulk.failed_count], ['processing', 0, 0])
     await db.prepare('DELETE FROM bulk_delete_jobs').run()
-    await db.prepare('DELETE FROM system_flags').run()
+    await db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
     const raced = await Promise.all([call('begin'), call('bulk-create')])
     assert.equal(raced.filter(result => result.ok).length, 1, 'exactly one native D1 admission wins')
     if (raced[0].ok) assert.equal(raced[1].code, 'import_maintenance_active')
     else assert.equal(raced[0].ok, false, 'active bulk job refuses restore')
+    assert.equal((await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").first()).value, 'legacy-separate-pool-v1')
     console.log('PASS native D1 import lease, stock create/add, generic chunk, batchOnce+branch guard, bulk admission/run/reaper, same-id retry, split IMPORT_DB staging')
   } finally { await mf.dispose() }
 }
