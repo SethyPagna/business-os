@@ -36,7 +36,11 @@ function loadModule(relPath, requireShim) {
 
 // backup.ts pulls in the R2 stream writer and restore stream; only the
 // exported constants/helpers are exercised here, so stub the heavy imports.
+const stockTransaction = loadModule('lib/stockTransaction.ts', require)
+const maintenance = loadModule('lib/maintenance.ts', (id) => id === './stockTransaction' ? stockTransaction : require(id))
 const backup = loadModule('lib/backup.ts', (id) => {
+  if (id === './stockTransaction') return stockTransaction
+  if (id === './maintenance') return maintenance
   if (id === './customTableName') return loadModule('lib/customTableName.ts', require)
   if (id === './planTier') return loadModule('lib/planTier.ts', require)
   if (id === './uploadSecurity') return loadModule('lib/uploadSecurity.ts', require)
