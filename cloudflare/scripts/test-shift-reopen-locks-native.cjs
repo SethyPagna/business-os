@@ -13,6 +13,9 @@ const { createHash } = require('node:crypto')
 const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
+const { shiftClock, clockSql } = require('./shift-clock-fixture.cjs')
+const clock = shiftClock()
+const Date = clock.Date
 
 const root = path.resolve(__dirname, '..')
 const ORIGIN = 'https://admin.shift-reopen-locks.example'
@@ -20,21 +23,31 @@ const MIN = 60_000
 const stored = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 
 async function main() {
-  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: "import worker from './src/index.ts'; export default worker" },
+  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: clock.entry }, banner: { js: clock.prelude },
     bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:workers'], logLevel: 'silent' })
   const outbound = []
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], kvNamespaces: ['CACHE'], cache: false, bindings: { PLAN_TIER: 'paid', BUSINESS_OS_ADMIN_URL: ORIGIN },
     outboundService: async (request) => { outbound.push(request.url); return new Response('refused', { status: 503 }) }, log: new Log(LogLevel.ERROR) })
   try {
-    const db = await mf.getD1Database('DB')
+    const rawDb = await mf.getD1Database('DB')
     for (const name of fs.readdirSync(path.join(root, 'migrations')).filter((file) => file.endsWith('.sql')).sort()) {
       for (const statement of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
         if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
-        await db.prepare(statement).run()
+        await rawDb.prepare(statement).run()
       }
     }
+    const db = clock.database(rawDb)
     const first = (sql, ...values) => db.prepare(sql).bind(...values).first()
+    const clockState = await (await mf.dispatchFetch(`${ORIGIN}/__fixture_clock`)).json()
+    assert.ok(Math.abs(clockState.now - Date.now()) < 1000, 'Worker and host use one advancing clock')
+    assert.equal(clockState.sql.business_date, '2026-10-18')
+    assert.equal((await first("SELECT date('now', '+7 hours') AS day")).day, clockState.sql.business_date)
+    assert.ok(Math.abs(Date.parse(clockState.sql.now.replace(' ', 'T') + 'Z') - Date.now()) < 2000)
+    const literals = `SELECT 'now', 'CURRENT_TIMESTAMP', "CURRENT_TIMESTAMP", \`CURRENT_TIMESTAMP\`, [CURRENT_TIME], @CURRENT_TIMESTAMP, :CURRENT_DATE, $CURRENT_TIME, @now, datetime(?), @date /* CURRENT_TIMESTAMP */ -- datetime('now')`
+    assert.equal(clockSql(literals, Date.now()), literals, 'literal data, identifiers, placeholders and comments stay unchanged')
+    assert.equal(clockSql("SELECT datetime('now'), date('now', '+7 hours'), CURRENT_TIMESTAMP, strftime('%s', 'now')", Date.parse('2026-10-18T05:00:00Z')),
+      "SELECT datetime('2026-10-18T05:00:00.000Z'), date('2026-10-18T05:00:00.000Z', '+7 hours'), '2026-10-18 05:00:00', strftime('%s', '2026-10-18T05:00:00.000Z')")
     const roleId = async (code, permissions) => {
       await db.prepare('INSERT OR IGNORE INTO roles(code,name,permissions) VALUES(?,?,?)').bind(code, code, permissions).run()
       return (await first('SELECT id FROM roles WHERE code=?', code)).id
@@ -140,6 +153,43 @@ async function main() {
       const done = await amend('repl', replacement.json.shift.id, { opening_float_usd: 45, opening_float_khr: 0 })
       assert.equal(done.status, 200, done.text)
       assert.equal((await rowOf(replacement.json.shift.id)).opening_float_usd, 45)
+    })
+
+    await check('Cambodia midnight preserves same-day reopen and refuses the previous day without changing rows or amendments', async () => {
+      for (const [index, key] of ['boundary_before', 'boundary_previous', 'boundary_today', 'boundary_utc'].entries()) await addPerson(key, 101 + index, employeeRole, '{"pos":true,"sales":true}')
+      const beforeClock = await clock.setWorker(mf, ORIGIN, '2026-10-18T16:59:00Z')
+      assert.equal(beforeClock.sql.business_date, '2026-10-18')
+      const closeBoundary = async who => {
+        const id = await openShift(who, 0, 50, 0)
+        const closed = await call(who, 'POST', `/${id}/close`, { expected_revision: 0, closing_counted_usd: 50, closing_counted_khr: 0 })
+        assert.equal(closed.status, 200, closed.text)
+        return id
+      }
+      const sameDay = await closeBoundary('boundary_before')
+      const beforeReopen = await call('boundary_before', 'POST', `/${sameDay}/reopen`, { expected_revision: (await rowOf(sameDay)).revision, reason: 'Same day boundary' })
+      assert.equal(beforeReopen.status, 201, beforeReopen.text)
+      const previous = await closeBoundary('boundary_previous')
+      const snapshot = async () => JSON.stringify({ row: await rowOf(previous), journal: (await db.prepare('SELECT * FROM shift_session_amendments WHERE shift_session_id=? ORDER BY id').bind(previous).all()).results,
+        children: (await db.prepare('SELECT * FROM shift_sessions WHERE parent_shift_id=? ORDER BY id').bind(previous).all()).results })
+      const before = await snapshot()
+      const afterClock = await clock.setWorker(mf, ORIGIN, '2026-10-18T17:00:05Z')
+      assert.equal(afterClock.sql.business_date, '2026-10-19')
+      assert.equal((await first("SELECT date('now', '+7 hours') AS day")).day, afterClock.sql.business_date)
+      const denied = await call('boundary_previous', 'POST', `/${previous}/reopen`, { expected_revision: (await rowOf(previous)).revision, reason: 'Previous day boundary' })
+      assert.equal(denied.status, 409, denied.text)
+      assert.equal(denied.json.error, 'Only a shift closed today can be reopened.')
+      assert.equal(await snapshot(), before, 'previous-day refusal preserves the whole shift row, amendment journal and children')
+      const current = await closeBoundary('boundary_today')
+      const afterReopen = await call('boundary_today', 'POST', `/${current}/reopen`, { expected_revision: (await rowOf(current)).revision, reason: 'New day boundary' })
+      assert.equal(afterReopen.status, 201, afterReopen.text)
+      const beforeUtc = await clock.setWorker(mf, ORIGIN, '2026-10-18T23:59:00Z')
+      assert.equal(beforeUtc.sql.business_date, '2026-10-19')
+      const utcParent = await closeBoundary('boundary_utc')
+      const afterUtc = await clock.setWorker(mf, ORIGIN, '2026-10-19T00:00:05Z')
+      assert.equal(afterUtc.sql.business_date, beforeUtc.sql.business_date)
+      assert.equal((await first("SELECT date('now', '+7 hours') AS day")).day, afterUtc.sql.business_date)
+      const utcReopen = await call('boundary_utc', 'POST', `/${utcParent}/reopen`, { expected_revision: (await rowOf(utcParent)).revision, reason: 'UTC boundary stays same business day' })
+      assert.equal(utcReopen.status, 201, utcReopen.text)
     })
 
     await check('nothing left the process', async () => assert.deepEqual(outbound, []))
