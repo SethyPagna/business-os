@@ -31,7 +31,7 @@ const { unstable_splitSqlQuery: split } = require('wrangler')
 const root = path.resolve(__dirname, '..')
 
 async function pricingKernel() {
-  const bundle = await build({ stdin: { contents: "export * from './src/lib/saleItemPricing'", resolveDir: root, loader: 'ts' },
+  const bundle = await build({ stdin: { contents: "export * from './src/lib/saleItemPricing'; export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: root, loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
   const mod = { exports: {} }
   new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
@@ -82,7 +82,7 @@ async function main() {
   try {
     const db = await mf.getD1Database('DB')
     await migrate(db)
-    await db.batch([
+    await kernel.executeRawStockTransaction(db, [
       db.prepare("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)"),
       db.prepare(`INSERT INTO products(id,name,is_active,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr)
         VALUES(1,'V1 A',1,0,10.01,40040,1,4000),(2,'V1 B',1,0,30.03,120120,1,4000),
@@ -90,6 +90,11 @@ async function main() {
         (5,'V1 C',1,0,10.01,40040,1,4000),(6,'V1 D',1,0,30.03,120120,1,4000)`),
       db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0),(2,1,0),(3,1,0),(4,1,0),(5,1,0),(6,1,0)'),
     ])
+    assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await stockState()
+    await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await stockState(), beforeRawMutation, 'ordinary unadmitted stock writes remain refused without changing any ledger or flag')
 
     // The exact sale the verifier used: two lines whose gross is 60.06, one
     // receipt discount of 40.04, payable 20.02. Line 1's own net entitlement is
