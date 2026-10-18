@@ -6,28 +6,26 @@
 //
 // Run: node scripts/test-restore-maintenance-pure.cjs
 const assert = require('node:assert/strict')
-const { execSync } = require('node:child_process')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const ts = require('typescript')
 
 const cloudflareRoot = path.join(__dirname, '..')
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'restore-maintenance-'))
-const tsPath = path.join(tmpDir, 'maintenance.ts')
-// Strip the Env type import so the file compiles standalone (same trick the
-// other pure tests use for lib files that only need Env structurally).
-const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'maintenance.ts'), 'utf8')
-  .replace(
-    "import type { Env } from '../index'",
-    'type Env = { DB: { prepare(sql: string): { bind(...params: unknown[]): { first<T>(): Promise<T | null>; run(): Promise<{meta:{changes:number}}> } } } }',
-  )
-fs.writeFileSync(tsPath, source)
-const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
+function load(name, dependencies = {}) {
+  const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', name + '.ts'), 'utf8')
+  const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const mod = { exports: {} }
+  new Function('require', 'module', 'exports', output)(id => {
+    assert.ok(Object.hasOwn(dependencies, id), `Unexpected dependency ${id}`)
+    return dependencies[id]
+  }, mod, mod.exports)
+  return mod.exports
+}
+const stockTransaction = load('stockTransaction')
 const {
   beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, isMaintenanceGatedRequest,
-} = require(path.join(tmpDir, 'maintenance.js'))
+} = load('maintenance', { './stockTransaction': stockTransaction })
 
 // Real migration chain -> real system_flags table.
 const db = new Database(':memory:')
@@ -36,20 +34,19 @@ for (const file of fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'
   db.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
 }
 
-// Minimal D1-shaped adapter over better-sqlite3 for the three call shapes
-// maintenance.ts uses (prepare().bind().first / .run).
 function d1(dbHandle) {
+  const prepare = (sql, params = []) => ({
+    sql, params,
+    bind: (...values) => prepare(sql, values),
+    first: async () => dbHandle.prepare(sql).get(...params) ?? null,
+    run: async () => ({ meta: { changes: dbHandle.prepare(sql).run(...params).changes } }),
+  })
   return {
-    prepare(sql) {
-      return {
-        bind(...params) {
-          return {
-            first: async () => dbHandle.prepare(sql).get(...params) ?? null,
-            run: async () => ({ meta: { changes: dbHandle.prepare(sql).run(...params).changes } }),
-          }
-        },
-      }
-    },
+    prepare,
+    batch: async statements => dbHandle.transaction(() => statements.map(({ sql, params }) => {
+      const result = dbHandle.prepare(sql).run(...params)
+      return { success: true, meta: { changes: result.changes } }
+    }))(),
   }
 }
 const env = { DB: d1(db) }
@@ -71,6 +68,12 @@ async function check(name, fn) {
     assert.equal(await getMaintenance(env), null)
   })
 
+  await check('raw maintenance setup refuses without stock admission', async () => {
+    assert.throws(() => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')").run(), /stock_transaction_required/)
+    assert.equal(await getMaintenance(env), null)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
+
   let token = ''
   await check('begin sets the flag with restore state', async () => {
     const state = await beginMaintenance(env, { backupKey: 'backups/cloudflare/test.json', startedBy: 'admin' })
@@ -79,6 +82,7 @@ async function check(name, fn) {
     assert.equal(read.backupKey, 'backups/cloudflare/test.json')
     assert.equal(read.phase, 'deleting')
     assert.equal(read.token, token)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   })
 
   await check('a second begin refuses while the first holds', async () => {
