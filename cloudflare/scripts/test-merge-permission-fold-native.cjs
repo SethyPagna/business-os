@@ -15,6 +15,7 @@
 // touch a file on disk and fail loudly if their anchor text is missing.
 // ============================================================================================
 const assert = require('node:assert/strict')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
@@ -379,7 +380,7 @@ async function pair(H, { shape, xImage = '/uploads/mp-x.jpg' } = {}) {
   const nameX = 'MP Identity ' + n, nameY = shape === 'barcode' ? nameX : 'MP Identity ' + n + ' Large'
   const barX = '88600' + String(x).padStart(8, '0'), barY = shape === 'name' ? barX : '88600' + String(y).padStart(8, '0')
   const old = '2026-01-01 00:00:00'
-  await H.db.batch([
+  await executeRawStockTransaction(H.db, [
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,?,?,?)').bind(x, nameX, barX, xImage, old, old),
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,?,?)').bind(y, nameY, barY, old, old),
   ])
@@ -389,8 +390,8 @@ async function pair(H, { shape, xImage = '/uploads/mp-x.jpg' } = {}) {
 async function existingForCreate(H) {
   const n = ++seq, id = 300 + n * 2
   const name = 'MP Create ' + n, clean = '88600' + String(id).padStart(8, '0')
-  await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')")
-    .bind(id, name, '00' + clean).run()
+  await executeRawStockTransaction(H.db, [H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')")
+    .bind(id, name, '00' + clean)])
   return { id, name, clean }
 }
 
@@ -612,7 +613,7 @@ async function main() {
       const s = await pair(H, { shape: 'both' })
       const twinId = s.y + 100000
       const x = await H.q1('SELECT name, barcode FROM products WHERE id=?', s.x)
-      await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2,0,0,1,'2026-01-01 00:00:00','2026-01-01 00:00:00')").bind(twinId, x.name, x.barcode).run()
+      await executeRawStockTransaction(H.db, [H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2,0,0,1,'2026-01-01 00:00:00','2026-01-01 00:00:00')").bind(twinId, x.name, x.barcode)])
       const r = await H.api('PUT', '/api/products/' + s.x, { name: x.name, barcode: x.barcode, description: 'MP resave ' + s.x }, { as: 'mergeoff' })
       t.eq('status', r.status, 200)
       t.eq('description saved', (await H.q1('SELECT description d FROM products WHERE id=?', s.x)).d, 'MP resave ' + s.x)
