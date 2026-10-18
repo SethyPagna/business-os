@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const filename = path.join(__dirname, 'test-catalog-cost-recompute-native.cjs')
 const source = fs.readFileSync(filename, 'utf8')
@@ -16,7 +17,7 @@ const prefix = source.slice(0, boundary).replace('let sqlite', 'let queries = []
   .replaceAll('statement[method]', "statement[method.replace('Once','')]")
   .replace('async batch(statements)', 'async batchOnce(statements) { return sqlite.transaction(() => statements.map(({sql,params}) => sqlite.prepare(sql).run(params||{})))() },\n    async batch(statements)')
 fixture._compile(prefix + `
-module.exports={fresh,request,addBody,catalogCost,load,sql:()=>sqlite,
+module.exports={fresh,request,addBody,catalogCost,load,db:wrapDb,sql:()=>sqlite,
  setUser:value=>{user=value}, queries:()=>queries, resetQueries:()=>{queries=[]},
  cloneForWriter:()=>{const original=sqlite;sqlite=new Database(original.serialize());original.close()}}`, filename)
 const f = fixture.exports
@@ -40,9 +41,13 @@ async function add(cost,quantity=1,date='01/09/2026',extra={}) {
 }
 function manual(cost) {
   const plan=f.load('lib/catalogCostRecompute.ts').planManualCostChange(1,f.sql().prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=1').get(),{cost_price_usd:cost},{id:null,name:'Fixture'})
-  if(plan?.entry)f.sql().prepare(plan.entry.sql).run(plan.entry.params)
-  f.sql().prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=? WHERE id=1').run(cost,cost)
+  seedStockFixture(f.sql(), () => {
+    if(plan?.entry)f.sql().prepare(plan.entry.sql).run(plan.entry.params)
+    f.sql().prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=? WHERE id=1').run(cost,cost)
+  })
 }
+const arrange = sql => seedStockFixture(f.sql(), () => f.sql().exec(sql))
+const protectedWrite = sql => f.load('lib/stockTransaction.ts').executeStockTransaction(f.db(), [{ sql }], 'once')
 async function writer(input) {
   if(input.wire==='adjust')return f.request(input.body)
   if(input.wire==='stock_session')return f.load('lib/stockSession.ts').commitStockSession({DB:{},PLAN_TIER:'paid'}, {id:7,name:'Operator',permissions:JSON.stringify({inventory:true,product_cost_edit:true,product_cost_view:true})}, {client_request_id:`preview-session-${++sequence}-abcdefgh`,mode:'stock_in',items:[{line_id:`preview-line-${sequence}`, ...input.body}]})
@@ -97,24 +102,24 @@ async function main() {
   await check('global cross-branch available weight',async()=>{await add(4,2);f.sql().exec("INSERT INTO branches(id,name,is_active) VALUES(2,'Storage',1)");await add(8,3,'02/09/2026',{branchId:2});await parity(line(8,2),6.8571)})
   await check('same-day automatic exact-price target',async()=>{await add(4,2);await add(8,2,'02/09/2026');await parity(line(4,2,{receivedDate:'01/09/2026'}),5.3333);assert.equal(f.sql().prepare('SELECT COUNT(*) n FROM product_batches').get().n,2)})
   await check('explicit target preserves original date',async()=>{await add(4,2);const batch=f.sql().prepare('SELECT id FROM product_batches').get().id;await parity(line(4,2,{batchId:batch,receivedDate:'31/12/2026'}),4);assert.equal(f.sql().prepare('SELECT received_at FROM product_batches').get().received_at,'2026-09-01')})
-  await check('inactive empty target reactivates without bypassing stocked-lot guard',async()=>{await add(4,2);const batch=f.sql().prepare('SELECT id FROM product_batches').get().id;assert.throws(()=>f.sql().exec('UPDATE product_batches SET is_active=0'),/positive branch stock/);await f.request({productId:1,branchId:1,type:'remove',quantity:2,reason:'Fixture'});f.sql().exec('UPDATE product_batches SET is_active=0');await parity(line(4,2,{batchId:batch}),4);assert.equal(f.sql().prepare('SELECT is_active FROM product_batches').get().is_active,1)})
+  await check('inactive empty target reactivates without bypassing stocked-lot guard',async()=>{await add(4,2);const batch=f.sql().prepare('SELECT id FROM product_batches').get().id;await assert.rejects(protectedWrite('UPDATE product_batches SET is_active=0'),/positive branch stock/);assert.equal(f.sql().prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0);await f.request({productId:1,branchId:1,type:'remove',quantity:2,reason:'Fixture'});arrange('UPDATE product_batches SET is_active=0');await parity(line(4,2,{batchId:batch}),4);assert.equal(f.sql().prepare('SELECT is_active FROM product_batches').get().is_active,1)})
   for(const which of ['wrong_cost','baseline','foreign_product','missing','legacy_precision'])await check(`explicit stale target ${which} unavailable`,async()=>{
     await add(4,2);const batch=f.sql().prepare('SELECT id FROM product_batches').get().id
     let cost=which==='wrong_cost'?8:4,target=which==='missing'?999:batch
     if(which==='baseline')manual(10)
-    if(which==='foreign_product')f.sql().exec("INSERT INTO products(id,name) VALUES(2,'Other');UPDATE product_batches SET variant_product_id=2")
-    if(which==='legacy_precision')f.sql().exec('UPDATE product_batches SET unit_cost_usd=4.00001')
+    if(which==='foreign_product')arrange("INSERT INTO products(id,name) VALUES(2,'Other');UPDATE product_batches SET variant_product_id=2")
+    if(which==='legacy_precision')arrange('UPDATE product_batches SET unit_cost_usd=4.00001')
     const result=await preview([line(cost,2,{batchId:target})]);assert.equal(result.body.results[0].reason,'invalid_target');assert.equal(result.body.results[0].afterUsd,null)
     const actual=await writer(line(cost,2,{batchId:target}));assert.equal(actual.status,400,JSON.stringify(actual))
   })
-  await check('legacy five-place lot not merged into new rounded price',async()=>{await add(4,2);f.sql().exec('UPDATE product_batches SET unit_cost_usd=4.00001');await parity(line(4,2,{receivedDate:'01/09/2026'}),4);assert.equal(f.sql().prepare('SELECT COUNT(*) n FROM product_batches').get().n,2)})
+  await check('legacy five-place lot not merged into new rounded price',async()=>{await add(4,2);arrange('UPDATE product_batches SET unit_cost_usd=4.00001');await parity(line(4,2,{receivedDate:'01/09/2026'}),4);assert.equal(f.sql().prepare('SELECT COUNT(*) n FROM product_batches').get().n,2)})
   await check('sold-out fallback survives free receipt',async()=>{await add(8,2);await f.request({productId:1,branchId:1,type:'remove',quantity:2,reason:'Fixture'});await parity(line(0,2,{freeGoods:true}),8)})
   await check('tagged receipt has net zero shelf delta',async()=>{await add(4,2);await parity(line(8,2,{conditionTag:'damaged'}),4)})
   await check('new tagged lot still changes sold-out fallback',async()=>{await parity(line(8,2,{conditionTag:'damaged'}),8)})
   await check('direct receive paid/free dilution parity',async()=>{await add(4,2);await parity({...line(8,2,{freeQuantity:2}),wire:'receive'},4)})
   await check('direct adjust paid/free dilution parity',async()=>{await add(4,2);await parity(line(8,2,{freeQuantity:2}),4)})
   await check('fully free direct receipt is zero even with absent cost',async()=>{await parity(line(null,0,{freeQuantity:3}),0)})
-  await check('unknown is retained separately from zero',async()=>{f.sql().exec('UPDATE products SET cost_price_usd=NULL,purchase_price_usd=NULL');await parity(line(0,1,{freeGoods:true}),null)})
+  await check('unknown is retained separately from zero',async()=>{arrange('UPDATE products SET cost_price_usd=NULL,purchase_price_usd=NULL');await parity(line(0,1,{freeGoods:true}),null)})
   await check('NULL receipt is refused rather than converted to free',async()=>{const result=await preview([line(null)]);assert.equal(result.body.results[0].reason,'cost_required');assert.equal((await writer(line(null))).status,400)})
   await check('undeclared zero is refused',async()=>{const result=await preview([line(0)]);assert.equal(result.body.results[0].reason,'free_goods_required')})
   await check('nearest four places uses actual receipt kernel',async()=>{await parity(line(1.23456),1.2346)})
@@ -129,12 +134,14 @@ async function main() {
   })
   await check('active product and branch scope with current cost-view denial',async()=>{
     assert.equal((await preview([line(3,1,{branchId:999})])).body.results[0].reason,'branch_unavailable')
-    f.sql().exec('UPDATE products SET is_active=0');assert.equal((await preview([line(3)])).body.results[0].reason,'product_unavailable')
+    arrange('UPDATE products SET is_active=0');assert.equal((await preview([line(3)])).body.results[0].reason,'product_unavailable')
     f.setUser({id:7,permissions:JSON.stringify({inventory:true,products:true,product_cost_edit:true})})
     const denied=await preview([line(3)]);assert.equal(denied.status,403);assert.equal(denied.queries.length,0);assert.equal(denied.body.results,undefined)
   })
   await check('one and 25 lines use one read, no per-line DB calls',async()=>{
-    for(let id=2;id<=25;id++)f.sql().prepare('INSERT INTO products(id,name) VALUES(?,?)').run(id,`Product ${id}`)
+    seedStockFixture(f.sql(), () => {
+      for(let id=2;id<=25;id++)f.sql().prepare('INSERT INTO products(id,name) VALUES(?,?)').run(id,`Product ${id}`)
+    })
     const lines=Array.from({length:25},(_,i)=>({...line(8),key:`line-${i}`,body:{...line(8).body,productId:i+1}}))
     const many=await preview(lines);assert.equal(many.body.results.length,25);assert.equal(many.queries.length,1);assert.ok(many.body.results.every(r=>r.afterUsd===8))
     const plans=f.sql().prepare('EXPLAIN QUERY PLAN '+helper.RECEIVING_COST_PREVIEW_SQL).all({lines:JSON.stringify(helper.parseReceivingCostPreview({lines}))})
@@ -146,11 +153,22 @@ async function main() {
 
 async function wholeWorker() {
   const {startWorker}=require('./harness/al_money_native.cjs')
+  const arrangeNative = async (db, statements) => {
+    const permits = async () => (await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n
+    assert.equal(await permits(), 0)
+    try {
+      await db.batch([
+        db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+        ...statements,
+        db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+      ])
+    } finally { assert.equal(await permits(), 0) }
+  }
   for(const tier of ['free','paid']) {
     process.env.AL_PLAN_TIER=tier
     const h=await startWorker()
     try {
-      for(let id=1;id<=25;id++)await h.db.prepare('INSERT INTO products(id,name,cost_price_usd,cost_price_khr) VALUES(?,?,NULL,123.4567)').bind(id,`Preview ${id}`).run()
+      await arrangeNative(h.db, Array.from({length:25}, (_, i) => h.db.prepare('INSERT INTO products(id,name,cost_price_usd,cost_price_khr) VALUES(?,?,NULL,123.4567)').bind(i+1,`Preview ${i+1}`)))
       await h.db.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Inactive fixture',0)").run()
       const lines=Array.from({length:25},(_,i)=>({...line(8),key:`line-${i}`,body:{...line(8).body,productId:i+1}}))
       const tables=await h.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
@@ -179,13 +197,16 @@ async function wholeWorker() {
       const negative=await h.call('POST','/api/products/receiving-cost-preview',{lines:[line(-0.00001,1,{freeGoods:true})]},`${tier} raw negative`)
       assert.equal(negative.body.results[0].status,'unavailable')
       for(let id=1;id<=25;id++) {
-        await h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) VALUES(?,?,'2026-09-01',4,1)").bind(id,`preview-base-${id}`).run()
-        const batch=await h.one('SELECT MAX(id) id FROM product_batches')
-        await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,2)').bind(batch.id).run()
+        await arrangeNative(h.db, [
+          h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) VALUES(?,?,'2026-09-01',4,1)").bind(id,`preview-base-${id}`),
+          h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,1,2 FROM product_batches WHERE variant_product_id=? AND batch_key=?').bind(id,`preview-base-${id}`),
+        ])
       }
-      await h.db.prepare("WITH RECURSIVE ids(id) AS (SELECT 100 UNION ALL SELECT id+1 FROM ids WHERE id<599) INSERT INTO products(id,name) SELECT id,'Unrelated '||id FROM ids").run()
-      await h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) SELECT id,'unrelated-'||id,'2026-09-01',99,1 FROM products WHERE id>=100").run()
-      await h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,1,100 FROM product_batches WHERE variant_product_id>=100').run()
+      await arrangeNative(h.db, [
+        h.db.prepare("WITH RECURSIVE ids(id) AS (SELECT 100 UNION ALL SELECT id+1 FROM ids WHERE id<599) INSERT INTO products(id,name) SELECT id,'Unrelated '||id FROM ids"),
+        h.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at,unit_cost_usd,is_active) SELECT id,'unrelated-'||id,'2026-09-01',99,1 FROM products WHERE id>=100"),
+        h.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,1,100 FROM product_batches WHERE variant_product_id>=100'),
+      ])
       for(const size of [1,25]) {
         const normalized=helper.parseReceivingCostPreview({lines:lines.slice(0,size)})
         const query=await h.db.prepare(helper.RECEIVING_COST_PREVIEW_SQL).bind(JSON.stringify(normalized)).all().catch(error=>{throw new Error('raw preview row measurement: '+error.message)})

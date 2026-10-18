@@ -3,6 +3,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const worldFile = path.join(__dirname, 'test-intake-full-request-budget.cjs')
 const source = fs.readFileSync(worldFile, 'utf8').split(';(async () => {')[0]
 const { world } = new Function('require', '__dirname', source + ';return {world};')(require, __dirname)
@@ -38,11 +39,14 @@ async function receiptCase({ tier, variant, warm, tails, branch = 1, candidates 
   const f = await world(tier, warm ? 'add' : 'add-tagged', false, { tailRetries: tails })
   const trace = []
   try {
-    if (variant === 'existing') f.sql.exec("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd,is_active) VALUES(2,'Serum','DIFFERENT-1',0,2,2,3,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)")
-    for (let i = 0; i < candidates; i++) {
-      const created = f.sql.prepare('INSERT INTO products(name,barcode,stock_quantity,is_active) VALUES(?,?,0,1)').run('Serum', '12345678' + i)
-      f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)').run(Number(created.lastInsertRowid))
-    }
+    if (variant === 'existing' || candidates) seedStockFixture(f.sql, () => {
+      if (variant === 'existing') f.sql.exec("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd,is_active) VALUES(2,'Serum','DIFFERENT-1',0,2,2,3,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)")
+      for (let i = 0; i < candidates; i++) {
+        const created = f.sql.prepare('INSERT INTO products(name,barcode,stock_quantity,is_active) VALUES(?,?,0,1)').run('Serum', '12345678' + i)
+        f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)').run(Number(created.lastInsertRowid))
+      }
+    })
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     if (redirect) f.sql.exec("INSERT INTO branches(id,name,is_active,successor_branch_id) VALUES(2,'Retired receiving',0,1)")
     else if (branch === 2) f.sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(2,'Selected warehouse',1,0)")
     if (warm) {
