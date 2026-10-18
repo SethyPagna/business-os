@@ -340,9 +340,16 @@ async function main() {
   ]) {
     await check(`${label} between snapshot and revision capture rejects without durable session rows`, async () => {
       const f = fixture()
-      f.beforeRevisionCapture((sql) => sql.exec(mutation))
+      let competitorRan = false
+      f.beforeRevisionCapture((sql) => {
+        if (label === 'stock ABA') seedStockFixture(sql, () => sql.exec(mutation))
+        else sql.exec(mutation)
+        competitorRan = true
+      })
       await assert.rejects(() => commitStockSession(f.env, user, receiveRequest()),
         (error) => error instanceof StockSessionError && error.code === 'stale_state')
+      assert.equal(competitorRan, true)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       const state = receiptState(f.sql)
       assert.equal(state.product.stock_quantity, 0)
       for (const key of ['operations', 'members', 'movements', 'audits', 'history', 'snapshots']) assert.equal(state[key], 0, key)
@@ -709,14 +716,20 @@ async function main() {
       assert.ok(packed && packed.text.indexOf('branch_stock') > packed.text.indexOf('UNION ALL'), 'the failing branch-stock guard follows a valid maintenance guard in the same statement')
       return originalBatch(statements)
     }
+    let competitorRan = false
     f.beforeCommit((sql) => {
-      sql.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run()
-      sql.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1').run()
+      seedStockFixture(sql, () => {
+        assert.equal(sql.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run().changes, 1)
+        assert.equal(sql.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1').run().changes, 1)
+      })
+      competitorRan = true
     })
     await assert.rejects(
       () => commitStockSession(f.env, user, receiveRequest('stock-request-aba')),
       (error) => error instanceof StockSessionError && error.statusCode === 409 && error.code === 'stale_state',
     )
+    assert.equal(competitorRan, true)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count, 0)
     for (const table of ['product_batches','action_history','undo_snapshots','inventory_movements','audit_logs','stock_session_guards']) assert.equal(table === 'audit_logs' ? f.auditRows().length : f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table)
