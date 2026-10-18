@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
+const completedCutover = require('./harness/completed-cutover-world.cjs')
 const root = path.resolve(__dirname, '..')
 function modules() {
   const cache = new Map()
@@ -11,7 +12,7 @@ function modules() {
     if (cache.has(name)) return cache.get(name).exports
     const module = { exports: {} }; cache.set(name, module)
     const controlFile = process.env.PARENT_CONTROL_SOURCE && path.join(process.env.PARENT_CONTROL_SOURCE, name)
-    let source = fs.readFileSync(controlFile && fs.existsSync(controlFile) ? controlFile : path.join(root, 'src', name), 'utf8')
+    let source = controlFile && fs.existsSync(controlFile) ? fs.readFileSync(controlFile, 'utf8') : completedCutover.readSource(name)
     if (process.env.PARENT_WRONG_CONTROL === 'guards' && name === 'lib/branchCutoverParent.ts') {
       assert.ok(source.includes('return guards')); source = source.replace('return guards', 'return []')
     }
@@ -31,11 +32,14 @@ function modules() {
   }
   return { load, parent: load('lib/branchCutoverParent'), capture: load('lib/branchCutoverCapture'), D1Compat: load('lib/db').D1Compat }
 }
-function world(labels = true) {
+function world(labels = true, { currentSchema = false } = {}) {
   const { parent, capture, D1Compat, load } = modules()
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100; raw.limits.variableNumber = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql') && (labels || n !== '0226_branch_history_labels.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+  const migrations = currentSchema
+    ? fs.readdirSync(path.join(root, 'migrations')).filter(name => name.endsWith('.sql')).sort().map(name => ({ name, sql: fs.readFileSync(path.join(root, 'migrations', name), 'utf8') }))
+    : completedCutover.migrationEntries()
+  for (const entry of migrations.filter(entry => labels || entry.name !== '0226_branch_history_labels.sql')) raw.exec(entry.sql)
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default,canonical_key,role,created_at) VALUES(2,'Shop',1,1,'shop','shop','2026-10-03 00:00:00'),(1,'Warehouse',1,0,'warehouse','warehouse','2026-10-03 00:00:00');
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true,"backup_restore":true}',1);
     INSERT INTO system_flags(key,value) VALUES('branch_cutover_control_incarnation','00000000-0000-4000-8000-000000000099')`)
