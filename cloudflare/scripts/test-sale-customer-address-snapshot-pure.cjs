@@ -1,3 +1,4 @@
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // N21 -- sales.customer_address holds the DISPLAY address, never the Contact
@@ -36,7 +37,7 @@ const cache = new Map()
 // contactOptions is on this list deliberately: the loader stubs any relative
 // import it does not name, and a stubbed kernel would make every address here
 // resolve to undefined -- a test that agrees with itself and proves nothing.
-const actual = new Set(['loyaltyEligibility','businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
+const actual = new Set(['stockTransaction','loyaltyEligibility','businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
   'offlineSaleOwnership',
   'acquisitionCostAccess','courierCostAccess',
   'saleCustomerAssignmentGuard','customerPointsReturn',
@@ -153,7 +154,7 @@ function fixture(options = {}) {
     const response = await sales.request(url, { method: 'GET' }, env, executionCtx)
     return { status: response.status, body: await response.json() }
   }
-  sql.exec(`
+  seedStockFixture(sql, () => sql.exec(`
     INSERT INTO settings(key,value,updated_at) VALUES
       ('exchange_rate','4200','s1'),('pos_payment_methods','["Cash"]','s1');
     INSERT INTO branches(id,name) VALUES(1,'Shop');
@@ -163,7 +164,11 @@ function fixture(options = {}) {
       id,receipt_number,cashier_name,branch_id,branch_name,payment_method,payment_details,
       payment_currency,exchange_rate,subtotal_usd,total_usd,amount_paid_usd,sale_status,updated_at
     ) VALUES(1,'S-1','admin',1,'Shop','Cash','[{"method":"Cash","amount_usd":5,"amount_khr":0}]','USD',4200,5,5,5,'completed','sale-v1');
-  `)
+  `))
+  const stockState = () => Object.fromEntries(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(table => [table,sql.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()]))
+  const beforeRawMutation = stockState()
+  assert.throws(() => sql.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+  assert.deepEqual(stockState(),beforeRawMutation,'raw stock writes cannot change seeded ledgers or flags')
   // Bound, not inlined: the options JSON carries double quotes.
   sql.prepare('INSERT INTO customers(id,name,phone,address) VALUES(1,?,?,?)').run('Sok Dara', '012345678', OPTIONS_JSON)
   return { sql, call, read }

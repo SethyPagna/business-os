@@ -107,6 +107,7 @@ overrides['../lib/receiptNumber'] = {
     realReceipts.uniqueBusinessDateTimeNumber(prefix, exists, moment ?? mintMoment ?? undefined),
 }
 const app = load('routes/sales.ts').default
+const { executeRawStockTransaction } = load('lib/stockTransaction.ts')
 
 const background = []
 const executionCtx = {
@@ -232,7 +233,7 @@ async function migrate(db) {
   try {
     const native = await mf.getD1Database('DB')
     await migrate(native)
-    await native.batch([
+    await executeRawStockTransaction(native, [
       native.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)"),
       ...PRODUCTS.flatMap((id) => [
         native.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
@@ -243,6 +244,12 @@ async function migrate(db) {
         native.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,10)').bind(lotOf(id)),
       ]),
     ])
+
+    assert.deepEqual((await native.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results,[],'synthetic stock setup releases its permit')
+    const rawState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await native.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
+    const beforeRawMutation = await rawState()
+    await assert.rejects(native.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)
+    assert.deepEqual(await rawState(),beforeRawMutation,'unadmitted writes leave all stock and flags unchanged')
 
     const tills = gate(native)
     const count = async (sql, ...binds) => Number((await native.prepare(sql).bind(...binds).first()).n)
