@@ -632,7 +632,7 @@ app.delete('/:id', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
   const id = Number(c.req.param('id'))
-  const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // A deactivated batch drops out of every FIFO picker (listBatchesForProduct
@@ -664,6 +664,8 @@ app.delete('/:id', async (c) => {
   // into the same waitUntil the broadcast already used.
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null),
+    bumpVersion(c.env, 'products'),
+    broadcast(c.env, 'products', { action: 'update', id: existing.variant_product_id }),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
   ]))
   return c.json({ success: true })

@@ -581,6 +581,19 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
   return { filters: { brands: brandRows.map((row) => row.value), categories: categoryRows.map((row) => row.value) }, initials }
 }
 
+function inventoryProductRow(row: Record<string, unknown>): Record<string, unknown> {
+  const { cost_review_key, branch_stock_json, ...product } = row
+  let branchStock: unknown = []
+  try {
+    branchStock = JSON.parse(String(branch_stock_json || '[]'))
+  } catch {}
+  return {
+    ...product,
+    cost_needs_review: Object.hasOwn(row, 'cost_review_key') ? Boolean(cost_review_key) : Boolean(row.cost_needs_review),
+    branch_stock: branchStock,
+  }
+}
+
 async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -604,7 +617,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
 
   const selectColumns = metadataOnly ? 'p.id' : `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr, p.purchase_price_usd, p.purchase_price_khr,
-           p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
+           p.cost_price_usd, p.cost_price_khr, (COALESCE(p.cost_review_key, '') <> '') AS cost_needs_review,
+           p.stock_quantity, p.low_stock_threshold,
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
            p.is_group, p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE((
@@ -650,16 +664,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
 
   const pagedResult = paged
 
-  const items = metadataOnly ? [] : (pagedResult.items as Array<Record<string, unknown>>).map((row) => {
-    const next = { ...row }
-    try {
-      next.branch_stock = JSON.parse(String(next.branch_stock_json || '[]'))
-    } catch (_) {
-      next.branch_stock = []
-    }
-    delete next.branch_stock_json
-    return next
-  })
+  const items = metadataOnly ? [] : (pagedResult.items as Array<Record<string, unknown>>).map(inventoryProductRow)
 
   if (items.length) {
     await Promise.all([
@@ -826,16 +831,7 @@ app.get('/summary', async (c) => {
     // That's what produced a misleading "no stock in this branch" error on
     // a genuinely successful remove/transfer whenever the Inventory page's
     // branch filter wasn't "All branches".
-    const branchScopedItems = (rows || []).map((product) => {
-      const next = { ...product } as Record<string, unknown>
-      try {
-        next.branch_stock = JSON.parse(String(next.branch_stock_json || '[]'))
-      } catch (_) {
-        next.branch_stock = []
-      }
-      delete next.branch_stock_json
-      return next
-    })
+    const branchScopedItems = (rows || []).map(inventoryProductRow)
     return c.json(branchScopedItems)
   }
 
@@ -871,16 +867,7 @@ app.get('/summary', async (c) => {
     ORDER BY lower(p.name) ASC
   `).all<Record<string, unknown>>({})
 
-  const items = (rows || []).map((product) => {
-    const next = { ...product } as Record<string, unknown>
-    try {
-      next.branch_stock = JSON.parse(String(next.branch_stock_json || '[]'))
-    } catch (_) {
-      next.branch_stock = []
-    }
-    delete next.branch_stock_json
-    return next
-  })
+  const items = (rows || []).map(inventoryProductRow)
   return c.json(items)
 })
 
