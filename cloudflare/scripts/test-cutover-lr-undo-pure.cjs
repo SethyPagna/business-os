@@ -20,18 +20,18 @@ const stockOnly = (db) => JSON.stringify(['branch_stock', 'branch_batch_stock', 
 // The cutover's end state applied to a world that recorded work at Shop (2) while it was active: Shop becomes the
 // disabled Old Shop and whatever it still held moves to LC Store (1). The history rows are deliberately NOT closed.
 function cutOver(db) {
-  db.exec(`UPDATE branch_stock SET quantity = quantity + COALESCE((SELECT o.quantity FROM branch_stock o WHERE o.product_id=branch_stock.product_id AND o.branch_id=2),0) WHERE branch_id=1;
+  W.seed(db, () => db.exec(`UPDATE branch_stock SET quantity = quantity + COALESCE((SELECT o.quantity FROM branch_stock o WHERE o.product_id=branch_stock.product_id AND o.branch_id=2),0) WHERE branch_id=1;
            UPDATE branch_stock SET quantity = 0 WHERE branch_id=2;
            INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT batch_id,1,quantity FROM branch_batch_stock WHERE branch_id=2 AND quantity>0
              ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity;
            UPDATE branch_batch_stock SET quantity = 0 WHERE branch_id=2;
            UPDATE branches SET name='LC Store', role='shop', is_default=1 WHERE id=1;
-           UPDATE branches SET name='Old Shop', role='shop', is_default=0, is_active=0, successor_branch_id=1 WHERE id=2;`)
+           UPDATE branches SET name='Old Shop', role='shop', is_default=0, is_active=0, successor_branch_id=1 WHERE id=2;`))
   return db
 }
 
 async function setAtShopThenCutOver(world) {
-  const db = W.build('before')
+  const db = world.build('before')
   const set = await W.call(inventory(world), db, 'POST', '/adjust', { productId: 10, branchId: 2, type: 'set', setScope: 'lot', batchId: 500, quantity: 0, reason: 'count' })
   assert.equal(set.status, 200, JSON.stringify(set.body))
   return { db: cutOver(db), historyId: set.body.action_history_id }
@@ -55,8 +55,8 @@ async function main() {
 
   await W.check('stock.session_line_edit: the Undo of a Shop-era line edit is refused undo_closed_branch_retired and writes nothing', async () => {
     const db = W.build('before')
-    db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
-      VALUES(4000,10,'Powder',2,'Shop','add',10,4,40,'delivery',71,'Owner',500)`).run()
+    W.seed(db, () => db.prepare(`INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,user_id,user_name,batch_id)
+      VALUES(4000,10,'Powder',2,'Shop','add',10,4,40,'delivery',71,'Owner',500)`).run())
     const rev = Number(db.prepare("SELECT COALESCE(MAX(revision),0) r FROM stock_session_revisions WHERE entity_type='batch' AND entity_key='500'").get()?.r ?? 0)
     const edited = await W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', { client_request_id: 'edit-undo-0001', quantity: 0, expected_quantity: 10, expected_batch_id: 500, expected_batch_revision: rev })
     assert.equal(edited.status, 200, JSON.stringify(edited.body))
@@ -81,7 +81,7 @@ async function main() {
 
   await W.check('a closed row (the cutover marker) answers undo_closed_branch_retired before any applier runs', async () => {
     const { db, historyId } = await setAtShopThenCutOver(fresh)
-    db.prepare("UPDATE action_history SET status='recorded', reversible=0, last_error='undo_closed:branch_retired' WHERE id=?").run([historyId])
+    W.seed(db, () => db.prepare("UPDATE action_history SET status='recorded', reversible=0, last_error='undo_closed:branch_retired' WHERE id=?").run([historyId]))
     const undo = await W.call(history(fresh), db, 'POST', `/${historyId}/undo`, { require_applied: true, expected_generation: 0 })
     assert.deepEqual([undo.status, undo.body.code], [409, 'undo_closed_branch_retired'])
   })

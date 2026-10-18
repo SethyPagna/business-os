@@ -15,22 +15,23 @@ const W = require('./harness/cutover_lr_world.cjs')
 const CASHIER = { id: 72, username: 'cashier', name: 'Cashier', role: 'staff', permissions: JSON.stringify({ pos: true, sales: true }) }
 const fresh = W.makeWorld(null, { user: CASHIER })
 const oracle = W.makeWorld(W.ORACLE, { user: CASHIER })
+const archivedAfter = W.makeWorld(W.AFTER, { user: CASHIER })
 const owner = W.makeWorld(null)
 const shifts = (world) => world.load('routes/shifts.ts').default
 
-function shiftDb(state) {
-  const db = W.build(state)
-  db.prepare("INSERT INTO settings(key,value) VALUES('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+function shiftDb(state, world = fresh) {
+  const db = world.build(state)
+  W.seed(db, () => db.prepare("INSERT INTO settings(key,value) VALUES('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run())
   return db
 }
 const openBody = (branchId) => ({ branch_id: branchId, opening_float_usd: 10, opening_float_khr: 0 })
 const shiftRows = (db) => W.plain(db.prepare('SELECT branch_id, branch_name, closed_at IS NULL AS open FROM shift_sessions ORDER BY id').all())
 
 async function main() {
-  await W.check('before: opening a shift at Shop writes byte-identical statements to the eb5dd0ba3 oracle', async () => {
-    const dbNew = shiftDb('before'); const dbOld = shiftDb('before')
+  await W.check('historical BEFORE/AFTER: opening a shift at Shop writes byte-identical statements to the eb5dd0ba3 oracle', async () => {
+    const dbNew = shiftDb('before', archivedAfter); const dbOld = shiftDb('before', oracle)
     const capNew = []; const capOld = []
-    const a = await W.call(shifts(fresh), dbNew, 'POST', '/open', openBody(2), { capture: capNew, redirect: 1 })
+    const a = await W.call(shifts(archivedAfter), dbNew, 'POST', '/open', openBody(2), { capture: capNew, redirect: 1 })
     const b = await W.call(shifts(oracle), dbOld, 'POST', '/open', openBody(2), { capture: capOld })
     assert.equal(a.status, 201, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
@@ -57,18 +58,18 @@ async function main() {
 
   await W.check('after: race -- the target disabled before the open batch commits aborts it, nothing written', async () => {
     const db = shiftDb('after')
-    db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+    W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
     const before = W.ledger(db)
-    const res = await W.callWith(shifts(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/open', openBody(2), 1)
-    db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+    const res = await W.callWith(shifts(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', '/open', openBody(2), 1)
+    W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
     assert.deepEqual([res.status, res.body.code], [409, 'branch_redirect_target_invalid'], JSON.stringify(res.body))
     assert.equal(W.ledger(db), before)
   })
 
   await W.check('after: reopen, amend, cancel and close of a closed Old Shop shift are refused and write nothing', async () => {
     const db = shiftDb('after')
-    db.prepare(`INSERT INTO shift_sessions(id,shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,closed_at,revision)
-      VALUES(9,'SH-OLD','per_account',72,'Cashier',2,'Shop','2026-10-04','2026-10-04T01:00:00.000Z','2026-10-04T10:00:00.000Z',1)`).run()
+    W.seed(db, () => db.prepare(`INSERT INTO shift_sessions(id,shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,closed_at,revision)
+      VALUES(9,'SH-OLD','per_account',72,'Cashier',2,'Shop','2026-10-04','2026-10-04T01:00:00.000Z','2026-10-04T10:00:00.000Z',1)`).run())
     const before = W.ledger(db)
     const audits = db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n
     for (const [method, url, body] of [
@@ -87,7 +88,7 @@ async function main() {
   await W.check('transfers naming Old Shop are refused with a code and write nothing (no redirect for a transfer)', async () => {
     const db = W.build('after')
     // Units stranded at Old Shop (the 0109 residue shape) make the out-of-Old-Shop direction a real transfer attempt.
-    db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500')
+    W.seed(db, () => db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500'))
     const before = W.ledger(db)
     const inventory = owner.load('routes/inventory.ts').default
     const branches = owner.load('routes/branches.ts').default

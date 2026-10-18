@@ -16,10 +16,10 @@ const oldShopTotals = (db) => W.plain(db.prepare(`SELECT
     (SELECT COUNT(*) FROM inventory_movements WHERE branch_id=2) AS movements`).get())
 
 function withDuplicate(db) {
-  db.prepare(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,cost_price_usd,is_active) VALUES(30,'Powder','POWDER-2','8850001',2,9.5,4,1)`).run()
-  db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd) VALUES(800,30,'2026-09-05','POWDER-X','2026-09-05',1,1,4)`).run()
-  db.exec(`INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(30,1,2),(30,2,0);
-           INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(800,1,2),(800,2,0);`)
+  W.seed(db, () => db.prepare(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,cost_price_usd,is_active) VALUES(30,'Powder','POWDER-2','8850001',2,9.5,4,1)`).run())
+  W.seed(db, () => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd) VALUES(800,30,'2026-09-05','POWDER-X','2026-09-05',1,1,4)`).run())
+  W.seed(db, () => db.exec(`INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(30,1,2),(30,2,0);
+           INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(800,1,2),(800,2,0);`))
   return db
 }
 
@@ -44,7 +44,7 @@ async function main() {
   })
   await W.check('remove: an empty product remains removable and posts no branch write-off', async () => {
     const db = W.build('after')
-    db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10); UPDATE branch_stock SET quantity=0 WHERE product_id=10; UPDATE products SET stock_quantity=0 WHERE id=10')
+    W.seed(db, () => db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10); UPDATE branch_stock SET quantity=0 WHERE product_id=10; UPDATE products SET stock_quantity=0 WHERE id=10'))
     const res = await W.call(products, db, 'DELETE', '/10', { reason: 'empty duplicate' })
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.deepEqual(W.movements(db), [])

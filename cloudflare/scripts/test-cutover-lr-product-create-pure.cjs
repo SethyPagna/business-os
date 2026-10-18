@@ -9,6 +9,7 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const products = (world) => world.load('routes/products.ts').default
 const reviewQueue = (world) => world.load('routes/reviewQueue.ts').default
 
@@ -21,26 +22,26 @@ const opening = (db) => W.plain(db.prepare(`SELECT bs.branch_id, bs.quantity, (S
 const recordedZeroCost = { cost_price_usd: 0, cost_price_khr: 0 }
 
 function queue(db, branchId, extra = {}) {
-  db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,summary,status,requested_by,requested_by_name)
-    VALUES(50,'products','create','product',?,'Create product "Toner"','open',99,'Requester')`).run([JSON.stringify(createBody(branchId, extra))])
+  W.seed(db, () => db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,summary,status,requested_by,requested_by_name)
+    VALUES(50,'products','create','product',?,'Create product "Toner"','open',99,'Requester')`).run([JSON.stringify(createBody(branchId, extra))]))
   return db
 }
 
 async function main() {
-  await W.check('before: create and variant with opening stock write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('historical BEFORE/AFTER: create and variant with opening stock write byte-identical statements to the eb5dd0ba3 oracle', async () => {
     for (const url of ['/', '/variant']) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = archivedAfter.build('before'); const dbOld = oracle.build('before')
       const capNew = []; const capOld = []
-      const a = await W.call(products(fresh), dbNew, 'POST', url, createBody(2, recordedZeroCost), { capture: capNew, redirect: 1 })
+      const a = await W.call(products(archivedAfter), dbNew, 'POST', url, createBody(2, recordedZeroCost), { capture: capNew, redirect: 1 })
       const b = await W.call(products(oracle), dbOld, 'POST', url, createBody(2, recordedZeroCost), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), url)
       assert.equal(W.normalised(capNew), W.normalised(capOld), url)
       assert.deepEqual(opening(dbNew), [{ branch_id: 1, quantity: 0, lots: null }, { branch_id: 2, quantity: 5, lots: 5 }])
     }
-    const dbNew = queue(W.build('before'), 2, recordedZeroCost); const dbOld = queue(W.build('before'), 2, recordedZeroCost)
+    const dbNew = queue(archivedAfter.build('before'), 2, recordedZeroCost); const dbOld = queue(oracle.build('before'), 2, recordedZeroCost)
     const capNew = []; const capOld = []
-    const a = await W.call(reviewQueue(fresh), dbNew, 'POST', '/50/approve', {}, { capture: capNew, redirect: 1 })
+    const a = await W.call(reviewQueue(archivedAfter), dbNew, 'POST', '/50/approve', {}, { capture: capNew, redirect: 1 })
     const b = await W.call(reviewQueue(oracle), dbOld, 'POST', '/50/approve', {}, { capture: capOld })
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
@@ -48,7 +49,7 @@ async function main() {
   })
 
   await W.check('control: the oracle refused opening stock at the disabled branch with receiving_branch_inactive (no way through)', async () => {
-    const db = W.build('after')
+    const db = oracle.build('after')
     const old = await W.call(products(oracle), db, 'POST', '/', createBody(2))
     assert.deepEqual([old.status, old.body.code], [409, 'receiving_branch_inactive'])
   })
@@ -76,10 +77,10 @@ async function main() {
 
   await W.check('race: the target disabled between plan and commit aborts the create, nothing written', async () => {
     const db = W.build('after')
-    db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+    W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
     const before = W.ledger(db)
-    const res = await W.callWith(products(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/', createBody(2), 1)
-    db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+    const res = await W.callWith(products(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), 'POST', '/', createBody(2), 1)
+    W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
     assert.equal(res.status, 409, JSON.stringify(res.body))
     assert.equal(res.body.code, 'branch_redirect_target_invalid')
     assert.equal(W.ledger(db), before)

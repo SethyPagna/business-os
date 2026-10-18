@@ -8,6 +8,7 @@ const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
 const oracle = W.makeWorld(W.ORACLE)
+const archivedAfter = W.makeWorld(W.AFTER)
 const batches = (world) => world.load('routes/batches.ts').default
 const inventory = (world) => world.load('routes/inventory.ts').default
 
@@ -18,7 +19,7 @@ const OLD_SHOP_ZERO = [{ t: 'branch_batch_stock', k: 500, quantity: 0 }, { t: 'b
 
 
 async function main() {
-  await W.check('before: receive, lot top-up, lot Set and move-row preserve business statements and atomic receipts to the eb5dd0ba3 oracle', async () => {
+  await W.check('historical BEFORE/AFTER: receive, lot top-up, lot Set and move-row preserve business statements and atomic receipts to the eb5dd0ba3 oracle', async () => {
     const cases = [
       [batches, 'POST', '/', receive(2)],
       [batches, 'POST', '/', receive(2, { batch_id: 500 })],
@@ -26,13 +27,31 @@ async function main() {
       [inventory, 'POST', '/move-row', moveRow(2)],
     ]
     for (const [app, method, url, body] of cases) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = archivedAfter.build('before'); const dbOld = oracle.build('before')
       const capNew = []; const capOld = []
-      const a = await W.call(app(fresh), dbNew, method, url, body, { capture: capNew, redirect: 1 })
+      const a = await W.call(app(archivedAfter), dbNew, method, url, body, { capture: capNew, redirect: 1 })
       const b = await W.call(app(oracle), dbOld, method, url, body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), `${url}: same answer`)
       W.assertComposedWrites(capNew, capOld, dbNew)
+      assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${url}: same ledgers`)
+    }
+  })
+
+  await W.check('current receipt and move routes keep stock, movement, guards and cost atomic', async () => {
+    const cases = [
+      [batches, 'POST', '/', receive(2)],
+      [batches, 'POST', '/', receive(2, { batch_id: 500 })],
+      [batches, 'PATCH', '/500/branches/2', { quantity: 7, reason: 'count' }],
+      [inventory, 'POST', '/move-row', moveRow(2)],
+    ]
+    for (const [app, method, url, body] of cases) {
+      const dbNew = W.build('before')
+      const capNew = []
+      const a = await W.call(app(fresh), dbNew, method, url, body, { capture: capNew, redirect: 1 })
+      assert.equal(a.status, 200, JSON.stringify(a.body))
+      if (method === 'POST' && url === '/' && body.unit_cost_usd != null) assert.ok(capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)), 'priced batch receipt records derived catalog cost')
+      W.assertComposedWrites(capNew, capNew, dbNew)
       if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
         for (const [label, pattern] of [
           ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1|DO UPDATE SET written=excluded\.written/],
@@ -41,26 +60,26 @@ async function main() {
           ['missing business guard', /INSERT INTO stock_session_guards/],
         ]) {
           const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
-          assert.throws(() => W.assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+          assert.throws(() => W.assertComposedWrites(mutant, capNew, dbNew), undefined, label)
         }
         const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
         separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
-        assert.throws(() => W.assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        assert.throws(() => W.assertComposedWrites(separated, capNew, dbNew), undefined, 'cost outside stock transaction')
         const movedGuard = capNew.map(rows => rows.slice())
         const stockIndex = movedGuard.findIndex(rows => rows.some(s => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
-        assert.match(movedGuard[stockIndex][0].sql.trim(), /^SELECT CASE/)
-        const [guard] = movedGuard[stockIndex].splice(0, 1)
-        movedGuard.splice(stockIndex, 0, [guard])
+        const guardIndex = movedGuard[stockIndex].findIndex(s => /^SELECT CASE/.test(s.sql.trim()))
+        assert.ok(guardIndex >= 0)
+        const prefix = movedGuard[stockIndex].splice(0, guardIndex + 1)
+        movedGuard.splice(stockIndex, 0, prefix)
         assert.deepEqual(movedGuard.flat(), capNew.flat(), 'moved-guard control preserves flattened business ordering')
-        assert.throws(() => W.assertComposedWrites(movedGuard, capOld, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
+        assert.throws(() => W.assertComposedWrites(movedGuard, capNew, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
       }
-      assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${url}: same ledgers`)
     }
   })
 
   await W.check('control: the oracle Set a lot at the disabled branch (a decrease never asked)', async () => {
-    const db = W.build('after')
-    db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500 AND branch_id=2; UPDATE branch_stock SET quantity=3 WHERE product_id=10 AND branch_id=2')
+    const db = oracle.build('after')
+    W.seed(db, () => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500 AND branch_id=2; UPDATE branch_stock SET quantity=3 WHERE product_id=10 AND branch_id=2'))
     const old = await W.call(batches(oracle), db, 'PATCH', '/500/branches/2', { quantity: 1 })
     assert.equal(old.status, 200)
     assert.equal(W.qty(db, 'branch_batch_stock', 'batch_id', 500, 2), 1)
@@ -106,10 +125,10 @@ async function main() {
   for (const [label, app, method, url, body] of [['receive', batches, 'POST', '/', receive(2)], ['move-row', inventory, 'POST', '/move-row', moveRow(2)], ['PATCH lot Set', batches, 'PATCH', '/500/branches/2', { quantity: 9 }]]) {
     await W.check(`race: ${label}: the target disabled between plan and commit aborts the batch, nothing written`, async () => {
       const db = W.build('after')
-      db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
+      W.seed(db, () => db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run())
       const before = W.ledger(db)
-      const res = await W.callWith(app(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), method, url, body, 1)
-      db.exec('UPDATE branches SET is_active=1 WHERE id=1')
+      const res = await W.callWith(app(fresh), W.raceBinding(db, () => W.seed(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))), method, url, body, 1)
+      W.seed(db, () => db.exec('UPDATE branches SET is_active=1 WHERE id=1'))
       assert.equal(res.status, 409, JSON.stringify(res.body))
       assert.ok(['branch_redirect_target_invalid', 'receiving_branch_inactive'].includes(res.body.code), JSON.stringify(res.body))
       assert.equal(W.ledger(db), before)

@@ -11,6 +11,7 @@
 //
 // Run (from cloudflare/): node scripts/test-cutover-ld-historical-readers-native.cjs
 const assert = require('node:assert/strict')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
@@ -50,11 +51,11 @@ function fixture() {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.exec('PRAGMA foreign_keys=ON')
-  sql.exec(`
+  seedStockFixture(sql, () => sql.exec(`
     INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1),(2,'Warehouse',0,1);
     INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0);
-  `)
+  `))
   const statement = (text, values = []) => {
     const prepared = sql.prepare(text)
     const args = Array.isArray(values) ? values : [values]
@@ -86,7 +87,7 @@ const receive = (key = 'ld-receive-001') => ({ client_request_id: key, mode: 'st
   defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Supplier' },
   items: [{ line_id: 'receive-1', kind: 'receive', product_id: 1, quantity: 5, unit_cost_usd: 2 }] })
 // The cutover, as far as readers can tell: Shop is retired and renamed, Warehouse takes the successor name.
-const retireShop = (f) => f.sql.exec("UPDATE branches SET name='Old Shop', is_active=0, is_default=0 WHERE id=1; UPDATE branches SET name='LC Store', is_default=1 WHERE id=2")
+const retireShop = (f) => seedStockFixture(f.sql, () => f.sql.exec("UPDATE branches SET name='Old Shop', is_active=0, is_default=0 WHERE id=1; UPDATE branches SET name='LC Store', is_default=1 WHERE id=2"))
 async function json(app, url, env, init) {
   const response = await app.request(url, init || {}, env, ctx)
   assert.equal(response.status, 200, `${url} -> ${response.status} ${await response.clone().text()}`)
@@ -122,7 +123,7 @@ async function main() {
     assert.equal(lines.lines[0].received_branch_name, 'Shop')
     // Fallback, not the rule: a lot whose snapshot is blank (older than the label column) reads the live name.
     for (const blank of [null, '', ' ', ' ﻿　']) {
-      f.sql.prepare('UPDATE product_batches SET received_branch_name=?').run(blank)
+      seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET received_branch_name=?').run(blank))
       const again = await json(app, `/suppliers/reports/stock-in-invoice-lines?supplier_key=${encodeURIComponent(groups.invoices[0].supplier_key)}&day=2026-09-05`, f.env)
       assert.equal(again.lines[0].received_branch_name, 'Old Shop')
       const regroup = await json(app, '/suppliers/reports/stock-in-invoices', f.env)
@@ -139,7 +140,7 @@ async function main() {
     const breakdown = await recompute.getCatalogCostBreakdown(getDb(f.env), 1)
     assert.equal(breakdown.inputs.length, 1)
     assert.match(breakdown.inputs[0].label, / . Shop$/, JSON.stringify(breakdown.inputs))
-    f.sql.exec('UPDATE product_batches SET received_branch_name=NULL')
+    seedStockFixture(f.sql, () => f.sql.exec('UPDATE product_batches SET received_branch_name=NULL'))
     const blank = await recompute.getCatalogCostBreakdown(getDb(f.env), 1)
     assert.match(blank.inputs[0].label, / . Old Shop$/, 'blank snapshot: the live name fills in')
     f.sql.close()
@@ -147,8 +148,8 @@ async function main() {
 
   await check('live/operational control: the tagged-lot (damaged stock) groups show the CURRENT branch name', async () => {
     const f = fixture()
-    f.sql.exec(`INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity_remaining,condition_tag,unit_cost_usd) VALUES(1,'Serum',2,3,'damaged',1)`)
-    f.sql.exec("UPDATE branches SET name='LC Store' WHERE id=2")
+    seedStockFixture(f.sql, () => f.sql.exec(`INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity_remaining,condition_tag,unit_cost_usd) VALUES(1,'Serum',2,3,'damaged',1)`))
+    seedStockFixture(f.sql, () => f.sql.exec("UPDATE branches SET name='LC Store' WHERE id=2"))
     const lots = load('lib/damagedLotActions.ts')
     const groups = await lots.readTaggedLotGroups(getDb(f.env), [1])
     assert.equal(groups.length, 1)
@@ -158,9 +159,9 @@ async function main() {
 
   await check('a sale line keeps the sale\'s branch label after the rename; another-branch line and blank snapshots read live', async () => {
     const f = fixture()
-    f.sql.exec(`
+    seedStockFixture(f.sql, () => f.sql.exec(`
       INSERT INTO sales(id,receipt_number,branch_id,branch_name,total_usd,sale_status,created_at,updated_at) VALUES(1,'R-1',1,'Shop',5,'paid','2026-09-05 03:00:00','2026-09-05 03:00:00');
-      INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,total_usd) VALUES(1,1,1,'Serum',1,1,5),(2,1,1,'Serum',1,2,5);`)
+      INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,total_usd) VALUES(1,1,1,'Serum',1,1,5),(2,1,1,'Serum',1,2,5);`))
     retireShop(f)
     const app = load('routes/sales.ts', { auth }).default
     const body = await json(app, '/?limit=10', f.env)
@@ -170,7 +171,7 @@ async function main() {
     const lines = sale.items
     assert.equal(lines.find(line => line.id === 1).branch_name, 'Shop', 'the line recorded at the sale branch reads the sale\'s own label')
     assert.equal(lines.find(line => line.id === 2).branch_name, 'LC Store', 'a line at a different branch has no snapshot: live name')
-    f.sql.exec("UPDATE sales SET branch_name=NULL WHERE id=1")
+    seedStockFixture(f.sql, () => f.sql.exec("UPDATE sales SET branch_name=NULL WHERE id=1"))
     const blank = await json(app, '/?limit=10', f.env)
     const blankSale = (blank.sales || blank.items || blank.data || blank)[0]
     assert.equal(blankSale.items.find(line => line.id === 1).branch_name, 'Old Shop')
@@ -213,7 +214,7 @@ async function main() {
 
   await check('the transfer list hides the closed consolidation transfers behind includeCutover=1', async () => {
     const f = fixture()
-    f.sql.exec(`
+    seedStockFixture(f.sql, () => f.sql.exec(`
       INSERT INTO action_history(id,scope,entity,entity_id,label,status,reversible,undo_payload,redo_payload,created_by_id,last_error) VALUES
         (101,'branches','stock_transfer','a','Real','undoable',1,'{}','{}',7,NULL),
         (102,'branches','stock_transfer','b','Move','recorded',0,'{}','{}',7,'undo_closed:branch_cutover_move');
@@ -221,7 +222,7 @@ async function main() {
         VALUES(1,7,'req-real','d1','{}','committed','op-real',1,'applied',0,101),(2,7,'bc_op_1','d2','{}','committed','op-move',1,'applied',0,102);
       INSERT INTO stock_transfers(id,product_id,product_name,from_branch_id,to_branch_id,from_branch_name,to_branch_name,quantity,receipt_id,created_at) VALUES
         (1,1,'Serum',1,2,'Shop','Warehouse',1,1,'2026-10-06 01:00:00'),(2,1,'Serum',1,2,'Shop','Warehouse',4,2,'2026-10-06 02:00:00'),
-        (3,1,'Serum',2,1,'Warehouse','Shop',2,NULL,'2026-10-05 02:00:00');`)
+        (3,1,'Serum',2,1,'Warehouse','Shop',2,NULL,'2026-10-05 02:00:00');`))
     retireShop(f)
     const app = load('routes/compat.ts', { auth, reports: { gateTotals: () => { throw new Error('unrelated') } } }).default
     for (const paged of [true, false]) {
@@ -243,9 +244,9 @@ async function main() {
     assert.equal(Object.hasOwn(snap.expected.movements[0], 'addressed_branch_name'), false)
     // A postimage captured by a Worker that predates the columns carries neither key (json_remove keeps every
     // number's text, so only the keys differ); it must still match the state read now.
-    f.sql.exec(`UPDATE undo_snapshots SET payload_json=json_remove(payload_json,
+    seedStockFixture(f.sql, () => f.sql.exec(`UPDATE undo_snapshots SET payload_json=json_remove(payload_json,
       '$.after.batches[0].received_branch_name','$.expected.batches[0].received_branch_name',
-      '$.after.movements[0].addressed_branch_name','$.expected.movements[0].addressed_branch_name')`)
+      '$.after.movements[0].addressed_branch_name','$.expected.movements[0].addressed_branch_name')`))
     const history = f.sql.prepare('SELECT * FROM action_history WHERE id=?').get(result.actionHistoryId)
     await session.replayStockSession(f.env, admin, 'undo', result.actionHistoryId, 0, JSON.parse(history.undo_payload))
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
