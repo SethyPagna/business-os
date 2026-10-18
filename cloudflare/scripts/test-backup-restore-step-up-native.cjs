@@ -8,6 +8,7 @@
 //
 // Run (from cloudflare/): node scripts/test-backup-restore-step-up-native.cjs
 const { randomBytes } = require('node:crypto')
+const assert = require('node:assert/strict')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
 
 async function main() {
@@ -84,8 +85,19 @@ async function main() {
     const holdFlag = JSON.stringify({ mode: 'restore', token: 'stuck-restore-token', backupKey: 'backups/cloudflare/x.json', startedAt: '2026-10-14T01:00:00.000Z',
       startedBy: 'admin', phase: 'failed', error: 'died', updatedAt: '2026-10-14T01:00:05.000Z' })
 
+    const seedHold = async () => {
+      assert.equal((await world.first("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'")).n, 0)
+      await world.db.batch([
+        world.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+        world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value) VALUES ('maintenance', ?)").bind(holdFlag),
+        world.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
+      ])
+      assert.equal((await world.first("SELECT value FROM system_flags WHERE key='maintenance'")).value, holdFlag)
+      assert.equal((await world.first("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'")).n, 0)
+    }
+
     await check('forcing the maintenance hold off needs the current password, like the restore', async (t) => {
-      await world.run("INSERT OR REPLACE INTO system_flags (key, value) VALUES ('maintenance', ?)", holdFlag)
+      await seedHold()
       const before = (await world.first("SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'step_up_refused'")).n
       const none = await clearHold({ force: true })
       t.eq('no password: status', none.status, 403)
@@ -108,7 +120,7 @@ async function main() {
     })
 
     await check('a backup_restore holder who is not the built-in admin may clear the hold with their own password', async (t) => {
-      await world.run("INSERT OR REPLACE INTO system_flags (key, value) VALUES ('maintenance', ?)", holdFlag)
+      await seedHold()
       const refused = await clearHold({ force: true }, 'operator')
       t.eq('no password: code', refused.json && refused.json.code, 'current_password_required')
       t.eq('the hold is still on', await maintenanceHeld(), true)
