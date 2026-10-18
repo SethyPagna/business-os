@@ -55,6 +55,7 @@ const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyP
 const saleItemPricing = compile('saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
+  './stockTransaction': compile('stockTransaction.ts'),
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': moneyPrecision,
