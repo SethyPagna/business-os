@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const file = path.join(__dirname, 'test-intake-full-request-budget.cjs')
 const worldSource = fs.readFileSync(file, 'utf8').split(';(async () => {')[0]
 function loadWorld(removeGuard) {
@@ -67,13 +68,17 @@ async function run(tier, kind, negative = false) {
     f.beforeCommit(sql => {
       assert.equal(snapshotRead,true,'competing edit occurs after the actual combined snapshot returned')
       assert.equal(physicalBatch,true,'competing edit occurs immediately before the physical atomic batch')
-      fired = true
-      sql.prepare(kind === 'unit-cost' ? 'UPDATE product_batches SET unit_cost_usd=9 WHERE id=?'
-        : 'UPDATE product_batches SET received_cost_usd=received_cost_usd+100 WHERE id=?').run(batchId)
+      seedStockFixture(sql, () => {
+        const changed = sql.prepare(kind === 'unit-cost' ? 'UPDATE product_batches SET unit_cost_usd=9 WHERE id=?'
+          : 'UPDATE product_batches SET received_cost_usd=received_cost_usd+100 WHERE id=?').run(batchId)
+        assert.equal(changed.changes, 1)
+      })
       competingState = state(f,id)
+      fired = true
     })
     const answer = await f.call()
-    assert.equal(fired,true,'the native beforeCommit hook must actually fire')
+    assert.equal(fired,true,'the native beforeCommit hook must complete the competing mutation')
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
     assert.ok(answer.physical <= cap, 'failed batch, cleanup, auth and tails remain within actual invocation cap')
     console.log('MEASURED '+JSON.stringify({tier,kind,negative,warmupPhysical:warmup.physical,...answer}))
     if (negative) {
