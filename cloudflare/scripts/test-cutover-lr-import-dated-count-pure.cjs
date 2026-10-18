@@ -32,10 +32,13 @@ function withoutProductAdmission(value) {
     if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
       const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
       const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
-      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const currentSingle = "SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END"
+      const isCurrentSingle = statement.sql.replace(/\s+/g, ' ').trim() === currentSingle
+      assert.ok(isCurrentSingle || [allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
       const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
       const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
       assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      if (isCurrentSingle) assert.ok(Number.isSafeInteger(statement.params.productId) && statement.params.productId > 0, 'current guard binds its product identity')
       return undefined
     }
     if (statement && typeof statement.sql === 'string' && withoutMovementCost(statement.sql) !== statement.sql) {
@@ -89,6 +92,7 @@ function makeWorld(oracleSha = null) {
     resolve: load('lib/datedStockCountResolve.ts'),
     route: load('lib/datedStockCountRoute.ts'),
     apply: load('lib/datedStockCountApply.ts'),
+    batches: load('lib/productBatches.ts'),
   }
 }
 const fresh = makeWorld()
@@ -150,6 +154,37 @@ let checks = 0
 const check = async (name, fn) => { await fn(); checks++; console.log(`PASS ${name}`) }
 
 async function main() {
+  await check('historical comparison removes only exact admission guards with valid identities', async () => {
+    const current = fresh.batches.planReceiveBatchStock({ productId: 10, branchId: 1, quantity: 1, receivedDate: '2026-09-05' }).statements[0]
+    const legacy = { sql: "SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END", params: { productId: 10 } }
+    const shared = require('./harness/product_stock_guard.cjs').productStockGuardStatement([10], 'active')
+    const unrelated = { sql: 'SELECT stock_quantity FROM products WHERE id=@productId', params: { productId: 10 } }
+    assert.deepEqual(withoutProductAdmission([current, legacy, shared, unrelated]), [unrelated])
+    assert.deepEqual(withoutProductAdmission([JSON.stringify(current), JSON.stringify(unrelated)]), [JSON.stringify(unrelated)])
+    for (const sql of [current.sql.replace('is_active IS 1', 'is_active IS 0'), current.sql.replace('@productId', '@batchId'), current.sql.replace('ELSE 1 END', 'ELSE 0 END')]) {
+      assert.throws(() => withoutProductAdmission([{ ...current, sql }]), /only exact active-product admission guards/)
+    }
+    for (const productId of [0, -1, 1.5, null, undefined, '10']) {
+      assert.throws(() => withoutProductAdmission([{ ...current, params: { ...current.params, productId } }]), /guard.*identit/)
+    }
+    const differentError = { ...current, sql: current.sql.replace('$[product_has_stock]', '$[another_guard]') }
+    assert.deepEqual(withoutProductAdmission([differentError]), [differentError])
+  })
+
+  await check('current receipt guard accepts existing active products and refuses missing or disabled products without a permit', async () => {
+    const w = world('before')
+    seedStockFixture(w.raw, () => w.raw.exec("INSERT INTO products(id,name,name_normalized,unit,stock_quantity,is_active) VALUES(11,'Disabled','disabled','pcs',0,0)"))
+    const before = rows(w.raw)
+    for (const productId of [10, 11, 999]) {
+      const guard = fresh.batches.planReceiveBatchStock({ productId, branchId: 1, quantity: 1, receivedDate: '2026-09-05' }).statements[0]
+      assert.equal(w.raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      const execute = () => w.db.prepare(guard.sql).get(guard.params)
+      if (productId === 10) assert.equal(Object.values(execute())[0], 1)
+      else assert.throws(execute, /product_has_stock/)
+      assert.deepEqual(rows(w.raw), before)
+    }
+  })
+
   await check('before the cutover: resolve, plan and the apply batch are byte-identical to eb5dd0ba3, and the rows match', async () => {
     const results = []
     for (const subject of [fresh, old]) {
