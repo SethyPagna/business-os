@@ -20,6 +20,7 @@ const { pathToFileURL } = require('node:url')
 const { world, drive, snapshot } = require('./test-branch-cutover-parent-e2e-native.cjs')
 const { DatabaseSync } = require('node:sqlite')
 const { historicalMigrations, installCurrentStockGuards } = require('./harness/historical_product_stock.cjs')
+const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const root = path.resolve(__dirname, '../..')
 const NAMES = ['branch-cutover-post-checks', 'branch-cutover-post-stock', 'branch-cutover-post-labels']
@@ -189,7 +190,12 @@ async function main() {
       if (ledger === 'damaged') raw.exec('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining) VALUES(1,1,1,1)')
       installCurrentStockGuards(raw)
       assert.equal(raw.prepare(q['branch-cutover-post-checks']).get().inactive_with_stock, ledger === 'zero' ? 0 : 1, ledger)
-      assert.throws(() => raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1'), /product_has_stock/, ledger + ': guards remain enabled')
+      const before = raw.prepare('SELECT * FROM products WHERE id=1').get()
+      const invalidWrite = () => raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1')
+      assert.throws(invalidWrite, /stock_transaction_required/, ledger + ': raw write remains refused')
+      assert.throws(() => seedStockFixture(raw, invalidWrite), /product_has_stock/, ledger + ': product guard remains enabled within admission')
+      assert.deepEqual(raw.prepare('SELECT * FROM products WHERE id=1').get(), before)
+      assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
       raw.close()
     }
   })

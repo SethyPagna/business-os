@@ -17,6 +17,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
+const completedCutover = require('./harness/completed-cutover-world.cjs')
 const { seedHistoryFamilies } = require('./test-branch-cutover-history-pure.cjs')
 const root = path.resolve(__dirname, '..')
 
@@ -63,7 +64,7 @@ function modules(control) {
     name = path.posix.normalize(name.endsWith('.ts') ? name : name + '.ts')
     if (cache.has(name)) return cache.get(name).exports
     const module = { exports: {} }; cache.set(name, module)
-    let source = fs.readFileSync(path.join(root, 'src', name), 'utf8').replace(/\r\n/g, '\n')
+    let source = completedCutover.readSource(name).replace(/\r\n/g, '\n')
     for (const [from, to] of mutations.get(name) || []) { assert.ok(source.includes(from), control + ': ' + from.slice(0, 80)); source = source.replace(from, to); used.add(from) }
     const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', js)(request => {
@@ -150,10 +151,12 @@ function generated(count, seed = 7) {
   return { products, lots }
 }
 
-function world({ control, generatedProducts = 28, duplicate = false } = {}) {
+function world({ control, generatedProducts = 28, duplicate = false, legacySeed } = {}) {
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100; raw.limits.variableNumber = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const sql of require('./harness/historical_product_stock.cjs').historicalMigrations()) raw.exec(sql)
+  const migrations = completedCutover.migrationEntries()
+  const initial = legacySeed ? migrations.filter(entry => Number(entry.name.slice(0, 4)) < 242) : migrations
+  for (const { sql } of initial) raw.exec(sql)
   raw.limits.functionArg = 100
   raw.exec(`INSERT INTO branches(id,name,notes,is_active,is_default,canonical_key,role,created_at) VALUES
       (2,'Shop','front of house',1,1,'shop','shop','2026-01-01 00:00:00'),(1,'Warehouse','back store',1,0,'warehouse','warehouse','2026-01-01 00:00:00'),
@@ -183,6 +186,15 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     INSERT INTO stock_transfers(id,product_id,from_branch_id,to_branch_id,quantity) VALUES(900001,2,1,2,1);
     INSERT INTO pending_actions(section,action_type,entity_type,status) VALUES('inventory','adjust','product','rejected'),('inventory','adjust','product','approved');`)
   const history = seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 }, 20000)
+  if (legacySeed) {
+    legacySeed(raw)
+    const tables = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'damaged_stock_lots']
+    const stock = () => tables.map(table => raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
+    const before = stock()
+    for (const { sql } of migrations.slice(initial.length)) raw.exec(sql)
+    assert.deepEqual(stock(), before)
+    assert.throws(() => raw.exec("INSERT INTO products(name,is_active,stock_quantity) VALUES('Refused legacy state',0,1)"), /product_has_stock/)
+  }
   const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, before: null, after: null, cpuRead: null, cpuBatch: false, duplicate, duplicatesCommitted: 0, duplicatesRefused: 0, dbNs: 0n }
   const timed = (fn) => { const t = process.hrtime.bigint(); try { return fn() } finally { stats.dbNs += process.hrtime.bigint() - t } }
   let m = modules(control)
@@ -212,7 +224,7 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     if (stats.after) { const after = stats.after; stats.after = null; after(raw) }
     return result
   } })
-  const w = { raw, stats, history, products, lots, get m() { require('./harness/historical_product_stock.cjs').installCurrentStockGuards(raw); return m }, db: makeDb() }
+  const w = { raw, stats, history, products, lots, get m() { return m }, db: makeDb() }
   w.reload = (next = control) => { m = modules(next); w.db = makeDb() }
   return w
 }
@@ -320,8 +332,7 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
 
 function round(n) { return Math.round(n * 1e9) / 1e9 }
 async function scenario({ control, duplicate = false, faults = {}, generatedProducts = 28, timings, pageSize = 16, seed, hooks } = {}) {
-  const w = world({ control, duplicate, generatedProducts })
-  if (seed) seed(w.raw)
+  const w = world({ control, duplicate, generatedProducts, legacySeed: seed })
   if (hooks) w.hooks = hooks(w.raw)
   const base = snapshot(w.raw)
   const before = {
@@ -564,7 +575,7 @@ async function main() {
     for (const [label, extra] of [['no twin', twinSeed(9021, 'Lonely inactive', '9000000000216', 0, 4) + 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9021,2,4);'],
       ['two twins', twinSeed(9031, 'Doubled inactive', '9000000000314', 0, 4) + twinSeed(9032, 'Doubled inactive', '9000000000314', 1, 0) + twinSeed(9033, 'Doubled inactive', '9000000000314', 1, 0)
         + 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9031,1,4);']]) {
-      const w = world({ generatedProducts: 4 }); w.raw.exec(extra)
+      const w = world({ generatedProducts: 4, legacySeed: raw => raw.exec(extra) })
       const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
       assert.deepEqual(plan.capabilities.map(c => c.code), ['inactive_stock_without_twin'], label)
       assert.match(plan.capabilities[0].detail, label === 'no twin' ? /^9021:no_active_twin$/ : /^9031:several_active_twins$/)
@@ -576,10 +587,9 @@ async function main() {
     }
   })
   await check('F3 owner-approved fold (7091 -> 1529): inspect lists it as refused without the approval; with it begin seals the list into the intent and every later step reads it from the journal', async () => {
-    const w = world({ generatedProducts: 4 })
-    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+    const w = world({ generatedProducts: 4, legacySeed: raw => raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
         (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
-      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`) })
     const calls = []
     w.hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { calls.push([dup.id, keeper.id, approved]); await stubFold(w.raw)(user, dup, keeper) } }
     const bare = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
@@ -603,10 +613,9 @@ async function main() {
     w.raw.close()
   })
   await check('F1 an approved fold survives a crash between the merge and the next save: the resume (continue) and a replayed begin both proceed, folding nothing twice', async () => {
-    const w = world({ generatedProducts: 4 })
-    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+    const w = world({ generatedProducts: 4, legacySeed: raw => raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
         (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
-      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`) })
     let folds = 0, dieAfterFold = true
     const hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { await stubFold(w.raw)(user, dup, keeper, approved); folds++; if (dieAfterFold) { dieAfterFold = false; throw new Error('isolate died after the fold') } } }
     const approvedFolds = [{ dup: 7091, keeper: 1529 }]
@@ -626,7 +635,7 @@ async function main() {
     w.raw.close()
   })
   await check('F3 without the merge hook a plan that needs a fold refuses before anything is read (the Worker always supplies it)', async () => {
-    const w = world({ generatedProducts: 4 }); seedF3(w.raw)
+    const w = world({ generatedProducts: 4, legacySeed: seedF3 })
     const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
     assert.equal(plan.capabilities.length, 0)
     assert.deepEqual(plan.inactiveStock.fold.map(i => [i.dup.id, i.keeper.id]), [[9001, 9011], [9002, 9012]])

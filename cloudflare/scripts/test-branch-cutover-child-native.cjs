@@ -1,16 +1,16 @@
 const { captureAuditBaseline } = require('./harness/audit_baseline.cjs')
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
-const root = path.resolve(__dirname, '..')
+const { archivedWorld, COST_PROVENANCE_REF } = require('./harness/completed-cutover-world.cjs')
+const costProvenanceWorld = archivedWorld(COST_PROVENANCE_REF)
 const cache = new Map()
 function load(relative) {
   relative = path.posix.normalize(relative.endsWith('.ts') ? relative : relative + '.ts')
   if (cache.has(relative)) return cache.get(relative).exports
   const module = { exports: {} }; cache.set(relative, module)
-  let source = fs.readFileSync(path.join(root, 'src', relative), 'utf8')
+  let source = costProvenanceWorld.readSource(relative)
   if (relative === 'lib/branchCutoverChild.ts' && process.env.CHILD_WRONG_CONTROL) {
     const mutations = {
       retry: ['await db.batchOnce(statements)', 'await db.batch(statements)'],
@@ -48,7 +48,7 @@ const budget = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, completionQuer
 function world(lots = [1], untracked = 0) {
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(file => file.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+  for (const { sql } of costProvenanceWorld.migrationEntries()) raw.exec(sql)
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0);
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true}',1);
     INSERT INTO products(id,name,sku,is_active,cost_price_usd,cost_price_khr) VALUES(1,'Product','P1',1,2.5,10000);`)
