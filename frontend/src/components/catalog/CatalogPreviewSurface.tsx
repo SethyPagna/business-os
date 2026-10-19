@@ -134,6 +134,8 @@ type CatalogPreviewSurfaceProps = {
   productDetailNeedMoreDetailsDefault?: string
   onAddToBucket?: (product: { id: number | string }, priceText?: string) => void
   getBucketQty?: (id: number | string) => number
+  isInWishlist?: (id: number | string) => boolean
+  onToggleWishlist?: (product: { id: number | string }, priceText?: string) => void
   filePicker: FilePickerState
   setFilePicker: Dispatch<SetStateAction<FilePickerState>>
   handleFilePickerSelect: (asset: unknown) => void
@@ -187,6 +189,8 @@ export default function CatalogPreviewSurface({
   productDetailNeedMoreDetailsDefault,
   onAddToBucket,
   getBucketQty,
+  isInWishlist,
+  onToggleWishlist,
   filePicker,
   setFilePicker,
   handleFilePickerSelect,
@@ -662,6 +666,8 @@ export default function CatalogPreviewSurface({
             language={pageLanguage}
             onAddToBucket={onAddToBucket}
             bucketQty={productDetailView.product ? getBucketQty?.(productDetailView.product.id) : 0}
+            onToggleWishlist={onToggleWishlist}
+            isInWishlist={productDetailView.product ? isInWishlist?.(productDetailView.product.id) : false}
           />
         ) : null}
         {!publicView && filePicker.open ? (
