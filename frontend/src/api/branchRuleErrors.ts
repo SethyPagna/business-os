@@ -86,6 +86,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
   stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
   import_queue_required: 'import_queue_required',
+  import_apply_permission_revoked: 'import_apply_permission_revoked',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',

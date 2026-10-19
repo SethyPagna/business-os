@@ -711,4 +711,5 @@ async function main() {
   }
   finish('B')
 }
-main().catch(error => { console.error(error); process.exitCode = 2 })
+module.exports = { world }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 2 })

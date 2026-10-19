@@ -8,7 +8,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -27,6 +27,9 @@ import { dispatchImportWork } from '../lib/queueDispatch'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.onError((error, c) => {
+  if (isImportApplyAuthorizationError(error)) {
+    return c.json({ success: false, code: error.code, permission: error.permission, error: error.message }, 409)
+  }
   if (isImportMaintenanceFenceError(error)) {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
   }

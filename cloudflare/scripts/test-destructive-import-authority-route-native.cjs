@@ -11,11 +11,10 @@ function seedFixture(raw, seed) {
 // database. Only the unrelated edges (session lookup, audit sink, cache,
 // broadcast, image queue) are stubbed.
 //
-// This is the step-1 subset of the root-chain 6.0.5 fix (84ce5e073): the
-// approve / retry / apply-start boundaries. The commit-guard re-check inside the
-// final-deactivate transaction depends on stockActorGuard.ts and
-// import_stock_action_guards, which do not exist on this chain, and is NOT
-// covered here.
+// This fast matrix covers admission and invocation authority. The whole-Worker
+// late-user-revocation finalizer check is in
+// test-destructive-import-commit-authority-native.cjs; broader commit, image,
+// role, policy and recovery cases remain separate coverage obligations.
 //
 // Discrimination: after the real implementation passes every case, the same
 // cases are re-run against deliberately wrong implementations (source-patched

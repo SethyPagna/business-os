@@ -403,6 +403,53 @@ export async function assertCurrentImportApplyAuthority(
   return { actor, allowProductImageWrites }
 }
 
+function withProductImportCommitAuthority(db: D1Compat, job: ImportApplyJob, actor: SessionUser): D1Compat {
+  if (job.type !== 'products' || !['replace_all', 'replace_columns'].includes(getProductImportMode(job.policy_json))) return db
+  const authority = {
+    sql: `SELECT CASE WHEN EXISTS(
+      SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id
+      WHERE u.id=@authorityActor AND u.is_active=1 AND u.deleted_at IS NULL
+        AND u.username IS @authorityUsername AND u.organization_id IS @authorityOrganization
+        AND u.role_id IS @authorityRole AND u.permissions IS @authorityPermissions
+        AND r.code IS @authorityRoleCode AND r.permissions IS @authorityRolePermissions
+    ) AND EXISTS(
+      SELECT 1 FROM import_jobs WHERE id=@authorityJob AND type='products'
+        AND policy_json IS @authorityPolicy AND cancel_requested=0
+    ) THEN 1 ELSE json_extract('[]','$[import_authority_changed]') END`,
+    params: {
+      authorityActor: actor.id, authorityUsername: actor.username,
+      authorityOrganization: actor.organization_id ?? null, authorityRole: actor.role_id ?? null,
+      authorityPermissions: actor.permissions ?? null, authorityRoleCode: actor.role_code ?? null,
+      authorityRolePermissions: actor.role_permissions ?? null,
+      authorityJob: job.id, authorityPolicy: job.policy_json,
+    },
+  }
+  const guarded = Object.create(db) as D1Compat
+  const commit = async (statements: Parameters<D1Compat['batch']>[0], once: boolean) => {
+    try {
+      const results = await (once ? db.batchOnce([...statements, authority]) : db.batch([...statements, authority]))
+      return results.slice(0, -1)
+    } catch (error) {
+      if (String(error).includes('import_authority_changed')) {
+        throw new ImportApplyAuthorizationError('import', 'Import permissions or the reviewed plan changed. Review and retry this import with a currently authorized user.')
+      }
+      throw error
+    }
+  }
+  guarded.batch = ((statements: Parameters<D1Compat['batch']>[0]) => commit(statements, false)) as D1Compat['batch']
+  guarded.batchOnce = ((statements: Parameters<D1Compat['batch']>[0]) => commit(statements, true)) as D1Compat['batchOnce']
+  guarded.prepare = ((sql: string) => {
+    const prepared = db.prepare(sql)
+    const guardedStatement = Object.create(prepared) as typeof prepared
+    guardedStatement.run = async (params) => {
+      const results = await guarded.batch([{ sql, params }])
+      return { changes: results[0].meta?.changes ?? 0, lastInsertRowid: Number(results[0].meta?.last_row_id ?? 0) }
+    }
+    return guardedStatement
+  }) as D1Compat['prepare']
+  return guarded
+}
+
 // Human-readable label for each warning kind, used as the group heading in
 // the row-number notation report (see summarizeImportWarnings) -- e.g.
 // "Same barcode, different name: rows 5, 12, 89". Kept centralized here so
@@ -6486,6 +6533,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // actor from live users/roles before this invocation changes job/chunk
     // state or composes any catalog, stock, sales, or image write.
     const authority = await assertCurrentImportApplyAuthority(env, job, db)
+    const productWriteDb = withProductImportCommitAuthority(db, job, authority.actor)
     const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (job.type === 'stock_actions' && !env.IMPORT_QUEUE) {
       throw Object.assign(new Error('Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
@@ -6570,7 +6618,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           })
         }
       }
-      if (renameStatements.length) await runD1BatchInChunks(db, renameStatements)
+      if (renameStatements.length) await runD1BatchInChunks(productWriteDb, renameStatements)
     }
     sw.lap('imageRenameMs')
 
@@ -6683,14 +6731,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       : null
     for (const { row, code, message, params } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message, undefined, params)
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
-    let importWriteDb = db
+    let importWriteDb = productWriteDb
     // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that
     // pair in every write batch. Empty while every branch is active (the guarded batches are then unchanged).
     const branchRedirects = importRowRedirectGuards(actionable, job.type === 'sales')
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
       await validateResolvedImportBranches(db, actionable, { sells: job.type === 'sales' })
       if ((job.type === 'products' || job.type === 'inventory') && actionable.length) {
-        importWriteDb = withCanonicalImportBranchWriteGuard(db, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)), branchRedirects)
+        importWriteDb = withCanonicalImportBranchWriteGuard(productWriteDb, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)), branchRedirects)
       }
       // Sales line items are nested one level deeper (data.items[]), each
       // carrying its own copy of the same validated order-level branch_id.
@@ -7432,7 +7480,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
 
     if (job.type === 'products' && productSeedBranchIds.length) {
-      importWriteDb = withCanonicalImportBranchWriteGuard(db, [
+      importWriteDb = withCanonicalImportBranchWriteGuard(productWriteDb, [
         ...actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)),
         ...productSeedBranchIds,
       ], branchRedirects)
@@ -7530,7 +7578,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
       if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
       const skippedProductIds = await readSkippedProductIds(db, jobId)
-      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: skippedProductIds })
+      deactivatedCount = await finalizeProductReplacement(productWriteDb, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: skippedProductIds })
       skippedKeptCount = skippedProductIds.length
     }
 
@@ -7542,7 +7590,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // helper because they are movements, not snapshot counts.
     let aggregatedSnapshotGroupCount = 0
     if (job.type === 'products' && (productImportMode === 'merge' || productImportMode === 'replace_all')) {
-      aggregatedSnapshotGroupCount = await reconcileDuplicateProductSnapshotRows(db, jobId)
+      aggregatedSnapshotGroupCount = await reconcileDuplicateProductSnapshotRows(productWriteDb, jobId)
       sw.lap('aggregateProductSnapshotMs')
     }
 
@@ -7551,7 +7599,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // part of any group and must not vote on its group's category/brand.
     let unifiedGroupCount = 0
     if (job.type === 'products') {
-      unifiedGroupCount = await unifyTouchedProductGroups(db, jobRow.started_at || nowIso)
+      unifiedGroupCount = await unifyTouchedProductGroups(productWriteDb, jobRow.started_at || nowIso)
     }
 
     // Last chunk: cache invalidation + broadcast, once, now that every
