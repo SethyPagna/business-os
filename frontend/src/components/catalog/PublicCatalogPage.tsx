@@ -40,7 +40,7 @@ import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWha
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
-import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
+import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
@@ -1073,8 +1073,18 @@ export default function PublicCatalogPage() {
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice, portalPromotionRules)
       : null
-    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
+    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices, showStockStatus: shouldShowStockStatus(displayConfig) })
   }
+  // The product cards and the detail sheet add and save through these same two
+  // functions, so a product behaves the same wherever it is tapped.
+  const addToBucket = (product: CatalogProduct, priceText?: string) => bucket.add(
+    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+    priceText,
+  )
+  const toggleWishlist = (product: CatalogProduct, priceText?: string) => wishlist.toggle(
+    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+    priceText,
+  )
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // The announcement strip and the promotion cards link to a product by id.
   // It is usually not on the loaded page, and there is no public by-id
@@ -1172,17 +1182,11 @@ export default function PublicCatalogPage() {
         openPortalImage={openPortalImage}
         formatPortalPrice={formatPortalPrice}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
-        onAddToBucket={(product, priceText) => bucket.add(
-          { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-          priceText,
-        )}
+        onAddToBucket={addToBucket}
         isInBucket={bucket.hasItem}
         getBucketQty={bucket.getQty}
         isInWishlist={wishlist.has}
-        onToggleWishlist={(product, priceText) => wishlist.toggle(
-          { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-          priceText,
-        )}
+        onToggleWishlist={toggleWishlist}
       />
     </Suspense>
   )) : null
@@ -1793,6 +1797,10 @@ export default function PublicCatalogPage() {
       footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
+      onAddToBucket={addToBucket}
+      getBucketQty={bucket.getQty}
+      isInWishlist={wishlist.has}
+      onToggleWishlist={toggleWishlist}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
       productDetailCautionDefault={displayConfig.productCautionDefault || ''}
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}

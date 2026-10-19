@@ -43,7 +43,8 @@ assert.equal(resolveOfficialProductName('---', 'Night Cream'), '', 'punctuation 
 //    optional row is gated on having a value.
 const flyout = read('src/components/catalog/ProductDetailFlyout.tsx')
 assert.match(flyout, /const officialName = resolveOfficialProductName\(parsed\.officialName, product\.name\)/)
-assert.match(flyout, /\{officialName \? \(\s*<DetailField label=\{copy\('productOfficialName'/)
+// D3 (2026-10-19): the official name is the small secondary line under the title, not a body row.
+assert.match(flyout, /\{officialName \? \(\s*<div className="mt-0\.5[^"]*">\s*<span>\{copy\('productOfficialName'/)
 assert.doesNotMatch(flyout, /parsed\.officialName \|\||officialName \|\| product\.name|product\.name \|\| parsed\.officialName/, 'no fallback path to the shop name')
 assert.match(flyout, /\{parsed\.intro \? \(\s*<DetailField label=\{copy\('productIntroduction'/)
 assert.match(flyout, /\{categoryValues\.length \? \(\s*<DetailField label=\{copy\('productCategory'/)
