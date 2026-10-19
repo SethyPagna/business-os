@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { createHarness, propsOf } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
+import { fmtDateTime24 } from '../src/utils/formatters.ts'
 
 const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
 const uuidDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID')
@@ -34,6 +36,7 @@ const saves: unknown[][] = []
 const creates: unknown[][] = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
+let historyTimestamp: string | number = '2026-10-19 18:05:00'
 let productTotal = 1
 let productOverride: InventoryCheckProduct[] | null = null
 let memberOverride: InventoryCheckSessionItem[] | null = null
@@ -71,7 +74,7 @@ const doubles = {
     },
     readInventoryCheckSessions: async () => ({ items: [selected], total: 1, page: 1, pageSize: 20 }),
     readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation] }),
-    readInventoryCheckHistory: async () => ({ items: [{ id: 1, product_id: 12, action: 'observe', created_at: '2026-10-19', before: null, after: { state: 'issue', reason: 'History reason' } }], total: 1, page: 1, pageSize: 20 }),
+    readInventoryCheckHistory: async () => ({ items: [{ id: 1, product_id: 12, action: 'observe', created_at: historyTimestamp, before: null, after: { state: 'issue', reason: 'History reason' } }], total: 1, page: 1, pageSize: 20 }),
     createInventoryCheckSession: async (...args: unknown[]) => { creates.push(args); return { item: selected, receipt: {} } },
     saveInventoryCheckObservation: async (...args: unknown[]) => {
       saves.push(args)
@@ -149,6 +152,7 @@ try {
   assert.equal(surface.findAll(node => node.getAttribute('data-check-action') === 'done').length, 1, 'reselecting the current session returns to its editable product list')
   await surface.click(surface.button('history'))
   assert.ok(surface.text().includes('History reason'), 'session immutable action history is read through the dedicated endpoint')
+  assert.ok(surface.text().includes('20/10/2026 01:05'), 'SQLite UTC history timestamps use dd/mm/yyyy and 24-hour business time across midnight')
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Close', 'history close'))
   await surface.unmount()
 
@@ -365,5 +369,30 @@ try {
   assert.ok(!members.text().includes('19283') && !members.text().includes('19284') && !members.text().includes('37'), 'hidden system quantities and another creator count stay absent in the frozen fallback')
   assert.equal(members.findAll(node => node.getAttribute('data-check-action') !== null).length, 0)
   await members.unmount()
+  productOverride = null
+  memberOverride = null
+  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true } }
+  selected = { ...selected, started_at: '2026-10-19 18:05:00', progress: undefined }
+  for (const language of ['en', 'km']) {
+    const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>
+    app.language = language
+    app.t = (key: string) => pack[key] || key
+    window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+    const dates = await mount()
+    await dates.click(dates.button(pack.inventory_check_sessions))
+    assert.ok(dates.button('Test check').textContent.includes('20/10/2026 01:05'), `${language}: session start fallback uses the same business date/time formatter`)
+    await dates.click(dates.button('Test check'))
+    for (const raw of ['2026-10-19 18:05:00', 0, 'not-a-date']) {
+      historyTimestamp = raw
+      await dates.click(dates.button(pack.history))
+      const historyRow = dates.find(node => node.tagName === 'LI' && node.textContent.includes('History reason'), 'history event')
+      const expected = raw === '2026-10-19 18:05:00' ? '20/10/2026 01:05' : fmtDateTime24(raw)
+      assert.ok(historyRow.textContent.startsWith(`${expected} · `), `${language}: history uses the actual formatter including zero/invalid fallback`)
+      assert.ok(historyRow.textContent.includes('History reason'))
+      assert.ok(!dates.text().includes('913.27'), `${language}: date formatting does not expose cost`)
+      await dates.click(dates.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.close, 'history close'))
+    }
+    await dates.unmount()
+  }
   console.log('inventoryChecksPage mounted journeys passed')
 } finally { restoreUuid(); await harness.close() }

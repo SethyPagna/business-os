@@ -7,6 +7,7 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
 import { isAdminControlUser } from '../../utils/permissions.ts'
 import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import InventoryCheckControls, { type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows from './InventoryCheckRows.tsx'
@@ -283,7 +284,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     {error ? <p role="alert" className="text-xs text-red-700">{error}</p> : null}
     {loading ? <p role="status" className="text-xs">{t('loading')}</p> : null}
     {section === 'sessions' ? <ul className="min-w-0 divide-y">
-      {fresh ? sessions?.items.map(item => <li key={item.id}><button type="button" className="min-h-10 w-full break-words py-2 text-left text-xs" onClick={() => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id }) }}>{item.title} · {item.status === 'open' ? t('open') : t('shift_status_closed')} · {item.progress ? `${item.progress.done + item.progress.issue}/${item.progress.total}` : item.started_at}</button></li>) : null}
+      {fresh ? sessions?.items.map(item => <li key={item.id}><button type="button" className="min-h-10 w-full break-words py-2 text-left text-xs" onClick={() => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id }) }}>{item.title} · {item.status === 'open' ? t('open') : t('shift_status_closed')} · {item.progress ? `${item.progress.done + item.progress.issue}/${item.progress.total}` : fmtDateTime24(item.started_at)}</button></li>) : null}
     </ul> : section === 'issues' && !sessionId ? <ul className="min-w-0 divide-y" aria-label={t('issues')}>
       {fresh ? data?.issues?.map(issue => <li key={`${issue.session_id}:${issue.product_id}`} className="min-w-0 py-2 text-xs">
         <button type="button" className="min-h-10 max-w-full break-words text-left font-semibold" onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}>{visibleProducts.find(product => Number(product.id) === issue.product_id)?.name || `#${issue.product_id}`} · {issue.session_title}</button>
@@ -311,7 +312,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       {access.fields.stock && items.find(item => String(item.product_id) === String(detail.id))?.stock_changed ? <p className="col-span-2 text-amber-700">{tr('inventory_check_stock_changed', 'Stock changed since this session started.')}</p> : null}
     </dl></Modal> : null}
     {historyPage !== null ? <Modal title={t('history')} onClose={() => setHistoryPage(null)} keyboard size="sm" unsavedChanges="read-only">
-      {historyError ? <p role="alert" className="text-xs text-red-700">{historyError}</p> : !history ? <p role="status">{t('loading')}</p> : <ul className="divide-y text-xs">{history.items.map(event => <li key={event.id} className="min-w-0 break-words py-2"><span>{event.created_at} · {t(event.action)}{event.product_id !== null ? ` · #${event.product_id}` : ''}</span>{event.after?.state ? <span> · {t(event.after.state)}</span> : null}{event.after?.reason ? <p>{event.after.reason}</p> : null}</li>)}</ul>}
+      {historyError ? <p role="alert" className="text-xs text-red-700">{historyError}</p> : !history ? <p role="status">{t('loading')}</p> : <ul className="divide-y text-xs">{history.items.map(event => <li key={event.id} className="min-w-0 break-words py-2"><span>{fmtDateTime24(event.created_at)} · {t(event.action)}{event.product_id !== null ? ` · #${event.product_id}` : ''}</span>{event.after?.state ? <span> · {t(event.after.state)}</span> : null}{event.after?.reason ? <p>{event.after.reason}</p> : null}</li>)}</ul>}
       {history?.page === historyPage ? <PaginationControls page={historyPage} pageSize={20} totalItems={history.total} onPageChange={setHistoryPage} t={t} compact /> : null}
     </Modal> : null}
   </div>
