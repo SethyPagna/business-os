@@ -24,6 +24,7 @@ const boundaries: Array<[string, string]> = [
   ['api/offlineQueueOwnership.ts', 'actor-read-scope'],
   ['utils/businessTimeBounds.ts', 'shared-formatters'],
   ['utils/permissions.ts', 'permissions-core'],
+  ['utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
   ['utils/dirtyWork.ts', 'work-drafts'],
   ['components/shared/hubNavigation.ts', 'hub-navigation'],
@@ -131,6 +132,7 @@ function sourceClosure(relative: string): Set<string> {
   return seen
 }
 for (const relative of [
+  'utils/acquisitionCostAccess.ts',
   'utils/workDrafts.ts', 'utils/dirtyWork.ts', 'utils/lazyImport.ts',
   'components/shared/Modal.tsx', 'components/shared/UnsavedChangesPrompt.tsx',
   'components/shared/AlphaIndexRail.tsx', 'utils/alphaRail.ts',

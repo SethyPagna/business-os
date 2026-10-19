@@ -17,6 +17,7 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // 'returns-read-api' manual chunk, which the storefront then had to fetch.
   ['/src/utils/businessTimeBounds.ts', 'shared-formatters'],
   ['/src/utils/permissions.ts', 'permissions-core'],
+  ['/src/utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['/src/utils/workDrafts.ts', 'work-drafts'],
   ['/src/utils/dirtyWork.ts', 'work-drafts'],
   ['/src/components/shared/hubNavigation.ts', 'hub-navigation'],
