@@ -32,6 +32,18 @@ type Section = 'products' | 'sessions' | 'issues'
 type ControlIntent = { range: DateTimeRange; query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; showCustomerRanking: boolean }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
 type HistoryResult = { items: Array<{ id: number; action: string; product_id: number | null; created_at: string; before: { state?: string; reason?: string | null } | null; after: { state?: string; reason?: string | null } | null }>; total: number; page: number; pageSize: number }
+// Definite server refusals (the request was answered and nothing was written). Each gets its own concise message;
+// unlike an unknown outcome, the frozen attempt is dropped so the operator can correct and send a fresh request.
+const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
+  inventory_check_count_requires_issue: { key: 'inventory_check_error_count_requires_issue', fallback: 'Counted quantity differs from stock. Report it as an issue.' },
+  inventory_check_baseline_changed: { key: 'inventory_check_error_baseline_changed', fallback: 'Stock or products changed. Reload and try again.' },
+  inventory_check_owner_required: { key: 'inventory_check_error_owner_required', fallback: 'Only the session creator or an administrator can change this check.' },
+  inventory_check_product_not_eligible: { key: 'inventory_check_error_product_not_eligible', fallback: 'A product on this page cannot be checked. Reload and try again.' },
+}
+function knownRefusal(cause: unknown) {
+  const code = (cause as { code?: unknown } | null)?.code
+  return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined
+}
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', state: '', reason: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
 
 function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
@@ -97,6 +109,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [writeError, setWriteError] = useState('')
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
+  const [savingId, setSavingId] = useState<number | null>(null)
   const [editingRows, setEditingRows] = useState<Record<string, boolean>>({})
   const onEditingChange = useCallback((productId: number | string, editing: boolean) => {
     const id = String(productId)
@@ -118,11 +131,15 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const params: QueryParams = { ...filters, ...continuousRangeParams(range), query, page, pageSize, sessionId, state: section === 'issues' ? 'issue' : filters.state, ...(showCustomerRanking && access.canViewCustomerDetails ? { customerRanking: '1' } : {}) }
+  // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
+  // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (after a save,
+  // Close/Resume or the Refresh button) reloads in the background while the existing rows stay mounted.
+  const scopeKey = JSON.stringify([params, section])
   const requestKey = JSON.stringify([params, section, refresh])
   const queryFence = useRef(requestKey)
   queryFence.current = requestKey
   const [loadedKey, setLoadedKey] = useState('')
-  const fresh = loadedKey === requestKey
+  const fresh = loadedKey === scopeKey
   const canEdit = access.canCheck && !!session && (isAdminControlUser(user) || Number(session.created_by) === Number(user?.id))
   const canViewCounts = access.fields.stock || (!!session && Number(session.created_by) === Number(user?.id))
 
@@ -141,14 +158,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const abort = new AbortController()
     let live = true
     const publish = () => live && !abort.signal.aborted && current() && queryFence.current === requestKey
-    setLoading(true)
+    const backgroundReload = loadedKey === scopeKey
+    if (!backgroundReload) { setLoading(true); setDetail(null) }
     setError('')
-    setDetail(null)
     async function load() {
       try {
         if (section === 'sessions') {
           const result = await readInventoryCheckSessions({ branchId, page, pageSize }, abort.signal)
-          if (publish()) { setSessions(result); setLoadedKey(requestKey) }
+          if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
           const [products, selected] = await Promise.all([
             readInventoryCheckProducts<ProductsResult>(params, abort.signal),
@@ -162,7 +179,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             setData(showCustomerRanking && access.canViewCustomerDetails ? products : { ...products, rankings: { products: products.rankings?.products } })
             setSession(selected?.item ?? null)
             setItems(selected?.items ?? [])
-            setLoadedKey(requestKey)
+            setLoadedKey(scopeKey)
           }
         }
       } catch {
@@ -189,7 +206,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       attempt = { productId: id, patch: { ...patch }, revision, sessionRevision: session.revision, requestId: createClientRequestId('inventory_check') }
       attempts.current.set(id, attempt)
     }
-    inFlight.current = true; setBusy(true); setRowErrors(previous => ({ ...previous, [id]: '' }))
+    inFlight.current = true; setBusy(true); setSavingId(id); setRowErrors(previous => ({ ...previous, [id]: '' }))
     try {
       const result = await saveInventoryCheckObservation(writeScope, id, attempt.patch, attempt.revision, attempt.sessionRevision, attempt.requestId)
       if (current()) {
@@ -199,9 +216,11 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         setRefresh(value => value + 1)
       }
     } catch (cause) {
-      if (current()) setRowErrors(previous => ({ ...previous, [id]: tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
+      const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
+      if (refusal) attempts.current.delete(id)
+      if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
       throw cause
-    } finally { inFlight.current = false; if (current()) setBusy(false) }
+    } finally { inFlight.current = false; if (current()) { setBusy(false); setSavingId(null) } }
   }
 
   async function start() {
@@ -216,7 +235,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const result = await createInventoryCheckSession(writeScope, createAttempt.current)
       if (current()) onSelect({ branchId, sessionId: result.item.id })
     } catch (cause) {
-      if (current()) setWriteError(tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
+      if (refusal) createAttempt.current = null
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -229,7 +250,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const result = await changeInventoryCheckSession(writeScope, attempt.action, attempt.revision, attempt.requestId)
       if (current()) { lifecycleAttempt.current = null; setSession(result.item); setRefresh(value => value + 1) }
     } catch (cause) {
-      if (current()) setWriteError(tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
+      if (refusal) lifecycleAttempt.current = null
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -291,7 +314,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {issue.reason ? <p className="break-words text-amber-800 dark:text-amber-200">{issue.reason}</p> : null}
         {(access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity) ? <p>{t('inventory_check_counted')}: {issue.counted_quantity}</p> : null}
       </li>) : null}
-    </ul> : <InventoryCheckRows key={requestKey} products={visibleProducts} observations={observations} errors={rowErrors} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), busy]))} canCheck={fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current} canViewStock={access.fields.stock} {...{ canViewCounts, onEditingChange }} canViewPrice={access.fields.price} canViewCost={access.fields.cost} t={t} onOpenProduct={setDetail} onSave={save} />}
+    </ul> : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy} canCheck={fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current} canViewStock={access.fields.stock} {...{ canViewCounts, onEditingChange }} canViewPrice={access.fields.price} canViewCost={access.fields.cost} t={t} onOpenProduct={setDetail} onSave={save} />}
     {section !== 'sessions' && unavailableProducts.length ? <section className="min-w-0 rounded-lg border border-amber-200 p-2 dark:border-amber-900" aria-label={t('inventory_check_unavailable_members')}>
       <h3 className="text-xs font-semibold">{t('inventory_check_unavailable_members')} · {unavailableProducts.length}</h3>
       <p className="text-xs text-gray-500">{t('inventory_check_unavailable_member_hint')}</p>

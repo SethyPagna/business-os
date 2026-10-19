@@ -7623,5 +7623,9 @@
   "inventory_check_unavailable_members": "ផលិតផលក្នុងវគ្គដែលលែងមាន",
   "inventory_check_unavailable_member_hint": "ផលិតផលដើមនេះលែងមាន។ លទ្ធផលពិនិត្យដែលបានរក្សាទុកអាចមើលបានតែប៉ុណ្ណោះ។",
   "inventory_check_original_name": "ឈ្មោះពេលចាប់ផ្តើម",
-  "inventory_check_current_name": "ឈ្មោះបច្ចុប្បន្ន"
+  "inventory_check_current_name": "ឈ្មោះបច្ចុប្បន្ន",
+  "inventory_check_error_count_requires_issue": "ចំនួនដែលបានរាប់ខុសពីស្តុក។ សូមរាយការណ៍ជាបញ្ហា។",
+  "inventory_check_error_baseline_changed": "ស្តុក ឬផលិតផលបានផ្លាស់ប្តូរ។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្តងទៀត។",
+  "inventory_check_error_owner_required": "មានតែអ្នកបង្កើតវគ្គ ឬអ្នកគ្រប់គ្រងជាន់ខ្ពស់ប៉ុណ្ណោះដែលអាចកែការត្រួតពិនិត្យនេះ។",
+  "inventory_check_error_product_not_eligible": "មានផលិតផលក្នុងទំព័រនេះមិនអាចត្រួតពិនិត្យបាន។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្តងទៀត។"
 }

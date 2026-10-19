@@ -19,6 +19,8 @@ export type InventoryCheckRowsProps = {
   pending?: Readonly<Record<string, boolean | undefined>>
   errors?: Readonly<Record<string, string | null | undefined>>
   canCheck: boolean
+  /** Another row (or the session) is being written: actions wait, but nothing here shows as saving. */
+  locked?: boolean
   canViewStock?: boolean
   canViewCounts?: boolean
   canViewPrice: boolean
@@ -37,13 +39,13 @@ function finiteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function CheckRow({ product, observation, pending, error, header, canCheck, canViewStock = true, canViewCounts = canCheck || canViewStock, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave, onEditingChange }: {
+function CheckRow({ product, observation, pending, error, header, canCheck, locked = false, canViewStock = true, canViewCounts = canCheck || canViewStock, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave, onEditingChange }: {
   product: InventoryCheckProduct
   observation?: InventoryCheckObservation
   pending: boolean
   error?: string | null
   header: boolean
-} & Pick<InventoryCheckRowsProps, 'canCheck' | 'canViewStock' | 'canViewCounts' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave' | 'onEditingChange'>) {
+} & Pick<InventoryCheckRowsProps, 'canCheck' | 'locked' | 'canViewStock' | 'canViewCounts' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave' | 'onEditingChange'>) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -54,6 +56,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
   const dirtyKey = useId()
   const revision = observation?.revision ?? 0
   const busy = pending || saving
+  const actionsDisabled = busy || locked
   const editing = canCheck && (draft !== null || busy || attempt !== null)
   const editingRef = useRef(editing)
   editingRef.current = editing
@@ -107,7 +110,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
   }, [observation, revision, attempt])
 
   async function save(patch: InventoryCheckPatch, expectedRevision: number) {
-    if (!canCheck || header || pending || inFlight.current) return
+    if (!canCheck || header || pending || locked || inFlight.current) return
     inFlight.current = true
     setSaving(true)
     setSaveError('')
@@ -157,12 +160,14 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       </div>
       {!header ? <span className="flex shrink-0 items-center gap-0.5">
         {canCheck ? <>
-          <button type="button" data-check-action="done" aria-label={`${doneLabel}: ${product.name}`} title={doneLabel} aria-pressed={observation?.state === 'done'} disabled={busy}
+          <button type="button" data-check-action="done" aria-label={`${doneLabel}: ${product.name}`} title={doneLabel} aria-pressed={observation?.state === 'done'} disabled={actionsDisabled}
             className={`${toolbarIconButtonClassName} ${observation?.state === 'done' ? '!text-emerald-700 dark:!text-emerald-300' : ''} disabled:opacity-50`}
-            onClick={() => { void save({ state: observation?.state === 'done' ? 'unstarted' : 'done', counted_quantity: observation?.state === 'done' ? null : observation?.counted_quantity ?? null, reason: null }, revision) }}>
+            // Done and Clear carry no count: the server only accepts a count on Done when it equals stock
+            // (inventory_check_count_requires_issue otherwise), so a count left from an Issue must not travel along.
+            onClick={() => { void save({ state: observation?.state === 'done' ? 'unstarted' : 'done', counted_quantity: null, reason: null }, revision) }}>
             {observation?.state === 'done' ? <Check className="h-5 w-5" aria-hidden="true" /> : <Square className="h-5 w-5" aria-hidden="true" />}
           </button>
-          <button type="button" data-check-action="issue" aria-label={`${issueLabel}: ${product.name}`} title={issueLabel} aria-pressed={observation?.state === 'issue'} disabled={busy}
+          <button type="button" data-check-action="issue" aria-label={`${issueLabel}: ${product.name}`} title={issueLabel} aria-pressed={observation?.state === 'issue'} disabled={actionsDisabled}
             className={`${toolbarIconButtonClassName} ${observation?.state === 'issue' ? '!text-amber-700 dark:!text-amber-300' : ''} disabled:opacity-50`}
             onClick={() => { setDraft({ count: observation?.counted_quantity == null ? '' : String(observation.counted_quantity), reason: observation?.reason || '', revision }); setValidationError(''); setSaveError(''); setAttempt(null) }}>
             <AlertCircle className="h-5 w-5" aria-hidden="true" />
