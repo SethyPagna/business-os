@@ -30,6 +30,7 @@ const saves: unknown[][] = []
 const creates: unknown[][] = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
+let productTotal = 1
 let readRevision = '1'
 let delayedProducts: ((value: unknown) => void) | null = null
 const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
@@ -56,7 +57,7 @@ const doubles = {
       productRequests.push(params)
       if (failRead) throw new Error('test read failure')
       if (delayedProducts) return new Promise(resolve => { delayedProducts = resolve })
-      return response()
+      return { ...response(), total: productTotal, rankings: { products: [{ family_key: 'off-page', name: 'Best seller beyond visible page', qty_sold: 99 }], ...(params.customerRanking === '1' ? { customers: [{ customer_id: 9, name: 'Opt-in customer identity', sale_count: 7 }] } : {}) } }
     },
     readInventoryCheckSessions: async () => ({ items: [selected], total: 1, page: 1, pageSize: 20 }),
     readInventoryCheckSession: async () => ({ item: selected, items: [observation] }),
@@ -223,6 +224,7 @@ try {
   await admin.unmount()
 
   window.history.replaceState(null, '', '/inventory?retained=1#hub:inventory:issues')
+  productTotal = 41
   const cold = await mount()
   assert.equal(cold.button('issues').getAttribute('aria-pressed'), 'true', 'cold Inventory URL selects Issues through the actual shared hook')
   assert.ok(cold.text().includes('All-session issue reason'))
@@ -245,13 +247,42 @@ try {
   blockNavigation = false
   await cold.click(cold.button('sessions'))
   await cold.click(cold.button('Test check'))
+  await cold.click(cold.button('next'))
+  assert.equal(productRequests.at(-1)?.page, 2)
   await cold.click(cold.button('Edit issue'))
   await cold.type(cold.field('inventory-check-reason-12'), 'Guarded local draft')
   blockNavigation = true
   await cold.click(cold.button('issues'))
+  assert.equal(productRequests.at(-1)?.page, 2, 'a rejected section request cannot eagerly reset pagination and remount a dirty row')
   assert.equal((cold.field('inventory-check-reason-12') as unknown as { value: string }).value, 'Guarded local draft', 'rejected section navigation preserves the mounted local editor')
   assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true')
   blockNavigation = false
   await cold.unmount()
+  productTotal = 1
+
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  app.user = { ...app.user, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, contacts: true } }
+  const beforeRanking = productRequests.length
+  const ranking = await mount()
+  assert.ok(productRequests.slice(beforeRanking).every(request => request.customerRanking === undefined), 'customer identities are not requested before explicit opt-in')
+  assert.ok(!ranking.text().includes('Opt-in customer identity'))
+  await ranking.click(ranking.button('Stats'))
+  assert.ok(ranking.text().includes('Best seller beyond visible page'), 'product ranking uses the full-cohort server ranking rather than sorting the current page')
+  await ranking.click(ranking.button('top_products'))
+  assert.ok(ranking.text().includes('99'))
+  await ranking.click(ranking.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Close', 'product ranking close'))
+  await ranking.click(ranking.button('top_customers'))
+  assert.equal(productRequests.at(-1)?.customerRanking, '1')
+  assert.ok(ranking.text().includes('Opt-in customer identity'))
+  await ranking.click(ranking.button('top_customers'))
+  assert.equal(productRequests.at(-1)?.customerRanking, undefined)
+  assert.ok(!ranking.text().includes('Opt-in customer identity'), 'toggle-off removes customer names while the next bounded request loads')
+  await ranking.click(ranking.button('top_customers'))
+  assert.ok(ranking.text().includes('Opt-in customer identity'))
+  app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, contacts: false } }
+  await ranking.render({})
+  assert.equal(ranking.findAll(node => node.tagName === 'BUTTON' && node.textContent.includes('top_customers')).length, 0, 'Contacts denial immediately removes customer ranking controls')
+  assert.ok(!ranking.text().includes('Opt-in customer identity'))
+  await ranking.unmount()
   console.log('inventoryChecksPage mounted journeys passed')
 } finally { await harness.close() }
