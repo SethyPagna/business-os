@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
 
@@ -33,7 +33,7 @@ export function useDialogKeyboard(
   const latest = useRef({ promptOpen, onEscape, onPromptEscape })
   latest.current = { promptOpen, onEscape, onPromptEscape }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled) return undefined
     const entry: DialogEntry = { panel: panelRef.current, previousFocus: document.activeElement as HTMLElement | null, parent: openDialogs[openDialogs.length - 1] ?? null }
     openDialogs.push(entry)

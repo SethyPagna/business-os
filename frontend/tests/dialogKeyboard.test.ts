@@ -32,7 +32,8 @@ const doc: Record<string, unknown> & { activeElement: unknown } = {
 const cleanups: Array<() => void> = []
 const reactStub = {
   useRef: <T,>(value: T) => ({ current: value }),
-  useEffect: (effect: () => void | (() => void)) => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup) },
+  useEffect: () => { assert.fail('visible dialogs must register their keyboard before paint') },
+  useLayoutEffect: (effect: () => void | (() => void)) => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup) },
 }
 const exportsBag: { useDialogKeyboard?: (...args: unknown[]) => void } = {}
 new Function('require', 'exports', js)((id: string) => { assert.equal(id, 'react'); return reactStub }, exportsBag)
