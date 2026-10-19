@@ -1,6 +1,6 @@
 # progress.md — Business OS live ledger
 
-*Rewritten 13 Oct 2026 (6.0.149); reconciled 19 Oct 2026 (6.0.812) against current source, preserved work and the owner’s full-consolidation instruction. Compact on purpose: implementation, verification, deployment and acceptance stay separate.*
+*Rewritten 13 Oct 2026 (6.0.149); reconciled 19 Oct 2026 (6.0.817) against current source, preserved work and the owner’s full-consolidation instruction. Compact on purpose: implementation, verification, deployment and acceptance stay separate.*
 
 This is the shared coordination ledger for every session (Claude, Codex, Copilot): where production stands, the permanent Golden Rules, the owner's decisions, every open or unfinished task, the actions that stay gated, and a one-line-per-release done log. The previous 16,757-line chronological ledger (Parts, checkpoints, lane narratives, evidence, and real customer data that does not belong in a public repository) is archived verbatim and PRIVATELY at `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Archive/progress-2026-10-13-full.md`; a section-by-section loss map sits beside it (`progress-2026-10-13-map.md`). Narrative history stays in `docs/history/session-log.md`. Live lane state is in the private local `Records/Recovery/LANES.md` and `Records/Recovery/HANDOFF-LATEST.md`: read both before resuming (neither is in this repository; this file does not repeat their contents).
 
@@ -11,6 +11,9 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
 ---
 
 ## Status snapshot — 19 Oct 2026 (Cambodia, UTC+7)
+
+- **Inventory checkpoint 6.0.813–6.0.817 is partial and unshipped.** Saved shared date/preset scrolling, controlled real-product check rows, backend/client field projection and query restrictions; custom field controls preserve explicit hidden settings. Both languages, EN/KM 320/390/1280 browser controls, mounted count/error/permission cases and 2,700 access-parity cases pass. Plausibly wrong layout and inherited-field toggles are rejected. Fast checks pass 4/4; this is not a full GitHub gate. Actual Astra gave bounded GO for 813–815; composed page/API/release acceptance remains open. Navigation donor 6.0.816 is saved and reviewed but held until the real page/controller exists; stock read-model 6.0.818 remains separate work. Session persistence, global sales/customer ranking, API/field enforcement, scope-switch races and physical phones/PWA are not complete. No production or migration change.
+
 
 - **Latest owner priority: Inventory first.** Implement the main resumable count workspace, stock/product/low/out statistics and scoped sales/customer context; one scrolling date/preset row, search, then scrolling filter/sort row. Photos/keyboards/received dates/sole-branch and physical mobile/PWA acceptance follow. Other backlog implementation is parked except strict dependencies, with all tasks/evidence retained. Inventory is IN PROGRESS, not implemented or accepted: five independent design passes, anonymous critiques and chair verdict are complete; shared date-rail browser checks are bounded. Four owner choices on session/date/customer semantics and read-only migration-name approval remain pending.
 

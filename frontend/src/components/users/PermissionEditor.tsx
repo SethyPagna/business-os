@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
-import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
+import { PERMISSION_SECTIONS, permissionDefinitionValue, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome, type ActionRequirement } from '../../utils/permissionActions.ts'
 
@@ -121,7 +121,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     let allNone = true
     let allFull = true
     for (const permission of relevant) {
-      const value = perms[permission.key]
+      const value = permissionDefinitionValue(permission, perms)
       const isNone = !value
       const isFull = permission.tier ? value === true : !!value
       if (!isNone) allNone = false
@@ -148,8 +148,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   // data the controls edit, so an admin can scan the list before opening anything.
   const sectionGlance = (section: PermissionSection): { label: string; tone: 'full' | 'none' | 'partial' } => {
     const keys = section.permissions
-    const granted = keys.filter((permission) => tierOf(perms[permission.key]) !== 'none').length
-    const middleCount = keys.filter((permission) => ['review', 'view'].includes(tierOf(perms[permission.key]))).length
+    const granted = keys.filter((permission) => tierOf(permissionDefinitionValue(permission, perms)) !== 'none').length
+    const middleCount = keys.filter((permission) => ['review', 'view'].includes(tierOf(permissionDefinitionValue(permission, perms)))).length
     if (granted === 0) return { label: translate('none', 'None'), tone: 'none' }
     if (granted === keys.length && middleCount === 0) return { label: translate('label_full_access', 'Full Access'), tone: 'full' }
     if (middleCount > 0) return { label: translate('review_required', 'Partial Access'), tone: 'partial' }
@@ -202,7 +202,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     if (exclusivity && !perms[key] && tierOf(perms[exclusivity.exclusiveWithTier as string]) !== 'none') return
 
     const next: PermissionState = { ...perms }
-    if (next[key]) delete next[key]
+    const definition = PERMISSION_SECTIONS.flatMap(section => section.permissions).find(permission => permission.key === key)
+    if (definition?.defaultFromFull) next[key] = !permissionDefinitionValue(definition, perms)
+    else if (next[key]) delete next[key]
     else next[key] = true
 
     if (key === 'all' && next.all) {
@@ -555,7 +557,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                   )
                 }
 
-                const active = !!perms[permission.key]
+                const active = !!permissionDefinitionValue(permission, perms)
                 const exclusivity = permission.exclusiveWithTier
                 const blockedByTier = !!exclusivity && !active && tierOf(perms[exclusivity]) !== 'none'
                 const blockedTierLabel = blockedByTier

@@ -65,6 +65,12 @@ export interface PermissionDefinition {
   // they don't linger on as orphaned, inert `true` values in a role's
   // stored permissions.
   alsoClearsKeys?: string[]
+  defaultFromFull?: string
+}
+
+export function permissionDefinitionValue(permission: PermissionDefinition, permissions: Record<string, boolean | 'review' | 'view'>): boolean | 'review' | 'view' | undefined {
+  if (Object.hasOwn(permissions, permission.key)) return permissions[permission.key]
+  return permission.defaultFromFull ? permissions[permission.defaultFromFull] === true : undefined
 }
 
 export interface PermissionSection {
@@ -293,6 +299,15 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_inventory_review_desc',
         reviewDescription: 'Under Partial Access, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
+      ...[
+        ['price', 'Show selling prices'], ['barcode', 'Show barcodes and SKUs'],
+        ['category', 'Show categories'], ['brand', 'Show brands'], ['stock', 'Show recorded stock'],
+        ['received', 'Show received dates'], ['sales', 'Show units sold'], ['customers', 'Show customer counts'],
+        ['cost', 'Show costs when permitted'],
+      ].map(([field, label]) => ({
+        key: `inventory_check_show_${field}`, tKey: `perm_inventory_check_show_${field}`, label,
+        sensitivity: 'normal' as const, defaultFromFull: 'inventory',
+      })),
     ],
   },
   {
