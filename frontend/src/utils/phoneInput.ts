@@ -1,3 +1,5 @@
+import { isImeComposingKey } from './imeComposition.ts'
+
 export type PhoneInputEdit = {
   value: string
   selectionStart: number
@@ -162,7 +164,7 @@ function applyPhoneSeparatorDeletion(
  * are not immediately beside a formatting space.
  */
 export function handlePhoneInputKeyDown(event: PhoneInputKeyEvent, onValue: (value: string) => void): boolean {
-  if (event.nativeEvent?.isComposing || event.nativeEvent?.keyCode === 229) {
+  if (isImeComposingKey(event)) {
     markForNextBeforeInput(composingKeyDownInputs, event.currentTarget)
     return false
   }

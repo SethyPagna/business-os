@@ -35,6 +35,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { pickFiles } from '../../utils/filePicker.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 
@@ -250,7 +251,7 @@ export default function ProductsImageOnlyView() {
         branchName: branch.branch_name || String(branch.branch_id),
       }))
     }))
-      .then((lists) => { if (alive) setDetailBatches(lists.flat()) })
+      .then((lists) => { if (alive) setDetailBatches(sortLotsForDisplay(lists.flat().map((row) => ({ ...row, lot_code: row.lotCode, received_at: row.receivedAt, batch_number: row.batchNumber, expiry_date: row.expiryDate })))) })
       .catch(() => { if (alive) setDetailBatches('error') })
     return () => { alive = false }
   }, [detailsProduct, showBatches])
