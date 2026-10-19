@@ -407,7 +407,13 @@ export default function DateTimeRangePicker({
   }
 
   return (
-    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`}>
+    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`} onKeyDown={event => {
+      if (!open || event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[data-app-select-menu]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
+    }}>
       {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
           -- the user asked for LARGER dates on the OUTSIDE pill specifically
           (Aug 30), while the panel inside stays compact.
