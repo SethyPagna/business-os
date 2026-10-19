@@ -184,6 +184,29 @@ async function main() {
     }
     db.close()
   })
+  await check('reused filtered population evaluates computed stock once per product per main statement', async () => {
+    const db = fixture(), size = 160
+    db.prepare("INSERT INTO customers(id,name) VALUES(970000,'Synthetic work counter buyer')").run()
+    for (let index = 0; index < size; index++) {
+      const id = 970001 + index
+      product(db, id, `Synthetic family ${Math.floor(index / 4)}`, 5)
+      sale(db, id, 970000, [{ product_id: id, quantity: 1 }])
+    }
+    const options = { lowStock, rankingLimit: 10, customerRanking: 'sale_count' }
+    const original = await api.readInventoryCheckProducts(adapter(db), admin, {}, options)
+    let evaluations = 0
+    db.function('inventory_stock_work_probe', { deterministic: true }, value => { evaluations++; return value })
+    const proxy = adapter(db), actualBatch = proxy.batch.bind(proxy)
+    proxy.batch = statements => actualBatch(statements.map(statement => ({ ...statement,
+      sql: statement.sql.replaceAll('stock.quantity AS __quantity', 'inventory_stock_work_probe(stock.quantity) AS __quantity') })))
+    const measured = await api.readInventoryCheckProducts(proxy, admin, {}, options)
+    assert.deepEqual(measured, original, 'the transparent computation probe preserves every projected result')
+    assert.ok(evaluations > 0, 'the actual computed quantity must pass through the probe')
+    assert.ok(evaluations <= size * 4, `filtered stock repeated ${evaluations} evaluations for ${size} products`)
+    assert.equal(proxy.statements, 5, 'bounded reuse does not add request statements')
+    console.log(`MEASURE computed stock: ${evaluations} evaluations for ${size} products across five statements`)
+    db.close()
+  })
   console.log(`PASS ${passed} real SQLite Inventory product-read groups; statement/query plans measured, no scale certificate`)
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

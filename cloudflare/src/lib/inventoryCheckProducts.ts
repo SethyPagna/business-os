@@ -131,7 +131,7 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
     FROM products p LEFT JOIN products parent ON parent.id=p.parent_id LEFT JOIN stock ON stock.product_id=p.id
     WHERE ${stockVisibleProductSql('p')} AND NOT EXISTS (SELECT 1 FROM products child WHERE child.parent_id=p.id AND child.id<>p.id)
       AND (@branchId IS NULL OR EXISTS (SELECT 1 FROM branches allowed WHERE allowed.id=@branchId AND allowed.is_active=1))
-  ), cohort AS (SELECT * FROM base p WHERE ${conditions.join(' AND ')}),
+  ), cohort AS MATERIALIZED (SELECT * FROM base p WHERE ${conditions.join(' AND ')}),
     requested_ids(product_id) AS (SELECT id FROM cohort)`
   return { query, page, pageSize, branchId, params, ctes, saleClauses }
 }
