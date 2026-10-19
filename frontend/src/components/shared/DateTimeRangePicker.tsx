@@ -9,6 +9,7 @@ import ChevronsRight from 'lucide-react/dist/esm/icons/chevrons-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
 import DateEntryInput, { TimeEntryInput } from './DateEntryInput.tsx'
+import { useDialogKeyboard } from './useDialogKeyboard.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { activeStatsPreset, statsPresetRange, STATS_PRESETS, type StatsPresetKey } from './statsStripPresets.ts'
 
@@ -145,6 +146,15 @@ export default function DateTimeRangePicker({
     width: number
     maxHeight: number
   } | null>(null)
+  useDialogKeyboard(panelRef, {
+    enabled: open && panelPosition !== null,
+    promptOpen: false,
+    onEscape: () => {
+      setOpen(false)
+      rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
+    },
+    onPromptEscape: () => {},
+  })
   const today = todayIso()
   // Calendar view month/year -- follows the range start when one exists.
   const [viewYear, setViewYear] = useState(() => Number((value.startDate || today).slice(0, 4)))
@@ -407,13 +417,7 @@ export default function DateTimeRangePicker({
   }
 
   return (
-    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`} onKeyDown={event => {
-      if (!open || event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[data-app-select-menu]')) return
-      event.preventDefault()
-      event.stopPropagation()
-      setOpen(false)
-      rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
-    }}>
+    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`}>
       {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
           -- the user asked for LARGER dates on the OUTSIDE pill specifically
           (Aug 30), while the panel inside stays compact.
