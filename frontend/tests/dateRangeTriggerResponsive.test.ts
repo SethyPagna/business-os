@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import { transformSync } from 'esbuild'
 
 // P9 (Sep 16 2026), owner verbatim on the live app / small screens: "the date
 // start and date end are not responsive in the button row. too small and out
@@ -72,15 +74,37 @@ runTest('no sm:min-w-[15rem]-style min-width is applied below the sm breakpoint'
   assert.doesNotMatch(pickerSource, /(?<!sm:)min-w-\[1[0-9]rem\]/, 'a bare (non-sm:) min-width in rem would force overflow on narrow phones')
 })
 
-runTest('StatsRangeRow lets its action buttons wrap under the picker instead of shrinking the dates', () => {
-  const rowStart = rowSource.indexOf('data-stats-range-controls')
-  const rowContext = rowSource.slice(Math.max(0, rowStart - 400), rowStart)
-  assert.match(rowContext, /flex-wrap/, 'the control row must allow wrapping (not flex-nowrap) so actions can move to their own line')
-  assert.doesNotMatch(rowContext, /flex-nowrap/, 'flex-nowrap would force the picker to shrink instead of letting actions wrap')
+const require = createRequire(import.meta.url)
+const rowModule = { exports: {} as { default?: (props: Record<string, unknown>) => any } }
+const rowCode = transformSync(rowSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+new Function('require', 'module', 'exports', rowCode)((id: string) => {
+  if (id.includes('DateTimeRangePicker')) return () => null
+  if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
+  return require(id)
+}, rowModule, rowModule.exports)
+const renderRow = (layout?: 'wrap' | 'scroll') => rowModule.exports.default!({
+  range: { startDate: '', endDate: '', startTime: '', endTime: '' }, onRangeChange() {},
+  t: (key: string) => key, actions: 'Action', ...(layout ? { layout } : {}),
 })
 
-runTest('StatsRangeRow gives the picker a real minimum width so it is never squeezed unreadably narrow', () => {
-  assert.match(rowSource, /className="min-w-\[\d/, 'the picker wrapper must carry a concrete min-width floor')
+runTest('StatsRangeRow default action row wraps and retains a readable picker floor', () => {
+  const row = renderRow(), controls = row.props.children[0], picker = controls.props.children[1]
+  assert.match(controls.props.className, /(?:^| )flex-wrap(?: |$)/)
+  assert.doesNotMatch(controls.props.className, /flex-nowrap/)
+  assert.match(picker.props.className, /min-w-\[10\.5rem\]/)
+  assert.match(picker.props.className, /flex-1/)
+  assert.equal(controls.props.children[2], null, 'default presets stay below the action row')
+  assert.ok(row.props.children[1], 'default presets remain available')
+})
+
+runTest('StatsRangeRow opt-in scroll rail keeps picker and presets on one local row', () => {
+  const row = renderRow('scroll'), controls = row.props.children[0], picker = controls.props.children[1]
+  assert.match(controls.props.className, /flex-nowrap/)
+  assert.match(controls.props.className, /overflow-x-auto/)
+  assert.match(picker.props.className, /min-w-\[14rem\]/)
+  assert.match(picker.props.className, /shrink-0/)
+  assert.ok(controls.props.children[2], 'scroll presets share the picker rail')
+  assert.equal(row.props.children[1], null, 'scroll presets are not duplicated below')
 })
 
 // P9 follow-up (Sep 16 2026): the Reports compact/mobile control row had its

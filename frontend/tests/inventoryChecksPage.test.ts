@@ -38,6 +38,7 @@ let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
 let historyTimestamp: string | number = '2026-10-19 18:05:00'
 let productTotal = 1
+let emptyPastLastPage = false
 let productOverride: InventoryCheckProduct[] | null = null
 let memberOverride: InventoryCheckSessionItem[] | null = null
 let readRevision = '1'
@@ -70,7 +71,7 @@ const doubles = {
       if (failRead) throw new Error('test read failure')
       if (delayBootstrap) return new Promise(resolve => { bootstrapReads.push({ params, resolve }) })
       if (delayedProducts) return new Promise(resolve => { delayedProducts = resolve })
-      return { ...response(), items: productOverride ?? response().items, total: productOverride?.length ?? productTotal, rankings: { products: [{ family_key: 'off-page', name: 'Best seller beyond visible page', qty_sold: 99 }], ...(params.customerRanking === '1' ? { customers: [{ customer_id: 9, name: 'Opt-in customer identity', sale_count: 7 }] } : {}) } }
+      return { ...response(), items: productOverride ?? (emptyPastLastPage && Number(params.page) > Math.ceil(productTotal / Number(params.pageSize)) ? [] : response().items), total: productOverride?.length ?? productTotal, rankings: { products: [{ family_key: 'off-page', name: 'Best seller beyond visible page', qty_sold: 99 }], ...(params.customerRanking === '1' ? { customers: [{ customer_id: 9, name: 'Opt-in customer identity', sale_count: 7 }] } : {}) } }
     },
     readInventoryCheckSessions: async () => ({ items: [selected], total: 1, page: 1, pageSize: 20 }),
     readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation] }),
@@ -107,6 +108,24 @@ try {
   await bootstrap.settle()
   assert.ok(!bootstrap.text().includes('Stale bootstrap result'), 'older bootstrap requests remain fenced after branch discovery')
   await bootstrap.unmount()
+  const filtering = await mount()
+  assert.ok(filtering.find(node => node.getAttribute('data-inventory-check-page') !== null, 'Inventory page root').className.split(' ').includes('page-scroll'))
+  const retainedFilters: Record<string, string> = { branchId: '1' }
+  for (const [label, value, key] of [
+    ['brand', 'Off-page brand', 'brand'], ['category', 'Off-page category', 'category'],
+    ['reason', 'Off-page reason', 'reason'], ['stock_status', 'low_stock', 'stockState'],
+    ['inventory_check_state', 'issue', 'state'], ['sort_by', 'qty_sold', 'sortBy'],
+  ]) {
+    const beforeFilter = productRequests.length
+    await filtering.click(filtering.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === label, label))
+    await filtering.click(filtering.find(node => node.getAttribute('data-app-select-option') === value, value))
+    retainedFilters[key] = value
+    assert.ok(productRequests.length > beforeFilter, `${key} changes the request key and dispatches a fresh query`)
+    for (const [field, expected] of Object.entries(retainedFilters)) assert.equal(productRequests.at(-1)?.[field], expected, `${field} survives the next filter change`)
+  }
+  await filtering.click(filtering.button('inventory_check_ascending'))
+  assert.equal(productRequests.at(-1)?.sortDirection, 'desc')
+  await filtering.unmount()
   const surface = await mount()
   assert.ok(surface.text().includes('Test variant'))
   assert.ok(surface.text().includes('More options available. Narrow with Search.'), 'bounded full-cohort facets advertise how to find remaining options')
@@ -308,6 +327,19 @@ try {
   await cold.click(cold.button('sessions'))
   assert.equal(cold.button('sessions').getAttribute('aria-pressed'), 'true')
   await cold.unmount()
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  const shrinking = await mount()
+  await shrinking.click(shrinking.button('next'))
+  await shrinking.click(shrinking.button('next'))
+  assert.equal(productRequests.at(-1)?.page, 3)
+  productTotal = 1
+  emptyPastLastPage = true
+  const beforeShrink = productRequests.length
+  await shrinking.click(shrinking.button('refresh'))
+  assert.deepEqual(productRequests.slice(beforeShrink).map(request => request.page), [3, 1], 'a smaller authoritative total re-requests the valid page through the shared pager')
+  assert.ok(shrinking.text().includes('Test variant'), 'the re-request restores rows after the former last page is empty')
+  await shrinking.unmount()
+  emptyPastLastPage = false
   productTotal = 1
 
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')

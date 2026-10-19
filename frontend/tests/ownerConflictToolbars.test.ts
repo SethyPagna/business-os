@@ -37,7 +37,7 @@ location.hash='#hub:'+kind+':duplicates';window.calls=[];
 function ProductHost(){const {t,settings}=useApp();const layeredSectionNav=useLayeredSectionNav(settings?.ui_mobile_section_nav);const tr=(key,fallback)=>t(key)||fallback;const activeProductSection='duplicates';const setActiveProductSection=()=>{};const sectionPillsRef=useRef(null);
 const productSectionTabs=[{id:'products',key:'products',label:'Products'},{id:'duplicates',key:'possible_duplicates',label:'Conflicts'}];
 return <>{layeredSectionNav?null:${productTitle}}<ProductConflicts t={t} notify={()=>{}} canRemoveProduct={false} onMergeLeadingZero={()=>{}}/></>}
-function Host(){const {user}=useApp();return <><Sidebar showQuickPreferences={false}/><main key={user.id} style={{padding:12,maxWidth:1000,marginTop:72}}>{kind==='contacts'?<Contacts/>:<ProductHost/>}</main></>}
+function Host(){const {user}=useApp();return <div style={{display:'flex',height:'100vh'}}><Sidebar showQuickPreferences={false}/><main key={user.id} style={{padding:12,maxWidth:1000,marginTop:72,flex:1,minWidth:0}}>{kind==='contacts'?<Contacts/>:<ProductHost/>}</main></div>}
 createRoot(document.getElementById('root')).render(<Host/>);`
 const app = `import React from'react';const q=new URLSearchParams(location.search),packs=${JSON.stringify(packs)};
 const t=key=>{const value=packs[q.get('lang')||'en'][key]||key;return q.get('long')==='1'&&key==='product_dup_leading_zero'?value+' '+value+' '+value:value};

@@ -257,7 +257,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   if (showCustomerRanking && access.canViewCustomerDetails) cards.push({ key: 'top_customers', label: t('top_customers'), value: <span className="block truncate text-xs">{customerRanking[0]?.name || '—'}</span>, hint: tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.'), details: customerRanking.map(customer => ({ label: customer.name, value: customer.sale_count })) })
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
-  return <div className="min-w-0 space-y-2" data-inventory-check-page>
+  return <div className="page-scroll min-w-0 space-y-2 p-3" data-inventory-check-page>
     <HubSectionNav pageId="inventory" active={section} sections={[
       { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
     ]} onChange={id => { if (!busy && !createAttempt.current) setSection(id as Section) }} />

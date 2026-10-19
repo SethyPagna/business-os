@@ -93,7 +93,7 @@ function reviewPayload(row: PendingActionRow): Record<string, unknown> {
 
 function reviewDestination(row: PendingActionRow): { page: string; section: string } | null {
   if (row.section === 'products') return { page: 'products', section: 'products' }
-  if (row.section === 'inventory') return { page: 'branches', section: 'products' }
+  if (row.section === 'inventory') return { page: 'products', section: 'products' }
   if (row.section === 'branches') return { page: 'branches', section: 'overview' }
   if (row.section === 'fees' || row.section === 'returns') return { page: 'sales', section: row.section }
   if (row.section === 'contacts') return { page: 'contacts', section: row.entity_type === 'supplier' ? 'suppliers' : row.entity_type === 'delivery_contact' ? 'delivery' : 'customers' }
