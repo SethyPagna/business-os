@@ -59,10 +59,12 @@ function productionLeaseSql(name) {
 const acquireSql = productionLeaseSql('acquireImportLease')
 const releaseSql = productionLeaseSql('releaseImportLease')
 
-async function acquire(db, jobId, token, nowMs) {
+async function acquire(db, jobId, token, nowMs, status = 'queued', activeStatus = 'applying') {
   const now = new Date(nowMs)
   const result = await db.prepare(acquireSql).run({
     id: jobId,
+    status,
+    activeStatus,
     token,
     now: now.toISOString(),
     expires: new Date(nowMs + LEASE_MS).toISOString(),
@@ -104,7 +106,7 @@ check('terminal jobs cannot be claimed even when an earlier status read was stal
     await seedJob(db, id)
     await db.prepare('UPDATE import_jobs SET status=@status WHERE id=@id').run({ id, status })
     const before = await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id })
-    assert.equal(await acquire(db, id, 'late-token', Date.now()), null, status + ' must not restart')
+    assert.equal(await acquire(db, id, 'late-token', Date.now(), status), null, status + ' must not restart')
     assert.deepEqual(await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id }), before)
     await db.prepare("UPDATE import_jobs SET status='queued' WHERE id=@id").run({ id })
     assert.equal(await acquire(db, id, 'retry-token', Date.now()), 'retry-token', 'explicit Retry re-admits ' + status)
@@ -113,12 +115,44 @@ check('terminal jobs cannot be claimed even when an earlier status read was stal
 
 check('authorized starts, failed recovery and pending cancellation remain eligible', async () => {
   const db = openDb(MIGRATION_SQLS)
-  for (const status of ['queued', 'approved', 'failed', 'analyzing', 'applying', 'cancelling']) {
-    const id = 'eligible-' + status
-    await seedJob(db, id)
-    await db.prepare('UPDATE import_jobs SET status=@status WHERE id=@id').run({ id, status })
-    assert.equal(await acquire(db, id, 'active-token', Date.now()), 'active-token', status + ' must remain eligible')
+  for (const phase of ['analyzing', 'applying']) {
+    const statuses = ['queued', 'failed', 'cancelling', phase, ...(phase === 'applying' ? ['approved'] : [])]
+    for (const status of statuses) {
+      const id = 'eligible-' + phase + '-' + status
+      await seedJob(db, id)
+      await db.prepare('UPDATE import_jobs SET status=@status,cancel_requested=@cancel WHERE id=@id')
+        .run({ id, status, cancel: status === 'cancelling' ? 1 : 0 })
+      assert.equal(await acquire(db, id, 'active-token', Date.now(), status, phase), 'active-token', id + ' must remain eligible')
+    }
   }
+})
+
+check('review, pending and wrong-phase deliveries cannot change a job or claim its lease', async () => {
+  const db = openDb(MIGRATION_SQLS)
+  for (const [phase, statuses] of [
+    ['analyzing', ['pending', 'awaiting_review', 'approved', 'applying']],
+    ['applying', ['pending', 'awaiting_review', 'analyzing']],
+  ]) {
+    for (const status of statuses) {
+      const id = phase + '-refuses-' + status
+      await seedJob(db, id)
+      await db.prepare('UPDATE import_jobs SET status=@status WHERE id=@id').run({ id, status })
+      const before = await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id })
+      assert.equal(await acquire(db, id, 'wrong-phase', Date.now(), status, phase), null, id)
+      assert.deepEqual(await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id }), before)
+    }
+  }
+})
+
+check('an eligible status change between read and claim cannot reuse the earlier fresh-run decision', async () => {
+  const db = openDb(MIGRATION_SQLS)
+  await seedJob(db, 'changed-before-claim')
+  const observed = await db.prepare('SELECT status FROM import_jobs WHERE id=@id').get({ id: 'changed-before-claim' })
+  await db.prepare("UPDATE import_jobs SET status='analyzing',chunk_cursor=37 WHERE id=@id").run({ id: 'changed-before-claim' })
+  const before = await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id: 'changed-before-claim' })
+  assert.equal(await acquire(db, 'changed-before-claim', 'stale-read', Date.now(), observed.status, 'analyzing'), null)
+  assert.deepEqual(await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id: 'changed-before-claim' }), before)
+  assert.equal(await acquire(db, 'changed-before-claim', 'current-read', Date.now(), 'analyzing', 'analyzing'), 'current-read')
 })
 
 check('releasing hands the job straight to the next continuation', async () => {
@@ -181,8 +215,10 @@ check('the lease is released on the FAILURE path too', async () => {
 })
 
 check('both phases claim before touching a chunk, and ack rather than retry when refused', async () => {
-  const claims = engine.match(/const leaseToken = await acquireImportLease\(db, jobId\)/g) || []
+  const claims = engine.match(/const leaseToken = await acquireImportLease\(db, jobId, jobRow\.status, '(analyzing|applying)'\)/g) || []
   assert.equal(claims.length, 2, 'analyze and apply must both claim')
+  assert.match(claims[0], /'analyzing'/)
+  assert.match(claims[1], /'applying'/)
   // Returning (not throwing) is what makes the duplicate ack instead of
   // retrying -- throwing would spin the message against a healthy run.
   assert.ok(

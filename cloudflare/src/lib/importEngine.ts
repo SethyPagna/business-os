@@ -4722,17 +4722,21 @@ const IMPORT_LEASE_MS = 60_000
  * cannot both see a free lease -- D1 reports how many rows the UPDATE
  * actually changed, and only one of them gets 1.
  */
-async function acquireImportLease(db: D1Compat, jobId: string): Promise<string | null> {
+async function acquireImportLease(db: D1Compat, jobId: string, status: string, activeStatus: 'analyzing' | 'applying'): Promise<string | null> {
   const token = crypto.randomUUID()
   const now = new Date()
   const result = await db.prepare(`
     UPDATE import_jobs
     SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
-      AND status NOT IN ('completed', 'completed_with_errors', 'cancelled')
+      AND status = @status
+      AND (status IN ('queued', 'failed', 'cancelling') OR status = @activeStatus
+        OR (@activeStatus = 'applying' AND status = 'approved'))
       AND (lease_expires_at IS NULL OR lease_expires_at < @now)
   `).run({
     id: jobId,
+    status,
+    activeStatus,
     token,
     now: now.toISOString(),
     expires: new Date(now.getTime() + IMPORT_LEASE_MS).toISOString(),
@@ -4947,9 +4951,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // return without processing. Deliberately NOT an error: the holder is
   // making progress, so this message has nothing left to do and must ack
   // rather than retry, or it would spin against a healthy run.
-  const leaseToken = await acquireImportLease(db, jobId)
+  const leaseToken = await acquireImportLease(db, jobId, jobRow.status, 'analyzing')
   if (!leaseToken) {
-    console.log('[import] skipping finished or already claimed delivery', jobId)
+    console.log('[import] skipping changed, wrong-phase or already claimed delivery', jobId)
     return
   }
 
@@ -6507,9 +6511,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   // return without processing. Deliberately NOT an error: the holder is
   // making progress, so this message has nothing left to do and must ack
   // rather than retry, or it would spin against a healthy run.
-  const leaseToken = await acquireImportLease(db, jobId)
+  const leaseToken = await acquireImportLease(db, jobId, jobRow.status, 'applying')
   if (!leaseToken) {
-    console.log('[import] skipping finished or already claimed delivery', jobId)
+    console.log('[import] skipping changed, wrong-phase or already claimed delivery', jobId)
     // Zero applied, zero failed -- honest for an invocation that did
     // nothing. The holder reports the real totals when it finishes.
     return { applied: 0, failed: 0 }
