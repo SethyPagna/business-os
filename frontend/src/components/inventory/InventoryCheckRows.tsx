@@ -176,7 +176,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       {finiteNumber(product.qty_sold) ? <span>{tr('inventory_check_sold', 'Sold')}: {product.qty_sold}</span> : null}
       {finiteNumber(product.customer_count) ? <span>{tr('inventory_check_customers', 'Customers')}: {product.customer_count}</span> : null}
       {canViewPrice ? <span>{tr('inventory_check_price', 'Price')}: {price === null ? '—' : fmtUSD(price)}</span> : null}
-      {canViewCost ? <span>{tr('inventory_check_cost', 'Cost')}: {cost === null ? '—' : fmtUSD(cost)}</span> : null}
+      {canViewCost ? <span>{tr('inventory_check_cost', 'Cost')}: {cost === null ? '—' : fmtUSD(cost)}{product.cost_needs_review === true ? <span className="ml-1 text-amber-700 dark:text-amber-300">{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}</span> : null}
       {!header ? <span data-check-status={String(product.id)} className="font-semibold">{stateLabel}</span> : null}
       {!header && canViewCounts && finiteNumber(observation?.counted_quantity) ? <span>{tr('inventory_check_counted', 'Counted')}: {observation.counted_quantity}</span> : null}
       {busy ? <span role="status">{tr('inventory_check_saving', 'Saving…')}</span> : null}

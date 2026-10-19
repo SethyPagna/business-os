@@ -18,6 +18,7 @@ export type InventoryCheckProduct = {
   customer_count?: number | null
   selling_price_usd?: number | null
   cost_price_usd?: number | null
+  cost_needs_review?: boolean
   stock_consistent?: boolean
   stock_diagnostics?: string | null
 }

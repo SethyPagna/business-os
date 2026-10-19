@@ -37,7 +37,7 @@ function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAc
   const visible = { ...product }
   if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity }
   if (!fields.price) delete visible.selling_price_usd
-  if (!fields.cost) delete visible.cost_price_usd
+  if (!fields.cost) { delete visible.cost_price_usd; delete visible.cost_needs_review }
   if (!fields.sales) delete visible.qty_sold
   if (!fields.customers) delete visible.customer_count
   if (!fields.brand) delete visible.brand

@@ -146,6 +146,13 @@ try {
   await money.render({ ...base, products: [products[1]], fmtUSD: () => { throw new Error('denied money must not be formatted') } })
   assert.ok(!money.text().includes('Price:') && !money.text().includes('Cost:'))
   await money.unmount()
+  const review = await mount({ products: [{ ...products[1], cost_needs_review: true }], canViewCost: true })
+  assert.ok(review.text().includes('87.25') && review.text().includes('Cost needs review'), 'a saved known fallback cost still displays its review tag')
+  await review.render({ ...base, products: [{ ...products[1], cost_needs_review: true }], canViewCost: false })
+  assert.ok(!review.text().includes('Cost needs review') && !review.text().includes('87.25'), 'a hidden cost cannot leak its derived review status')
+  await review.render({ ...base, products: [{ ...products[1], cost_needs_review: false }], canViewCost: true })
+  assert.ok(!review.text().includes('Cost needs review'), 'confirmed cost control has no review tag')
+  await review.unmount()
   const blind = await mount({ products: [{ id: 91, name: 'Synthetic blind check', quantity: 4444, damaged_quantity: 3333 }],
     canViewStock: false, observations: { 91: { product_id: 91, state: 'done', counted_quantity: 0, reason: null, revision: 1, baseline_quantity: 2222 } } })
   assert.ok(!blind.text().includes('Stock:') && !blind.text().includes('Damaged:') && !blind.text().includes('4444') && !blind.text().includes('3333') && !blind.text().includes('2222'), 'blind checks hide stock, damage and baseline without deriving mismatch signals')
