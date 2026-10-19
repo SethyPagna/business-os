@@ -166,13 +166,19 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
-    const fresh = await currentInventoryCheckActor(db, principal, true)
-    const recovered = await receipt(db, fresh, key, hash)
-    if (recovered) return { event: recovered, replayed: true }
+    try {
+      const fresh = await currentInventoryCheckActor(db, principal, true)
+      const recovered = await receipt(db, fresh, key, hash)
+      if (recovered) return { event: recovered, replayed: true }
+    } catch { return fail(503, 'inventory_check_outcome_unknown') }
     fail(503, 'inventory_check_outcome_unknown')
   }
   const event = await receipt(db, actor, key, hash)
   return event ? { event, replayed: false } : fail(503, 'inventory_check_outcome_unknown')
+}
+async function committedSessionDetail(db: D1Compat, principal: InventoryCheckPrincipal, id: string) {
+  try { return await getInventoryCheckSession(db, principal, id) }
+  catch { return fail(503, 'inventory_check_outcome_unknown') }
 }
 const PHYSICAL_SCHEMA_SQL = `SELECT json_object('epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'),
   'epoch_present',(SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch'),
@@ -212,7 +218,7 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const scope = Object.fromEntries(Object.keys(normalizedScope).sort().map(key=>[key,normalizedScope[key]]))
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'create', branchId, productIds, title, scope }))
   const existing = await receipt(db, actor, key, hash)
-  if (existing) return { ...(await getInventoryCheckSession(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  if (existing) return { ...(await committedSessionDetail(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
   const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
   const settingsSignature = JSON.stringify(settings.map(row=>({key:row.key,value:row.value})))
   lowStock = resolveLowStockConfig(Object.fromEntries(settings.map(row=>[row.key,row.value])))
@@ -249,7 +255,7 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
     eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
-  return { ...(await getInventoryCheckSession(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+  return { ...(await committedSessionDetail(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -291,7 +297,7 @@ export async function patchInventoryCheckObservation(db: D1Compat, principal: In
   return observationResponse(db, principal, saved.event, saved.replayed)
 }
 async function observationResponse(db: D1Compat, principal: InventoryCheckPrincipal, event: EventRow, replayed: boolean) {
-  const detail = await getInventoryCheckSession(db, principal, event.session_id)
+  const detail = await committedSessionDetail(db, principal, event.session_id)
   return { item: detail.items.find(item => item.product_id === event.product_id), session: detail.item, receipt: receiptResponse(event, replayed) }
 }
 export async function patchInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, input: unknown) {
@@ -301,7 +307,7 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   const expected = revision(body.expectedRevision), key = requestId(body.requestId), action = body.action
   if (action !== 'close' && action !== 'resume') return fail(400, 'inventory_check_invalid_action')
   const hash = await inventoryCheckDigest(JSON.stringify({ action, id, expected })), previous = await receipt(db, actor, key, hash)
-  if (previous) return { item: (await getInventoryCheckSession(db, principal, id)).item, receipt: receiptResponse(previous, true) }
+  if (previous) return { item: (await committedSessionDetail(db, principal, id)).item, receipt: receiptResponse(previous, true) }
   const status = action === 'close' ? 'closed' : 'open', now = new Date().toISOString()
   const params = { id, status, expected, now, closed: action === 'close' ? now : null }
   const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
@@ -309,7 +315,7 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
     guard('changes()=1', 'inventory_check_conflict', {}),
     eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }),
   ], key, hash)
-  return { item: (await getInventoryCheckSession(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
+  return { item: (await committedSessionDetail(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
 }
 export async function inventoryCheckSessionHistory(db: D1Compat, principal: InventoryCheckPrincipal, id: string, query: Record<string,string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)

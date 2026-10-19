@@ -15,7 +15,7 @@ function load(file) {
   return module.exports
 }
 let route
-let db, beforeCommit, loseAck
+let db, beforeCommit, loseAck, afterCommit
 function binding() {
   function prepare(sql) {
     return { sql, values: [], bind(...values) { if(values.length>100) throw new Error('D1_ERROR: too many SQL variables'); return { ...this, values } }, async all() {
@@ -31,6 +31,7 @@ function binding() {
       const result = []
       for (const statement of statements) result.push(await statement.all())
       db.exec('COMMIT')
+      if (writing && afterCommit) { const inject = afterCommit; afterCommit = null; inject() }
       if (writing && loseAck) { loseAck = false; throw new Error('Lost commit acknowledgement') }
       return result
     } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error }
@@ -50,7 +51,7 @@ function reset(schema = true) {
     INSERT INTO products(id,name,stock_quantity) VALUES(900001,'One product',0),(900002,'Two product',0);
     INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) VALUES(900001,900001,'one','2026-10-01'),(900002,900002,'two','2026-10-01');`)
   for (const actor of [900001,900002,900003,900004]) db.prepare("INSERT INTO user_sessions(user_id,token_hash,expires_at,last_seen_at) VALUES(?,?,'2099-01-01T00:00:00.000Z',CURRENT_TIMESTAMP)").run(actor, createHash('sha256').update(`token-${actor}`).digest('hex'))
-  beforeCommit = null; loseAck = false
+  beforeCommit = null; loseAck = false; afterCommit = null
 }
 async function request(method, url, body, actor = 900001) {
   const tasks = []
@@ -180,6 +181,26 @@ async function main() {
     db.exec("UPDATE products SET is_group=1 WHERE id=900001; UPDATE products SET parent_id=900001,name='One product' WHERE id=900002; UPDATE product_batches SET received_at='2025-01-01' WHERE id=900002")
     assert.equal((await create('header-create-01',[900001])).status,400)
     assert.equal((await create('outside-cohort-01',[900002])).status>=400,true)
+  })
+  await check('post-commit revocation never reports a committed create, observation or lifecycle change as rejected', async () => {
+    for (const action of ['create','observe','close','resume','lost_ack']) {
+      reset()
+      const id = action === 'create' ? null : (await create()).body.item.id
+      if (action === 'resume') assert.equal((await request('PATCH',`/sessions/${id}`,{action:'close',expectedRevision:0,requestId:'pre-resume-close-01'})).status,200)
+      const eventsBefore = db.prepare('SELECT COUNT(*) AS n FROM inventory_check_events').get().n
+      const before = physical()
+      afterCommit = () => db.exec("UPDATE users SET permissions='{\"inventory_checks\":false}' WHERE id=900001")
+      if (action === 'lost_ack') loseAck = true
+      const key = `post-commit-${action}-01`
+      const result = action === 'create' ? await create(key)
+        : action === 'observe' || action === 'lost_ack' ? await request('PATCH',`/sessions/${id}/items/900001`,{state:'done',counted_quantity:0,expectedRevision:0,expectedSessionRevision:0,requestId:key})
+        : await request('PATCH',`/sessions/${id}`,{action,expectedRevision:action === 'resume' ? 1 : 0,requestId:key})
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_events').get().n,eventsBefore+1,action)
+      assert.equal(result.status,503,`${action} committed; permission changes after commit cannot imply rejection`)
+      assert.equal(result.body.outcome,'unknown',action)
+      assert.equal('item' in result.body,false, 'revoked access must not leak the saved detail')
+      assert.deepEqual(physical(),before)
+    }
   })
   console.log(`PASS ${groups} actual authenticated HTTP/SQLite Inventory session groups`)
   db.close()

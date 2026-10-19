@@ -13,7 +13,7 @@ app.use('*', async (c, next) => { c.header('Cache-Control','private, no-store');
 app.onError((error,c) => {
   const status = error instanceof InventoryCheckSessionError ? error.status : 'status' in error && typeof error.status === 'number' && [400,403,409,503].includes(error.status) ? error.status as 400|403|409|503 : 503
   const code = 'code' in error && typeof error.code === 'string' ? error.code : 'inventory_check_unavailable'
-  return c.json({ error: code, code }, status)
+  return c.json({ error: code, code, ...(code === 'inventory_check_outcome_unknown' ? { outcome: 'unknown' } : {}) }, status)
 })
 async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const token = getCookie(c, 'bos_session')
