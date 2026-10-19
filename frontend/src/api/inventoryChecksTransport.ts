@@ -21,6 +21,8 @@ export type InventoryCheckSession = {
 export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'> & {
   state: 'unstarted' | 'done' | 'issue'
   product_snapshot: InventoryCheckProduct
+  current_product_available?: boolean
+  current_product_name?: string | null
   current_quantity?: number | null
   stock_changed?: boolean
 }

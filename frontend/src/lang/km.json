@@ -7619,5 +7619,9 @@
   "inventory_check_empty": "គ្មានផលិតផលត្រូវនឹងលក្ខខណ្ឌ។",
   "inventory_check_starting_stock": "ស្តុកពេលចាប់ផ្តើម",
   "inventory_check_stock_changed": "ស្តុកបានផ្លាស់ប្តូរ",
-  "inventory_check_filter_options_limited": "នៅមានជម្រើសបន្ថែម។ សូមប្រើការស្វែងរកដើម្បីច្រោះឱ្យតូចជាងមុន។"
+  "inventory_check_filter_options_limited": "នៅមានជម្រើសបន្ថែម។ សូមប្រើការស្វែងរកដើម្បីច្រោះឱ្យតូចជាងមុន។",
+  "inventory_check_unavailable_members": "ផលិតផលក្នុងវគ្គដែលលែងមាន",
+  "inventory_check_unavailable_member_hint": "ផលិតផលដើមនេះលែងមាន។ លទ្ធផលពិនិត្យដែលបានរក្សាទុកអាចមើលបានតែប៉ុណ្ណោះ។",
+  "inventory_check_original_name": "ឈ្មោះពេលចាប់ផ្តើម",
+  "inventory_check_current_name": "ឈ្មោះបច្ចុប្បន្ន"
 }

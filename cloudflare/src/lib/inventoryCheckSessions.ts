@@ -11,10 +11,10 @@ import { actorSnapshot } from './actorSnapshot'
 export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
-export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
+export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
 type Actor = SessionUser & { tokenHash: string }
 type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
-type ItemRow = { session_id: string; product_id: number; branch_id: number; product_snapshot_json: string; baseline_quantity: number | null; baseline_json: string; state: InventoryCheckObservation['state']; counted_quantity: number | null; reason: string | null; revision: number; updated_by: number | null; updated_at: string | null }
+type ItemRow = { session_id: string; product_id: number; branch_id: number; product_snapshot_json: string; current_product_available?: number; current_product_name?: string | null; baseline_quantity: number | null; baseline_json: string; state: InventoryCheckObservation['state']; counted_quantity: number | null; reason: string | null; revision: number; updated_by: number | null; updated_at: string | null }
 type EventRow = { id: number; session_id: string; product_id: number | null; actor_id: number; actor_name: string | null; action: string; request_id: string; request_hash: string; before_json: string; after_json: string; result_json: string; created_at: string }
 type Statement = { sql: string; params?: Record<string, unknown> }
 
@@ -101,6 +101,7 @@ function stockProjection(stock: InventoryCheckStockRow | Record<string, unknown>
 function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, current?: InventoryCheckStockRow): InventoryCheckObservation {
   const access = getInventoryCheckAccess(actor)
   return { product_id: row.product_id, branch_id: row.branch_id, product_snapshot: projectInventoryCheckProduct(parse(row.product_snapshot_json), access),
+    current_product_available: row.current_product_available === 1, current_product_name: row.current_product_name ?? null,
     state: row.state, reason: row.reason, revision: row.revision,
     ...(access.fields.stock || ownSession ? { counted_quantity:row.counted_quantity } : {}),
     ...(access.fields.stock ? { baseline_quantity: row.baseline_quantity,
@@ -110,7 +111,9 @@ function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, cur
 export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
-  const items = await db.prepare('SELECT * FROM inventory_check_items WHERE session_id=@id ORDER BY product_id').all<ItemRow>({ id })
+  const items = await db.prepare(`SELECT i.*,CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN 1 ELSE 0 END AS current_product_available,
+    CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN p.name END AS current_product_name
+    FROM inventory_check_items i LEFT JOIN products p ON p.id=i.product_id WHERE i.session_id=@id ORDER BY i.product_id`).all<ItemRow>({ id })
   if (items.length > 500) fail(503, 'inventory_check_membership_unavailable')
   const current = await readInventoryCheckStock(db, { branchId: session.branch_id, productIds: items.map(item => item.product_id) })
   actor = await currentInventoryCheckActor(db, principal)
@@ -189,8 +192,10 @@ async function committedSessionProjection(db: D1Compat, principal: InventoryChec
           FROM inventory_check_items WHERE session_id=s.id) AS progress_json,
         CASE WHEN @productId IS NOT NULL THEN (SELECT json_object('session_id',i.session_id,'product_id',i.product_id,'branch_id',i.branch_id,
           'product_snapshot_json',i.product_snapshot_json,'baseline_quantity',i.baseline_quantity,'baseline_json',i.baseline_json,
-          'state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision,'updated_by',i.updated_by,'updated_at',i.updated_at)
-          FROM inventory_check_items i WHERE i.session_id=s.id AND i.product_id=@productId AND i.branch_id=s.branch_id) END AS item_json
+          'state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision,'updated_by',i.updated_by,'updated_at',i.updated_at,
+          'current_product_available',CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN 1 ELSE 0 END,
+          'current_product_name',CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN p.name END)
+          FROM inventory_check_items i LEFT JOIN products p ON p.id=i.product_id WHERE i.session_id=s.id AND i.product_id=@productId AND i.branch_id=s.branch_id) END AS item_json
       FROM post_write_snapshot s JOIN current_actor a ON s.organization_id IS a.organization_id`
     const statement = {sql,params:{actorId:principal.id,tokenHash:principal.tokenHash,id,productId:observation?.productId ?? null,branchId:observation?.branchId ?? null}}
     let result: D1Result[] = [], current: InventoryCheckStockRow | undefined
@@ -232,6 +237,7 @@ const LOW_STOCK_ROWS_SQL = `SELECT key,value FROM settings WHERE key IN ('low_st
 const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'value',value)) FROM (${LOW_STOCK_ROWS_SQL})`
 const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
   AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
+const CURRENT_PRODUCT_CHECKABLE_SQL = `p.id IS NOT NULL AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL}`
 export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   const branchId = positive(body.branchId), key = requestId(body.requestId)

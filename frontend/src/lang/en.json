@@ -7619,5 +7619,9 @@
   "inventory_check_empty": "No matching products.",
   "inventory_check_starting_stock": "Starting stock",
   "inventory_check_stock_changed": "Stock changed",
-  "inventory_check_filter_options_limited": "More options available. Narrow with Search."
+  "inventory_check_filter_options_limited": "More options available. Narrow with Search.",
+  "inventory_check_unavailable_members": "Unavailable session products",
+  "inventory_check_unavailable_member_hint": "This original product is unavailable. Its saved check remains read-only.",
+  "inventory_check_original_name": "Starting name",
+  "inventory_check_current_name": "Current name"
 }
