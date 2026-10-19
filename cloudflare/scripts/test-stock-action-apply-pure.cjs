@@ -166,7 +166,7 @@ function makeDb() {
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, product_name TEXT,
       branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL DEFAULT 0,
       total_cost_usd REAL, total_cost_khr REAL DEFAULT 0, reason TEXT, reference_id INTEGER, created_at TEXT, batch_id INTEGER);
-    CREATE TABLE import_jobs (id TEXT PRIMARY KEY, type TEXT, policy_json TEXT, status TEXT, phase TEXT,
+    CREATE TABLE import_jobs (id TEXT PRIMARY KEY, type TEXT, policy_json TEXT, status TEXT, phase TEXT, last_error TEXT,
       started_at TEXT, materialize_state_json TEXT, materialize_done INTEGER DEFAULT 0,
       processed_rows INTEGER DEFAULT 0, failed_rows INTEGER DEFAULT 0, warning_count INTEGER DEFAULT 0,
       summary_json TEXT, finished_at TEXT, cancel_requested INTEGER DEFAULT 0, updated_at TEXT,

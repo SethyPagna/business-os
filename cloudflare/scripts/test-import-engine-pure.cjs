@@ -739,7 +739,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const block = source.slice(blockStart, blockEnd)
   const dbPrepareCount = (block.match(/db\.prepare\(/g) || []).length
   assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its guarded transaction to finalizeProductReplacement')
-  assert.match(block, /finalizeProductReplacement\(db,/)
+  assert.match(source, /const productWriteDb = withProductImportCommitAuthority\(db, job, authority\.actor\)/)
+  assert.match(block, /finalizeProductReplacement\(productWriteDb,/)
   assert.ok(!/\bDELETE\s+FROM\b/i.test(block), 'replace_all must never hard-DELETE -- soft-deactivate only, so sales/returns/audit rows referencing a deactivated product stay valid')
   assert.ok(!/\bsale_items\b|\breturns\b|\bsales\b|\bbranch_stock\b|\bdiscounts?\b/i.test(block), 'the replace_all block must not reference sales, returns, sale_items, branch_stock, or discounts -- it only ever touches products')
 

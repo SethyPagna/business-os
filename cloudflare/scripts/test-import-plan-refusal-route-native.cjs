@@ -26,7 +26,6 @@ async function main() {
     sqlite.exec(`CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT);
       CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT);
       INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Admin',1,1,'{}',1,NULL);
-      ALTER TABLE import_jobs ADD COLUMN last_error TEXT;
       CREATE TABLE product_damaged_stock(product_id INTEGER,batch_id INTEGER,branch_id INTEGER,remaining_quantity REAL);
       CREATE TABLE import_job_files(job_id TEXT,kind TEXT,status TEXT);
       CREATE TABLE import_job_row_signatures(job_id TEXT);`)

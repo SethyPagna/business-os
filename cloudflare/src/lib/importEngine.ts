@@ -4472,7 +4472,7 @@ type ImportChunkState = {
   // import_job_image_matches / import_job_image_renames in migration 0052.
   // Held here purely as the "already computed" flag and for the finished
   // job's summary_json; the bulk that made this column expensive is gone.
-  imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean }
+  imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean; renameComplete?: boolean }
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
   // DIRECT-mode stock-action continuation (see applyStockActionsJob): the
   // apply runs as windowed CLASSIFY invocations (chunk_cursor = source-row
@@ -5568,7 +5568,7 @@ export async function finalizeImportApply(
   const warnedApply = warnedApplyRow?.n || 0
   await db.prepare(`
     UPDATE import_jobs SET status = @status, phase = @status,
-      processed_rows = @processed, failed_rows = @failed, warning_count = @warned, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      processed_rows = @processed, failed_rows = @failed, warning_count = @warned, last_error = NULL, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
   `).run({ id: jobId, status: finalStatus, processed: totalApplied, failed: totalFailed, warned: warnedApply })
 
@@ -6592,33 +6592,33 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       deniedImagePaths = (await computeImportImageMatch(db, jobId, allRows, job.policy_json)).rowImagePaths
     }
 
-    // Auto-rename matched images now that this job is actually committing
-    // (analyze already showed the plan for review; apply is the point a
-    // match becomes final). Renames are keyed by fileId, global to the
-    // job -- not row-window-scoped -- so this only needs to run once, on
-    // this run's first chunk, not repeated per window.
-    if (isFreshStart && job.type === 'products' && authority.allowProductImageWrites && imageMatchCache?.hasRenamePlan) {
-      // Read here rather than carried in chunk state: this runs on the first
-      // chunk only, so serialising the whole plan on all ~58 of them paid for
-      // something used once.
+    if (cursor === 0 && job.type === 'products' && authority.allowProductImageWrites
+      && imageMatchCache?.hasRenamePlan && !imageMatchCache.renameComplete) {
       const renamePlanEntries = await readImageRenamePlan(db, jobId)
-      const renameRows = await db.prepare(`SELECT id, file_asset_id FROM import_job_files WHERE job_id = @jobId AND kind = 'image'`).all<{ id: number; file_asset_id: number | null }>({ jobId })
-      const fileAssetByJobFileId = new Map(renameRows.map((r) => [r.id, r.file_asset_id]))
-      const renameStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+      const renameRows = await db.prepare(`SELECT f.id, f.file_asset_id, f.original_name, a.original_name AS asset_name
+        FROM import_job_files f LEFT JOIN file_assets a ON a.id=f.file_asset_id
+        WHERE f.job_id = @jobId AND f.kind = 'image'`)
+        .all<{ id: number; file_asset_id: number | null; original_name: string; asset_name: string | null }>({ jobId })
+      const fileByJobFileId = new Map(renameRows.map((r) => [r.id, r]))
+      const renameGroups: ImportStatement[][] = []
       for (const [fileId, newName] of renamePlanEntries) {
-        renameStatements.push({
+        const file = fileByJobFileId.get(Number(fileId))
+        if (file?.original_name === newName && (!file.file_asset_id || file.asset_name === newName)) continue
+        const group: ImportStatement[] = [{
           sql: `UPDATE import_job_files SET original_name = @name WHERE id = @id`,
           params: { id: fileId, name: newName },
-        })
-        const assetId = fileAssetByJobFileId.get(Number(fileId))
+        }]
+        const assetId = file?.file_asset_id
         if (assetId) {
-          renameStatements.push({
+          group.push({
             sql: `UPDATE file_assets SET original_name = @name WHERE id = @id`,
             params: { id: assetId, name: newName },
           })
         }
+        renameGroups.push(group)
       }
-      if (renameStatements.length) await runD1BatchInChunks(productWriteDb, renameStatements)
+      await runD1BatchGroupsInChunks(productWriteDb, renameGroups)
+      imageMatchCache.renameComplete = true
     }
     sw.lap('imageRenameMs')
 
