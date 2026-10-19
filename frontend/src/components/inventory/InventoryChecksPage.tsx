@@ -10,6 +10,7 @@ import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProd
 import InventoryCheckControls, { type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows from './InventoryCheckRows.tsx'
 import HubSectionNav from '../shared/HubSectionNav.tsx'
+import { useHubSection } from '../shared/hubNavigation.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import Modal from '../shared/Modal.tsx'
@@ -19,7 +20,8 @@ type ProductsResult = {
   items: InventoryCheckProduct[]; total: number; page: number; pageSize: number; totalPages?: number
   branches: Array<{ id: number; name: string }>
   stats?: Record<string, number | null | undefined>
-  brands?: string[]; categories?: string[]; reasons?: string[]
+  facets?: { brands?: string[]; categories?: string[]; reasons: string[] }
+  facetsLimited?: { brands: boolean; categories: boolean; reasons: boolean }
   issues?: Array<{ product_id: number; branch_id: number; session_id: string; session_title: string; created_by: number; reason: string | null; revision: number; state: 'issue'; counted_quantity?: number | null }>
 }
 type Selection = { branchId: string; sessionId: string }
@@ -68,10 +70,10 @@ function InventorySelection({ access, isCurrent }: { access: InventoryCheckAcces
 }
 
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
-  const { t, user, canWriteToServer } = useApp() as AppContextCoreValue
+  const { t, user, canWriteToServer, navigateTo } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
-  const [section, setSection] = useState<Section>('products')
+  const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
   const [range, setRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<InventoryCheckFilters>({ ...initialFilters, branchId })
@@ -229,8 +231,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
     ]} onChange={id => { if (!controlsLocked) { setSection(id as Section); setPage(1) } }} />
     <fieldset disabled={controlsLocked} className="min-w-0">
-      <InventoryCheckControls range={range} onRangeChange={value => { setRange(value); setPage(1) }} query={query} onQueryChange={value => { setQuery(value); setPage(1) }} filters={filters} onFiltersChange={changeFilters} fields={access.fields} {...{ showSessionStates: !!sessionId }} branches={data?.branches ?? []} brands={data?.brands} categories={data?.categories} reasons={data?.reasons} t={t} />
+      <InventoryCheckControls range={range} onRangeChange={value => { setRange(value); setPage(1) }} query={query} onQueryChange={value => { setQuery(value); setPage(1) }} filters={filters} onFiltersChange={changeFilters} fields={access.fields} {...{ showSessionStates: !!sessionId }} branches={data?.branches ?? []} brands={data?.facets?.brands} categories={data?.facets?.categories} reasons={data?.facets?.reasons} t={t} />
     </fieldset>
+    {fresh && Object.values(data?.facetsLimited ?? {}).some(Boolean) ? <p className="text-xs text-gray-500">{tr('inventory_check_filter_options_limited', 'More options available. Narrow with Search.')}</p> : null}
     <p className="text-xs text-gray-500">{tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')}</p>
     {section !== 'sessions' ? <StatsStrip cards={cards} t={t} loading={loading} /> : null}
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">

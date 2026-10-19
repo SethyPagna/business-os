@@ -1,8 +1,27 @@
 import assert from 'node:assert/strict'
+import { act } from 'react'
 import { createHarness } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
+import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 
 const harness = await createHarness({ observe: ['api/actorReadScope.ts'] })
+const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
+window.addEventListener = (type: string, listener: unknown) => { if (listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(listener as EventListenerOrEventListenerObject) } }
+window.removeEventListener = (type: string, listener: unknown) => { if (listener) listeners.get(type)?.delete(listener as EventListenerOrEventListenerObject) }
+window.dispatchEvent = event => { for (const listener of [...listeners.get(event.type) ?? []]) { if (typeof listener === 'function') listener.call(window, event); else listener.handleEvent(event) }; return true }
+const entries: string[] = ['https://admin.example.test/inventory#hub:inventory:products']
+let entryIndex = 0
+let blockNavigation = false
+const applyLocation = (url: string) => {
+  const next = new URL(url, window.location.href)
+  Object.assign(window.location, { href: next.href, pathname: next.pathname, search: next.search, hash: next.hash })
+}
+const publishLocation = () => window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page: 'inventory', path: window.location.pathname, anchor: window.location.hash.slice(1) } }))
+window.history.pushState = (_state, _unused, url) => { entries.splice(entryIndex + 1); entries.push(new URL(String(url), window.location.href).href); entryIndex += 1; applyLocation(entries[entryIndex]) }
+window.history.replaceState = (_state, _unused, url) => { entries[entryIndex] = new URL(String(url), window.location.href).href; applyLocation(entries[entryIndex]) }
+window.history.back = () => { if (entryIndex > 0) { entryIndex -= 1; applyLocation(entries[entryIndex]); window.dispatchEvent(new Event('popstate')); publishLocation() } }
+window.history.forward = () => { if (entryIndex < entries.length - 1) { entryIndex += 1; applyLocation(entries[entryIndex]); window.dispatchEvent(new Event('popstate')); publishLocation() } }
+applyLocation(entries[0])
 const product = { id: 12, name: 'Test variant', quantity: 8, cost_price_usd: 913.27, selling_price_usd: 17, brand: 'Test brand', qty_sold: 4 }
 let selected: InventoryCheckSession = { id: 'check-1', branch_id: 1, created_by: 7, title: 'Test check', status: 'open', revision: 1, scope: {}, started_at: '2026-10-19', updated_at: '2026-10-19', progress: { total: 1, done: 0, issue: 0, unstarted: 1 } }
 let observation: InventoryCheckSessionItem = { product_id: 12, state: 'unstarted', revision: 0, counted_quantity: null, reason: null, baseline_quantity: 9, current_quantity: 8, stock_changed: true, product_snapshot: product }
@@ -13,11 +32,16 @@ let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
 let readRevision = '1'
 let delayedProducts: ((value: unknown) => void) | null = null
-const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
+const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_cost: false } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key,
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
+  navigateTo: (page: string, anchor?: string) => {
+    if (blockNavigation) return
+    window.history.pushState(null, '', `/inventory${window.location.search}#${anchor || ''}`)
+    window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } }))
+  },
 }
 const doubles = {
   'api/actorReadScope.ts': {
@@ -52,6 +76,10 @@ const mount = () => harness.mount({ component: 'components/inventory/InventoryCh
 try {
   const surface = await mount()
   assert.ok(surface.text().includes('Test variant'))
+  assert.ok(surface.text().includes('More options available. Narrow with Search.'), 'bounded full-cohort facets advertise how to find remaining options')
+  await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'brand', 'brand filter'))
+  assert.ok(surface.text().includes('Off-page brand'), 'filter options come from the complete cohort facet response, never the visible products')
+  await surface.click(surface.button('all'))
   assert.ok(!surface.text().includes('913.27'), 'denied cost never renders')
   assert.equal(productRequests.at(-1)?.startDate, undefined)
   await surface.click(surface.button('Today'))
@@ -193,5 +221,37 @@ try {
   await admin.click(admin.button('Test check'))
   assert.equal(admin.findAll(node => node.getAttribute('data-check-action') === 'done').length, 1, 'administrator authority can edit another creator session')
   await admin.unmount()
+
+  window.history.replaceState(null, '', '/inventory?retained=1#hub:inventory:issues')
+  const cold = await mount()
+  assert.equal(cold.button('issues').getAttribute('aria-pressed'), 'true', 'cold Inventory URL selects Issues through the actual shared hook')
+  assert.ok(cold.text().includes('All-session issue reason'))
+  assert.equal(window.location.search, '?retained=1', 'initial section publication preserves query state')
+  await cold.click(cold.button('products'))
+  assert.equal(window.location.hash, '#hub:inventory:products')
+  await cold.click(cold.button('sessions'))
+  assert.equal(window.location.hash, '#hub:inventory:sessions')
+  await act(async () => { window.history.back() }); await cold.settle()
+  assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true', 'Back restores the previously committed Products section')
+  await act(async () => { window.history.back() }); await cold.settle()
+  assert.equal(cold.button('issues').getAttribute('aria-pressed'), 'true', 'Back restores the cold Issues section')
+  await act(async () => { window.history.forward() }); await cold.settle()
+  assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true', 'Forward restores the committed Products section')
+  blockNavigation = true
+  const blockedHash = window.location.hash
+  await cold.click(cold.button('sessions'))
+  assert.equal(window.location.hash, blockedHash)
+  assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true', 'page body defers to the app navigation guard instead of switching eagerly')
+  blockNavigation = false
+  await cold.click(cold.button('sessions'))
+  await cold.click(cold.button('Test check'))
+  await cold.click(cold.button('Edit issue'))
+  await cold.type(cold.field('inventory-check-reason-12'), 'Guarded local draft')
+  blockNavigation = true
+  await cold.click(cold.button('issues'))
+  assert.equal((cold.field('inventory-check-reason-12') as unknown as { value: string }).value, 'Guarded local draft', 'rejected section navigation preserves the mounted local editor')
+  assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true')
+  blockNavigation = false
+  await cold.unmount()
   console.log('inventoryChecksPage mounted journeys passed')
 } finally { await harness.close() }
