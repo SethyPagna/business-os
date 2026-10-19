@@ -13,7 +13,7 @@ let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
 let readRevision = '1'
 let delayedProducts: ((value: unknown) => void) | null = null
-const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 } })
+const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_cost: false } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key,
@@ -176,10 +176,22 @@ try {
   await blindOwner.unmount()
   app.user = { ...app.user, id: 8 }
   const blindOther = await mount()
-  await blindOther.click(blindOther.button('sessions'))
+  await blindOther.click(blindOther.button('issues'))
+  assert.equal(productRequests.at(-1)?.state, 'issue', 'all-session issue filtering belongs to the server population before pagination')
+  assert.ok(blindOther.text().includes('All-session issue reason'))
+  assert.ok(!blindOther.text().includes('37'), 'all-session issue summaries respect other creator hidden counts')
+  assert.equal(blindOther.findAll(node => node.getAttribute('data-check-action') === 'issue').length, 0, 'all-session issue list has no writes before selecting a real session')
   await blindOther.click(blindOther.button('Test check'))
+  assert.equal(productRequests.at(-1)?.sessionId, 'check-1')
+  assert.equal(productRequests.at(-1)?.branchId, '1', 'issue link resumes its actual branch/session identity')
   assert.ok(!blindOther.text().includes('Counted: 37'), 'stock-blind staff cannot see another creator entered count')
   assert.equal(blindOther.findAll(node => node.getAttribute('data-check-action') === 'issue').length, 0)
   await blindOther.unmount()
+  app.user = { ...app.user, role_code: 'admin' }
+  const admin = await mount()
+  await admin.click(admin.button('sessions'))
+  await admin.click(admin.button('Test check'))
+  assert.equal(admin.findAll(node => node.getAttribute('data-check-action') === 'done').length, 1, 'administrator authority can edit another creator session')
+  await admin.unmount()
   console.log('inventoryChecksPage mounted journeys passed')
 } finally { await harness.close() }

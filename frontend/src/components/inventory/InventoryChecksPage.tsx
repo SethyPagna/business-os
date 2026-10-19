@@ -20,6 +20,7 @@ type ProductsResult = {
   branches: Array<{ id: number; name: string }>
   stats?: Record<string, number | null | undefined>
   brands?: string[]; categories?: string[]; reasons?: string[]
+  issues?: Array<{ product_id: number; branch_id: number; session_id: string; session_title: string; created_by: number; reason: string | null; revision: number; state: 'issue'; counted_quantity?: number | null }>
 }
 type Selection = { branchId: string; sessionId: string }
 type Section = 'products' | 'sessions' | 'issues'
@@ -228,7 +229,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
     ]} onChange={id => { if (!controlsLocked) { setSection(id as Section); setPage(1) } }} />
     <fieldset disabled={controlsLocked} className="min-w-0">
-      <InventoryCheckControls range={range} onRangeChange={value => { setRange(value); setPage(1) }} query={query} onQueryChange={value => { setQuery(value); setPage(1) }} filters={filters} onFiltersChange={changeFilters} fields={access.fields} branches={data?.branches ?? []} brands={data?.brands} categories={data?.categories} reasons={data?.reasons} t={t} />
+      <InventoryCheckControls range={range} onRangeChange={value => { setRange(value); setPage(1) }} query={query} onQueryChange={value => { setQuery(value); setPage(1) }} filters={filters} onFiltersChange={changeFilters} fields={access.fields} {...{ showSessionStates: !!sessionId }} branches={data?.branches ?? []} brands={data?.brands} categories={data?.categories} reasons={data?.reasons} t={t} />
     </fieldset>
     <p className="text-xs text-gray-500">{tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')}</p>
     {section !== 'sessions' ? <StatsStrip cards={cards} t={t} loading={loading} /> : null}
@@ -247,8 +248,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     {loading ? <p role="status" className="text-xs">{t('loading')}</p> : null}
     {section === 'sessions' ? <ul className="min-w-0 divide-y">
       {fresh ? sessions?.items.map(item => <li key={item.id}><button type="button" className="min-h-10 w-full break-words py-2 text-left text-xs" onClick={() => { setSection('products'); setPage(1); onSelect({ branchId: String(item.branch_id), sessionId: item.id }) }}>{item.title} · {item.status === 'open' ? t('open') : t('shift_status_closed')} · {item.progress ? `${item.progress.done + item.progress.issue}/${item.progress.total}` : item.started_at}</button></li>) : null}
+    </ul> : section === 'issues' && !sessionId ? <ul className="min-w-0 divide-y" aria-label={t('issues')}>
+      {fresh ? data?.issues?.map(issue => <li key={`${issue.session_id}:${issue.product_id}`} className="min-w-0 py-2 text-xs">
+        <button type="button" className="min-h-10 max-w-full break-words text-left font-semibold" onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}>{visibleProducts.find(product => Number(product.id) === issue.product_id)?.name || `#${issue.product_id}`} · {issue.session_title}</button>
+        {issue.reason ? <p className="break-words text-amber-800 dark:text-amber-200">{issue.reason}</p> : null}
+        {(access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity) ? <p>{t('inventory_check_counted')}: {issue.counted_quantity}</p> : null}
+      </li>) : null}
     </ul> : <InventoryCheckRows key={requestKey} products={visibleProducts} observations={observations} errors={rowErrors} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), busy]))} canCheck={fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current} canViewStock={access.fields.stock} {...{ canViewCounts }} canViewPrice={access.fields.price} canViewCost={access.fields.cost} t={t} onOpenProduct={setDetail} onSave={save} />}
-    {!loading && fresh && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length) ? <p className="text-xs text-gray-500">{tr('inventory_check_empty', 'No matching checks or products.')}</p> : null}
+    {!loading && fresh && !(section === 'sessions' ? sessions?.items.length : section === 'issues' && !sessionId ? data?.issues?.length : visibleProducts.length) ? <p className="text-xs text-gray-500">{tr('inventory_check_empty', 'No matching checks or products.')}</p> : null}
     <PaginationControls page={page} pageSize={pageSize} totalItems={fresh ? (section === 'sessions' ? sessions?.total : data?.total) ?? 0 : 0} onPageChange={value => { if (!controlsLocked) setPage(value) }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1) } }} t={t} compact />
     {detail && fresh ? <Modal title={detail.name} onClose={() => setDetail(null)} keyboard size="sm" unsavedChanges="read-only"><dl className="grid grid-cols-2 gap-2 text-xs">
       {access.fields.barcode ? <><dt>{t('barcode')}</dt><dd className="break-all">{detail.barcode || detail.sku || '—'}</dd></> : null}
