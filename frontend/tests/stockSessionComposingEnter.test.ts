@@ -7,7 +7,6 @@ import { createHarness, type MemoryNode, type MountedSurface } from './mountedCo
 
 const harness = await createHarness()
 let adds = 0
-let picked: string | null = null
 const reasons: string[] = []
 
 type Key = { key: string; nativeEvent?: { isComposing?: boolean; keyCode?: number } }
@@ -20,7 +19,6 @@ const keyEvent = (target: MemoryNode, spec: Key): Probe => ({
 
 async function mountEntry(): Promise<MountedSurface> {
   adds = 0
-  picked = null
   reasons.length = 0
   return harness.mount({
     component: 'components/stock-session/StockSessionLineEntry.tsx',
@@ -31,7 +29,7 @@ async function mountEntry(): Promise<MountedSurface> {
       quantity: '2', onQuantity() {}, unitCost: '1', onUnitCost() {}, canViewCosts: true, canEditCosts: true, canReceive: true,
       sellingPrice: '3', onSellingPrice() {}, canEditPrice: true, expiryDate: '', onExpiryDate() {}, lotOptions: [], lotValue: '', onLot() {},
       conditionTag: '', onConditionTag() {}, tagDisabled: false,
-      reason: '', onReason: (next: string) => { reasons.push(next); picked = next },
+      reason: '', onReason: (next: string) => { reasons.push(next) },
       savedReasons: [{ id: 'r1', label: 'Counted again' }], onAdd: () => { adds += 1 }, editing: false, refusal: null, invalidField: null,
     },
     app: { t: (key: string) => key, notify() {}, user: { id: 1, username: 'fixture', role_code: 'admin' }, can: () => true },
