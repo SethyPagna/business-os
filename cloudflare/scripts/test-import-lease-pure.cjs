@@ -40,14 +40,28 @@ const LEASE_MS = 60_000
 // comparing undefined === 1 and passing for the wrong reason.
 const changedRows = (result) => Number(result?.changes ?? result?.meta?.changes ?? 0)
 
-// The real SQL, lifted from source so the test cannot drift from it.
+function productionLeaseSql(name) {
+  const parsed = ts.createSourceFile('importEngine.ts', engine, ts.ScriptTarget.Latest, true)
+  const fn = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
+  assert.ok(fn, name)
+  const queries = []
+  const visit = node => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'prepare' && ts.isNoSubstitutionTemplateLiteral(node.arguments[0])) {
+      queries.push(node.arguments[0].text)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(fn)
+  assert.equal(queries.length, 1, name + ' must have one atomic lease query')
+  return queries[0]
+}
+const acquireSql = productionLeaseSql('acquireImportLease')
+const releaseSql = productionLeaseSql('releaseImportLease')
+
 async function acquire(db, jobId, token, nowMs) {
   const now = new Date(nowMs)
-  const result = await db.prepare(`
-    UPDATE import_jobs
-    SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
-    WHERE id = @id AND (lease_expires_at IS NULL OR lease_expires_at < @now)
-  `).run({
+  const result = await db.prepare(acquireSql).run({
     id: jobId,
     token,
     now: now.toISOString(),
@@ -57,10 +71,7 @@ async function acquire(db, jobId, token, nowMs) {
 }
 
 async function release(db, jobId, token) {
-  await db.prepare(`
-    UPDATE import_jobs SET lease_token = NULL, lease_expires_at = NULL
-    WHERE id = @id AND lease_token = @token
-  `).run({ id: jobId, token })
+  await db.prepare(releaseSql).run({ id: jobId, token })
 }
 
 async function seedJob(db, jobId) {
@@ -84,6 +95,30 @@ check('two DIFFERENT jobs never contend -- concurrent imports are fine', async (
   const now = Date.now()
   assert.equal(await acquire(db, 'job-a', 'token-a', now), 'token-a')
   assert.equal(await acquire(db, 'job-b', 'token-b', now), 'token-b', 'a second import must not be blocked by the first')
+})
+
+check('terminal jobs cannot be claimed even when an earlier status read was stale', async () => {
+  const db = openDb(MIGRATION_SQLS)
+  for (const status of ['completed', 'completed_with_errors', 'cancelled']) {
+    const id = 'terminal-' + status
+    await seedJob(db, id)
+    await db.prepare('UPDATE import_jobs SET status=@status WHERE id=@id').run({ id, status })
+    const before = await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id })
+    assert.equal(await acquire(db, id, 'late-token', Date.now()), null, status + ' must not restart')
+    assert.deepEqual(await db.prepare('SELECT * FROM import_jobs WHERE id=@id').get({ id }), before)
+    await db.prepare("UPDATE import_jobs SET status='queued' WHERE id=@id").run({ id })
+    assert.equal(await acquire(db, id, 'retry-token', Date.now()), 'retry-token', 'explicit Retry re-admits ' + status)
+  }
+})
+
+check('authorized starts, failed recovery and pending cancellation remain eligible', async () => {
+  const db = openDb(MIGRATION_SQLS)
+  for (const status of ['queued', 'approved', 'failed', 'analyzing', 'applying', 'cancelling']) {
+    const id = 'eligible-' + status
+    await seedJob(db, id)
+    await db.prepare('UPDATE import_jobs SET status=@status WHERE id=@id').run({ id, status })
+    assert.equal(await acquire(db, id, 'active-token', Date.now()), 'active-token', status + ' must remain eligible')
+  }
 })
 
 check('releasing hands the job straight to the next continuation', async () => {

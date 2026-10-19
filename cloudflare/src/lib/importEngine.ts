@@ -4729,6 +4729,7 @@ async function acquireImportLease(db: D1Compat, jobId: string): Promise<string |
     UPDATE import_jobs
     SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND status NOT IN ('completed', 'completed_with_errors', 'cancelled')
       AND (lease_expires_at IS NULL OR lease_expires_at < @now)
   `).run({
     id: jobId,
@@ -4948,7 +4949,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // rather than retry, or it would spin against a healthy run.
   const leaseToken = await acquireImportLease(db, jobId)
   if (!leaseToken) {
-    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
+    console.log('[import] skipping finished or already claimed delivery', jobId)
     return
   }
 
@@ -6508,7 +6509,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   // rather than retry, or it would spin against a healthy run.
   const leaseToken = await acquireImportLease(db, jobId)
   if (!leaseToken) {
-    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
+    console.log('[import] skipping finished or already claimed delivery', jobId)
     // Zero applied, zero failed -- honest for an invocation that did
     // nothing. The holder reports the real totals when it finishes.
     return { applied: 0, failed: 0 }
