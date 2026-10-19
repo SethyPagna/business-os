@@ -20689,3 +20689,8 @@ Validation:17 SQLite fixtures compare the guarded query and actual Ops interpret
 - Focused Worker/UI/browser checks and bounded independent Astra reviews pass. Final composed build, end-to-end flows, exact-SHA full GitHub gate/raw artifact review and approved release/postflight are pending. Earlier gates never certify this checkpoint.
 - Corrected the current migration set to seven names0243/0251/0255–0259 and conditional201→203→208. The whole Golden Rules/backlog tail is unchanged; mobile/photos/image-only filters follow Inventory, with other work parked and physical-device acceptance open.
 - Main, production, unknown work and paused schedules remain unchanged. No cutover, remote D1 operation or branch cleanup was run.
+
+
+## 6.0.852 — Consolidate progress and pause release work (19 October 2026)
+
+The owner requested documentation wrap-up and no deployment. Consolidate the current status, preserve all 428 register references and permanent rules, replace stale Inventory/verification/migration descriptions, and retain the full prior text privately. Inventory behavior, configurable permissions, compact date/search/filter rails and mobile acceptance remain explicit; wider work is partial or held. Application850 is published to main and passed its exact gate with one isolated frontend retry; production stays on2bb192bcbd5f. KIT851 is saved separately and still needs terminal raw gate acceptance. No new migrations, broad physical export, deployment, cleanup or main promotion occurred. Exact saved commits, evidence and missing checks are in the private handoff; schedules remain paused. This documentation checkpoint changes no runtime behavior.
