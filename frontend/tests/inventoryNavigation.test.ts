@@ -8,6 +8,7 @@ import * as routing from '../src/app/pathRouting.ts'
 import * as hubs from '../src/components/shared/hubNavigation.ts'
 import { NAV_ITEMS, DEFAULT_MOBILE_PINNED, orderNavItems } from '../src/components/shared/navigationConfig.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { getInventoryCheckAccess } from '../src/utils/inventoryCheckAccess.ts'
 
 const read = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const require = createRequire(import.meta.url)
@@ -30,7 +31,8 @@ function actualCallback(source: string, name: string, env: Record<string, unknow
   const initializer = variable(source, name).initializer!
   const callback = ts.isCallExpression(initializer) ? initializer.arguments[0] : initializer
   const compiled = transformSync(`const callback = ${callback.getText()}`, { loader: 'tsx' }).code
-  return new Function(...Object.keys(env), `${compiled}; return callback`)(...Object.values(env))
+  const context = { getInventoryCheckAccess, ...env }
+  return new Function(...Object.keys(context), `${compiled}; return callback`)(...Object.values(context))
 }
 
 test('Inventory is a canonical route and configurable navigation item after Products', () => {
@@ -51,6 +53,18 @@ test('Inventory is a canonical route and configurable navigation item after Prod
 test('Inventory access is independent of Branches while legacy RFID grants survive', () => {
   const source = read('AppContext.tsx')
   const permissions = new Function(`return (${variable(source, 'PAGE_PERMISSIONS').initializer!.getText()})`)()
+  for (const allowed of [true, false]) {
+    const user = { permissions: { inventory: true, inventory_checks: allowed } }
+    const authority = effectivePermissions(user)
+    const canAccess = actualCallback(source, 'canAccessPage', { user, ...authority, PAGE_PERMISSIONS: permissions })
+    assert.equal(canAccess('inventory'), allowed, 'explicit metadata denial cannot fall back to physical stock access')
+    assert.equal(hubs.getHubDestinations('inventory', { ...authority, canAccessPage: canAccess }).length, allowed ? 3 : 0)
+  }
+  const checker = { permissions: { inventory_checks: true } }
+  const checkerAuthority = effectivePermissions(checker)
+  const checkerAccess = actualCallback(source, 'canAccessPage', { user: checker, ...checkerAuthority, PAGE_PERMISSIONS: permissions })
+  assert.equal(checkerAccess('inventory'), true)
+  assert.equal(checkerAccess('branches'), false, 'a count-only grant never opens the physical stock host')
   for (const grant of [true, 'review']) {
     const user = { permissions: { inventory: grant } }
     const authority = effectivePermissions(user)

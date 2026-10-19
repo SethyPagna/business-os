@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { createHarness, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
 import type { InventoryCheckProduct, InventoryCheckObservation, InventoryCheckPatch } from '../src/types/inventoryChecks.ts'
 
@@ -9,7 +10,7 @@ const products: InventoryCheckProduct[] = [
 ]
 const originalProducts = JSON.stringify(products)
 const calls: Array<{ productId: number | string; patch: InventoryCheckPatch; revision: number }> = []
-const harness = await createHarness()
+const harness = await createHarness({ observe: ['utils/dirtyWork.ts'] })
 let rejectSave = false
 const base = {
   products, observations: {} as Record<string, InventoryCheckObservation>, pending: {}, errors: {},
@@ -23,7 +24,7 @@ const base = {
 const opened: Array<number | string> = []
 const row = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
 const state = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-check-status') === String(id), `status ${id}`).textContent
-const mount = (props: Record<string, unknown> = {}) => harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', props: { ...base, ...props }, app: {}, doubles: {} })
+const mount = (props: Record<string, unknown> = {}) => harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', props: { ...base, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } })
 try {
   const surface = await mount()
   assert.equal(state(surface, 11), 'Not started')
@@ -165,6 +166,18 @@ try {
   const otherBlind = await mount({ canCheck: false, canViewStock: false, canViewCounts: false, products: [{ id: 94, name: 'Another staff session' }], observations: { 94: { product_id: 94, state: 'done', counted_quantity: 9876, reason: null, revision: 1 } } })
   assert.ok(!otherBlind.text().includes('9876') && !otherBlind.text().includes('Counted:'), 'a blind viewer cannot infer stock from another staff member’s count')
   await otherBlind.unmount()
+  const editing: Array<[number | string, boolean]> = []
+  const guarded = await mount({ products: [{ id: 95, name: 'Unsaved physical count' }], onEditingChange: (id: number | string, value: boolean) => { editing.push([id, value]) } })
+  await guarded.click(guarded.button('Report issue', row(guarded, 95)))
+  const registered = dirtyWork.getDirtyWork().find(entry => entry.label === 'Unsaved physical count')
+  assert.equal(registered?.pageId, 'inventory', 'the real row editor registers with the shared navigation guard')
+  assert.deepEqual(editing.at(-1), [95, true])
+  await guarded.click(guarded.button('Cancel', row(guarded, 95)))
+  assert.ok(!dirtyWork.getDirtyWork().some(entry => entry.label === 'Unsaved physical count'))
+  assert.deepEqual(editing.at(-1), [95, false])
+  await guarded.click(guarded.button('Report issue', row(guarded, 95)))
+  await guarded.unmount()
+  assert.ok(!dirtyWork.getRegisteredWork().some(entry => entry.label === 'Unsaved physical count'), 'scope teardown removes the old row’s registry entry')
   assert.equal(JSON.stringify(products), originalProducts, 'row interaction never mutates stock/product input records')
 } finally { await harness.close() }
 console.log('PASS mounted Inventory check rows: real variants, blank/zero, explicit issue save/cancel/retry, invalid count/reason, pending/permissions and long Khmer names')

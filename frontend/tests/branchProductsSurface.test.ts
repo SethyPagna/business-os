@@ -9,9 +9,12 @@ const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory
 const surface = fs.readFileSync(new URL('../src/components/inventory/InventoryProductsSurface.tsx', import.meta.url), 'utf8')
 const hub = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
 
-test('Branches Products mounts the product workspace rather than ranged statistics', () => {
-  assert.match(hub, /active === 'products'[\s\S]{0,400}hostSection="products"/)
-  assert.doesNotMatch(hub, /active === 'products'[\s\S]{0,500}hostSection="stats"/)
+test('Branches delegates product checks to Inventory while preserving the RFID stock host', () => {
+  assert.doesNotMatch(hub, /hostSection="products"/)
+  assert.match(hub, /navigateTo\('inventory', hubAnchor\('inventory', 'products'\)\)/)
+  assert.match(hub, /hostSection="rfid"/)
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /inventory: asPageModule\(\(\) => import\('\.\/components\/inventory\/InventoryChecksPage\.tsx'\)\)/)
 })
 
 test('product search has an independent tracked lifecycle and branch-scoped query', () => {

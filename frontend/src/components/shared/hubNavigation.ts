@@ -4,6 +4,7 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath } from '../../app/pathRoutin
 export type HubAccess = {
   getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
+  canAccessPage?: (pageId: string) => boolean
   /** Per-ACTION grant -- AppContext's `can(section, action)`. Sections whose
    *  own page gates them on an action (Products' Stock-in Sessions and
    *  Duplicates) are withheld from a caller that cannot answer for actions:
@@ -17,14 +18,15 @@ export type HubDestination = { id: string; key: string; label: string }
 export function getHubDestinations(page: string, access: HubAccess): HubDestination[] {
   const can = (key: string) => access.can ? access.can(key, 'view') : access.getPermissionTier(key) !== 'none'
   const act = (key: string, action: string) => access.can ? access.can(key, action) : false
+  const inventoryChecks = access.canAccessPage ? access.canAccessPage('inventory') : can('inventory_checks') || can('inventory')
   const rows: Array<[string, string, string, boolean]> = page === 'branches' ? [
     ['overview', 'overview', 'Overview', can('branches')],
     ['transfers', 'transfer', 'Transfer', can('branches')],
     ['rfid', 'rfid', 'RFID', can('inventory')],
   ] : page === 'inventory' ? [
-    ['products', 'products', 'Products', can('inventory')],
-    ['sessions', 'inventory_check_sessions', 'Sessions', can('inventory')],
-    ['issues', 'issues', 'Issues', can('inventory')],
+    ['products', 'products', 'Products', inventoryChecks],
+    ['sessions', 'inventory_check_sessions', 'Sessions', inventoryChecks],
+    ['issues', 'issues', 'Issues', inventoryChecks],
   ] : page === 'sales' ? [
     ['sales', 'sales', 'Sales', can('sales')],
     ['returns', 'returns', 'Returns', can('returns')],

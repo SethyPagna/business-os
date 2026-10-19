@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { transformSync } from 'esbuild'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { getInventoryCheckAccess } from '../src/utils/inventoryCheckAccess.ts'
 import * as navigation from '../src/components/shared/hubNavigation.ts'
 import { NAV_ITEMS } from '../src/components/shared/navigationConfig.ts'
 
@@ -22,10 +23,12 @@ visit(ast)
 const callbackJs = transformSync(`const callback = ${pageCallback}`, { loader: 'ts' }).code
 const pageAccess = (user: any) => {
   const authority = effectivePermissions(user)
-  return new Function('user', 'can', 'getPermissionTier', 'PAGE_PERMISSIONS', `${callbackJs}; return callback`)(user, authority.can, authority.getPermissionTier, new Function(`return (${pageMap})`)())
+  return new Function('user', 'can', 'getPermissionTier', 'PAGE_PERMISSIONS', 'getInventoryCheckAccess', `${callbackJs}; return callback`)(user, authority.can, authority.getPermissionTier, new Function(`return (${pageMap})`)(), getInventoryCheckAccess)
 }
 for (const item of NAV_ITEMS) assert.ok(Object.hasOwn(new Function(`return (${pageMap})`)(), item.id), `current page ${item.id} must be modeled`)
 assert.equal(pageAccess({ permissions: {} })('unknown-page'), false)
+assert.equal(pageAccess({ permissions: { inventory_checks: true } })('inventory'), true)
+assert.equal(pageAccess({ permissions: { inventory: true, inventory_checks: false } })('inventory'), false)
 assert.equal(pageAccess(null)('notes'), false)
 assert.equal(pageAccess({ permissions: {} })('files'), true, 'authenticated library read remains unconditional')
 for (const [page, keys] of Object.entries({ inventory: ['inventory'], sales: ['sales', 'returns', 'fees'], branches: ['branches', 'inventory'], review: ['review', 'audit_log'], promotions: ['promotions', 'products', 'customer_portal'], settings: ['settings', 'backup', 'business_identity', 'sales_policy', 'drive_credentials'] })) {

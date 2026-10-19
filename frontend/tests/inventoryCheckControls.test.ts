@@ -23,7 +23,7 @@ const fixture = String.raw`
     return <main style={{ width: '100%', padding: 12 }}><InventoryCheckControls range={range} onRangeChange={setRange}
       query={query} onQueryChange={setQuery} filters={filters} onFiltersChange={patch => setFilters(old => ({ ...old, ...patch }))}
       fields={fields} branches={[{id:1,name:'Synthetic sole active branch'}]} brands={['Synthetic long brand']}
-      categories={['Synthetic long category']} reasons={['Shelf mismatch']} t={t} />
+      categories={['Synthetic long category']} reasons={['Shelf mismatch']} showSessionStates={params.get('session') !== 'false'} t={t} />
       <output hidden>{JSON.stringify({query, filters})}</output></main>
   }
   createRoot(document.getElementById('root')).render(<AppContext.Provider value={{...FALLBACK_APP_CONTEXT,t,language}}><Harness /></AppContext.Provider>)
@@ -47,11 +47,18 @@ await browser.run('PASS Inventory compact controls, sole branch, field visibilit
     assert.ok(geometry.heights.every((height: number) => height >= 40))
     assert.match(geometry.branch, /Synthetic sole active branch/, 'one active branch remains visible')
     assert.equal(geometry.selected.length, restricted ? 4 : 7, 'hidden stock/brand/category controls are absent')
+    assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('[data-stats-range-controls] button')).every(button => button.matches(':disabled'))`), restricted, 'received-date filters cannot query hidden fields')
     await browser.evaluate(`document.querySelector('[data-inventory-check-filters]').scrollLeft = 100000`)
     await browser.mouseClick('[data-inventory-check-filters] > button:last-child')
     await browser.waitFor('sort direction changes', async () => await browser.evaluate(`JSON.parse(document.querySelector('output').textContent).filters.sortDirection === 'desc'`) ? true : null)
     await browser.evaluate(`(() => { const input=document.querySelector('#inventory-check-search'); input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Synthetic query'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`)
     await browser.waitFor('search remains controlled', async () => await browser.evaluate(`JSON.parse(document.querySelector('output').textContent).query === 'Synthetic query'`) ? true : null)
     assert.equal(await browser.evaluate(`document.activeElement.id`), 'inventory-check-search')
+  }
+  for (const [session, expected] of [['false', 2], ['true', 4]] as const) {
+    await browser.open(390, `lang=en&session=${session}`, `document.querySelector('#inventory-check-search')`, 480)
+    await browser.mouseClick('[data-inventory-check-filters] > :nth-child(2) button')
+    await browser.waitFor('count state menu', async () => await browser.evaluate(`document.querySelector('[data-app-select-menu]') !== null`) ? true : null)
+    assert.equal(await browser.evaluate(`document.querySelectorAll('[data-app-select-menu] [role="option"]').length`), expected, 'Done and Not started require a selected count session; global Issues remains available')
   }
 })

@@ -27,6 +27,7 @@ import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWo
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { keepUnresolvedPosCheckouts } from './utils/posUnresolvedCheckout.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
+import { getInventoryCheckAccess } from './utils/inventoryCheckAccess.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
@@ -2491,6 +2492,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false
+    if (pageId === 'inventory') return getInventoryCheckAccess(user).canView
     // `files` (Library) resolves to `null` in PAGE_PERMISSIONS below, same
     // as `notes` -- view is unconditional for any authenticated user (this
     // session's ask). See cloudflare/src/routes/files.ts's own

@@ -5,7 +5,7 @@ const read = (path: string): string => readFileSync(new URL(`../src/${path}`, im
 
 const app = read('App.tsx')
 const registeredPages = [...app.matchAll(/(\w+):\s*asPageModule\(\(\)\s*=>\s*import\('([^']+)'\)\)/g)].map((match) => match[1])
-const expectedPages = ['dashboard', 'notes', 'products', 'pos', 'sales', 'branches', 'contacts', 'catalog', 'promotions', 'review', 'receipt_settings', 'settings', 'files', 'server']
+const expectedPages = ['dashboard', 'notes', 'products', 'inventory', 'pos', 'sales', 'branches', 'contacts', 'catalog', 'promotions', 'review', 'receipt_settings', 'settings', 'files', 'server']
 assert.deepEqual(registeredPages, expectedPages, 'every main admin page must remain represented in the nested UI audit')
 
 // Stable state/component identifiers pin mini-sections that are easy to miss
@@ -13,6 +13,7 @@ assert.deepEqual(registeredPages, expectedPages, 'every main admin page must rem
 const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   dashboard: { file: 'components/dashboard/Dashboard.tsx', tokens: ['recentSalesOpen', 'recentSaleDetail', 'setProductDetail', 'setCustomerDetail', 'setKpiDetail'] },
   notes: { file: 'components/notes/NotesPage.tsx', tokens: ['NotesWidget', 'page-scroll'] },
+  inventory: { file: 'components/inventory/InventoryChecksPage.tsx', tokens: ['InventoryCheckControls', 'InventoryCheckRows', 'StatsStrip', 'historyPage', 'detail'] },
   products: { file: 'components/products/Products.tsx', tokens: ["'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'", 'HeaderActions', 'ManageBatchesModal', 'ProductDetailModal'] },
   pos: { file: 'components/pos/POS.tsx', tokens: ['FilterPanel', 'ProductDetailSheet', 'QuickAddModal', 'PaginationControls'] },
   sales: { file: 'components/sales/SalesHubPage.tsx', tokens: ["'sales'", "'returns'", "'fees'", "'reports'"] },

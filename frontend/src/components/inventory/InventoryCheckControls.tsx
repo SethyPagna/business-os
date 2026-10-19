@@ -37,10 +37,11 @@ type Props = {
   brands?: string[]
   categories?: string[]
   reasons?: string[]
+  showSessionStates?: boolean
   t: (key: string) => string
 }
 
-export default function InventoryCheckControls({ range, onRangeChange, query, onQueryChange, filters, onFiltersChange, fields, branches, brands = [], categories = [], reasons = [], t }: Props) {
+export default function InventoryCheckControls({ range, onRangeChange, query, onQueryChange, filters, onFiltersChange, fields, branches, brands = [], categories = [], reasons = [], showSessionStates = true, t }: Props) {
   const all = { value: '', label: t('all') }
   const select = (key: keyof Omit<InventoryCheckFilters, 'sortDirection'>, label: string, options: AppSelectOption[]) => {
     const Icon = FILTER_ICONS[key]
@@ -59,12 +60,14 @@ export default function InventoryCheckControls({ range, onRangeChange, query, on
   const DirectionIcon = filters.sortDirection === 'asc' ? ArrowUp : ArrowDown
   return (
     <div className="min-w-0 space-y-1" data-inventory-check-controls>
-      <StatsRangeRow layout="scroll" compactRange range={range} onRangeChange={onRangeChange} t={t} />
+      <fieldset disabled={!fields.received} className="m-0 min-w-0 border-0 p-0">
+        <StatsRangeRow layout="scroll" compactRange range={range} onRangeChange={onRangeChange} t={t} />
+      </fieldset>
       <SearchInput id="inventory-check-search" value={query} onChange={onQueryChange}
         ariaLabel={t('search')} placeholder={t('search')} className="block min-w-0" inputClassName="h-10" />
       <div className="stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1" data-inventory-check-filters>
         {select('branchId', t('branch'), [{ value: '', label: t('all_branches') }, ...branches.map(branch => ({ value: String(branch.id), label: branch.name }))])}
-        {select('state', t('inventory_check_state'), [all, { value: 'unstarted', label: t('inventory_check_unstarted') }, { value: 'done', label: t('done') }, { value: 'issue', label: t('issues') }])}
+        {select('state', t('inventory_check_state'), [all, ...(showSessionStates ? [{ value: 'unstarted', label: t('inventory_check_unstarted') }, { value: 'done', label: t('done') }] : []), { value: 'issue', label: t('issues') }])}
         {reasons.length ? select('reason', t('reason'), [all, ...reasons.map(reason => ({ value: reason, label: reason }))]) : null}
         {fields.stock ? select('stockState', t('stock_status'), [all, { value: 'in_stock', label: t('in_stock') }, { value: 'low_stock', label: t('low_stock') }, { value: 'out_of_stock', label: t('out_of_stock') }]) : null}
         {fields.brand && brands.length ? select('brand', t('brand'), [all, ...brands.map(brand => ({ value: brand, label: brand }))]) : null}

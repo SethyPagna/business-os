@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
@@ -7,6 +7,7 @@ import ProductNameRail from '../shared/ProductNameRail.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { knownCost } from '../../utils/costDisplay.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import type { InventoryCheckId, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 
 type Translator = (key: string) => string | null | undefined
@@ -25,6 +26,7 @@ export type InventoryCheckRowsProps = {
   t: Translator
   onOpenProduct: (product: InventoryCheckProduct) => void
   onSave: (productId: InventoryCheckId, patch: InventoryCheckPatch, expectedRevision: number) => void | Promise<void>
+  onEditingChange?: (productId: InventoryCheckId, editing: boolean) => void
 }
 
 type Draft = { count: string; reason: string; revision: number }
@@ -34,13 +36,13 @@ function finiteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function CheckRow({ product, observation, pending, error, header, canCheck, canViewStock = true, canViewCounts = canCheck || canViewStock, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave }: {
+function CheckRow({ product, observation, pending, error, header, canCheck, canViewStock = true, canViewCounts = canCheck || canViewStock, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave, onEditingChange }: {
   product: InventoryCheckProduct
   observation?: InventoryCheckObservation
   pending: boolean
   error?: string | null
   header: boolean
-} & Pick<InventoryCheckRowsProps, 'canCheck' | 'canViewStock' | 'canViewCounts' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave'>) {
+} & Pick<InventoryCheckRowsProps, 'canCheck' | 'canViewStock' | 'canViewCounts' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave' | 'onEditingChange'>) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -48,8 +50,12 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
   const [attempt, setAttempt] = useState<Attempt | null>(null)
   const inFlight = useRef(false)
   const active = useRef(true)
+  const dirtyKey = useId()
   const revision = observation?.revision ?? 0
   const busy = pending || saving
+  const editing = canCheck && (draft !== null || busy || attempt !== null)
+  const editingRef = useRef(editing)
+  editingRef.current = editing
   const failure = error || saveError
   const price = knownCost(product.selling_price_usd)
   const cost = knownCost(product.cost_price_usd)
@@ -64,6 +70,19 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
     active.current = true
     return () => { active.current = false }
   }, [])
+
+  useEffect(() => {
+    onEditingChange?.(product.id, editing)
+    return () => onEditingChange?.(product.id, false)
+  }, [product.id, editing, onEditingChange])
+
+  useEffect(() => {
+    if (!editing) return
+    return registerDirtyWork({ key: `inventory-check:${dirtyKey}`, pageId: 'inventory', label: product.name,
+      isDirty: () => editingRef.current,
+      discard: () => { setDraft(null); setAttempt(null); setSaveError(''); setValidationError('') },
+    })
+  }, [dirtyKey, editing, product.name])
 
   useEffect(() => {
     if (!canCheck) {

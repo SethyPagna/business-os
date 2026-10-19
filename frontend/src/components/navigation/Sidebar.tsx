@@ -275,7 +275,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     return () => window.removeEventListener(APP_NAVIGATION_EVENT, committed)
   }, [])
   useEffect(() => { setMoreOpen(false); setExpandedGroup(null) }, [inline])
-  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission, can }) : []
+  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission, can, canAccessPage }) : []
   const currentSections = destinations(page)
   // Chrome follows the COMMITTED route, and shows page level when the route
   // names no section. It must not fall back to `bos:hub:<page>:active` (the

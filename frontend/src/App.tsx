@@ -45,6 +45,7 @@ type PageId =
   | 'dashboard'
   | 'notes'
   | 'products'
+  | 'inventory'
   | 'pos'
   | 'sales'
   | 'branches'
@@ -322,11 +323,10 @@ const PAGE_IMPORTERS = {
   dashboard: asPageModule(() => import('./components/dashboard/Dashboard')),
   notes: asPageModule(() => import('./components/notes/NotesPage.tsx')),
   products: asPageModule(() => import('./components/products/Products.tsx')),
+  inventory: asPageModule(() => import('./components/inventory/InventoryChecksPage.tsx')),
   pos: asPageModule(() => import('./components/pos/POS.tsx')),
   // E2: the sales page id now hosts the Sales hub (receipts + returns + fees).
   sales: asPageModule(() => import('./components/sales/SalesHubPage.tsx')),
-  // E1: the branches page id now hosts the Branches hub (stats & branches /
-  // products / movements / rfid) -- Inventory.tsx renders inside it.
   branches: asPageModule(() => import('./components/branches/BranchesHubPage.tsx')),
   contacts: asPageModule(() => import('./components/contacts/Contacts')),
   catalog: asPageModule(() => import('./components/catalog/CatalogPage.tsx')),
@@ -534,6 +534,7 @@ function lazyWithRetry(importer: ChunkImporter, key: string) {
 const Dashboard = lazyWithRetry(PAGE_IMPORTERS.dashboard, 'dashboard')
 const NotesPage = lazyWithRetry(PAGE_IMPORTERS.notes, 'notes')
 const Products = lazyWithRetry(PAGE_IMPORTERS.products, 'products')
+const InventoryChecks = lazyWithRetry(PAGE_IMPORTERS.inventory, 'inventory')
 const POS = lazyWithRetry(PAGE_IMPORTERS.pos, 'pos')
 const Sales = lazyWithRetry(PAGE_IMPORTERS.sales, 'sales')
 const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
@@ -557,6 +558,7 @@ const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
   notes: NotesPage,
   products: Products,
+  inventory: InventoryChecks,
   pos: POS,
   sales: Sales,
   branches: Branches,

@@ -39,9 +39,7 @@ runTest('admin path helpers map direct admin URLs to app pages', () => {
   assert.equal(isAdminAppPath('/products'), true)
   assert.equal(isAdminAppPath('/public'), false)
   assert.equal(getAdminPageFromPath('/products'), 'products')
-  // E1: Inventory merged into the Branches hub -- old inventory URLs land
-  // on the host page (which opens the matching chip for this segment).
-  assert.equal(getAdminPageFromPath('/inventory/movements'), 'branches')
+  assert.equal(getAdminPageFromPath('/inventory/movements'), 'inventory')
   assert.equal(getAdminPageFromPath('/point-of-sale'), 'pos')
   // E3 (Part 403): the standalone audit page merged into Review & Logs --
   // the old URL keeps working by landing on the host page (which opens
