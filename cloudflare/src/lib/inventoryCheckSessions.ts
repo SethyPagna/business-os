@@ -12,7 +12,7 @@ export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
 export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
-type Actor = SessionUser & { tokenHash: string }
+type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
 type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
 type ItemRow = { session_id: string; product_id: number; branch_id: number; product_snapshot_json: string; current_product_available?: number; current_product_name?: string | null; baseline_quantity: number | null; baseline_json: string; state: InventoryCheckObservation['state']; counted_quantity: number | null; reason: string | null; revision: number; updated_by: number | null; updated_at: string | null }
 type EventRow = { id: number; session_id: string; product_id: number | null; actor_id: number; actor_name: string | null; action: string; request_id: string; request_hash: string; before_json: string; after_json: string; result_json: string; created_at: string }
@@ -32,12 +32,14 @@ export async function inventoryCheckDigest(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 const CURRENT_ACTOR_SQL = `SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,
-  r.code AS role_code,r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id
+  r.code AS role_code,r.permissions AS role_permissions,
+  EXISTS(SELECT 1 FROM pragma_table_info('products') WHERE name='cost_review_key') AS product_cost_review_key_available
+  FROM users u LEFT JOIN roles r ON r.id=u.role_id
   WHERE u.id=@actorId AND u.is_active=1 AND u.deleted_at IS NULL AND COALESCE(u.must_change_password,0)=0
     AND EXISTS(SELECT 1 FROM user_sessions s WHERE s.user_id=u.id AND s.token_hash=@tokenHash
       AND s.revoked_at IS NULL AND julianday(s.expires_at)>julianday('now'))`
 export async function currentInventoryCheckActor(db: D1Compat, principal: InventoryCheckPrincipal, write = false): Promise<Actor> {
-  const actor = await db.prepare(CURRENT_ACTOR_SQL).get<SessionUser>({ actorId: principal.id, tokenHash: principal.tokenHash })
+  const actor = await db.prepare(CURRENT_ACTOR_SQL).get<Actor>({ actorId: principal.id, tokenHash: principal.tokenHash })
   if (!actor) return fail(403, 'inventory_check_authority_changed')
   const access = getInventoryCheckAccess(actor)
   if (!access.canView || write && !access.canCheck) fail(403, 'inventory_check_permission_required')

@@ -37,6 +37,7 @@ app.get('/', async c => {
     query.branchId = String(detail.item.branch_id)
   }
   const result = await readInventoryCheckProducts(db, actor, query, { lowStock: await loadLowStockConfig(c.env), rankingLimit: 10,
+    costReviewKeyAvailable: actor.product_cost_review_key_available === 1,
     ...(rawRanking === '1' ? { customerRanking: 'sale_count' as const } : {}),
     observationFilter: { organizationId: actor.organization_id ?? null, viewerId: actor.id, sessionId,
       state: state as 'unstarted' | 'done' | 'issue' | undefined, reason } })

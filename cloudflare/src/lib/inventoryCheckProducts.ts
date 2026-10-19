@@ -17,6 +17,7 @@ export type InventoryCheckProductsOptions = {
   rankingLimit?: number
   customerRanking?: 'sale_count'
   productIds?: readonly number[]
+  costReviewKeyAvailable?: boolean
   observationFilter?: { organizationId: number | null; viewerId: number; sessionId?: string; state?: 'unstarted' | 'done' | 'issue'; reason?: string }
 }
 
@@ -52,7 +53,7 @@ function observationWhere(filter: NonNullable<InventoryCheckProductsOptions['obs
     AND (@observationReason IS NULL OR i.state='issue' AND instr(lower(i.reason),@observationReason)>0)`
 }
 
-function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[], observationFilter?: InventoryCheckProductsOptions['observationFilter']) {
+function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[], observationFilter?: InventoryCheckProductsOptions['observationFilter'], costReviewKeyAvailable = false) {
   if (productIds !== undefined && (!Array.isArray(productIds) || productIds.length > 500 || productIds.some(id => !Number.isSafeInteger(id) || id <= 0))) invalid('productIds')
   const query = validateInventoryCheckQuery(rawQuery, access)
   const page = integer(query.page, 1, 100000, 'page')
@@ -118,7 +119,8 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   if (access.fields.brand) columns.push('p.brand', 'p.brands')
   if (access.fields.category) columns.push('p.category', 'p.categories')
   if (access.fields.price) columns.push('p.selling_price_usd', 'p.selling_price_khr')
-  if (access.fields.cost) columns.push('p.cost_price_usd', 'p.cost_price_khr')
+  if (access.fields.cost) columns.push('p.cost_price_usd', 'p.cost_price_khr',
+    `${costReviewKeyAvailable ? "(COALESCE(p.cost_review_key,'')<>'')" : '0'} AS cost_needs_review`)
   if (access.fields.received) columns.push('(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=p.id) AS latest_received_at')
   const ctes = `stock AS (${stock.rowsSql}), base AS (
     SELECT ${columns.join(',')}, ${FAMILY_ROOT_KEY_SQL} AS family_key, parent.name AS parent_name,
@@ -167,7 +169,7 @@ export async function readInventoryCheckProductMembership(db: Pick<D1Compat, 'ba
 
 export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, user: PermissionUser, rawQuery: Record<string, unknown>, options: InventoryCheckProductsOptions) {
   const access = getInventoryCheckAccess(user)
-  const plan = population(rawQuery, access, options.lowStock, options.productIds, options.observationFilter)
+  const plan = population(rawQuery, access, options.lowStock, options.productIds, options.observationFilter, options.costReviewKeyAvailable === true)
   const limit = options.rankingLimit ?? 0
   if (!Number.isSafeInteger(limit) || limit < 0 || limit > 50) invalid('rankingLimit')
   if (options.customerRanking && options.customerRanking !== 'sale_count') invalid('customerRanking')
@@ -242,6 +244,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
     }
     const flags = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged', 'missing_branch_allocation'].filter(key => Number(row[key]) > 0)
     const projected = projectInventoryCheckProduct({ ...row, quantity: row.__quantity, display_quantity: row.__quantity,
+      ...(access.fields.cost ? { cost_needs_review: Number(row.cost_needs_review) === 1 } : {}),
       damaged_quantity: row.recorded_damaged_quantity, stock_consistent: Number(row.stock_consistent) === 1, stock_diagnostics: flags.join(',') }, access)
     items.push({ ...projected, checkable: true, matches_filters: true })
     if (access.fields.stock) diagnostics.push({ product_id: row.id, stock_diagnostics: flags.join(',') })

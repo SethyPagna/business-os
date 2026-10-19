@@ -79,6 +79,37 @@ const physical = () => ['products','product_batches','branch_stock','branch_batc
 let groups=0
 async function check(name,run) { await run(); groups++; console.log(`PASS ${name}`) }
 async function main() {
+  await check('authenticated historical and review-column reads preserve privacy, booleans and statement count',async()=>{
+    reset()
+    const old=await request('pageSize=3',900003), oldStatements=statements
+    assert.equal(old.status,200)
+    assert.deepEqual(old.body.items.map(row=>row.cost_needs_review),[false,false,false])
+    assert.ok(!JSON.stringify(old.body).includes('product_cost_review_key_available'))
+    db.exec('ALTER TABLE products ADD COLUMN cost_review_key TEXT')
+    db.prepare('UPDATE products SET cost_review_key=? WHERE id=910001').run('0123456789abcdef0123456789abcdef')
+    db.exec("UPDATE products SET cost_review_key='' WHERE id=910002")
+    const before=physical(); statements=0
+    const current=await request('pageSize=3',900003)
+    assert.equal(current.status,200)
+    assert.equal(statements,oldStatements,'column detection piggybacks on existing authority reads')
+    assert.deepEqual(current.body.items.map(row=>row.cost_needs_review),[true,false,false])
+    assert.deepEqual({...current.body,items:current.body.items.map(row=>({...row,cost_needs_review:false}))},old.body,'full HTTP output changes only the marker')
+    for(const secret of ['cost_review_key','product_cost_review_key_available','0123456789abcdef0123456789abcdef']) assert.ok(!JSON.stringify(current.body).includes(secret),secret)
+    for(const permissions of [
+      {inventory_checks:true,inventory_check_show_cost:false,product_cost_view:true},
+      {inventory_checks:true,inventory_check_show_cost:true,product_cost_view:false},
+    ]) {
+      db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify(permissions))
+      const hidden=await request('pageSize=3')
+      assert.equal(hidden.status,200)
+      for(const row of hidden.body.items) for(const key of ['cost_needs_review','cost_review_key','cost_price_usd','cost_price_khr']) assert.ok(!Object.hasOwn(row,key),key)
+    }
+    db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_view:true}))
+    const permitted=await request('pageSize=3')
+    assert.equal(permitted.status,200); assert.deepEqual(permitted.body.items.map(row=>row.cost_needs_review),[true,false,false])
+    assert.deepEqual(physical(),before,'read metadata does not alter business data')
+    console.log(`MEASURE old/new authenticated review metadata: ${oldStatements} statements each; fixture column only, no canonical cost-writer certificate`)
+  })
   await check('actual cookie auth, dedicated Employee checks access and no-store without legacy stock authority',async()=>{
     reset(); const missing=await request('',0); assert.equal(missing.status,401); assert.match(missing.cache,/no-store/)
     const before=physical(), result=await request('branchId=1&pageSize=1')

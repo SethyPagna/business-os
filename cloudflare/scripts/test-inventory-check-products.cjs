@@ -25,8 +25,9 @@ function fixture() {
   return db
 }
 function adapter(db) {
-  return { statements: 0, calls: 0, plans: [], async batch(statements) {
+  return { statements: 0, calls: 0, plans: [], sql: [], async batch(statements) {
     this.calls++; this.statements += statements.length
+    this.sql.push(...statements.map(statement => statement.sql))
     db.exec('PRAGMA query_only=ON'); db.exec('BEGIN')
     try {
       const results = statements.map(({ sql, params = {} }) => {
@@ -63,6 +64,36 @@ async function read(db, query = {}, user = admin, options = {}) {
   return { result, proxy }
 }
 async function main() {
+  await check('cost review metadata remains schema compatible, boolean, private and field authorized without added reads', async () => {
+    const db = fixture()
+    product(db, 900000, 'Synthetic family', 0, { is_group: 1, received_at: '2026-09-01' })
+    for (let n = 1; n <= 3; n++) product(db, 900000+n, `Synthetic review ${n}`, n, { parent_id: 900000 })
+    const query = { startDate: '2026-10-19' }
+    const historical = await read(db, query)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('products') WHERE name='cost_review_key'").get().n, 0)
+    for (const row of historical.result.items.filter(row => row.checkable)) assert.equal(row.cost_needs_review, false)
+    assert.ok(historical.proxy.sql.every(sql => !sql.includes('p.cost_review_key')))
+    db.exec('ALTER TABLE products ADD COLUMN cost_review_key TEXT')
+    db.prepare('UPDATE products SET cost_review_key=? WHERE id=900001').run('0123456789abcdef0123456789abcdef')
+    db.exec("UPDATE products SET cost_review_key='' WHERE id=900002")
+    const tagged = await read(db, query, admin, { costReviewKeyAvailable: true })
+    assert.deepEqual(tagged.result.items.filter(row => row.checkable).map(row => row.cost_needs_review), [true, false, false])
+    assert.ok(!Object.hasOwn(tagged.result.items[0], 'cost_needs_review'), 'decorative family header never inherits a child marker')
+    assert.deepEqual({ ...tagged.result, items: tagged.result.items.map(row => row.checkable ? { ...row, cost_needs_review: false } : row) }, historical.result, 'only the derived marker changes the full model output')
+    assert.ok(!JSON.stringify(tagged.result).includes('cost_review_key'))
+    assert.ok(!JSON.stringify(tagged.result).includes('0123456789abcdef0123456789abcdef'))
+    for (const permissions of [
+      { inventory_checks: true, inventory_check_show_cost: false, product_cost_view: true },
+      { inventory_checks: true, inventory_check_show_cost: true, product_cost_view: false },
+    ]) {
+      const hidden = await read(db, {}, { id: 2, role_code: 'employee', role_permissions: JSON.stringify(permissions) }, { costReviewKeyAvailable: true })
+      assert.ok(hidden.proxy.sql.every(sql => !sql.includes('p.cost_review_key')), 'hidden cost never selects the source marker')
+      for (const row of hidden.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
+    }
+    const permitted = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_view: true }) }, { costReviewKeyAvailable: true })
+    assert.equal(permitted.result.items.find(row => row.id === 900001).cost_needs_review, true)
+    db.close()
+  })
   await check('four stock ledgers overlap once, unknown stays nullable and genuine zero is out', async () => {
     const db = fixture()
     product(db, 910001, 'Synthetic known', 10)
