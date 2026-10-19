@@ -56,9 +56,6 @@ jobs:
     defaults:
       run:
         shell: pwsh
-    env:
-      RELEASE_RECORDS_ROOT: ${{ runner.temp }}/records-${{ github.run_id }}-${{ github.run_attempt }}
-      RELEASE_RECORDS_OUTPUT: ${{ runner.temp }}/release-records-${{ github.run_id }}-${{ github.run_attempt }}.enc.json
     steps:
       - name: Check the confirm word
         env:
@@ -68,6 +65,21 @@ jobs:
             Write-Output '::error::Type DEPLOY (in capitals) in the confirm box to release.'
             exit 1
           }
+
+      - name: Initialize release record paths
+        run: |
+          if ($env:GITHUB_RUN_ID -notmatch '\A[1-9][0-9]*\z' -or $env:GITHUB_RUN_ATTEMPT -notmatch '\A[1-9][0-9]*\z') {
+            throw 'Invalid release record identity.'
+          }
+          foreach ($value in @($env:RUNNER_TEMP, $env:GITHUB_ENV)) {
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -match '[\r\n]' -or -not [System.IO.Path]::IsPathFullyQualified($value)) {
+              throw 'Invalid release record environment.'
+            }
+          }
+          @(
+            "RELEASE_RECORDS_ROOT=$(Join-Path $env:RUNNER_TEMP "records-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")"
+            "RELEASE_RECORDS_OUTPUT=$(Join-Path $env:RUNNER_TEMP "release-records-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.enc.json")"
+          ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 
       - name: Check out the release kit
         uses: actions/checkout@v4
