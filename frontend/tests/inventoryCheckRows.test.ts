@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { createHarness, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
 import type { InventoryCheckProduct, InventoryCheckObservation, InventoryCheckPatch } from '../src/types/inventoryChecks.ts'
@@ -26,6 +27,37 @@ const row = (surface: MountedSurface, id: number) => surface.find(node => node.g
 const state = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-check-status') === String(id), `status ${id}`).textContent
 const mount = (props: Record<string, unknown> = {}) => harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', props: { ...base, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } })
 try {
+  for (const language of ['en', 'km']) {
+    const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>
+    for (const canCheck of [true, false]) for (const savedState of ['unstarted', 'done', 'issue'] as const) {
+      const visual = await mount({ products: [{ id: 201, name: 'Saved visual state' }], canCheck,
+        observations: { 201: { product_id: 201, state: savedState, counted_quantity: savedState === 'unstarted' ? null : 0, reason: savedState === 'issue' ? 'Saved issue reason' : null, revision: 4 } },
+        t: (key: string) => pack[key] || key })
+      const status = visual.find(node => node.getAttribute('data-check-status') === '201', 'localized saved status')
+      assert.equal(status.textContent, pack[`inventory_check_${savedState}`], `${language}: saved state retains its localized accessible label`)
+      const icons = visual.findAll(node => status.contains(node) && node.tagName.toLowerCase() === 'svg')
+      if (canCheck || savedState === 'unstarted') {
+        assert.ok(status.className.split(' ').includes('sr-only'), 'unstarted and editable status text is visually absent')
+        assert.equal(icons.length, 0, 'editable actions must not duplicate their status glyph')
+      } else {
+        assert.equal(icons.length, 1, 'read-only completed or issue state has one glyph')
+        assert.equal(icons[0].getAttribute('aria-hidden'), 'true', 'the localized text supplies the accessible status')
+        assert.ok(icons[0].className.includes(savedState === 'done' ? 'lucide-check' : 'lucide-alert-circle'))
+        assert.ok(status.className.includes(savedState === 'done' ? 'text-emerald-700' : 'text-amber-700'))
+        assert.ok(visual.findAll(node => status.contains(node) && node.className.split(' ').includes('sr-only')).some(node => node.textContent === status.textContent))
+      }
+      if (canCheck) {
+        const action = visual.find(node => node.getAttribute('data-check-action') === 'done', 'done action')
+        const glyph = visual.find(node => action.contains(node) && node.tagName.toLowerCase() === 'svg', 'done action glyph')
+        assert.ok(glyph.className.includes(savedState === 'done' ? 'lucide-check' : 'lucide-square'), 'unselected done action is unchecked rather than a gray tick')
+        assert.equal(action.getAttribute('aria-pressed'), String(savedState === 'done'))
+        assert.equal(glyph.getAttribute('aria-hidden'), 'true')
+      }
+      if (savedState !== 'unstarted') assert.ok(visual.text().includes(`${pack.inventory_check_counted}: 0`), 'a saved zero remains visible')
+      if (savedState === 'issue') assert.ok(visual.text().includes('Saved issue reason'))
+      await visual.unmount()
+    }
+  }
   const surface = await mount()
   assert.equal(state(surface, 11), 'Not started')
   assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('data-check-action') === 'done').length, 2, 'a family header cannot be checked instead of its two real variants')

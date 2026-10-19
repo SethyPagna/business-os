@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
+import Square from 'lucide-react/dist/esm/icons/square.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import ProductImage from '../pos/ProductImage.tsx'
@@ -63,6 +64,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
     const value = t(key)
     return value && value !== key ? value : fallback
   }
+  const showStateIcon = !canCheck && (observation?.state === 'done' || observation?.state === 'issue')
   const stateLabel = observation?.state === 'done' ? tr('inventory_check_done', 'Done')
     : observation?.state === 'issue' ? tr('inventory_check_issue', 'Issue') : tr('inventory_check_unstarted', 'Not started')
 
@@ -156,12 +158,12 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       {!header ? <span className="flex shrink-0 items-center gap-0.5">
         {canCheck ? <>
           <button type="button" data-check-action="done" aria-label={`${doneLabel}: ${product.name}`} title={doneLabel} aria-pressed={observation?.state === 'done'} disabled={busy}
-            className={`${toolbarIconButtonClassName} ${observation?.state === 'done' ? 'text-emerald-700 dark:text-emerald-300' : ''} disabled:opacity-50`}
+            className={`${toolbarIconButtonClassName} ${observation?.state === 'done' ? '!text-emerald-700 dark:!text-emerald-300' : ''} disabled:opacity-50`}
             onClick={() => { void save({ state: observation?.state === 'done' ? 'unstarted' : 'done', counted_quantity: observation?.state === 'done' ? null : observation?.counted_quantity ?? null, reason: null }, revision) }}>
-            <Check className="h-5 w-5" aria-hidden="true" />
+            {observation?.state === 'done' ? <Check className="h-5 w-5" aria-hidden="true" /> : <Square className="h-5 w-5" aria-hidden="true" />}
           </button>
           <button type="button" data-check-action="issue" aria-label={`${issueLabel}: ${product.name}`} title={issueLabel} aria-pressed={observation?.state === 'issue'} disabled={busy}
-            className={`${toolbarIconButtonClassName} ${observation?.state === 'issue' ? 'text-amber-700 dark:text-amber-300' : ''} disabled:opacity-50`}
+            className={`${toolbarIconButtonClassName} ${observation?.state === 'issue' ? '!text-amber-700 dark:!text-amber-300' : ''} disabled:opacity-50`}
             onClick={() => { setDraft({ count: observation?.counted_quantity == null ? '' : String(observation.counted_quantity), reason: observation?.reason || '', revision }); setValidationError(''); setSaveError(''); setAttempt(null) }}>
             <AlertCircle className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -177,7 +179,10 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       {finiteNumber(product.customer_count) ? <span>{tr('inventory_check_customers', 'Customers')}: {product.customer_count}</span> : null}
       {canViewPrice ? <span>{tr('inventory_check_price', 'Price')}: {price === null ? '—' : fmtUSD(price)}</span> : null}
       {canViewCost ? <span>{tr('inventory_check_cost', 'Cost')}: {cost === null ? '—' : fmtUSD(cost)}{product.cost_needs_review === true ? <span className="ml-1 text-amber-700 dark:text-amber-300">{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}</span> : null}
-      {!header ? <span data-check-status={String(product.id)} className="font-semibold">{stateLabel}</span> : null}
+      {!header ? <span data-check-status={String(product.id)} className={showStateIcon ? `inline-flex items-center ${observation?.state === 'done' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}` : 'sr-only'}>
+        <span className="sr-only">{stateLabel}</span>
+        {showStateIcon ? observation?.state === 'done' ? <Check className="h-4 w-4" aria-hidden="true" /> : <AlertCircle className="h-4 w-4" aria-hidden="true" /> : null}
+      </span> : null}
       {!header && canViewCounts && finiteNumber(observation?.counted_quantity) ? <span>{tr('inventory_check_counted', 'Counted')}: {observation.counted_quantity}</span> : null}
       {busy ? <span role="status">{tr('inventory_check_saving', 'Saving…')}</span> : null}
     </div>
