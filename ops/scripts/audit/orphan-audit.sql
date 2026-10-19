@@ -13,6 +13,10 @@
 --
 -- Deliberately NOT audited, because the id is provenance and the row it
 -- named is meant to be gone:
+--   inventory_check_sessions.branch_id -- 0259 freezes the session branch identity; branch retirement cannot reparent the baseline
+--   inventory_check_items.branch_id -- 0259 freezes the branch counted at session admission, independent of the live branch row
+--   inventory_check_items.product_id -- 0259 freezes selected membership and product_snapshot_json, independent of the live product row
+--   inventory_check_events.product_id -- 0259 immutable observations retain the product id observed even after product retirement
 --   sale_amendments.sale_item_id -- the removed line is gone by design; the ledger keeps its id as provenance
 --   product_merge_map_0165.loser_id -- the merged product is deleted by 0165; the map keeps its id as provenance
 --   customer_merge_map_0166.loser_id -- the merged customer is deleted by 0166; the map keeps its id as provenance
@@ -68,6 +72,10 @@ SELECT 'import_job_errors.batch_id->product_batches' AS relation, COUNT(*) AS or
 SELECT 'import_job_files.file_asset_id->file_assets' AS relation, COUNT(*) AS orphan_count FROM import_job_files c LEFT JOIN file_assets p ON p.id = c.file_asset_id WHERE c.file_asset_id IS NOT NULL AND p.id IS NULL;
 SELECT 'import_jobs.created_by_id->users' AS relation, COUNT(*) AS orphan_count FROM import_jobs c LEFT JOIN users p ON p.id = c.created_by_id WHERE c.created_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'imported_sale_stock_skip_0235.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM imported_sale_stock_skip_0235 c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
+SELECT 'inventory_check_events.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM inventory_check_events c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
+SELECT 'inventory_check_events.session_id->inventory_check_sessions' AS relation, COUNT(*) AS orphan_count FROM inventory_check_events c LEFT JOIN inventory_check_sessions p ON p.id = c.session_id WHERE c.session_id IS NOT NULL AND p.id IS NULL;
+SELECT 'inventory_check_items.session_id->inventory_check_sessions' AS relation, COUNT(*) AS orphan_count FROM inventory_check_items c LEFT JOIN inventory_check_sessions p ON p.id = c.session_id WHERE c.session_id IS NOT NULL AND p.id IS NULL;
+SELECT 'inventory_check_sessions.organization_id->organizations' AS relation, COUNT(*) AS orphan_count FROM inventory_check_sessions c LEFT JOIN organizations p ON p.id = c.organization_id WHERE c.organization_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN product_batches p ON p.id = c.batch_id WHERE c.batch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.product_id->products' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;

@@ -213,6 +213,8 @@ const RECEIPT_SNAPSHOTS = new Map([
   ['product_remove_operations.product_id', 'durable receipt: the product selected for reversible removal'],
   ['transfer_operation_members.source_product_id', 'durable transfer provenance: the exact product stock left'],
   ['transfer_operation_members.destination_product_id', 'durable transfer provenance: the exact product stock entered'],
+  ['inventory_check_items.product_id', 'immutable count baseline: the exact product selected when the session began'],
+  ['inventory_check_events.product_id', 'immutable observation provenance: the exact product observed'],
 ])
 
 async function fkSweep() {
@@ -317,6 +319,9 @@ async function main() {
     assert.match(globalActionReceiptMigration, /Never drop receipt rows/)
     assert.match(transferReceiptMigration, /immutable provenance/)
     assert.match(transferReceiptMigration, /Product and lot identities cannot be removed\/reparented while replay evidence exists/)
+    const inventoryMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0259_inventory_check_sessions.sql'), 'utf8')
+    assert.match(inventoryMigration, /inventory_check_items_baseline BEFORE UPDATE OF\s+session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json/)
+    assert.match(inventoryMigration, /inventory_check_events_no_update BEFORE UPDATE/)
     for (const key of RECEIPT_SNAPSHOTS.keys()) {
       assert.ok(found.has(key), `${key} must remain visible to the migration FK sweep`)
       assert.ok(!reparented.has(key), `${key} must not be rewritten by the product merge fold`)
@@ -353,6 +358,14 @@ async function main() {
     const live = seed()
     const { mod: liveMod, adapter: liveAdapter, undoAppliers } = loadProductsRoute(live)
     const promo = loadPromotionRules()
+    live.db.exec(`INSERT INTO inventory_check_sessions(id,branch_id,created_by,title,scope_json,started_at,updated_at)
+      VALUES('merge-count',1,1,'Frozen count','{}','2026-10-19','2026-10-19');
+      INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
+      VALUES('merge-count',${DUP},1,'{"id":200,"name":"Original name"}',6,'{"quantity":6}');
+      INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      VALUES('merge-count',${DUP},1,'observe','merge-count-1','digest','{}','{"state":"done"}','{}','2026-10-19')`)
+    const countEvidence = () => ['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events'].map(table => live.db.prepare(`SELECT * FROM ${table}`).all())
+    const frozenCount = countEvidence()
     seedStockFixture(live.db, () => live.db.prepare(`INSERT INTO promotion_rules (id, title, rule_type, percent_off, scope_type, product_ids, is_active)
                      VALUES (10, 'Twin 10%', 'percent_off', 10, 'products', '[200,777]', 1)`).run())
     // A rule already naming BOTH rows must end up naming the keeper ONCE.
@@ -372,6 +385,9 @@ async function main() {
       new Map([[1, 'shop'], [2, 'warehouse']]),
       'fk test merge',
     )
+    assert.deepEqual(countEvidence(), frozenCount, 'merge preserves Inventory membership, baseline, snapshot and event bytes')
+    assert.throws(() => live.db.prepare('UPDATE inventory_check_items SET product_id=?').run(KEEPER), /inventory_check_baseline_immutable/)
+    assert.throws(() => live.db.prepare('UPDATE inventory_check_events SET product_id=?').run(KEEPER), /inventory_check_history_immutable/)
 
     const ruleRow = (id) => live.db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get(id)
     const applies = (id, productId) => promo.ruleAppliesToProduct(promo.normalizePromotionRule(ruleRow(id)), { id: productId })
@@ -396,6 +412,7 @@ async function main() {
     const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: snapshotId })
     assert.ok(applier, 'the product.merge applier must be registered')
     await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
+    assert.deepEqual(countEvidence(), frozenCount, 'merge undo preserves the same immutable Inventory evidence')
     assert.equal(ruleRow(10).product_ids, '[200,777]', 'undo restores the scope list byte for byte')
     assert.equal(ruleRow(11).product_ids, '[100,200]')
     assert.equal(ruleRow(12).product_ids, '[777]')

@@ -64,6 +64,59 @@ async function read(db, query = {}, user = admin, options = {}) {
   return { result, proxy }
 }
 async function main() {
+  await check('received EXISTS keeps SQLite date semantics and searches only the selected variant lots', async () => {
+    const db = fixture()
+    const dates = ['2026-10-19', '2026-10-19T23:59:59.999Z', '2026-10-19 12:30:00',
+      '2026-10-18T23:30:00-02:00', '2026-10-20T00:30:00+02:00', '2026-10-19T00:30:00+02:00',
+      '2026-02-30', '2026-02-31', '2461332.5', '12:00:00', null, '', '2026/10/19', 'not-a-date']
+    for (let i = 0; i < dates.length; i++) {
+      product(db, 980001 + i, `Date shape ${i}`, 1)
+      db.prepare('UPDATE product_batches SET received_at=? WHERE id=?').run(dates[i], 980001 + i)
+    }
+    for (const query of [{ startDate: '2026-10-19', endDate: '2026-10-19' }, { startDate: '2026-03-02', endDate: '2026-03-03' },
+      { endDate: '2000-01-01' }, { startDate: '2026-10-19' }]) {
+      const params = { receivedFrom: query.startDate ?? null, receivedTo: query.endDate ?? null }
+      const expected = db.prepare(`SELECT p.id FROM products p WHERE EXISTS(SELECT 1 FROM product_batches receipt WHERE receipt.variant_product_id=p.id
+        AND (@receivedFrom IS NULL OR date(receipt.received_at)>=@receivedFrom)
+        AND (@receivedTo IS NULL OR date(receipt.received_at)<=@receivedTo)) ORDER BY p.id`).all(params).map(row => row.id)
+      const { result } = await read(db, { ...query, pageSize: 100 })
+      assert.deepEqual(result.items.filter(row => row.checkable).map(row => row.id).sort((a,b) => a-b), expected)
+      assert.equal(result.stats.total_variants, expected.length)
+      const membership = api.buildInventoryCheckProductMembershipQuery(query, dates.map((_, i) => 980001+i), api.getInventoryCheckProductsAccess(admin), lowStock)
+      const statement = db.prepare(membership.rowsSql); statement.setAllowUnknownNamedParameters(true)
+      assert.deepEqual(statement.all(membership.params).map(row => row.id).sort((a,b) => a-b), expected)
+      const plan = db.prepare(`EXPLAIN QUERY PLAN ${membership.rowsSql}`); plan.setAllowUnknownNamedParameters(true)
+      assert.ok(plan.all(membership.params).some(row => /SEARCH receipt(?: EXISTS)? USING COVERING INDEX idx_product_batches_variant_expiry \(variant_product_id=\?\)/.test(row.detail)), 'actual admission SQL searches the variant-key index')
+    }
+    const overflow = await read(db, { startDate: '2026-03-02', endDate: '2026-03-03' })
+    assert.ok(overflow.result.items.some(row => row.id === 980007) && overflow.result.items.some(row => row.id === 980008), 'SQLite-normalized overflow dates must not be lost to a raw textual day bound')
+    db.close()
+
+    const work = fixture(), size = 160, ids = []
+    for (let i = 0; i < size; i++) {
+      const id = 981001+i; ids.push(id); product(work, id, `Receipt work ${i}`, 1, { received_at: '2026-09-01' })
+      for (let n = 1; n <= 3; n++) work.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) VALUES(?,?,?,?)').run(982000+i*3+n, id, `receipt-${id}-${n}`, '2026-09-01')
+    }
+    work.prepare('UPDATE product_batches SET received_at=? WHERE variant_product_id=?').run('2026-10-19', ids.at(-1))
+    const membership = api.buildInventoryCheckProductMembershipQuery({ startDate: '2026-10-19', endDate: '2026-10-19' }, ids, api.getInventoryCheckProductsAccess(admin), lowStock)
+    let evaluations = 0
+    work.function('inventory_received_work_probe', value => { evaluations++; return value })
+    const measuredSql = membership.rowsSql.replaceAll('date(receipt.received_at)', 'date(inventory_received_work_probe(receipt.received_at))')
+    const execute = sql => { const statement = work.prepare(sql); statement.setAllowUnknownNamedParameters(true); return statement.all(membership.params).map(row => row.id) }
+    assert.deepEqual(execute(measuredSql), [ids.at(-1)])
+    const indexedWork = evaluations
+    assert.ok(indexedWork > 0 && indexedWork <= size * 4 * 2, `${indexedWork} date evaluations exceed the per-variant lot bound`)
+    evaluations = 0
+    const scanSql = measuredSql.replace('receipt.variant_product_id=p.id', '+receipt.variant_product_id=p.id')
+    assert.notEqual(scanSql, measuredSql)
+    assert.deepEqual(execute(scanSql), [ids.at(-1)], 'the no-index negative control preserves rows')
+    const scanPlan = work.prepare(`EXPLAIN QUERY PLAN ${scanSql}`); scanPlan.setAllowUnknownNamedParameters(true)
+    assert.ok(!scanPlan.all(membership.params).some(row => /SEARCH receipt .*\(variant_product_id=\?\)/.test(row.detail)), 'negative control actually disables the variant seek')
+    const uncorrelated = membership.rowsSql.replace('receipt.variant_product_id=p.id', '1=1')
+    assert.equal(execute(uncorrelated).length, size, 'removing correlation admits unrelated variants and is detected')
+    console.log(`MEASURE received date: ${indexedWork} residual evaluations for ${size} variants with four lots; variant-index removal preserves rows and loses its seek`)
+    work.close()
+  })
   await check('cost review metadata remains schema compatible, boolean, private and field authorized without added reads', async () => {
     const db = fixture()
     product(db, 900000, 'Synthetic family', 0, { is_group: 1, received_at: '2026-09-01' })

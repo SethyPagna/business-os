@@ -28,8 +28,7 @@
 // The same relation list is emitted to ops/scripts/audit/orphan-audit.sql, a
 // read-only file the coordinator can run against production; this test asserts
 // the committed file still matches what the schema derives, so it cannot rot.
-// On a first run (or after the schema changes) it rewrites that file, fails the
-// one check, and asks for a re-run -- that is the bootstrap, not a flake.
+// A stale file fails without writing. Regenerate deliberately with --generate.
 //
 // Run (from cloudflare/scripts/): node test-record-orphans-native.cjs
 // About two minutes: most of it is the migration chain through Miniflare's D1
@@ -100,6 +99,10 @@ const NOT_A_REFERENCE = new Set([
  * write, so the exemption cannot quietly become a cover for a real orphan.
  */
 const HISTORICAL_REFERENCE = {
+  'inventory_check_sessions.branch_id': '0259 freezes the session branch identity; branch retirement cannot reparent the baseline',
+  'inventory_check_items.branch_id': '0259 freezes the branch counted at session admission, independent of the live branch row',
+  'inventory_check_items.product_id': '0259 freezes selected membership and product_snapshot_json, independent of the live product row',
+  'inventory_check_events.product_id': '0259 immutable observations retain the product id observed even after product retirement',
   // The amendment ledger is the ONLY record that a removed line was ever on the
   // sale (lib/saleAmendments.ts's header states this for 'line_removed'), so a
   // line_removed entry keeps the id of the sale_item it deleted. Nothing joins
@@ -252,6 +255,51 @@ function auditFileText(relations) {
   ].join('\n')
 }
 
+function assertAuditFile(file, expected) {
+  const actual = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\r\n').join('\n') : null
+  assert.equal(actual, expected, 'ops/scripts/audit/orphan-audit.sql is stale; run this script with --generate, review and commit the generated file')
+}
+
+function assertInventorySnapshotControls(schema) {
+  for (const key of ['inventory_check_items.session_id', 'inventory_check_events.session_id']) {
+    assert.ok(schema.relations.some(r => `${r.child}.${r.column}` === key && r.parent === 'inventory_check_sessions' && r.source === 'declared'), key)
+  }
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec('PRAGMA foreign_keys=OFF')
+    for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(name => name.endsWith('.sql')).sort()) db.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+    db.exec(`INSERT INTO users(id,username,password,name,is_active) VALUES(990001,'count-history-control','synthetic','Synthetic actor',1);
+      INSERT INTO inventory_check_sessions(id,branch_id,created_by,title,scope_json,started_at,updated_at)
+      VALUES('orphan-count',990001,990001,'Frozen count','{}','2026-10-19','2026-10-19');
+      INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
+      VALUES('orphan-count',990001,990001,'{"id":990001,"name":"Retired product"}',3,'{"quantity":3}');
+      INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      VALUES('orphan-count',990001,990001,'observe','orphan-count-1','digest','{}','{"state":"done"}','{}','2026-10-19')`)
+    const relations = schema.relations.filter(r => r.child.startsWith('inventory_check_'))
+    const findings = () => relations.flatMap(r => { const row = db.prepare(orphanSql(r)).get(); return row.orphan_count ? [{ ...row }] : [] })
+    assert.deepEqual(findings(), [], 'retired product/branch snapshot ids are historical evidence, not dangling live links')
+    db.exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_json) VALUES('missing-session',1,1,'{}','{}')")
+    assert.deepEqual(findings(), [{ relation: 'inventory_check_items.session_id->inventory_check_sessions', orphan_count: 1 }])
+    db.exec("INSERT INTO inventory_check_events(session_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('missing-session',990001,'create','missing-session-1','digest','{}','{}','{}','2026-10-19')")
+    assert.deepEqual(findings().map(r => r.relation).sort(), ['inventory_check_events.session_id->inventory_check_sessions', 'inventory_check_items.session_id->inventory_check_sessions'])
+    assert.throws(() => db.exec('UPDATE inventory_check_items SET product_id=1'), /inventory_check_baseline_immutable/)
+    assert.throws(() => db.exec('DELETE FROM inventory_check_events'), /inventory_check_history_immutable/)
+  } finally { db.close() }
+}
+
+function assertStaleArtifactRefusal(expected) {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'orphan-artifact-control-'))
+  const file = path.join(dir, 'orphan-audit.sql')
+  try {
+    const stale = Buffer.from('-- deliberately stale control\n')
+    fs.writeFileSync(file, stale)
+    assert.throws(() => assertAuditFile(file, expected), /is stale/)
+    assert.deepEqual(fs.readFileSync(file), stale, 'normal stale-artifact refusal must not heal the file')
+    fs.writeFileSync(file, expected)
+    assertAuditFile(file, expected)
+  } finally { fs.unlinkSync(file); fs.rmdirSync(dir) }
+}
+
 const BRANCH_RELATIONS = [
   'branches.successor_branch_id->branches',
   'branch_cutovers.actor_id->users',
@@ -400,6 +448,11 @@ function report(name, error) {
 async function main() {
   const started = Date.now()
   const schema = deriveSchema()
+  if (process.argv.includes('--generate')) {
+    fs.writeFileSync(auditSqlPath, auditFileText(schema.relations))
+    console.log('Generated ops/scripts/audit/orphan-audit.sql; review and commit it before the read-only test')
+    return
+  }
   try {
     assert.deepEqual(schema.unresolved, [],
       `these *_id columns resolve to no owning table -- map them in OWNER_TABLE/CHILD_SCOPED or list them in NOT_A_REFERENCE with a reason:\n${schema.unresolved.join('\n')}`)
@@ -426,11 +479,13 @@ async function main() {
     report('branch relation queries discriminate missing, inactive and nullable parents at native depth100')
   } catch (error) { report('branch relation queries discriminate missing, inactive and nullable parents at native depth100', error) }
 
+  try { assertInventorySnapshotControls(schema); report('Inventory snapshot identities are historical and declared session FKs remain audited') }
+  catch (error) { report('Inventory snapshot identities are historical and declared session FKs remain audited', error) }
+
   try {
     const expected = auditFileText(schema.relations)
-    const onDisk = fs.existsSync(auditSqlPath) ? fs.readFileSync(auditSqlPath, 'utf8').split('\r\n').join('\n') : null
-    if (onDisk !== expected) fs.writeFileSync(auditSqlPath, expected)
-    assert.equal(onDisk, expected, 'ops/scripts/audit/orphan-audit.sql was stale; it has been regenerated, re-run to confirm')
+    assertStaleArtifactRefusal(expected)
+    assertAuditFile(auditSqlPath, expected)
     // Check the STATEMENTS, not the header comment -- the comment names the very
     // words it forbids ("no writes and no PRAGMA here").
     const statements = expected.split('\n').filter(line => line && !line.startsWith('--')).join('\n')
@@ -438,6 +493,8 @@ async function main() {
       'the exported audit is not read-only')
     report('ops/scripts/audit/orphan-audit.sql matches the schema and is read-only')
   } catch (error) { report('ops/scripts/audit/orphan-audit.sql matches the schema and is read-only', error) }
+
+  if (failures) { process.exitCode = 1; return }
 
   const [kernel, bundle] = await Promise.all([pricingKernel(), workerBundle()])
   const mf = new Miniflare({

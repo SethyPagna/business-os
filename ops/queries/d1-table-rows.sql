@@ -173,6 +173,9 @@ SELECT
     'verification_codes', (SELECT COUNT(*) FROM verification_codes)
   ) AS rows_9,
   json_object(
+    'inventory_check_sessions', (SELECT COUNT(*) FROM inventory_check_sessions),
+    'inventory_check_items', (SELECT COUNT(*) FROM inventory_check_items),
+    'inventory_check_events', (SELECT COUNT(*) FROM inventory_check_events),
     'imported_sale_stock_skip_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_0235),
     'imported_sale_stock_skip_guard_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_guard_0235)
   ) AS rows_10;

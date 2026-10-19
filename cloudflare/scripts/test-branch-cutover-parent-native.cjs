@@ -32,14 +32,14 @@ function modules() {
   }
   return { load, parent: load('lib/branchCutoverParent'), capture: load('lib/branchCutoverCapture'), D1Compat: load('lib/db').D1Compat }
 }
-function world(labels = true, { currentSchema = false } = {}) {
+function world(labels = true, { currentSchema = false, through = Infinity } = {}) {
   const { parent, capture, D1Compat, load } = modules()
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100; raw.limits.variableNumber = 100
   raw.exec('PRAGMA foreign_keys=OFF')
   const migrations = currentSchema
     ? fs.readdirSync(path.join(root, 'migrations')).filter(name => name.endsWith('.sql')).sort().map(name => ({ name, sql: fs.readFileSync(path.join(root, 'migrations', name), 'utf8') }))
     : completedCutover.migrationEntries()
-  for (const entry of migrations.filter(entry => labels || entry.name !== '0226_branch_history_labels.sql')) raw.exec(entry.sql)
+  for (const entry of migrations.filter(entry => Number(entry.name.slice(0, 4)) <= through && (labels || entry.name !== '0226_branch_history_labels.sql'))) raw.exec(entry.sql)
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default,canonical_key,role,created_at) VALUES(2,'Shop',1,1,'shop','shop','2026-10-03 00:00:00'),(1,'Warehouse',1,0,'warehouse','warehouse','2026-10-03 00:00:00');
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true,"backup_restore":true}',1);
     INSERT INTO system_flags(key,value) VALUES('branch_cutover_control_incarnation','00000000-0000-4000-8000-000000000099')`)

@@ -108,10 +108,11 @@ const PROJECTED = {
   'reports.ts': [/canViewAcquisitionCosts/, /gateTotals/],
   'productCost.ts': [/canViewAcquisitionCosts/],
   'backups.ts': [/canViewAcquisitionCosts/, /canEditAcquisitionCosts/],
+  'inventoryCheckProducts.ts': [/getInventoryCheckAccess\(actor\)/, /readInventoryCheckProducts\(db, actor, query,/, /currentInventoryCheckActor\(db, principal\)/],
 }
 // route files that never put a cost-bearing field in a response (checked below)
 const NO_COST = ['ai.ts', 'auth.ts', 'branchCutoverOperator.ts', 'devices.ts', 'fees.ts', 'files.ts', 'lookups.ts', 'notes.ts', 'notifications.ts', 'organizations.ts',
-  'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts']
+  'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts', 'inventoryChecks.ts']
 const COST_FIELD = /\b(cost_price_(?:usd|khr)|purchase_price_(?:usd|khr)|received_cost_usd|cost_usd|cogs|total_cost_usd)\b/
 
 check('SERVER: every cost-bearing route module is governed by the projection middleware or an explicit cost gate', () => {
@@ -126,6 +127,29 @@ check('SERVER: every route file is classified, so a new surface cannot ship unre
   const known = new Set([...Object.keys(PROJECTED), ...NO_COST])
   for (const file of files) assert.ok(known.has(file), file + ' is new: classify it in PROJECTED (cost-bearing) or NO_COST (and justify it) before it ships')
   for (const file of known) assert.ok(files.includes(file), file + ' is classified but no longer exists')
+})
+
+check('SERVER: Inventory costs need both grants, use the strict whitelist and never expose the raw review key', () => {
+  const inventory = load(path.join(root, 'cloudflare/src/lib/inventoryCheckAccess.ts'))
+  const sample = { id: 1, name: 'Synthetic', cost_price_usd: 7, cost_needs_review: true, cost_review_key: 'private-source-key', unknown_cost: 99 }
+  for (const field of [false, true]) for (const grant of [false, true]) {
+    const user = session('employee', { inventory_checks: true, inventory_check_show_cost: field, product_cost_view: grant })
+    const permissions = inventory.getInventoryCheckAccess(user)
+    assert.equal(permissions.fields.cost, field && grant)
+    const projected = inventory.projectInventoryCheckProduct(sample, permissions)
+    assert.equal(Object.hasOwn(projected, 'cost_price_usd'), field && grant)
+    assert.equal(Object.hasOwn(projected, 'cost_needs_review'), field && grant)
+    assert.ok(!Object.hasOwn(projected, 'cost_review_key') && !Object.hasOwn(projected, 'unknown_cost'))
+  }
+  const projected = inventory.projectInventoryCheckProduct(sample, inventory.getInventoryCheckAccess(session('admin')))
+  assert.equal(projected.cost_needs_review, true)
+  assert.ok(!Object.hasOwn(projected, 'cost_review_key'))
+  const model = read('cloudflare/src/lib/inventoryCheckProducts.ts')
+  assert.match(model, /if \(access.fields.cost\) columns.push\('p.cost_price_usd', 'p.cost_price_khr'/)
+  assert.match(model, /projectInventoryCheckProduct\(/)
+  const writer = read('cloudflare/src/lib/inventoryCheckSessions.ts')
+  assert.match(writer, /SELECT id,name,image_path,unit,parent_id,is_group FROM products/)
+  assert.doesNotMatch(writer, /SELECT[^\n]*(?:cost_price_|cost_review_key)[^\n]*FROM products/)
 })
 
 check('SERVER: the NO_COST route files do not select or return a cost column in a response', () => {
@@ -179,6 +203,8 @@ const RUNTIME = [
   'cloudflare/scripts/test-cost-grant-consistency.cjs', 'cloudflare/scripts/test-cost-residual-access.cjs',
   'cloudflare/scripts/test-reports-cost-visibility-pure.cjs', 'cloudflare/scripts/test-backup-read-cost-native.cjs',
   'cloudflare/scripts/test-employee-products-default-native.cjs',
+  'cloudflare/scripts/test-inventory-check-access.cjs', 'cloudflare/scripts/test-inventory-check-products.cjs',
+  'cloudflare/scripts/test-inventory-check-products-http.cjs', 'cloudflare/scripts/test-inventory-check-sessions.cjs',
   'frontend/tests/acquisitionCostAccess.test.ts', 'frontend/tests/acquisitionCostSecondarySurfaces.test.ts',
   'frontend/tests/stockCostAccess.test.ts', 'frontend/tests/supplierCostVisibility.test.ts', 'frontend/tests/rolePresetDefaults.test.ts',
 ]

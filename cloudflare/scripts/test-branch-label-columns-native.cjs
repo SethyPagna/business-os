@@ -261,6 +261,15 @@ async function main() {
     })
     const schema = await capture.readCutoverCaptureSchema(new D1Compat({ prepare: prepared, batch: async () => { throw Error('read only') } }))
     assert.deepEqual(schema.capabilities.filter((c) => c.code === 'unclassified_scalar_reference'), [])
+    assert.deepEqual(schema.capabilities.filter(c => c.code === 'historical_scalar_reference_restricted').map(c => c.detail).sort(),
+      ['inventory_check_items.branch_id', 'inventory_check_sessions.branch_id'])
+    for (const [table, column] of capture.RESTRICTED_HISTORICAL_BRANCH_REFERENCES) {
+      assert.ok(!capture.BRANCH_SCALAR_REFERENCES.some(([name, field]) => name === table && field === column))
+      assert.ok(!capture.CAPTURE_STREAMS.includes(table), 'immutable count baselines never join the generic capture/reparent streams')
+    }
+    raw.exec('CREATE TABLE unknown_branch_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)')
+    const unknown = await capture.readCutoverCaptureSchema(new D1Compat({ prepare: prepared, batch: async () => { throw Error('read only') } }))
+    assert.deepEqual(unknown.capabilities.filter(c => c.code === 'unclassified_scalar_reference'), [{ code: 'unclassified_scalar_reference', detail: 'unknown_branch_reference.branch_id' }])
     for (const [table, column] of NEW_COLUMNS) assert.ok(schema.columns[table]?.includes(column), `${table}.${column} is captured with its row`)
     raw.close()
   })

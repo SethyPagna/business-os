@@ -410,6 +410,15 @@ function blankComments(text) {
 
 const ALLOWLIST = [
   {
+    file: 'src/lib/inventoryCheckProducts.ts', table: 'product_batches', column: 'received_at', alias: 'receipt',
+    reason: 'The sole received EXISTS first correlates receipt.variant_product_id=p.id. The real migrated '
+      + 'idx_product_batches_variant_expiry searches that variant; date() is residual over only its lots, '
+      + 'not a global received_at range scan. Keep SQLite date semantics for mixed ISO, offsets, Julian '
+      + 'and normalized overflow calendar days. The exact predicate and actual-schema plan are pinned '
+      + 'below; test-inventory-check-products.cjs exercises generated admission/full reads, work counters '
+      + 'and no-index/uncorrelated negative controls. Any additional receipt date wrap fails the exact count.',
+  },
+  {
     file: 'src/lib/stockRevert.ts', table: 'inventory_movements', column: 'created_at', alias: 'm',
     reason: "lotDrawUnrecorded reads ONE movement by primary key (FROM inventory_movements m WHERE m.id = @rootId); "
       + "its EXISTS compares the product's lot times with that single row's created_at, a per-row correlated "
@@ -561,6 +570,23 @@ function scanFile(absPath, relPath, tableIndexLeadingCols, knownTables) {
 
 function main() {
   const { tableIndexLeadingCols, knownTables } = parseMigrations()
+  const inventorySource = fs.readFileSync(path.join(SRC_DIR, 'lib', 'inventoryCheckProducts.ts'), 'utf8')
+  const receiptPredicate = inventorySource.match(/EXISTS \(SELECT 1 FROM product_batches receipt WHERE receipt\.variant_product_id=p\.id\s+AND \(@receivedFrom IS NULL OR date\(receipt\.received_at\)>=@receivedFrom\)\s+AND \(@receivedTo IS NULL OR date\(receipt\.received_at\)<=@receivedTo\)\)/)
+  check('Inventory received-date exception covers exactly one variant-correlated EXISTS and two residual date predicates',
+    !!receiptPredicate && (inventorySource.match(/date\(receipt\.received_at\)/g) || []).length === 2)
+  const { DatabaseSync } = require('node:sqlite')
+  const receiptDb = new DatabaseSync(':memory:')
+  try {
+    for (const migration of loadAllMigrations()) receiptDb.exec(migration)
+    const statement = `SELECT p.id FROM products p WHERE ${receiptPredicate[0]}`
+    const params = { receivedFrom: '2026-10-19', receivedTo: '2026-10-19' }
+    const plan = receiptDb.prepare(`EXPLAIN QUERY PLAN ${statement}`).all(params)
+    check('Inventory received-date exception actually searches the variant-key covering index in the migrated schema',
+      plan.some(row => /SEARCH receipt(?: EXISTS)? USING COVERING INDEX idx_product_batches_variant_expiry \(variant_product_id=\?\)/.test(row.detail)))
+    const noSeek = statement.replace('receipt.variant_product_id=p.id', '+receipt.variant_product_id=p.id')
+    check('Inventory received-date plan control detects loss of the variant seek',
+      !receiptDb.prepare(`EXPLAIN QUERY PLAN ${noSeek}`).all(params).some(row => /SEARCH receipt .*\(variant_product_id=\?\)/.test(row.detail)))
+  } finally { receiptDb.close() }
   check('parsed at least one table with a leading-column index from migrations', tableIndexLeadingCols.size > 0)
   check(
     'idx_sales_created_pg parsed with leading column created_at on table sales',

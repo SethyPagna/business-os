@@ -29,6 +29,9 @@ export const BRANCH_SCALAR_REFERENCES = [
   ['stock_transfers', 'from_branch_id'], ['stock_transfers', 'to_branch_id'], ['supplier_invoices', 'branch_id'],
   ['transfer_operation_members', 'destination_branch_id'], ['transfer_operation_members', 'source_branch_id'],
 ] as const
+export const RESTRICTED_HISTORICAL_BRANCH_REFERENCES = [
+  ['inventory_check_items', 'branch_id'], ['inventory_check_sessions', 'branch_id'],
+] as const
 /** JSON payload families (design §1.2 c). action_history is streamed and classified; the other three are fenced by count:max. */
 export const CUTOVER_JSON_FAMILIES = ['action_history', 'undo_snapshots', 'pending_actions', 'stock_session_operations'] as const
 /** Tables the history classification reads; part of the schema digest so a mid-run DDL change refuses. */
@@ -77,7 +80,8 @@ export async function readCutoverCaptureSchema(db: D1Compat): Promise<CaptureSch
     if (/WITHOUT\s+ROWID/i.test(definition || '')) throw new BranchCutoverCapabilityError('capture_requires_stable_rowid:' + table)
     if (/^(rowid|_rowid_|oid)$/i.test(column)) capabilities.push({ code: 'capture_shadowed_rowid', detail: table })
     if ((column === 'branch_id' || column.endsWith('_branch_id')) && !BRANCH_SCALAR_REFERENCES.some(([name, field]) => name === table && field === column)) {
-      capabilities.push({ code: 'unclassified_scalar_reference', detail: `${table}.${column}` })
+      const historical = RESTRICTED_HISTORICAL_BRANCH_REFERENCES.some(([name, field]) => name === table && field === column)
+      capabilities.push({ code: historical ? 'historical_scalar_reference_restricted' : 'unclassified_scalar_reference', detail: `${table}.${column}` })
     }
     ;(columns[table] ||= []).push(column)
   }

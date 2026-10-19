@@ -40,6 +40,8 @@ const SENTINELS = {
   apiKey: 'SENTINEL-API-KEY-eeee', refresh: 'SENTINEL-REFRESH-TOKEN-ffff', resend: 'SENTINEL-RESEND-gggg', secret: 'SENTINEL-SECRET-hhhh', bot: 'SENTINEL-BOT-iiii',
   maintenance: 'SENTINEL-MAINT-jjjj', session: 'SENTINEL-SESSION-kkkk', code: 'SENTINEL-CODE-llll',
 }
+const INVENTORY_LIFECYCLE = { action: 'close', id: 'physical-count', expected: 0 }
+const INVENTORY_REQUEST_HASH = crypto.createHash('sha256').update(JSON.stringify(INVENTORY_LIFECYCLE)).digest('hex')
 
 function fixtureDatabase() {
   const db = new DatabaseSync(':memory:')
@@ -63,6 +65,7 @@ function fixtureDatabase() {
     CREATE TABLE verification_codes (id INTEGER PRIMARY KEY, code_hash TEXT);
     CREATE TABLE login_lockouts (k TEXT PRIMARY KEY, n INTEGER);
     CREATE TABLE telegram_scheduled_sends (id INTEGER PRIMARY KEY, status TEXT);
+    CREATE TABLE inventory_check_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, product_id INTEGER, request_hash TEXT NOT NULL, after_json TEXT NOT NULL);
     CREATE VIRTUAL TABLE docs_fts USING fts5(body, content='docs', content_rowid='id');
     CREATE INDEX idx_plain_name ON plain_pk(name);
     CREATE UNIQUE INDEX idx_text_pk_v ON text_pk(v);
@@ -97,6 +100,7 @@ function fixtureDatabase() {
     INSERT INTO verification_codes(code_hash) VALUES ('${SENTINELS.code}');
     INSERT INTO login_lockouts(k, n) VALUES ('1.2.3.4', 5), ('5.6.7.8', 1);
     INSERT INTO telegram_scheduled_sends(status) VALUES ('pending'), ('sending'), ('sent'), ('failed');
+    INSERT INTO inventory_check_events VALUES(1,'synthetic-count',200,'${INVENTORY_REQUEST_HASH}','{"state":"done"}');
   `)
   db.exec("INSERT INTO d1_migrations(name) VALUES ('0001_a.sql'), ('0002_b.sql')")
   db.exec("INSERT INTO docs(body) VALUES ('hello world'), ('khmer ខ្មែរ'); INSERT INTO docs_fts(docs_fts) VALUES ('rebuild')")
@@ -287,7 +291,7 @@ async function main() {
     const dir = tmpdir('engine')
     const { manifest, verdict } = await job.exportToDir({ outDir: dir, run: '777', commit: 'abcdef1', query: d1.query, write })
     assert.equal(verdict.ok, true, JSON.stringify(manifest.issues))
-    assert.deepEqual(manifest.tables.map((t) => t.name), ['ai_provider_configs', 'audit', 'auto_seq', 'd1_migrations', 'docs', 'empty_t', 'no_pk', 'plain_pk', 'portal_accounts', 'settings', 'shadowed', 'system_flags', 'telegram_scheduled_sends', 'text_pk', 'users'])
+    assert.deepEqual(manifest.tables.map((t) => t.name), ['ai_provider_configs', 'audit', 'auto_seq', 'd1_migrations', 'docs', 'empty_t', 'inventory_check_events', 'no_pk', 'plain_pk', 'portal_accounts', 'settings', 'shadowed', 'system_flags', 'telegram_scheduled_sends', 'text_pk', 'users'])
     assert.deepEqual(manifest.excluded.map((e) => `${e.name}:${e.reason}`).sort(), ['_cf_KV:cloudflare-internal', 'docs_fts:fts-virtual', 'docs_fts_config:fts-shadow', 'docs_fts_data:fts-shadow', 'docs_fts_docsize:fts-shadow', 'docs_fts_idx:fts-shadow'])
     assert.deepEqual(manifest.omitted, [{ name: 'login_lockouts', rows: 2, reason: 'credentials-and-lockouts' }, { name: 'user_sessions', rows: 3, reason: 'credentials-and-lockouts' }, { name: 'verification_codes', rows: 1, reason: 'credentials-and-lockouts' }])
     const byName = Object.fromEntries(manifest.tables.map((t) => [t.name, t]))
@@ -474,6 +478,7 @@ async function main() {
     }
     assert.ok(all.includes('LC Cosmetics') && all.includes("'USD'"), 'ordinary settings are exported')
     assert.ok(all.includes('-1001234'), 'telegram settings are exported (the loader neutralises them after the check)')
+    assert.ok(all.includes(INVENTORY_REQUEST_HASH), 'the noncredential request digest remains operational replay evidence')
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
@@ -497,7 +502,9 @@ async function main() {
     mdb.exec('PRAGMA foreign_keys = OFF;')
     for (const sql of loadAll()) mdb.exec(sql)
     const cols = mdb.prepare("SELECT m.name AS t, x.name AS c FROM sqlite_master m, pragma_table_info(m.name) x WHERE m.type = 'table'").all()
-    const BENIGN = new Set(['ai_provider_configs.max_completion_tokens', 'business_os_migration_status.source_hash', 'users.otp_enabled', 'users.otp_pending_created_at', 'users.must_change_password'])
+    const BENIGN = new Set(['ai_provider_configs.max_completion_tokens', 'business_os_migration_status.source_hash', 'users.otp_enabled', 'users.otp_pending_created_at', 'users.must_change_password',
+      'inventory_check_events.request_hash'])
+    assert.equal(lib.redactionFor('inventory_check_events', 'request_hash'), null, 'the exact request digest must survive for replay integrity')
     const looksSecret = /pass|secret|api_key|token|hash|otp|credential/i
     const unhandled = cols.filter((r) => looksSecret.test(r.c) && !/digest|_fts/.test(r.t + r.c) && !BENIGN.has(`${r.t}.${r.c}`)
       && !lib.OMITTED_ROW_TABLES.includes(r.t) && lib.redactionFor(r.t, r.c) === null && !(r.t.endsWith('_fts') || r.t.includes('_fts_')))
@@ -640,6 +647,12 @@ async function main() {
     const mig = source.prepare('INSERT INTO d1_migrations(name) VALUES (?)')
     for (const n of names.slice(0, -2)) mig.run(n)
     source.exec("INSERT INTO categories(name, color) VALUES ('Soap', '#fff'), ('Ünï 🧴', NULL); INSERT INTO system_flags(key, value) VALUES ('k', 'v'); INSERT INTO settings(key, value) VALUES ('s', NULL)")
+    source.exec(`INSERT INTO roles(id,name,code,permissions) VALUES(990001,'Synthetic counter','admin','{}');
+      INSERT INTO users(id,username,name,password,role_id) VALUES(990001,'physical-counter','Synthetic counter','synthetic-password',990001);
+      INSERT INTO inventory_check_sessions(id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
+      VALUES('physical-count',1,990001,'Synthetic count','closed',1,'{}','2026-10-19','2026-10-19','2026-10-19');
+      INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      VALUES('physical-count',NULL,990001,'close','physical-count-1','${INVENTORY_REQUEST_HASH}','{"status":"open","revision":0}','{"status":"closed","revision":1}','{"sessionRevision":1}','2026-10-19')`)
     const { dir, manifest } = await exportFixture(source, '55')
     assert.ok(manifest.tables.length > 130 && manifest.omitted.length === 6)
     assert.ok(manifest.tables.some((t) => t.name === 'products') && !manifest.tables.some((t) => /products_fts/.test(t.name)))
@@ -654,6 +667,26 @@ async function main() {
     assert.deepEqual(result.checks.migrations.inFolderNotApplied, names.slice(-2))
     const rebuilt = new DatabaseSync(out)
     for (const t of ['categories', 'system_flags', 'settings', 'd1_migrations']) assert.deepEqual(dump(rebuilt, t), dump(source, t), t)
+    assert.deepEqual(dump(rebuilt, 'inventory_check_sessions'), dump(source, 'inventory_check_sessions'))
+    assert.deepEqual(dump(rebuilt, 'inventory_check_events'), dump(source, 'inventory_check_events'), 'the entire immutable event, including its operational digest, survives byte-for-byte')
+    assert.equal(rebuilt.prepare('SELECT request_hash FROM inventory_check_events').get().request_hash, INVENTORY_REQUEST_HASH)
+    const code = require('esbuild').buildSync({ entryPoints: [path.join(ROOT, 'cloudflare/src/lib/inventoryCheckSessions.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, target: 'es2022', external: ['cloudflare:*'] }).outputFiles[0].text
+    const inventoryModule = { exports: {} }
+    new Function('require', 'module', 'exports', code)(require, inventoryModule, inventoryModule.exports)
+    const principal = { id: 990001, tokenHash: crypto.createHash('sha256').update('fresh-synthetic-login-after-restore').digest('hex') }
+    rebuilt.prepare("INSERT INTO user_sessions(user_id,token_hash,expires_at,last_seen_at) VALUES(@id,@tokenHash,'2099-01-01',CURRENT_TIMESTAMP)").run(principal)
+    const adapter = {
+      prepare(sql) { const statement = rebuilt.prepare(sql); statement.setAllowUnknownNamedParameters(true); return { get: async (params = {}) => statement.get(params), all: async (params = {}) => statement.all(params) } },
+      async batch(statements) { return statements.map(({ sql, params = {} }) => { const statement = rebuilt.prepare(sql); statement.setAllowUnknownNamedParameters(true); return { success: true, results: statement.all(params) } }) },
+    }
+    const beforeReplay = dump(rebuilt, 'inventory_check_events')
+    const replay = await inventoryModule.exports.patchInventoryCheckSession(adapter, principal, 'physical-count', { action: 'close', expectedRevision: 0, requestId: 'physical-count-1' })
+    assert.equal(replay.receipt.replayed, true)
+    assert.equal(replay.receipt.eventId, source.prepare('SELECT id FROM inventory_check_events').get().id)
+    assert.equal(replay.item.status, 'closed')
+    await assert.rejects(inventoryModule.exports.patchInventoryCheckSession(adapter, principal, 'physical-count', { action: 'resume', expectedRevision: 0, requestId: 'physical-count-1' }), error => error.status === 409 && error.code === 'inventory_check_request_reused')
+    assert.deepEqual(dump(rebuilt, 'inventory_check_events'), beforeReplay, 'same-receipt replay and changed-payload refusal never rewrite immutable evidence')
+    assert.throws(() => rebuilt.exec("UPDATE inventory_check_events SET after_json='{}'"), /inventory_check_history_immutable/)
     // The 167 migration triggers are back, none fired during the load.
     assert.equal(rebuilt.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger'").get().n, source.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger'").get().n)
     rebuilt.close()
