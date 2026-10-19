@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { act } from 'react'
-import { createHarness } from './mountedComponentHarness.ts'
+import { createHarness, propsOf } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
+import * as dirtyWork from '../src/utils/dirtyWork.ts'
 
-const harness = await createHarness({ observe: ['api/actorReadScope.ts'] })
+const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
+const uuidDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID')
+const restoreUuid = () => { if (uuidDescriptor) Object.defineProperty(crypto, 'randomUUID', uuidDescriptor); else Reflect.deleteProperty(crypto, 'randomUUID') }
 const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
 window.addEventListener = (type: string, listener: unknown) => { if (listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(listener as EventListenerOrEventListenerObject) } }
 window.removeEventListener = (type: string, listener: unknown) => { if (listener) listeners.get(type)?.delete(listener as EventListenerOrEventListenerObject) }
@@ -39,12 +42,13 @@ const app = {
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key,
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
-    if (blockNavigation) return
+    if (blockNavigation || dirtyWork.hasDirtyWork()) return
     window.history.pushState(null, '', `/inventory${window.location.search}#${anchor || ''}`)
     window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } }))
   },
 }
 const doubles = {
+  'utils/dirtyWork.ts': dirtyWork,
   'api/actorReadScope.ts': {
     captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: readRevision }),
     captureActorWriteIdentity: () => ({ owner: 'test', epoch: 1 }),
@@ -133,13 +137,16 @@ try {
 
   app.user = { ...app.user, id: 7 }
   const creation = await mount()
+  Object.defineProperty(crypto, 'randomUUID', { configurable: true, writable: true, value: undefined })
   await creation.click(creation.button('sessions'))
   await creation.click(creation.button('Test check'))
   await creation.click(creation.button('All products'))
   await creation.click(creation.button('Start check'))
-  const input = creates.at(-1)?.[1] as { productIds: number[]; scope: Record<string, unknown> }
+  const input = creates.at(-1)?.[1] as { productIds: number[]; scope: Record<string, unknown>; requestId: string }
   assert.deepEqual(input.productIds, [12])
   assert.equal(input.scope.membership, 'visible_page', 'creation records its actual bounded membership')
+  assert.match(input.requestId, /^inventory_check_\d+_[a-z0-9]+$/, 'session creation uses the shared supported-browser fallback without randomUUID')
+  restoreUuid()
   await creation.unmount()
 
   failRead = true
@@ -157,6 +164,7 @@ try {
   app.user = { ...app.user, id: 8 }
   await switching.render({})
   assert.equal(switching.findAll(node => node.getAttribute('id') === 'inventory-check-reason-12').length, 0)
+  assert.equal(dirtyWork.getDirtyWork().filter(entry => entry.pageId === 'inventory').length, 0, 'actor transitions detach actual row dirty entries without allowing a stale guard to retain protected input')
   app.user = { ...app.user, id: 7 }
   await switching.render({})
   assert.ok(!switching.text().includes('Private A draft'), 'A→B→A remount never restores private in-memory drafts')
@@ -251,12 +259,25 @@ try {
   assert.equal(productRequests.at(-1)?.page, 2)
   await cold.click(cold.button('Edit issue'))
   await cold.type(cold.field('inventory-check-reason-12'), 'Guarded local draft')
-  blockNavigation = true
+  assert.ok(dirtyWork.getDirtyWork().some(entry => entry.pageId === 'inventory'), 'the actual row registers its entered count/reason in the actual shared dirty-work registry')
+  assert.equal(propsOf(cold.button('All products')).disabled, true)
+  assert.equal(propsOf(cold.button('Close session')).disabled, true)
+  assert.equal(propsOf(cold.button('refresh')).disabled, true)
+  assert.equal(propsOf(cold.find(node => node.getAttribute('data-inventory-check-query-lock') !== null, 'query controls')).disabled, true)
+  assert.equal(propsOf(cold.find(node => node.getAttribute('data-inventory-check-pager-lock') !== null, 'paging controls')).disabled, true)
+  assert.equal(propsOf(cold.button('top_customers')).disabled, true, 'ranking opt-in cannot change scope while the real row is editing')
+  const beforeBlockedInput = productRequests.length
+  await cold.type(cold.field('inventory-check-search'), 'must not change scope')
+  assert.equal(productRequests.length, beforeBlockedInput)
   await cold.click(cold.button('issues'))
   assert.equal(productRequests.at(-1)?.page, 2, 'a rejected section request cannot eagerly reset pagination and remount a dirty row')
   assert.equal((cold.field('inventory-check-reason-12') as unknown as { value: string }).value, 'Guarded local draft', 'rejected section navigation preserves the mounted local editor')
   assert.equal(cold.button('products').getAttribute('aria-pressed'), 'true')
-  blockNavigation = false
+  await cold.click(cold.button('Cancel'))
+  assert.equal(dirtyWork.getDirtyWork().filter(entry => entry.pageId === 'inventory').length, 0, 'actual row Cancel releases navigation protection')
+  assert.equal(propsOf(cold.button('All products')).disabled, false)
+  await cold.click(cold.button('sessions'))
+  assert.equal(cold.button('sessions').getAttribute('aria-pressed'), 'true')
   await cold.unmount()
   productTotal = 1
 
@@ -285,4 +306,4 @@ try {
   assert.ok(!ranking.text().includes('Opt-in customer identity'))
   await ranking.unmount()
   console.log('inventoryChecksPage mounted journeys passed')
-} finally { await harness.close() }
+} finally { restoreUuid(); await harness.close() }
