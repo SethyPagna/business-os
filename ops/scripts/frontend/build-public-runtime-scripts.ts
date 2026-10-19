@@ -84,8 +84,9 @@ function main() {
 
     const outputPath = path.join(outDir, outputName)
     const expected = BANNER + outputText
+    const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : ''
+    const matches = normalizeEol(current) === normalizeEol(expected)
     if (checkOnly) {
-      const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : ''
       // Compare CONTENT, not bytes. Git stores these files with LF; this
       // checkout is core.autocrlf=true, so they arrive on disk with CRLF while
       // this generator always emits LF. A raw byte comparison therefore called
@@ -94,13 +95,13 @@ function main() {
       // stop a lane before a single one of its 170 test files ever ran. A
       // staleness check answers "is the generated code out of date", and a
       // line ending is not the generated code.
-      if (normalizeEol(current) !== normalizeEol(expected)) {
+      if (!matches) {
         throw new Error(`Generated runtime is stale: ${path.relative(root, outputPath)}. Run npm.cmd --prefix frontend run build:public-runtime.`)
       }
       console.log(`Verified ${path.relative(root, outputPath)}`)
       continue
     }
-    fs.writeFileSync(outputPath, expected, 'utf8')
+    if (!matches) fs.writeFileSync(outputPath, expected, 'utf8')
     console.log(`Built ${path.relative(root, sourcePath)} -> ${path.relative(root, outputPath)}`)
   }
 }
