@@ -15,18 +15,24 @@ function load(file) {
   return module.exports
 }
 let route
-let db, beforeCommit, loseAck, afterCommit
+let db, beforeCommit, loseAck, afterCommit, queryTrace = [], batchTrace = [], batchSequence = 0, activeBatch = 0, projectionFailures = 0
 function binding() {
   function prepare(sql) {
     return { sql, values: [], bind(...values) { if(values.length>100) throw new Error('D1_ERROR: too many SQL variables'); return { ...this, values } }, async all() {
       const results = db.prepare(sql).all(...this.values)
+      queryTrace.push({sql,values:this.values,rows:results.length,batch:activeBatch})
       return { success: true, results, meta: { changes: db.prepare('SELECT changes() AS n').get().n } }
-    }, async run() { const result = db.prepare(sql).run(...this.values); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } } }
+    }, async run() { const result = db.prepare(sql).run(...this.values); queryTrace.push({sql,values:this.values,rows:0,batch:activeBatch}); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } } }
   }
   return { prepare, async batch(statements) {
+    batchTrace.push(statements.map(statement=>({sql:statement.sql,values:statement.values})))
+    if (statements.some(statement=>statement.sql.includes('post_write_snapshot')) && projectionFailures>0) {
+      projectionFailures--; throw new Error('D1_ERROR: network projection read failed')
+    }
     const writing = statements.some(statement => /INSERT INTO inventory_check_events/.test(statement.sql))
     if (writing && beforeCommit) { const inject = beforeCommit; beforeCommit = null; inject() }
     db.exec('BEGIN')
+    activeBatch = ++batchSequence
     try {
       const result = []
       for (const statement of statements) result.push(await statement.all())
@@ -34,7 +40,7 @@ function binding() {
       if (writing && afterCommit) { const inject = afterCommit; afterCommit = null; inject() }
       if (writing && loseAck) { loseAck = false; throw new Error('Lost commit acknowledgement') }
       return result
-    } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error }
+    } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error } finally { activeBatch = 0 }
   } }
 }
 function reset(schema = true) {
@@ -51,13 +57,14 @@ function reset(schema = true) {
     INSERT INTO products(id,name,stock_quantity) VALUES(900001,'One product',0),(900002,'Two product',0);
     INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) VALUES(900001,900001,'one','2026-10-01'),(900002,900002,'two','2026-10-01');`)
   for (const actor of [900001,900002,900003,900004]) db.prepare("INSERT INTO user_sessions(user_id,token_hash,expires_at,last_seen_at) VALUES(?,?,'2099-01-01T00:00:00.000Z',CURRENT_TIMESTAMP)").run(actor, createHash('sha256').update(`token-${actor}`).digest('hex'))
-  beforeCommit = null; loseAck = false; afterCommit = null
+  beforeCommit = null; loseAck = false; afterCommit = null; queryTrace=[]; batchTrace=[]; batchSequence=0; activeBatch=0; projectionFailures=0
 }
 async function request(method, url, body, actor = 900001) {
+  queryTrace=[]; batchTrace=[]
   const tasks = []
   const result = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding() }, { waitUntil: task => tasks.push(task) })
   await Promise.allSettled(tasks)
-  return { status: result.status, body: await result.json() }
+  return { status: result.status, body: await result.json(), queries:queryTrace.slice(), batches:batchTrace.slice() }
 }
 const physical = () => ['products','product_batches','branch_stock','branch_batch_stock','damaged_stock_lots','sales','sale_items','returns','return_items','inventory_movements','audit_logs'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
 const metadata = () => ['inventory_check_sessions','inventory_check_items','inventory_check_events'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
@@ -201,6 +208,55 @@ async function main() {
       assert.equal('item' in result.body,false, 'revoked access must not leak the saved detail')
       assert.deepEqual(physical(),before)
     }
+  })
+  await check('500-member saves return only needed rows and retain bounded postwrite query counts', async () => {
+    reset()
+    db.exec(`WITH RECURSIVE ids(id) AS (SELECT 910000 UNION ALL SELECT id+1 FROM ids WHERE id<910499)
+      INSERT INTO products(id,name,stock_quantity) SELECT id,'Count product '||id,0 FROM ids;
+      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) SELECT id,id,'count-'||id,'2026-10-01' FROM products WHERE id BETWEEN 910000 AND 910499`)
+    const made=await create('large-create-01',Array.from({length:500},(_,index)=>910000+index))
+    assert.equal(made.status,201)
+    const id=made.body.item.id
+    const edited=await request('PATCH',`/sessions/${id}/items/910000`,{state:'done',expectedRevision:0,expectedSessionRevision:0,requestId:'large-edit-01'})
+    const closed=await request('PATCH',`/sessions/${id}`,{action:'close',expectedRevision:0,requestId:'large-close-01'})
+    console.log(`QUERY_BUDGET create500=${made.queries.length} edit500=${edited.queries.length} close500=${closed.queries.length}`)
+    assert.equal('items' in made.body,false,'creation must not hydrate all500 observations')
+    assert.equal(edited.status,200); assert.equal(edited.body.item.product_id,910000)
+    assert.equal(edited.body.session.progress.total,500); assert.equal(edited.body.session.progress.done,1)
+    const projectionBatch=edited.batches.find(batch=>batch.some(statement=>statement.sql.includes('post_write_snapshot')))
+    assert.equal(projectionBatch.length,3,'one current-stock schema/read plus current authority/session/item projection must share one actual batch')
+    const projection=projectionBatch.find(statement=>statement.sql.includes('post_write_snapshot')).sql
+    for(const clause of ['u.permissions','r.permissions','s.token_hash','s.revoked_at','s.expires_at','s.organization_id IS a.organization_id']) assert.ok(projection.includes(clause),clause)
+    assert.ok(projectionBatch.some(statement=>statement.sql.includes('epoch_present')),'stock epoch validation must be in the projection batch')
+    const stockRead=projectionBatch.find(statement=>statement.sql.includes('wanted AS'))
+    assert.ok(stockRead.values.includes('[910000]'),'single changed product only, never500 current stock rows')
+    for(const result of [made,edited,closed]) assert.equal(result.queries.some(query=>/SELECT \* FROM inventory_check_items WHERE session_id=.*ORDER BY product_id/s.test(query.sql)),false,'postwrite must not read all member observations')
+    assert.ok(made.queries.length<=22); assert.ok(edited.queries.length<=17); assert.ok(closed.queries.length<=13)
+  })
+  await check('current projection refuses changed token/org/schema or unreadable snapshots and reconciles compound lost ACK plus a read retry', async () => {
+    for(const mode of ['token','organization','schema','database']) {
+      reset(); const id=(await create()).body.item.id
+      const before=physical(), count=db.prepare('SELECT COUNT(*) AS n FROM inventory_check_events').get().n
+      afterCommit=()=>{
+        if(mode==='token') db.exec('UPDATE user_sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=900001')
+        if(mode==='organization') db.exec('UPDATE users SET organization_id=2 WHERE id=900001')
+        if(mode==='schema') db.exec("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','unknown-future') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        if(mode==='database') projectionFailures=2
+      }
+      const result=await request('PATCH',`/sessions/${id}/items/900001`,{state:'done',expectedRevision:0,expectedSessionRevision:0,requestId:`snapshot-${mode}-01`})
+      assert.equal(result.status,503,mode); assert.equal(result.body.outcome,'unknown',mode); assert.equal('item' in result.body,false)
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_events').get().n,count+1,mode)
+      assert.deepEqual(physical(),before,mode)
+    }
+    reset(); const id=(await create()).body.item.id
+    const body={state:'done',expectedRevision:0,expectedSessionRevision:0,requestId:'compound-lost-ack-01'}
+    loseAck=true; afterCommit=()=>{projectionFailures=1}
+    const saved=await request('PATCH',`/sessions/${id}/items/900001`,body)
+    assert.equal(saved.status,200); assert.equal(saved.body.receipt.replayed,true)
+    assert.equal(saved.batches.filter(batch=>batch.some(statement=>statement.sql.includes('post_write_snapshot'))).length,2)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM inventory_check_events WHERE request_id='compound-lost-ack-01'").get().n,1)
+    const replay=await request('PATCH',`/sessions/${id}/items/900001`,body)
+    assert.equal(replay.status,200); assert.equal(replay.body.receipt.eventId,saved.body.receipt.eventId)
   })
   console.log(`PASS ${groups} actual authenticated HTTP/SQLite Inventory session groups`)
   db.close()

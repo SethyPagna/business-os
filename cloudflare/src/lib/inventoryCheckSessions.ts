@@ -176,9 +176,44 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
   const event = await receipt(db, actor, key, hash)
   return event ? { event, replayed: false } : fail(503, 'inventory_check_outcome_unknown')
 }
-async function committedSessionDetail(db: D1Compat, principal: InventoryCheckPrincipal, id: string) {
-  try { return await getInventoryCheckSession(db, principal, id) }
-  catch { return fail(503, 'inventory_check_outcome_unknown') }
+async function committedSessionProjection(db: D1Compat, principal: InventoryCheckPrincipal, id: string, observation?: {productId:number;branchId:number}) {
+  try {
+    const sql = `WITH current_actor AS (${CURRENT_ACTOR_SQL}), post_write_snapshot AS (
+      SELECT s.* FROM inventory_check_sessions s JOIN current_actor a ON s.organization_id IS a.organization_id
+      WHERE s.id=@id AND (@branchId IS NULL OR s.branch_id=@branchId))
+      SELECT json_object('id',a.id,'username',a.username,'name',a.name,'organization_id',a.organization_id,
+        'role_id',a.role_id,'permissions',a.permissions,'is_active',a.is_active,'role_code',a.role_code,'role_permissions',a.role_permissions) AS actor_json,
+        json_object('id',s.id,'organization_id',s.organization_id,'branch_id',s.branch_id,'created_by',s.created_by,
+          'title',s.title,'status',s.status,'revision',s.revision,'scope_json',s.scope_json,'started_at',s.started_at,'updated_at',s.updated_at,'closed_at',s.closed_at) AS session_json,
+        (SELECT json_object('total',COUNT(*),'unstarted',COALESCE(SUM(state='unstarted'),0),'done',COALESCE(SUM(state='done'),0),'issue',COALESCE(SUM(state='issue'),0))
+          FROM inventory_check_items WHERE session_id=s.id) AS progress_json,
+        CASE WHEN @productId IS NOT NULL THEN (SELECT json_object('session_id',i.session_id,'product_id',i.product_id,'branch_id',i.branch_id,
+          'product_snapshot_json',i.product_snapshot_json,'baseline_quantity',i.baseline_quantity,'baseline_json',i.baseline_json,
+          'state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision,'updated_by',i.updated_by,'updated_at',i.updated_at)
+          FROM inventory_check_items i WHERE i.session_id=s.id AND i.product_id=@productId AND i.branch_id=s.branch_id) END AS item_json
+      FROM post_write_snapshot s JOIN current_actor a ON s.organization_id IS a.organization_id`
+    const statement = {sql,params:{actorId:principal.id,tokenHash:principal.tokenHash,id,productId:observation?.productId ?? null,branchId:observation?.branchId ?? null}}
+    let result: D1Result[] = [], current: InventoryCheckStockRow | undefined
+    if (observation) {
+      const stock = await readInventoryCheckStock({batch:async statements=>{
+        const combined=await db.batch([...statements,statement])
+        result=combined.slice(statements.length)
+        return combined.slice(0,statements.length)
+      }},{branchId:observation.branchId,productIds:[observation.productId]})
+      current=stock.find(row=>row.product_id===observation.productId)
+    } else result=await db.batch([statement])
+    if (result.length!==1 || result[0].success!==true || result[0].results?.length!==1) return fail(503,'inventory_check_outcome_unknown')
+    const row=result[0].results[0] as {actor_json:string;session_json:string;progress_json:string;item_json:string|null}
+    const actor={...parse(row.actor_json),tokenHash:principal.tokenHash} as Actor
+    if (!getInventoryCheckAccess(actor).canView) return fail(503,'inventory_check_outcome_unknown')
+    const session=parse(row.session_json) as unknown as SessionRow
+    const counts=parse(row.progress_json) as InventoryCheckSession['progress']
+    const summary=await projectSession(db,actor,session,counts)
+    if (!observation) return {item:summary}
+    if (!row.item_json) return fail(503,'inventory_check_outcome_unknown')
+    const item=parse(row.item_json) as unknown as ItemRow
+    return {item:summary,observation:projectObservation(actor,item,session.created_by===actor.id,current)}
+  } catch { return fail(503,'inventory_check_outcome_unknown') }
 }
 const PHYSICAL_SCHEMA_SQL = `SELECT json_object('epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'),
   'epoch_present',(SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch'),
@@ -218,7 +253,7 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const scope = Object.fromEntries(Object.keys(normalizedScope).sort().map(key=>[key,normalizedScope[key]]))
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'create', branchId, productIds, title, scope }))
   const existing = await receipt(db, actor, key, hash)
-  if (existing) return { ...(await committedSessionDetail(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
   const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
   const settingsSignature = JSON.stringify(settings.map(row=>({key:row.key,value:row.value})))
   lowStock = resolveLowStockConfig(Object.fromEntries(settings.map(row=>[row.key,row.value])))
@@ -255,7 +290,7 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
     eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
-  return { ...(await committedSessionDetail(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -270,7 +305,7 @@ export async function patchInventoryCheckObservation(db: D1Compat, principal: In
   const after = { state, counted_quantity: counted, reason, revision: expected+1 }
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'observe', id, productId, expected, expectedSession, ...after }))
   const previous = await receipt(db, actor, key, hash)
-  if (previous) return observationResponse(db, principal, previous, true)
+  if (previous) return observationResponse(db, principal, previous, true,session.branch_id)
   const item = await db.prepare('SELECT * FROM inventory_check_items WHERE session_id=@id AND product_id=@productId AND branch_id=@branchId').get<ItemRow>({ id, productId, branchId: session.branch_id })
   if (!item) return fail(404, 'inventory_check_item_not_found')
   const countGuards: Statement[] = []
@@ -294,11 +329,12 @@ export async function patchInventoryCheckObservation(db: D1Compat, principal: In
     { sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params },
     eventStatement(actor, { sessionId: id, productId, action: 'observe', key, hash, before: { state: item.state, counted_quantity: item.counted_quantity, reason: item.reason, revision: item.revision }, after, result: { sessionRevision: expectedSession, itemRevision: expected+1 }, now: params.now }),
   ], key, hash)
-  return observationResponse(db, principal, saved.event, saved.replayed)
+  return observationResponse(db, principal, saved.event, saved.replayed,session.branch_id)
 }
-async function observationResponse(db: D1Compat, principal: InventoryCheckPrincipal, event: EventRow, replayed: boolean) {
-  const detail = await committedSessionDetail(db, principal, event.session_id)
-  return { item: detail.items.find(item => item.product_id === event.product_id), session: detail.item, receipt: receiptResponse(event, replayed) }
+async function observationResponse(db: D1Compat, principal: InventoryCheckPrincipal, event: EventRow, replayed: boolean, branchId:number) {
+  if (event.product_id===null) return fail(503,'inventory_check_outcome_unknown')
+  const detail = await committedSessionProjection(db, principal, event.session_id,{productId:event.product_id,branchId})
+  return { item: detail.observation, session: detail.item, receipt: receiptResponse(event, replayed) }
 }
 export async function patchInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -307,7 +343,7 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   const expected = revision(body.expectedRevision), key = requestId(body.requestId), action = body.action
   if (action !== 'close' && action !== 'resume') return fail(400, 'inventory_check_invalid_action')
   const hash = await inventoryCheckDigest(JSON.stringify({ action, id, expected })), previous = await receipt(db, actor, key, hash)
-  if (previous) return { item: (await committedSessionDetail(db, principal, id)).item, receipt: receiptResponse(previous, true) }
+  if (previous) return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(previous, true) }
   const status = action === 'close' ? 'closed' : 'open', now = new Date().toISOString()
   const params = { id, status, expected, now, closed: action === 'close' ? now : null }
   const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
@@ -315,7 +351,7 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
     guard('changes()=1', 'inventory_check_conflict', {}),
     eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }),
   ], key, hash)
-  return { item: (await committedSessionDetail(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
+  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
 }
 export async function inventoryCheckSessionHistory(db: D1Compat, principal: InventoryCheckPrincipal, id: string, query: Record<string,string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
