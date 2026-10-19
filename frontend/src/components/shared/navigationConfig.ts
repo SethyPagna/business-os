@@ -42,9 +42,7 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'promotions', key: 'promotions', permission: 'promotions' },
   { id: 'pos', key: 'pos', permission: 'pos' },
   { id: 'products', key: 'products', permission: 'products' },
-  // inventory nav entry removed (E1): Inventory renders as sections of the
-  // Branches hub now; canAccessPage lets inventory grant-holders through
-  // the branches door. Its 'inventory' permission key is untouched.
+  { id: 'inventory', key: 'inventory', permission: 'inventory' },
   // Branch used to share Inventory's own permission key -- split into its
   // own 'branches' key so a person can be granted one without the other,
   // per the standing "every page gets its own permission" decision. See

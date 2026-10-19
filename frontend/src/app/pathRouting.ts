@@ -8,8 +8,7 @@ const ADMIN_ROUTE_PAGE_BY_SEGMENT = new Map<string, string>([
   ['product', 'products'],
   ['pos', 'pos'],
   ['point-of-sale', 'pos'],
-  // E1: old Inventory URLs land on the Branches hub (products slice open).
-  ['inventory', 'branches'],
+  ['inventory', 'inventory'],
   ['sales', 'sales'],
   // E2: old Returns/Fees URLs land on the Sales hub with that section open.
   ['returns', 'sales'],
@@ -45,6 +44,7 @@ const ADMIN_PATH_BY_PAGE = new Map<string, string>([
   ['dashboard', '/'],
   ['notes', '/notes'],
   ['products', '/products'],
+  ['inventory', '/inventory'],
   ['pos', '/pos'],
   ['sales', '/sales'],
   ['branches', '/branches'],

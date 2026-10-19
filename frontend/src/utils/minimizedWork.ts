@@ -126,11 +126,12 @@ export function completeTransferDraft(actorId: unknown, key: string): void {
   clearWorkDraft(key)
   removeMinimizedWork(key)
 }
+export const INVENTORY_TRANSFER_RESTORE_HOST = { pageId: 'branches', anchor: 'hub:branches:rfid' } as const
+
 export function parkTransferDraft(kind: TransferDraftKind, actorId: unknown, key: string, label: string): void {
   if (key !== transferDraftKey(kind)) return
   minimizeWork({ key, kind, draftKey: key, label,
-    pageId: 'branches',
-    anchor: kind === 'branch_transfer' ? 'hub:branches:transfers' : 'hub:branches:products',
+    ...(kind === 'branch_transfer' ? { pageId: 'branches', anchor: 'hub:branches:transfers' } : INVENTORY_TRANSFER_RESTORE_HOST),
     payload: { actorId: String(actorId) },
     requiredPermission: FALLBACK_PERMISSION_BY_KIND[kind],
   })
@@ -147,7 +148,7 @@ export const FAST_STOCK_IN_RESTORE_HOST = {
 function normalizeEntry(entry: MinimizedWorkEntry): MinimizedWorkEntry {
   return entry.kind === 'fast_stockin'
     ? { ...entry, ...FAST_STOCK_IN_RESTORE_HOST }
-    : entry
+    : entry.kind === 'inventory_transfer' ? { ...entry, ...INVENTORY_TRANSFER_RESTORE_HOST } : entry
 }
 
 export type MinimizedWorkRestoreScope = Readonly<{ storeKey: string; entryKey: string; transferKey?: string }>

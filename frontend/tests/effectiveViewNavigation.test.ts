@@ -28,7 +28,7 @@ for (const item of NAV_ITEMS) assert.ok(Object.hasOwn(new Function(`return (${pa
 assert.equal(pageAccess({ permissions: {} })('unknown-page'), false)
 assert.equal(pageAccess(null)('notes'), false)
 assert.equal(pageAccess({ permissions: {} })('files'), true, 'authenticated library read remains unconditional')
-for (const [page, keys] of Object.entries({ sales: ['sales', 'returns', 'fees'], branches: ['branches', 'inventory'], review: ['review', 'audit_log'], promotions: ['promotions', 'products', 'customer_portal'], settings: ['settings', 'backup', 'business_identity', 'sales_policy', 'drive_credentials'] })) {
+for (const [page, keys] of Object.entries({ inventory: ['inventory'], sales: ['sales', 'returns', 'fees'], branches: ['branches', 'inventory'], review: ['review', 'audit_log'], promotions: ['promotions', 'products', 'customer_portal'], settings: ['settings', 'backup', 'business_identity', 'sales_policy', 'drive_credentials'] })) {
   for (const key of keys) {
     assert.equal(pageAccess({ permissions: { [key]: true } })(page), true)
     assert.equal(pageAccess({ permissions: { [key]: true, [`${key}:view`]: false } })(page), false)

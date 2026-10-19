@@ -40,14 +40,14 @@ test('Fees range selects continuous timestamps and movement surface exposes the 
   assert.match(read('components/inventory/InventoryMovementsSurface.tsx'), /showTime\s+continuous/)
 })
 
-test('Branch hub retains continuous endpoints when switching to Inventory and never mutates invalid overnight state', () => {
+test('Branch hub retains continuous endpoints for Overview and Transfers without mutating invalid overnight state', () => {
   const range = Object.freeze({ startDate: '2026-09-05', endDate: '2026-09-05', startTime: '22:00', endTime: '02:00' })
   assert.throws(() => continuousRangeParams(range), RangeError)
   assert.deepEqual(continuousRangeParams({ ...range, endDate: '2026-09-06' }), { startDate: '2026-09-05', endDate: '2026-09-06', createdFrom: '2026-09-05 15:00:00', createdTo: '2026-09-05 19:01:00' })
   assert.equal(range.endDate, '2026-09-05')
   const hub = read('components/branches/BranchesHubPage.tsx')
-  assert.equal((hub.match(/dateRange=\{sharedDateRange\}/g) || []).length, 3)
-  assert.equal((hub.match(/onDateRangeChange=\{setSharedDateRange\}/g) || []).length, 3)
+  assert.equal((hub.match(/dateRange=\{sharedDateRange\}/g) || []).length, 2)
+  assert.equal((hub.match(/onDateRangeChange=\{setSharedDateRange\}/g) || []).length, 2)
 })
 
 test('actual movement export fetches changed hours with identical dates instead of exporting stale visible groups', async () => {

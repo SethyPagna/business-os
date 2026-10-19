@@ -654,9 +654,7 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   promotions:       'promotions',
   pos:              'pos',
   products:         'products',
-  // inventory page row removed (E1): the PAGE id retired into the Branches
-  // hub; the 'inventory' permission key lives on and gates the hub's
-  // stats/products/movements/rfid chips inside BranchesHubPage.
+  inventory:        'inventory',
   branches:         'branches',  // Split from 'inventory' -- own key now, see navigationConfig.ts's note
   sales:            'sales',
   contacts:         'contacts',  // Requires explicit contacts permission
@@ -2542,9 +2540,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
     if (pageId === 'sales' && (can('returns', 'view') || can('fees', 'view'))) return true
-    // E1: inventory retired as a standalone page into the Branches hub --
-    // an inventory-only grant still opens the Branches page, whose chips
-    // self-gate ('branches' for the branch list, 'inventory' for the rest).
+    // Legacy RFID and saved Inventory transfers still live under Branches.
     if (pageId === 'branches' && can('inventory', 'view')) return true
     // 'settings' page (alongside routes/settings.ts's per-field
     // business_identity/sales_policy gating): a user granted only one of the
@@ -2623,6 +2619,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const pageRef = useRef(page)
   pageRef.current = page
   const navigateTo = useCallback((pageId: string, anchor?: string) => {
+    if (pageId === 'branches' && anchor?.replace(/^#/, '') === 'hub:branches:products') {
+      pageId = 'inventory'
+      anchor = 'hub:inventory:products'
+    }
     if (!canAccessPage(pageId)) return
     pendingTraversalRef.current = null
     const currentHash = typeof window === 'undefined' ? '' : window.location.hash
@@ -2695,11 +2695,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (typeof window === 'undefined') return
     const onPopState = () => {
       const targetUrl = new URL(window.location.href)
+      if (getHubPageFromLocation(targetUrl.pathname, targetUrl.hash) === 'branches' && targetUrl.hash === '#hub:branches:products') {
+        targetUrl.pathname = getAdminPathForPage('inventory')
+        targetUrl.hash = '#hub:inventory:products'
+      }
       const target = getHubPageFromLocation(targetUrl.pathname, targetUrl.hash) || resolveAdminLandingPage(settingsRef.current.default_landing_page)
       const previous = committedLocationRef.current
       // Fold/modal history uses the same URL. It must never change the host section.
       const pending = pendingTraversalRef.current
-      if (previous?.href === targetUrl.href) {
+      if (previous?.href === window.location.href) {
         if (pending && !pending.resumed) {
           pending.restored = true
           resumeHistoryNavigation()
@@ -2728,6 +2732,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         }
         return
       }
+      if (window.location.href !== targetUrl.href) window.history.replaceState(window.history.state, '', targetUrl.href)
       committedLocationRef.current = { href: targetUrl.href, state: window.history.state }
       window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
         detail: { page: target, path: targetUrl.pathname, anchor: targetUrl.hash.slice(1) || null },

@@ -169,6 +169,7 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   loyalty_points: Ticket,
   pos: ShoppingCart,
   products: Package,
+  inventory: ClipboardList,
   branches: Building2,
   sales: BadgeDollarSign,
   contacts: BookUser,

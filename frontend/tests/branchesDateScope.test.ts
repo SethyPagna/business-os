@@ -15,19 +15,10 @@ test('Branches exposes one compact standalone date range and one Export action',
   assert.match(source, /actions=\{branchExportButton\}/)
 })
 
-// N10 reverses the earlier contract this test used to pin. Products showed
-// per-product Net sold / Revenue / COGS / Profit that the Worker already
-// scopes by startDate/endDate, so leaving the tab rangeless did not mean "no
-// dated statistics" -- it meant those columns silently answered all-time
-// while Overview and Transfers answered the picked window. All three data
-// tabs now run off the hub's one clock.
-test('the hub owns ONE range for Overview, Products and Transfers', () => {
+test('the hub owns one range for Overview and Transfers after Inventory moves out', () => {
   assert.match(hubSource, /const \[sharedDateRange, setSharedDateRange\] = useState<DateTimeRange>/)
-  assert.match(hubSource, /active === 'products'[\s\S]{0,300}<InventorySection[\s\S]{0,120}hostSection="products"/)
-  const productsMount = hubSource.match(/active === 'products'[\s\S]*?<InventorySection([\s\S]*?)\/>/)?.[1] || ''
-  assert.match(productsMount, /dateRange=\{sharedDateRange\}/)
-  assert.match(productsMount, /onDateRangeChange=\{setSharedDateRange\}/)
-  assert.doesNotMatch(hubSource, /Products uses\s*\n?\s*\/\/ branch\/search scope/, 'the stale rangeless-Products comment is gone')
+  assert.doesNotMatch(hubSource, /hostSection="products"/)
+  assert.equal((hubSource.match(/dateRange=\{sharedDateRange\}/g) || []).length, 2)
   assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange/)
   assert.match(hubSource, /view="transfers"[\s\S]{0,180}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
   assert.match(inventorySource, /const stripRange = dateRange \?\? localStripRange/)
@@ -60,13 +51,13 @@ test('Branches overview stock cards no longer print a SKU line', () => {
   assert.match(source, /SKU: product\.sku \|\| ''/)
 })
 
-test('Branches keeps branch Overview, product stock and Transfer history separate', () => {
-  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'products' \| 'transfers' \| 'rfid'/)
+test('Branches retains Overview, Transfer history and RFID without duplicate Inventory products', () => {
+  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'transfers' \| 'rfid'/)
   assert.match(hubSource, /id: 'overview'.*'Overview'/)
-  assert.match(hubSource, /id: 'products'.*'Products'/)
+  assert.doesNotMatch(hubSource, /id: 'products'/)
   assert.match(hubSource, /id: 'transfers'.*trh\('transfer', 'Transfer'\)/)
-  assert.match(hubSource, /active === 'products'[\s\S]*hostSection="products"/)
-  assert.doesNotMatch(hubSource, /active === 'products'[\s\S]{0,500}view="branches"/)
+  assert.doesNotMatch(hubSource, /hostSection="products"/)
+  assert.match(hubSource, /navigateTo\('inventory', hubAnchor\('inventory', 'products'\)\)/)
   assert.doesNotMatch(hubSource, /hostSection="movements"/)
   assert.match(hubSource, /focus === 'movements'\) navigateTo\('products'\)/)
   assert.ok((hubSource.match(/showSectionNavigation=\{false\}/g) || []).length >= 2)

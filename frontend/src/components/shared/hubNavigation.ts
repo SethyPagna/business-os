@@ -19,9 +19,12 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
   const act = (key: string, action: string) => access.can ? access.can(key, action) : false
   const rows: Array<[string, string, string, boolean]> = page === 'branches' ? [
     ['overview', 'overview', 'Overview', can('branches')],
-    ['products', 'products', 'Products', can('inventory')],
     ['transfers', 'transfer', 'Transfer', can('branches')],
     ['rfid', 'rfid', 'RFID', can('inventory')],
+  ] : page === 'inventory' ? [
+    ['products', 'products', 'Products', can('inventory')],
+    ['sessions', 'inventory_check_sessions', 'Sessions', can('inventory')],
+    ['issues', 'issues', 'Issues', can('inventory')],
   ] : page === 'sales' ? [
     ['sales', 'sales', 'Sales', can('sales')],
     ['returns', 'returns', 'Returns', can('returns')],
@@ -68,7 +71,7 @@ export const hubAnchor = (page: string, section: string): string => `hub:${page}
 export function getHubPageFromLocation(pathname: string, hash: string): string {
   const page = getAdminPageFromPath(pathname)
   if (page) return page
-  return pathname === '/' ? (hash.match(/^#hub:(branches|sales|contacts|promotions|settings|review):/)?.[1] || '') : ''
+  return pathname === '/' ? (hash.match(/^#hub:(branches|inventory|sales|contacts|promotions|settings|review):/)?.[1] || '') : ''
 }
 
 /** The root landing page has no route identity until its visible host publishes
@@ -84,7 +87,7 @@ export function sealRootHubSection(page: string, section: string, activePage: st
 }
 
 const LEGACY_SECTION_PATHS: Record<string, string> = {
-  '/returns': 'returns', '/fees': 'fees', '/inventory': 'products',
+  '/returns': 'returns', '/fees': 'fees',
   '/users': 'users', '/backup': 'backup', '/backups': 'backup',
   '/audit': 'audit', '/audit-log': 'audit', '/delivery-contacts': 'delivery',
   '/loyalty': 'loyalty', '/loyalty-points': 'loyalty',

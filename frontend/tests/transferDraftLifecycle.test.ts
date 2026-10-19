@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { transformSync } from 'esbuild'
 
 const memory = new Map<string, string>()
 const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) }, removeItem: (key: string) => { memory.delete(key) } }
@@ -16,7 +17,7 @@ for (const kind of ['branch_transfer', 'inventory_transfer'] as const) {
   assert.deepEqual(draft.readTransferDraft(kind, 7), form, 'minimize/navigation/reload read the serialized fields')
   const entry = draft.getMinimizedWork().find((item) => item.key === key)!
   assert.equal(entry.pageId, 'branches')
-  assert.equal(entry.anchor, kind === 'branch_transfer' ? 'hub:branches:transfers' : 'hub:branches:products')
+  assert.equal(entry.anchor, kind === 'branch_transfer' ? 'hub:branches:transfers' : 'hub:branches:rfid')
   assert.equal(draft.canRestoreMinimizedWork(entry, () => false), false, 'permission revocation blocks restore')
   assert.equal(draft.canRestoreMinimizedWork(entry, (permission, action) => permission === (kind === 'branch_transfer' ? 'branches' : 'inventory') && action === 'transfer'), true)
   signIn(8)
@@ -53,6 +54,61 @@ for (const kind of ['branch_transfer', 'inventory_transfer'] as const) {
 const branch = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const inventory = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const modal = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
+const workDrafts = await import('../src/utils/workDrafts.ts')
+signIn(7)
+const legacyKey = draft.transferDraftKey('inventory_transfer')
+const legacyForm = { product: { id: 41, name: 'Tea' }, form: { fromBranchId: '1', toBranchId: '2', quantity: '3', reason: 'restock' } }
+assert.equal(draft.writeTransferDraft('inventory_transfer', 7, legacyKey, legacyForm), true)
+const legacyEntry = { key: legacyKey, draftKey: legacyKey, kind: 'inventory_transfer' as const, pageId: 'branches', anchor: 'hub:branches:products', label: 'Transfer tea', payload: { actorId: '7', savedMetadata: 'preserve' }, minimizedAt: 123, requiredPermission: { permissionKey: 'inventory', actionKey: 'transfer' } }
+workDrafts.writeWorkDraft(workDrafts.scopedWorkDraftKey('minimized_work'), [legacyEntry])
+signIn(8)
+draft.getMinimizedWork()
+signIn(7)
+const restoredEntry = draft.getMinimizedWork().find(entry => entry.key === legacyKey)!
+assert.deepEqual(restoredEntry, { ...legacyEntry, ...draft.INVENTORY_TRANSFER_RESTORE_HOST }, 'old saved chips change only their retired destination, preserving metadata and grants')
+assert.equal(draft.canRestoreMinimizedWork(restoredEntry, (key, action) => key === 'inventory' && action === 'transfer'), true)
+assert.equal(draft.canRestoreMinimizedWork(restoredEntry, () => false), false)
+draft.dispatchRestore(restoredEntry)
+assert.equal(draft.peekPendingRestore('inventory_transfer')?.anchor, 'hub:branches:rfid', 'the lazy RFID Inventory host can still claim the transfer')
+const actual = (start: string, end: string, name: string, env: Record<string, unknown>) => {
+  const begin = inventory.indexOf(start), stop = inventory.indexOf(end, begin)
+  assert.ok(begin >= 0 && stop > begin)
+  const code = transformSync(inventory.slice(begin, stop), { loader: 'tsx' }).code
+  return new Function('env', `with(env){${code};return ${name}}`)(env)
+}
+let restoredProduct: unknown, restoredForm: unknown
+const ownerRef = { current: { key: legacyKey, actorId: '7' } }
+const snapshotRef = { current: legacyForm as unknown }
+const restore = actual('  const restoreInventoryTransfer = useCallback(', '\n  useEffect(', 'restoreInventoryTransfer', {
+  useCallback: (fn: unknown) => fn, user: { id: 7 }, canTransferStock: true,
+  transferDraftKey: draft.transferDraftKey, readTransferDraft: draft.readTransferDraft,
+  reparkDeniedRestore: draft.reparkDeniedRestore,
+  getInventoryApi: () => ({ getProductsByIds: async (ids: unknown, options: unknown) => {
+    assert.deepEqual(ids, [41]); assert.deepEqual(options, { include: 'branch_stock' })
+    return { items: [{ id: 41, name: 'Tea', branch_stock: [{ branch_id: 1, quantity: 9 }] }] }
+  } }),
+  transferAuthorityRef: { current: { actorId: '7', allowed: true } }, transferDraftOwnerRef: ownerRef,
+  setTransferRestoredDirty: (value: boolean) => assert.equal(value, true),
+  setTransferForm: (value: unknown) => { restoredForm = value }, setTransferModal: (value: unknown) => { restoredProduct = value },
+  tr: (_key: string, fallback: string) => fallback, notify: (message: string) => assert.fail(message),
+})
+await restore(draft.peekPendingRestore('inventory_transfer'))
+assert.deepEqual(restoredForm, legacyForm.form, 'the actual Inventory restore handler keeps saved fields')
+assert.equal((restoredProduct as { id: number }).id, 41)
+assert.match(modal, /if \(transferModal\) markRestoreHandled\('inventory_transfer'\)/)
+draft.markRestoreHandled('inventory_transfer')
+assert.equal(draft.peekPendingRestore('inventory_transfer'), null)
+const close = actual('  const closeTransferDraft = () =>', '\n  const minimizeTransferDraft', 'closeTransferDraft', {
+  transferStockInFlightRef: { current: false }, transferSaving: false, pendingTransfer: null,
+  discardTransferDraft: draft.discardTransferDraft, user: { id: 7 }, transferDraftOwnerRef: ownerRef,
+  transferDraftSnapshotRef: snapshotRef, parkCurrentTransfer: () => assert.fail('a resolved close must discard only its draft'),
+  setTransferModal: (value: unknown) => { restoredProduct = value },
+})
+close()
+assert.equal(restoredProduct, null)
+assert.equal(draft.readTransferDraft('inventory_transfer', 7), null)
+assert.equal(draft.getMinimizedWork().some(entry => entry.key === legacyKey), false, 'closing the restored dialog leaves no stranded chip')
+assert.equal(snapshotRef.current, null)
 assert.match(branch, /previousSourceRef.current === fromBranch/, 'mount-time availability refresh preserves restored picks')
 assert.doesNotMatch(branch, /setMultiProducts\(\[\]\)\s*setSelectedQuantities\(\{\}\)\s*setLoadingMultiProducts\(true\)/)
 assert.match(branch, /onClick=\{\(\) => \{ if \(!saving && !savingBulk\) closeGuard.requestClose\(\)/, 'backdrop follows the busy-aware close guard')
@@ -64,4 +120,4 @@ assert.match(modal, /useCloseGuard\(transferWorkKey \? \{ workKey: transferWorkK
 assert.match(branch, /useCloseGuard\(\{ workKey: draftKey \}/)
 assert.match(branch, /registerDirtyWork\(/)
 assert.match(inventory, /registerDirtyWork\(/)
-console.log('PASS transfer draft minimize/navigation/reload, actor/permission, pending/discard, availability and close lifecycle')
+console.log('PASS transfer draft minimize/navigation/reload, actor/permission, pending/discard, availability and close lifecycle; legacy RFID-host restoration preserves metadata and executes actual restore/close handlers')

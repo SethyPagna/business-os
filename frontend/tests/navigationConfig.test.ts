@@ -94,7 +94,7 @@ await runTest('inline groups expand without navigation; legacy and standalone ac
 await runTest('destinations retain section permission gates and never expose unsupported ids', () => {
   const restricted = (tiers: Record<string, string>, grants: string[] = []) => ({ getPermissionTier: (key: string) => tiers[key] || 'none', hasPermission: (key: string) => grants.includes(key) })
   const ids = (page: string, tiers: Record<string, string>, grants: string[] = []) => getHubDestinations(page, restricted(tiers, grants)).map((item) => item.id)
-  assert.deepEqual(ids('branches', { inventory: 'view' }), ['products', 'rfid'])
+  assert.deepEqual(ids('branches', { inventory: 'view' }), ['rfid'])
   assert.deepEqual(ids('sales', { returns: 'review' }), ['returns', 'reports'])
   assert.deepEqual(ids('settings', { business_identity: 'full', users: 'full' }), ['settings'])
   assert.deepEqual(ids('settings', { backup: 'view' }, ['all']), ['users', 'backup'])
@@ -107,7 +107,7 @@ await runTest('destinations retain section permission gates and never expose uns
   // Owner, 6 Oct 2026: a product discount is a price change, so the Discounts tile needs Edit product and the price
   // action; a caller that cannot answer for actions is not offered it (asserted with real actions below).
   assert.deepEqual(ids('promotions', { products: 'review' }), [])
-  assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
+  assert.deepEqual(ids('inventory', { inventory: 'full' }), ['products', 'sessions', 'issues'])
 
   // Products' four sections are the compact navigation's only route into
   // them (N7). Three are gated on a per-ACTION grant inside the page (Stock
@@ -145,7 +145,7 @@ await runTest('destinations retain section permission gates and never expose uns
 
 await runTest('section URLs round-trip, reject hidden/foreign ids, preserve old links and unrelated anchors', () => {
   const access = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
-  for (const page of ['branches', 'sales', 'settings', 'contacts', 'promotions', 'review', 'products']) {
+  for (const page of ['branches', 'inventory', 'sales', 'settings', 'contacts', 'promotions', 'review', 'products']) {
     const sections = getHubDestinations(page, access)
     const ids = sections.map((section) => section.id)
     for (const section of sections) assert.equal(resolveHubSection(page, `/${page}`, `#${hubAnchor(page, section.id)}`, ids, ids[0]), section.id)

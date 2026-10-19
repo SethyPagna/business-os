@@ -6,6 +6,8 @@ import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Bike from 'lucide-react/dist/esm/icons/bike.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Factory from 'lucide-react/dist/esm/icons/factory.js'
 import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
@@ -26,7 +28,9 @@ import { ConflictIcon } from '../shared/ConflictIcon.ts'
 
 const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'branches:overview': Gauge,
-  'branches:products': PackageSearch,
+  'inventory:products': PackageSearch,
+  'inventory:sessions': ClipboardList,
+  'inventory:issues': AlertCircle,
   'branches:transfers': ArrowLeftRight,
   'branches:rfid': RadioTower,
   'sales:sales': ReceiptText,
