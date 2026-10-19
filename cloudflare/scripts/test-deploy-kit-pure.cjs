@@ -380,6 +380,14 @@ check('migration list parsing, first comment and touched tables', () => {
   const out = 'Migrations to be applied:\n│ 0195_example_one.sql │\n│ 0196_example-two.sql │\n'
   assert.deepStrictEqual(lib.parseMigrationNames(out), ['0195_example_one.sql', '0196_example-two.sql'])
   assert.deepStrictEqual(lib.parseMigrationNames('✅ No migrations to apply!'), [])
+  assert.deepStrictEqual(lib.parseMigrationNames('\u001b[32m✅ No migrations to apply!\u001b[0m\r\n'), [])
+  assert.deepStrictEqual(lib.parseMigrationNames('Migrations to be applied:\n┌──────────────────────┐\n│ Name                 │\n├──────────────────────┤\n│ 0259_inventory.sql   │\n└──────────────────────┘'), ['0259_inventory.sql'])
+  for (const invalid of ['', 'unknown response', 'No migrations to apply', 'Migrations to be applied:',
+    'ERROR: unreadable\n✅ No migrations to apply!', '✅ No migrations to apply!\n✅ No migrations to apply!',
+    'Migrations to be applied:\n│ 0259_inventory.sql │\n│ 0259_inventory.sql │']) assert.throws(() => lib.parseMigrationNames(invalid))
+  const requireUnknownRefusal = parser => assert.throws(() => parser('unknown response'))
+  requireUnknownRefusal(lib.parseMigrationNames)
+  assert.throws(() => requireUnknownRefusal(() => []), /Missing expected exception/)
   assert.strictEqual(lib.firstCommentLine('\n-- -----\n-- Adds the thing.\nCREATE TABLE x (a);'), 'Adds the thing.')
   const t = lib.tablesTouched('ALTER TABLE products ADD COLUMN x;\nUPDATE sales SET a=1;\n-- DELETE FROM customers\nINSERT OR IGNORE INTO settings VALUES (1);')
   assert.deepStrictEqual([...t].sort(), ['products', 'sales', 'settings'])
@@ -545,16 +553,18 @@ async function runGuardMigrationProbe(options = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-guard-stage-'))
   const cf = path.join(tmp, 'cloudflare')
   fs.mkdirSync(path.join(cf, 'migrations'), { recursive: true })
+  fs.mkdirSync(path.join(cf, 'migrations-import'))
+  fs.writeFileSync(path.join(cf, 'migrations-import', '0001_import_staging.sql'), '-- fixture\n')
   fs.mkdirSync(path.join(cf, 'node_modules', 'wrangler'), { recursive: true })
   fs.writeFileSync(path.join(cf, 'wrangler.toml'), options.config || read('cloudflare', 'wrangler.toml'))
   fs.writeFileSync(path.join(cf, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/wrangler': { version: '4.116.0' } } }))
   fs.writeFileSync(path.join(cf, 'node_modules', 'wrangler', 'package.json'), '{"version":"4.116.0"}')
   for (const file of guardFiles) fs.writeFileSync(path.join(cf, 'migrations', file.name), file.bytes)
-  const later = ['0251_loyalty_reset.sql', '0255_product_review.sql', '0256_validated_cost.sql', '0257_confirmation.sql']
+  const later = ['0251_loyalty_reset.sql', '0255_product_review.sql', '0256_validated_cost.sql', '0257_confirmation.sql', '0259_inventory_check_sessions.sql']
   for (const name of later) fs.writeFileSync(path.join(cf, 'migrations', name), '-- fixture pending lower-numbered file\n')
   const calls = []
   let installed = false
-  const before = options.before || guardState([])
+  const before = options.allApplied ? guardState([...guardFiles.map(file => file.name), ...later]) : options.before || guardState([])
   const ctx = { sha: SHA, args: { noApply: !!options.noApply }, ci: true, dryRun: false,
     releaseDir: tmp, recordDir: tmp, state: {} }
   try {
@@ -564,8 +574,14 @@ async function runGuardMigrationProbe(options = {}) {
       runSpec: async (spec, _ctx, approval) => {
         lib.assertApproved(spec, approval)
         calls.push(spec.id)
-        if (spec.id === 'migrations-list:business-os') return { code: 0, out: [...guardFiles.map(file => file.name), ...later].filter(name => !before.applied.includes(name)).join('\n') }
-        if (spec.id === 'migrations-list:business-os-import') return { code: 0, out: 'No migrations to apply' }
+        if (spec.id === 'migrations-list:business-os') {
+          const remaining = [...guardFiles.map(file => file.name), ...later].filter(name => !before.applied.includes(name))
+          return { code: 0, out: remaining.length ? 'Migrations to be applied:\n' + remaining.map(name => `│ ${name} │`).join('\n') : '✅ No migrations to apply!' }
+        }
+        if (spec.id === 'import-migration-ledger') {
+          assert.deepEqual(spec.args, ['d1', 'execute', 'business-os-import', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'])
+          return options.importResult || { code: 0, out: JSON.stringify([{ success: true, results: [{ name: '0001_import_staging.sql' }], meta: { rows_written: 0, changes: 0, changed_db: false } }]) }
+        }
         if (spec.id === 'stock-guard-state') return { code: 0, out: JSON.stringify([{ success: true, results: [{ guard_state: JSON.stringify(installed ? (options.after || guardState()) : before) }] }]) }
         if (spec.id === 'stock-guard-stage') {
           const configFile = spec.args[spec.args.indexOf('--config') + 1]
@@ -590,19 +606,82 @@ async function runGuardMigrationProbe(options = {}) {
         }
         throw Error(`Unexpected migration command ${spec.id}`)
       },
-    }, () => COMMANDS.migrations(ctx))
+    }, () => (options.command || COMMANDS.migrations)(ctx))
     assert.deepEqual(fs.readdirSync(cf).filter(name => name.startsWith('.guard-stage-')), [], 'temporary config and files removed')
     return { ...result, calls }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
 }
 
+function assertImportRefused(result) {
+  assert.equal(result.result, false, result.text)
+  assert.ok(!result.calls.includes('stock-guard-stage'), 'import admission precedes every fence')
+  assert.ok(!result.calls.some(id => id.startsWith('migrations-apply:')), 'no database may be applied')
+  assert.ok(!result.calls.includes('migrations-list:business-os-import'), 'import ledger must never be initialized by migrations list')
+  assert.ok(!result.calls.includes('migrations-list:business-os'), 'import admission precedes main ledger initialization')
+}
+
 ;(async () => {
+  await checkAsync('unexpected or unreadable import migrations refuse before any guard or migration write', async () => {
+    for (const importResult of [
+      { code: 0, out: JSON.stringify([{ success: true, results: [], meta: { rows_written: 0, changes: 0, changed_db: false } }]) },
+      { code: 0, out: '' },
+      { code: 0, out: 'unrecognized response' },
+      { code: 1, out: 'no such table: d1_migrations' },
+      ...[undefined, null, [], {}, { rows_written: 0, changes: 0 },
+        { rows_written: false, changes: 0, changed_db: false },
+        { rows_written: '0', changes: 0, changed_db: false },
+        { rows_written: 0, changes: '0', changed_db: false },
+        { rows_written: 0, changes: 0, changed_db: 'true' },
+        { rows_written: 0, changes: 0, changed_db: true },
+      ].map(meta => ({ code: 0, out: JSON.stringify([{ success: true, results: [{ name: '0001_import_staging.sql' }], meta }]) })),
+      ...[
+        [{ success: false, results: [{ name: '0001_import_staging.sql' }] }],
+        [{ success: true, results: [{ name: '0001_import_staging.sql' }, { name: '0001_import_staging.sql' }] }],
+        [{ success: true, results: [{ name: '0001_import_staging.sql' }, { name: '0002_unapproved.sql' }] }],
+        [{ success: true, results: [{ name: null }] }],
+        [{ success: true, results: [{ name: 'unknown' }] }],
+        [{ success: true, results: [{ name: '0001_import_staging.sql' }], meta: { rows_written: 1 } }],
+        [{ success: true, results: [{ name: '0001_import_staging.sql' }] }, { success: true, results: [] }],
+      ].map(json => ({ code: 0, out: JSON.stringify(json.map(set => ({ meta: { rows_written: 0, changes: 0, changed_db: false }, ...set }))) })),
+    ]) {
+      const result = await runGuardMigrationProbe({ importResult })
+      assertImportRefused(result)
+    }
+  })
+  await checkAsync('import admission controls reject a check after guards and an unreadable-ledger-as-applied parser', async () => {
+    const filename = path.join(KIT, 'release.cjs')
+    const source = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+    const early = 'const applied = lib.validateImportMigrationLedger(result.json, candidate)'
+    assert.equal(source.split(early).length, 2)
+    const anchor = '  for (const db of lib.DATABASES) {\n    if (pending[db.name]'
+    assert.equal(source.split(anchor).length, 2)
+    const late = source.replace(early, 'const applied = candidate; ctx.deferredImportCheck = () => lib.validateImportMigrationLedger(result.json, candidate)')
+      .replace(anchor, '  try { ctx.deferredImportCheck() } catch { return false }\n' + anchor)
+    const Module = require('module')
+    const mutant = new Module(filename, module)
+    mutant.filename = filename
+    mutant.paths = Module._nodeModulePaths(KIT)
+    mutant._compile(late, filename)
+    const result = await runGuardMigrationProbe({ command: mutant.exports.COMMANDS.migrations,
+      importResult: { code: 0, out: JSON.stringify([{ success: true, results: [], meta: { rows_written: 0, changes: 0, changed_db: false } }]) } })
+    assert.throws(() => assertImportRefused(result), /precedes every fence/)
+    const original = lib.validateImportMigrationLedger
+    try {
+      lib.validateImportMigrationLedger = (_json, candidate) => candidate
+      const loose = await runGuardMigrationProbe({ importResult: { code: 0, out: 'unknown response' } })
+      assert.throws(() => assertImportRefused(loose))
+    } finally { lib.validateImportMigrationLedger = original }
+  })
   await checkAsync('guard stage verifies both guards before ordinary lower-numbered pending migrations, including partial0243 resume', async () => {
     for (const before of [guardState([]), guardState([guardFiles[0].name]), guardState()]) {
       const result = await runGuardMigrationProbe({ before })
       assert.equal(result.result, true, result.text)
       assert.equal(result.calls.filter(id => id === 'stock-guard-stage').length, 1)
       assert.equal(result.calls.filter(id => id === 'migrations-apply:business-os').length, 1)
+      assert.equal(result.calls.filter(id => id === 'import-migration-ledger').length, 1)
+      assert.ok(result.calls.indexOf('import-migration-ledger') < result.calls.indexOf('migrations-list:business-os'))
+      assert.ok(!result.calls.includes('migrations-list:business-os-import'))
+      assert.ok(!result.calls.includes('migrations-apply:business-os-import'))
     }
   })
   await checkAsync('guard stage failures and ambiguous verification never fall through to normal apply', async () => {
@@ -615,6 +694,14 @@ async function runGuardMigrationProbe(options = {}) {
   await checkAsync('NoApply reads safe guard state without staging or applying any migration', async () => {
     const result = await runGuardMigrationProbe({ noApply: true })
     assert.equal(result.result, true, result.text)
+    assert.ok(result.calls.includes('stock-guard-state'))
+    assert.ok(!result.calls.includes('stock-guard-stage'))
+    assert.ok(!result.calls.some(id => id.startsWith('migrations-apply:')))
+  })
+  await checkAsync('fully applied main and exact import ledgers resume without any migration writes', async () => {
+    const result = await runGuardMigrationProbe({ allApplied: true })
+    assert.equal(result.result, true, result.text)
+    assert.ok(result.calls.includes('import-migration-ledger'))
     assert.ok(result.calls.includes('stock-guard-state'))
     assert.ok(!result.calls.includes('stock-guard-stage'))
     assert.ok(!result.calls.some(id => id.startsWith('migrations-apply:')))
