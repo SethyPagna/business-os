@@ -17,6 +17,7 @@ export type InventoryCheckProductsOptions = {
   rankingLimit?: number
   customerRanking?: 'sale_count'
   productIds?: readonly number[]
+  observationFilter?: { organizationId: number | null; viewerId: number; sessionId?: string; state?: 'unstarted' | 'done' | 'issue'; reason?: string }
 }
 
 export class InventoryCheckProductsLimitError extends Error {
@@ -35,7 +36,23 @@ const integer = (value: string | undefined, fallback: number, maximum: number, k
   return Number(value)
 }
 
-function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[]) {
+function observationWhere(filter: NonNullable<InventoryCheckProductsOptions['observationFilter']>, params: Record<string, unknown>) {
+  if (filter.organizationId !== null && (!Number.isSafeInteger(filter.organizationId) || filter.organizationId <= 0)) invalid('organizationId')
+  if (!Number.isSafeInteger(filter.viewerId) || filter.viewerId <= 0) invalid('viewerId')
+  if (filter.sessionId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(filter.sessionId)) invalid('sessionId')
+  if (filter.state && !['unstarted', 'done', 'issue'].includes(filter.state)) invalid('state')
+  if (['unstarted', 'done'].includes(filter.state || '') && !filter.sessionId) invalid('sessionId')
+  if (filter.reason && (filter.reason.length > 500 || filter.state && filter.state !== 'issue')) invalid('reason')
+  Object.assign(params, { observationOrganization: filter.organizationId, observationSession: filter.sessionId ?? null,
+    observationState: filter.state ?? null, observationReason: filter.reason?.normalize('NFC').toLowerCase() || null, observationViewer: filter.viewerId })
+  return `s.organization_id IS @observationOrganization AND i.branch_id=s.branch_id
+    AND (@branchId IS NULL OR i.branch_id=@branchId)
+    AND (@observationSession IS NULL OR s.id=@observationSession)
+    AND (@observationState IS NULL OR i.state=@observationState)
+    AND (@observationReason IS NULL OR i.state='issue' AND instr(lower(i.reason),@observationReason)>0)`
+}
+
+function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[], observationFilter?: InventoryCheckProductsOptions['observationFilter']) {
   if (productIds !== undefined && (!Array.isArray(productIds) || productIds.length > 500 || productIds.some(id => !Number.isSafeInteger(id) || id <= 0))) invalid('productIds')
   const query = validateInventoryCheckQuery(rawQuery, access)
   const page = integer(query.page, 1, 100000, 'page')
@@ -44,6 +61,11 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   const stock = buildInventoryCheckStockQuery({ branchId, productIds })
   const params: Record<string, unknown> = { ...stock.params, branchId: branchId ?? null }
   const conditions = ['1=1']
+  if (observationFilter) {
+    const where = observationWhere(observationFilter, params)
+    if (observationFilter.sessionId || observationFilter.state || observationFilter.reason) conditions.push(`EXISTS (
+      SELECT 1 FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id WHERE i.product_id=p.id AND ${where})`)
+  }
   if (productIds !== undefined) { params.admittedIds = JSON.stringify([...new Set(productIds)]); conditions.push('p.id IN (SELECT value FROM json_each(@admittedIds))') }
   const saleClauses: string[] = []
   let receivedFrom = query.startDate || '', receivedTo = query.endDate || ''
@@ -145,7 +167,7 @@ export async function readInventoryCheckProductMembership(db: Pick<D1Compat, 'ba
 
 export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, user: PermissionUser, rawQuery: Record<string, unknown>, options: InventoryCheckProductsOptions) {
   const access = getInventoryCheckAccess(user)
-  const plan = population(rawQuery, access, options.lowStock, options.productIds)
+  const plan = population(rawQuery, access, options.lowStock, options.productIds, options.observationFilter)
   const limit = options.rankingLimit ?? 0
   if (!Number.isSafeInteger(limit) || limit < 0 || limit > 50) invalid('rankingLimit')
   if (options.customerRanking && options.customerRanking !== 'sale_count') invalid('customerRanking')
@@ -176,6 +198,12 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   const productRanking = limit && access.fields.sales ? `(SELECT json_group_array(json(item)) FROM (SELECT json_object('family_key',family_key,'name',name,'qty_sold',qty_sold) AS item FROM family_metrics ORDER BY qty_sold DESC,family_key ASC LIMIT @rankingLimit))` : "'[]'"
   const customerRanking = limit && options.customerRanking ? `(SELECT json_group_array(json(item)) FROM (SELECT json_object('customer_id',buyer.customer_id,'name',COALESCE(customer.name,''),'sale_count',COUNT(DISTINCT buyer.sale_id)) AS item
     FROM buyers buyer LEFT JOIN customers customer ON customer.id=buyer.customer_id GROUP BY buyer.customer_id ORDER BY COUNT(DISTINCT buyer.sale_id) DESC,buyer.customer_id ASC LIMIT @rankingLimit))` : "'[]'"
+  const facets = (field: 'brand' | 'category') => access.fields[field] ? `(SELECT json_group_array(value) FROM (SELECT DISTINCT trim(choice.value) AS value
+    FROM cohort c,json_each(replace(json_array(COALESCE(c.${field},'')||'||'||COALESCE(c.${field === 'brand' ? 'brands' : 'categories'},'')),'||','","')) choice
+    WHERE trim(choice.value)<>'' ORDER BY value COLLATE NOCASE,value LIMIT 201))` : "'[]'"
+  const reasonFacets = options.observationFilter ? `(SELECT json_group_array(reason) FROM (SELECT DISTINCT i.reason FROM cohort c
+    JOIN inventory_check_items i ON i.product_id=c.id JOIN inventory_check_sessions s ON s.id=i.session_id
+    WHERE i.state='issue' AND ${observationWhere(options.observationFilter, plan.params)} ORDER BY i.reason COLLATE NOCASE,i.reason LIMIT 201))` : "'[]'"
   const summarySql = `WITH ${ctes} SELECT
     (SELECT COUNT(*) FROM cohort) AS total_variants,
     (SELECT CASE WHEN COUNT(__quantity)=COUNT(*) THEN COALESCE(SUM(__quantity),0) END FROM cohort) AS stock_quantity,
@@ -188,7 +216,8 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
     COALESCE(SUM(qty_sold),0) AS qty_sold,(SELECT COUNT(DISTINCT customer_id) FROM buyers) AS unique_customer_count,
     (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branches,
     (SELECT COUNT(*) FROM branches WHERE id=@branchId AND is_active=1) AS selected_branch_exists,
-    ${productRanking} AS product_ranking,${customerRanking} AS customer_ranking FROM family_metrics`
+    ${productRanking} AS product_ranking,${customerRanking} AS customer_ranking,
+    ${facets('brand')} AS brand_facets,${facets('category')} AS category_facets,${reasonFacets} AS reason_facets FROM family_metrics`
   let summary: Record<string, unknown> = {}
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db: { batch: async statements => {
@@ -222,7 +251,28 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   if (access.fields.stock) for (const key of ['stock_quantity', 'known_stock_quantity', 'unknown_stock', 'in_stock', 'healthy', 'low_stock', 'out_of_stock']) stats[key] = summary[key]
   if (access.fields.sales) stats.qty_sold = Number(summary.qty_sold)
   if (access.fields.customers) stats.unique_customer_count = Number(summary.unique_customer_count)
+  let issues: Array<Record<string, unknown>> | undefined
+  if (options.observationFilter) {
+    const params = { ...plan.params, issueProductIds: JSON.stringify(items.filter(item => item.checkable).map(item => item.id)) }
+    const where = observationWhere(options.observationFilter, params)
+    const result = await db.batch([{ sql: `SELECT i.product_id,i.branch_id,s.id AS session_id,s.title AS session_title,s.created_by,
+      i.reason,i.revision,i.state,CASE WHEN @showIssueCounts=1 OR s.created_by=@observationViewer THEN i.counted_quantity END AS counted_quantity,
+      CASE WHEN @showIssueCounts=1 OR s.created_by=@observationViewer THEN 1 ELSE 0 END AS __show_count
+      FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
+      WHERE i.product_id IN (SELECT value FROM json_each(@issueProductIds)) AND i.state='issue' AND ${where}
+      ORDER BY i.product_id,s.updated_at DESC,s.id LIMIT 501`, params: { ...params, showIssueCounts: Number(access.fields.stock) } }])
+    if (result[0]?.success !== true) throw new Error('Inventory issue read did not complete')
+    issues = (result[0].results || []).map(value => {
+      const row = value as Record<string, unknown>, { __show_count, counted_quantity, ...identity } = row
+      return { ...identity, ...(Number(__show_count) === 1 ? { counted_quantity } : {}) }
+    })
+    if (issues.length > 500) throw new InventoryCheckProductsLimitError()
+  }
+  const facetValues = Object.fromEntries([['brands','brand_facets'],['categories','category_facets'],['reasons','reason_facets']].map(([key, column]) => [key, JSON.parse(String(summary[column] || '[]')) as string[]]))
   return { ...paged, items, stats, branches: JSON.parse(String(summary.branches || '[]')) as Array<{ id: number; name: string }>,
+    facets: { ...(access.fields.brand ? { brands: facetValues.brands.slice(0,200) } : {}), ...(access.fields.category ? { categories: facetValues.categories.slice(0,200) } : {}), reasons: facetValues.reasons.slice(0,200) },
+    facetsLimited: Object.fromEntries(Object.entries(facetValues).map(([key, values]) => [key, values.length > 200])),
+    ...(issues ? { issues } : {}),
     ...(access.fields.stock ? { stockDiagnostics: diagnostics } : {}),
     ...(limit ? { rankings: { ...(access.fields.sales ? { products: JSON.parse(String(summary.product_ranking || '[]')) as unknown[] } : {}),
       ...(options.customerRanking ? { customers: JSON.parse(String(summary.customer_ranking || '[]')) as unknown[] } : {}) } } : {}) }
