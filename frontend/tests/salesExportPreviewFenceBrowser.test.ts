@@ -58,6 +58,12 @@ try {
     try {
       await page.goto(`http://127.0.0.1:${address.port}/sales-export-preview-fence?lang=${language}`)
       const trigger = page.getByRole('button', { name: pack.date_time_range, exact: true })
+      const previewFromDeliberateExternalFocus = async () => {
+        await page.keyboard.press('Tab')
+        assert.equal(await page.locator('[data-date-time-range-panel]').evaluate(panel => panel.contains(document.activeElement)), true, 'Tab stays in the open date picker')
+        await page.getByRole('button', { name: pack.preview_summary, exact: true }).focus()
+        await page.keyboard.press('Space')
+      }
       await trigger.waitFor({ timeout: 15000 }).catch(async error => {
         console.error('Fixture body:', await page.locator('body').innerText())
         console.error('Fixture buttons:', await page.locator('button').allTextContents())
@@ -66,9 +72,7 @@ try {
       })
       await trigger.click()
       await page.locator('[data-date-time-range-panel]').waitFor()
-      await page.keyboard.press('Tab')
-      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), pack.preview_summary)
-      await page.keyboard.press('Space')
+      await previewFromDeliberateExternalFocus()
       await page.waitForFunction(() => (window as any).__requests.length === 1)
       assert.equal(await page.locator('fieldset').evaluate(element => (element as HTMLFieldSetElement).disabled), true)
       assert.equal(await page.locator('[data-date-time-range-panel]').count(), 1)
@@ -101,7 +105,7 @@ try {
       await trigger.click()
       await page.locator('[data-date-time-range-panel]').waitFor()
       if (screenshotDir) await page.screenshot({ path: join(screenshotDir, `sales-export-preview-fence-picker-${width}-${language}.png`) })
-      await page.keyboard.press('Tab'); await page.keyboard.press('Space')
+      await previewFromDeliberateExternalFocus()
       await page.waitForFunction(() => (window as any).__requests.length === 3)
       await page.evaluate(() => (window as any).__changeActor())
       await page.waitForFunction(() => !document.body.textContent?.includes('$123'))
@@ -115,7 +119,7 @@ try {
       await page.evaluate(() => (window as any).__finish(3, 987.65))
       await page.waitForTimeout(80)
       assert.equal(await page.getByText('$987.65', { exact: true }).count(), 0)
-      console.log(`PASS trusted keyboard portal range mutation, ${language === 'en' ? 'old-first' : 'new-first'} completion, actor and unmount ${width}x800 ${language}`)
+      console.log(`PASS child Tab containment, deliberate external focus plus trusted Space, portal range mutation, ${language === 'en' ? 'old-first' : 'new-first'} completion, actor and unmount ${width}x800 ${language}`)
     } finally { await page.close() }
   }
 } finally { await browser?.close(); await server.close() }
