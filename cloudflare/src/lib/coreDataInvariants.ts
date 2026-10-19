@@ -49,6 +49,16 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
   manager: {},
   employee: {
     pos: true,
+    inventory_checks: true,
+    inventory_check_show_price: true,
+    inventory_check_show_barcode: true,
+    inventory_check_show_category: true,
+    inventory_check_show_brand: true,
+    inventory_check_show_stock: true,
+    inventory_check_show_received: true,
+    inventory_check_show_sales: true,
+    inventory_check_show_customers: true,
+    inventory_check_show_cost: false,
     // Receipt/print settings (page menu + avatar dropdown, Sep 16 2026 owner
     // request) is an operational tool for whoever actually prints receipts,
     // not an admin-only setting -- an Employee needs to change print modes

@@ -18,6 +18,7 @@ export type InventoryCheckRowsProps = {
   errors?: Readonly<Record<string, string | null | undefined>>
   canCheck: boolean
   canViewStock?: boolean
+  canViewCounts?: boolean
   canViewPrice: boolean
   canViewCost: boolean
   fmtUSD?: (amount: number) => string
@@ -33,13 +34,13 @@ function finiteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function CheckRow({ product, observation, pending, error, header, canCheck, canViewStock = true, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave }: {
+function CheckRow({ product, observation, pending, error, header, canCheck, canViewStock = true, canViewCounts = canCheck || canViewStock, canViewPrice, canViewCost, fmtUSD = formatUsd4, t, onOpenProduct, onSave }: {
   product: InventoryCheckProduct
   observation?: InventoryCheckObservation
   pending: boolean
   error?: string | null
   header: boolean
-} & Pick<InventoryCheckRowsProps, 'canCheck' | 'canViewStock' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave'>) {
+} & Pick<InventoryCheckRowsProps, 'canCheck' | 'canViewStock' | 'canViewCounts' | 'canViewPrice' | 'canViewCost' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave'>) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -76,7 +77,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
   useEffect(() => {
     if (attempt && observation && revision > attempt.revision
       && observation.state === attempt.patch.state
-      && observation.counted_quantity === (attempt.patch.counted_quantity ?? null)
+      && (!Object.hasOwn(attempt.patch, 'counted_quantity') || observation.counted_quantity === attempt.patch.counted_quantity)
       && observation.reason === (attempt.patch.reason ?? null)) {
       setDraft(null)
       setAttempt(null)
@@ -114,7 +115,7 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       setValidationError(tr('inventory_check_reason_required', 'Enter an issue reason.'))
       return
     }
-    void save({ state: 'issue', counted_quantity: count, reason }, draft.revision)
+    void save({ state: 'issue', ...(canViewCounts ? { counted_quantity: count } : {}), reason }, draft.revision)
   }
 
   const doneLabel = observation?.state === 'done' ? tr('inventory_check_clear', 'Clear check') : tr('inventory_check_mark_done', 'Mark done')
@@ -150,13 +151,15 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
     </div>
     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600 dark:text-gray-300">
       {canViewStock ? <span>{tr('inventory_check_stock', 'Stock')}: <strong className="tabular-nums">{finiteNumber(product.quantity) ? product.quantity : '—'}</strong></span> : null}
+      {canViewStock && observation && Object.hasOwn(observation, 'baseline_quantity') ? <span>{tr('inventory_check_starting_stock', 'Starting stock')}: {finiteNumber(observation.baseline_quantity) ? observation.baseline_quantity : '—'}</span> : null}
+      {canViewStock && observation?.stock_changed ? <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"><AlertCircle className="h-3 w-3" aria-hidden="true" />{tr('inventory_check_stock_changed', 'Stock changed')}</span> : null}
       {canViewStock && finiteNumber(product.damaged_quantity) && product.damaged_quantity > 0 ? <span>{tr('inventory_check_damaged', 'Damaged')}: {product.damaged_quantity}</span> : null}
       {finiteNumber(product.qty_sold) ? <span>{tr('inventory_check_sold', 'Sold')}: {product.qty_sold}</span> : null}
       {finiteNumber(product.customer_count) ? <span>{tr('inventory_check_customers', 'Customers')}: {product.customer_count}</span> : null}
       {canViewPrice ? <span>{tr('inventory_check_price', 'Price')}: {price === null ? '—' : fmtUSD(price)}</span> : null}
       {canViewCost ? <span>{tr('inventory_check_cost', 'Cost')}: {cost === null ? '—' : fmtUSD(cost)}</span> : null}
       {!header ? <span data-check-status={String(product.id)} className="font-semibold">{stateLabel}</span> : null}
-      {!header && finiteNumber(observation?.counted_quantity) ? <span>{tr('inventory_check_counted', 'Counted')}: {observation.counted_quantity}</span> : null}
+      {!header && canViewCounts && finiteNumber(observation?.counted_quantity) ? <span>{tr('inventory_check_counted', 'Counted')}: {observation.counted_quantity}</span> : null}
       {busy ? <span role="status">{tr('inventory_check_saving', 'Saving…')}</span> : null}
     </div>
     {!header && observation?.state === 'issue' && observation.reason ? <p className="mt-1 break-words text-xs text-amber-800 dark:text-amber-200">{observation.reason}</p> : null}
@@ -165,11 +168,11 @@ function CheckRow({ product, observation, pending, error, header, canCheck, canV
       {!draft && attempt && canCheck ? <button type="button" disabled={busy} className="btn-secondary inline-flex min-h-10 shrink-0 items-center gap-1 px-2 text-xs" onClick={() => { void save(attempt.patch, attempt.revision) }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_retry', 'Retry')}</button> : null}
     </div> : null}
     {draft && canCheck && !header ? <div className="mt-2 min-w-0 space-y-2 rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50" role="group" aria-label={`${issueLabel}: ${product.name}`}>
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
-        <label className="min-w-0 text-xs" htmlFor={countId}>{tr('inventory_check_count_optional', 'Counted quantity (optional)')}
+      <div className={`grid min-w-0 gap-2 ${canViewCounts ? 'grid-cols-[minmax(0,1fr)_minmax(0,2fr)]' : 'grid-cols-1'}`}>
+        {canViewCounts ? <label className="min-w-0 text-xs" htmlFor={countId}>{tr('inventory_check_count_optional', 'Counted quantity (optional)')}
           <input id={countId} type="text" inputMode="decimal" autoComplete="off" value={draft.count} disabled={busy} className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-gray-300 px-2 dark:border-gray-600 dark:bg-gray-900"
             onChange={event => setDraft({ ...draft, count: event.target.value })} />
-        </label>
+        </label> : null}
         <label className="min-w-0 text-xs" htmlFor={reasonId}>{tr('inventory_check_reason', 'Issue reason')}
           <textarea id={reasonId} rows={2} value={draft.reason} disabled={busy} className="mt-1 min-h-10 w-full min-w-0 resize-y rounded-lg border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900"
             onChange={event => setDraft({ ...draft, reason: event.target.value })} />
@@ -191,6 +194,6 @@ export default function InventoryCheckRows({ products, observations, pending = {
     {products.map(product => <CheckRow key={product.id} product={product}
       observation={String(observations[String(product.id)]?.product_id) === String(product.id) ? observations[String(product.id)] : undefined}
       pending={pending[String(product.id)] === true} error={errors[String(product.id)]}
-      header={parentsWithMembers.has(String(product.id))} {...props} />)}
+      header={parentsWithMembers.has(String(product.id))} {...props} canCheck={props.canCheck && product.checkable !== false} />)}
   </ul>
 }

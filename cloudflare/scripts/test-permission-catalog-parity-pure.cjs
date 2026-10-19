@@ -357,6 +357,12 @@ for (const [file, text] of workerText) {
 function workerChecksKey(key) {
   const call = checkedKeys.get(key)
   if (call) return `${call[0].split(' ')[0]} (check call)`
+  const inventoryAccess = workerText.get('lib/inventoryCheckAccess.ts') || ''
+  const inventoryFields = inventoryAccess.match(/INVENTORY_CHECK_FIELDS\s*=\s*\[([^\]]+)\]/)
+  if (inventoryFields && inventoryAccess.includes('permissions[`inventory_check_show_${field}`]')) {
+    const keys = [...inventoryFields[1].matchAll(/'([a-z_]+)'/g)].map(match => `inventory_check_show_${match[1]}`)
+    if (keys.includes(key)) return 'lib/inventoryCheckAccess.ts (enumerated field check)'
+  }
   const directFile = Object.keys(DIRECT_READS).find((file) => DIRECT_READS[file].keys.includes(key))
   if (directFile) return `${directFile} (direct read)`
   const table = new RegExp(`(?:'${key}'|"${key}"|\\.${key}\\b|(?:^|[\\s,{(])${key}\\s*:)`)
@@ -463,6 +469,7 @@ const VARIABLE_KEY_SITES = [
 ]
 // Files that read the merged permission map directly, with the keys they read as properties.
 const DIRECT_READS = {
+  'lib/inventoryCheckAccess.ts': { keys: [], why: 'Reads the merged map once; exact inventory_check_show_ fields are enumerated and checked by workerChecksKey, and the dedicated page key is checked through getActionTier.' },
   'lib/acquisitionCostAccess.ts': { keys: ['product_cost_view', 'product_cost_edit'], why: 'The two cost grants are separate keys read off the merged map.' },
   'lib/undoAppliers.ts': { keys: ['product_cost_edit'], why: 'A revert that restores a chosen cost needs Edit product costs.' },
   'routes/products.ts': { keys: [], why: 'Hands the merged map to restrictToImageOnlyFields (lib/productWrites.ts), which reads the products_image_only keys.' },

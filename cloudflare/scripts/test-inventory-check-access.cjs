@@ -22,6 +22,22 @@ const presets = load(path.join(root, 'frontend/src/components/users/rolePresetDe
 const user = (role = {}, own = {}, role_code = 'employee') => ({ role_code, role_permissions: JSON.stringify(role), permissions: JSON.stringify(own) })
 let checks = 0
 const check = (name, run) => { run(); checks++; console.log(`PASS ${name}`) }
+check('dedicated checks grants preserve denials and do not grant physical writes or hidden fields', () => {
+  for (const role of [{ inventory_checks: true }, { inventory_checks: false, inventory: true }, { inventory_checks: true, 'inventory_checks:view': false }, { inventory_checks: true, 'inventory_checks:check': false }, { inventory_checks: 'review' }]) {
+    const actor = user(role)
+    assert.deepEqual(worker.getInventoryCheckAccess(actor), client.getInventoryCheckAccess(actor))
+  }
+  const access = worker.getInventoryCheckAccess(user({ inventory_checks: true }))
+  assert.ok(access.canView && access.canCheck)
+  assert.ok(Object.values(access.fields).every(value => value === false))
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: false, inventory: true })).canView, false)
+  const permissions = load(path.join(root, 'cloudflare/src/lib/permissions.ts'))
+  for (const action of ['adjust', 'transfer', 'stock_count', 'import']) assert.equal(permissions.getActionTier(user({ inventory_checks: true }), 'inventory', action), 'none')
+  const projected = worker.projectInventoryCheckProduct({ id: 7, name: 'Stock evidence', checkable: false, quantity: null, damaged_quantity: 4, stock_diagnostics: 'cache_mismatch', recorded_cache_quantity: 99 }, access)
+  assert.deepEqual(projected, { id: 7, name: 'Stock evidence', checkable: false })
+  const visible = worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_stock: true }))
+  assert.deepEqual(worker.projectInventoryCheckProduct({ id: 7, quantity: null, stock_diagnostics: 'cache_mismatch' }, visible), { id: 7, quantity: null, stock_diagnostics: 'cache_mismatch' })
+})
 
 check('actual role presets and permission maps agree between Worker and client', () => {
   for (const preset of presets.ROLE_PRESETS) {

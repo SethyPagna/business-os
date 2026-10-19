@@ -7601,5 +7601,22 @@
   "perm_inventory_check_show_received": "បង្ហាញថ្ងៃទទួល",
   "perm_inventory_check_show_sales": "បង្ហាញចំនួនបានលក់",
   "perm_inventory_check_show_customers": "បង្ហាញចំនួនអតិថិជន",
-  "perm_inventory_check_show_cost": "បង្ហាញថ្លៃដើម នៅពេលមានសិទ្ធិ"
+  "perm_inventory_check_show_cost": "បង្ហាញថ្លៃដើម នៅពេលមានសិទ្ធិ",
+  "perm_inventory_checks": "វគ្គត្រួតពិនិត្យស្តុក",
+  "perm_act_inventory_checks_view": "មើលវគ្គរាប់ស្តុកទាំងអស់",
+  "perm_act_inventory_checks_check": "កត់ត្រាការត្រួតពិនិត្យស្តុករបស់ខ្លួន",
+  "inventory_check_load_failed": "មិនអាចផ្ទុកបញ្ជីស្តុកបានទេ។ សូមព្យាយាមម្តងទៀត។",
+  "inventory_check_save_unknown": "មិនទាន់ដឹងលទ្ធផលនៃការរក្សាទុក។ សូមពិនិត្យវគ្គមុនពេលសាកល្បងម្តងទៀត។",
+  "inventory_check_page_session": "ផលិតផលនៅទំព័រនេះ",
+  "inventory_check_cohort_hint": "កាលបរិច្ឆេទទទួលចូលច្រោះផលិតផល។ ការលក់ និងអតិថិជនប្រើរយៈពេលដូចគ្នា។ ស្តុកបង្ហាញចំនួនបច្ចុប្បន្ន។",
+  "inventory_check_current_stock": "ស្តុកបច្ចុប្បន្ន",
+  "inventory_check_period_sales": "លក់ក្នុងរយៈពេល",
+  "inventory_check_period_customers": "អតិថិជនក្នុងរយៈពេល",
+  "inventory_check_leave_session": "ចាកចេញពីវគ្គ",
+  "inventory_check_close_session": "បិទវគ្គ",
+  "inventory_check_resume_session": "បន្តវគ្គ",
+  "inventory_check_start_page": "រាប់ផលិតផលទំព័រនេះ",
+  "inventory_check_empty": "គ្មានផលិតផលត្រូវនឹងលក្ខខណ្ឌ។",
+  "inventory_check_starting_stock": "ស្តុកពេលចាប់ផ្តើម",
+  "inventory_check_stock_changed": "ស្តុកបានផ្លាស់ប្តូរ"
 }

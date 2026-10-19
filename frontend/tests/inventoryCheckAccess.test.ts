@@ -40,4 +40,11 @@ for (const admin of [user({}, {}, 'admin'), user({ all: true, 'inventory:view': 
   assert.ok(Object.values(access.fields).every(Boolean))
 }
 assert.equal(getInventoryCheckAccess({ username: 'admin' }).canView, false)
+const dedicated = getInventoryCheckAccess(user({ inventory_checks: true }))
+assert.ok(dedicated.canView && dedicated.canCheck)
+assert.ok(Object.values(dedicated.fields).every(value => value === false), 'a metadata grant does not expose stock, costs or customer data implicitly')
+assert.equal(getInventoryCheckAccess(user({ inventory: true, inventory_checks: false })).canView, false, 'dedicated denial cannot fall back to physical Inventory authority')
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:view': false })).canView, false)
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:check': false })).canCheck, false)
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: 'review' })).canCheck, false, 'metadata checks have no approval tier')
 console.log('PASS Inventory check field defaults, explicit grants, page/action boundaries and customer-detail dependencies')

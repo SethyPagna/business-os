@@ -7601,5 +7601,22 @@
   "perm_inventory_check_show_received": "Show received dates",
   "perm_inventory_check_show_sales": "Show units sold",
   "perm_inventory_check_show_customers": "Show customer counts",
-  "perm_inventory_check_show_cost": "Show costs when permitted"
+  "perm_inventory_check_show_cost": "Show costs when permitted",
+  "perm_inventory_checks": "Inventory check sessions",
+  "perm_act_inventory_checks_view": "View all count sessions",
+  "perm_act_inventory_checks_check": "Record own inventory checks",
+  "inventory_check_load_failed": "Could not load Inventory. Try again.",
+  "inventory_check_save_unknown": "Save result unknown. Check the session before retrying.",
+  "inventory_check_page_session": "This page’s products",
+  "inventory_check_cohort_hint": "Received dates filter products; sales and customers use the same period. Stock is current.",
+  "inventory_check_current_stock": "Current stock",
+  "inventory_check_period_sales": "Sold in period",
+  "inventory_check_period_customers": "Customers in period",
+  "inventory_check_leave_session": "Leave session",
+  "inventory_check_close_session": "Close session",
+  "inventory_check_resume_session": "Resume session",
+  "inventory_check_start_page": "Count this page",
+  "inventory_check_empty": "No matching products.",
+  "inventory_check_starting_stock": "Starting stock",
+  "inventory_check_stock_changed": "Stock changed"
 }

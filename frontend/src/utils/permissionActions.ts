@@ -124,6 +124,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // routes/importJobs.ts for the import row.
   inventory: [
     { key: 'view', tKey: 'perm_act_inventory_view', label: 'View and search', review: 'allow' },
+    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', review: 'allow' },
     // PUT /reasons queues (maybeQueueForReview). The only Inventory write with
     // no live-state staleness risk, so the only one that queues.
     { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', review: 'queue' },
@@ -144,6 +145,11 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // types -- strict full-grant checks there ('stock_actions' needs
     // products+inventory+sales all at Full Access).
     { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', review: 'block', requires: IMPORT_COSTS },
+  ],
+
+  inventory_checks: [
+    { key: 'view', tKey: 'perm_act_inventory_checks_view', label: 'View all count sessions', review: 'block' },
+    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', review: 'block' },
   ],
 
   // cloudflare/src/routes/branches.ts

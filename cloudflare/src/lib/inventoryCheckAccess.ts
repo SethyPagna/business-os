@@ -13,7 +13,8 @@ export type InventoryCheckAccess = {
 export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAccess {
   const permissions = getMergedPermissions(user)
   const admin = isAdminControlUser(user)
-  const canView = getActionTier(user, 'inventory', 'view') !== 'none'
+  const dedicated = Object.hasOwn(permissions, 'inventory_checks')
+  const canView = admin || (dedicated ? getActionTier(user, 'inventory_checks', 'view') === 'full' : getActionTier(user, 'inventory', 'view') !== 'none')
   const tier = getPermissionTier(user, 'inventory')
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
     const explicit = permissions[`inventory_check_show_${field}`]
@@ -23,19 +24,19 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   const checkTier = getActionTier(user, 'inventory', 'check')
   return {
     canView,
-    canCheck: canView && (checkTier === 'full' || checkTier === 'review'),
+    canCheck: admin || canView && (dedicated ? getActionTier(user, 'inventory_checks', 'check') === 'full' : checkTier === 'full' || checkTier === 'review'),
     canViewCustomerDetails: fields.customers && getActionTier(user, 'contacts', 'view') !== 'none',
     fields,
   }
 }
 
-const IDENTITY_FIELDS = ['id', 'name', 'image_path', 'image_url', 'unit', 'parent_id', 'is_group', 'is_grouped_cached'] as const
+const IDENTITY_FIELDS = ['id', 'name', 'image_path', 'image_url', 'unit', 'parent_id', 'is_group', 'is_grouped_cached', 'checkable', 'matches_filters'] as const
 const PRODUCT_FIELDS: Record<InventoryCheckField, readonly string[]> = {
   price: ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'],
   barcode: ['barcode', 'sku'],
   category: ['category', 'categories'],
   brand: ['brand', 'brands'],
-  stock: ['stock_quantity', 'display_quantity', 'low_stock_threshold', 'out_of_stock_threshold', 'stock_state', 'is_low_stock', 'is_out_of_stock'],
+  stock: ['quantity', 'damaged_quantity', 'stock_consistent', 'stock_diagnostics', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity', 'stock_quantity', 'display_quantity', 'low_stock_threshold', 'out_of_stock_threshold', 'stock_state', 'is_low_stock', 'is_out_of_stock'],
   received: ['received_date', 'received_at', 'latest_received_at', 'earliest_received_at', 'batch_count'],
   sales: ['qty_sold', 'net_sold_qty'],
   customers: ['customer_count', 'unique_customer_count'],

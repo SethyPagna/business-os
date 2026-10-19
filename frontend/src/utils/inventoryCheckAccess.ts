@@ -15,7 +15,8 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   const authority = effectivePermissions(user)
   const permissions = { ...parsePermissionMap(user?.role_permissions), ...parsePermissionMap(user?.permissions) }
   const admin = isAdminControlUser(user)
-  const canView = authority.can('inventory', 'view')
+  const dedicated = Object.hasOwn(permissions, 'inventory_checks')
+  const canView = admin || (dedicated ? authority.can('inventory_checks', 'view') : authority.can('inventory', 'view'))
   const tier = authority.getPermissionTier('inventory')
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
     const explicit = permissions[`inventory_check_show_${field}`]
@@ -24,7 +25,7 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   fields.cost = fields.cost && canViewAcquisitionCosts(user)
   return {
     canView,
-    canCheck: canView && (tier === 'full' || tier === 'review') && !isActionOverriddenOff(permissions, 'inventory', 'check'),
+    canCheck: admin || canView && (dedicated ? authority.can('inventory_checks', 'check') : (tier === 'full' || tier === 'review') && !isActionOverriddenOff(permissions, 'inventory', 'check')),
     canViewCustomerDetails: fields.customers && authority.can('contacts', 'view'),
     fields,
   }

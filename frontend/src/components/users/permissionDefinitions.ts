@@ -299,6 +299,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_inventory_review_desc',
         reviewDescription: 'Under Partial Access, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
+      { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal' },
       ...[
         ['price', 'Show selling prices'], ['barcode', 'Show barcodes and SKUs'],
         ['category', 'Show categories'], ['brand', 'Show brands'], ['stock', 'Show recorded stock'],
