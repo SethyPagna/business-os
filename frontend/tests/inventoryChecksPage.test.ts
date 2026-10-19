@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { act } from 'react'
 import { createHarness, propsOf } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
+import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 
@@ -34,8 +35,12 @@ const creates: unknown[][] = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
 let productTotal = 1
+let productOverride: InventoryCheckProduct[] | null = null
+let memberOverride: InventoryCheckSessionItem[] | null = null
 let readRevision = '1'
 let delayedProducts: ((value: unknown) => void) | null = null
+let delayBootstrap = false
+const bootstrapReads: Array<{ params: Record<string, unknown>; resolve: (value: unknown) => void }> = []
 const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_cost: false } as Record<string, boolean> },
@@ -60,11 +65,12 @@ const doubles = {
     readInventoryCheckProducts: async (params: Record<string, unknown>) => {
       productRequests.push(params)
       if (failRead) throw new Error('test read failure')
+      if (delayBootstrap) return new Promise(resolve => { bootstrapReads.push({ params, resolve }) })
       if (delayedProducts) return new Promise(resolve => { delayedProducts = resolve })
-      return { ...response(), total: productTotal, rankings: { products: [{ family_key: 'off-page', name: 'Best seller beyond visible page', qty_sold: 99 }], ...(params.customerRanking === '1' ? { customers: [{ customer_id: 9, name: 'Opt-in customer identity', sale_count: 7 }] } : {}) } }
+      return { ...response(), items: productOverride ?? response().items, total: productOverride?.length ?? productTotal, rankings: { products: [{ family_key: 'off-page', name: 'Best seller beyond visible page', qty_sold: 99 }], ...(params.customerRanking === '1' ? { customers: [{ customer_id: 9, name: 'Opt-in customer identity', sale_count: 7 }] } : {}) } }
     },
     readInventoryCheckSessions: async () => ({ items: [selected], total: 1, page: 1, pageSize: 20 }),
-    readInventoryCheckSession: async () => ({ item: selected, items: [observation] }),
+    readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation] }),
     readInventoryCheckHistory: async () => ({ items: [{ id: 1, product_id: 12, action: 'observe', created_at: '2026-10-19', before: null, after: { state: 'issue', reason: 'History reason' } }], total: 1, page: 1, pageSize: 20 }),
     createInventoryCheckSession: async (...args: unknown[]) => { creates.push(args); return { item: selected, receipt: {} } },
     saveInventoryCheckObservation: async (...args: unknown[]) => {
@@ -79,6 +85,25 @@ const doubles = {
 }
 const mount = () => harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} })
 try {
+  delayBootstrap = true
+  const bootstrap = await mount()
+  await bootstrap.type(bootstrap.field('inventory-check-search'), 'Typed before branch discovery')
+  await bootstrap.click(bootstrap.button('Today'))
+  await bootstrap.click(bootstrap.button('inventory_check_ascending'))
+  const newestBootstrap = bootstrapReads.at(-1)!
+  delayBootstrap = false
+  await act(async () => { newestBootstrap.resolve(response()) })
+  await bootstrap.settle()
+  assert.equal(propsOf(bootstrap.field('inventory-check-search')).value, 'Typed before branch discovery', 'sole-branch discovery preserves controls typed while its request was pending')
+  assert.equal(productRequests.at(-1)?.branchId, '1')
+  assert.equal(productRequests.at(-1)?.query, newestBootstrap.params.query)
+  assert.equal(productRequests.at(-1)?.startDate, newestBootstrap.params.startDate)
+  assert.equal(productRequests.at(-1)?.endDate, newestBootstrap.params.endDate)
+  assert.equal(productRequests.at(-1)?.sortDirection, 'desc')
+  for (const older of bootstrapReads.slice(0, -1)) older.resolve({ ...response(), items: [{ ...product, name: 'Stale bootstrap result' }] })
+  await bootstrap.settle()
+  assert.ok(!bootstrap.text().includes('Stale bootstrap result'), 'older bootstrap requests remain fenced after branch discovery')
+  await bootstrap.unmount()
   const surface = await mount()
   assert.ok(surface.text().includes('Test variant'))
   assert.ok(surface.text().includes('More options available. Narrow with Search.'), 'bounded full-cohort facets advertise how to find remaining options')
@@ -305,5 +330,40 @@ try {
   assert.equal(ranking.findAll(node => node.tagName === 'BUTTON' && node.textContent.includes('top_customers')).length, 0, 'Contacts denial immediately removes customer ranking controls')
   assert.ok(!ranking.text().includes('Opt-in customer identity'))
   await ranking.unmount()
+
+  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true } }
+  selected = { ...selected, progress: { total: 2, done: 0, issue: 1, unstarted: 1 } }
+  memberOverride = [
+    { ...observation, product_id: 901, state: 'issue', reason: 'Saved original issue', counted_quantity: 37, baseline_quantity: 19283, current_quantity: null, current_product_available: false, current_product_name: null, product_snapshot: { id: 901, name: 'Removed original', cost_price_usd: 913.27, selling_price_usd: 777.13 } },
+    { ...observation, product_id: 902, state: 'unstarted', counted_quantity: null, baseline_quantity: 19284, current_quantity: 8, current_product_available: true, current_product_name: 'Current renamed name', product_snapshot: { id: 902, name: 'Starting original name' } },
+  ]
+  productOverride = [{ id: 902, name: 'Current renamed name', quantity: 8 }]
+  const members = await mount()
+  await members.click(members.button('sessions'))
+  await members.click(members.button('Test check'))
+  assert.ok(members.text().includes('Removed original') && members.text().includes('Saved original issue'), 'removed originals remain visible from their authorized frozen session snapshots')
+  assert.ok(members.text().includes('Starting original name') && members.text().includes('Current renamed name'), 'renamed originals show starting and current identity under the original product ID')
+  assert.equal(members.findAll(node => Boolean(node.getAttribute('data-check-action') && node.getAttribute('aria-label')?.includes('Removed original'))).length, 0, 'unavailable originals are read-only')
+  assert.ok(members.findAll(node => Boolean(node.getAttribute('data-check-action') && node.getAttribute('aria-label')?.includes('Current renamed name'))).length > 0, 'a current renamed member remains independently checkable')
+  assert.ok(!members.text().includes('913.27') && !members.text().includes('777.13'), 'unavailable snapshots never imply current prices or expose frozen commercial fields')
+  await members.click(members.button('refresh'))
+  assert.equal(members.findAll(node => node.getAttribute('data-inventory-check-row') === '901').length, 1, 'repeated reads preserve one frozen original without duplication')
+  productOverride = []
+  await members.click(members.button('refresh'))
+  assert.equal(members.findAll(node => node.getAttribute('data-inventory-check-row') === '901').length, 1)
+  assert.equal(members.findAll(node => node.getAttribute('data-inventory-check-row') === '902').length, 0, 'a member absent only from a filtered or paged response is not mislabeled unavailable')
+  assert.ok(!members.text().includes('No matching checks or products.'), 'empty live results do not conceal the frozen unavailable member behind a generic empty state')
+  memberOverride = memberOverride.map(item => ({ ...item, current_product_available: false, current_product_name: null }))
+  await members.click(members.button('refresh'))
+  assert.equal(members.findAll(node => node.getAttribute('data-inventory-check-row') !== null).length, 2, 'all removed originals remain visible with zero current products')
+  assert.equal(members.findAll(node => node.getAttribute('data-check-action') !== null).length, 0)
+  app.user = { ...app.user, id: 8, permissions: { inventory: true, inventory_checks: true, inventory_check_show_stock: false, inventory_check_show_price: false, inventory_check_show_cost: false } }
+  await members.render({})
+  await members.click(members.button('sessions'))
+  await members.click(members.button('Test check'))
+  assert.ok(members.text().includes('Removed original'))
+  assert.ok(!members.text().includes('19283') && !members.text().includes('19284') && !members.text().includes('37'), 'hidden system quantities and another creator count stay absent in the frozen fallback')
+  assert.equal(members.findAll(node => node.getAttribute('data-check-action') !== null).length, 0)
+  await members.unmount()
   console.log('inventoryChecksPage mounted journeys passed')
 } finally { restoreUuid(); await harness.close() }

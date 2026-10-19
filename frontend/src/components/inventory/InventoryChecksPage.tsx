@@ -26,8 +26,9 @@ type ProductsResult = {
   rankings?: { products?: Array<{ family_key: string; name: string; qty_sold: number }>; customers?: Array<{ customer_id: number; name: string; sale_count: number }> }
   issues?: Array<{ product_id: number; branch_id: number; session_id: string; session_title: string; created_by: number; reason: string | null; revision: number; state: 'issue'; counted_quantity?: number | null }>
 }
-type Selection = { branchId: string; sessionId: string }
+type Selection = { branchId: string; sessionId: string; bootstrapIntent?: ControlIntent }
 type Section = 'products' | 'sessions' | 'issues'
+type ControlIntent = { range: DateTimeRange; query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; showCustomerRanking: boolean }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
 type HistoryResult = { items: Array<{ id: number; action: string; product_id: number | null; created_at: string; before: { state?: string; reason?: string | null } | null; after: { state?: string; reason?: string | null } | null }>; total: number; page: number; pageSize: number }
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', state: '', reason: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
@@ -74,16 +75,17 @@ function InventorySelection({ access, isCurrent }: { access: InventoryCheckAcces
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
+  const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
-  const [range, setRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
-  const [query, setQuery] = useState('')
-  const [showCustomerRanking, setShowCustomerRanking] = useState(false)
-  const [filters, setFilters] = useState<InventoryCheckFilters>({ ...initialFilters, branchId })
-  const [pagination, setPagination] = useState<{ section: Section; page: number }>({ section, page: 1 })
+  const [range, setRange] = useState<DateTimeRange>(() => bootstrapIntent?.range ?? statsPresetRange('all'))
+  const [query, setQuery] = useState(bootstrapIntent?.query ?? '')
+  const [showCustomerRanking, setShowCustomerRanking] = useState(bootstrapIntent?.showCustomerRanking ?? false)
+  const [filters, setFilters] = useState<InventoryCheckFilters>({ ...(bootstrapIntent?.filters ?? initialFilters), branchId })
+  const [pagination, setPagination] = useState<{ section: Section; page: number }>(bootstrapIntent?.pagination ?? { section, page: 1 })
   const page = pagination.section === section ? pagination.page : 1
   const setPage = (value: number) => setPagination({ section, page: value })
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(bootstrapIntent?.pageSize ?? 20)
   const [refresh, setRefresh] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
@@ -152,7 +154,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             sessionId ? readInventoryCheckSession(sessionId, abort.signal) : Promise.resolve(null),
           ])
           if (publish()) {
-            if (!branchId && !sessionId && products.branches?.length === 1) { onSelect({ branchId: String(products.branches[0].id), sessionId: '' }); return }
+            if (!branchId && !sessionId && products.branches?.length === 1) {
+              onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { range: { ...range }, query, filters: { ...filters }, pagination: { ...pagination }, pageSize, showCustomerRanking } })
+              return
+            }
             setData(showCustomerRanking && access.canViewCustomerDetails ? products : { ...products, rankings: { products: products.rankings?.products } })
             setSession(selected?.item ?? null)
             setItems(selected?.items ?? [])
@@ -176,6 +181,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   async function save(productId: number | string, patch: InventoryCheckPatch, revision: number) {
     if (!current() || queryFence.current !== requestKey || !fresh || !canEdit || session?.status !== 'open' || !canWriteToServer || inFlight.current || lifecycleAttempt.current) throw new Error('Check cannot be saved in this context.')
     const id = Number(productId)
+    if (items.find(item => Number(item.product_id) === id)?.current_product_available === false) throw new Error('This original session product is unavailable.')
     let attempt = attempts.current.get(id)
     if (attempt && (JSON.stringify(attempt.patch) !== JSON.stringify(patch) || attempt.revision !== revision)) throw new Error('Resolve the previous save before changing this check.')
     if (!attempt) {
@@ -226,7 +232,11 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
-  const visibleProducts = fresh ? (data?.items ?? []).map(product => projectProduct(product, access.fields)) : []
+  const unavailableMembers = fresh && sessionId ? items.filter(item => item.current_product_available === false) : []
+  const unavailableIds = new Set(unavailableMembers.map(item => String(item.product_id)))
+  const renamedMembers = fresh && sessionId ? items.filter(item => item.current_product_available === true && item.current_product_name && item.current_product_name !== item.product_snapshot.name) : []
+  const visibleProducts = fresh ? (data?.items ?? []).filter(product => !unavailableIds.has(String(product.id))).map(product => projectProduct(product, access.fields)) : []
+  const unavailableProducts = unavailableMembers.map(item => ({ ...projectProduct(item.product_snapshot, access.fields), id: item.product_id, quantity: null, damaged_quantity: null, qty_sold: null, customer_count: null, selling_price_usd: null, cost_price_usd: null, checkable: false }))
   const observations: Record<string, InventoryCheckObservation> = {}
   if (fresh) for (const item of items) observations[String(item.product_id)] = { product_id: item.product_id, state: item.state, counted_quantity: canViewCounts ? item.counted_quantity : null, reason: item.reason, revision: item.revision, ...(access.fields.stock ? { baseline_quantity: item.baseline_quantity, current_quantity: item.current_quantity, stock_changed: item.stock_changed } : {}) }
   const cards: StatCardDef[] = []
@@ -281,9 +291,19 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {(access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity) ? <p>{t('inventory_check_counted')}: {issue.counted_quantity}</p> : null}
       </li>) : null}
     </ul> : <InventoryCheckRows key={requestKey} products={visibleProducts} observations={observations} errors={rowErrors} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), busy]))} canCheck={fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current} canViewStock={access.fields.stock} {...{ canViewCounts, onEditingChange }} canViewPrice={access.fields.price} canViewCost={access.fields.cost} t={t} onOpenProduct={setDetail} onSave={save} />}
-    {!loading && fresh && !(section === 'sessions' ? sessions?.items.length : section === 'issues' && !sessionId ? data?.issues?.length : visibleProducts.length) ? <p className="text-xs text-gray-500">{tr('inventory_check_empty', 'No matching checks or products.')}</p> : null}
+    {section !== 'sessions' && unavailableProducts.length ? <section className="min-w-0 rounded-lg border border-amber-200 p-2 dark:border-amber-900" aria-label={t('inventory_check_unavailable_members')}>
+      <h3 className="text-xs font-semibold">{t('inventory_check_unavailable_members')} · {unavailableProducts.length}</h3>
+      <p className="text-xs text-gray-500">{t('inventory_check_unavailable_member_hint')}</p>
+      <InventoryCheckRows products={unavailableProducts} observations={observations} canCheck={false} canViewStock={access.fields.stock} canViewCounts={canViewCounts} canViewPrice={false} canViewCost={false} t={t} onOpenProduct={setDetail} onSave={() => { throw new Error('This original session product is unavailable.') }} />
+    </section> : null}
+    {section !== 'sessions' && renamedMembers.length ? <details className="min-w-0 text-xs">
+      <summary className="min-h-10 cursor-pointer py-2">{t('inventory_check_original_name')} · {renamedMembers.length}</summary>
+      <ul className="min-w-0 space-y-1">{renamedMembers.map(item => <li key={item.product_id} className="break-words">#{item.product_id} · {t('inventory_check_original_name')}: {item.product_snapshot.name} · {t('inventory_check_current_name')}: {item.current_product_name}</li>)}</ul>
+    </details> : null}
+    {!loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : section === 'issues' && !sessionId ? data?.issues?.length : visibleProducts.length) ? <p className="text-xs text-gray-500">{tr('inventory_check_empty', 'No matching checks or products.')}</p> : null}
     {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) setPage(value) }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1) } }} t={t} compact /></fieldset> : null}
     {detail && fresh ? <Modal title={detail.name} onClose={() => setDetail(null)} keyboard size="sm" unsavedChanges="read-only"><dl className="grid grid-cols-2 gap-2 text-xs">
+      {unavailableIds.has(String(detail.id)) ? <p className="col-span-2 text-amber-800 dark:text-amber-200">{t('inventory_check_unavailable_member_hint')}</p> : null}
       {access.fields.barcode ? <><dt>{t('barcode')}</dt><dd className="break-all">{detail.barcode || detail.sku || '—'}</dd></> : null}
       {access.fields.stock ? <><dt>{tr('inventory_check_current_stock', 'Current stock')}</dt><dd>{detail.quantity ?? '—'}</dd><dt>{tr('inventory_check_starting_stock', 'Starting stock')}</dt><dd>{items.find(item => String(item.product_id) === String(detail.id))?.baseline_quantity ?? '—'}</dd></> : null}
       {access.fields.brand ? <><dt>{t('brand')}</dt><dd>{detail.brand || '—'}</dd></> : null}
