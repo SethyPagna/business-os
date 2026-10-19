@@ -20655,3 +20655,10 @@ The saved slices add an opt-in horizontal date/preset rail, compact controlled v
 Navigation 6.0.816 is saved separately and held until the real Inventory page/API exists. Session collaboration, baseline, date/customer semantics and read-only Ops migration-name approval remain pending. Global ranking before pagination, count persistence/concurrency, stock non-mutation, page/cache/account isolation and device acceptance remain unfinished. No new production operation, migration allocation, deployment, main promotion or branch deletion occurred. Schedules remain paused.
 
 IDs: CONSOL-NEXT-INVENTORY [~] · CONSOL-MOBILE [ ] next · other backlog execution parked with evidence retained.
+
+
+### Inventory stock reader (6.0.818–6.0.819)
+
+The new schema-validated read model compares branch, lot and cached quantities, and adds legacy damaged quantities exactly once. Discrepancies retain their raw evidence and nullable quantity. Twelve actual SQLite/read-only controls and an independent Astra review passed for 818. Root then reproduced an asynchronous labeling defect: changing the caller’s options while a read was pending returned branch1 stock labeled branch2. Version819 uses the captured query scope; the new thirteenth control fails on818 and passes after the one-line fix, with Worker types green.
+
+The current frontend build/startup/chunk checks pass with the existing SheetJS export warning retained. Build-generated runtime files had identical committed content; refreshing index metadata removed the line-ending-only status without staging content changes. The main Inventory page, sessions, global ranking/customer statistics, HTTP permission/cache races and final gate/device/release acceptance remain unfinished. Five owner answers, including read-only Ops approval, remain pending. No production access or migration allocation occurred.

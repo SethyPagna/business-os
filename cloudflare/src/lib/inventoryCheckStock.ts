@@ -174,7 +174,7 @@ export async function readInventoryCheckStock(db: Pick<D1Compat, 'batch'>, scope
     const quantities = ['quantity', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity', 'global_ordinary_quantity', 'global_lot_quantity', 'global_damaged_quantity', 'unallocated_damaged_quantity'] as const
     if (quantities.some(key => raw[key] != null && numeric(key) === null)) flags.push('invalid_quantity')
     return {
-      product_id: Number(raw.product_id), branch_id: scope.branchId ?? null,
+      product_id: Number(raw.product_id), branch_id: query.params.inventoryBranchId,
       ...Object.fromEntries(quantities.map(key => [key, numeric(key)])) as Record<typeof quantities[number], number | null>,
       quantity: flags.includes('invalid_quantity') && raw.quantity != null && numeric('quantity') === null ? null : numeric('quantity'),
       consistent: Number(raw.consistent) === 1 && flags.length === 0, flags: [...new Set(flags)],

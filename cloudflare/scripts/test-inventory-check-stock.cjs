@@ -201,6 +201,25 @@ async function main() {
     for (const options of [{ productIds: [0] }, { productIds: [1.5] }, { productIds: Array.from({ length: 501 }, (_, i) => i + 1) }, { branchId: 0 }]) assert.throws(() => api.buildInventoryCheckStockQuery(options), /Invalid Inventory stock scope/)
     db.close()
   })
+  await check('asynchronous reads keep the branch and product scope captured before dispatch', async () => {
+    const db = fixture(); seedBranch(db, 8, 1); seedBranch(db, 5, 2); cacheQty(db, 13)
+    const before = snapshot(db)
+    try {
+      const scope = { branchId: 1, productIds: [900001] }
+      const proxy = adapter(db)
+      const pending = api.readInventoryCheckStock(proxy, scope)
+      scope.branchId = 2
+      scope.productIds[0] = 900002
+      const rows = await pending
+      assert.equal(rows.length, 1)
+      assert.equal(rows[0].product_id, 900001)
+      assert.equal(rows[0].quantity, 8)
+      assert.equal(rows[0].branch_id, 1, 'stock results must retain the captured branch, even if the caller reuses its scope object')
+      assert.equal(proxy.calls, 1)
+      assert.equal(proxy.statements, 2)
+      assert.deepEqual(snapshot(db), before)
+    } finally { db.close() }
+  })
   console.log(`PASS ${passed} actual SQLite Inventory stock-read groups; no business writes`)
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
