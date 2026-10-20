@@ -99,6 +99,7 @@ const common = {
   '../lib/actorSnapshot': load('lib/actorSnapshot.ts'),
 }
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   ...common,
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
   '../lib/adminControlGuard': load('lib/adminControlGuard.ts', { './permissions': permissions }),

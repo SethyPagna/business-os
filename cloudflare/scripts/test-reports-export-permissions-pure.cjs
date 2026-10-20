@@ -63,8 +63,6 @@ function load(filename) {
   const mod = { exports: {} }
   cache.set(filename, mod)
   let source = fs.readFileSync(filename, 'utf8')
-  // Exercise the actual seed definition without changing its public API.
-  if (filename.endsWith('coreDataInvariants.ts')) source += '\nexport { DEFAULT_ROLE_PERMISSIONS }\n'
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     fileName: filename,
@@ -82,7 +80,7 @@ function load(filename) {
   return mod.exports
 }
 const app = load(path.join(root, 'cloudflare/src/routes/reports.ts')).default
-const seeds = load(path.join(root, 'cloudflare/src/lib/coreDataInvariants.ts')).DEFAULT_ROLE_PERMISSIONS
+const seeds = load(path.join(root, 'cloudflare/src/lib/roleDefaults.ts')).DEFAULT_ROLE_PERMISSIONS
 const frontend = load(path.join(root, 'frontend/src/utils/permissions.ts'))
 const { actionAllowed, isActionOverriddenOff } = load(path.join(root, 'frontend/src/utils/permissionActions.ts'))
 const staff = (role = {}, overrides = {}) => ({ id: 17, username: 'employee', role_code: 'employee',

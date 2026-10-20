@@ -52,6 +52,7 @@ let db
 let actor
 const authLib = load('lib/auth.ts', { './db': { getDb: (env) => env.DB } })
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },

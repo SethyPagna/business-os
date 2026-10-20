@@ -30,7 +30,7 @@ function load(name, dependencies = {}) {
 stockTransaction = load('lib/stockTransaction.ts')
 const core = load('lib/coreDataInvariants.ts', {
  './db': {getDb:()=>db}, './productStockGuard':guard,
- './customTableName':load('lib/customTableName.ts'), './sqlBinding':load('lib/sqlBinding.ts'), './passwordHash':{hashPassword:async()=> 'test-hash'}, './passwordPolicy':load('lib/passwordPolicy.ts'),
+ './customTableName':load('lib/customTableName.ts'), './sqlBinding':load('lib/sqlBinding.ts'), './passwordHash':{hashPassword:async()=> 'test-hash'}, './passwordPolicy':load('lib/passwordPolicy.ts'), './roleDefaults':load('lib/roleDefaults.ts'),
 })
 const backup = async()=>{backupCalls++; if(backupFails) throw new Error('fixture backup refused')}
 const noop = async()=>{}

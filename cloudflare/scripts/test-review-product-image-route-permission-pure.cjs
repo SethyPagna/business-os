@@ -44,7 +44,7 @@ function loadMoneyDependency(name) {
       isImportMaintenanceFenceError: () => false,
       ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
     }
-    const allowed = new Set(['./productCostReview', './permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles', './productWrites', './productImagePermission', './sqlBinding', './acquisitionCostAccess', './productDiscountGate', './stockMutationReceipt', './productIdentity', './productDetailRule'])
+    const allowed = new Set(['./productCostReview', './permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles', './productWrites', './productImagePermission', './sqlBinding', './acquisitionCostAccess', './productDiscountGate', './stockMutationReceipt', './productIdentity', './productDetailRule', './productSupplierGate'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }

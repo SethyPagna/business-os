@@ -113,6 +113,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // The DEFAULT selling and wholesale price, off for the Employee default. PUT /:id, /bulk-price-adjust, the
     // receipt-time selling price and a merge price choice other than the rule all require it.
     { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'queue' },
+    // Owner, 19 Oct 2026: the supplier of an existing product, off for the Employee default. PUT /:id, the supplier
+    // backfill and approving a queued supplier change require it; a supplier on a NEW product follows Add. Absent = allowed.
+    { key: 'supplier', tKey: 'perm_act_products_supplier', label: 'Change supplier', review: 'queue' },
     // The Products sub-pages: Stock Changes, Stock-in Sessions and a product's sales and supplier history. Off for
     // the Employee default, who see only the main Products page.
     { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', review: 'allow' },

@@ -66,7 +66,7 @@ const ctx = { waitUntil() {}, passThroughOnException() {} }
 // The role rows. EMPLOYEE_AFTER_5 is the one-row update proposed in MERGEPERM-REPORT section 5
 // (Products Full, every other Products action off, no Website Editor grant); MANAGER_LIVE is the
 // production Manager row read on 6 Oct 2026; the seed is read from the source, not copied.
-const coreSource = fs.readFileSync(path.join(SRC, 'lib/coreDataInvariants.ts'), 'utf8').split('\r\n').join('\n')
+const coreSource = fs.readFileSync(path.join(SRC, 'lib/roleDefaults.ts'), 'utf8').split('\r\n').join('\n')
 const seedStart = coreSource.indexOf('const DEFAULT_ROLE_PERMISSIONS')
 const seedOpen = coreSource.indexOf('= {', seedStart) + 2
 const SEED = new Function('return ' + coreSource.slice(seedOpen, coreSource.indexOf('\n}\n', seedOpen) + 2))()

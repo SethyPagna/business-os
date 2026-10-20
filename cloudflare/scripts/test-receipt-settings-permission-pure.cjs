@@ -79,7 +79,7 @@ check('no grant writes nothing', () => {
 
 // --- source guards -----------------------------------------------------
 const settingsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
-const coreDataSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'coreDataInvariants.ts'), 'utf8')
+const coreDataSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'roleDefaults.ts'), 'utf8')
 const appContextSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'AppContext.tsx'), 'utf8')
 const navConfigSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'shared', 'navigationConfig.ts'), 'utf8')
 const permDefsSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'users', 'permissionDefinitions.ts'), 'utf8')

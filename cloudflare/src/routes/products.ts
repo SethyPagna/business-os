@@ -5,6 +5,7 @@ import { Hono, type Context } from 'hono'
 import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { acquisitionCostResponses, canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
+import { PRODUCT_SUPPLIER_REFUSAL, productSupplierChanged } from '../lib/productSupplierGate'
 import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
@@ -1733,12 +1734,14 @@ app.get('/:id/supplier-purchases', async (c) => {
 // undoable/redoable via the supplier.backfill applier -- the reversal (each
 // lot's prior supplier_id/_name) goes to undo_snapshots, a small action_history
 // row points at it. Gated by the products EDIT action (attributing a lot's
-// supplier is a product edit), full tier -- the same tier the applier demands.
+// supplier is a product edit), full tier -- the same tier the applier demands -- and by products:supplier.
 app.post('/:id/suppliers/backfill', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'edit') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  // Attributing lots to a supplier is a supplier change: the same switch as PUT /:id (owner, 19 Oct 2026).
+  if (getActionTier(user, 'products', 'supplier') === 'none') return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
   const productId = Number(c.req.param('id')) || 0
   if (!productId) return c.json({ error: 'Product not found' }, 404)
   const body = await c.req.json().catch(() => ({})) as { supplierId?: unknown; batchIds?: unknown }
@@ -2610,6 +2613,17 @@ app.put('/:id', async (c) => {
     // OPUS-H-2: compared exactly; only the form's own 4-decimal rendering of a stored amount is dropped (kept as stored).
     keepStoredDiscountRendering(storedDiscount, body)
     if (productDiscountChanged(storedDiscount, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
+  }
+  // Owner, 19 Oct 2026: the supplier is its own action (products:supplier, off for the Employee default). Refused
+  // here, before the image, identity-fold and review-queue steps, so a refusal has no side effect. The form posts
+  // the stored supplier back on every save: an unchanged one (any letter case or spacing) is dropped from the body
+  // so the stored spelling stays, and the rest of the edit goes through.
+  if (getActionTier(user, 'products', 'supplier') === 'none' && Object.prototype.hasOwnProperty.call(body, 'supplier')) {
+    const storedSupplier = await getDb(c.env).prepare('SELECT supplier FROM products WHERE id = @id').get<{ supplier: string | null }>({ id })
+    if (storedSupplier) {
+      if (productSupplierChanged(storedSupplier.supplier, body)) return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
+      delete body.supplier
+    }
   }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {

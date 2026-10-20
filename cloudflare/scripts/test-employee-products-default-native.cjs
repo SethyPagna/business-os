@@ -49,7 +49,7 @@ const harness = harnessBase
 if (!harness.includes('maybeQueueForReview') || !harness.includes('plainDiff') || !harness.includes('productEditAlert')) throw new Error('the harness override anchors moved')
 const checks = `
 async function main() {
-  const coreSource = fs.readFileSync(path.join(SRC, 'lib/coreDataInvariants.ts'), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
+  const coreSource = fs.readFileSync(path.join(SRC, 'lib/roleDefaults.ts'), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
   const start = coreSource.indexOf('const DEFAULT_ROLE_PERMISSIONS')
   const open = coreSource.indexOf('= {', start) + 2
   const end = coreSource.indexOf('\\n}\\n', open) + 2
@@ -68,8 +68,10 @@ async function main() {
     const tier = (action) => permissions.getActionTier(EMPLOYEE_USER, 'products', action)
     for (const action of ['view', 'edit', 'image']) assert.equal(tier(action), 'full', action)
     assert.equal(SEED.employee['products:price'], false, 'the seed switches the default-price action off')
+    assert.equal(SEED.employee['products:supplier'], false, 'the seed switches the supplier action off')
+    assert.equal(Object.hasOwn(SEED.employee, 'inventory'), false, 'the seed gives the Employee no physical-stock writer grant')
     assert.equal(SEED.employee['products:history'], false, 'the seed switches the Products sub-pages off')
-    for (const action of ['add', 'delete', 'bulk_delete', 'variant', 'import', 'import_replace_all', 'export', 'merge_duplicates', 'zero_qty_cleanup', 'manage_lookups', 'price', 'history']) {
+    for (const action of ['add', 'delete', 'bulk_delete', 'variant', 'import', 'import_replace_all', 'export', 'merge_duplicates', 'zero_qty_cleanup', 'manage_lookups', 'price', 'supplier', 'history']) {
       assert.equal(tier(action), 'none', action)
     }
     assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(EMPLOYEE_USER), false)
@@ -311,6 +313,84 @@ async function main() {
       const reply = await request('POST', '/api/products/bulk-price-adjust', { direction: 'increase', amount: 10, fields: ['selling_price_usd'], preview: true })
       assert.equal(reply.status, expected, who.username + ': ' + JSON.stringify(reply.body))
     }
+  })
+
+  await check('the supplier is its own action (owner, 19 Oct 2026): the Employee edits every other detail, a changed supplier is refused with no side effect, an unchanged one is not', async () => {
+    fresh()
+    state.native.db.exec("UPDATE products SET supplier = 'Acme Trading' WHERE id = " + KEEP)
+    const stored = one('SELECT supplier, name, updated_at FROM products WHERE id = ?', KEEP)
+    state.user = EMPLOYEE_USER
+    const before = dump()
+    // A different supplier (and a clear) is refused; the same request carrying other edits writes NOTHING, not even those.
+    for (const change of [{ supplier: 'Other Co' }, { supplier: '' }, { supplier: null }, { supplier: 'Other Co', name: 'Renamed With Supplier', brand: 'B2' }]) {
+      const refused = await request('PUT', '/api/products/' + KEEP, { ...change, expected_updated_at: stored.updated_at })
+      assert.equal(refused.status, 403, JSON.stringify(change) + ' ' + JSON.stringify(refused.body))
+      assert.equal(refused.body.code, 'product_supplier_edit_required')
+    }
+    assert.equal(dump(), before, 'a refused supplier change writes nothing')
+    // The form posts the stored supplier back: any letter case or spacing is the same supplier, the stored spelling stays.
+    const same = await request('PUT', '/api/products/' + KEEP, { supplier: '  ACME trading ', name: 'Glow Serum 30ml Renewed', expected_updated_at: stored.updated_at })
+    assert.equal(same.status, 200, JSON.stringify(same.body))
+    assert.notEqual(same.body.pending, true)
+    const afterSame = one('SELECT supplier, name FROM products WHERE id = ?', KEEP)
+    assert.equal(afterSame.supplier, 'Acme Trading')
+    assert.equal(afterSame.name, 'Glow Serum 30ml Renewed')
+    // Every other detail is applied, not queued.
+    const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    const details = { name: 'Glow Serum Detail', brand: 'Detail Brand', category: 'Detail Cat', unit: 'bottle', description: 'A new description', expiry_date: '2027-12-31' }
+    const edited = await request('PUT', '/api/products/' + KEEP, { ...details, supplier: 'Acme Trading', expected_updated_at: row.updated_at })
+    assert.equal(edited.status, 200, JSON.stringify(edited.body))
+    assert.notEqual(edited.body.pending, true, 'a Full-tier Edit is applied, not queued')
+    const applied = one('SELECT name, brand, category, unit, description, expiry_date, supplier FROM products WHERE id = ?', KEEP)
+    assert.deepEqual(applied, { ...details, supplier: 'Acme Trading' })
+    // Price and cost stay refused, with their own codes, whatever the supplier switch says.
+    const next = one('SELECT selling_price_usd, updated_at FROM products WHERE id = ?', KEEP)
+    const price = await request('PUT', '/api/products/' + KEEP, { selling_price_usd: next.selling_price_usd + 1, expected_updated_at: next.updated_at })
+    assert.equal(price.status, 403)
+    assert.equal(price.body.code, 'product_price_edit_required')
+    const cost = await request('PUT', '/api/products/' + KEEP, { cost_price_usd: 1, expected_updated_at: next.updated_at })
+    assert.equal(cost.status, 403)
+    assert.equal(cost.body.code, 'product_cost_edit_required')
+    // Attributing lots to a supplier is a supplier change.
+    state.native.db.exec("INSERT INTO suppliers (id, name) VALUES (501, 'Acme Trading')")
+    const beforeBackfill = dump()
+    const backfill = await request('POST', '/api/products/' + KEEP + '/suppliers/backfill', { supplierId: 501 })
+    assert.equal(backfill.status, 403, JSON.stringify(backfill.body))
+    assert.equal(backfill.body.code, 'product_supplier_edit_required')
+    assert.equal(dump(), beforeBackfill)
+    // Discriminating: the same requests pass for a Full Products role with no supplier switch (absent = no opinion), an admin,
+    // and fail again for that role once an admin switches the supplier off.
+    for (const who of [MANAGER_USER, ADMIN]) {
+      state.user = who
+      const current = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+      const supplier = who.username + ' Supply'
+      const done = await request('PUT', '/api/products/' + KEEP, { supplier, expected_updated_at: current.updated_at })
+      assert.equal(done.status, 200, who.username + ' ' + JSON.stringify(done.body))
+      assert.equal(one('SELECT supplier FROM products WHERE id = ?', KEEP).supplier, supplier)
+      const lots = await request('POST', '/api/products/' + KEEP + '/suppliers/backfill', { supplierId: 501 })
+      assert.equal(lots.status, 200, who.username + ' ' + JSON.stringify(lots.body))
+    }
+    state.user = asRole(30, 'manager', { products: true, 'products:supplier': false })
+    const narrowed = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    const refused = await request('PUT', '/api/products/' + KEEP, { supplier: 'Narrowed Co', expected_updated_at: narrowed.updated_at })
+    assert.equal(refused.status, 403, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'product_supplier_edit_required')
+  })
+
+  await check('approving a queued supplier change needs the CURRENT reviewer to hold the supplier action', async () => {
+    fresh()
+    state.native.db.exec("UPDATE products SET supplier = 'Acme Trading' WHERE id = " + KEEP)
+    const approval = load('lib/reviewApprovalPermission.ts', { './db': { getDb: () => adapter } })
+    const queued = (payload) => ({ section: 'products', action_type: 'update', entity_type: 'product', entity_id: KEEP, payload_json: JSON.stringify(payload) })
+    const reviewer = (own) => asRole(40, 'manager', { products: true, ...own })
+    const noSupplier = reviewer({ 'products:supplier': false })
+    const refused = await approval.reviewApprovalPermissionError({}, noSupplier, queued({ supplier: 'Other Co' }))
+    assert.equal(refused && refused.status, 403)
+    assert.equal(refused.body.permission, 'products:supplier')
+    assert.equal(await approval.reviewApprovalPermissionError({}, noSupplier, queued({ supplier: ' acme TRADING ' })), null, 'an unchanged supplier is not a supplier change')
+    assert.equal(await approval.reviewApprovalPermissionError({}, noSupplier, queued({ name: 'Only a name' })), null, 'a queued edit without a supplier is not judged on it')
+    assert.equal(await approval.reviewApprovalPermissionError({}, reviewer({}), queued({ supplier: 'Other Co' })), null, 'positive control: a reviewer without the switch off may approve')
+    assert.equal(await approval.reviewApprovalPermissionError({}, ADMIN, queued({ supplier: 'Other Co' })), null)
   })
 
   await check('Employee default with the cost grants added by an admin may write a cost; the default alone never does', async () => {

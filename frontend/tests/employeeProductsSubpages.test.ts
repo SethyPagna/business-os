@@ -60,7 +60,7 @@ test('PACKS: the new action row has text in both languages', () => {
   }
   const preset = ROLE_PRESETS.find((p) => p.key === 'employee')!.permissions as Record<string, unknown>
   assert.equal(preset['products:history'], false)
-  const seed = read('../../cloudflare/src/lib/coreDataInvariants.ts')
+  const seed = read('../../cloudflare/src/lib/roleDefaults.ts')
   assert.match(seed, /'products:history': false,/)
 })
 
