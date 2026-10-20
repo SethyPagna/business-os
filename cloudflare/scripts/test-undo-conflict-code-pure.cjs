@@ -65,6 +65,7 @@ function loadHistoryRoute(db, undoAppliers) {
   const stubs = {
     '../lib/stockTransaction': stockTransaction,
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
+    '../lib/productSupplierGate': loadLibrary('productSupplierGate'),
     '../lib/productCostReview': loadLibrary('productCostReview', { './catalogCostRecompute': loadLibrary('catalogCostRecompute', { './moneyPrecision': loadLibrary('moneyPrecision') }) }),
     '../lib/db': { getDb: () => db },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
