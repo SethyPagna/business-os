@@ -817,6 +817,11 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   const db = getDb(env)
   const settings = await loadSettingsMap(env)
   const config = buildPortalConfig(settings, env)
+  // Off: nothing earns and nothing is shown, so the four ledger reads are skipped; the data is untouched.
+  if (!config.loyaltyPointsEnabled) {
+    for (const id of customerIds) result.set(id, summarizePoints([], [], [], config, []))
+    return result
+  }
   const idChunks = chunkForBinding(customerIds)
 
   const salesRows: Array<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }> = []

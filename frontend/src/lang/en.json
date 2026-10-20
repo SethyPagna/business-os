@@ -7683,5 +7683,7 @@
   "perm_user_exceptions_heading": "Individual exceptions",
   "perm_user_exceptions_one": "1 individual exception",
   "perm_user_exceptions_other": "{n} individual exceptions",
-  "perm_switched_off_heading": "Switched off"
+  "perm_switched_off_heading": "Switched off",
+  "loyalty_points_enabled": "Loyalty points",
+  "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays."
 }

@@ -86,6 +86,7 @@ interface AppUser extends NonNullable<PermissionUser> {
 }
 
 interface AppContextValue {
+  settings?: Record<string, unknown>
   // App language ('en' | 'km'); drives the period filter's month names.
   language: string
   // Per-action gate (utils/permissionActions.ts) -- the same table the
@@ -260,6 +261,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+function isLoyaltyPointsOn(value: unknown): boolean {
+  return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase())
+}
+
 function formatPoints(value: number | string | null | undefined): string {
   return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
@@ -300,7 +305,9 @@ const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
-  const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR, language, settings } = useApp()
+  // Off: the membership id stays, balances are not shown (the Worker answers zeros without reading the ledgers).
+  const pointsOn = isLoyaltyPointsOn(settings?.loyalty_points_enabled)
   const savingGate = useSavingGate()
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
@@ -541,7 +548,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // column set, search, form payload, and XLSX export. Suppliers keep
   // their own Company field (SuppliersTab.tsx) -- that form does expose
   // it and a business identity genuinely applies there.
-  const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'gender', 'Gender'), tr(t, 'col_added', 'Added'), 'Options']
+  const customerColumns = [tr(t, 'name', 'Name'), 'Membership', ...(pointsOn ? [tr(t, 'loyalty_points', 'Points')] : []), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'gender', 'Gender'), tr(t, 'col_added', 'Added'), 'Options']
 
   const contactFilterSections = useMemo(() => ([
     // Part 567: the "arrange by" controls moved OFF the visible SortChip and
@@ -1300,9 +1307,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 </span>
               </td>
               <td className="max-w-[10rem] cursor-pointer px-3 py-1.5 font-mono text-[11px] text-blue-600 dark:text-blue-400" title={customerRow.membership_number || undefined} onClick={() => handleContactCellClick(customerRow)}><span className="detail-scroll-text">{customerRow.membership_number || '--'}</span></td>
-              <td className="cursor-pointer px-3 py-1.5 font-semibold text-blue-600 dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
-                {formatPoints(customerRow.points_balance)}
-              </td>
+              {pointsOn ? (
+                <td className="cursor-pointer px-3 py-1.5 font-semibold text-blue-600 dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
+                  {formatPoints(customerRow.points_balance)}
+                </td>
+              ) : null}
               <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.phone || customerRow.phone || '-'}</td>
               <td className="max-w-[12rem] cursor-pointer px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}><span className="detail-scroll-text">{primaryOption.email || customerRow.email || '-'}</span></td>
               <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{customerRow.gender ? tr(t, customerRow.gender, customerRow.gender) : tr(t, 'unspecified', 'Unspecified')}</td>
@@ -1416,8 +1425,8 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 </div>
                 <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-500">
                   {customerRow.membership_number ? <span className="font-mono text-blue-500">{customerRow.membership_number}</span> : null}
-                  {customerRow.membership_number ? <span className="mx-1 text-gray-300 dark:text-gray-600">·</span> : null}
-                  <span className="font-semibold text-blue-600 dark:text-blue-300">{formatPoints(customerRow.points_balance)} {tr(t, 'points_short', 'pts')}</span>
+                  {pointsOn && customerRow.membership_number ? <span className="mx-1 text-gray-300 dark:text-gray-600">·</span> : null}
+                  {pointsOn ? <span className="font-semibold text-blue-600 dark:text-blue-300">{formatPoints(customerRow.points_balance)} {tr(t, 'points_short', 'pts')}</span> : null}
                 </div>
                 {cardPhone ? <div className="detail-scroll-text text-[11px] text-gray-500">{cardPhone}</div> : null}
               </div>
@@ -1464,11 +1473,13 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           fields={[
             [tr(t, 'name', 'Name'), selected.name],
             ['Membership', selected.membership_number],
-            [tr(t, 'loyalty_points', 'Points'), Number(selected.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
-            ['Points earned', Number(selected.points_earned || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
-            ['Points redeemed', Number(selected.points_redeemed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
-            ['Reward points', Number(selected.points_rewarded || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
-            ['Points deducted', Number(selected.points_deducted || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+            ...(pointsOn ? [
+              [tr(t, 'loyalty_points', 'Points'), Number(selected.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+              ['Points earned', Number(selected.points_earned || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+              ['Points redeemed', Number(selected.points_redeemed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+              ['Reward points', Number(selected.points_rewarded || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+              ['Points deducted', Number(selected.points_deducted || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
+            ] as Array<[string, string]> : []),
             [tr(t, 'phone', 'Phone'), selected.phone],
             [tr(t, 'email', 'Email'), selected.email],
             [tr(t, 'gender', 'Gender'), selected.gender ? tr(t, selected.gender, selected.gender) : tr(t, 'unspecified', 'Unspecified')],

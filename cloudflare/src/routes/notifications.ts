@@ -759,8 +759,9 @@ app.get('/summary', async (c) => {
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
   if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
-  if (preferences.loyaltyEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
-    loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
+  // Loyalty off: no cache-version read and no ledger or settings read at all.
+  if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
+    loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
       () => buildLoyaltySection(c.env, preferences.loyaltyThreshold, () => requestMetricsOf(c)?.invocation.attemptedStatements || 0))
   }
   // Pending Share & Reward submissions are an approve/reject queue (an

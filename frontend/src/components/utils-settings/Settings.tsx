@@ -1331,6 +1331,21 @@ export default function Settings() {
               onChange={(event) => setValue('tax_enabled', event.target.checked ? 'true' : 'false')}
             />
           </label>
+          {/* Same setting as the Loyalty points page switch; the Worker accepts a change from an administrator only. */}
+          {isAdmin ? (
+            <label className="mt-2 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+              <div className="pr-3">
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('loyalty_points_enabled')}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{t('loyalty_points_enabled_desc')}</div>
+              </div>
+              <input
+                type="checkbox"
+                name="loyalty_points_enabled"
+                checked={['1', 'true', 'yes', 'on'].includes(String(form.loyalty_points_enabled ?? 'false').trim().toLowerCase())}
+                onChange={(event) => setValue('loyalty_points_enabled', event.target.checked ? 'true' : 'false')}
+              />
+            </label>
+          ) : null}
         </SettingsSection>
         ) : null}
 
