@@ -20,7 +20,7 @@ import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { normalizeSearchText, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { limitSearchTermGroups, normalizeSearchText, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -1209,26 +1209,14 @@ export function canonicalPortalQuery(route: PortalPublicRoute, rawSearch: string
   return { ok: true, params, search }
 }
 
-// Each search word binds about four parameters (lib/productSearchQuery.ts); with every
-// filter list set this keeps a storefront statement well under D1's 100.
-const PORTAL_SEARCH_MAX_GROUPS = 3
-const PORTAL_SEARCH_MAX_WORDS = 12
-
 // Spellings with one search meaning share one key: each comma group is folded by normalizeSearchText, the fold
-// every word-matching consumer applies anyway, and words past the caps above are dropped. A lone token holding
-// a digit stays as typed (lowercased): the exact-barcode probe reads it raw, hyphens and leading zeros included.
+// every word-matching consumer applies anyway, and words past the shared search caps (lib/productSearchQuery.ts,
+// the ones the query builder applies) are dropped. A lone token holding a digit stays as typed (lowercased): the
+// exact-barcode probe reads it raw, hyphens and leading zeros included.
 export function portalSearchKeyText(text: string): string {
   if (!/[\s,]/.test(text) && /\d/.test(text)) return text.toLowerCase()
-  let budget = PORTAL_SEARCH_MAX_WORDS
-  const groups: string[] = []
-  for (const group of text.split(',')) {
-    const words = normalizeSearchText(group).split(' ').filter(Boolean).slice(0, budget)
-    if (!words.length) continue
-    groups.push(words.join(' '))
-    budget -= words.length
-    if (!budget || groups.length === PORTAL_SEARCH_MAX_GROUPS) break
-  }
-  return groups.join(',')
+  const groups = text.split(',').map((group) => normalizeSearchText(group).split(' ').filter(Boolean))
+  return limitSearchTermGroups(groups, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS).map((words) => words.join(' ')).join(',')
 }
 
 export function portalSearchDependsOnStock(params: Record<string, string>, showOutOfStockProducts: boolean, allowStockStateFilter: boolean): boolean {

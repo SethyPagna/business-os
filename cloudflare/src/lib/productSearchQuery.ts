@@ -56,6 +56,9 @@ import {
   PRODUCTS_FTS_BM25_SQL,
   searchTermBarcodeKey,
   searchTermBarcodeKeys,
+  limitSearchTermGroups,
+  SEARCH_MAX_GROUPS,
+  SEARCH_MAX_WORDS,
   tokenizeSearchTermGroups,
 } from './searchMatch'
 
@@ -282,20 +285,18 @@ function buildMatchTierSql(
 // every caller gains the tier. Each strategy's own "why" lives on its
 // builder in lib/searchMatch.ts; the one-line notes here say only what the
 // clause is for.
-export function buildProductSearchQuery(
+function buildProductSearchQueryFromGroups(
   rawSearchText: string,
   params: Record<string, unknown>,
-  options: ProductSearchQueryOptions = {},
+  options: ProductSearchQueryOptions,
+  termGroups: string[][],
 ): ProductSearchQuery {
   const prefix = options.paramPrefix || ''
   const nameNormalizedColumn = options.nameNormalizedColumn || 'p.name_normalized'
   const nameColumn = options.nameColumn || 'p.name'
   const barcodeColumn = options.barcodeColumn || 'p.barcode'
   const titleOnly = Boolean(options.titleOnly)
-  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, prefix, titleOnly, options.catalogOnly)
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-  const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
-  if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
 
   // A checked UPC-E/UPC-A query is an exact scanner lookup. Letting it also
   // enter FTS/trigram matching would re-admit an unrelated seven-digit
@@ -420,6 +421,33 @@ export function buildProductSearchQuery(
       prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,
     }),
   }
+}
+
+// D1 refuses a statement with more than 100 bound parameters, and each search word binds up to
+// ~5 (hybrid + short-word + partial-word clauses). The caps below are the ones the storefront
+// already used; the budget trims trailing words of an adversarial query (short or code-like words
+// bind the most) so the search tail alone stays at or under SEARCH_PARAM_BUDGET, leaving
+// 100 - SEARCH_PARAM_BUDGET for the caller's filters, branch, promotions and paging.
+export const SEARCH_PARAM_BUDGET = 56
+
+export function buildProductSearchQuery(
+  rawSearchText: string,
+  params: Record<string, unknown>,
+  options: ProductSearchQueryOptions = {},
+): ProductSearchQuery {
+  const titleOnly = Boolean(options.titleOnly)
+  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, options.paramPrefix || '', titleOnly, options.catalogOnly)
+  let termGroups = limitSearchTermGroups(tokenizeSearchTermGroups(rawSearchText, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS), SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS)
+  while (termGroups.length) {
+    const bound: Record<string, unknown> = {}
+    const query = buildProductSearchQueryFromGroups(rawSearchText, bound, options, termGroups)
+    if (Object.keys(bound).length <= SEARCH_PARAM_BUDGET || termGroups.flat().length === 1) {
+      Object.assign(params, bound)
+      return query
+    }
+    termGroups = termGroups.map((group, index) => (index === termGroups.length - 1 ? group.slice(0, -1) : group)).filter((group) => group.length)
+  }
+  return { hasSearchTerm: false, titleOnly }
 }
 
 // The family-level ORDER BY every product picker uses, assembled in one

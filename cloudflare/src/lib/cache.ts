@@ -232,6 +232,25 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 
 // Missing KV versions share one D1 lookup and one set-based upsert. KV quota
 // admission covers all KV candidates once; per-key writes remain sequential.
+// Every cache version a reader keys on. Leaving maintenance (a finished or force-cleared restore, a
+// completed or aborted branch cutover) moves them all, so nothing cached from before or during it is
+// served afterwards (the storefront stores nothing while maintenance is held; see routes/portal.ts
+// portalMaintenanceHeld).
+export const MAINTENANCE_CACHE_NAMESPACES = [
+  'products', 'settings', 'stock', 'promotions', 'sales', 'returns',
+  'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log',
+]
+
+// Never throws: the hold is already released and the caches age out by TTL regardless. Callers invoke
+// it only after maintenance was actually released.
+export async function invalidateCachesAfterMaintenance(env: Env, source: string): Promise<void> {
+  try {
+    await bumpVersions(env, MAINTENANCE_CACHE_NAMESPACES)
+  } catch (error) {
+    console.error(`[${source}] cache versions not advanced after maintenance ended`, error)
+  }
+}
+
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return

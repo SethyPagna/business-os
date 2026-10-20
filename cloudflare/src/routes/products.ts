@@ -1245,13 +1245,13 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
       if (multiCol) params[`${field}esc`] = escapeLike(values[0].toLowerCase())
       where.push(matchOneSql(field))
     } else if (values.length > 1) {
-      const clauses = values.map((value, index) => {
-        const key = `${field}${index}`
-        params[key] = value.toLowerCase()
-        if (multiCol) params[`${key}esc`] = escapeLike(value.toLowerCase())
-        return matchOneSql(key)
-      })
-      where.push(`(${clauses.join(' OR ')})`)
+      // One JSON list per field, so a long selection binds 1-2 parameters instead of 1-2 per value (D1 caps a statement at 100).
+      params[`${field}List`] = JSON.stringify(values.map((value) => value.toLowerCase()))
+      const exactSql = `lower(trim(COALESCE(p.${field}, ''))) IN (SELECT value FROM json_each(@${field}List))`
+      if (multiCol) {
+        params[`${field}EscList`] = JSON.stringify(values.map((value) => escapeLike(value.toLowerCase())))
+        where.push(`(${exactSql} OR EXISTS (SELECT 1 FROM json_each(@${field}EscList) WHERE ('||' || lower(COALESCE(p.${multiCol}, p.${field}, '')) || '||') LIKE '%||' || value || '||%' ESCAPE '\\'))`)
+      } else where.push(exactSql)
     }
   }
 
