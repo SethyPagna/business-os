@@ -7635,6 +7635,7 @@
   "inventory_check_error_baseline_changed": "ស្តុក ឬផលិតផលបានផ្លាស់ប្តូរ។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្តងទៀត។",
   "inventory_check_error_owner_required": "មានតែអ្នកបង្កើតវគ្គ ឬអ្នកគ្រប់គ្រងជាន់ខ្ពស់ប៉ុណ្ណោះដែលអាចកែការត្រួតពិនិត្យនេះ។",
   "inventory_check_error_product_not_eligible": "មានផលិតផលក្នុងទំព័រនេះមិនអាចត្រួតពិនិត្យបាន។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្តងទៀត។",
+  "product_supplier_read_only": "អ្នកផ្គត់ផ្គង់មិនត្រូវបានកែនៅក្នុងតារាងទេ។ សូមបើកផលិតផលដើម្បីកែ។",
   "inventory_check_now": "បច្ចុប្បន្ន",
   "inventory_check_start": "ចាប់ផ្តើម",
   "inventory_check_customers_short": "អតិថិជន",

@@ -319,16 +319,19 @@ const onlyOffsets = (tokens: string[], where: string) => {
 
 test('Products table row: the tag is in the image cell (the name cell is untouched) and the memo boundaries are intact', () => {
   const desktop = products_tsx.slice(products_tsx.indexOf('function ProductDesktopRowComponent'), products_tsx.indexOf('const ProductDesktopRow = memo'))
-  const imageCell = desktop.slice(desktop.indexOf('<td className="relative px-2 py-2">'), desktop.indexOf('{/* Name rail (col 3)'))
-  assert.ok(imageCell.length > 0, 'the image cell is positioned (relative) so the tag has a container')
+  // 6.0.873: the image cell is a pinned (sticky) column; sticky positions the tag exactly as relative did.
+  const imageCellOpen = '<td className={`px-2 py-2 ${pinClass}`} style={{ left: pinnedLeft(\'image\', selectionModeActive) }}>'
+  assert.ok(desktop.includes(imageCellOpen), 'the image cell is pinned')
+  const imageCell = desktop.slice(desktop.indexOf(imageCellOpen), desktop.indexOf('{/* Name rail (col 3)'))
+  assert.ok(imageCell.length > 0, 'the image cell is positioned (sticky) so the tag has a container')
   assert.match(imageCell, /<PendingReviewTag section="products" entityType="product" ids=\{rowScopeIds\}/)
   assert.equal((desktop.match(/<PendingReviewTag/g) || []).length, 1, 'one tag per desktop row')
   onlyOffsets(offsetOf(desktop, '<PendingReviewTag'), 'desktop row')
   // A child row has no image, but its (empty) image cell still hosts the tag in the same column.
   assert.ok(imageCell.indexOf('<PendingReviewTag') < imageCell.indexOf('{indented ? null : ('), 'the tag renders for child rows too')
   // The name cell is byte-for-byte what it was.
-  assert.ok(desktop.includes('<td className={`${ROW_TEXT_GUTTER} py-2`}>'), 'the name cell\'s opening tag is unchanged')
-  const nameCell = desktop.slice(desktop.indexOf('<td className={`${ROW_TEXT_GUTTER} py-2`}>'), desktop.indexOf('{/* border-l here'))
+  assert.ok(desktop.includes('<td className={`${ROW_TEXT_GUTTER} py-2 ${pinClass}`}'), 'the name cell\'s opening tag only gained its pin (6.0.873)')
+  const nameCell = desktop.slice(desktop.indexOf('<td className={`${ROW_TEXT_GUTTER} py-2 ${pinClass}`}'), desktop.indexOf('{/* One cell per chosen column'))
   assert.doesNotMatch(nameCell, /PendingReviewTag|relative/, 'nothing was added to the name cell')
 
   // Rows read the store through the tag; the shared ctx did not grow, so no row re-renders when the list changes.

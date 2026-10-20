@@ -3,6 +3,7 @@ import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import { chooserHostKey, productTableMinWidthRem, productTableSpans, type ProductColumn } from '../config/productTableColumns.ts'
 
 // ---------------------------------------------------------------------------
 // Desktop table geometry: ONE left rail
@@ -40,6 +41,25 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 // thumbnail target.
 const SELECT_COL_WIDTH = '2rem'
 const IMAGE_COL_WIDTH = '4rem'
+// Pinned (sticky) leading columns: the horizontal scroll lives inside the table's
+// own container, so the checkbox, image and name stay put while data columns pass
+// under them. Their cells MUST be opaque or the scrolled cells show through.
+export type PinnedColumn = 'select' | 'image' | 'name'
+export function pinnedLeft(column: PinnedColumn, selectionModeActive: boolean): string {
+  const select = selectionModeActive ? SELECT_COL_WIDTH : '0px'
+  if (column === 'select') return '0px'
+  return column === 'image' ? select : `calc(${select} + ${IMAGE_COL_WIDTH})`
+}
+export const PINNED_CELL = 'sticky z-[5]'
+export const PINNED_BG = 'bg-white dark:bg-zinc-800'
+export const PINNED_BG_SELECTED = 'bg-primary-50 dark:bg-zinc-700'
+// Header cells keep the opaque thead colour from main.css; they only need to sit above the body's pinned cells.
+const PINNED_HEAD = 'sticky z-[6]'
+const COLUMN_TONE: Record<string, string> = {
+  cost: 'col-highlight-red text-red-600 dark:text-red-400',
+  selling: 'col-highlight-green text-green-600 dark:text-green-400',
+  margin: 'text-blue-600 dark:text-blue-400',
+}
 /** Padding between the image column and the start of any title text. */
 export const ROW_TEXT_GUTTER = 'px-2'
 // A grouped child row does NOT get a text indent: it aligns exactly with
@@ -47,16 +67,11 @@ export const ROW_TEXT_GUTTER = 'px-2'
 // a thumbnail, the children do not) is what sets the group apart, so an
 // extra indent on the name would double the offset. Kept as a note rather
 // than a constant because there is deliberately nothing to apply.
-/**
- * The columns a full-width row spans past the image column. Kept next to
- * the <colgroup> below because the two have to agree: 2 leading cells plus
- * this must equal the table's column count.
- */
-const FULL_WIDTH_ROW_SPAN = 6
-/** The category band spans one column further LEFT than the group header:
- *  its label sits on the image column (above the thumbnails), so it covers
- *  the image column plus the 6 trailing ones. */
-const CATEGORY_BAND_SPAN = 7
+// How many columns a full-width row spans past the image column is NOT a
+// constant: the data columns are the user's choice, so productTableSpans()
+// derives every span from the same list that renders the <th>s. The category
+// band spans one column further LEFT than the group header (its label sits on
+// the image column).
 
 type Translate = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string
@@ -105,6 +120,10 @@ type ProductsListSurfaceProps = {
   // header select-all checkbox (11.2 alignment: in select mode the
   // column-header checkbox IS select-all, like the other five list pages).
   allVisibleIds: ProductId[]
+  // Data columns drawn after Image and Name: already role-filtered and chosen.
+  columns: readonly ProductColumn[]
+  // The ColumnChooser, drawn inside the last header cell.
+  columnChooser: ReactNode
   loading: boolean
   productSections: ProductSection[]
   productTotal?: number
@@ -151,6 +170,8 @@ export default function ProductsListSurface({
   isSelectionScopeFullySelected,
   isSelectionScopePartiallySelected,
   allVisibleIds,
+  columns,
+  columnChooser,
   loading,
   productSections,
   productTotal,
@@ -172,13 +193,16 @@ export default function ProductsListSurface({
   visibleProducts,
 }: ProductsListSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
+  const spans = productTableSpans(columns)
+  const chooserHost = chooserHostKey(columns)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
-  // A responsive fixed-layout grid keeps the final Stock/Qty column visible
-  // on an ordinary desktop. Name and Details share the available width as
-  // percentages; the numeric columns stay compact and predictable. At widths
-  // below xl we use the card surface, because a sidebar leaves too little
-  // usable space for an eight-column table even when the viewport is `lg`.
+  // Excel-style: Name is the one auto column and every data column has a bounded
+  // width (config/productTableColumns.ts, sized in Khmer as well as English).
+  // The table declares its own minimum width, so a wide choice scrolls inside
+  // its container with Image and Name pinned instead of squeezing cells. At
+  // widths below xl we use the card surface, because a sidebar leaves too little
+  // usable space for a table even when the viewport is `lg`.
   // 11.1 + 11.2: the checkbox column only takes space in SELECT mode.
   // Out of select mode the column collapses to 0 width and its cells drop
   // their padding, so nothing is reserved and the whole grid sits a touch
@@ -194,36 +218,9 @@ export default function ProductsListSurface({
       <col style={{ width: selectColWidth }} />
       <col style={{ width: IMAGE_COL_WIDTH }} />
       {/* Name is the one auto column: it receives exactly the remaining
-          width after the compact, bounded Details and numeric columns. */}
+          width after the bounded data columns (productTableColumns). */}
       <col />
-      {/* Details holds one chip per branch ("Main Store: 10", "Branch 2: 0")
-          plus SKU / unit / supplier / discount chips. At 10.5rem the branch
-          pair wrapped onto a second line and every row in the report stood at
-          103px, while Name -- the auto column -- sat at 396px to hold a 134px
-          product name.
-
-          Size this in KHMER, not English. `body.lang-km` swaps the whole app
-          onto Noto Sans Khmer, which renders even these Latin chips wider, so
-          an English-only measurement under-sizes the column and the report
-          silently regrows a line for Khmer operators. Measured at 1280, chips
-          plus their 4px gap, against this column's content box:
-
-            Main Store: 10   / Branch 2: 0     181px
-            Main Store: 100  / Branch 2: 0     188px
-            Main Store: 100  / Branch 2: 100   202px
-            Main Store: 1000 / Branch 2: 250   208px
-
-          15rem leaves a 216px content box, so all four fit on one line and
-          every row settles at 85px (-17%) in both languages, with Name still
-          at 324px. Bounded, not auto: this column stays compact so the
-          numeric columns stay put. A third branch, or quantities past those,
-          will wrap again -- that is inherent to a fixed width and is the
-          trade the bounded column is making. */}
-      <col style={{ width: '15rem' }} />
-      <col style={{ width: '5.5rem' }} />
-      <col style={{ width: '6.5rem' }} />
-      <col style={{ width: '5rem' }} />
-      <col style={{ width: '5.5rem' }} />
+      {columns.map((column) => <col key={column.key} style={{ width: `${column.widthRem}rem` }} />)}
     </colgroup>
   )
 
@@ -233,7 +230,7 @@ export default function ProductsListSurface({
         {/* 11.2 alignment: in select mode the column-header checkbox IS
             select-all, matching the other five list pages. The cell
             collapses to nothing out of select mode. */}
-        <th className={`${selectCellPad} py-3`}>
+        <th className={`${PINNED_HEAD} ${selectCellPad} py-3`} style={{ left: pinnedLeft('select', selectionModeActive) }}>
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -245,19 +242,24 @@ export default function ProductsListSurface({
             />
           ) : null}
         </th>
-        <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
-        <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
-        <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('details') || 'Details'}</th>
-        {/* Was t('cost_in_purchase') ("Cost In (Purchase)") -- too long for
-            this column at normal widths, overflowing/truncating to
-            "Costin...". Just "Cost" (same short key ProductForm's other
-            cost surfaces already use) fits and is unambiguous given the
-            red cost-column styling and the Selling/Margin columns beside
-            it. */}
-        <th className="col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400">{t('cost')}</th>
-        <th className="col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400">{t('selling_price_label')}</th>
-        <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">{t('margin')}</th>
-        <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('stock')}</th>
+        <th className={`${PINNED_HEAD} truncate whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400`} style={{ left: pinnedLeft('image', selectionModeActive) }}>{t('receipt_image_short') || t('image') || 'Image'}</th>
+        <th className={`${PINNED_HEAD} min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`} style={{ left: pinnedLeft('name', selectionModeActive) }}>
+          {chooserHost === 'name' ? (
+            <span className="flex items-center justify-between gap-1"><span className="truncate">{t('product_name')}</span>{columnChooser}</span>
+          ) : t('product_name')}
+        </th>
+        {columns.map((column) => {
+          const label = t(column.label) || column.label
+          const tone = COLUMN_TONE[column.key] || 'text-gray-600 dark:text-gray-400'
+          const align = column.align === 'right' ? 'text-right' : 'text-left'
+          return (
+            <th key={column.key} title={label} data-column={column.key} className={`truncate whitespace-nowrap px-3 py-3 ${align} font-semibold ${tone}`}>
+              {column.key === chooserHost ? (
+                <span className={`flex items-center gap-1 ${column.align === 'right' ? 'justify-end' : 'justify-between'}`}><span className="truncate">{label}</span>{columnChooser}</span>
+              ) : label}
+            </th>
+          )
+        })}
       </tr>
     </thead>
   )
@@ -320,7 +322,7 @@ export default function ProductsListSurface({
           stays visible while scrolling" behavior, just anchored one level up. */}
       <div className="card hidden min-w-0 max-w-full overflow-hidden xl:flex xl:flex-col">
         <div className="relative overflow-x-auto">
-          <table className="w-full min-w-[58rem] table-fixed text-sm table-bordered">
+          <table className="w-full table-fixed text-sm table-bordered" style={{ minWidth: `${productTableMinWidthRem(columns)}rem` }}>
             {desktopColGroup}
             {renderDesktopTableHead()}
             <tbody className={showDesktopLoadingOverlay ? 'invisible' : ''}>
@@ -329,7 +331,7 @@ export default function ProductsListSurface({
                   ? null
                   : (
                     <tr>
-                      <td colSpan={8} className="py-10 text-center text-gray-400">
+                      <td colSpan={spans.row} className="py-10 text-center text-gray-400">
                         {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
                       </td>
                     </tr>
@@ -349,7 +351,7 @@ export default function ProductsListSurface({
                           band still reads full width -- the background is
                           on the <tr>. */}
                       <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                        <td className={`${selectCellPad} py-2`}>
+                        <td className={`${selectCellPad} py-2 ${PINNED_CELL} bg-slate-100 dark:bg-slate-800`} style={{ left: pinnedLeft('select', selectionModeActive) }}>
                           {selectionModeActive ? (
                             <input
                               type="checkbox"
@@ -363,7 +365,7 @@ export default function ProductsListSurface({
                             />
                           ) : null}
                         </td>
-                        <td colSpan={CATEGORY_BAND_SPAN} className={`${ROW_TEXT_GUTTER} py-2`}>
+                        <td colSpan={spans.band} className={`${ROW_TEXT_GUTTER} py-2`}>
                           <div className="flex items-center justify-between gap-3">
                             <span className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                               <span className="truncate">{section.label}</span>
@@ -398,7 +400,7 @@ export default function ProductsListSurface({
                                 every viewport width. */}
                             {showGroupRow ? (
                               <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId} {...(bindGroupHold ? bindGroupHold(group) : {})}>
-                                <td className={`${selectCellPad} py-2.5`}>
+                                <td className={`${selectCellPad} py-2.5 ${PINNED_CELL} ${PINNED_BG}`} style={{ left: pinnedLeft('select', selectionModeActive) }}>
                                   {selectionModeActive ? (
                                     <input
                                       type="checkbox"
@@ -412,10 +414,10 @@ export default function ProductsListSurface({
                                     />
                                   ) : null}
                                 </td>
-                                <td className="px-2 py-2.5">
+                                <td className={`px-2 py-2.5 ${PINNED_CELL} ${PINNED_BG}`} style={{ left: pinnedLeft('image', selectionModeActive) }}>
                                   <span className="flex items-center justify-center">{renderGroupThumbnail ? renderGroupThumbnail(group) : null}</span>
                                 </td>
-                                <td colSpan={FULL_WIDTH_ROW_SPAN} className={`${ROW_TEXT_GUTTER} py-2.5`}>
+                                <td colSpan={spans.group} className={`${ROW_TEXT_GUTTER} py-2.5`}>
                                   <div className="flex min-w-0 items-center justify-between gap-3">
                                     {/* Title has no leading chevron/icon -- a leading
                                         disclosure icon pushed this text ~24px right of

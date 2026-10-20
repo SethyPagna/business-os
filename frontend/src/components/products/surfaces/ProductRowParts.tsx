@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react'
+import Lock from 'lucide-react/dist/esm/icons/lock.js'
+import Store from 'lucide-react/dist/esm/icons/store.js'
 import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
+import { getKhmerTextProps } from '../../../utils/scriptTypography.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
+import type { StockCellModel } from '../config/productTableColumns.ts'
 
 type BranchId = string | number
 type Translate = (key: string, fallback?: string, khmerFallback?: string) => string
@@ -194,6 +198,107 @@ export function ProductDetailsCell({
         {!branchRows.length && !detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
       </div>
       <ProductBatchPreview product={product} branchId={selectedBranchId} tr={tr} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Excel-style table cells (config/productTableColumns.ts decides which exist)
+// ---------------------------------------------------------------------------
+
+/** The lock on a column the signed-in user may read but not change. */
+export function ReadOnlyMark({ tip }: { tip: string }) {
+  return (
+    <span role="img" aria-label={tip} title={tip} className="inline-flex shrink-0 text-gray-400 dark:text-gray-500">
+      <Lock className="h-3 w-3" aria-hidden="true" />
+    </span>
+  )
+}
+
+type ProductPriceCellProps = {
+  usd: number
+  khr: number
+  tone: 'selling' | 'wholesale'
+  /** Set when the user cannot change prices: the value turns muted and gains a lock. */
+  lockTip?: string
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+  children?: ReactNode
+}
+
+/** USD on the first line, riel on the second. A wholesale price nobody set reads as a dash. */
+export function ProductPriceCell({ usd, khr, tone, lockTip, fmtUSD, fmtKHR, children }: ProductPriceCellProps) {
+  if (tone === 'wholesale' && !(usd > 0) && !(khr > 0)) {
+    return <div className="flex items-center justify-end gap-1 text-gray-300">{lockTip ? <ReadOnlyMark tip={lockTip} /> : null}<span>—</span></div>
+  }
+  const ink = lockTip
+    ? 'text-gray-500 dark:text-gray-400'
+    : tone === 'selling' ? 'font-semibold text-green-700 dark:text-green-400' : 'font-medium text-primary-700 dark:text-primary-400'
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-end gap-1">
+        {lockTip ? <ReadOnlyMark tip={lockTip} /> : null}
+        <span className={ink}>{fmtUSD(usd)}</span>
+      </div>
+      {khr > 0 ? <div {...getKhmerTextProps(fmtKHR(khr), 'text-xs text-gray-400')}>{fmtKHR(khr)}</div> : null}
+      {children}
+    </div>
+  )
+}
+
+type ProductSupplierCellProps = {
+  supplier?: string
+  /** Set while the table cannot edit the supplier: muted text and a lock. */
+  lockTip?: string
+  tr: Translate
+  navigateTo?: EntityNavigate
+}
+
+export function ProductSupplierCell({ supplier, lockTip, tr, navigateTo }: ProductSupplierCellProps) {
+  const copy = useCopyFloat(tr)
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      {supplier ? (
+        <span className={`inline-flex min-w-0 max-w-full ${lockTip ? 'text-gray-500 dark:text-gray-400' : ''}`} {...copy(supplier)}>
+          <EntityLink className="detail-scroll-text text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={supplier} navigate={navigateTo} title={tr('open_supplier', 'Open supplier', 'បើកអ្នកផ្គត់ផ្គង់')}>
+            {supplier}
+          </EntityLink>
+        </span>
+      ) : <span className="text-gray-300">—</span>}
+      {lockTip ? <ReadOnlyMark tip={lockTip} /> : null}
+    </div>
+  )
+}
+
+type ProductStockCellProps = {
+  qty: unknown
+  qtyClassName: string
+  unitChip: ReactNode
+  model: StockCellModel
+  totalLabel: string
+  inactiveLabel: string
+}
+
+/** The status-coloured total, then the branch: a chip for one branch, a short list for several. */
+export function ProductStockCell({ qty, qtyClassName, unitChip, model, totalLabel, inactiveLabel }: ProductStockCellProps) {
+  return (
+    <div className="min-w-0">
+      <div title={model.lines.length ? totalLabel : undefined} className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${qtyClassName}`}>
+        <span>{String(qty || 0)}</span>
+        {unitChip}
+      </div>
+      {model.chip ? (
+        <div data-stock-branch-chip="" title={model.chip} className="mt-0.5 flex min-w-0 items-center justify-end gap-1 text-[10px] text-gray-500 dark:text-gray-400">
+          <Store className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="detail-scroll-text min-w-0">{model.chip}</span>
+        </div>
+      ) : null}
+      {model.lines.map((line) => (
+        <div key={line.key} data-stock-branch-line={line.inactive ? 'inactive' : 'active'} className={`mt-0.5 flex min-w-0 items-center justify-between gap-1 text-[10px] ${line.inactive ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
+          <span className="detail-scroll-text min-w-0">{line.inactive ? `${line.name} (${inactiveLabel})` : line.name}</span>
+          <span className="shrink-0 tabular-nums">{line.quantity}</span>
+        </div>
+      ))}
     </div>
   )
 }
