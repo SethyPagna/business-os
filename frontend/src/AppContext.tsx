@@ -1275,7 +1275,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
         schedulePermissionRefresh()
       }
-      syncScheduler.schedule(channel, isRemoteSyncUpdate(detail), () => {
+      syncScheduler.schedule(channel, isRemoteSyncUpdate(detail), detail.source || null, (source) => {
         // Settings changes from other devices apply immediately; no reload needed.
         // A resume with the socket open throughout missed no settings push.
         // A save made in this tab is not re-read: its answer already carried the
@@ -1285,7 +1285,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           channel,
           ts: Date.now(),
           reason: detail.reason || null,
-          source: detail.source || null,
+          source,
           ...(detail.ownSettingsWrite ? { ownSettingsWrite: true } : {}),
         })
       })
