@@ -18,7 +18,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
 import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { generatePortalAiResponse } from '../lib/portalAi'
+import { generatePortalAiResponse, listPortalAiProviderDisclosures } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
@@ -1197,6 +1197,9 @@ app.get('/ai/status', async (c) => {
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
     provider: provider?.provider || '',
+    // Every enabled chat provider a question can reach (the chat fails over
+    // between them), as id + display name only. Empty when the assistant is off.
+    providers: config.aiEnabled ? await listPortalAiProviderDisclosures(c.env, config.aiProviderId) : [],
     dataUseNotice: provider
       ? 'Your question and optional shopping preferences are sent to this AI provider and may be processed outside Cambodia.'
       : '',

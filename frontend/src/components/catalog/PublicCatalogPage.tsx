@@ -53,6 +53,8 @@ import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
+import { aiProviderState } from './legal/aiProviderDisclosure.ts'
+import type { AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
@@ -460,7 +462,7 @@ export default function PublicCatalogPage() {
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantError, setAssistantError] = useState('')
   const [assistantResponse, setAssistantResponse] = useState<LooseRecord | null>(null)
-  const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
+  const [assistantDisclosure, setAssistantDisclosure] = useState<AiProviderState | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
   const [pageLanguage, setPageLanguage] = useState(readPublicStorefrontLanguage)
   const bucket = usePortalBucket()
@@ -895,8 +897,7 @@ export default function PublicCatalogPage() {
     if (activeTab !== 'ai') return
     getCatalogApi().getPortalAiStatus?.()
       ?.then((result) => {
-        const data = (result || {}) as LooseRecord
-        setAssistantDisclosure({ provider: data.provider || '', dataUseNotice: data.dataUseNotice || '' })
+        setAssistantDisclosure(aiProviderState(result))
       })
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])

@@ -24,6 +24,8 @@ import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTra
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
 import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { aiProviderNames, fillAiProviderTemplate } from './legal/aiProviderDisclosure.ts'
+import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -168,14 +170,20 @@ interface CatalogAiSectionProps {
   assistantResponse?: AssistantResponse | null
   // The storefront's product detail sheet; without it a card is plain text.
   openProductById?: (productId: number, productName: string) => void
-  assistantDisclosure?: { provider?: string; dataUseNotice?: string } | null
+  // What /ai/status says about the providers behind the assistant; null until it answers.
+  assistantDisclosure?: AiProviderState | null
   assistantDataUseConsent: boolean
   setAssistantDataUseConsent: (value: boolean) => void
 }
 
 // The assistant notice the merchant cannot edit away -- see its use below.
-const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider that processes it outside Cambodia, and it is deleted after 30 days, as our privacy policy sets out. Please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, speak to a pharmacist or doctor, and contact the store team for anything about a product.'
-const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដែលដំណើរការក្រៅប្រទេសកម្ពុជា ហើយត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ តាមគោលការណ៍ឯកជនភាពរបស់យើង។ សូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
+const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider{providerNames} that processes it outside Cambodia.{providerRetention} Our copy is deleted after 30 days, as our privacy policy sets out. Please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, speak to a pharmacist or doctor, and contact the store team for anything about a product.'
+const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី{providerNames} ដែលដំណើរការក្រៅប្រទេសកម្ពុជា។{providerRetention} ច្បាប់ចម្លងរបស់យើងត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ តាមគោលការណ៍ឯកជនភាពរបស់យើង។ សូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
+
+// The consent line beside the Send button. {providerNames} and {providerRetention}
+// come from the one provider map (legal/aiProviderDisclosure.ts).
+const ASSISTANT_CONSENT_EN = 'I understand that my question and optional shopping preferences are sent to a third-party AI provider{providerNames} and processed outside Cambodia.{providerRetention} Our copy is deleted after 30 days. I will not include personal, medical, or payment details.'
+const ASSISTANT_CONSENT_KM = 'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី{providerNames} ហើយដំណើរការក្រៅប្រទេសកម្ពុជា។{providerRetention} ច្បាប់ចម្លងរបស់យើងត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។'
 
 type CatalogSecondaryTabsProps = {
   tab?: string
@@ -731,7 +739,10 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     setAssistantDataUseConsent(next)
     writeAssistantConsent(next)
   }
-  const provider = assistantDisclosure?.provider || copy('assistantProviderFallback', 'our AI provider', 'អ្នកផ្តល់សេវា AI របស់យើង')
+  const aiState: AiProviderState = assistantDisclosure || { kind: 'unknown' }
+  // copy() answers in the storefront language; asking it for 'en' / 'ខ្មែរ' tells this section which wording to build.
+  const language: AiDisclosureLanguage = copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? 'km' : 'en'
+  const provider = aiProviderNames(aiState, language) || copy('assistantProviderFallback', 'our AI provider', 'អ្នកផ្តល់សេវា AI របស់យើង')
   const labelClass = 'block text-sm font-medium text-slate-700 dark:text-neutral-200'
 
   return (
@@ -849,11 +860,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                   onChange={(event) => changeConsent(event.target.checked)}
                 />
                 <span>
-                  {replaceVars(copy(
-                    'assistantDataUseConsent',
-                    'I understand that my question and optional shopping preferences are sent to {provider}, which processes them outside Cambodia, and are deleted after 30 days. I will not include personal, medical, or payment details.',
-                    'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅ {provider} ដែលដំណើរការវាក្រៅប្រទេសកម្ពុជា ហើយត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។',
-                  ), { provider })}
+                  {fillAiProviderTemplate(language === 'km' ? ASSISTANT_CONSENT_KM : ASSISTANT_CONSENT_EN, aiState, language)}
                 </span>
               </label>
             )}
@@ -891,7 +898,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 as a different product class; the assistant is instructed not
                 to make one, and a reader is told what it is either way. */}
             <p className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 text-[11px] leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-400">
-              {copy('assistantAutomatedNotice', ASSISTANT_AUTOMATED_EN, ASSISTANT_AUTOMATED_KM)}
+              {fillAiProviderTemplate(language === 'km' ? ASSISTANT_AUTOMATED_KM : ASSISTANT_AUTOMATED_EN, aiState, language)}
             </p>
           </div>
         </div>

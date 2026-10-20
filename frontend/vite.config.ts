@@ -871,6 +871,10 @@ function manualChunks(id: string): string | undefined {
       // (catalog-secondary-tabs) and the footer (catalog-legal), so they live here.
       || normalized.includes('/src/components/catalog/PortalSocialRow.tsx')
       || normalized.includes('/src/components/catalog/portalSocialLinks.ts')
+      // aiProviderDisclosure.ts (the AI provider map) is read by the assistant tab
+      // (catalog) and the privacy policy (catalog-legal); in either chunk it would
+      // add a catalog <-> catalog-legal cycle.
+      || normalized.includes('/src/components/catalog/legal/aiProviderDisclosure.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // catalog surfaces (CatalogEditorSurface -> catalog-editor, PortalSocialRow
       // -> catalog-public-core). Left to the generic
