@@ -13,6 +13,7 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
 import { importedReturnLines, importedReturnedQuantitySql } from './saleTransitions'
+import { planReturnMoney, readSalesReturnMoney, ReturnMoneyError, salePaymentState } from './returnRefundSplit'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -120,9 +121,16 @@ type Member = {
   reason: 'changed' | 'source_mismatch' | 'scope_mismatch'
   updateSale: boolean
   stock: StockDelta[]
+  // A restored customer return is a new refund: its debt/cash split is taken
+  // again against the sale as it stands. Absent on older snapshots and on
+  // every other member, which then leave both columns alone.
+  money?: { before: ReturnMoneyState; after: ReturnMoneyState }
 }
 
-type SaleStatusSnapshot = { saleId: number; before: string; after: string }
+type ReturnMoneyState = { owed_reduction_usd: number; refund_currency: string | null }
+// payment*: the sale's payment state (sale_status, or status_before_return
+// beside a return status) on each side. Absent on older snapshots.
+type SaleStatusSnapshot = { saleId: number; before: string; after: string; paymentBefore?: string; paymentAfter?: string }
 type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
 
 // `code` names a business refusal the client restates in the operator's
@@ -287,11 +295,12 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
 function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
+  const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
   return [
     ...stockStatements(member, direction, user, stamp),
     {
-      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,updated_at=@stamp WHERE id=@id`,
-      params: { ...target, stamp, id: member.id },
+      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,${money ? 'owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,' : ''}updated_at=@stamp WHERE id=@id`,
+      params: { ...target, ...(money ?? {}), stamp, id: member.id },
     },
   ]
 }
@@ -302,12 +311,13 @@ function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, 
 // guards use the SQL twin importedReturnedQuantitySql (lib/saleTransitions.ts); this status derivation, and the pre-read
 // that records it (saleStatusSnapshots), must too, or restoring a return would leave a sale one imported unit short of
 // 'returned' and cancelling the last recorded return would forget the imported unit and report the sale as not returned.
-function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string): Statement {
-  if (exactStatus) return { sql: 'UPDATE sales SET sale_status=@status,updated_at=@stamp WHERE id=@saleId', params: { saleId, stamp, status: exactStatus } }
+// payment: the payment state to leave beside (or, with no return left, as) the status; absent keeps the stored one.
+function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string, payment?: string): Statement {
+  if (exactStatus) return { sql: 'UPDATE sales SET sale_status=@status,status_before_return=COALESCE(@payment,status_before_return),updated_at=@stamp WHERE id=@saleId', params: { saleId, stamp, status: exactStatus, payment: payment ?? null } }
   return {
-    sql: `UPDATE sales SET sale_status = CASE
+    sql: `UPDATE sales SET status_before_return=COALESCE(@payment,status_before_return),sale_status = CASE
             WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer')
-              AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=@saleId AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(status_before_return,'completed')
+              AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=@saleId AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(@payment,status_before_return,'completed')
             WHEN NOT EXISTS(
               SELECT 1 FROM sale_items si
               WHERE si.sale_id=@saleId AND COALESCE((
@@ -318,8 +328,50 @@ function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string
             ) THEN 'returned'
             ELSE 'partial_return' END,
           updated_at=@stamp WHERE id=@saleId`,
-    params: { saleId, stamp },
+    params: { saleId, stamp, payment: payment ?? null },
   }
+}
+
+/**
+ * The money half of a status change (owner, 29 Sep 2026): a restored return
+ * splits its refund again into debt lowered and cash, and every touched sale
+ * reads Not Paid while it still owes (lib/returnRefundSplit.ts planReturnMoney). Sets member.money on each
+ * restored customer return; returns each sale's payment state before/after.
+ */
+async function planStatusMoney(db: D1Compat, members: Member[]): Promise<Map<number, { before: string; after: string }>> {
+  const touched = members.filter(member => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
+  const out = new Map<number, { before: string; after: string }>()
+  for (const [saleId, money] of await readSalesReturnMoney(db, [...new Set(touched.map(member => member.saleId!))])) {
+    const own = touched.filter(member => member.saleId === saleId)
+    const status = new Map(own.map(member => [member.id, member.after.status]))
+    const restored = own.filter(member => member.after.status === 'completed').map(member => member.id).sort((a, b) => a - b)
+    const rows = money.returns.map(row => ({ id: Number(row.id), active: (status.get(Number(row.id)) ?? row.status) !== 'cancelled',
+      refundUsd: row.total_refund_usd, owedReductionUsd: row.owed_reduction_usd,
+      currency: restored.includes(Number(row.id)) ? row.refund_currency ?? 'USD' : row.refund_currency }))
+    let plan: ReturnType<typeof planReturnMoney>
+    try { plan = planReturnMoney({ sale: money.sale, returns: rows, recompute: restored }) } catch (error) {
+      if (error instanceof ReturnMoneyError) fail(error.message, 409, error.code)
+      throw error
+    }
+    for (const id of restored) {
+      const stored = money.returns.find(row => Number(row.id) === id)
+      if (!stored || !plan.owedReductionUsd.has(id)) continue
+      const currency = stored.refund_currency == null ? null : String(stored.refund_currency)
+      own.find(member => member.id === id)!.money = {
+        before: { owed_reduction_usd: Number(stored.owed_reduction_usd) || 0, refund_currency: currency },
+        after: { owed_reduction_usd: plan.owedReductionUsd.get(id)!, refund_currency: currency ?? 'USD' },
+      }
+    }
+    out.set(saleId, { before: salePaymentState(money.sale), after: plan.paymentState })
+  }
+  return out
+}
+
+/** The status and payment state a replay leaves on its sale. */
+function replayTarget(status: SaleStatusSnapshot | undefined, exact: SaleStatusSnapshot | undefined, direction: 1 | -1): { status?: string; payment?: string } {
+  const payment = status ? (direction > 0 ? status.paymentAfter : status.paymentBefore) : undefined
+  if (!exact) return { payment }
+  return { status: payment && !['returned', 'partial_return'].includes(exact.after) ? payment : exact.after, payment }
 }
 
 function auditStatement(user: SessionUser, operationId: string, action: string, count: number): Statement {
@@ -370,8 +422,12 @@ async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<Sal
 
 function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
   return buildSaleRecordEventsInsert((snapshot.saleStatuses || []).flatMap((status) => {
-    const before = via === 'undo' ? status.after : status.before
-    const after = via === 'undo' ? status.before : status.after
+    // A change of payment state alone (a restore that clears the debt) is recorded as that state moving.
+    const paid = status.before === status.after && status.paymentBefore !== undefined && status.paymentBefore !== status.paymentAfter
+    const left = paid ? status.paymentBefore! : status.before
+    const right = paid ? status.paymentAfter! : status.after
+    const before = via === 'undo' ? right : left
+    const after = via === 'undo' ? left : right
     if (before === after) return []
     const related = snapshot.members.filter((member) => member.changed && member.saleId === status.saleId).map((member) => member.returnNumber)
     return [{
@@ -735,8 +791,16 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   const stamp = new Date().toISOString()
   const ordinarySaleStatuses = request.field === 'status' ? await saleStatusSnapshots(db, members) : []
   const exactBySale = new Map(entitlement.saleStatuses.map(status => [status.saleId, status]))
+  const payments = request.field === 'status' ? await planStatusMoney(db, members) : new Map<number, { before: string; after: string }>()
   const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
-    saleStatuses: ordinarySaleStatuses.map(status => exactBySale.get(status.saleId) || status) }
+    saleStatuses: ordinarySaleStatuses.map(ordinary => {
+      const status = exactBySale.get(ordinary.saleId) || ordinary
+      const payment = payments.get(status.saleId)
+      if (!payment) return status
+      const after = ['returned', 'partial_return'].includes(status.after) ? status.after : payment.after
+      return { ...status, after, paymentBefore: payment.before, paymentAfter: payment.after }
+    }) }
+  const snapshotBySale = new Map((snapshot.saleStatuses || []).map(status => [status.saleId, status]))
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -761,7 +825,8 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   ]
   for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
   for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
-    statements.push(saleStatusStatement(saleId, stamp, exactBySale.get(saleId)?.after))
+    const status = snapshotBySale.get(saleId)
+    statements.push(saleStatusStatement(saleId, stamp, exactBySale.has(saleId) ? status?.after : undefined, status?.paymentAfter))
   }
   const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
@@ -825,8 +890,10 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
   const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
+  const snapshotBySale = new Map((snapshot.saleStatuses || []).map(status => [status.saleId, status]))
   for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
-    statements.push(saleStatusStatement(saleId, stamp, replayExact.get(saleId)?.after))
+    const target = replayTarget(snapshotBySale.get(saleId), replayExact.get(saleId), directionSign)
+    statements.push(saleStatusStatement(saleId, stamp, target.status, target.payment))
   }
   const nextGeneration = Number(generation) + 1
   const recordEvents = returnSaleRecordEvents(snapshot, nextGeneration, direction, user, stamp)

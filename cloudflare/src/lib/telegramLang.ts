@@ -221,6 +221,8 @@ const LABELS = {
   type: { en: 'Type', km: 'ប្រភេទ', localizeValue: true },
   settlement: { en: 'Settlement', km: 'វិធីដោះស្រាយ', localizeValue: true },
   refund: { en: 'Refund', km: 'សងប្រាក់', localizeValue: true },
+  // The part of a return on a Not Paid sale that lowered its debt (owner, 29 Sep 2026); RET-A's wording.
+  debtLowered: { en: 'Debt lowered', km: 'បានបន្ថយប្រាក់ជំពាក់' },
   supplierPays: { en: 'Supplier pays', km: 'អ្នកផ្គត់ផ្គង់សង' },
   loss: { en: 'Loss', km: 'ខាតបង់' },
 

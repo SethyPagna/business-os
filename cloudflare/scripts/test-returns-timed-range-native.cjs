@@ -16,7 +16,7 @@ const permissions = load('lib/permissions.ts')
 const access = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const raw = new DatabaseSync(':memory:')
 raw.exec(`CREATE TABLE returns(id INTEGER PRIMARY KEY,created_at TEXT,return_scope TEXT,status TEXT,branch_id INTEGER,
-  total_refund_usd REAL DEFAULT 0,total_refund_khr REAL DEFAULT 0,supplier_compensation_usd REAL DEFAULT 0,
+  total_refund_usd REAL DEFAULT 0,total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT,supplier_compensation_usd REAL DEFAULT 0,
   supplier_compensation_khr REAL DEFAULT 0,supplier_loss_usd REAL DEFAULT 0,supplier_loss_khr REAL DEFAULT 0,
   reason TEXT,return_type TEXT,customer_id INTEGER,replacement_sale_id INTEGER,sale_id INTEGER);
   CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT);
@@ -47,6 +47,13 @@ new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(r
   if (name === '../lib/acquisitionCostAccess') return access
   if (name === '../lib/businessDateWindow') return dates
   if (name === '../lib/searchMatch') return load('lib/searchMatch.ts')
+  // GET /report sums the drawer cash with the shift kernel's own SQL (migration 0260).
+  if (name === '../lib/shiftReconciliation') {
+    const drawer = { exports: {} }
+    new Function('exports', compile(['refundCashUsdSql', 'refundDrawerUsdSql', 'refundDrawerKhrSql']
+      .map(fn => extract('lib/shiftReconciliation.ts', fn)).join('\n')))(drawer.exports)
+    return drawer.exports
+  }
   return {} // No write-only integration is invoked by these GET handlers.
 }, routeModule)
 const app = routeModule.exports.default

@@ -16,6 +16,7 @@ import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { PAID_SALE_STATUSES, returnSaleAwaitsPayment, salePaymentStatus, statusChangeNeedsPayment, sumRefundsUsd } from './saleStatusResolution';
+import { returnDebtLoweredSql } from './returnRefundSplit';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -346,11 +347,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     // every changed member carries makes the batch refuse if they move before
     // it commits.
     const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.status_before_return,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
-    // What a Not Paid sale with returns owes is its total less its active refunds (owner, 29 Sep 2026).
-    const refundRows = await rowsIn<{ sale_id: number; total_refund_usd: number | string | null }>(db, sales.filter(s => returnSaleAwaitsPayment(s)).map(s => Number(s.id)), m => `SELECT sale_id,total_refund_usd FROM returns WHERE sale_id IN (${m}) AND COALESCE(status,'completed')<>'cancelled' AND COALESCE(return_scope,'customer')='customer' ORDER BY id LIMIT 301`);
+    // What a Not Paid sale with returns owes is its total less the debt its active returns lowered (owner, 29 Sep 2026).
+    const refundRows = await rowsIn<{ sale_id: number; debt_lowered_usd: number | string | null }>(db, sales.filter(s => returnSaleAwaitsPayment(s)).map(s => Number(s.id)), m => `SELECT sale_id,${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id IN (${m}) AND COALESCE(status,'completed')<>'cancelled' AND COALESCE(return_scope,'customer')='customer' ORDER BY id LIMIT 301`);
     if (refundRows.length > 300)
         throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
-    const withRefunds = (sale: Row): Row => returnSaleAwaitsPayment(sale) ? { ...sale, refund_usd: sumRefundsUsd(refundRows.filter(r => r.sale_id === sale.id).map(r => r.total_refund_usd ?? 0)) } : sale;
+    const withRefunds = (sale: Row): Row => returnSaleAwaitsPayment(sale) ? { ...sale, refund_usd: sumRefundsUsd(refundRows.filter(r => r.sale_id === sale.id).map(r => r.debt_lowered_usd ?? 0)) } : sale;
     const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);

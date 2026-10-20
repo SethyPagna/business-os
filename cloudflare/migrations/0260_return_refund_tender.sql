@@ -1,0 +1,22 @@
+-- 0260 return refund tender (lane 6.0.884, money half of finding D). Same two columns as RET-A's unapplied
+-- 0234_return_refund_tender (branch claude/returns-correctness-20261005), renumbered: 0234 is taken in other refs.
+-- Owner rulings 29 Sep 2026, re-confirmed 5-6 Oct: a return on a Not Paid sale lowers the debt and pays no cash;
+-- only the part above the remaining debt is a cash refund, recorded in the currency it was paid ($ or riel).
+--   refund_currency     'USD' | 'KHR' for a return recorded by this code; NULL = recorded before it.
+--   owed_reduction_usd  the part of total_refund_usd that lowered the sale's debt instead of leaving a drawer.
+-- total_refund_usd keeps the return value (revenue, trigger 0158); cash refunded = total_refund_usd - owed_reduction_usd.
+-- A NULL-currency row reads as before this file: the whole refund was dollar cash. The held 0238 backfill
+-- (ops/scripts/migration/held, owner go required) rewrites the pre-fix Not Paid ones; nothing here touches data.
+--
+-- PRE (read-only, before apply):
+--   SELECT COUNT(*) AS n, ROUND(SUM(total_refund_usd),4) AS usd, SUM(total_refund_khr) AS khr FROM returns;
+-- POST (after apply):
+--   the PRE SELECT returns identical values;
+--   SELECT COUNT(*) FROM returns WHERE refund_currency IS NOT NULL OR owed_reduction_usd <> 0;  -- 0 right after apply
+-- DEPLOY ORDER: the migration runs before the Worker. The previous Worker keeps working on the new schema: its
+--   inserts leave the columns NULL/0, and its edits never write them, which both CHECKs accept.
+-- RECOVERY (append-only, never edit this file): NULL/0 is the pre-0260 reading everywhere, so a Worker rollback
+--   needs no schema change. The CHECKs refuse only values no Worker writes; lifting one needs a returns table
+--   rebuild in a later migration that copies every column and omits the CHECK.
+ALTER TABLE returns ADD COLUMN refund_currency TEXT CHECK (refund_currency IS NULL OR refund_currency IN ('USD', 'KHR'));
+ALTER TABLE returns ADD COLUMN owed_reduction_usd REAL NOT NULL DEFAULT 0 CHECK (typeof(owed_reduction_usd) IN ('integer', 'real') AND owed_reduction_usd >= 0 AND (owed_reduction_usd = 0 OR owed_reduction_usd <= total_refund_usd));

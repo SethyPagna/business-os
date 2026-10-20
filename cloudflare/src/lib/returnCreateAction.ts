@@ -2,6 +2,16 @@ import { assertSaleRecordBatchBounds } from './saleRecordEvents'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
 
+// A riel refund is part of the request; a dollar refund (the default) leaves
+// the digest bytes of every request sent before the currency existed.
+function refundCurrencyKey(body: Record<string, unknown>): { refund_currency?: 'KHR' } {
+  const value = body.refund_currency
+  const currency = typeof value === 'string' ? value.trim().toUpperCase() : value == null ? '' : null
+  if (currency === '' || currency === 'USD') return {}
+  if (currency === 'KHR') return { refund_currency: 'KHR' }
+  throw new Error('Refund currency must be USD or KHR')
+}
+
 export type ReturnCreateStatement = { sql: string; params: Record<string, unknown> }
 
 export const RETURN_CREATE_MAX_ITEMS = 50
@@ -210,6 +220,7 @@ function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<st
     items,
     expected_quote: expected satisfies CustomerReturnExpectedQuoteV1,
     replacement_items: [],
+    ...refundCurrencyKey(body),
   }
 }
 
@@ -245,6 +256,7 @@ export function canonicalReturnCreateIntent(body: Record<string, unknown>): Reco
     items: body.items.map(canonicalItem),
     replacement_items: replacements.map(canonicalReplacementItem),
     replacement_payment_method: boundedText(body.replacement_payment_method, 120) || 'Cash',
+    ...refundCurrencyKey(body),
   }
 }
 

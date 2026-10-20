@@ -32,6 +32,11 @@ import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError }
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
+import {
+  planReturnMoney, readSalesReturnMoney, refundCashOut, refundCashUsd, ReturnMoneyError, salePaymentState,
+  saleReturnMoney, saleReturnMoneySql,
+} from '../lib/returnRefundSplit'
+import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
 // A replacement line is an ordinary sale line, so the warehouse may not
 // carry one -- the same rule, and the same message, POST /sales enforces.
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
@@ -139,6 +144,7 @@ export async function customerReturnQuotePlanFromDb(
     s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
     s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,s.sale_status,s.status_before_return,
     s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,s.branch_id,s.branch_name,
+    s.amount_paid_usd,s.amount_paid_khr,${saleReturnMoneySql('s')},
     COALESCE(v.revision,0) AS sale_revision
     FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
     .get<Record<string, unknown>>({ saleId })
@@ -1077,8 +1083,13 @@ app.get('/report', async (c) => {
   const supplierFields = { compensation_usd: 'supplier_compensation_usd', compensation_khr: 'supplier_compensation_khr', loss_usd: 'supplier_loss_usd', loss_khr: 'supplier_loss_khr' }
   const supplierSums = Object.entries(supplierFields).map(([key, column]) =>
     `CASE WHEN COUNT(*) = 0 THEN 0 ELSE ROUND(SUM(${column}), 4) END AS ${key}, COUNT(${column}) AS ${key}_known_count, COUNT(*) - COUNT(${column}) AS ${key}_unknown_count`).join(', ')
+  // refund_* is the return value (revenue); cash_refund_* what left the drawers,
+  // riel as paid in riel (owner, 29 Sep 2026: reports add a riel row).
   const moneySums = `ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd,
-    ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr, ${supplierSums}`
+    ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr,
+    ROUND(COALESCE(SUM(owed_reduction_usd), 0), 2) AS owed_reduction_usd,
+    ROUND(COALESCE(SUM(${refundDrawerUsdSql('returns')}), 0), 2) AS cash_refund_usd,
+    ROUND(COALESCE(SUM(${refundDrawerKhrSql('returns')}), 0), 0) AS cash_refund_khr, ${supplierSums}`
   const [totals, days, byReason, byType] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT ${localDateExpr('created_at')} AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY ${localDateExpr('created_at')} ORDER BY ${localDateExpr('created_at')} DESC`).all<Record<string, unknown>>(params),
@@ -1094,7 +1105,9 @@ app.get('/report', async (c) => {
         supplier[`${key}_unknown_count`] = Number(row?.[`${key}_unknown_count`] || 0)
       }
     }
-    return { refund_usd: Number(row?.refund_usd || 0), refund_khr: Number(row?.refund_khr || 0), ...supplier }
+    return { refund_usd: Number(row?.refund_usd || 0), refund_khr: Number(row?.refund_khr || 0),
+      owed_reduction_usd: Number(row?.owed_reduction_usd || 0), cash_refund_usd: Number(row?.cash_refund_usd || 0),
+      cash_refund_khr: Number(row?.cash_refund_khr || 0), ...supplier }
   }
   return c.json({
     startDate,
@@ -1516,6 +1529,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     branch_name: string | null; exchange_rate: number | null; sale_status: string | null
     status_before_return: string | null; write_revision: number
     sale_money_precision_version: number | null
+    // Read with the sale, for the debt this return lowers (saleReturnMoneySql).
+    return_money_json?: string | null
   }
   let saleMeta: SaleMeta | null = null
   let soldLines: Array<{
@@ -1532,7 +1547,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       sale_money_precision_version: Number(customerReturnV1Plan.authority.sale.money_precision_version),
     } as SaleMeta : await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
       s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,
-      s.money_precision_version AS sale_money_precision_version,
+      s.money_precision_version AS sale_money_precision_version,s.money_precision_version,s.calculated_total_usd,
+      s.total_usd,s.amount_paid_usd,s.amount_paid_khr,${saleReturnMoneySql('s')},
       COALESCE(v.revision,0) AS write_revision
       FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
       .get<SaleMeta>([requestedSaleId]) || null
@@ -1771,6 +1787,35 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
   const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
     ?? Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
+
+  // The refund first lowers what the customer still owes (owner, 29 Sep 2026);
+  // only the rest is cash, paid in the currency the till chose.
+  const refundCurrency = canonicalIntent.refund_currency === 'KHR' ? 'KHR' : 'USD'
+  let owedReductionUsd = 0
+  let paymentStateAfter: string | null = null
+  if (saleMeta) {
+    const money = saleReturnMoney({ ...saleMeta, id: requestedSaleId })
+    try {
+      const plan = planReturnMoney({ sale: money.sale, recompute: [0], returns: [
+        ...money.returns.map(row => ({ id: Number(row.id), active: row.status !== 'cancelled', refundUsd: row.total_refund_usd, owedReductionUsd: row.owed_reduction_usd, currency: row.refund_currency })),
+        { id: 0, active: true, refundUsd: totalRefundUsd, owedReductionUsd: 0, currency: refundCurrency },
+      ] })
+      owedReductionUsd = plan.owedReductionUsd.get(0) ?? 0
+      paymentStateAfter = plan.paymentState
+    } catch (error) {
+      if (error instanceof ReturnMoneyError) return c.json({ error: error.message, code: error.code }, 409)
+      throw error
+    }
+  }
+  const cashRefundUsd = refundCashUsd(totalRefundUsd, owedReductionUsd)
+  if (refundCurrency === 'KHR' && cashRefundUsd > 0 && !(Number(totalRefundKhr) > 0)) {
+    return c.json({ error: 'This return has no riel price to refund in riel. Refund it in dollars.', code: 'return_refund_khr_unavailable' }, 400)
+  }
+  // A replacement is recorded as paid by the refund; when the refund only
+  // lowered a debt no money arrived to pay it (finding E, its own lane).
+  if (owedReductionUsd > 0 && replacementLines.length) {
+    return c.json({ error: 'This return lowers what the customer owes, so no refund is paid out to cover a replacement. Record the return, then sell the replacement as a new sale.', code: 'return_replacement_on_debt' }, 409)
+  }
 
   const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of returnItems) {
@@ -2095,12 +2140,12 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
       customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
       notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
-      money_precision_version,calculated_refund_usd,rounding_adjustment_usd${addressedBranchName ? ',addressed_branch_name' : ''}
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd,refund_currency,owed_reduction_usd${addressedBranchName ? ',addressed_branch_name' : ''}
     ) VALUES(
       @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
       @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
       @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
-      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd${addressedBranchName ? ',@addressed_branch_name' : ''}
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd,@refund_currency,@owed_reduction_usd${addressedBranchName ? ',@addressed_branch_name' : ''}
     )`,
     params: {
       return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
@@ -2114,6 +2159,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       ...(addressedBranchName ? { addressed_branch_name: addressedBranchName } : {}),
       return_type: String(canonicalIntent.return_type), notes: canonicalIntent.notes,
       total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr,
+      refund_currency: refundCurrency, owed_reduction_usd: owedReductionUsd,
       exchange_rate: customerReturnV1Plan
         ? Number(customerReturnV1Plan.authority.sale.exchange_rate)
         : returnExchangeRate,
@@ -2344,20 +2390,24 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   })
 
   let eventBytes = 0
-  if (saleMeta && projectedStatus && projectedStatus !== beforeSaleStatus) {
+  // A return that clears the debt settles the payment state beside the return status.
+  const paymentStateBefore = saleMeta ? salePaymentState(saleMeta) : null
+  const paymentStateChange = paymentStateAfter && paymentStateAfter !== paymentStateBefore ? paymentStateAfter : null
+  if (saleMeta && projectedStatus && (projectedStatus !== beforeSaleStatus || paymentStateChange)) {
     statements.push({
-      sql: `UPDATE sales SET status_before_return=CASE
+      sql: `UPDATE sales SET status_before_return=COALESCE(@paymentState,CASE
         WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed')
-        ELSE status_before_return END,sale_status=@status,updated_at=@occurredAt WHERE id=@saleId`,
-      params: { status: projectedStatus, occurredAt, saleId: requestedSaleId },
+        ELSE status_before_return END),sale_status=@status,updated_at=@occurredAt WHERE id=@saleId`,
+      params: { status: projectedStatus, paymentState: paymentStateChange, occurredAt, saleId: requestedSaleId },
     })
+    const [before, after] = projectedStatus !== beforeSaleStatus ? [beforeSaleStatus!, projectedStatus] : [paymentStateBefore!, paymentStateChange!]
     const event = buildSaleRecordEventsInsert([{
       saleId: requestedSaleId!, sourceKind: 'return_create', sourceId: receiptId,
       generation: 0, kind: 'status_changed', via: 'apply', subject: returnNumber,
       actorId: authenticatedActorId, actorUsername: actorSnapshot(user), occurredAt,
       changes: [{
-        field: 'sale_status', before: { state: 'known_value', value: beforeSaleStatus! },
-        after: { state: 'known_value', value: projectedStatus },
+        field: 'sale_status', before: { state: 'known_value', value: before },
+        after: { state: 'known_value', value: after },
       }],
     }])!
     statements.push(event.statement)
@@ -2396,7 +2446,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return_items: returnItems.length, return_allocations: returnAllocationCount,
     replacement_items: replacementLines.length, sale_allocations: saleAllocationCount,
     movements: movementCount, event: eventBytes > 0 ? 1 : 0,
-    status: projectedStatus, branch_stock: branchSnapshots, batch_stock: batchSnapshots,
+    status: projectedStatus, payment_state: paymentStateChange, branch_stock: branchSnapshots, batch_stock: batchSnapshots,
+    money: { refund_currency: refundCurrency, owed_reduction_usd: owedReductionUsd },
     v1_header: customerReturnV1Plan ? {
       money_precision_version: 1,
       calculated_refund_usd: customerReturnV1Plan.quote.calculated_refund_usd,
@@ -2437,6 +2488,9 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         AND ri.total_usd=json_extract(j.value,'$.total_usd') AND ri.total_khr=json_extract(j.value,'$.total_khr')
         AND ri.refund_snapshot_json=json_extract(j.value,'$.refund_snapshot_json')))
     AND (json_type(@expectedJson,'$.status')='null' OR COALESCE((SELECT sale_status FROM sales WHERE id=@saleId),'completed')=json_extract(@expectedJson,'$.status'))
+    AND (json_type(@expectedJson,'$.payment_state')='null' OR (SELECT status_before_return FROM sales WHERE id=@saleId)=json_extract(@expectedJson,'$.payment_state'))
+    AND EXISTS(SELECT 1 FROM returns r WHERE r.id=${returnIdExpression} AND r.refund_currency=json_extract(@expectedJson,'$.money.refund_currency')
+      AND r.owed_reduction_usd=json_extract(@expectedJson,'$.money.owed_reduction_usd'))
     AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.branch_stock') j
       WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
         AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.after'))
@@ -2512,8 +2566,13 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
     party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,
-    returnType: String(canonicalIntent.return_type), refundUsd: totalRefundUsd, refundKhr: totalRefundKhr,
-    by: actorSnapshot(user),
+    returnType: String(canonicalIntent.return_type), by: actorSnapshot(user),
+    // What left the till, in the currency it left in, beside the debt the return lowered.
+    ...(owedReductionUsd === 0 && refundCurrency === 'USD' ? { refundUsd: totalRefundUsd, refundKhr: totalRefundKhr } : {
+      refundUsd: refundCurrency === 'USD' ? cashRefundUsd : 0,
+      refundKhr: refundCurrency === 'KHR' ? refundCashOut({ total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr, owed_reduction_usd: owedReductionUsd, refund_currency: 'KHR' }).khr : 0,
+      debtLoweredUsd: owedReductionUsd,
+    }),
   }).catch((error) => console.error('[telegram] return notification failed', error)))
   if (replacementNotice) c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales', lines: formatSaleTelegramLines(replacementNotice),
@@ -3212,6 +3271,7 @@ app.patch('/:id', async (c) => {
   }
 
   let projectedSaleStatus: string | null = null
+  let editPaymentState: string | null = null
   if (linkedSale) {
     const soldLines = await db.prepare('SELECT id,product_id,quantity,returned_quantity FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<{ id: number; product_id: number | null; quantity: number; returned_quantity: number | null }>([existing.sale_id])
@@ -3536,6 +3596,29 @@ app.patch('/:id', async (c) => {
     })
   }
 
+  // The edited refund is split again against the sale's debt (owner, 29 Sep
+  // 2026): the debt it lowers first, the rest cash in its recorded currency.
+  const editRefundCurrency = existing.refund_currency === 'KHR' ? 'KHR' : 'USD'
+  let editOwedReductionUsd = 0
+  if (linkedSale) {
+    const money = (await readSalesReturnMoney(db, [linkedSale.id])).get(linkedSale.id)
+    if (!money) return c.json({ error: 'Original sale not found' }, 400)
+    try {
+      const plan = planReturnMoney({ sale: money.sale, recompute: [returnId], returns: money.returns.map(row => ({
+        id: Number(row.id), active: row.status !== 'cancelled', owedReductionUsd: row.owed_reduction_usd,
+        ...(Number(row.id) === returnId ? { refundUsd: Number(totalRefundUsd.toFixed(2)), currency: editRefundCurrency } : { refundUsd: row.total_refund_usd, currency: row.refund_currency }),
+      })) })
+      editOwedReductionUsd = plan.owedReductionUsd.get(returnId) ?? 0
+      editPaymentState = plan.paymentState
+    } catch (error) {
+      if (error instanceof ReturnMoneyError) return c.json({ error: error.message, code: error.code }, 409)
+      throw error
+    }
+  }
+  if (editRefundCurrency === 'KHR' && refundCashUsd(Number(totalRefundUsd.toFixed(2)), editOwedReductionUsd) > 0 && !(Math.round(totalRefundKhr) > 0)) {
+    return c.json({ error: 'This return has no riel price to refund in riel. Refund it in dollars.', code: 'return_refund_khr_unavailable' }, 400)
+  }
+
   // Named so the audit row below records the values this statement actually
   // wrote -- a recomputed copy would be a second source of truth that can
   // drift from the UPDATE it claims to describe.
@@ -3548,12 +3631,15 @@ app.patch('/:id', async (c) => {
     // line-level resolution above exists to prevent.
     total_refund_usd: Number(totalRefundUsd.toFixed(2)),
     total_refund_khr: Math.round(totalRefundKhr),
+    owed_reduction_usd: editOwedReductionUsd,
+    refund_currency: editRefundCurrency,
     branch_id: body.branch_id || existing.branch_id,
     branch_name: branchName,
   }
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
           total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
+          owed_reduction_usd=@owed_reduction_usd, refund_currency=@refund_currency,
           branch_id=@branch_id, branch_name=@branch_name, updated_at=@updated_at WHERE id=@id`,
     params: {
       ...returnUpdateValues,
@@ -3591,13 +3677,16 @@ app.patch('/:id', async (c) => {
       }),
     )
     const beforeStatus = String(linkedSale.sale_status || 'completed')
-    if (projectedSaleStatus && projectedSaleStatus !== beforeStatus) {
+    const paymentBefore = salePaymentState(linkedSale)
+    const paymentChange = editPaymentState && editPaymentState !== paymentBefore ? editPaymentState : null
+    if (projectedSaleStatus && (projectedSaleStatus !== beforeStatus || paymentChange)) {
       statements.push({
         sql: `UPDATE sales SET
-          status_before_return=CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+          status_before_return=COALESCE(@paymentState,CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END),
           sale_status=@status,updated_at=@updatedAt WHERE id=@sale`,
-        params: { status: projectedSaleStatus, updatedAt: mutationStamp, sale: linkedSale.id },
+        params: { status: projectedSaleStatus, paymentState: paymentChange, updatedAt: mutationStamp, sale: linkedSale.id },
       })
+      const [statusBefore, statusAfter] = projectedSaleStatus !== beforeStatus ? [beforeStatus, projectedSaleStatus] : [paymentBefore, paymentChange!]
       const event = buildSaleRecordEventsInsert([{
         saleId: linkedSale.id,
         sourceKind: 'return_edit', sourceId: receiptId, generation: 0,
@@ -3606,8 +3695,8 @@ app.patch('/:id', async (c) => {
         actorId: authenticatedActorId, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
         changes: [{
           field: 'sale_status',
-          before: { state: 'known_value', value: beforeStatus },
-          after: { state: 'known_value', value: projectedSaleStatus },
+          before: { state: 'known_value', value: statusBefore },
+          after: { state: 'known_value', value: statusAfter },
         }],
       }])!
       eventBytes = event.eventsBytes

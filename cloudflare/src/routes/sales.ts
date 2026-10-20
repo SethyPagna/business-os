@@ -134,6 +134,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, notPaidSaleSql } from '../lib/salesStatus'
+import { returnDebtLoweredSql } from '../lib/returnRefundSplit'
 import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, returnSaleAwaitsPayment, saleReadsNotPaid, salePaymentStatus, statusChangeNeedsPayment, sumRefundsUsd, PAID_SALE_STATUSES, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -2258,12 +2259,12 @@ app.patch('/:id/status', async (c) => {
   const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null, settlesReturnSale)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
 
-  // What a Not Paid sale owes is its total less its active customer refunds
-  // less what was paid (owner, 29 Sep 2026: a return lowers the debt).
+  // What a Not Paid sale owes is its total less the debt its active customer
+  // returns lowered less what was paid (owner, 29 Sep 2026).
   const saleMoney: RecordedSaleMoney = saleReadsNotPaid(sale)
-    ? { ...sale, refund_usd: sumRefundsUsd((await db.prepare(`SELECT total_refund_usd FROM returns WHERE sale_id = ?
+    ? { ...sale, refund_usd: sumRefundsUsd((await db.prepare(`SELECT ${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id = ?
         AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'`)
-        .all<{ total_refund_usd: number | string | null }>([id])).map((row) => row.total_refund_usd ?? 0)) }
+        .all<{ debt_lowered_usd: number | string | null }>([id])).map((row) => row.debt_lowered_usd ?? 0)) }
     : sale
 
   // S4-41, the forward half. A Not Paid sale may take a paid status
@@ -6004,16 +6005,17 @@ app.get('/', async (c) => {
         // Read recorded operands, never SQLite binary-money SUM. A bounded page
         // must refuse excessive linked history rather than silently omit refunds.
         const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnDebtLoweredSql('returns')} AS debt_lowered_usd,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
       ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
     `).all<Record<string,unknown>>(chunk))
         if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
-        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal;debtLowered:unknown[]}>()
         for(const row of refundRows){
-          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero(),debtLowered:[]}
           group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+          group.debtLowered.push(row.debt_lowered_usd??0)
           map.set(id,group)
         }
         return map
@@ -6072,6 +6074,8 @@ app.get('/', async (c) => {
         items: itemsForResponse,
         refund_usd: refundUsd.toNumber(4),
         refund_khr: refundKhr.toNumber(4),
+        // The debt the active returns lowered: what a Not Paid sale's balance subtracts (lib/returnRefundSplit.ts).
+        return_owed_reduction_usd: Number(sumRefundsUsd((refund?.debtLowered??[]) as Array<number|string>)),
         return_count: refund?.count || 0,
         // Never 0: a sale always has at least the fact that it happened, and
         // that is the record every later one is relative to.

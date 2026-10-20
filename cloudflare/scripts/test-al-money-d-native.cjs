@@ -11,13 +11,11 @@
 // Partial payment: $10 with $3 paid owes $7; a $4 return leaves $3 owed and
 // refunds $0; a return worth more than the debt refunds only the excess.
 //
-// Two kinds of check:
-//   * CHECK   -- status and settlement half. Fails the run.
-//   * PENDING -- money half: the cash refunded vs the debt lowered. A return
-//     row has one refund figure (total_refund_usd, pinned to its line value
-//     by the 0158 money-precision trigger and read as revenue everywhere), so
-//     the split needs a stored column (RET-A's 0234 owed_reduction_usd) that
-//     this lane may not add. Printed, not failing, unless AL_D_STRICT=1.
+// Money half (lane 6.0.884, migration 0260): total_refund_usd stays the
+// return value (revenue, pinned by the 0158 money-precision trigger);
+// owed_reduction_usd is the debt the return lowered and the rest is the cash
+// refund, which is all the shift drawer pays out -- in riel when the till
+// refunds in riel. Every check fails the run.
 //
 // Harness: test-al-money-c-native.cjs (real src/index.ts, every migration,
 // real login, D1 counted per request). AL_MUTATION=1 runs the negative
@@ -28,13 +26,8 @@ const H = require('./test-al-money-c-native.cjs')
 async function main() {
   const h = await H.startWorker()
   const mutation = process.env.AL_MUTATION === '1'
-  const strict = process.env.AL_D_STRICT === '1'
   const r = H.recorder(mutation ? 'AL-D [control: no return, owes $10]' : 'AL-D')
-  const pending = []
-  const money = (name, fn) => {
-    try { fn(); pending.push({ name, ok: true }); console.log(`PASS AL-D (money half) ${name}`) }
-    catch (error) { pending.push({ name, ok: false }); console.log(`PENDING AL-D (money half) ${name}\n     ${error.message.split('\n').join('\n     ')}`) }
-  }
+  const money = (name, fn) => r.check(`(money half) ${name}`, fn)
   try {
     await H.seedProduct(h, 201, 'AL-D Lipstick', 2, 50)
     // A drawer to observe: the administrator is not shift-exempt here.
@@ -57,7 +50,11 @@ async function main() {
     // payment_details is the sale's FULL tender snapshot: what was already paid, then the new payment.
     const settle = (saleId, key, usd, label, alreadyPaidUsd = 0) => h.call('PATCH', `/api/sales/${saleId}/status`, { sale_status: 'completed', client_request_id: key,
       expected_exchange_rate: 4000, payment_details: [...(alreadyPaidUsd ? [{ method: 'Cash', amount_usd: alreadyPaidUsd, amount_khr: 0 }] : []), { method: 'Cash', amount_usd: usd, amount_khr: 0 }] }, label)
-    const refundStored = async (saleId) => (await h.one('SELECT total_refund_usd FROM returns WHERE sale_id=? ORDER BY id DESC LIMIT 1', saleId)).total_refund_usd
+    // The cash part of the sale's latest return: its value less the debt it lowered.
+    const refundStored = async (saleId) => {
+      const row = await h.one('SELECT total_refund_usd,owed_reduction_usd FROM returns WHERE sale_id=? ORDER BY id DESC LIMIT 1', saleId)
+      return Number((Number(row.total_refund_usd) - Number(row.owed_reduction_usd)).toFixed(4))
+    }
 
     // Sale 1: Not Paid, 5 x $2 = $10, nothing tendered.
     const sale = await H.createSale(h, { key: 'al-d-sale', status: 'awaiting_payment', lines: [{ productId: 201, quantity: 5 }], label: 'D create Not Paid $10 sale' })
@@ -193,7 +190,7 @@ async function main() {
         assert.ok(readsAsNotPaid(afterThirdReturn))
       })
       const thirdRefund = Number(await refundStored(thirdId))
-      money(`partial payment: the return refunds $0 (stored ${thirdRefund})`, () => {
+      money(`partial payment: the return refunds $0 in cash (cash part ${thirdRefund})`, () => {
         assert.equal(thirdRefund, 0)
       })
       money(`partial payment: drawer unchanged by the return (expected $${drawerAfterThird.expected.usd}, before $${drawerBeforeThird.expected.usd})`, () => {
@@ -230,12 +227,85 @@ async function main() {
         assert.equal(Math.max(0, owed(afterFourthReturn)), 0)
       })
       const fourthRefund = Number(await refundStored(fourthId))
-      money(`over the debt: only the $1 excess is refunded in cash (stored $${fourthRefund}; drawer refunds moved $${(Number(drawerAfterFourth.refunds.usd) - Number(drawerBeforeFourth.refunds.usd)).toFixed(2)})`, () => {
+      money(`over the debt: only the $1 excess is refunded in cash (cash part $${fourthRefund}; drawer refunds moved $${(Number(drawerAfterFourth.refunds.usd) - Number(drawerBeforeFourth.refunds.usd)).toFixed(2)})`, () => {
         assert.equal(fourthRefund, 1)
         assert.equal(Number((Number(drawerAfterFourth.refunds.usd) - Number(drawerBeforeFourth.refunds.usd)).toFixed(2)), 1)
       })
       money(`over the debt: a sale whose debt the return cleared leaves Not Paid (status ${JSON.stringify(await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId))})`, () => {
         assert.ok(!readsAsNotPaid(afterFourthReturn))
+      })
+
+      // Cancelling that return brings the $3 debt back (and the $1 back into
+      // the drawer); restoring it splits the refund again against the sale as
+      // it stands; undoing the restore puts the cancel back exactly.
+      const fourthReturnId = Number(fourthReturn.created.body.id)
+      const fourthCancel = await H.bulkReturnStatus(h, 'al-d-cancel-4', fourthReturnId, 'completed', 'cancelled', 'D cancel the over-debt return')
+      const afterFourthCancel = await saleRow(fourthId)
+      const drawerAfterFourthCancel = await drawer()
+      money(`cancelling the over-debt return brings the $3 debt back and the $1 back into the drawer (got ${fourthCancel.status}; owes $${owed(afterFourthCancel)}; ${afterFourthCancel.sale_status}/${afterFourthCancel.status_before_return})`, () => {
+        assert.equal(fourthCancel.status, 200, JSON.stringify(fourthCancel.body).slice(0, 200))
+        assert.equal(owed(afterFourthCancel), 3)
+        assert.ok(readsAsNotPaid(afterFourthCancel))
+        assert.equal(Number(drawerAfterFourthCancel.expected.usd), Number(drawerBeforeFourth.expected.usd))
+      })
+      const fourthRestore = await H.bulkReturnStatus(h, 'al-d-restore-4', fourthReturnId, 'cancelled', 'completed', 'D restore the over-debt return')
+      const afterFourthRestore = await saleRow(fourthId)
+      const restoredMoney = await h.one('SELECT owed_reduction_usd,refund_currency FROM returns WHERE id=?', fourthReturnId)
+      money(`restoring it lowers the $3 debt and refunds $1 again, and the sale reads paid (got ${fourthRestore.status}; ${JSON.stringify(restoredMoney)}; ${afterFourthRestore.sale_status}/${afterFourthRestore.status_before_return})`, () => {
+        assert.equal(fourthRestore.status, 200, JSON.stringify(fourthRestore.body).slice(0, 200))
+        assert.deepEqual({ ...restoredMoney, owed_reduction_usd: Number(restoredMoney.owed_reduction_usd) }, { owed_reduction_usd: 3, refund_currency: 'USD' })
+        assert.ok(!readsAsNotPaid(afterFourthRestore))
+      })
+      const restoreUndo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'undo', 0, 'D undo the restore')
+      const afterRestoreUndo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
+      money(`undoing the restore cancels it again and the sale owes $3 Not Paid (got ${restoreUndo.status}; ${JSON.stringify(afterRestoreUndo)})`, () => {
+        assert.equal(restoreUndo.status, 200, JSON.stringify(restoreUndo.body).slice(0, 200))
+        assert.deepEqual(afterRestoreUndo, { sale_status: 'awaiting_payment', status_before_return: 'awaiting_payment' })
+      })
+      const restoreRedo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'redo', 1, 'D redo the restore')
+      const afterRestoreRedo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
+      money(`redoing the restore clears the debt again (got ${restoreRedo.status}; ${JSON.stringify(afterRestoreRedo)})`, () => {
+        assert.equal(restoreRedo.status, 200, JSON.stringify(restoreRedo.body).slice(0, 200))
+        assert.deepEqual(afterRestoreRedo, { sale_status: 'partial_return', status_before_return: 'completed' })
+      })
+
+      // Riel tender (owner, 29 Sep 2026): $10 with $7 paid, $4 returned and
+      // refunded in riel -- $3 lowers the debt, the $1 cash leaves the riel
+      // drawer as its share of the return's riel figure (16,000 x 1/4).
+      const sixth = await H.createSale(h, { key: 'al-d-sale-6', status: 'awaiting_payment', lines: [{ productId: 201, quantity: 5 }],
+        paymentDetails: [{ method: 'Cash', amount_usd: 7, amount_khr: 0 }], label: 'D create Not Paid $10 sale, $7 paid (riel refund)' })
+      assert.equal(sixth.status, 200, JSON.stringify(sixth.body).slice(0, 300))
+      const sixthItem = sixth.body.sale.items[0].id
+      const rielQuote = await h.call('POST', '/api/returns/quote', { sale_id: sixth.body.id, items: [{ sale_item_id: sixthItem, quantity: 2 }] }, 'quote D riel return')
+      const { customer_return_create_version: _c, customer_return_edit_version: _e, ...rielExpected } = rielQuote.body
+      const rielBody = (currency) => ({ client_request_id: 'al-d-return-6', money_precision_version: 1, sale_id: sixth.body.id, reason: 'AL money probe',
+        expected_quote: rielExpected, refund_currency: currency, items: [{ sale_item_id: sixthItem, product_id: 201, quantity: 2, stock_action: 'restock', branch_id: 1 }] })
+      const drawerBeforeSixth = await drawer()
+      const rielReturn = await h.call('POST', '/api/returns', rielBody('KHR'), 'D riel return ($4 on $3 owed, $1 cash in riel)')
+      const rielReplay = await h.call('POST', '/api/returns', rielBody('KHR'), 'D riel return replay')
+      const rielChanged = await h.call('POST', '/api/returns', rielBody('USD'), 'D same request id refunded in dollars')
+      const drawerAfterSixth = await drawer()
+      const rielRow = await h.one('SELECT total_refund_usd,total_refund_khr,owed_reduction_usd,refund_currency FROM returns WHERE sale_id=?', sixth.body.id)
+      money(`riel refund: $3 lowers the debt and the $1 cash leaves the riel drawer (create ${rielReturn.status}; row ${JSON.stringify(rielRow)}; drawer refunds $${drawerAfterSixth.refunds.usd} / ${drawerAfterSixth.refunds.khr}៛)`, () => {
+        assert.equal(rielReturn.status, 200, JSON.stringify(rielReturn.body).slice(0, 200))
+        assert.deepEqual({ ...rielRow, total_refund_usd: Number(rielRow.total_refund_usd), total_refund_khr: Number(rielRow.total_refund_khr), owed_reduction_usd: Number(rielRow.owed_reduction_usd) },
+          { total_refund_usd: 4, total_refund_khr: 16000, owed_reduction_usd: 3, refund_currency: 'KHR' })
+        assert.equal(Number(drawerAfterSixth.refunds.khr) - Number(drawerBeforeSixth.refunds.khr), 4000)
+        assert.equal(Number(drawerAfterSixth.refunds.usd), Number(drawerBeforeSixth.refunds.usd), 'a riel refund takes no dollars')
+        assert.equal(Number(drawerAfterSixth.expected.usd), Number(drawerBeforeSixth.expected.usd))
+        assert.equal(Number(drawerAfterSixth.expected.khr), Number(drawerBeforeSixth.expected.khr) - 4000)
+      })
+      money(`riel refund: the currency is part of the request (replay ${rielReplay.status}, same id in dollars ${rielChanged.status} ${rielChanged.body.code || ''})`, () => {
+        assert.equal(rielReplay.status, 200)
+        assert.deepEqual(rielReplay.body, rielReturn.body)
+        assert.equal(rielChanged.status, 409)
+        assert.equal(rielChanged.body.code, 'idempotency_conflict')
+      })
+      const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)
+      const report = await h.call('GET', H.fresh(`/api/returns/report?startDate=${today}&endDate=${today}`), undefined, 'D returns report', { observe: true })
+      money(`returns report carries the riel paid out (cash refunds $${report.body.totals && report.body.totals.cash_refund_usd} / ${report.body.totals && report.body.totals.cash_refund_khr}៛, return value $${report.body.totals && report.body.totals.refund_usd})`, () => {
+        assert.equal(report.status, 200)
+        assert.equal(report.body.totals.cash_refund_khr, 4000)
       })
 
       // The Sales page group action (POST /api/sales/bulk-status) reads the
@@ -254,6 +324,15 @@ async function main() {
       assert.equal(fifth.status, 200, JSON.stringify(fifth.body).slice(0, 300))
       await H.customerReturn(h, { key: 'al-d-return-5', saleId: fifth.body.id,
         lines: [{ saleItemId: fifth.body.sale.items[0].id, productId: 201, quantity: 2 }], label: 'D fifth return ($4 clears the $4 owed)' })
+      // A return worth exactly the debt moves no money: nothing is owed, no
+      // cash leaves, and the sale stays Not Paid until it is marked paid.
+      const clearedRow = await saleRow(fifth.body.id)
+      const fifthCash = Number(await refundStored(fifth.body.id))
+      money(`a return worth exactly the debt clears it with no cash and leaves it to be marked paid (cash part $${fifthCash}; owes $${owed(clearedRow)}; ${clearedRow.sale_status}/${clearedRow.status_before_return})`, () => {
+        assert.equal(fifthCash, 0)
+        assert.equal(owed(clearedRow), 0)
+        assert.ok(readsAsNotPaid(clearedRow))
+      })
       const covered = await bulk('al-d-bulk-covered', await saleRow(fifth.body.id), 'D group-complete a covered returned Not Paid sale')
       const coveredState = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fifth.body.id)
       r.check(`group status marks a covered returned Not Paid sale paid beside its return (got ${covered.status}; ${JSON.stringify(coveredState)}; receipt ${JSON.stringify(covered.body.items)})`, () => {
@@ -279,9 +358,8 @@ async function main() {
     await h.mf.dispose()
   }
   const failed = r.results.filter(result => !result.ok)
-  const open = pending.filter(result => !result.ok)
-  console.log(`${failed.length || (strict && open.length) ? 'RED' : 'GREEN'} AL-D unpaid return then settlement: ${r.results.length - failed.length}/${r.results.length} status/settlement checks hold; money half ${pending.length - open.length}/${pending.length}${open.length ? ' (PENDING: needs the stored refund split)' : ''}${mutation ? ' (AL_MUTATION=1 control run, no return)' : ''}`)
-  if (failed.length || (strict && open.length)) process.exitCode = 1
+  console.log(`${failed.length ? 'RED' : 'GREEN'} AL-D unpaid return then settlement: ${r.results.length - failed.length}/${r.results.length} checks hold${mutation ? ' (AL_MUTATION=1 control run, no return)' : ''}`)
+  if (failed.length) process.exitCode = 1
 }
 
 // A settled sale reads as paid in the list: status completed (or a return

@@ -3073,6 +3073,8 @@ export type TelegramReturnSummary = {
   receiptNumber?: string | null; party?: string | null; branch?: string | null
   reason?: string | null; returnType?: string | null; settlement?: string | null
   items: TelegramReturnLine[]; refundUsd?: number | null; refundKhr?: number | null
+  /** Part of a customer return that lowered a Not Paid sale's debt; refundUsd/refundKhr are then the cash part. */
+  debtLoweredUsd?: number | null
   compensationUsd?: number | null; compensationKhr?: number | null; lossUsd?: number | null; lossKhr?: number | null
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
@@ -3157,6 +3159,7 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
       // (a replacement, a write-off) already says so on its own Settlement
       // line, so "Refund: none" was a line that stated nothing.
       : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : ''),
+    ret.kind === 'customer' && (ret.debtLoweredUsd || 0) > 0 ? `Debt lowered: ${usd(Number(ret.debtLoweredUsd))}` : '',
     ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
     ret.by ? `By: ${ret.by}` : '',
   ]

@@ -33,6 +33,7 @@ import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMo
 import { parseReportExport, readRecordExport, recordExportTotals, reportExportStamp, reportExportToken } from '../lib/reportExport'
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { costViewProfit } from '../lib/reportProfitView'
+import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -479,9 +480,13 @@ app.get('/overview', async (c) => {
   // takes refunds off twice, on mismatched bases, and can drive a period
   // below zero. The sale-basis reversal is SalesTotals.refund_usd.
     const base = `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'`
-    const money = `COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr`
+    // cash_refund_*: what left the drawers, riel as paid in riel (owner, 29 Sep 2026: a riel row).
+    const money = `COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr,
+      ROUND(COALESCE(SUM(owed_reduction_usd), 0), 2) AS owed_reduction_usd, ROUND(COALESCE(SUM(${refundDrawerUsdSql('returns')}), 0), 2) AS cash_refund_usd,
+      ROUND(COALESCE(SUM(${refundDrawerKhrSql('returns')}), 0), 0) AS cash_refund_khr`
     const cur = reportRecordRange('returns', 'returns', f)
-    const shape = (r: Record<string, unknown> | null | undefined) => ({ count: num(r?.count), refund_usd: num(r?.refund_usd), refund_khr: num(r?.refund_khr) })
+    const shape = (r: Record<string, unknown> | null | undefined) => ({ count: num(r?.count), refund_usd: num(r?.refund_usd), refund_khr: num(r?.refund_khr),
+      owed_reduction_usd: num(r?.owed_reduction_usd), cash_refund_usd: num(r?.cash_refund_usd), cash_refund_khr: num(r?.cash_refund_khr) })
     const [totals, byReason, previous] = await Promise.all([
       db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${cur.sql}`).get<Record<string, unknown>>(cur.params),
       db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '') AS reason, ${money} FROM returns WHERE ${base} AND ${cur.sql} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '') ORDER BY refund_usd DESC, refund_khr DESC, count DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
