@@ -86,7 +86,15 @@ type Surface = Awaited<ReturnType<typeof mount>>
 const rowOf = (surface: Surface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
 const action = (surface: Surface, id: number, which: 'done' | 'issue') => surface.find(node => node.getAttribute('data-check-action') === which && rowOf(surface, id).contains(node), `${which} on ${id}`)
 const status = (surface: Surface, id: number) => surface.find(node => node.getAttribute('data-check-status') === String(id), `status ${id}`).textContent
-const openSession = async (surface: Surface) => { await surface.click(surface.button('sessions')); await surface.click(surface.button('Test check')) }
+// The Sessions tab names a session by its start and branch, so the row is found by its id, never by a stored title.
+const openSessionRow = async (surface: Surface, tab = 'sessions') => {
+  await surface.click(surface.button(tab))
+  await surface.click(surface.button(/./, surface.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'session row')))
+}
+const openSession = (surface: Surface) => openSessionRow(surface)
+// Buttons by exact visible text: 'Count' is also a prefix of the 'Count sessions' chip.
+const exactButtons = (surface: Surface, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
+const confirmInDialog = async (surface: Surface, text: string) => { await surface.click(exactButtons(surface, text).at(-1)!) }
 const attached = (node: MemoryNode) => { let at: MemoryNode | null = node; while (at && at !== at.ownerDocument.body) at = at.parentNode; return at !== null }
 
 try {
@@ -146,7 +154,7 @@ try {
       const message = pack[code.replace('inventory_check_', 'inventory_check_error_')]
       assert.ok(message, `${language}: ${code} has a message`)
       const page = await mount()
-      await page.click(page.button(pack.inventory_check_sessions)); await page.click(page.button('Test check'))
+      await openSessionRow(page, pack.inventory_check_sessions)
       await page.click(page.button(pack.inventory_check_report_issue, rowOf(page, 13)))
       await page.type(page.field('inventory-check-count-13'), '2')
       await page.type(page.field('inventory-check-reason-13'), 'Draft survives')
@@ -168,14 +176,17 @@ try {
     // Create and Close/Resume surfaces map the same codes.
     const page = await mount()
     createRefusal = 'inventory_check_product_not_eligible'
-    await page.click(page.button(pack.inventory_check_start_page))
+    await page.click(exactButtons(page, pack.inventory_check_start_page)[0])
+    assert.ok(page.text().includes(pack.inventory_check_count_review_title), `${language}: Count opens a review before anything is created`)
+    await confirmInDialog(page, pack.inventory_check_start_page)
     assert.ok(page.text().includes(pack.inventory_check_error_product_not_eligible), `${language}: create refusal message`)
     createRefusal = null
     await page.unmount()
     const lifecycle = await mount()
-    await lifecycle.click(lifecycle.button(pack.inventory_check_sessions)); await lifecycle.click(lifecycle.button('Test check'))
+    await openSessionRow(lifecycle, pack.inventory_check_sessions)
     lifecycleRefusal = 'inventory_check_owner_required'
     await lifecycle.click(lifecycle.button(pack.inventory_check_close_session))
+    await confirmInDialog(lifecycle, pack.inventory_check_close_session)
     assert.ok(lifecycle.text().includes(pack.inventory_check_error_owner_required), `${language}: close refusal message`)
     lifecycleRefusal = null
     await lifecycle.unmount()

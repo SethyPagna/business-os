@@ -51,6 +51,7 @@ const expectedConsumers = [
   'src/components/files/FilePickerModal.tsx',
   'src/components/files/FilesPage.tsx',
   'src/components/imports/ServerImportReviewScreen.tsx',
+  'src/components/inventory/InventoryCheckHistoryFloat.tsx',
   'src/components/inventory/InventoryChecksPage.tsx',
   'src/components/inventory/InventoryMovementsSurface.tsx',
   'src/components/inventory/InventoryProductsSurface.tsx',

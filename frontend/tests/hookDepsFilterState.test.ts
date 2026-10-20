@@ -49,7 +49,7 @@ type Finding = { file: string; line: number; hook: string; name: string }
 // decays into a list of things nobody dares delete.
 export const ALLOWLIST: AllowEntry[] = [
   {
-    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 140,
+    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 214,
     reason: 'The load effect is keyed by requestKey, whose serialized params spread every filter. '
       + 'The same snapshot carries sole-branch bootstrap intent. inventoryChecksPage.test.ts '
       + 'checks each filter dispatch and delayed discovery; adding object identity would reload equal queries.',
