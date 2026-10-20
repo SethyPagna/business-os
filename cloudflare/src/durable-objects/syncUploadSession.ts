@@ -3,6 +3,10 @@ import { buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAsse
 import { classifyUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { getDb } from '../lib/db'
 
+// RETIRED: no route reaches this class any more (the /api/sync/files/chunks/*
+// routes were removed). It stays exported and bound until a wrangler
+// deleted_classes migration is applied to production.
+//
 // Backs the offline "sync file upload" flow, ported from
 // backend/src/routes/sync.ts's /files/chunks/* endpoints. The legacy Docker
 // backend staged chunks on local disk (STORAGE_ROOT/sync-upload-chunks/<id>)

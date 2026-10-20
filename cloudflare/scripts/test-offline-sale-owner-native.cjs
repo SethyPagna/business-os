@@ -6,7 +6,6 @@ const path = require('node:path')
 const Module = require('node:module')
 const { execFileSync } = require('node:child_process')
 const { Hono } = require('hono')
-const { createHash } = require('node:crypto')
 const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs')
 const source = fs.readFileSync(file, 'utf8')
 const boundary = source.indexOf(';(async () => {')
@@ -31,7 +30,7 @@ harness._compile(source.slice(0, boundary)
 const h = harness.exports
 const app = new Hono()
 app.route('/api/sales', h.app)
-app.route('/api/sync', h.load('routes/sync.ts').createSyncRoute(app))
+app.route('/api/sync', h.load('routes/sync.ts').createSyncRoute())
 const authority = 'https://shop.example.test'
 const userA = { ...h.USER, organization_id: 2 }
 const userB = { ...userA, id: 72, name: 'Other cashier' }
@@ -45,17 +44,6 @@ async function call(db, route, value, method = 'POST') {
   return { status: response.status, cache: response.headers.get('cache-control'), body: await response.json() }
 }
 const sale = (db, value) => call(db, '/api/sales', value)
-function stable(value) {
-  if (value == null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`
-}
-function operation(payload) {
-  const clean = JSON.parse(JSON.stringify(payload))
-  return { operation_id: 'sales.create', client_request_id: clean.client_request_id, schema_version: 1,
-    base_updated_at: '2026-09-19T10:00:00.000Z', payload: clean,
-    payload_digest: createHash('sha256').update(stable(clean)).digest('hex') }
-}
 function assertDenied(result, code, expectedState, fixture) {
   assert.equal(result.status, 409, `Expected ${code}; got status=${result.status}, code=${result.body.code || 'none'}`)
   assert.equal(result.body.code, code)
@@ -132,35 +120,15 @@ async function run() {
   assert.equal(h.creationState(lost.raw).branch, 9)
   console.log('PASS concurrent foreign identity cannot leak; same-owner committed-but-lost response recovers')
 
-  const op = operation(body('outbox-original'))
-  const outbox = await call(f.route, '/api/sync/outbox', { operations: [op] })
-  assert.equal(outbox.status, 200, JSON.stringify(outbox))
-  const applied = outbox.body.results[0]
-  assert.equal(applied.operation_id, 'sales.create')
-  assert.equal(applied.client_request_id, 'outbox-original')
-  assert.equal(applied.status, 'applied')
-  assertAck({ status: 200, body: applied.response }, 'outbox-original')
-  const afterOutbox = h.creationState(f.raw)
-  const same = await call(f.route, '/api/sync/outbox', { operations: [op] })
-  assert.equal(same.body.results[0].response.duplicate, true)
-  assert.deepEqual(h.creationState(f.raw), afterOutbox)
-  for (const user of [userA, userB]) {
-    h.setUser(user)
-    const legacy = operation(h.request('ownerless-outbox'))
-    const rejected = await call(f.route, '/api/sync/outbox', { operations: [legacy] })
-    assert.equal(rejected.body.success, false)
-    assert.equal(rejected.body.results[0].status, 'rejected')
-    assert.equal(rejected.body.results[0].code, 'offline_owner_required')
-    assert.equal(Object.hasOwn(rejected.body.results[0], 'response'), false)
+  // The offline outbox replay and chunked-upload routes are retired: they must not exist.
+  h.setUser(userA)
+  const afterSales = h.creationState(f.raw)
+  for (const route of ['/api/sync/outbox', '/api/sync/files/chunks/init', '/api/sync/files/chunks/u1/chunk', '/api/sync/files/chunks/u1/complete']) {
+    const gone = await app.request(authority + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"operations":[]}' }, { DB: f.route }, h.executionCtx)
+    assert.equal(gone.status, 404, route)
   }
-  const switched = await call(f.route, '/api/sync/outbox', { operations: [op] })
-  assert.equal(switched.body.results[0].code, 'offline_owner_mismatch')
-  assert.equal(switched.body.results[0].status, 'rejected')
-  const relabeled = await call(f.route, '/api/sync/outbox', { operations: [operation(body('outbox-original', userB))] })
-  assert.equal(relabeled.body.results[0].code, 'offline_owner_mismatch')
-  assert.equal(Object.hasOwn(relabeled.body.results[0], 'response'), false)
-  assert.deepEqual(h.creationState(f.raw), afterOutbox)
-  console.log('PASS real outbox preserves authority and correlated acknowledgments; rejects ownerless and switched-cookie replay')
+  assert.deepEqual(h.creationState(f.raw), afterSales)
+  console.log('PASS retired /api/sync outbox and chunk routes answer 404')
   h.setUser({ ...userA, organization_id: null })
   const nullOrg = await sale(f.route, body('null-org', { ...userA, organization_id: null }))
   assertAck(nullOrg, 'null-org', owner({ ...userA, organization_id: null }))

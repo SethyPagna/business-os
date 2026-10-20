@@ -449,24 +449,6 @@ export function getSalesStatsStrip(params: { startDate: string; endDate: string;
 // No local fallbacks that fabricate zeros: a failed report read should show
 // the error path, never an all-zero report that reads as "no sales".
 
-export function getSalesDailyReport(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
-  return route(
-    `sales:daily-report:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales/daily-report', query)),
-    null,
-  )
-}
-
-export function getSalesDayReport(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
-  return route(
-    `sales:day-report:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales/day-report', query)),
-    null,
-  )
-}
-
 export function getDeliveryContactReport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(

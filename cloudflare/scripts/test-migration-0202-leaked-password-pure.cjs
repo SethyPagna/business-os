@@ -379,7 +379,7 @@ async function check(name, fn) {
 
   await check('owner: Sign out on the change screen finishes -- the sign-out probe answers, logout revokes, the probe then reads 401', async () => {
     assert.equal(SIGNOUT_PROBE_PATH, '/api/sync/owner', 'the path the app probes (frontend/src/api/http.ts)')
-    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8'), /app\.route\('\/api\/sync', createSyncRoute\(app\)\)/)
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8'), /app\.route\('\/api\/sync', createSyncRoute\(\)\)/)
     assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8'), /app\.use\('\*', requireAuth\)\s+app\.get\('\/owner'/)
     reset()
     const token = (await login('owner', LEAKED)).minted

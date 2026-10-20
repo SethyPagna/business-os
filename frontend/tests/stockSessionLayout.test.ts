@@ -2,7 +2,7 @@
 // the mode is the title, the shared details never change shape, labels live
 // inside the controls, and the buttons carry the owner's words.
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -24,7 +24,6 @@ const entry = src('components/stock-session/StockSessionLineEntry.tsx')
 const items = src('components/stock-session/StockSessionItems.tsx')
 const footer = src('components/stock-session/StockSessionFooter.tsx')
 const review = src('components/stock-session/StockSessionReviewStep.tsx')
-const reasonField = src('components/shared/StockReasonField.tsx')
 const supplierField = src('components/shared/SupplierPickerField.tsx')
 const tagRow = src('components/inventory/StockConditionTagRow.tsx')
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -143,7 +142,7 @@ runTest('Items and Review show the barcode under the name: two child rows of one
 runTest('build: the catalog closure does not grow -- the compact controls live in the lazy float, not components/shared', () => {
   // components/shared is vite.config.ts's app-shared catch-all, which the public
   // catalog loads. Measured 30 Sep: the compact variants added 2.5 KB there.
-  assert.doesNotMatch(reasonField, /variant\b|MessageSquare|SuggestionTextInput/, 'StockReasonField is back to its one shape')
+  assert.ok(!existsSync(new URL('../src/components/shared/StockReasonField.tsx', import.meta.url)), 'the retired StockReasonField does not return to components/shared')
   assert.doesNotMatch(supplierField, /variant ===|variant\?:|Truck/, 'SupplierPickerField renders no compact shape')
 })
 
@@ -158,7 +157,7 @@ runTest('build: an icon in a shared stock control never pulls the public catalog
   const catalogIcons = new Set(readdirSync(catalogDir, { recursive: true }).map(String).filter((file) => /\.tsx?$/.test(file))
     .flatMap((file) => [...readFileSync(new URL(file.replace(/\\/g, '/'), catalogDir), 'utf8').matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)].map((match) => match[1])))
   assert.ok(catalogIcons.size > 0, 'read the catalog icon imports')
-  for (const [name, text] of [['StockReasonField', reasonField], ['SupplierPickerField', supplierField], ['StockConditionTagRow', tagRow]] as const) {
+  for (const [name, text] of [['SupplierPickerField', supplierField], ['StockConditionTagRow', tagRow]] as const) {
     for (const [, icon] of text.matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)) {
       assert.ok(pinned.has(icon) || !catalogIcons.has(icon), `${name} imports "${icon}", which the public catalog also imports and vite.config.ts does not pin to shared-ui`)
     }

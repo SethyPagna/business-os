@@ -90,7 +90,7 @@ async function main() {
   await check('receive and remove keep all ledgers under installed guard', async () => {
     const received = await batches.receiveBatchStock(db, { productId: 1001, branchId: 1, batchId: 1001, quantity: 3, historicalReceiptReplay: true })
     assert.equal(received.batchId, 1001); assert.deepEqual(totals(), [10,10,10])
-    await batches.removeStockFromBatch(db, { productId: 1001, branchId: 1, batchId: 1001, quantity: 2 })
+    await executor.executeStockTransaction(db, batches.planRemoveStockFromBatch({ productId: 1001, branchId: 1, batchId: 1001, quantity: 2 }).statements, 'retry')
     assert.deepEqual(totals(), [8,8,8])
   })
   await check('identity creation preserves result index with and without caller guard', async () => {
@@ -102,7 +102,7 @@ async function main() {
   })
   await check('later failure rolls back all physical ledgers', async () => {
     const before = state(); failSql = /UPDATE products SET stock_quantity/
-    await assert.rejects(batches.removeStockFromBatch(db, { productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }), /fixture transaction failure/)
+    await assert.rejects(executor.executeStockTransaction(db, batches.planRemoveStockFromBatch({ productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }).statements, 'retry'), /fixture transaction failure/)
     assert.equal(state(), before)
   })
   await check('missing and future epoch refuse before effects', async () => {
@@ -110,7 +110,7 @@ async function main() {
       if (value === null) sql.exec("DELETE FROM system_flags WHERE key='stock_schema_epoch'")
       else sql.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?)").run(value)
       const before = state()
-      await assert.rejects(batches.removeStockFromBatch(db, { productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }), e => e.code === 'stock_schema_unavailable')
+      await assert.rejects(executor.executeStockTransaction(db, batches.planRemoveStockFromBatch({ productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }).statements, 'retry'), e => e.code === 'stock_schema_unavailable')
       assert.equal(state(), before)
     }
     sql.prepare("UPDATE system_flags SET value=? WHERE key='stock_schema_epoch'").run(executor.STOCK_SCHEMA_EPOCH)
@@ -166,7 +166,7 @@ async function main() {
   await check('maintenance blocks physical changes without blocking lot metadata', async () => {
     await executor.executeStockTransaction(db, [{ sql: "INSERT INTO system_flags(key,value) VALUES('maintenance','{}')" }], 'once')
     const before = state()
-    await assert.rejects(batches.removeStockFromBatch(db, { productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }), e => e.code === 'stock_schema_unavailable')
+    await assert.rejects(executor.executeStockTransaction(db, batches.planRemoveStockFromBatch({ productId: 1001, branchId: 1, batchId: 1001, quantity: 1 }).statements, 'retry'), e => e.code === 'stock_schema_unavailable')
     assert.equal(state(), before)
     await db.prepare("UPDATE product_batches SET notes='metadata during hold' WHERE id=1001").run()
     assert.equal(sql.prepare('SELECT notes FROM product_batches WHERE id=1001').get().notes, 'metadata during hold')

@@ -14,6 +14,8 @@ assert.match(hub, /get\(env\.BROADCAST_HUB\.idFromName\(HUB_NAME\), \{ locationH
 assert.match(hub, /const HUB_NAME = 'global-apac'/, 'a fresh hub name, because a hint cannot move an existing instance')
 assert.match(index, /broadcastHubStub\(c\.env\)\.fetch\(c\.req\.raw\)/, 'sockets connect to the APAC hub')
 assert.doesNotMatch(index, /BROADCAST_HUB\.idFromName\('global'\)/, 'no socket attaches to the legacy hub')
+assert.doesNotMatch(hub, /idFromName\('global'\)|LEGACY_HUB_NAME/, 'broadcast() no longer posts to the legacy hub')
+assert.equal((hub.match(/idFromName\(/g) || []).length, 1, 'one hub instance is addressed per broadcast')
 
 function tsFiles(dir) {
   return fs.readdirSync(dir).filter((file) => file.endsWith('.ts')).sort()

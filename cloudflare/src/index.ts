@@ -607,7 +607,7 @@ app.route('/api/review', reviewQueueRoute)
 app.route('/api/pos', posRoute)
 app.route('/api', usersRoute)
 app.route('/api', compatRoute)
-app.route('/api/sync', createSyncRoute(app))
+app.route('/api/sync', createSyncRoute())
 
 export { SyncUploadSession } from './durable-objects/syncUploadSession'
 export { BroadcastHub } from './durable-objects/broadcastHub'

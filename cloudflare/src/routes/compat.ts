@@ -14,7 +14,6 @@ import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
-import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { BUCKET_MONEY_PLACES, DASHBOARD_TOP_ROWS, applyLiveProductNames, dashboardRankingRows, getSalesTotalsAndPeriodSeries, getSalesTotalsWithoutLosses, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere, type DashboardProductRow } from '../lib/salesAnalytics'
 import { DASHBOARD_RANKING_ROWS, openDashboardRankingsCache, type DashboardRankingsCacheContext } from '../lib/dashboardRankingsCache'
@@ -854,67 +853,6 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   return c.json({ item: { checks, runtime }, checks, ok })
 })
 
-// Ported from backend's testObjectStore(): write, read-back, delete a probe
-// key against the same bucket production uploads go to (R2's ASSETS
-// binding), confirming credentials/bucket config actually work end-to-end
-// rather than just "the binding exists". Both legacy routes hit the same
-// underlying check; kept as two routes to match existing frontend call
-// sites (`GET .../doctor` for passive display, `POST .../test-write` for
-// an explicit user-triggered "Test connection" button).
-async function testObjectStore(env: Env) {
-  const key = `system/doctor/object-store-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
-  const probeBody = new Uint8Array(new TextEncoder().encode('business-os-object-store-test')).buffer as ArrayBuffer
-  await putObject(env.ASSETS, key, probeBody, 'text/plain; charset=utf-8')
-  const object = await getObject(env.ASSETS, key)
-  if (!object) throw new Error('Object store test read returned no body')
-  await deleteObject(env.ASSETS, key)
-  return { ok: true, driver: 'cloudflare-r2', bucket: 'ASSETS' }
-}
-app.get('/system/object-storage/doctor', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage doctor failed' }, 503)
-  }
-})
-app.post('/system/object-storage/test-write', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage test failed' }, 503)
-  }
-})
-
-// Ported from backend's `/backups/versions`(+`/list` alias)/`/backups/:id` --
-// these were missing entirely on Cloudflare even though `routes/backups.ts`
-// (mounted at /api/backups) covers create/list/restore; this compat.ts
-// `/system/backups/*` path is the one the Settings > Backups panel's
-// version-history view and per-job status poll actually call.
-async function sendBackupVersions(c: any) {
-  const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query('limit') || '50', 10) || 50))
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  try {
-    const items = (await listCloudflareBackups(c.env)).slice(0, limit)
-    return c.json({ items })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Failed to list backup versions' }, 500)
-  }
-}
-app.get('/system/backups/versions', requireAuth, sendBackupVersions)
-app.get('/system/backups/versions/list', requireAuth, sendBackupVersions)
-app.get('/system/backups/:id', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  const item = await getSystemJob(c.env, c.req.param('id') || '')
-  if (!item) return c.json({ error: 'Backup job not found' }, 404)
-  return c.json({ item })
-})
-
 // -----------------------------------------------------------------------
 // Filesystem / Postgres-only diagnostics from the Docker-era backend.
 // These have no meaningful Cloudflare equivalent: Workers have no local
@@ -929,7 +867,6 @@ app.get('/system/backups/:id', requireAuth, async (c) => {
 const NOT_APPLICABLE_CLOUD = { error: 'Not applicable when running fully on Cloudflare -- there is no local filesystem or Postgres instance to manage.', code: 'not_applicable_cloud_mode' }
 app.post('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.delete('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.get('/system/storage-mode', requireAuth, (c) => c.json({ mode: 'cloudflare', driver: 'd1+r2', migratable: false }))
 app.post('/system/scale-migration/prepare', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.post('/system/scale-migration/run', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.post('/system/browse-dir', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))

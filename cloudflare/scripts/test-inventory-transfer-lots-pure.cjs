@@ -129,7 +129,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/reviewGate') return { maybeQueueForReview: asyncNoop }
   if (id === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
   if (id === '../lib/cache') return { bumpVersion: asyncNoop }
-  if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockFromBatch: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
+  if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
@@ -562,12 +562,8 @@ await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonle
   })
 })
 
-await check('offline replay still dispatches Inventory transfer to the same guarded route and forwards its request id', () => {
-  const sync = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8')
+await check('Inventory transfer transport sends its request id to the guarded route', () => {
   const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'inventoryWriteTransport.ts'), 'utf8')
-  assert.match(sync, /'inventory\.transfer': \{ method: 'POST', path: '\/api\/inventory\/transfer' \}/)
-  assert.match(sync, /'x-client-request-id': operation\.client_request_id/)
-  assert.match(sync, /client_request_id: operation\.client_request_id/)
   assert.match(transport, /'inventory:transfer'[\s\S]*'POST'[\s\S]*'\/api\/inventory\/transfer'/)
   assert.match(transport, /ensureClientRequestId\([\s\S]*'transfer'\)/)
 })
