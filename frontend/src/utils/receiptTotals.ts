@@ -202,6 +202,8 @@ export function receiptTotalsFigures(
   try {
     owedUsd = recordedSaleOutstandingUsd({
       total_usd: totalUsd,
+      // A return lowers what is owed (owner, 29 Sep 2026).
+      refund_usd: refundUsd,
       amount_paid_usd: paidUsd,
       amount_paid_khr: paidKhr,
       exchange_rate: exchangeRate,

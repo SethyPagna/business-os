@@ -68,7 +68,7 @@ db.exec(`
     total_usd REAL, branch_id INTEGER, product_id INTEGER, product_name TEXT,
     applied_price_usd REAL, applied_price_khr REAL,
     product_discount_usd REAL DEFAULT 0, manual_discount_usd REAL DEFAULT 0);
-  CREATE TABLE returns (id INTEGER PRIMARY KEY, sale_id INTEGER, total_refund_usd REAL, total_refund_khr REAL,
+  CREATE TABLE returns (id INTEGER PRIMARY KEY, sale_id INTEGER, total_refund_usd REAL, total_refund_khr REAL, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT,
     status TEXT, return_scope TEXT, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
     supplier_compensation_usd REAL, supplier_loss_usd REAL, reason TEXT);
   CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,

@@ -16,6 +16,14 @@ const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 
 const fs = require('fs')
 const path = require('path')
+// Bundled (esbuild) so a kernel's own imports resolve without a hand-written map.
+function bundledKernel(rel) {
+  const out = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '..', 'src', rel)], bundle: true, write: false,
+    format: 'cjs', platform: 'node', target: 'es2022', external: ['cloudflare:*'], logLevel: 'silent' })
+  const m = { exports: {} }
+  new Function('module', 'exports', 'require', out.outputFiles[0].text)(m, m.exports, require)
+  return m.exports
+}
 const ts = require('typescript')
 const assert = require('assert')
 const Module = require('module')
@@ -252,6 +260,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
+  // Migration 0260: the route splits a refund into the debt it lowers and the cash it pays,
+  // and its report sums drawer cash with the shift kernel's own SQL.
+  '../lib/returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  '../lib/shiftReconciliation': bundledKernel('lib/shiftReconciliation.ts'),
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
   '../lib/productMergeLineage': productMergeLineageKernel,
   '../lib/saleMoneyPrecision': saleMoneyPrecisionKernel,

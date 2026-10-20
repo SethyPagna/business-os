@@ -28,11 +28,9 @@
  * Owner rulings encoded here (Sep 6 2026), each one a decision rather than a
  * fact the schema could supply:
  *
- *   * REFUNDS are subtracted. There is no refund-tender column anywhere in the
- *     schema -- `returns` carries total_refund_usd/khr and nothing about how
- *     the money went back -- so a refund issued in the window is treated as
- *     cash out of this drawer, once, in dollars: total_refund_khr is the same
- *     refund's riel equivalent, not a second payout (see shiftRefunds).
+ *   * REFUNDS are subtracted, once, from the drawer of the currency they were
+ *     paid in (returns.refund_currency, migration 0260); the part of a refund
+ *     that lowered a Not Paid sale's debt left no drawer (see shiftRefunds).
  *   * COURIER payouts are subtracted, for the same reason: what a courier was
  *     actually paid (sales.delivery_actual_cost_usd/khr, migration 0068) is a
  *     payout with no tender column. The double-count guard is NOT re-invented
@@ -67,6 +65,23 @@ import {
   PAYMENT_METHOD_KINDS_SETTING, type PaymentMethodKindMap,
 } from './paymentMethodRegistry'
 import type { Env } from '../index'
+
+// The cash a customer refund took out of a drawer (owner rulings 29 Sep and
+// 5-6 Oct 2026, migration 0260): its return value less the debt it lowered
+// (owed_reduction_usd), from the dollar drawer, or -- refund_currency 'KHR' --
+// that cash share of its riel figure from the riel drawer. A row from before
+// 0260 (currency NULL, nothing lowered) reads as it always did: dollar cash.
+// lib/returnRefundSplit.ts refundCashOut is the JS reading.
+function refundCashUsdSql(alias: string): string {
+  return `(COALESCE(${alias}.total_refund_usd, 0) - COALESCE(${alias}.owed_reduction_usd, 0))`
+}
+export function refundDrawerUsdSql(alias: string): string {
+  return `(CASE WHEN ${alias}.refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
+}
+export function refundDrawerKhrSql(alias: string): string {
+  return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
+    THEN ROUND(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd) ELSE 0 END)`
+}
 
 const round2 = (value: number) => Math.round(value * 100) / 100
 const roundKhr = (value: number) => Math.round(value)
@@ -424,20 +439,22 @@ export async function tenderWhere(
  * is attributed for revenue (there it belongs to the sale's window). Both are
  * right for their own question; this one is about the cash box.
  *
- * Dollars only. total_refund_khr is the riel equivalent of the same refund
+ * Each refund leaves ONE drawer (refundDrawerUsdSql / refundDrawerKhrSql):
+ * total_refund_khr is the riel equivalent of the same refund
  * (customerReturnEntitlement: multiplyMoney4(usd, rate); the legacy path sums
- * the sale lines' riel twins), not a second payout, so subtracting it as well
- * took every refund out of the drawer twice (SCAN1 M2).
+ * the sale lines' riel twins), not a second payout, so subtracting it beside
+ * the dollars took every refund out of the drawer twice (SCAN1 M2).
  */
 export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
   const { clauses, params } = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('returns.branch_id = @branchId'); params.branchId = shift.branch_id }
   clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'")
   clauses.push("COALESCE(returns.return_scope, 'customer') = 'customer'")
-  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_usd), 0) AS usd
+  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${refundDrawerUsdSql('returns')}), 0) AS usd,
+      COALESCE(SUM(${refundDrawerKhrSql('returns')}), 0) AS khr
       FROM returns WHERE ${clauses.join(' AND ')}`)
-    .get<{ usd: number }>(params)
-  return { usd: round2(Number(row?.usd || 0)), khr: 0 }
+    .get<{ usd: number; khr: number }>(params)
+  return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
 }
 
 /**
@@ -1117,7 +1134,7 @@ export async function loadShiftCloseDrift(
 //   * the window's fees row by row (id and both amounts, so two offsetting
 //     edits still move it; the stored drawer keeps expense totals only, so a
 //     label edit is deliberately not a change), and its refunds: count, ids
-//     and the refunded dollars summed (the drawer reads dollars only);
+//     and the drawer cash they took, per currency;
 //   * the payment-method settings that decide which tender is cash.
 // The shift row's own opening/additional/counted values are guarded by the
 // close's revision already.
@@ -1142,7 +1159,7 @@ export function shiftCloseInputsDigestSql(shift: ShiftReconciliationSession, now
     (SELECT json_group_array(json_array(fees.id, fees.amount_usd, fees.amount_khr)) FROM (
       SELECT fees.id, fees.amount_usd, fees.amount_khr FROM fees
       WHERE ${fees.clauses.join(' AND ')} ORDER BY fees.id) fees),
-    (SELECT json_array(COUNT(*), TOTAL(returns.id), TOTAL(returns.total_refund_usd)) FROM returns WHERE ${refunds.clauses.join(' AND ')}),
+    (SELECT json_array(COUNT(*), TOTAL(returns.id), TOTAL(${refundDrawerUsdSql('returns')}), TOTAL(${refundDrawerKhrSql('returns')})) FROM returns WHERE ${refunds.clauses.join(' AND ')}),
     (SELECT json_group_array(json_array(key, value)) FROM (SELECT key, value FROM settings
       WHERE key IN ('pos_payment_methods', '${PAYMENT_METHOD_KINDS_SETTING}') ORDER BY key)))`
   return { expr, params: { ...sales.params, ...fees.params, ...refunds.params } }

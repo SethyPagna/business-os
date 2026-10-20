@@ -2,6 +2,7 @@ import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
+import { notPaidSaleSql } from '../lib/salesStatus'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
@@ -398,7 +399,7 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
     db.prepare(`
       SELECT id, receipt_number, total_usd FROM sales
-      WHERE sale_status = 'awaiting_payment'
+      WHERE ${notPaidSaleSql('sales')}
       ORDER BY created_at DESC LIMIT 50
     `).all<{ id: number; receipt_number: string; total_usd: number }>(),
     db.prepare(`

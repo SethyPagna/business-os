@@ -273,7 +273,10 @@ assert.equal(pastBand[1]?.usd, '0.01', 'past the band the shortfall is prefilled
 assert.match(editorSource, /const remaining = settlementOutstandingUsd\(rows, \{ totalUsd, exchangeRate, moneyPrecisionVersion \}\)/)
 assert.doesNotMatch(editorSource, /totalUsd - totals\.paidEquivalentUsd/, 'the float shortfall must not decide Outstanding')
 assert.match(modalSource, /<SaleSettlementEditor[\s\S]*?moneyPrecisionVersion=\{usesSavedExchangeRate \? 1 : 0\}/)
-assert.match(modalSource, /settlementOutstandingUsd\(settlementRows, \{ totalUsd, exchangeRate: settlementSession\.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate \? 1 : 0 \}\) > 0/)
+// A return lowers what is owed (owner, 29 Sep 2026): the gate and the editor settle the total less its refunds.
+assert.match(modalSource, /const payableUsd = refundUsd > 0 \? subtractMoney4\(totalUsd, refundUsd\) : totalUsd/)
+assert.match(modalSource, /settlementOutstandingUsd\(settlementRows, \{ totalUsd: payableUsd, exchangeRate: settlementSession\.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate \? 1 : 0 \}\) > 0/)
+assert.match(modalSource, /<SaleSettlementEditor[\s\S]*?totalUsd=\{payableUsd\}/)
 assert.match(modalSource, /moneyPrecisionVersion: savedRate \? 1 : 0,\s*configuredMethods,/, 'the prefill reads the sale on the basis settlement checks')
 // The add-items projection of what is still owed reads the same kernel answer.
 assert.match(modalSource, /recordedSaleOutstandingUsd\(\{ \.\.\.sale, total_usd: projectedTotalUsd, exchange_rate: totals\.exchangeRate \}\)/)

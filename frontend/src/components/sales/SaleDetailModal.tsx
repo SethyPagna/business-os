@@ -31,14 +31,14 @@ import {
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
-import { recordedSaleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
+import { recordedSaleOutstandingUsd, saleReadsNotPaid } from '../../utils/saleStatusResolution.ts'
 import { saleOwnExchangeRate, saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
 import { CURRENCY } from '../../constants'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
 import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
-import { multiplyMoney4, sellingPriceCeilCent, sumMoney4 } from '../../utils/moneyPrecision.ts'
+import { multiplyMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { promotionLabelText, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -485,7 +485,10 @@ export default function SaleDetailModal({
       paymentMethod: selectedSale?.payment_method,
       amountPaidUsd: selectedSale?.amount_paid_usd,
       amountPaidKhr: selectedSale?.amount_paid_khr,
-      totalUsd: toNumber(selectedSale?.total_usd || selectedSale?.total),
+      // A return lowers what is owed (owner, 29 Sep 2026): settle the total less its refunds.
+      totalUsd: toNumber(selectedSale?.refund_usd) > 0
+        ? subtractMoney4(toNumber(selectedSale?.total_usd || selectedSale?.total), toNumber(selectedSale?.refund_usd))
+        : toNumber(selectedSale?.total_usd || selectedSale?.total),
       exchangeRate,
       moneyPrecisionVersion: savedRate ? 1 : 0,
       configuredMethods,
@@ -1351,7 +1354,7 @@ export default function SaleDetailModal({
     })
   }
 
-  const settlementDirty = sale?.sale_status === 'awaiting_payment'
+  const settlementDirty = !!sale && saleReadsNotPaid(sale)
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
   const saleWriteBusy = statusSaving || addSaving || amendSaving || lineRecoveryBusy || driverSaving
@@ -1362,7 +1365,7 @@ export default function SaleDetailModal({
   // total. Payment that has not been opened yet starts from the new row, so
   // Record payment does not send the version from before the edit; an opened,
   // saving or pending payment keeps exactly what was reviewed.
-  const paymentEntryOpen = sale?.sale_status === 'awaiting_payment' && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
+  const paymentEntryOpen = !!sale && saleReadsNotPaid(sale) && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
   const settlementVersionRef = useRef(`${detailScope}:${sale?.updated_at || ''}`)
   useEffect(() => {
     const version = `${detailScope}:${sale?.updated_at || ''}`
@@ -1415,6 +1418,8 @@ export default function SaleDetailModal({
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
+  // Payment state is independent of the return status (owner, 6 Oct 2026).
+  const saleNotPaid = saleReadsNotPaid(sale)
   // The Return action reuses the Returns section's own guards rather than
   // inventing new ones -- see utils/saleReturnGuard.ts, shared with the
   // receipt view so the two surfaces never disagree. The reason is stated up
@@ -1437,6 +1442,7 @@ export default function SaleDetailModal({
   const totalUsd = totals.totalUsd
   const totalKhr = totals.totalKhr
   const refundUsd = totals.refundUsd
+  const payableUsd = refundUsd > 0 ? subtractMoney4(totalUsd, refundUsd) : totalUsd
   const refundKhr = totals.refundKhr
   const membershipDiscountUsd = totals.membershipDiscountUsd
   const baseDiscountUsd = totals.discountUsd
@@ -1566,7 +1572,7 @@ export default function SaleDetailModal({
   // An awaiting-payment sale is settled here even when it already has a
   // partial tender. The editor carries the full existing tender snapshot and
   // appends the outstanding amount; the server remains the coverage authority.
-  const needsPaymentEntry = currentStatus === 'awaiting_payment'
+  const needsPaymentEntry = saleNotPaid
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
   const paymentCorrection = needsPaymentEntry && Boolean(Number(sale.payment_correction_allowed || 0))
 
@@ -1727,7 +1733,7 @@ export default function SaleDetailModal({
       }
       // The one definition of paid, on the basis the Worker's settlement uses:
       // a tender inside the half-cent band completes the sale here and there.
-      if (settlementOutstandingUsd(settlementRows, { totalUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
+      if (settlementOutstandingUsd(settlementRows, { totalUsd: payableUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
         setPayError(translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.', 'ត្រូវទូទាត់គ្រប់ចំនួនសរុប មុនបញ្ចប់ការលក់។'))
         return
       }
@@ -1821,7 +1827,7 @@ export default function SaleDetailModal({
                   valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
                 />
               </div>
-              <StatusBadge status={currentStatus} t={t} />
+              <StatusBadge status={currentStatus} notPaid={saleNotPaid} t={t} />
             </div>
             <div data-sale-detail-secondary-meta="" className="mt-1 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
               <span>{fmtTime(sale.created_at)}</span>
@@ -1886,7 +1892,7 @@ export default function SaleDetailModal({
                 {/* Z8: an awaiting-payment (credit) sale carries no method yet
                     -- the field becomes a Record-payment affordance right here
                     "near the payment method", per the user. */}
-                {currentStatus === 'awaiting_payment' ? (
+                {saleNotPaid ? (
                   <DetailRow label={t('payment_method') || 'Payment method'}>
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">
@@ -2988,13 +2994,13 @@ export default function SaleDetailModal({
             </section>
           ) : null}
 
-          {pendingStatus || (onStatusChange && !['returned', 'cancelled'].includes(currentStatus)) ? (
+          {pendingStatus || (onStatusChange && (saleNotPaid || !['returned', 'cancelled'].includes(currentStatus))) ? (
             <section ref={statusSectionRef} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('update_status') || 'Update status'}
               </div>
               <SaleStatusWorkflow
-                currentStatus={currentStatus}
+                currentStatus={saleNotPaid ? 'awaiting_payment' : currentStatus}
                 selectedStatus={newStatus}
                 notes={statusNotes}
                 saving={statusSaving}
@@ -3031,7 +3037,7 @@ export default function SaleDetailModal({
                   rows={settlementRows}
                   configuredMethods={settlementSession.configuredMethods}
                   exchangeRate={settlementSession.exchangeRate}
-                  totalUsd={totalUsd}
+                  totalUsd={payableUsd}
                   moneyPrecisionVersion={usesSavedExchangeRate ? 1 : 0}
                   saving={statusSaving || !paymentConfigReady}
                   error={payError}

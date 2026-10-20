@@ -86,7 +86,7 @@ import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
-import { PAID_SALE_STATUSES, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
+import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -156,6 +156,7 @@ interface SaleRecord extends Record<string, unknown> {
   created_at?: string
   updated_at?: string
   sale_status?: string
+  status_before_return?: string | null
   // S4-2 (migration 0114): 1 when an admin deliberately changed this sale's
   // status without moving stock. The sale stays outside the stock ledger
   // from then on, so the confirmation says so instead of promising a
@@ -2167,7 +2168,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         // S4-41: a Not Paid sale whose recorded payment does not cover it cannot
         // become paid. The Worker refuses a group containing one, so the review
         // names it and leaves it out instead (the same rule, shared file).
-        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(sale.sale_status, status, sale)).map((status) => `value:${status}`) } : {}),
+        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(salePaymentStatus(sale), status, sale)).map((status) => `value:${status}`) } : {}),
       })),
       sourceChoices,
       targetChoices,

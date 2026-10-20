@@ -47,6 +47,8 @@ export type SaleSettlementState = {
   calculated_total_usd?: number | null
   rounding_adjustment_usd?: number
   sale_status: string | null
+  /** Absent on snapshots saved before a return-status sale could be settled; then it is never written. */
+  status_before_return?: string | null
   exchange_rate: number | null
   subtotal_khr: number | null
   discount_khr: number | null
@@ -102,12 +104,19 @@ function paymentDetailsState(value: unknown): SaleRecordValueState {
   }
 }
 
+// A settled return-status sale keeps sale_status; its record shows the payment state that moved.
+function recordedStatus(state: SaleSettlementState): string | null {
+  const returnStatus = state.sale_status === 'partial_return' || state.sale_status === 'returned'
+  const paymentState = ['awaiting_payment', 'completed', 'awaiting_delivery'].includes(String(state.status_before_return))
+  return returnStatus && paymentState ? state.status_before_return ?? null : state.sale_status
+}
+
 function settlementChanges(before: SaleSettlementState, after: SaleSettlementState): SaleRecordChange[] {
   const fields = ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'] as const
   const changes: SaleRecordChange[] = []
   for (const field of fields) {
-    const left = field === 'payment_details' ? paymentDetailsState(before[field]) : recordState(before[field])
-    const right = field === 'payment_details' ? paymentDetailsState(after[field]) : recordState(after[field])
+    const left = field === 'payment_details' ? paymentDetailsState(before[field]) : recordState(field === 'sale_status' ? recordedStatus(before) : before[field])
+    const right = field === 'payment_details' ? paymentDetailsState(after[field]) : recordState(field === 'sale_status' ? recordedStatus(after) : after[field])
     if (JSON.stringify(left) !== JSON.stringify(right)) changes.push({ field, before: left, after: right })
   }
   return changes
@@ -153,7 +162,7 @@ function nullableNumber(value: unknown): number | null {
 
 export async function readSaleSettlementState(db: D1Compat, saleId: number): Promise<SaleSettlementState | null> {
   const sale = await db.prepare(`
-    SELECT sale_status,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
+    SELECT sale_status,status_before_return,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
            payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
            change_is_actual,change_exchange_rate,search_normalized,
@@ -171,6 +180,7 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     calculated_total_usd: nullableNumber(sale.calculated_total_usd),
     rounding_adjustment_usd: nullableNumber(sale.rounding_adjustment_usd) ?? 0,
     sale_status: sale.sale_status == null ? null : String(sale.sale_status),
+    status_before_return: sale.status_before_return == null ? null : String(sale.status_before_return),
     exchange_rate: nullableNumber(sale.exchange_rate),
     subtotal_khr: nullableNumber(sale.subtotal_khr),
     discount_khr: nullableNumber(sale.discount_khr),
@@ -199,6 +209,13 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
   }
 }
 
+/** A snapshot saved before status_before_return was captured is compared and restored without it. */
+export function sameSettlementState(current: SaleSettlementState, expected: SaleSettlementState): boolean {
+  if (Object.prototype.hasOwnProperty.call(expected, 'status_before_return')) return samePrecisionCompatibleState(current, expected)
+  const { status_before_return: _ignored, ...legacy } = current
+  return samePrecisionCompatibleState(legacy, expected)
+}
+
 /**
  * Settling records a payment; it never re-rates the sale. The exchange rate
  * and every riel column stay exactly as booked, legacy (precision v0) sales
@@ -209,6 +226,9 @@ export function buildSaleSettlementAfterState(
   sale: Record<string, unknown>,
   targetStatus: string,
   plan: SettlementPlan,
+  // A return-status sale that reads Not Paid keeps its return status; the
+  // payment state it settles to is status_before_return.
+  returnSale = false,
 ): SaleSettlementState {
   return {
     ...(before.money_precision_version === undefined ? {} : {
@@ -216,7 +236,9 @@ export function buildSaleSettlementAfterState(
       calculated_total_usd: before.calculated_total_usd,
       rounding_adjustment_usd: before.rounding_adjustment_usd,
     }),
-    sale_status: targetStatus,
+    sale_status: returnSale ? before.sale_status : targetStatus,
+    ...(Object.prototype.hasOwnProperty.call(before, 'status_before_return')
+      ? { status_before_return: returnSale ? targetStatus : before.status_before_return ?? null } : {}),
     exchange_rate: before.exchange_rate,
     subtotal_khr: before.subtotal_khr,
     discount_khr: before.discount_khr,
@@ -246,8 +268,9 @@ export function buildSaleSettlementAfterState(
 }
 
 export function saleSettlementStateStatements(saleId: number, state: SaleSettlementState, stamp: string): Statement[] {
+  const withBeforeReturn = Object.prototype.hasOwnProperty.call(state, 'status_before_return')
   return [{
-    sql: `UPDATE sales SET sale_status=@sale_status,exchange_rate=@exchange_rate,
+    sql: `UPDATE sales SET sale_status=@sale_status,${withBeforeReturn ? 'status_before_return=@status_before_return,' : ''}exchange_rate=@exchange_rate,
           subtotal_khr=@subtotal_khr,discount_khr=@discount_khr,tax_khr=@tax_khr,
           total_khr=@total_khr,delivery_fee_khr=@delivery_fee_khr,
           membership_discount_khr=@membership_discount_khr,payment_method=@payment_method,
@@ -331,7 +354,7 @@ export async function replaySaleSettlementAction(
   const expected = direction === 'undo' ? after : before
   const target = direction === 'undo' ? before : after
   const current = await readSaleSettlementState(db, saleId)
-  if (!current || !samePrecisionCompatibleState(current, expected)) {
+  if (!current || !sameSettlementState(current, expected)) {
     throw new SaleSettlementReplayConflict('This sale was edited after the settlement. Refresh before reversing it.')
   }
   const expectedHistoryStatus = direction === 'undo' ? 'undoable' : 'redoable'

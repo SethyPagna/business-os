@@ -15,7 +15,7 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
 CREATE TABLE sale_items(id INTEGER PRIMARY KEY, sale_id INTEGER, cost_price_usd REAL, quantity REAL);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, return_number TEXT,
  receipt_number TEXT, customer_id INTEGER, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
- status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
+ status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
 CREATE TABLE return_items(id INTEGER PRIMARY KEY, return_id INTEGER, cost_price_usd REAL, quantity REAL, stock_action TEXT, return_to_stock INTEGER);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
  label TEXT, notes TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0);
@@ -84,6 +84,9 @@ const reportsModule=load('routes/reports.ts',{
    await next()
  }},
  '../lib/permissions':load('lib/permissions.ts'),
+ // The returns overview sums drawer cash with the shift kernel's SQL (0260); load it once, with the fixture DB.
+ '../lib/shiftReconciliation':load('lib/shiftReconciliation.ts',{'./db':{getDb:()=>db},'./salesAnalytics':analytics,
+   './nativeSaleChange':nativeSaleChange,'./paymentMethodRegistry':load('lib/paymentMethodRegistry.ts')}),
 })
 const app=reportsModule.default
 const base='http://local/business-summary/'
@@ -157,7 +160,7 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.equal(expenseOverview.body.previous_range.createdFrom,'2026-09-03 02:30:00')
  assert.equal(expenseOverview.body.previous_range.createdTo,'2026-09-03 04:00:00')
  const returnOverview=await overview(exact,'returns')
- assert.deepEqual(returnOverview.body.returns.totals,{count:1,refund_usd:7,refund_khr:0},'returns overview matches the exact detail cohort')
+ assert.deepEqual(returnOverview.body.returns.totals,{count:1,refund_usd:7,refund_khr:0,owed_reduction_usd:0,cash_refund_usd:7,cash_refund_khr:0},'returns overview matches the exact detail cohort (a pre-0260 row is dollar cash)')
  assert.equal((await get('expenses','createdFrom='+encodeURIComponent('2026-09-04 02:30:00'))).status,400,'one-sided exact ranges reject')
  assert.equal((await get('sales','createdFrom='+encodeURIComponent('2026-09-04 04:00:00')+'&createdTo='+encodeURIComponent('2026-09-04 02:30:00'))).status,400,'reversed exact ranges reject')
  // Exercise the real bounded grouped shift-expense query, not a D1 stub.

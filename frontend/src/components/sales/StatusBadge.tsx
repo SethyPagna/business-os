@@ -53,14 +53,26 @@ export function getStatusBadgeLabel(status: unknown, t?: TranslateFn) {
 
 type StatusBadgeProps = {
   status?: unknown
+  /** A return status that still reads Not Paid (saleReadsNotPaid): its payment chip shows beside it. */
+  notPaid?: boolean
   t?: TranslateFn
 }
 
-export default function StatusBadge({ status, t }: StatusBadgeProps) {
-  const s = isSaleStatus(status) ? status : 'completed'
+function Chip({ s, t }: { s: SaleStatus; t?: TranslateFn }) {
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s]}`}>
       {getStatusBadgeLabel(s, t)}
+    </span>
+  )
+}
+
+export default function StatusBadge({ status, notPaid = false, t }: StatusBadgeProps) {
+  const s = isSaleStatus(status) ? status : 'completed'
+  if (!notPaid || (s !== 'partial_return' && s !== 'returned')) return <Chip s={s} t={t} />
+  return (
+    <span className="inline-flex flex-nowrap items-center gap-1">
+      <Chip s={s} t={t} />
+      <Chip s="awaiting_payment" t={t} />
     </span>
   )
 }

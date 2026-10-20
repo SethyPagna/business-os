@@ -88,13 +88,44 @@
 // test-sale-bulk-status-paid-guard-pure.cjs drive the Worker copy through
 // the real routes.
 
-import { exactDecimalRatio, financialCalculationUnits, type FinancialDecimalInput } from './financialPrecision.ts'
+import { exactDecimalRatio, financialCalculationUnits, formatScaledUnits, type FinancialDecimalInput } from './financialPrecision.ts'
 
 /** The credit status: the sale asserts the customer still owes the money. */
 export const NOT_PAID_STATUS = 'awaiting_payment'
 
 /** The statuses that assert the sale IS paid: the counter sale, and the paid order still waiting for its driver. */
 export const PAID_SALE_STATUSES: readonly string[] = ['completed', 'awaiting_delivery']
+
+const RETURN_SALE_STATUSES: readonly string[] = ['partial_return', 'returned']
+
+type SaleStatusRow = { sale_status?: unknown; status_before_return?: unknown }
+
+/**
+ * Does the sale read Not Paid? A return status replaces sale_status but not
+ * the payment state (owner, 6 Oct 2026: the payment chip and the return
+ * ribbon are independent), which it keeps in status_before_return. Every Not
+ * Paid list, gate and chip asks this.
+ */
+export function saleReadsNotPaid(sale: SaleStatusRow): boolean {
+  const status = statusWord(sale.sale_status)
+  return status === NOT_PAID_STATUS
+    || (RETURN_SALE_STATUSES.includes(status) && sale.status_before_return === NOT_PAID_STATUS)
+}
+
+/** The status a payment rule reads: Not Paid when saleReadsNotPaid, else the stored status. */
+export function salePaymentStatus(sale: SaleStatusRow): string {
+  return saleReadsNotPaid(sale) ? NOT_PAID_STATUS : statusWord(sale.sale_status)
+}
+
+/** A sale's active customer refunds summed exactly, as RecordedSaleMoney.refund_usd takes them. */
+export function sumRefundsUsd(values: readonly FinancialDecimalInput[]): string {
+  return formatScaledUnits(values.reduce<bigint>((sum, value) => sum + financialCalculationUnits(value), 0n), 4)
+}
+
+/** A return-status sale that still reads Not Paid: settling it changes only status_before_return. */
+export function returnSaleAwaitsPayment(sale: SaleStatusRow): boolean {
+  return RETURN_SALE_STATUSES.includes(statusWord(sale.sale_status)) && saleReadsNotPaid(sale)
+}
 
 export type SaleCoverageInput = {
   totalUsd: FinancialDecimalInput
@@ -241,6 +272,12 @@ export type RecordedSaleMoney = {
   exchange_rate?: unknown
   money_precision_version?: unknown
   calculated_total_usd?: unknown
+  /**
+   * The sale's active customer refunds (GET /api/sales `refund_usd`). A
+   * return lowers what is owed (owner, 29 Sep 2026), so the payable amount is
+   * the total less these. Absent reads as none.
+   */
+  refund_usd?: unknown
   /** The rest of the row rides along untouched (and keeps this from being a weak type). */
   [column: string]: unknown
 }
@@ -267,7 +304,8 @@ function recordedTender(sale: RecordedSaleMoney): AmountTender {
   return {
     paidUsd: storedAmount(sale.amount_paid_usd, true),
     paidKhr: storedAmount(sale.amount_paid_khr, true),
-    totalUsd: storedAmount(sale.total_usd, false),
+    totalUsd: formatScaledUnits(financialCalculationUnits(storedAmount(sale.total_usd, false))
+      - financialCalculationUnits(storedAmount(sale.refund_usd, true)), 4),
     exchangeRate: storedAmount(sale.exchange_rate, false),
     moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
   }

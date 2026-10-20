@@ -43,6 +43,12 @@ export const STOCK_DEDUCTED_STATUSES: ReadonlySet<string> = new Set<string>(['co
 // statuses is the only signal it will ever get, so it restocks directly.
 export const RETURN_STATUSES: ReadonlySet<string> = new Set<string>(['returned', 'partial_return'])
 
+// SQL twin of lib/saleStatusResolution.ts saleReadsNotPaid for a sales row
+// aliased `alias`. Two equality terms, so idx_sales_status_created_pg serves both.
+export function notPaidSaleSql(alias: string): string {
+  return `(${alias}.sale_status = 'awaiting_payment' OR (${alias}.sale_status IN ('partial_return', 'returned') AND ${alias}.status_before_return = 'awaiting_payment'))`
+}
+
 export function normalizeSaleStatus(value: unknown): SaleStatus | null {
   const normalized = String(value ?? '').trim().toLowerCase()
   return VALID_SALE_STATUSES.includes(normalized) ? (normalized as SaleStatus) : null
