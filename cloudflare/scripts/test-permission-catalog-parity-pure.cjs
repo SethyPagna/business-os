@@ -214,6 +214,11 @@ const DYNAMIC_SITES = [
     reach: () => quoted(textOf('lib/undoAppliers.ts'), /permission:\s*'([a-z_]+)',\s*action:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`),
   },
   {
+    file: 'lib/undoAppliers.ts',
+    needle: 'getActionTier(user, applier.permission, applier.alsoAction)',
+    reach: () => quoted(textOf('lib/undoAppliers.ts'), /permission:\s*'([a-z_]+)',\s*action:\s*'[a-z_]+',\s*(?:\/\/[^\n]*\n\s*)*alsoAction:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`),
+  },
+  {
     file: 'routes/contacts.ts',
     needle: "getActionTier(c.get('user'), 'contacts', action)",
     reach: () => quoted(textOf('routes/contacts.ts'), WRAPPERS.denyUnlessFullContactAction.literal).map((m) => `contacts:${m[1]}`),
