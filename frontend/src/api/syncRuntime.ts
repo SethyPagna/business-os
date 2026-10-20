@@ -46,7 +46,7 @@ type SyncTimerHost = {
 }
 
 export type SyncChannelScheduler = {
-  schedule: (channel: string, remote: boolean, publish: () => void) => void
+  schedule: (channel: string, remote: boolean, source: string | null, publish: (source: string | null) => void) => void
   dispose: () => void
 }
 
@@ -56,28 +56,34 @@ export type SyncChannelScheduler = {
  * then publish once; later pushes in the burst join it instead of pushing it back, so a steady
  * stream still refreshes. Everything else, including this device's own writes, keeps the short
  * trailing debounce and replaces a slower remote wait already pending for the channel.
+ * A publish stands for every change merged into it, so it carries a source only when all of them
+ * share it; a mix publishes null. Pages skip their own echo by source (the POS skips 'pos-checkout'),
+ * and a null source is never an echo, so a remote change merged with the till's own sale still reaches it.
  */
 export function createSyncChannelScheduler(host: SyncTimerHost): SyncChannelScheduler {
-  const pending = new Map<string, number>()
-  const arm = (channel: string, publish: () => void, delayMs: number) => {
-    pending.set(channel, host.setTimeout(() => {
+  const pending = new Map<string, { timer: number; sources: Set<string | null> }>()
+  const arm = (channel: string, sources: Set<string | null>, publish: (source: string | null) => void, delayMs: number) => {
+    const timer = host.setTimeout(() => {
       pending.delete(channel)
-      publish()
-    }, delayMs))
+      publish(sources.size === 1 ? [...sources][0] : null)
+    }, delayMs)
+    pending.set(channel, { timer, sources })
   }
   return {
-    schedule(channel, remote, publish) {
+    schedule(channel, remote, source, publish) {
       const current = pending.get(channel)
+      const sources = current?.sources ?? new Set<string | null>()
+      sources.add(source)
       if (remote && REMOTE_COALESCED_SYNC_CHANNELS.has(channel)) {
         // The publish already pending reads after this change as well.
-        if (current === undefined) arm(channel, publish, SYNC.REMOTE_EVENT_COALESCE_MS)
+        if (!current) arm(channel, sources, publish, SYNC.REMOTE_EVENT_COALESCE_MS)
         return
       }
-      if (current !== undefined) host.clearTimeout(current)
-      arm(channel, publish, SYNC.EVENT_DEBOUNCE_MS)
+      if (current) host.clearTimeout(current.timer)
+      arm(channel, sources, publish, SYNC.EVENT_DEBOUNCE_MS)
     },
     dispose() {
-      for (const timer of pending.values()) host.clearTimeout(timer)
+      for (const { timer } of pending.values()) host.clearTimeout(timer)
       pending.clear()
     },
   }
