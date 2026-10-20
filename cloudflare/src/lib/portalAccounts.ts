@@ -85,7 +85,7 @@ async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): P
   }
 }
 
-export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
+export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown; ageConfirmed?: unknown }
 export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
@@ -162,6 +162,19 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
       status: 400,
       error: 'Please agree to the Terms & Conditions and the Privacy Policy to create an account.',
       code: 'consent_required',
+      abuse: false,
+    }
+  }
+  // Owner rule: minimum account age is 16. Strict boolean, unlike consent: the
+  // storefront sends JSON true from the combined tick, and a form-style
+  // 'true'/'on' is not a confirmation. No column stores it (a migration is
+  // owner-gated); the consent tick text itself carries the 16 wording.
+  if (input.ageConfirmed !== true) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Please confirm you are 16 or older to create an account.',
+      code: 'age_confirmation_required',
       abuse: false,
     }
   }

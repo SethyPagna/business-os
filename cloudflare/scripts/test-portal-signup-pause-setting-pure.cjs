@@ -42,7 +42,7 @@ function setup(signupSetting) {
   return h
 }
 const count = (h, table) => Number(h.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get({}).n)
-const signup = (h, phone, ip) => h.request('/auth/signup', 'POST', { name: 'Visitor', phone, password: 'visitor-pass', consent: true, consentLocale: 'km' }, { ip })
+const signup = (h, phone, ip) => h.request('/auth/signup', 'POST', { name: 'Visitor', phone, password: 'visitor-pass', consent: true, ageConfirmed: true, consentLocale: 'km' }, { ip })
 
 async function main() {
   await check('positive control: with the setting explicitly true the two phones answer differently (sign-up open)', async () => {

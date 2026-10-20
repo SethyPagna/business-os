@@ -186,7 +186,7 @@ async function run() {
   })
 
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
-    const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true)
     // New IDs use the shared house LC- gap-fill contract -- this is the
     // first LC- customer in this fresh in-memory DB, so it lands on 1.
@@ -204,7 +204,7 @@ async function run() {
   })
 
   await check('signup rejects a phone that already exists in ANY format (canonical uniqueness)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Someone Else', phone: '+855 99 888 777', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Someone Else', phone: '+855 99 888 777', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(res.abuse, true)
@@ -227,7 +227,7 @@ async function run() {
       },
     })
 
-    const res = await signup(env, { name: 'Portal Visitor', phone: '+855 97 101 202', password: 'secret12345', consent: true })
+    const res = await signup(env, { name: 'Portal Visitor', phone: '+855 97 101 202', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(res.status, 409)
@@ -256,7 +256,7 @@ async function run() {
       },
     })
 
-    const res = await signup(env, { name: 'Portal Visitor', phone: '096 303 404', password: 'secret12345', consent: true })
+    const res = await signup(env, { name: 'Portal Visitor', phone: '096 303 404', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 0, 'the contact insert rolls back with the account collision')
@@ -268,7 +268,7 @@ async function run() {
 
   await check('signup (existing customer) succeeds with membership id + MATCHING phone, links the contact', async () => {
     const contactId = seedCustomer({ name: 'Old Buyer', phone: '011 222 333', phone_normalized: '011222333', membership_number: 'LCMN-OLDBUYER' })
-    const res = await signupPortalAccount(env, { name: 'Old Buyer', phone: '855 11 222 333', membershipId: 'lcmn-oldbuyer', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Old Buyer', phone: '855 11 222 333', membershipId: 'lcmn-oldbuyer', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true)
     const account = rawDb.prepare('SELECT contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
     assert.strictEqual(account.contact_id, contactId, 'linked to the existing contact, no new one')
@@ -277,7 +277,7 @@ async function run() {
 
   await check('a marked historical customer cannot be claimed through membership signup', async () => {
     seedCustomer({ name: 'General', phone: '010 555 010', phone_normalized: '010555010', membership_number: 'LC-ANON', is_anonymous: 1 })
-    const res = await signupPortalAccount(env, { name: 'General', phone: '010 555 010', membershipId: 'LC-ANON', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'General', phone: '010 555 010', membershipId: 'LC-ANON', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM portal_accounts WHERE membership_id='LC-ANON'").get().n, 0)
@@ -293,7 +293,7 @@ async function run() {
       },
     })
     raceDb.prepare("INSERT INTO customers (name,phone,phone_normalized,membership_number,is_anonymous) VALUES ('Race General','010555011','010555011','LC-RACE-ANON',0)").run()
-    const res = await signup(env, { name: 'Race General', phone: '010555011', membershipId: 'LC-RACE-ANON', password: 'secret12345', consent: true })
+    const res = await signup(env, { name: 'Race General', phone: '010555011', membershipId: 'LC-RACE-ANON', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 0)
@@ -302,34 +302,34 @@ async function run() {
 
   await check('signup (existing customer) with a PHONE MISMATCH is rejected with the reminder', async () => {
     seedCustomer({ name: 'Mismatch', phone: '012 000 000', phone_normalized: '012000000', membership_number: 'LCMN-MISMATCH' })
-    const res = await signupPortalAccount(env, { name: 'Mismatch', phone: '012 999 999', membershipId: 'LCMN-MISMATCH', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Mismatch', phone: '012 999 999', membershipId: 'LCMN-MISMATCH', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
   })
 
   await check('signup with an unknown membership id is rejected (no oracle — same reminder)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Ghost', phone: '078 555 111', membershipId: 'LCMN-NOSUCHID', password: 'secret12345', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Ghost', phone: '078 555 111', membershipId: 'LCMN-NOSUCHID', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
   })
 
   await check('signup with a short password is a benign form error (not counted as abuse)', async () => {
-    const res = await signupPortalAccount(env, { name: 'Shorty', phone: '070 111 222', password: '123', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Shorty', phone: '070 111 222', password: '123', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'password_weak')
     assert.strictEqual(res.abuse, false)
   })
 
   await check('the portal minimum is ten characters: nine are refused, ten are accepted', async () => {
-    const nine = await signupPortalAccount(env, { name: 'Ninish', phone: '070 111 332', password: 'abcdefghi', consent: true })
+    const nine = await signupPortalAccount(env, { name: 'Ninish', phone: '070 111 332', password: 'abcdefghi', consent: true, ageConfirmed: true })
     assert.strictEqual(nine.ok, false)
     assert.strictEqual(nine.code, 'password_weak')
-    const ten = await signupPortalAccount(env, { name: 'Tenish', phone: '070 111 333', password: 'abcdefghij', consent: true })
+    const ten = await signupPortalAccount(env, { name: 'Tenish', phone: '070 111 333', password: 'abcdefghij', consent: true, ageConfirmed: true })
     assert.strictEqual(ten.ok, true, JSON.stringify(ten))
   })
 
   await check('a long passphrase with no symbols or digits is accepted', async () => {
-    const res = await signupPortalAccount(env, { name: 'Passphrase', phone: '070 111 666', password: 'correct horse battery', consent: true })
+    const res = await signupPortalAccount(env, { name: 'Passphrase', phone: '070 111 666', password: 'correct horse battery', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true, JSON.stringify(res))
   })
 
@@ -342,7 +342,7 @@ async function run() {
   })
 
   await check('marking a linked contact invalidates portal signin without exposing the marker', async () => {
-    const signup = await signupPortalAccount(env, { name: 'Later Marker', phone: '010 555 012', password: 'secret12345', consent: true })
+    const signup = await signupPortalAccount(env, { name: 'Later Marker', phone: '010 555 012', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(signup.ok, true)
     rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=(SELECT contact_id FROM portal_accounts WHERE id=?)').run([signup.accountId])
     const signin = await signinPortalAccount(env, { identifier: 'Later Marker', phone: '010 555 012', password: 'secret12345', consent: true })
@@ -392,7 +392,7 @@ async function run() {
 
     // A brand-new signup's auto id equals no pre-existing id in EITHER store.
     const existing = new Set([...customerNumbers, ...accountIds])
-    return signupPortalAccount(env, { name: 'Fresh Auto', phone: '096 424 242', password: 'secret12345', consent: true }).then((res) => {
+    return signupPortalAccount(env, { name: 'Fresh Auto', phone: '096 424 242', password: 'secret12345', consent: true, ageConfirmed: true }).then((res) => {
       assert.strictEqual(res.ok, true)
       assert.ok(!existing.has(res.membershipId.toLowerCase()), 'the auto-issued id did not collide with any existing id')
     })
@@ -406,8 +406,8 @@ async function run() {
     // entirely this function's own doing.
     const { signup: signup2, rawDb: concurrentDb } = makeIsolatedPortal()
     const [a, b] = await Promise.all([
-      signup2(env, { name: 'Dara', phone: '099 111 222', password: 'secret12345', consent: true }),
-      signup2(env, { name: 'Sokha', phone: '099 333 444', password: 'secret12345', consent: true }),
+      signup2(env, { name: 'Dara', phone: '099 111 222', password: 'secret12345', consent: true, ageConfirmed: true }),
+      signup2(env, { name: 'Sokha', phone: '099 333 444', password: 'secret12345', consent: true, ageConfirmed: true }),
     ])
     assert.strictEqual(a.ok, true, `first signup should succeed: ${JSON.stringify(a)}`)
     assert.strictEqual(b.ok, true, `second signup should succeed: ${JSON.stringify(b)}`)
@@ -444,8 +444,8 @@ async function run() {
     })
 
     const [a, b] = await Promise.all([
-      signup(env, { name: 'Twin Customer', phone: '099 010 010', membershipId: 'LC-00099', password: 'secret12345', consent: true }),
-      signup(env, { name: 'Twin Customer', phone: '099 020 020', membershipId: 'LC-00099', password: 'secret12345', consent: true }),
+      signup(env, { name: 'Twin Customer', phone: '099 010 010', membershipId: 'LC-00099', password: 'secret12345', consent: true, ageConfirmed: true }),
+      signup(env, { name: 'Twin Customer', phone: '099 020 020', membershipId: 'LC-00099', password: 'secret12345', consent: true, ageConfirmed: true }),
     ])
     const results = [a, b]
     const succeeded = results.filter((r) => r.ok === true)
@@ -479,7 +479,7 @@ async function run() {
     ).run({ membership_id: fixedId, name: 'Already Here', phone: '099700700', password_hash: 'x', contact_id: null })
 
     await assert.rejects(
-      () => signup(env, { name: 'New Customer', phone: '099 800 900', password: 'secret12345', consent: true }),
+      () => signup(env, { name: 'New Customer', phone: '099 800 900', password: 'secret12345', consent: true, ageConfirmed: true }),
       /UNIQUE constraint failed/,
       'exhausting every retry must throw, not resolve to a SignupResult of any kind',
     )

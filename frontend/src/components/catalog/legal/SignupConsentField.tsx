@@ -29,6 +29,14 @@ export function consentRequiredMessage(copy: CopyFn, mode: 'signin' | 'signup'):
     : copy('portal_legal_consent_required', CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM)
 }
 
+/** The Worker's refusal when a sign-up arrives without the age confirmation. */
+export const AGE_CONFIRMATION_REQUIRED_CODE = 'age_confirmation_required'
+
+/** The sign-up fields the combined tick answers; the Worker requires ageConfirmed === true. */
+export function signupConsentFields(consent: boolean, consentLocale: string): { consent: boolean; consentLocale: string; ageConfirmed?: true } {
+  return consent ? { consent, consentLocale, ageConfirmed: true } : { consent, consentLocale }
+}
+
 export default function SignupConsentField({
   copy,
   checked,

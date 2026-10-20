@@ -6,7 +6,7 @@ import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
-import SignupConsentField, { consentRequiredMessage } from './legal/SignupConsentField.tsx'
+import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
@@ -69,7 +69,7 @@ export default function CatalogAccountSection({
   const pausedByServer = errorCode === 'portal_signup_paused'
   const signupOpen = signupEnabled && !pausedByServer
   const showSignup = signupOpen && mode === 'signup'
-  const errorText = pausedByServer ? signupPausedText : error
+  const errorText = pausedByServer ? signupPausedText : errorCode === AGE_CONFIRMATION_REQUIRED_CODE ? consentRequiredMessage(copy, 'signup') : error
   // Sign-in fields
   const [identifier, setIdentifier] = useState('')
   const [signinPhone, setSigninPhone] = useState('')
@@ -115,7 +115,7 @@ export default function CatalogAccountSection({
   }
 
   const submitSignUp = async () => {
-    const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword, consent, consentLocale })
+    const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword, ...signupConsentFields(consent, consentLocale) })
     if (ok) {
       setName(''); setSignupPhone(''); setMembershipId(''); setSignupPassword(''); setConsent(false)
     }

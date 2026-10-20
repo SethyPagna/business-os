@@ -145,7 +145,7 @@ async function run() {
   })
 
   await check('a new sign-up records the current version', async () => {
-    const result = await accounts.signupPortalAccount(ctx.env, { name: 'New Consent', phone: '012 777 888', password: 'sup3rsecret', consent: true })
+    const result = await accounts.signupPortalAccount(ctx.env, { name: 'New Consent', phone: '012 777 888', password: 'sup3rsecret', consent: true, ageConfirmed: true })
     assert.strictEqual(result.ok, true, `signup failed: ${result.error || ''}`)
     const row = rawDb.prepare('SELECT consent_version FROM portal_accounts WHERE id = ?').get([result.accountId])
     assert.strictEqual(row.consent_version, CURRENT)
