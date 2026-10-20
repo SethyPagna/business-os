@@ -340,7 +340,8 @@ runTest('the storefront paints a real focus indicator and honours reduced motion
 // ink, and slate-500 at ~3.7:1 against the menu's dark:bg-neutral-900).
 runTest('the AI-assistant form labels carry a dark ink, not just slate-700', () => {
   const tabs = read('CatalogSecondaryTabs.tsx')
-  const labelBlock = /portal-assistant-brand[\s\S]{0,8000}portal-assistant-question/.exec(tabs)
+  // The question box leads and the optional details follow it.
+  const labelBlock = /portal-assistant-question[\s\S]{0,8000}portal-assistant-concerns/.exec(tabs)
   assert.ok(labelBlock, 'the assistant form fields must still exist')
   const bareLabels = labelBlock[0].match(/text-slate-700"/g) || []
   assert.deepEqual(bareLabels, [], 'no assistant label may carry text-slate-700 with no dark: override')

@@ -1,25 +1,28 @@
-import { Fragment } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
-import Bot from 'lucide-react/dist/esm/icons/bot.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
+import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import Search from 'lucide-react/dist/esm/icons/search.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
-import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { FacebookIcon, InstagramIcon } from '../shared/BrandIcons.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
-import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
+import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
+import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
+import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -103,6 +106,9 @@ interface CatalogFaqSectionProps {
   publicFaqItems: FaqItem[]
   expandedFaqId: IdValue | null
   setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
+  // Both optional: a surface without a contact sheet simply shows no button.
+  onOpenContact?: () => void
+  faqLoading?: boolean
 }
 
 interface AssistantProfile {
@@ -118,15 +124,6 @@ function toAssistantSelectOptions(values: string[], allLabel: string): AppSelect
     { value: '', label: allLabel },
     ...values.map((value) => ({ value, label: value })),
   ]
-}
-
-interface AiUsageSummary {
-  activeVisitors?: number
-  perUserPerMinute?: number
-}
-
-interface AssistantRequestPolicy {
-  perUserPerMinute?: number
 }
 
 interface AssistantRecommendation {
@@ -162,21 +159,19 @@ interface CatalogAiSectionProps {
   askAssistant: () => void
   assistantLoading: boolean
   clearAssistantState: () => void
-  aiUsageSummary?: AiUsageSummary | null
-  assistantRequestPolicy?: AssistantRequestPolicy | null
   replaceVars: (template: string, values: Record<string, string | number>) => string
   assistantError?: string
   assistantResponse?: AssistantResponse | null
-  assistantExpandedProductId: IdValue | null
-  setAssistantExpandedProductId: Dispatch<SetStateAction<IdValue | null>>
+  // The storefront's product detail sheet; without it a card is plain text.
+  openProductById?: (productId: number, productName: string) => void
   assistantDisclosure?: { provider?: string; dataUseNotice?: string } | null
   assistantDataUseConsent: boolean
   setAssistantDataUseConsent: (value: boolean) => void
 }
 
 // The assistant notice the merchant cannot edit away -- see its use below.
-const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider to produce an answer and is kept for about 30 days, so please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, please speak to a pharmacist or doctor -- and contact the store team for anything about a product.'
-const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ ហើយរក្សាទុកប្រហែល៣០ថ្ងៃ ដូច្នេះសូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
+const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider that processes it outside Cambodia, and it is deleted after 30 days, as our privacy policy sets out. Please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, speak to a pharmacist or doctor, and contact the store team for anything about a product.'
+const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដែលដំណើរការក្រៅប្រទេសកម្ពុជា ហើយត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ តាមគោលការណ៍ឯកជនភាពរបស់យើង។ សូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
 
 type CatalogSecondaryTabsProps = {
   tab?: string
@@ -198,6 +193,8 @@ function OwnerText({ text }: { text: string }) {
     </>
   )
 }
+
+const LEANG_ICON_FALLBACK = '/leang-cosmetics-icon-512-v2.png'
 
 function normalizePortalColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
@@ -233,8 +230,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   } = props
 
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
-  const previewBusinessName = String(previewConfig.businessName || '').trim()
-  const showBrandLabel = previewBusinessName && previewTitle && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const aboutTitle = previewConfig.aboutTitle || copy('about', 'About')
   // Shopper-voiced fallback: this renders on the PUBLIC About tab when the
   // merchant hasn't written a story yet -- it must never read like an
@@ -334,21 +329,16 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   />
                 </button>
               ) : (
-                <span className="text-2xl font-semibold text-slate-700 dark:text-neutral-200">{String(previewConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
+                <img
+                  src={LEANG_ICON_FALLBACK}
+                  alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
+                  className="h-full w-full rounded-full object-cover"
+                />
               )}
             </div>
 
             <div className="min-w-0 flex-1 pb-1">
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400">
-                <Store className="h-3 w-3" />
-                {aboutTitle}
-              </div>
-              {showBrandLabel ? (
-                <div className="notranslate mt-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400" translate="no">
-                  {previewConfig.businessName}
-                </div>
-              ) : null}
-              <h2 className="notranslate mt-1 break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
+              <h2 className="notranslate break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
               {previewConfig.businessTagline ? <div className="notranslate mt-1 text-sm text-slate-500 dark:text-neutral-400" translate="no">{previewConfig.businessTagline}</div> : null}
@@ -424,7 +414,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                       </div>
                     </div>
                   )
-                  return item.href ? <a key={item.key} href={item.href} target={item.href.startsWith('tel:') ? undefined : '_blank'} rel={item.href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
+                  // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
+                  const href = item.key === 'phone' ? derivePhoneCallLink(item.value || '') || item.href : item.href
+                  return href ? <a key={item.key} href={href} target={href.startsWith('tel:') ? undefined : '_blank'} rel={href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
                 })}
               </div>
             ) : null}
@@ -525,70 +517,187 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   )
 }
 
+const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
+// Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
+const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
+
+function FaqContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
+  if (!onOpenContact) return null
+  return (
+    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
+      <MessageCircle aria-hidden="true" className="h-4 w-4" />
+      {copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
+    </button>
+  )
+}
+
+function FaqSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-3xl" data-portal-faq-skeleton="true" aria-busy="true">
+      {[0, 1, 2, 3].map((row) => (
+        <div key={row} className="flex min-h-[3.75rem] items-center border-b border-stone-200 dark:border-neutral-700">
+          <span className="h-4 rounded-full bg-stone-200 motion-safe:animate-pulse dark:bg-neutral-700" style={{ width: `${86 - row * 11}%` }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function FaqList(props: {
+  copy: CopyFn
+  items: FaqItem[]
+  expandedFaqId: IdValue | null
+  setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
+  query: string
+  setQuery: (value: string) => void
+  onOpenContact?: () => void
+  loading?: boolean
+}) {
+  const { copy, items, expandedFaqId, setExpandedFaqId, query, setQuery, onOpenContact, loading } = props
+  const entries = faqEntries(items)
+  const searchable = faqSearchVisible(entries.length)
+  const activeQuery = searchable ? query.trim() : ''
+  const visible = filterFaqEntries(entries, activeQuery)
+
+  if (loading) return <FaqSkeleton />
+  if (!entries.length) {
+    return (
+      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90">
+        <p className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
+        <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
+        <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-3xl" data-portal-faq-list="true">
+      {searchable ? (
+        <div className="relative mb-2">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-neutral-400" />
+          <input
+            type="search"
+            name="portal_faq_search"
+            autoComplete="off"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
+            placeholder={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
+            className="h-11 w-full rounded-full border border-stone-300 bg-white pl-10 pr-11 text-sm text-[#23201b] placeholder:text-slate-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400"
+          />
+          {query ? (
+            <button
+              type="button"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-slate-600 dark:text-neutral-300"
+              aria-label={copy('clear', 'Clear', 'សម្អាត')}
+              title={copy('clear', 'Clear', 'សម្អាត')}
+              onClick={() => setQuery('')}
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {visible.length ? (
+        <ul className="m-0 list-none p-0">
+          {visible.map(({ item, index, key }) => {
+            const open = expandedFaqId === key
+            const answerId = `portal-faq-answer-${index}`
+            return (
+              <li key={key} className="border-b border-stone-200 dark:border-neutral-700">
+                <h3 className="m-0">
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-start justify-between gap-3 py-4 text-left"
+                    aria-expanded={open}
+                    aria-controls={open ? answerId : undefined}
+                    onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
+                  >
+                    <span
+                      {...getKhmerTextProps(item.question, 'min-w-0 text-[15px] font-semibold text-[#23201b] [overflow-wrap:anywhere] dark:text-neutral-100')}
+                      style={{ lineHeight: 1.8 }}
+                    >
+                      {item.question}
+                    </span>
+                    <ChevronDown aria-hidden="true" className={`mt-1.5 h-5 w-5 shrink-0 transition-transform motion-reduce:transition-none ${BRASS_TEXT} ${open ? 'rotate-180' : ''}`} />
+                  </button>
+                </h3>
+                {open ? (
+                  <div
+                    id={answerId}
+                    {...getKhmerTextProps(item.answer, 'whitespace-pre-line pb-4 pr-8 text-sm leading-7 text-slate-700 [overflow-wrap:anywhere] dark:text-neutral-300')}
+                    style={{ lineHeight: 1.8 }}
+                  >
+                    {item.answer}
+                  </div>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 border-b border-stone-200 py-5 text-sm text-slate-700 dark:border-neutral-700 dark:text-neutral-300" role="status">
+          <span className="min-w-0 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
+          <button type="button" className="inline-flex min-h-11 items-center rounded-full border border-stone-300 px-4 text-sm font-semibold text-[#23201b] dark:border-neutral-600 dark:text-neutral-100" onClick={() => setQuery('')}>
+            {copy('clear', 'Clear', 'សម្អាត')}
+          </button>
+        </div>
+      )}
+
+      {onOpenContact ? (
+        <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90" data-portal-faq-contact="true">
+          <p className="text-base font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
+          <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function CatalogFaqSection(props: CatalogFaqSectionProps) {
-  const {
-    copy,
-    previewConfig,
-    publicFaqItems,
-    expandedFaqId,
-    setExpandedFaqId,
-  } = props
-  const faqColumns = splitFaqColumns(publicFaqItems)
+  const { copy, previewConfig, publicFaqItems, expandedFaqId, setExpandedFaqId, onOpenContact, faqLoading } = props
+  const [query, setQuery] = useState('')
 
   return (
     <SectionShell
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Quick answers to common questions.')}
     >
-      {/* Two independent column stacks, not a shared grid: opening a card
-          only moves the cards below it in its own column (portalFaqLayout.ts). */}
-      {publicFaqItems.length ? (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start" data-portal-faq-columns="true">
-          {faqColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-col gap-4 sm:flex-1">
-              {column.map(({ item, index, key }) => {
-          const open = expandedFaqId === key
-          const answerId = `portal-faq-answer-${index}`
-          const accentClass = index % 2 === 0
-            ? 'from-cyan-50 to-white border-cyan-200/80'
-            : 'from-amber-50 to-white border-amber-200/80'
-          const iconClass = index % 2 === 0
-            ? 'bg-cyan-100 text-cyan-700'
-            : 'bg-amber-100 text-amber-700'
-          return (
-            <article key={key} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 ${accentClass}`}>
-              <button
-                type="button"
-                className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"
-                aria-expanded={open}
-                aria-controls={open ? answerId : undefined}
-                onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
-              >
-                <div className="flex items-center gap-3">
-                  <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClass}`}>
-                    <HelpCircle className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-neutral-400">{copy('faq', 'FAQ')}</div>
-                    <div className="mt-1 text-sm font-semibold leading-6 text-slate-900 dark:text-neutral-100">{item.question}</div>
-                  </div>
-                </div>
-                <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
-              </button>
-              {open ? <div id={answerId} className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
-            </article>
-          )
-              })}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
-          {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
-        </div>
-      )}
+      <FaqList
+        copy={copy}
+        items={publicFaqItems}
+        expandedFaqId={expandedFaqId}
+        setExpandedFaqId={setExpandedFaqId}
+        query={query}
+        setQuery={setQuery}
+        onOpenContact={onOpenContact}
+        loading={faqLoading}
+      />
     </SectionShell>
   )
+}
+
+// Asked once per browser session: a reload or a trip to another tab does not ask again.
+const ASSISTANT_CONSENT_KEY = 'portal-assistant-consent'
+
+function readAssistantConsent(): boolean {
+  try {
+    return window.sessionStorage.getItem(ASSISTANT_CONSENT_KEY) === '1'
+  } catch {
+    // Storage blocked (private mode): consent just lasts until the page closes.
+    return false
+  }
+}
+
+function writeAssistantConsent(on: boolean): void {
+  try {
+    if (on) window.sessionStorage.setItem(ASSISTANT_CONSENT_KEY, '1')
+    else window.sessionStorage.removeItem(ASSISTANT_CONSENT_KEY)
+  } catch {
+    // Storage blocked: the in-memory flag still gates Send for this page.
+  }
 }
 
 function CatalogAiSection(props: CatalogAiSectionProps) {
@@ -605,28 +714,32 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     askAssistant,
     assistantLoading,
     clearAssistantState,
-    aiUsageSummary,
-    assistantRequestPolicy,
     replaceVars,
     assistantError,
     assistantResponse,
-    assistantExpandedProductId,
-    setAssistantExpandedProductId,
+    openProductById,
     assistantDisclosure,
     assistantDataUseConsent,
     setAssistantDataUseConsent,
   } = props
 
+  useEffect(() => {
+    if (!assistantDataUseConsent && readAssistantConsent()) setAssistantDataUseConsent(true)
+    // Restore once on mount; the parent owns the live flag afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const changeConsent = (next: boolean) => {
+    setAssistantDataUseConsent(next)
+    writeAssistantConsent(next)
+  }
+  const provider = assistantDisclosure?.provider || copy('assistantProviderFallback', 'our AI provider', 'អ្នកផ្តល់សេវា AI របស់យើង')
+  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-neutral-200'
+
   return (
     <SectionShell
       title={previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
       subtitle={previewConfig.aiIntro || copy('assistantNotice', 'AI generated, for reference only.')}
-      action={(
-        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:bg-neutral-800 dark:text-neutral-200">
-          <Bot className="h-3.5 w-3.5" />
-          {copy('aiQuery', 'AI query', 'សំណួរ AI')}
-        </span>
-      )}
     >
       <div className="space-y-4">
         <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
@@ -637,115 +750,134 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 black card is ~1.7:1, nowhere near AA's 4.5:1 (owner,
                 2026-09-18: "the dark mode are not contrasted correctly for
                 the text and buttons"). portalContrast.ts's own audited dark
-                token (`dark:text-neutral-200`, the same ink the disclosure
-                checkbox label two lines below this block already used) is
-                what every label here takes now. */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="portal-assistant-brand" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
-                <AppSelect
-                  id="portal-assistant-brand"
-                  name="portal_assistant_brand"
-                  value={assistantProfile.brand}
-                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, brand: nextValue }))}
-                  ariaLabel={copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}
-                  className="mt-1 w-full"
-                  buttonClassName="h-10 w-full"
-                  menuClassName="min-w-[12rem]"
-                  options={toAssistantSelectOptions(brands, copy('all', 'All'))}
-                />
-              </div>
-              <div>
-                <label htmlFor="portal-assistant-skin-type" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
-                <AppSelect
-                  id="portal-assistant-skin-type"
-                  name="portal_assistant_skin_type"
-                  value={assistantProfile.skinType}
-                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, skinType: nextValue }))}
-                  ariaLabel={copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}
-                  className="mt-1 w-full"
-                  buttonClassName="h-10 w-full"
-                  menuClassName="min-w-[12rem]"
-                  options={[
-                    { value: '', label: copy('all', 'All') },
-                    { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
-                    { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
-                    { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
-                    { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
-                    { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
-                    { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
-                  ]}
-                />
-              </div>
-              <div>
-                <label htmlFor="portal-assistant-shopping-for" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
-                <AppSelect
-                  id="portal-assistant-shopping-for"
-                  name="portal_assistant_shopping_for"
-                  value={assistantProfile.shoppingFor}
-                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, shoppingFor: nextValue }))}
-                  ariaLabel={copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}
-                  className="mt-1 w-full"
-                  buttonClassName="h-10 w-full"
-                  menuClassName="min-w-[12rem]"
-                  options={toAssistantSelectOptions(assistantCategoryOptions, copy('all', 'All'))}
-                />
-              </div>
-              <div>
-                <label htmlFor="portal-assistant-goal" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
-                <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <label htmlFor="portal-assistant-concerns" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
-              <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
-            </div>
-
-            <div className="mt-3">
-              <label htmlFor="portal-assistant-question" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
-              <textarea id="portal-assistant-question" name="portal_assistant_question" autoComplete="off" className="input mt-1 resize-none" rows={5} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.', 'ឧទាហរណ៍៖ ខ្ញុំមានស្បែកខ្លាញ់ងាយកើតមុន ហើយចង់បានឡេការពារកម្ដៅថ្ងៃប្រើរាល់ថ្ងៃដែលទន់ភ្លន់។')} />
+                token (`dark:text-neutral-200`) is what every label here takes. */}
+            <div>
+              <label htmlFor="portal-assistant-question" className={labelClass}>{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
+              <textarea id="portal-assistant-question" name="portal_assistant_question" autoComplete="off" className="input mt-1 resize-none" rows={4} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.', 'ឧទាហរណ៍៖ ខ្ញុំមានស្បែកខ្លាញ់ងាយកើតមុន ហើយចង់បានឡេការពារកម្ដៅថ្ងៃប្រើរាល់ថ្ងៃដែលទន់ភ្លន់។')} />
               <div className="mt-1 text-right text-xs text-slate-500 dark:text-neutral-400">{assistantQuestion.length}/{questionCharLimit}</div>
             </div>
 
-            <label className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0"
-                checked={assistantDataUseConsent}
-                onChange={(event) => setAssistantDataUseConsent(event.target.checked)}
-              />
-              <span>
-                {replaceVars(copy(
-                  'assistantDataUseConsent',
-                  'I understand that my question and optional shopping preferences are sent to {provider} and may be processed outside Cambodia. I will not include personal, medical, or payment details.',
-                  'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅ {provider} ហើយអាចត្រូវបានដំណើរការនៅក្រៅប្រទេសកម្ពុជា។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។',
-                ), {
-                  provider: assistantDisclosure?.provider || copy('configuredAiProvider', 'the configured AI provider', 'អ្នកផ្តល់សេវា AI ដែលបានកំណត់'),
-                })}
-              </span>
-            </label>
+            <details className="group mt-2 rounded-2xl border border-slate-200 dark:border-neutral-700" data-portal-assistant-details="true">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium text-slate-700 dark:text-neutral-200">
+                {copy('assistantDetails', 'Skin type, brand and goal (optional)', 'ប្រភេទស្បែក ម៉ាក និងគោលបំណង (មិនបង្ខំ)')}
+                <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none ${BRASS_TEXT}`} />
+              </summary>
+              <div className="space-y-3 px-4 pb-4 pt-1">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="portal-assistant-brand" className={labelClass}>{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
+                    <AppSelect
+                      id="portal-assistant-brand"
+                      name="portal_assistant_brand"
+                      value={assistantProfile.brand}
+                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, brand: nextValue }))}
+                      ariaLabel={copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}
+                      className="mt-1 w-full"
+                      buttonClassName="h-10 w-full"
+                      menuClassName="min-w-[12rem]"
+                      options={toAssistantSelectOptions(brands, copy('all', 'All'))}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-assistant-skin-type" className={labelClass}>{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
+                    <AppSelect
+                      id="portal-assistant-skin-type"
+                      name="portal_assistant_skin_type"
+                      value={assistantProfile.skinType}
+                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, skinType: nextValue }))}
+                      ariaLabel={copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}
+                      className="mt-1 w-full"
+                      buttonClassName="h-10 w-full"
+                      menuClassName="min-w-[12rem]"
+                      options={[
+                        { value: '', label: copy('all', 'All') },
+                        { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
+                        { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
+                        { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
+                        { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
+                        { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
+                        { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-assistant-shopping-for" className={labelClass}>{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
+                    <AppSelect
+                      id="portal-assistant-shopping-for"
+                      name="portal_assistant_shopping_for"
+                      value={assistantProfile.shoppingFor}
+                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, shoppingFor: nextValue }))}
+                      ariaLabel={copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}
+                      className="mt-1 w-full"
+                      buttonClassName="h-10 w-full"
+                      menuClassName="min-w-[12rem]"
+                      options={toAssistantSelectOptions(assistantCategoryOptions, copy('all', 'All'))}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-assistant-goal" className={labelClass}>{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
+                    <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="portal-assistant-concerns" className={labelClass}>{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
+                  <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
+                </div>
+              </div>
+            </details>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className="btn-primary text-sm" onClick={askAssistant} disabled={assistantLoading || !assistantDataUseConsent}>
-                <Send className="mr-2 inline h-4 w-4" />
-                {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('askAssistant', 'Ask AI assistant')}
+            {assistantDataUseConsent ? (
+              <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200" data-portal-assistant-consent="given">
+                <Check aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+                <span className="min-w-0 flex-1">
+                  {replaceVars(copy('assistantConsentGiven', 'You agreed to send your questions to {provider} during this visit.', 'អ្នកបានយល់ព្រមផ្ញើសំណួរទៅ {provider} ក្នុងអំឡុងពេលចូលមើលលើកនេះ។'), { provider })}
+                </span>
+                <button
+                  type="button"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-600 dark:text-neutral-300"
+                  aria-label={copy('assistantConsentWithdraw', 'Withdraw consent', 'ដកការយល់ព្រម')}
+                  title={copy('assistantConsentWithdraw', 'Withdraw consent', 'ដកការយល់ព្រម')}
+                  onClick={() => changeConsent(false)}
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <label className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200" data-portal-assistant-consent="ask">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0"
+                  checked={assistantDataUseConsent}
+                  onChange={(event) => changeConsent(event.target.checked)}
+                />
+                <span>
+                  {replaceVars(copy(
+                    'assistantDataUseConsent',
+                    'I understand that my question and optional shopping preferences are sent to {provider}, which processes them outside Cambodia, and are deleted after 30 days. I will not include personal, medical, or payment details.',
+                    'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅ {provider} ដែលដំណើរការវាក្រៅប្រទេសកម្ពុជា ហើយត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។',
+                  ), { provider })}
+                </span>
+              </label>
+            )}
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" className="btn-primary min-h-11 text-sm" onClick={askAssistant} disabled={assistantLoading || !assistantDataUseConsent}>
+                <Send aria-hidden="true" className="mr-2 inline h-4 w-4" />
+                {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('assistantSend', 'Send', 'ផ្ញើ')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={clearAssistantState}>
-                <RotateCcw className="mr-2 inline h-4 w-4" />
-                {copy('assistantReset', 'Clear')}
+              <button
+                type="button"
+                className="btn-secondary flex min-h-11 min-w-11 items-center justify-center text-sm"
+                onClick={clearAssistantState}
+                aria-label={copy('assistantReset', 'Clear')}
+                title={copy('assistantReset', 'Clear')}
+              >
+                <RotateCcw aria-hidden="true" className="h-4 w-4" />
               </button>
             </div>
           </div>
 
           <div className="space-y-3">
-            <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-300">
-              {replaceVars(copy('assistantUsageCompact', '{users} user(s) are using this right now. Each visitor can send {searches} search(es) per minute.'), {
-                users: aiUsageSummary?.activeVisitors || 1,
-                searches: assistantRequestPolicy?.perUserPerMinute || aiUsageSummary?.perUserPerMinute || 1,
-              })}
-            </div>
-
             <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
               {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
             </div>
@@ -766,11 +898,11 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
           </div>
         </div>
 
-        {assistantError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{assistantError}</div> : null}
+        {assistantError ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700/60 dark:bg-rose-900/20 dark:text-rose-200">{assistantError}</div> : null}
 
         {assistantResponse?.summary ? (
           <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantResults', 'Suggested matches')}</div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-neutral-400">{copy('assistantResults', 'Suggested matches')}</div>
             <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-neutral-300">{assistantResponse.summary}</p>
             {/* Backend returns follow_up_questions (snake_case); the
                 camelCase followUpQuestions was pre-existing dead UI (this
@@ -780,10 +912,10 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 across the AI response contract. */}
             {(assistantResponse.followUpQuestions?.length || assistantResponse.follow_up_questions?.length) ? (
               <div className="mt-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
+                <div className="text-xs font-semibold text-slate-600 dark:text-neutral-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
-                    <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-200" onClick={() => setAssistantQuestion(question)}>
+                    <button key={question} type="button" className="min-h-11 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-200" onClick={() => setAssistantQuestion(question)}>
                       {question}
                     </button>
                   ))}
@@ -794,48 +926,59 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
         ) : null}
 
         {assistantResponse?.recommendations?.length ? (
-          <div className="space-y-3">
+          <div className="space-y-3" data-portal-assistant-products="true">
             {assistantResponse.recommendations.map((item) => {
-              const open = assistantExpandedProductId === item.product_id
               const servedPrice = previewConfig.showPrices === true
                 ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
                 : undefined
               const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
                 ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${servedPrice.toFixed(2)}`)
                 : ''
+              const productId = Number(item.product_id)
+              const canOpen = Boolean(openProductById) && Number.isFinite(productId)
+              const body = (
+                <>
+                  {item.image_path ? (
+                    <img src={item.image_path} alt={item.name} className="h-16 w-16 shrink-0 rounded-2xl object-cover" />
+                  ) : (
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-neutral-800 dark:text-neutral-400" aria-hidden="true">
+                      <ShoppingBag className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
+                      <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
+                      {item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')}
+                      {priceLabel ? (
+                        <>
+                          {' | '}
+                          <span translate="no" className="notranslate">{priceLabel}</span>
+                        </>
+                      ) : null}
+                    </div>
+                    {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
+                    {item.fit_summary ? <div className="mt-2 text-sm text-slate-700 dark:text-neutral-300"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
+                  </div>
+                  {canOpen ? <ChevronRight aria-hidden="true" className={`mt-1 h-5 w-5 shrink-0 ${BRASS_TEXT}`} /> : null}
+                </>
+              )
               return (
                 <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-                  <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
-                    {item.image_path ? (
-                      <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
-                    ) : (
-                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400" aria-hidden="true">
-                        <ShoppingBag className="h-5 w-5" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
-                        <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
-                        {item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')}
-                        {priceLabel ? (
-                          <>
-                            {' | '}
-                            <span translate="no" className="notranslate">{priceLabel}</span>
-                          </>
-                        ) : null}
-                      </div>
-                      {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
-                    </div>
-                    <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
-                  </button>
-                  {open ? (
-                    <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700 dark:border-neutral-800 dark:text-neutral-300">
-                      {item.fit_summary ? <div><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
-                    </div>
-                  ) : null}
+                  {canOpen ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-start gap-3 px-4 py-4 text-left"
+                      aria-label={`${copy('assistantViewProduct', 'View product', 'មើលផលិតផល')}: ${item.name}`}
+                      onClick={() => openProductById?.(productId, item.name)}
+                    >
+                      {body}
+                    </button>
+                  ) : (
+                    <div className="flex items-start gap-3 px-4 py-4">{body}</div>
+                  )}
                 </article>
               )
             })}
