@@ -170,7 +170,7 @@ assert.doesNotMatch(
 // text-xs, which is what "very tiny various buttons" referred to.
 assert.match(
   source,
-  /min-w-\[5\.5rem\] px-3 py-2 text-sm font-semibold/,
+  /min-w-\[3\.75rem\] px-2\.5 py-1\.5 text-sm font-semibold/,
   'tier buttons should be comfortably sized rather than text-xs',
 )
 assert.match(definitions, /reviewTKey\?:\s*string/)

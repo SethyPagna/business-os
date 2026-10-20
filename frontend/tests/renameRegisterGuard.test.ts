@@ -233,7 +233,7 @@ const CANONICAL: Array<[key: string, english: string, khmer: string]> = [
   ['possible_duplicates', 'Conflicts', 'ទំនាស់ទិន្នន័យ'],
   ['product_duplicates_section', 'Conflicts', 'ទំនាស់ទិន្នន័យ'],
   ['customer_portal', 'Website Editor', 'កម្មវិធីកែសម្រួលគេហទំព័រ'],
-  ['review_required', 'Partial Access', 'សិទ្ធិមួយផ្នែក'],
+  ['review_required', 'Review', 'ពិនិត្យ'],
   ['complete_session', 'Complete Session', 'បញ្ចប់វគ្គ'],
   ['items', 'Items', 'មុខទំនិញ'],
   ['field_history', 'Records', 'កំណត់ត្រា'],

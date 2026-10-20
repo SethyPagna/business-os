@@ -1,6 +1,6 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtDate } from '../../utils/formatters'
-import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './permissionDefinitions'
+import { describePermissionMap, permissionTierWord, type PermissionEntry } from './rolePermissionLabel.ts'
 import { UserAvatarImage } from './UserAvatar.tsx'
 
 type TranslateFunction = (key: string) => string
@@ -18,16 +18,11 @@ type UserDetail = {
   email?: string | null
   is_active?: boolean | number
   otp_enabled?: boolean | number
+  permissions?: string | Record<string, unknown> | null
   created_at?: string | number | Date | null
   avatar_path?: string | null
   name?: string | null
   username?: string | null
-}
-
-type PermissionDefinition = {
-  key: string
-  tKey?: string
-  label?: string
 }
 
 type UserDetailSheetProps = {
@@ -41,8 +36,6 @@ type UserDetailSheetProps = {
   onClose?: () => void
   t?: TranslateFunction
 }
-
-const PERMISSION_DEFS = PERMISSION_DEFS_SOURCE as PermissionDefinition[]
 
 function translateLabel(t: TranslateFunction | undefined, key: string, fallback: string): string {
   const value = typeof t === 'function' ? t(key) : null
@@ -61,22 +54,22 @@ function buildRowData(user: UserDetail, role: UserRole | undefined, t: Translate
   ]
 }
 
-function parsePermissions(role: UserRole | undefined): Record<string, unknown> {
-  try {
-    if (!role) return {}
-    return typeof role.permissions === 'string'
-      ? JSON.parse(role.permissions || '{}')
-      : (role.permissions || {})
-  } catch {
-    return {}
-  }
+function PermissionChip({ entry, tr, off, bare }: { entry: PermissionEntry; tr: (key: string, fallback: string) => string; off?: boolean; bare?: boolean }) {
+  const tier = permissionTierWord(entry.tier, tr)
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs leading-5 ${off ? 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
+      {entry.label}
+      {tier && !bare ? ` (${tier})` : ''}
+    </span>
+  )
 }
 
 export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp, onEdit, onResetPw, onRecoverOtp, onClose, t }: UserDetailSheetProps) {
   const role = roles?.find((item) => Number(item.id) === Number(user.role_id))
-  const permissions = parsePermissions(role)
-
-  const permissionKeys = Object.keys(permissions).filter((key) => permissions[key])
+  const tr = (key: string, fallback: string) => translateLabel(t, key, fallback)
+  const rolePermissions = describePermissionMap(role?.permissions, tr)
+  const userExceptions = describePermissionMap(user.permissions, tr)
+  const exceptionCount = userExceptions.granted.length + userExceptions.off.length + (userExceptions.all ? 1 : 0)
   const rowData = buildRowData(user, role, t)
 
   return (
@@ -113,22 +106,45 @@ export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp,
           <div className="flex gap-3">
             <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'permissions', 'Permissions')}</span>
             <div className="flex flex-1 flex-wrap gap-1">
-              {permissionKeys.length === 0 ? <span className="text-xs italic text-gray-400">{translateLabel(t, 'none', 'None')}</span> : null}
-              {permissions.all ? (
-                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+              {!rolePermissions.all && rolePermissions.granted.length === 0 ? <span className="text-xs italic text-gray-400">{translateLabel(t, 'none', 'None')}</span> : null}
+              {rolePermissions.all ? (
+                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs leading-5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                   {translateLabel(t, 'full_access', 'Full access')}
                 </span>
-              ) : permissionKeys.map((key) => {
-                const perm = PERMISSION_DEFS.find((item) => item.key === key)
-                return (
-                  <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                    {translateLabel(t, perm?.tKey || key, perm?.label || key)}
-                    {permissions[key] === 'review' ? ` (${translateLabel(t, 'review_required', 'Partial Access')})` : ''}
-                  </span>
-                )
-              })}
+              ) : rolePermissions.granted.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} />)}
             </div>
           </div>
+
+          {rolePermissions.off.length > 0 ? (
+            <div className="flex gap-3">
+              <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'perm_switched_off_heading', 'Switched off')}</span>
+              <div className="flex flex-1 flex-wrap gap-1">
+                {rolePermissions.off.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} off bare />)}
+              </div>
+            </div>
+          ) : null}
+
+          {exceptionCount > 0 ? (
+            <div className="flex gap-3">
+              <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'perm_user_exceptions_heading', 'Individual exceptions')}</span>
+              <div className="flex-1">
+                <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                  {exceptionCount === 1
+                    ? translateLabel(t, 'perm_user_exceptions_one', '1 individual exception')
+                    : translateLabel(t, 'perm_user_exceptions_other', '{n} individual exceptions').replace('{n}', String(exceptionCount))}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {userExceptions.all ? (
+                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs leading-5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                      {translateLabel(t, 'full_access', 'Full access')}
+                    </span>
+                  ) : null}
+                  {userExceptions.granted.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} />)}
+                  {userExceptions.off.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} off />)}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {canManage ? (
