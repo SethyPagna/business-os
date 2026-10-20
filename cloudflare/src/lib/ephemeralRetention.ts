@@ -77,9 +77,26 @@ const SUBMISSION_ROW_BATCH = 200
 // batchDeleteById below rather than kept as a second copy here.
 
 // SQLite CURRENT_TIMESTAMP renders 'YYYY-MM-DD HH:MM:SS' (UTC); age cutoffs
-// must be formatted the SAME way to compare correctly.
+// must be formatted the SAME way to compare correctly. Only for columns whose
+// every writer uses CURRENT_TIMESTAMP / sqliteUtcTimestamp.
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+// For a column written as BOTH 'YYYY-MM-DD HH:MM:SS' (column DEFAULT) and
+// toISOString() 'YYYY-MM-DDTHH:MM:SS.sssZ'. A single string cutoff is wrong for
+// one of the two shapes on the cutoff's own day (' ' < 'T'), so each shape gets
+// its own bounded range: space rows are exact below the space cutoff; ISO rows
+// are exact inside [cutoff-day 'T', ISO cutoff). A space row never reaches the
+// ISO range and an ISO row on the cutoff day never matches the space range, so
+// nothing is deleted early or kept past the TTL. Bare column: index-seekable.
+function mixedFormatOlderThan(column: string, days: number): { where: string; params: Record<string, string> } {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const iso = cutoff.toISOString()
+  return {
+    where: `(${column} < @spaceCutoff OR (${column} >= @isoDayStart AND ${column} < @isoCutoff))`,
+    params: { spaceCutoff: sqliteUtcTimestamp(cutoff.getTime()), isoDayStart: `${iso.slice(0, 10)}T`, isoCutoff: iso },
+  }
 }
 
 async function getSettingValue(env: Env, key: string): Promise<string | null> {
@@ -229,7 +246,8 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
     now: sqliteUtcTimestamp(verificationNow),
   }))
   await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
-  await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
+  const aiLogCutoff = mixedFormatOlderThan('created_at', AI_LOG_TTL_DAYS) // portal.ts writes toISOString()
+  await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', aiLogCutoff.where, aiLogCutoff.params))
   await step('action_history', () => batchDeleteById(env, db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
   await step('share_submission_images', () => pruneSubmissionImages(env, db))
   await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
