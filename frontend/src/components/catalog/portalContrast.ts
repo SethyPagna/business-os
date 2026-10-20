@@ -46,6 +46,16 @@ export const PORTAL_INK_ON_DARK = '#ffffff'
 export const PORTAL_LIGHT_SURFACE = '#ffffff'
 export const PORTAL_DARK_SURFACE = '#0b0b0c'
 
+/**
+ * Storefront design tokens, mirrored by the --portal-* custom properties in
+ * styles/public-portal.css (tests/portalContrast.test.ts compares the two).
+ * brass = UI parts / large text; brassText = small text.
+ */
+export const PORTAL_TOKENS = {
+  light: { ink: '#23201b', ground: '#f4f1ea', card: '#ffffff', brass: '#9c7a3c', brassText: '#7a5c22', onInk: '#f4f1ea' },
+  dark: { ink: '#f5f1e8', ground: '#0b0b0c', card: '#171717', brass: '#d6b56b', brassText: '#e3c887', onInk: '#23201b' },
+} as const
+
 export function normalizePortalHex(value: unknown, fallback: string): string {
   const raw = String(value ?? '').trim()
   if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw.toLowerCase()
@@ -237,6 +247,23 @@ export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
   { name: 'dark destructive icon button (rose-400)', foreground: '#fb7185', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
   { name: 'dark inactive promo dot (neutral-400)', foreground: '#a3a3a3', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'PortalPromoStrip dot row' },
   { name: 'dark focus ring against the dark ground', foreground: '#fcd34d', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline + the focus-visible:outline-[] classes on the createPortal()ed popups and the account form' },
+
+  // --- storefront tokens (public-portal.css --portal-*) ----------------------
+  { name: 'token ink on ivory ground', foreground: PORTAL_TOKENS.light.ink, background: PORTAL_TOKENS.light.ground, kind: 'text', where: '--portal-ink on --portal-ground' },
+  { name: 'token ink on white card', foreground: PORTAL_TOKENS.light.ink, background: PORTAL_TOKENS.light.card, kind: 'text', where: '--portal-ink on --portal-card' },
+  { name: 'token brass text on ivory ground', foreground: PORTAL_TOKENS.light.brassText, background: PORTAL_TOKENS.light.ground, kind: 'text', where: '.portal-accent-text' },
+  { name: 'token brass text on white card', foreground: PORTAL_TOKENS.light.brassText, background: PORTAL_TOKENS.light.card, kind: 'text', where: '.portal-accent-text' },
+  { name: 'token brass on ivory ground (large text)', foreground: PORTAL_TOKENS.light.brass, background: PORTAL_TOKENS.light.ground, kind: 'large', where: '.portal-accent large text' },
+  { name: 'token brass on ivory ground (UI)', foreground: PORTAL_TOKENS.light.brass, background: PORTAL_TOKENS.light.ground, kind: 'ui', where: '.portal-accent icons and rules' },
+  { name: 'token brass on white card (UI)', foreground: PORTAL_TOKENS.light.brass, background: PORTAL_TOKENS.light.card, kind: 'ui', where: '.portal-accent icons and rules' },
+  { name: 'token primary button label', foreground: PORTAL_TOKENS.light.onInk, background: PORTAL_TOKENS.light.ink, kind: 'text', where: '.portal-btn-primary' },
+  { name: 'token dark ink on dark ground', foreground: PORTAL_TOKENS.dark.ink, background: PORTAL_TOKENS.dark.ground, kind: 'text', where: '--portal-ink on --portal-ground' },
+  { name: 'token dark ink on dark card', foreground: PORTAL_TOKENS.dark.ink, background: PORTAL_TOKENS.dark.card, kind: 'text', where: '--portal-ink on --portal-card' },
+  { name: 'token dark brass text on dark ground', foreground: PORTAL_TOKENS.dark.brassText, background: PORTAL_TOKENS.dark.ground, kind: 'text', where: '.portal-accent-text' },
+  { name: 'token dark brass text on dark card', foreground: PORTAL_TOKENS.dark.brassText, background: PORTAL_TOKENS.dark.card, kind: 'text', where: '.portal-accent-text' },
+  { name: 'token dark brass on dark ground (UI)', foreground: PORTAL_TOKENS.dark.brass, background: PORTAL_TOKENS.dark.ground, kind: 'ui', where: '.portal-accent icons and rules' },
+  { name: 'token dark brass on dark card (UI)', foreground: PORTAL_TOKENS.dark.brass, background: PORTAL_TOKENS.dark.card, kind: 'ui', where: '.portal-accent icons and rules' },
+  { name: 'token dark primary button label', foreground: PORTAL_TOKENS.dark.onInk, background: PORTAL_TOKENS.dark.ink, kind: 'text', where: '.portal-btn-primary' },
 ]
 
 /**
