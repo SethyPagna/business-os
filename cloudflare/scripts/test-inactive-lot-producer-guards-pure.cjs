@@ -97,6 +97,7 @@ const costPermissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': costPermissions })
 const receivingBranch = loadReal('lib/receivingBranch.ts')
 const batchRoute = loadReal('routes/batches.ts', {
+  '../lib/productSupplierGate': loadReal('lib/productSupplierGate.ts'),
   '../lib/receivingBranch': receivingBranch,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,

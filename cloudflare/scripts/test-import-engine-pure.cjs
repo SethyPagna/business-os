@@ -431,6 +431,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return loaded.exports
   }
   if (request === './planTier') return planTierModule
+  if (request === './productSupplierGate') return loadPureSibling('productSupplierGate') // real module -- the import writer's products:supplier gate
   if (request === './actorSnapshot') return actorSnapshotModuleObj.exports
   if (request === './db') return dbStub
   if (request === './queueDispatch') return queueDispatchModule
