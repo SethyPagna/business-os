@@ -22,11 +22,22 @@ const reactOnly = (name: string) => (id: string) => {
 const brand = compile('../src/components/shared/BrandIcons.tsx', reactOnly('BrandIcons.tsx'))
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
 const Icon = () => null
+const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
+const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
+const socialRow = compile('../src/components/catalog/PortalSocialRow.tsx', (id) => {
+  if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+  if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
+  if (id.endsWith('/LazyPortalMenu')) return { __esModule: true, default: () => null }
+  if (id.endsWith('/BrandIcons.tsx')) return brand
+  if (id.endsWith('/scriptTypography.ts')) return scriptTypography
+  if (id.endsWith('/socialHandles.ts')) return socialHandles
+  throw new Error(`PortalSocialRow.tsx imports ${id}, which this harness does not provide`)
+})
 const legal = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
   if (id.endsWith('/legalContent.ts')) return legalContent
-  if (id.endsWith('/BrandIcons.tsx')) return brand
+  if (id.endsWith('/PortalSocialRow.tsx')) return socialRow
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 })
@@ -102,6 +113,11 @@ runCase('the storefront footer shows the Facebook and Instagram marks beside the
   assert.ok(!links[2].inner.includes('data-brand-mark'), 'the website link keeps the generic globe, not a brand mark')
 })
 
+// The one icon map lives in PortalSocialRow; every other surface reads it from there.
+const MARK_OWNERS: Array<[string, string]> = [
+  ['../src/components/catalog/PortalSocialRow.tsx', 'header row, contact sheets, About and footer icons'],
+  ['../src/components/catalog/CatalogEditorSurface.tsx', 'editor field labels and contact guide'],
+]
 const CONSUMERS: Array<[string, string]> = [
   ['../src/components/catalog/legal/LegalPages.tsx', 'storefront footer'],
   ['../src/components/catalog/PublicCatalogPage.tsx', 'storefront header and contact buttons'],
@@ -112,9 +128,10 @@ const CONSUMERS: Array<[string, string]> = [
 
 runCase('every surface that shows these two brands takes the marks from BrandIcons, and none imports a Lucide brand glyph', () => {
   for (const [file, where] of CONSUMERS) {
-    const source = read(file)
-    assert.doesNotMatch(source, /lucide-react\/dist\/esm\/icons\/(?:facebook|instagram|chrome)\.js/, `${where}: still imports a Lucide brand glyph`)
-    assert.match(source, /import \{[^}]*\b(?:FacebookIcon|InstagramIcon)\b[^}]*\} from '(?:\.\.\/)+shared\/BrandIcons\.tsx'/, `${where}: does not import the marks`)
+    assert.doesNotMatch(read(file), /lucide-react\/dist\/esm\/icons\/(?:facebook|instagram|chrome)\.js/, `${where}: still imports a Lucide brand glyph`)
+  }
+  for (const [file, where] of MARK_OWNERS) {
+    assert.match(read(file), /import \{[^}]*\b(?:FacebookIcon|InstagramIcon)\b[^}]*\} from '(?:\.\.\/)+shared\/BrandIcons\.tsx'/, `${where}: does not import the marks`)
   }
   const offenders: string[] = []
   const walk = (dir: URL): void => {
@@ -128,15 +145,15 @@ runCase('every surface that shows these two brands takes the marks from BrandIco
   assert.deepEqual(offenders, [])
 })
 
-runCase('sibling parity: each place that picks a glyph by network maps facebook to the Facebook mark and instagram to the Instagram mark', () => {
-  const footer = read('../src/components/catalog/legal/LegalPages.tsx')
-  assert.match(footer, /kind === 'facebook' \? FacebookIcon : kind === 'instagram' \? InstagramIcon : kind === 'telegram' \? Send : Globe/)
-  for (const file of ['../src/components/catalog/PublicCatalogPage.tsx', '../src/components/catalog/CatalogPage.tsx']) {
-    const source = read(file)
-    assert.match(source, /socialIconByKey: Record<string, LucideIcon> = \{\s*facebook: FacebookIcon,\s*instagram: InstagramIcon,\s*telegram: Send,\s*website: Globe,/, file)
+runCase('sibling parity: one network-to-glyph map serves the footer, header, contact sheets and About, and it maps facebook and instagram to their marks', () => {
+  const owner = read('../src/components/catalog/PortalSocialRow.tsx')
+  assert.match(owner, /PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = \{[\s\S]*?facebook: FacebookIcon,\s*instagram: InstagramIcon,\s*telegram: TelegramIcon,/)
+  for (const file of ['legal/LegalPages.tsx', 'PublicCatalogPage.tsx', 'CatalogSecondaryTabs.tsx']) {
+    assert.match(read(`../src/components/catalog/${file}`), /PORTAL_SOCIAL_ICONS/, `${file} must use the shared map`)
   }
-  assert.match(read('../src/components/catalog/PublicCatalogPage.tsx'), /contactIconByKey: Record<string, LucideIcon> = \{[\s\S]*?instagram: InstagramIcon,/)
-  assert.match(read('../src/components/catalog/CatalogSecondaryTabs.tsx'), /item\.key === 'facebook'\s*\? FacebookIcon\s*: item\.key === 'instagram'\s*\? InstagramIcon\s*: item\.key === 'telegram'\s*\? Send\s*: Globe/)
+  for (const file of ['PublicCatalogPage.tsx', 'CatalogPage.tsx']) {
+    assert.doesNotMatch(read(`../src/components/catalog/${file}`), /socialIconByKey|contactIconByKey/, `${file} still carries its own icon map`)
+  }
   const editor = read('../src/components/catalog/CatalogEditorSurface.tsx')
   assert.equal((editor.match(/<FacebookIcon /g) || []).length, 1)
   assert.equal((editor.match(/<InstagramIcon /g) || []).length, 3)
@@ -146,7 +163,8 @@ runCase('sibling parity: each place that picks a glyph by network maps facebook 
 runCase('the build config no longer pins the two Lucide brand modules, and says who imports BrandIcons', () => {
   const vite = read('../vite.config.ts')
   assert.doesNotMatch(vite.match(/const routeSharedIconNames = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /'facebook'|'instagram'/)
-  assert.match(vite, /BrandIcons\.tsx lives under components\/shared\/ but is only ever imported by\s*\/\/ catalog surfaces \(CatalogEditorSurface -> catalog-editor, PublicCatalogPage\s*\/\/ -> catalog-public, CatalogPage -> catalog, CatalogSecondaryTabs,\s*\/\/ LegalPages -> catalog-legal\)/)
+  assert.match(vite, /BrandIcons\.tsx lives under components\/shared\/ but is only ever imported by\s*\/\/ catalog surfaces \(CatalogEditorSurface -> catalog-editor, PortalSocialRow\s*\/\/ -> catalog-public-core\)/)
+  assert.match(vite, /normalized\.includes\('\/src\/components\/catalog\/PortalSocialRow\.tsx'\)\s*\|\| normalized\.includes\('\/src\/components\/catalog\/portalSocialLinks\.ts'\)/, 'the shared social modules sit in the shared core chunk')
 })
 
 if (failures.length) {

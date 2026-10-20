@@ -48,6 +48,7 @@ const PUBLIC_STOREFRONT_FILES = [
   'PortalFilterCombobox.tsx',
   'PortalPromoStrip.tsx',
   'PortalPromotionsBanner.tsx',
+  'PortalSocialRow.tsx',
   'PortalNoPaymentNotice.tsx',
   'catalogUi.tsx',
   'catalogImages.tsx',
