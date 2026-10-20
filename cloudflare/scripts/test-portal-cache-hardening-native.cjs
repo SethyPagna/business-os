@@ -112,7 +112,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/media': { sanitizeMediaList: (l) => l },
   '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/portalAi': { generatePortalAiResponse: async () => ({}) },
+  '../lib/portalAi': { generatePortalAiResponse: async () => ({}), listPortalAiProviderDisclosures: async () => [] },
   '../lib/searchMatch': searchMatch,
   '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch }),
   '../lib/importImageMatch': { ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },
