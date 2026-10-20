@@ -5,7 +5,9 @@ import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
+import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput'
@@ -20,6 +22,8 @@ import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { rolePermissionLabel } from './rolePermissionLabel.ts'
+import { diffRolePermissions, roleValueLabel } from './roleDiff.ts'
+import { resettableRoleCode } from './roleDefaultsReset.ts'
 import { ROLE_PRESETS } from './rolePresetDefaults'
 import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -49,6 +53,7 @@ import {
   createRole as createRoleRequest,
   createUser as createUserRequest,
   deleteRole as deleteRoleRequest,
+  getRoleDefaults as getRoleDefaultsRequest,
   getRoles as getRolesRequest,
   getUsers as getUsersRequest,
   resetPassword as resetPasswordRequest,
@@ -113,6 +118,7 @@ const USER_SORT_FIELD_DEFS = [
 interface RoleRecord extends Record<string, unknown> {
   id: EntityId
   name?: string
+  code?: string | null
   permissions?: string | Record<string, unknown> | null
   is_system?: boolean | number | null
   updated_at?: string | null
@@ -534,18 +540,24 @@ export default function Users() {
   const deleteRoleInFlightRef = useRef(false)
   // The role waiting on the shared delete confirmation (was native confirm()).
   const [roleDeleteTarget, setRoleDeleteTarget] = useState<RoleRecord | null>(null)
+  // The role-save review (before -> after for every changed key) is open; commitSaveRole writes on confirm.
+  const [roleConfirmOpen, setRoleConfirmOpen] = useState(false)
+  const [loadingRoleDefaults, setLoadingRoleDefaults] = useState(false)
+  const selectedRoleIdRef = useRef<EntityId | null>(null)
   // The shared Modal has no Escape handling; these two review dialogs promise
   // Escape aborts, so they wire their own (abort only -- never a write).
   useEffect(() => {
-    if (!userConfirmOpen && !roleDeleteTarget) return undefined
+    if (!userConfirmOpen && !roleDeleteTarget && !roleConfirmOpen) return undefined
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (userConfirmOpen && !saveUserInFlightRef.current) setUserConfirmOpen(false)
       if (roleDeleteTarget && !deleteRoleInFlightRef.current) setRoleDeleteTarget(null)
+      if (roleConfirmOpen && !saveRoleInFlightRef.current) setRoleConfirmOpen(false)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [userConfirmOpen, roleDeleteTarget])
+  }, [userConfirmOpen, roleDeleteTarget, roleConfirmOpen])
+  useEffect(() => { if (modal !== 'editRole') setRoleConfirmOpen(false) }, [modal])
   const [profileOpen, setProfileOpen] = useState(false)
   const [otpRecoveryTarget, setOtpRecoveryTarget] = useState<UserRecord | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1059,6 +1071,61 @@ export default function Users() {
     }
   }
 
+  const roleResetCode = canManage ? resettableRoleCode(selectedRole) : null
+  selectedRoleIdRef.current = selectedRole?.id ?? null
+  const roleResetLabel = roleResetCode === 'manager' ? tr('role_reset_manager_defaults', 'Reset to Manager defaults') : tr('role_reset_employee_defaults', 'Reset to Employee defaults')
+
+  // Loads the seeded permissions of this role into the editor DRAFT. Nothing is written: Save opens the review.
+  const handleResetRoleDefaults = async () => {
+    if (!roleResetCode || !selectedRole || loadingRoleDefaults) return
+    const roleId = selectedRole.id
+    setLoadingRoleDefaults(true)
+    try {
+      const result = await getRoleDefaultsRequest() as { success?: boolean; error?: string; defaults?: Record<string, Record<string, unknown>> } | null
+      if (!result || result.success === false) {
+        notify(result?.error || tr('role_defaults_load_failed', 'The role defaults could not be loaded. The role is unchanged.'), 'error')
+        return
+      }
+      if (selectedRoleIdRef.current !== roleId) return
+      const defaults = result.defaults?.[roleResetCode]
+      if (!defaults || typeof defaults !== 'object' || Object.keys(defaults).length === 0) {
+        notify(tr('role_defaults_none', 'No defaults are defined for this role. The role is unchanged.'), 'info')
+        return
+      }
+      setRoleForm((prev) => ({ ...prev, permissions: normalizePermissionState(defaults) }))
+      notify(tr('role_defaults_loaded', 'Defaults loaded into the editor. Review and save to apply them.'), 'info')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('role_defaults_load_failed', 'The role defaults could not be loaded. The role is unchanged.')), 'error')
+    } finally {
+      setLoadingRoleDefaults(false)
+    }
+  }
+
+  const buildRoleReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = []
+    const newName = roleForm.name.trim()
+    if (selectedRole && String(selectedRole.name || '').trim() !== newName) {
+      items.push({ label: tr('role_name', 'Role name'), value: `${String(selectedRole.name || '')} → ${newName}` })
+    }
+    for (const change of diffRolePermissions(selectedRole?.permissions, roleForm.permissions, tr)) {
+      const sensitive = tr(change.sensitivity === 'critical' ? 'permission_sensitive_critical' : 'permission_sensitive_high', 'Sensitive')
+      items.push({
+        label: (
+          <span className="inline-flex items-start gap-1">
+            {change.sensitivity !== 'normal' ? (
+              <span role="img" aria-label={sensitive} title={sensitive} className={`mt-px inline-flex shrink-0 ${change.sensitivity === 'critical' ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+            ) : null}
+            <span>{change.label}</span>
+          </span>
+        ),
+        value: `${roleValueLabel(change.before, tr)} → ${roleValueLabel(change.after, tr)}`,
+      })
+    }
+    return items
+  }
+
   const handleSaveRole = async () => {
     if (!roleForm.name.trim()) {
       notify(tr('role_name_required', 'Role name is required'), 'error')
@@ -1073,6 +1140,12 @@ export default function Users() {
       setRoleForm(INITIAL_ROLE_FORM)
       return
     }
+    // Nothing is written until the admin has seen every change: an edit opens the review first.
+    if (selectedRole) setRoleConfirmOpen(true)
+    else await commitSaveRole()
+  }
+
+  const commitSaveRole = async () => {
     if (!beginSingleAction(saveRoleInFlightRef, { blocked: saving })) return
 
     setSaving(true)
@@ -1625,6 +1698,22 @@ export default function Users() {
         />
       ) : null}
 
+      {roleConfirmOpen && modal === 'editRole' && selectedRole ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('role_review_title', 'Review role changes')}
+          message={roleForm.name.trim()}
+          items={buildRoleReviewItems()}
+          note={tr('affected_users_logout_warning', 'Affected users must log out and back in for changes to take effect.')}
+          confirmLabel={t('save') || 'Save'}
+          cancelLabel={t('cancel') || 'Cancel'}
+          working={saving}
+          workingLabel={t('loading') || 'Saving...'}
+          onConfirm={() => { void commitSaveRole() }}
+          onClose={() => { if (!saving) setRoleConfirmOpen(false) }}
+        />
+      ) : null}
+
       {modal === 'resetPw' && selectedUser ? (
         <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} closeDisabled={passwordSaving} unsavedChanges={{ dirty: passwordFormDirty }}>
           {passwordHandover && sameUserId(passwordHandover.userId, selectedUser.id) ? (
@@ -1668,7 +1757,21 @@ export default function Users() {
               </div>
             ) : null}
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
+                {roleResetCode ? (
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-gray-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+                    title={roleResetLabel}
+                    aria-label={roleResetLabel}
+                    disabled={loadingRoleDefaults || saving}
+                    onClick={() => { void handleResetRoleDefaults() }}
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
               <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>
                 <LazyPermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} t={t} />
               </Suspense>

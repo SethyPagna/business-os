@@ -7640,7 +7640,7 @@
   "inventory_check_error_baseline_changed": "Stock or products changed. Reload and try again.",
   "inventory_check_error_owner_required": "Only the session creator or an administrator can change this check.",
   "inventory_check_error_product_not_eligible": "A product on this page cannot be checked. Reload and try again.",
-  "product_supplier_read_only": "The supplier is not changed in the table. Open the product to change it.",
+  "product_supplier_read_only": "You do not have permission to change the supplier.",
   "inventory_check_now": "Now",
   "inventory_check_start": "Start",
   "inventory_check_customers_short": "Cust",
@@ -7685,5 +7685,13 @@
   "perm_user_exceptions_other": "{n} individual exceptions",
   "perm_switched_off_heading": "Switched off",
   "loyalty_points_enabled": "Loyalty points",
-  "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays."
+  "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays.",
+  "role_reset_employee_defaults": "Reset to Employee defaults",
+  "role_reset_manager_defaults": "Reset to Manager defaults",
+  "role_defaults_load_failed": "The role defaults could not be loaded. The role is unchanged.",
+  "role_defaults_none": "No defaults are defined for this role. The role is unchanged.",
+  "role_defaults_loaded": "Defaults loaded into the editor. Review and save to apply them.",
+  "role_review_title": "Review role changes",
+  "perm_value_on": "On",
+  "perm_value_not_set": "Not set"
 }

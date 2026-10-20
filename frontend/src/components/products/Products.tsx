@@ -34,6 +34,7 @@ import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import {
   buildStockCellModel,
+  isProductColumnLocked,
   productChooserColumns,
   productColumnsFor,
   productColumnsSurfaceKey,
@@ -41,6 +42,7 @@ import {
   type ProductColumn,
 } from './config/productTableColumns.ts'
 import { canChangeProductPrices } from '../../utils/productMergePriceAccess.ts'
+import { canChangeProductSupplier } from '../../utils/productSupplierAccess.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { fmtDate } from '../../utils/formatters.ts'
 import { TaggedStockActionModal, TaggedStockDesktopRow, TaggedStockMobileCard } from './TaggedStockRows.tsx'
@@ -786,6 +788,7 @@ type ProductRowCtx = {
   // switch (a locked price is shown muted), and the one active branch if there is one.
   columns: readonly ProductColumn[]
   canEditPrices: boolean
+  canEditSupplier: boolean
   soleBranchName: string
 }
 
@@ -797,7 +800,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct, openCostFloat, columns, canEditPrices, soleBranchName,
+    setDetailProduct, openCostFloat, columns, canEditPrices, canEditSupplier, soleBranchName,
   } = ctx
     const productId = p.id ?? 0
     const productName = String(p.name || '')
@@ -919,8 +922,8 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
       return item ? renderIdentityPill(item) : dash
     }
     const priceLockTip = canEditPrices ? undefined : tr('product_price_read_only', 'You do not have permission to change product prices. Adjust the price per sale in the cart instead.', 'អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។')
-    // The table never edits a supplier, for anyone: it changes in the product sheet.
-    const supplierLockTip = tr('product_supplier_read_only', 'The supplier is not changed in the table. Open the product to change it.', 'អ្នកផ្គត់ផ្គង់មិនត្រូវបានកែនៅក្នុងតារាងទេ។ សូមបើកផលិតផលដើម្បីកែ។')
+    // The table never edits a supplier: it changes in the product sheet, for a user whose supplier action is on.
+    const supplierLockTip = canEditSupplier ? undefined : tr('product_supplier_read_only', 'You do not have permission to change the supplier.', 'អ្នកគ្មានសិទ្ធិប្ដូរអ្នកផ្គត់ផ្គង់ទេ។')
     const promotionLine = promotion.active && !shownColumns.has('discount') ? (
       <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
         {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
@@ -980,7 +983,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
       }
     }
     const dataCellClass = (column: ProductColumn) => {
-      const locked = (column.lock === 'price' && !canEditPrices) || column.lock === 'supplier'
+      const locked = isProductColumnLocked(column, { canEditPrices, canEditSupplier })
       const tone = column.key === 'cost' ? ' col-highlight-red' : column.key === 'selling' && !locked ? ' col-highlight-green' : ''
       return `overflow-hidden px-3 py-2 ${column.align === 'right' ? 'text-right' : 'text-left'}${tone}`
     }
@@ -1114,7 +1117,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
         {/* One cell per chosen column, in the column list's own order, so the
             body can never disagree with the header or the <colgroup>. */}
         {columns.map((column) => {
-          const locked = (column.lock === 'price' && !canEditPrices) || column.lock === 'supplier'
+          const locked = isProductColumnLocked(column, { canEditPrices, canEditSupplier })
           return (
             <td key={column.key} data-column={column.key} aria-readonly={locked ? true : undefined} className={dataCellClass(column)}>
               {renderDataCell(column)}
@@ -4766,6 +4769,7 @@ function ProductsFullEditor() {
   const productColumns = useMemo(() => visibleProductColumns(productColumnDefs, columnPrefs.isVisible), [productColumnDefs, columnPrefs.isVisible])
   const productColumnKeys = useMemo(() => productColumns.map((column) => column.key), [productColumns])
   const canEditPrices = canChangeProductPrices(user)
+  const canEditSupplier = canChangeProductSupplier(user)
   const soleBranchName = String(soleActiveBranch(branches)?.name || '')
   const chooserColumns = useMemo(() => productChooserColumns(productColumnDefs, t), [productColumnDefs, t])
   const columnChooser = (
@@ -4788,8 +4792,8 @@ function ProductsFullEditor() {
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
     setDetailProduct,
     openCostFloat: setCostFloatProduct,
-    columns: productColumns, canEditPrices, soleBranchName,
-  }), [productColumns, canEditPrices, soleBranchName, branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
+    columns: productColumns, canEditPrices, canEditSupplier, soleBranchName,
+  }), [productColumns, canEditPrices, canEditSupplier, soleBranchName, branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
     <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />

@@ -50,6 +50,7 @@ import {
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 import { canChangeProductPrices } from '../../../utils/productMergePriceAccess.ts'
+import { isProductSupplierLocked } from '../../../utils/productSupplierAccess.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { branchChoiceSettled } from '../../../utils/branchScope.ts'
 
@@ -496,6 +497,9 @@ function ProductFormContent({
   useEffect(() => { setBlindCostInputs({ usd: '', khr: '' }) }, [currentProductId, canViewCosts])
   const isCreateMode = !product?.id
   const isEditMode = !isCreateMode
+  // Owner, 19 Oct 2026: the supplier of an existing product is its own action (off for the Employee default). A new
+  // product's supplier follows Add, as the Worker does.
+  const supplierLocked = isProductSupplierLocked(user, isCreateMode)
   const imageLimit = isAdminControlUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
   const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
   // The account and server this form was opened under (the form remounts on a new draft key, so this is its own).
@@ -687,6 +691,7 @@ function ProductFormContent({
     return isKhmer ? fallbackKm : fallbackEn
   }
   const priceReadOnlyTip = canEditPrices ? undefined : tr('product_price_read_only', 'You do not have permission to change product prices. Adjust the price per sale in the cart instead.', 'អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។')
+  const supplierLockTip = supplierLocked ? tr('product_supplier_read_only', 'You do not have permission to change the supplier.', 'អ្នកគ្មានសិទ្ធិប្ដូរអ្នកផ្គត់ផ្គង់ទេ។') : undefined
 
   // Category/Unit arrive from GET /api/categories and /api/units, which now
   // return the lookup table UNION the values products actually carry (see
@@ -1944,7 +1949,7 @@ function ProductFormContent({
                 emptyHint={emptyHintFor(unitSuggestionsSourced, unitSuggestionOptions.length)}
               />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0" title={supplierLockTip}>
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
               {/* Was a private copy of this control whose match list was
                   `form.supplier ? filter(...) : []` -- so focusing the empty
@@ -1955,6 +1960,7 @@ function ProductFormContent({
               <SuggestionTextInput
                 id="product-supplier"
                 name="product_supplier"
+                disabled={supplierLocked}
                 value={form.supplier || ''}
                 options={supplierSuggestionOptions}
                 onChange={(value) => setField('supplier', value)}
