@@ -561,6 +561,15 @@ export function reconstructSaleCreation(input: {
   mutations?: SaleRecordMutationRow[]
 }): SaleRecordSaleRow {
   const known: Partial<Record<CreationSnapshotField, KnownBefore>> = {}
+  // Settling a Not Paid sale that has returns rewrites status_before_return to
+  // its new payment state, so the row stops proving what the first return
+  // left. The earliest saved before-state of a return-status sale still does.
+  const beforeReturn: { value?: KnownBefore } = {}
+  const noteBeforeReturn = (saleStatus: unknown, value: unknown, at: unknown) => {
+    const stamp = atMs(at)
+    if (stamp === null || value === undefined || !['partial_return', 'returned'].includes(String(saleStatus))) return
+    if (!beforeReturn.value || stamp < beforeReturn.value.at) beforeReturn.value = { at: stamp, value }
+  }
   for (const row of input.ledger || []) {
     rememberEarlierBefore(known, 'total_usd', row.total_before_usd, row.created_at)
   }
@@ -569,6 +578,7 @@ export function reconstructSaleCreation(input: {
     const before = details.before && typeof details.before === 'object'
       ? details.before as Record<string, unknown> : {}
     rememberEarlierBefore(known, 'sale_status', before.sale_status ?? details.oldStatus, row.created_at)
+    noteBeforeReturn(before.sale_status, before.status_before_return, row.created_at)
     for (const field of CREATION_SNAPSHOT_FIELDS) {
       if (field === 'sale_status' || field === 'total_usd') continue
       if (field in before) rememberEarlierBefore(known, field, before[field], row.created_at)
@@ -586,6 +596,7 @@ export function reconstructSaleCreation(input: {
   for (const row of input.bulk || []) {
     const entry = bulkMemberEntry(row.receipt_json, input.sale.id)
     if (!entry || entry.before === undefined) continue
+    noteBeforeReturn(entry.return_status, entry.before, row.created_at)
     const before = entry.before
     if (before && typeof before === 'object') {
       for (const field of CREATION_SNAPSHOT_FIELDS) {
@@ -605,6 +616,7 @@ export function reconstructSaleCreation(input: {
     for (const field of CREATION_SNAPSHOT_FIELDS) {
       if (field in before) rememberEarlierBefore(known, field, before[field], row.created_at)
     }
+    noteBeforeReturn(before.sale_status, before.status_before_return, row.created_at)
   }
   const firstReturnAt = (input.returns || [])
     .filter(returnTouchesSale)
@@ -612,7 +624,7 @@ export function reconstructSaleCreation(input: {
     .filter((entry): entry is { row: SaleRecordReturnRow; stamp: number } => entry.stamp !== null)
     .sort((left, right) => left.stamp - right.stamp)[0]
   if (firstReturnAt) {
-    rememberEarlierBefore(known, 'sale_status', input.sale.status_before_return, firstReturnAt.row.created_at)
+    rememberEarlierBefore(known, 'sale_status', beforeReturn.value ? beforeReturn.value.value : input.sale.status_before_return, firstReturnAt.row.created_at)
   }
   if (text(input.sale.sale_status) === 'cancelled') {
     rememberEarlierBefore(known, 'sale_status', input.sale.status_before_cancel, input.sale.updated_at)

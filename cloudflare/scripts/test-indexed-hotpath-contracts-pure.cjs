@@ -44,7 +44,10 @@ assert.doesNotMatch(
   /COALESCE\(sale_status, 'completed'\) = 'awaiting_(?:payment|delivery)'/,
   'notification status equality must not wrap the indexed sale_status column',
 )
-assert.match(notifications, /WHERE sale_status = 'awaiting_payment'/)
+// Not Paid reads the payment state a return keeps (lib/salesStatus.ts notPaidSaleSql): two plain equality terms.
+assert.match(notifications, /WHERE \$\{notPaidSaleSql\('sales'\)\}/)
+assert.match(read('cloudflare', 'src', 'lib', 'salesStatus.ts'),
+  /\(\$\{alias\}\.sale_status = 'awaiting_payment' OR \(\$\{alias\}\.sale_status IN \('partial_return', 'returned'\) AND \$\{alias\}\.status_before_return = 'awaiting_payment'\)\)/)
 assert.match(notifications, /WHERE sale_status = 'awaiting_delivery'/)
 
 assert.match(staticHeaders, /\/assets\/\*[\s\S]*max-age=31536000, immutable/)

@@ -15,7 +15,7 @@ import { BranchEffectResolver, branchEffectGuardPredicate, branchEffectRefusal, 
 import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
-import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { PAID_SALE_STATUSES, returnSaleAwaitsPayment, salePaymentStatus, statusChangeNeedsPayment, sumRefundsUsd } from './saleStatusResolution';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -112,7 +112,9 @@ export class SaleBulkError extends Error {
 function refuseUnpaid(unpaid: Row[], statusCode: 400 | 409 = 400): never {
     throw new SaleBulkError(`Not fully paid: ${unpaid.map(s => String(s.receipt_number || s.id)).join(', ')}. Record the payment before marking a sale Completed or Awaiting Delivery. Nothing in the group was changed.`, statusCode, { code: 'insufficient_payment_for_status', sale_ids: unpaid.map(s => Number(s.id)) });
 }
-const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
+// status_before_return is absent from snapshots saved before a return-status
+// sale could be settled in a group; such a snapshot never writes it.
+const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id', 'status_before_return'] as const;
 // reference_id is polymorphic: use a conservative read guard, never revision
 // triggers that would write to an unrelated sale with the same numeric id.
 export function saleMovementFingerprint(idSql: string) {
@@ -220,10 +222,20 @@ function recordState(value: unknown): SaleRecordValueState {
 }
 function statusChanges(before: Row, after: Row, cancelled: boolean): SaleRecordChange[] {
     const keys = cancelled ? ['sale_status', 'cancel_reason', 'cancel_note'] as const : ['sale_status'] as const;
+    // A settled return-status sale keeps sale_status; its record shows the payment state that moved.
+    const paymentOnly = before.sale_status === after.sale_status && (before.status_before_return ?? null) !== (after.status_before_return ?? null);
     return keys.flatMap(field => {
-        const left = recordState(before[field]), right = recordState(after[field]);
+        const key = field === 'sale_status' && paymentOnly ? 'status_before_return' : field;
+        const left = recordState(before[key]), right = recordState(after[key]);
         return JSON.stringify(left) === JSON.stringify(right) ? [] : [{ field, before: left, after: right }];
     });
+}
+// A settled return-status member keeps sale_status: its receipt shows the payment state that moved, beside the return status.
+function receiptStatuses(m: Member): Row {
+    const paymentOnly = m.before.sale_status === m.after.sale_status && (m.before.status_before_return ?? null) !== (m.after.status_before_return ?? null);
+    return paymentOnly
+        ? { before: m.before.status_before_return, after: m.after.status_before_return, return_status: m.before.sale_status }
+        : { before: m.before.sale_status, after: m.after.sale_status };
 }
 function statusRecordEvents(members: Member[], operationId: string, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
     return buildSaleRecordEventsInsert(members.filter(member => member.changed).map(member => {
@@ -308,7 +320,7 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
             out.push({ sql: `INSERT INTO fees(${keys.join(',')}) VALUES(${keys.map(k => `@${k}`).join(',')})`, params: member.fee });
         }
     }
-    out.push({ sql: `UPDATE sales SET ${fields.map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: actorSnapshot(user) } });
+    out.push({ sql: `UPDATE sales SET ${fields.filter(k => Object.prototype.hasOwnProperty.call(target, k)).map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: actorSnapshot(user) } });
     return out;
 }
 function auditStatement(user: SessionUser, operationId: string, direction: string, count: number): StockStatement {
@@ -333,13 +345,18 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before
     // it commits.
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.status_before_return,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    // What a Not Paid sale with returns owes is its total less its active refunds (owner, 29 Sep 2026).
+    const refundRows = await rowsIn<{ sale_id: number; total_refund_usd: number | string | null }>(db, sales.filter(s => returnSaleAwaitsPayment(s)).map(s => Number(s.id)), m => `SELECT sale_id,total_refund_usd FROM returns WHERE sale_id IN (${m}) AND COALESCE(status,'completed')<>'cancelled' AND COALESCE(return_scope,'customer')='customer' ORDER BY id LIMIT 301`);
+    if (refundRows.length > 300)
+        throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
+    const withRefunds = (sale: Row): Row => returnSaleAwaitsPayment(sale) ? { ...sale, refund_usd: sumRefundsUsd(refundRows.filter(r => r.sale_id === sale.id).map(r => r.total_refund_usd ?? 0)) } : sale;
     const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
         if (!sale)
             fail(`Sale ${expected.id} was not found.`);
-        const sourceMatched = request.source_status === undefined || String(sale.sale_status || 'completed') === request.source_status;
+        const sourceMatched = request.source_status === undefined || String(sale.sale_status || 'completed') === request.source_status || salePaymentStatus(sale) === request.source_status;
         if (!sourceMatched)
             continue;
         if ((sale.sale_status || 'completed') !== expected.expected_status || (sale.updated_at ?? null) !== expected.expected_updated_at)
@@ -347,7 +364,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         if (sale.movement_fingerprint === null)
             throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
         sourceMatchedIds.push(expected.id);
-        if (statusChangeNeedsPayment(sale.sale_status || 'completed', request.target_status, sale))
+        if (statusChangeNeedsPayment(salePaymentStatus(sale), request.target_status, withRefunds(sale)))
             unpaid.push(sale);
     }
     if (unpaid.length)
@@ -386,16 +403,19 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         if (!sale)
             fail(`Sale ${expected.id} was not found.`);
         const old = String(sale.sale_status || 'completed');
-        const sourceMatched = request.source_status === undefined || old === request.source_status;
+        const sourceMatched = request.source_status === undefined || old === request.source_status || salePaymentStatus(sale) === request.source_status;
+        // A return-status sale that reads Not Paid keeps its return status: only status_before_return
+        // moves. Stock is untouched: a return status and a paid status hold the same units.
+        const settlesReturn = PAID_SALE_STATUSES.includes(request.target_status) && returnSaleAwaitsPayment(sale);
         const changed = sourceMatched && old !== request.target_status;
         if (sourceMatched) {
             guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
             guards.push(bulkAssertion(`${saleMovementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
         }
-        const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null);
+        const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null, settlesReturn);
         if (changed && !guard.ok)
             throw new SaleBulkError(guard.error || 'Invalid transition.', 400);
-        const before = scalar(sale), after: Row = changed ? { ...before, sale_status: request.target_status } : { ...before };
+        const before = scalar(sale), after: Row = !changed ? { ...before } : settlesReturn ? { ...before, status_before_return: request.target_status } : { ...before, sale_status: request.target_status };
         if (changed && request.notes !== undefined)
             after.notes = request.notes;
         const itemCancel = expected.cancel;
@@ -538,7 +558,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     }
     const snapshot: Snapshot = { version: 1, operationId, members };
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
-    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
+    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, ...receiptStatuses(m), changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
     const effectGuards = resolver.guards();
     if (effectGuards.length)
         guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }));

@@ -133,8 +133,8 @@ import {
   type SaleRecordEventRow,
   type SaleRecordChange,
 } from '../lib/saleRecords'
-import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
+import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, notPaidSaleSql } from '../lib/salesStatus'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, returnSaleAwaitsPayment, saleReadsNotPaid, salePaymentStatus, statusChangeNeedsPayment, sumRefundsUsd, PAID_SALE_STATUSES, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -2101,6 +2101,18 @@ app.post('/:id/line-receipt/:kind', async (c) => {
   return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
 })
 
+// The list's status filter. Not Paid reads the payment state, so a sale whose
+// returns kept it Not Paid is listed there as well as under its return status.
+function saleStatusFilterClause(raw: string, params: Record<string, unknown>): string | null {
+  const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)
+  const terms = statuses.map((status, index) => {
+    if (status === 'awaiting_payment') return notPaidSaleSql('s')
+    params[`status${index}`] = status
+    return `s.sale_status = @status${index}`
+  })
+  return terms.length ? `(${terms.join(' OR ')})` : null
+}
+
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -2223,6 +2235,12 @@ app.patch('/:id/status', async (c) => {
   }
 
   const oldStatus = sale.sale_status || 'completed'
+  // A return-status sale that still reads Not Paid keeps its return status
+  // when it is paid: only its payment state (status_before_return) moves.
+  // Stock is untouched: a return status and a paid status hold the same units.
+  const settlesReturnSale = PAID_SALE_STATUSES.includes(saleStatus) && returnSaleAwaitsPayment(sale)
+  const writtenStatus = settlesReturnSale ? oldStatus : saleStatus
+  const paymentFromStatus = salePaymentStatus(sale)
   if (oldStatus === saleStatus && !paymentFieldsSent) {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
   }
@@ -2237,8 +2255,16 @@ app.patch('/:id/status', async (c) => {
   // Which transitions are legal at all (returns-flow ownership of
   // partial_return/returned; un-cancel only back to where the sale was) --
   // see lib/saleTransitions.ts.
-  const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
+  const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null, settlesReturnSale)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // What a Not Paid sale owes is its total less its active customer refunds
+  // less what was paid (owner, 29 Sep 2026: a return lowers the debt).
+  const saleMoney: RecordedSaleMoney = saleReadsNotPaid(sale)
+    ? { ...sale, refund_usd: sumRefundsUsd((await db.prepare(`SELECT total_refund_usd FROM returns WHERE sale_id = ?
+        AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'`)
+        .all<{ total_refund_usd: number | string | null }>([id])).map((row) => row.total_refund_usd ?? 0)) }
+    : sale
 
   // S4-41, the forward half. A Not Paid sale may take a paid status
   // (completed / awaiting_delivery) only when the payment already recorded on
@@ -2257,7 +2283,7 @@ app.patch('/:id/status', async (c) => {
   // correction mode is reachable ONLY through it. Refusing it would leave a
   // mis-keyed tender uncorrectable forever. A reopened sale keeps its tender,
   // so putting a fully paid one back (the reopen's Undo) passes the check below.
-  if (!paymentFieldsSent && statusChangeNeedsPayment(oldStatus, saleStatus, sale)) {
+  if (!paymentFieldsSent && statusChangeNeedsPayment(paymentFromStatus, saleStatus, saleMoney)) {
     return c.json({
       error: 'This sale is not fully paid, so it cannot be marked Completed or Awaiting Delivery. Record the payment first.',
       code: 'insufficient_payment_for_status',
@@ -2428,7 +2454,11 @@ app.patch('/:id/status', async (c) => {
   const statusOperationId = statusSourceId || crypto.randomUUID()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
-  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
+  const updateParams: Record<string, unknown> = { sale_status: writtenStatus, id, updated_at: mutationStamp }
+  if (settlesReturnSale) {
+    updates.push('status_before_return = @status_before_return')
+    updateParams.status_before_return = saleStatus
+  }
   const emptySettlementNote = paymentFieldsSent && body.notes !== undefined && !String(body.notes ?? '').trim()
   if (body.notes !== undefined && !emptySettlementNote) {
     updates.push('notes = @notes')
@@ -2464,7 +2494,7 @@ app.patch('/:id/status', async (c) => {
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   let paymentCorrection = false
   if (paymentFieldsSent) {
-    const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
+    const isDeferredPaymentSettle = paymentFromStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing a Not Paid sale.' }, 400)
@@ -2510,7 +2540,7 @@ app.patch('/:id/status', async (c) => {
         existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
         existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
         existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
-        totalUsd: sale.total_usd,
+        totalUsd: Number(saleMoney.refund_usd) > 0 ? subtractMoney4(sale.total_usd as number | string, saleMoney.refund_usd as string) : sale.total_usd,
         exchangeRate: latestRate,
         changeExchangeRateRaw: settingMap.change_exchange_rate,
       })
@@ -2522,7 +2552,7 @@ app.patch('/:id/status', async (c) => {
     }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
-    const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan)
+    const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan, settlesReturnSale)
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2548,7 +2578,8 @@ app.patch('/:id/status', async (c) => {
     settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
     settlementResponse = {
       id: Number(id),
-      sale_status: saleStatus,
+      sale_status: writtenStatus,
+      ...(settlesReturnSale ? { status_before_return: saleStatus } : {}),
       updated_at: mutationStamp,
       exchange_rate: after.exchange_rate,
       payment_method: after.payment_method,
@@ -2660,7 +2691,8 @@ app.patch('/:id/status', async (c) => {
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   if (!paymentFieldsSent && statusSourceId && statusDigest) {
     directStatusResponse = {
-      id: Number(id), sale_status: saleStatus, updated_at: mutationStamp,
+      id: Number(id), sale_status: writtenStatus, updated_at: mutationStamp,
+      ...(settlesReturnSale ? { status_before_return: saleStatus } : {}),
       ...(skipStock ? { stock_skipped: 1 } : {}),
     }
     const statusChanges: Array<{
@@ -2669,7 +2701,7 @@ app.patch('/:id/status', async (c) => {
       after: { state: 'known_value'; value: string } | { state: 'known_none' }
     }> = [{
       field: 'sale_status',
-      before: { state: 'known_value', value: oldStatus },
+      before: { state: 'known_value', value: settlesReturnSale ? paymentFromStatus : oldStatus },
       after: { state: 'known_value', value: saleStatus },
     }]
     const cancellationTransition = oldStatus === 'cancelled' || saleStatus === 'cancelled'
@@ -2904,8 +2936,10 @@ app.patch('/:id/status', async (c) => {
       ...(!paymentFieldsSent && statusSourceId ? { record_event: {
         source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
       } } : {}),
-      oldStatus,
+      // A settled return-status sale keeps sale_status (returnStatus); its payment state moved.
+      oldStatus: settlesReturnSale ? paymentFromStatus : oldStatus,
       newStatus: saleStatus,
+      ...(settlesReturnSale ? { returnStatus: oldStatus } : {}),
       ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
       ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
       restoredUnits: plan.restoredUnits,
@@ -2947,7 +2981,7 @@ app.patch('/:id/status', async (c) => {
     type: 'status',
     lines: formatSaleStatusTelegramLines({
       receipt: sale.receipt_number || id,
-      fromStatus: oldStatus,
+      fromStatus: settlesReturnSale ? paymentFromStatus : oldStatus,
       toStatus: saleStatus,
       customer: sale.customer_name,
       reason: cancelReason ? cancelReasonLabel(cancelReason) : null,
@@ -5837,18 +5871,8 @@ app.get('/', async (c) => {
     params.branchId = query.branchId
   }
   if (query.status) {
-    const statuses = String(query.status).split(',').map((v) => v.trim()).filter(Boolean)
-    if (statuses.length === 1) {
-      where.push('s.sale_status = @status')
-      params.status = statuses[0]
-    } else if (statuses.length > 1) {
-      const keys = statuses.map((status, index) => {
-        const key = `status${index}`
-        params[key] = status
-        return `@${key}`
-      })
-      where.push(`s.sale_status IN (${keys.join(', ')})`)
-    }
+    const clause = saleStatusFilterClause(String(query.status), params)
+    if (clause) where.push(clause)
   }
 
   const searchClause = buildSalesSearchWhere(query, params)
@@ -6123,18 +6147,8 @@ app.get('/stats', async (c) => {
     }
   }
   if (query.status) {
-    const statuses = String(query.status).split(',').map((v) => v.trim()).filter(Boolean)
-    if (statuses.length === 1) {
-      where.push('s.sale_status = @status')
-      params.status = statuses[0]
-    } else if (statuses.length > 1) {
-      const keys = statuses.map((status, index) => {
-        const key = `status${index}`
-        params[key] = status
-        return `@${key}`
-      })
-      where.push(`s.sale_status IN (${keys.join(', ')})`)
-    }
+    const clause = saleStatusFilterClause(String(query.status), params)
+    if (clause) where.push(clause)
   }
   if (query.branchId) {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
