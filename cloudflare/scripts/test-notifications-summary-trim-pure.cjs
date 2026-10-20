@@ -309,6 +309,15 @@ async function main() {
     assert.equal(JSON.stringify(await summary(fullButHidden)).includes('R-1'), false, 'and the receipt number is nowhere in the body')
   })
 
+  // 0263 (6.0.890): a delivery order is Completed (or Not Paid) with the delivery_pending tag, not the retired word.
+  await check('the delivery queue reads the delivery tag: a tagged sale is listed, a cancelled one is not', async () => {
+    seedStockFixture(raw.db, () => raw.db.exec(`INSERT INTO sales (receipt_number, total_usd, sale_status, delivery_pending) VALUES
+      ('R-D1', 9, 'completed', 1), ('R-D2', 9, 'cancelled', 1), ('R-D3', 9, 'completed', 0)`))
+    const ids = (section(await summary(ADMIN), 'sales').items || []).map((item) => item.label)
+    assert.ok(ids.includes('R-D1'), `a Completed sale with the delivery tag is in the delivery queue (${ids})`)
+    assert.ok(!ids.includes('R-D2') && !ids.includes('R-D3'), 'a cancelled tagged sale and an untagged sale are not')
+  })
+
   await check('GET /summary/items returns the whole inventory list for "show all", gated like the section', async () => {
     const all = await call('GET', '/summary/items?section=inventory', ADMIN)
     assert.equal(all.status, 200)
