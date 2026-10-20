@@ -7684,6 +7684,11 @@
   "perm_user_exceptions_one": "1 individual exception",
   "perm_user_exceptions_other": "{n} individual exceptions",
   "perm_switched_off_heading": "Switched off",
+  "portal_legal_privacy_ai_h": "The assistant",
+  "portal_legal_privacy_ai_b": "Assistant questions go to a third-party AI provider and are processed outside Cambodia. Our copy is deleted after 30 days.",
+  "portal_legal_privacy_ai_off": "The assistant is off and no AI provider receives any data from this site.",
+  "portal_legal_privacy_ai_named": "Assistant questions go to {providers} and are processed outside Cambodia. Our copy is deleted after 30 days.",
+  "portal_legal_ai_provider_terms": "{provider} terms",
   "loyalty_points_enabled": "Loyalty points",
   "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays."
 }

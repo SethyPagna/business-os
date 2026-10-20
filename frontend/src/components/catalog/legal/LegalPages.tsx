@@ -29,6 +29,8 @@ import {
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
 import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
+import { aiProviderNames, aiProviderState } from './aiProviderDisclosure.ts'
+import type { AiProviderState } from './aiProviderDisclosure.ts'
 
 export const LEGAL_QUERY_PARAM = 'legal'
 
@@ -187,6 +189,22 @@ export default function PortalFooter({
     phone: sanitizeBusinessDetail(phone, 60),
     email: sanitizeBusinessDetail(email, 120),
   }), [businessName, legalName, registrationNumber, address, phone, email, text])
+
+  // The privacy policy names the AI provider(s) behind the assistant. Which
+  // ones is runtime data (D1), so the page asks once it is opened; until the
+  // answer lands, or if it fails, the policy keeps its neutral sentence.
+  const [aiState, setAiState] = useState<AiProviderState>({ kind: 'unknown' })
+  // copy() answers in the storefront language; asking it for 'en' / 'ខ្មែរ' tells the page which sentence to use.
+  const pick = useCallback((en: string, km: string) => (copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? km : en), [copy])
+  useEffect(() => {
+    if (activePage !== 'privacy' || typeof window === 'undefined') return undefined
+    let live = true
+    const api = (window as Window & { api?: { getPortalAiStatus?: () => Promise<unknown> } }).api
+    Promise.resolve(api?.getPortalAiStatus?.())
+      .then((status) => { if (live) setAiState(aiProviderState(status)) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [activePage])
 
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
@@ -422,7 +440,7 @@ export default function PortalFooter({
       </footer>
 
       {activePage ? (
-        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} />
+        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} />
       ) : null}
     </>
   )
@@ -435,6 +453,8 @@ function LegalReader({
   details,
   onClose,
   onNavigate,
+  aiState,
+  pick,
 }: {
   page: LegalPageKey
   text: (key: string) => string
@@ -442,6 +462,8 @@ function LegalReader({
   details: LegalBusinessDetails
   onClose: () => void
   onNavigate: (page: LegalPageKey) => void
+  aiState: AiProviderState
+  pick: (en: string, km: string) => string
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -546,7 +568,9 @@ function LegalReader({
           <section key={section.heading} className="mt-6">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{fill(section.heading)}</h2>
             {section.bodies.map((body) => (
-              <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
+              body === 'portal_legal_privacy_ai_b'
+                ? <AiProviderParagraphs key={body} body={body} state={aiState} text={text} fill={fill} pick={pick} />
+                : <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
             ))}
             {page === 'cookies' && section.heading === 'portal_legal_cookies_table_h' ? (
               <StorageTable text={text} />
@@ -568,6 +592,38 @@ function LegalReader({
         </nav>
       </div>
     </div>
+  )
+}
+
+// The assistant paragraph of the privacy policy: neutral until the provider list
+// is known, "no AI provider" when the assistant is off, otherwise the provider
+// names, what each one does with a question, and a link to its own terms.
+export function AiProviderParagraphs({ body, state, text, fill, pick }: {
+  body: string
+  state: AiProviderState
+  text: (key: string) => string
+  fill: (key: string) => string
+  pick: (en: string, km: string) => string
+}) {
+  if (state.kind === 'off') return <p className="mt-2">{fill('portal_legal_privacy_ai_off')}</p>
+  if (state.kind === 'unknown') return <p className="mt-2">{fill(body)}</p>
+  return (
+    <>
+      <p className="mt-2">{fill('portal_legal_privacy_ai_named').replace('{providers}', pick(aiProviderNames(state, 'en'), aiProviderNames(state, 'km')))}</p>
+      {state.providers.map((provider) => (
+        <p key={provider.id} className="mt-2" data-portal-ai-provider={provider.id}>
+          {pick(provider.retention.en, provider.retention.km)}{' '}
+          <a
+            href={provider.policyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center break-words underline underline-offset-2"
+          >
+            {text('portal_legal_ai_provider_terms').replace('{provider}', provider.displayName)}
+          </a>
+        </p>
+      ))}
+    </>
   )
 }
 

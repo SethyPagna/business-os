@@ -140,7 +140,7 @@ assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must com
 // question leaves the shop, and where a health question actually belongs.
 // The second one must not be reachable from the portal editor -- a notice a
 // merchant can shorten to nothing is not a notice.
-assert.match(secondary, /copy\('assistantAutomatedNotice'/, 'the automated-assistant notice must render beside the AI panel')
+assert.match(secondary, /fillAiProviderTemplate\(language === 'km' \? ASSISTANT_AUTOMATED_KM : ASSISTANT_AUTOMATED_EN/, 'the automated-assistant notice must render beside the AI panel')
 const automated = (secondary.match(/const ASSISTANT_AUTOMATED_EN = '([^']*)'/) || [])[1] || ''
 for (const phrase of [/automated/i, /not medical advice/i, /third-party AI provider/i, /30 days/, /pharmacist or doctor/i]) {
   assert.match(automated, phrase, `the assistant notice no longer says ${phrase}`)
@@ -245,9 +245,9 @@ for (const [text, where] of [[privacyKm, 'privacy'], [termsKm, 'terms']] as cons
 // The brand-enquiry route stays.
 assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /respective rights holders[\s\S]*Contact the store using the verified details above/)
 assert.match(PORTAL_LEGAL_KM.portal_legal_terms_ip_b, /ម្ចាស់សិទ្ធិ[\s\S]*សូមទាក់ទងហាង/)
-// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure, the 7-day returns section and the age-16 wording (1,039 English words; the 7 Sep text was 1,148).
+// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure, the 7-day returns section, the age-16 wording and the assistant provider section (1,061 English words; the 7 Sep text was 1,148).
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length
-assert.ok(words(privacyEn) + words(termsEn) <= 1039, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
+assert.ok(words(privacyEn) + words(termsEn) <= 1061, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
 
 // Page keys
 assert.equal(isLegalPageKey('privacy'), true)

@@ -261,8 +261,10 @@ runTest('AI: copy says deleted after 30 days, never "may", never Leang Beauty or
     assert.match(note, stated, 'automated note states outside-Cambodia processing (' + language + ')')
     assert.doesNotMatch(consent + note, /may/i)
   }
-  assert.doesNotMatch(html(aiProps({ assistantDisclosure: { provider: 'Acme AI' } })), /\{provider\}/, 'the provider placeholder is filled')
-  assert.match(html(aiProps({ assistantDisclosure: { provider: 'Acme AI' } })), /sent to Acme AI, which processes them outside Cambodia/)
+  // The per-provider wording is locked in portalAiProviderDisclosure.test.ts; here only that the placeholders are always filled.
+  const named = html(aiProps({ assistantDisclosure: { kind: 'named', providers: [{ id: 'acme', displayName: 'Acme AI', policyUrl: 'https://example.test', retention: { en: 'Acme AI keeps nothing.', km: 'Acme AI' } }] } }))
+  assert.doesNotMatch(named, /\{provider/, 'the provider placeholders are filled')
+  assert.match(named, /sent to a third-party AI provider \(Acme AI\) and processed outside Cambodia\. Acme AI keeps nothing\./)
 })
 
 runTest('AI: the error box has a dark style and is announced', () => {

@@ -410,6 +410,23 @@ async function listEnabledChatProviders(env: Env, preferredProviderId?: number |
   return [...preferred, ...others]
 }
 
+// The providers a shopper's question can reach, in the order the chat tries
+// them, as the public storefront may show them: a display name and a stable
+// id, never the row's own name, model, key or account. A provider this build
+// does not know is reported as 'other' with no name so the page stays neutral.
+export type PortalAiProviderDisclosure = { id: string; name: string }
+
+export async function listPortalAiProviderDisclosures(env: Env, preferredProviderId?: number | null): Promise<PortalAiProviderDisclosure[]> {
+  const out: PortalAiProviderDisclosure[] = []
+  for (const row of await listEnabledChatProviders(env, preferredProviderId)) {
+    const key = trim(row.provider).toLowerCase()
+    const meta = getProviderMeta(key)
+    const entry = meta ? { id: key, name: meta.label } : { id: 'other', name: '' }
+    if (!out.some((item) => item.id === entry.id)) out.push(entry)
+  }
+  return out
+}
+
 function chooseProviderForAttempt(providers: AnyRow[], currentMs = nowMs()) {
   const candidates = []
   for (const provider of providers) {
