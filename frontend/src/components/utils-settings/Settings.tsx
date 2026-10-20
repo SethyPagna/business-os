@@ -1178,7 +1178,7 @@ export default function Settings() {
           // View-only grant: no Save button, a plain read-only badge instead
           // (Part 557). The backend refuses the POST regardless.
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 dark:bg-teal-950/30 dark:text-teal-200">
-            {t('view_only') || 'View only'}
+            {t('view_only') || 'View'}
           </span>
         )}
       </div>

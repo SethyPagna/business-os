@@ -139,8 +139,8 @@ const RULES: Rule[] = [
     allow: [{ file: 'cloudflare/src/routes/portal.ts', text: "'customer portal visitor'", why: 'stored source label on AI log rows, not copy' }],
   },
   {
-    id: 'R13 Partial Access, not Review Required', owner: 'Part 347: the tier is Partial Access / សិទ្ធិមួយផ្នែក',
-    old: /Review Required|តម្រូវការត្រួតពិនិត្យ|«ត្រូវការពិនិត្យ»|ឬត្រូវការពិនិត្យ\)|សិទ្ធិមានកម្រិត/, sampleOld: 'Under Review Required, viewing', sampleNew: 'Under Partial Access, viewing',
+    id: 'R13 Review, not Partial Access or Review Required', owner: '20 Oct: the middle tier is Review / ពិនិត្យ (was Partial Access, Part 347)',
+    old: /Partial Access|សិទ្ធិមួយផ្នែក|Review Required|តម្រូវការត្រួតពិនិត្យ|«ត្រូវការពិនិត្យ»|ឬត្រូវការពិនិត្យ\)|សិទ្ធិមានកម្រិត/, sampleOld: 'Under Review Required, viewing', sampleNew: 'Under Review, viewing',
     packs: ['en', 'km'], code: true, worker: true,
   },
   {

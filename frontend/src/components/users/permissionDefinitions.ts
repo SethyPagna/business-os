@@ -21,9 +21,9 @@ export interface PermissionDefinition {
   // for every key without this flag.
   tier?: boolean
   // The flavor of the MIDDLE tier this `tier: true` section offers:
-  //   'review' (default) -> the amber "Partial Access" that queues writes for
+  //   'review' (default) -> the amber "Review" that queues writes for
   //                         approval (REVIEW_TIER_KEYS in permissions.ts).
-  //   'view'             -> a teal "View only" -- the page/data is visible but
+  //   'view'             -> a teal "View" -- the page/data is visible but
   //                         every write is blocked (VIEW_TIER_KEYS). Used for
   //                         coarse admin areas with no approval queue.
   // A key is in exactly one of REVIEW_/VIEW_TIER_KEYS; this field just tells
@@ -115,7 +115,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     permissions: [
       { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal' },
       // Independent of the page-access key above -- a role can have
-      // dashboard: true, dashboard_export: false ("View only, no export")
+      // dashboard: true, dashboard_export: false ("View, no export")
       // as well as the usual true/true ("Full access") and false/*
       // ("No access", export is unreachable without the page anyway).
       // Not a tier: true / Review Required key -- Dashboard has no
@@ -147,7 +147,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'promotions',
     tKey: 'perm_section_promotions',
     label: 'Promotions',
-    description: 'None / View only / Full. View only shows the promotion rule list but blocks creating, editing or deleting rules. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules. (Per-product discounts self-gate on the Products permission, not this one.)',
+    description: 'None / View / Full. View shows the promotion rule list but blocks creating, editing or deleting rules. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules. (Per-product discounts self-gate on the Products permission, not this one.)',
     permissions: [
       // View-tier section (Part 557 slice 4): the promotion RULE list read
       // (routes/promotions.ts GET /rules) admits a 'view' grant; every write
@@ -163,7 +163,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_promotions_view_desc',
-        reviewDescription: 'View only: see the promotion rule list, but New rule, edit and delete are hidden and refused. Full Access is required to manage promotions.',
+        reviewDescription: 'View: see the promotion rule list, but New rule, edit and delete are hidden and refused. Full Access is required to manage promotions.',
       },
     ],
   },
@@ -180,7 +180,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Partial Access) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
+    description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Review) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -192,7 +192,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_products_review_desc',
-        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
+        reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
       { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high' },
       { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high' },
@@ -297,7 +297,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_inventory_review_desc',
-        reviewDescription: 'Under Partial Access, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
+        reviewDescription: 'Under Review, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
       { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal' },
       ...[
@@ -327,7 +327,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_branches_review_desc',
-        reviewDescription: 'Under Partial Access, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
+        reviewDescription: 'Under Review, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
       },
     ],
   },
@@ -335,7 +335,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'sales',
     tKey: 'perm_section_sales',
     label: 'Sales',
-    description: 'None / View only / Full. View only permits reading Sales but blocks writes and does not open Shifts. Full Sales also opens Shifts with own-shift actions and configured shop-wide visibility; administrator control is required for cancellation and cross-account review. Server capability flags remain authoritative.',
+    description: 'None / View / Full. View permits reading Sales but blocks writes and does not open Shifts. Full Sales also opens Shifts with own-shift actions and configured shop-wide visibility; administrator control is required for cancellation and cross-account review. Server capability flags remain authoritative.',
     permissions: [
       // View-tier section (Part 557 slice 2): all sales READS
       // (list/stats/reports/export) admit a 'view' grant; the writes
@@ -351,7 +351,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_sales_view_desc',
-        reviewDescription: 'View only: see every sale, stat, report and export, but Cancel, change status, edit customer, and Import are hidden and refused. Full Access is required to change or import sales.',
+        reviewDescription: 'View: see every sale, stat, report and export, but Cancel, change status, edit customer, and Import are hidden and refused. Full Access is required to change or import sales.',
       },
     ],
   },
@@ -378,7 +378,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_returns_review_desc',
-        reviewDescription: 'Under Partial Access, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.',
+        reviewDescription: 'Under Review, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.',
       },
     ],
   },
@@ -403,7 +403,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_fees_review_desc',
-        reviewDescription: 'Under Partial Access, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
+        reviewDescription: 'Under Review, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
       },
     ],
   },
@@ -431,7 +431,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_contacts_review_desc',
-        reviewDescription: 'Under Partial Access, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.',
+        reviewDescription: 'Under Review, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.',
       },
       // Supplier privacy (Part 383 R2): the Suppliers tab (and every
       // /suppliers endpoint -- list with contact details, duplicates,
@@ -457,7 +457,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Review access.',
+    description: 'None / View / Full. The Review/Approval queue for every section’s Review tier above. View shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Review access.',
     permissions: [
       // View-tier section (Part 557 slice 5): reading the pending queue
       // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the
@@ -473,7 +473,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View only: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action.',
+        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action.',
       },
     ],
   },
@@ -481,7 +481,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'audit_log',
     tKey: 'perm_section_audit_log',
     label: 'Audit Log',
-    description: 'None / View only / Full. Read-only action history. View only shows a person their OWN actions; Full shows everyone’s (plus the legacy deleted-sales evidence ledger).',
+    description: 'None / View / Full. Read-only action history. View shows a person their OWN actions; Full shows everyone’s (plus the legacy deleted-sales evidence ledger).',
     permissions: [
       // View-tier section (Part 557 slice 7), where 'view' is OWN-scoped rather
       // than read-only (the whole page is read-only anyway): 'view' = see only
@@ -497,7 +497,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_audit_log_view_desc',
-        reviewDescription: 'View only: see your OWN actions in the audit log. Full Access is required to see every user’s actions and the deleted-sales evidence ledger.',
+        reviewDescription: 'View: see your OWN actions in the audit log. Full Access is required to see every user’s actions and the deleted-sales evidence ledger.',
       },
     ],
   },
@@ -521,7 +521,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // user already (routes/settings.ts GET / strips secrets and serves the
       // map to every cashier), and saving is gated on a strict `settings ===
       // true` (POST /), so a 'view' value can SEE settings but every save is
-      // refused. None / View only / Full.
+      // refused. None / View / Full.
       {
         key: 'settings',
         tKey: 'perm_settings',
@@ -530,7 +530,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_settings_view_desc',
-        reviewDescription: 'View only: this person can open Settings and see every value, but the Save button is disabled and any save is refused. Full Access is required to change settings.',
+        reviewDescription: 'View: this person can open Settings and see every value, but the Save button is disabled and any save is refused. Full Access is required to change settings.',
       },
       { key: 'business_identity', tKey: 'perm_business_identity', label: 'Business identity, logo, public profile', sensitivity: 'high' },
       { key: 'sales_policy', tKey: 'perm_sales_policy', label: 'Sales, return, and financial policy', sensitivity: 'high' },

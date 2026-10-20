@@ -267,7 +267,7 @@ export default function ReviewQueue() {
   }
 
   const handleApprove = async (row: PendingActionRow) => {
-    if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
+    if (!canReview) { notify(tr('perm_view_only_generic', 'View access: you do not have permission to make this change.'), 'error'); return }
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       await handleProductCreateApprove(row)
       return
@@ -308,7 +308,7 @@ export default function ReviewQueue() {
   // translated, nor show a counter, nor be capped). The dialog renders its real content -- the request, its status
   // before and after, and the reason field with its counter -- from first paint.
   const handleReject = (row: PendingActionRow) => {
-    if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
+    if (!canReview) { notify(tr('perm_view_only_generic', 'View access: you do not have permission to make this change.'), 'error'); return }
     setRejectDraft({ row, reason: '', refusal: '' })
   }
 
@@ -316,7 +316,7 @@ export default function ReviewQueue() {
     const draft = rejectDraft
     if (!draft) return
     const { row } = draft
-    if (!canReview) { setRejectDraft(null); notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
+    if (!canReview) { setRejectDraft(null); notify(tr('perm_view_only_generic', 'View access: you do not have permission to make this change.'), 'error'); return }
     // Trimmed, and never longer than the field allows; blank is "no reason" (optional), sent as null.
     const reason = draft.reason.trim()
     if (!beginKeyedAction(actionRef, row.id)) return

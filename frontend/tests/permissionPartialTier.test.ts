@@ -1,6 +1,6 @@
-// What the role editor shows for the Products switches the Worker honours at Partial Access, checked against the
+// What the role editor shows for the Products switches the Worker honours at Review, checked against the
 // Worker's own evaluation: the real getActionTier for each tier and switch state, the route source for what a
-// Partial Access caller gets, and the real editor rendered in English and Khmer.
+// Review caller gets, and the real editor rendered in English and Khmer.
 //
 // Run: node tests/permissionPartialTier.test.ts
 import assert from 'node:assert/strict'
@@ -27,8 +27,8 @@ const rowOf = (section: string, key: string) => PERMISSION_ACTIONS[section].find
 const workerTier = (permissions: Record<string, unknown>, section: string, action: string) =>
   getActionTier({ role_code: 'staff', permissions: JSON.stringify(permissions) }, section, action)
 
-// What a Partial Access caller gets from the Worker for each switch that is not off, read from the routes.
-const PARTIAL_ACCESS: Array<{ action: string; label: string; badge: ActionOutcome; tool: 'full only' | 'same'; proof: RegExp[] }> = [
+// What a Review caller gets from the Worker for each switch that is not off, read from the routes.
+const REVIEW_TIER_CASES: Array<{ action: string; label: string; badge: ActionOutcome; tool: 'full only' | 'same'; proof: RegExp[] }> = [
   {
     action: 'merge_duplicates', label: 'perm_act_products_merge_duplicates', badge: 'queue', tool: 'full only',
     proof: [
@@ -57,47 +57,47 @@ const PARTIAL_ACCESS: Array<{ action: string; label: string; badge: ActionOutcom
   },
 ]
 
-test('the Worker evaluates each of these switches as Partial Access unless it is off', () => {
-  for (const { action } of PARTIAL_ACCESS) {
+test('the Worker evaluates each of these switches as Review unless it is off', () => {
+  for (const { action } of REVIEW_TIER_CASES) {
     assert.equal(workerTier({}, 'products', action), 'none', `${action}: no Products grant`)
-    assert.equal(workerTier({ products: 'review' }, 'products', action), 'review', `${action}: Partial Access, not switched off`)
-    assert.equal(workerTier({ products: 'review', [`products:${action}`]: false }, 'products', action), 'none', `${action}: Partial Access, switched off`)
+    assert.equal(workerTier({ products: 'review' }, 'products', action), 'review', `${action}: Review, not switched off`)
+    assert.equal(workerTier({ products: 'review', [`products:${action}`]: false }, 'products', action), 'none', `${action}: Review, switched off`)
     assert.equal(workerTier({ products: true }, 'products', action), 'full', `${action}: Full Access`)
     assert.equal(workerTier({ products: true, [`products:${action}`]: false }, 'products', action), 'none', `${action}: Full Access, switched off`)
   }
 })
 
-test('the routes still treat Partial Access the way the table says', () => {
-  for (const { action, proof } of PARTIAL_ACCESS) {
+test('the routes still treat Review the way the table says', () => {
+  for (const { action, proof } of REVIEW_TIER_CASES) {
     for (const pattern of proof) assert.match(productsRoute, pattern, `${action}: the Worker no longer behaves as pinned (${pattern})`)
   }
 })
 
-test('the table gives each switch the outcome the Worker gives it at Partial Access', () => {
-  for (const { action, badge } of PARTIAL_ACCESS) {
-    assert.equal(outcomeAt(rowOf('products', action), 'review'), badge, `${action} at Partial Access`)
+test('the table gives each switch the outcome the Worker gives it at Review', () => {
+  for (const { action, badge } of REVIEW_TIER_CASES) {
+    assert.equal(outcomeAt(rowOf('products', action), 'review'), badge, `${action} at Review`)
     assert.equal(outcomeAt(rowOf('products', action), 'full'), 'allow', `${action} at Full Access`)
     assert.equal(outcomeAt(rowOf('products', action), 'none'), 'block', `${action} with no Products grant`)
   }
 })
 
-test('the page tool behind a row keeps its own Partial Access answer', () => {
-  for (const { action, tool } of PARTIAL_ACCESS) {
+test('the page tool behind a row keeps its own Review answer', () => {
+  for (const { action, tool } of REVIEW_TIER_CASES) {
     const expected = tool === 'full only' ? false : true
-    assert.equal(actionAllowed('products', action, 'review'), expected, `${action}: the page control at Partial Access`)
+    assert.equal(actionAllowed('products', action, 'review'), expected, `${action}: the page control at Review`)
     assert.equal(actionAllowed('products', action, 'full'), true)
     assert.equal(actionAllowed('products', action, 'full', () => false, (section, key) => section === 'products' && key === action), false, `${action}: switched off wins`)
-    assert.equal(actionAllowed('products', action, 'review', () => false, (section, key) => section === 'products' && key === action), false, `${action}: switched off wins at Partial Access`)
+    assert.equal(actionAllowed('products', action, 'review', () => false, (section, key) => section === 'products' && key === action), false, `${action}: switched off wins at Review`)
   }
 })
 
-test('a row that shows a different outcome from its page tool says so and only does so at Partial Access', () => {
+test('a row that shows a different outcome from its page tool says so and only does so at Review', () => {
   for (const [section, actions] of Object.entries(PERMISSION_ACTIONS)) {
     for (const action of actions) {
       if (action.controlReview === undefined) continue
       assert.equal(action.controlReview, 'block', `${section}.${action.key}: only a stricter page tool is modelled`)
       assert.notEqual(action.review, 'block', `${section}.${action.key}: a blocked row has no second outcome to describe`)
-      assert.equal(actionAllowed(section, action.key, 'view'), outcomeAt(action, 'view') !== 'block', `${section}.${action.key}: View only is unaffected`)
+      assert.equal(actionAllowed(section, action.key, 'view'), outcomeAt(action, 'view') !== 'block', `${section}.${action.key}: View is unaffected`)
       assert.equal(actionAllowed(section, action.key, 'full'), true, `${section}.${action.key}: Full Access is unaffected`)
     }
   }
@@ -135,11 +135,11 @@ const attribute = (button: string, name: string): string | null => button.match(
 const isDisabled = (button: string) => /<button[^>]*\sdisabled(?:=""|\s|>)/.test(button)
 
 for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
-  for (const { action, label, badge } of PARTIAL_ACCESS) {
+  for (const { action, label, badge } of REVIEW_TIER_CASES) {
     const text = pack[label]
     const badgeText = pack[badge === 'queue' ? 'perm_outcome_queue' : 'perm_outcome_allow']
 
-    test(`${name}: ${action} at Partial Access is a real control showing what the Worker does`, () => {
+    test(`${name}: ${action} at Review is a real control showing what the Worker does`, () => {
       const row = rowButton(render(pack, { products: 'review' }), text)
       assert.ok(!isDisabled(row), 'the row can be switched off')
       assert.ok(row.includes(`>${badgeText}<`), `the badge reads ${badgeText}`)
@@ -148,7 +148,7 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
       assert.ok((attribute(row, 'title') ?? '').includes(pack.perm_action_switch_off), 'the tooltip offers the switch-off')
     })
 
-    test(`${name}: ${action} switched off at Partial Access can be handed back`, () => {
+    test(`${name}: ${action} switched off at Review can be handed back`, () => {
       const row = rowButton(render(pack, { products: 'review', [`products:${action}`]: false }), text)
       assert.ok(!isDisabled(row), 'a stored false must stay reachable at this tier')
       assert.ok(row.includes(`>${pack.perm_action_off}<`) && row.includes('line-through'))
@@ -166,9 +166,9 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
     })
   }
 
-  test(`${name}: a page tool that stays Full only is explained on its Partial Access row`, () => {
+  test(`${name}: a page tool that stays Full only is explained on its Review row`, () => {
     const html = render(pack, { products: 'review' })
-    for (const { action, label, tool } of PARTIAL_ACCESS) {
+    for (const { action, label, tool } of REVIEW_TIER_CASES) {
       const title = attribute(rowButton(html, pack[label]), 'title') ?? ''
       assert.equal(title.includes(pack.perm_action_review_tool_full ?? '\u0000'), tool === 'full only', `${action}: tooltip names the Full Access tool exactly when the tool differs`)
     }
@@ -178,7 +178,7 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
 test('a row the tier blocks is inert and neutral: disabled, aria-disabled, never pressed', () => {
   const html = render(en, { products: 'review' })
   const bulk = rowButton(html, en.perm_act_products_bulk_delete)
-  assert.ok(isDisabled(bulk), 'a Full only row is inert at Partial Access')
+  assert.ok(isDisabled(bulk), 'a Full only row is inert at Review')
   assert.ok(bulk.includes(`>${en.perm_outcome_block}<`))
   assert.equal(attribute(bulk, 'aria-disabled'), 'true')
   assert.equal(attribute(bulk, 'aria-pressed'), null, 'a disabled Hidden row is not "pressed"')

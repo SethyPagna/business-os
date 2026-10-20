@@ -875,7 +875,7 @@ export default function Users() {
     return keys
       .map((key) => {
         const label = rolePermissionLabel(key, tr) || key
-        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View only')})` : label
+        return value[key] === 'review' ? `${label} (${tr('review_required', 'Review')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View')})` : label
       })
       .join(', ')
   }
@@ -1438,7 +1438,7 @@ export default function Users() {
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                           {rolePermissionLabel(key, tr)}
-                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View only')})` : ''}
+                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Review')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View')})` : ''}
                         </span>
                       ))}
                     </div>

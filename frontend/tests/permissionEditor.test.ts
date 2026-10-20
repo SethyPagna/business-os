@@ -112,8 +112,8 @@ for (const key of ['none', 'review_required', 'label_full_access']) {
 
 // Cross-check permissionDefinitions.ts's `tier: true` flags against
 // utils/permissions.ts's tier-key sets. Every tier:true key must appear in
-// exactly one of REVIEW_TIER_KEYS (amber "Partial Access", queues writes) or
-// VIEW_TIER_KEYS (teal "View only", read-only) -- and vice versa. This turns
+// exactly one of REVIEW_TIER_KEYS (amber "Review", queues writes) or
+// VIEW_TIER_KEYS (teal "View", read-only) -- and vice versa. This turns
 // a future drift into a failing test instead of a silent looks-wired-but-isn't
 // gap. Part 557 added the 'view' flavor (Settings).
 const tierFlagKeys = [...definitions.matchAll(/key:\s*'([a-z_]+)'[^}]*tier:\s*true/g)].map((m) => m[1])
@@ -138,7 +138,7 @@ assert.deepEqual(
   'permissionDefinitions.ts tier:true keys and utils/permissions.ts REVIEW_/VIEW_TIER_KEYS have drifted apart',
 )
 // Each view-tier section declares middleTier: 'view' so the editor renders
-// the teal "View only" option rather than the amber "Partial Access".
+// the teal "View" option rather than the amber "Review".
 for (const key of viewTierKeys) {
   assert.match(
     definitions,
@@ -152,7 +152,7 @@ for (const key of ['view_only']) {
   assert.ok(km[key], `Khmer tier-picker label missing: ${key}`)
 }
 
-console.log('PASS PermissionEditor renders None/Partial Access|View only/Full Access tier pickers, kept in sync with REVIEW_/VIEW_TIER_KEYS')
+console.log('PASS PermissionEditor renders None/Review|View/Full tier pickers, kept in sync with REVIEW_/VIEW_TIER_KEYS')
 
 // The per-row explanation goes through the shared InfoHint, which opens on hover and
 // on tap and carries no `title`: a native tooltip never opens on touch, so the
@@ -182,7 +182,7 @@ for (const key of ['review_required_generic_desc', 'perm_fees_review_desc']) {
   assert.ok(km[key], `Khmer tier tooltip text missing: ${key}`)
 }
 
-console.log('PASS PermissionEditor shows an info hint per tiered permission explaining exactly what Partial Access restricts for that section')
+console.log('PASS PermissionEditor shows an info hint per tiered permission explaining exactly what Review restricts for that section')
 
 // Dashboard has two plain boolean keys, not a tier:true section: it has no
 // create/edit/delete workflow to queue for review, so 'dashboard' (page access)
@@ -251,7 +251,7 @@ assert.match(en.perm_products_review_desc, /edit that would merge this product i
 assert.match(en.perm_products_review_desc, /unless Merge duplicates is switched off/)
 assert.doesNotMatch(en.perm_products_review_desc, /Approving a merge|reviewer to hold/i)
 assert.doesNotMatch(en.perm_products_review_desc, /approving it (?:performs|completes|applies)/i, 'must not promise the merge happens on approval')
-assert.ok(km.perm_products_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន') && km.perm_products_review_desc.includes('សិទ្ធិមួយផ្នែក'))
+assert.ok(km.perm_products_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន') && km.perm_products_review_desc.includes('កម្រិតពិនិត្យ'))
 assert.ok(!km.perm_products_review_desc.includes('ការអនុម័តការបញ្ចូលគ្នា'), 'the Khmer text drops the approval requirement too')
 
 // The Review description states what approving needs.

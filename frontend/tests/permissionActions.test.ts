@@ -12,7 +12,7 @@ import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitio
 
 // --- 1. structural invariants ------------------------------------------
 
-// A table is either for a tiered key (Partial Access / View only / Full) or for an on/off key, where on reads as
+// A table is either for a tiered key (Review / View / Full) or for an on/off key, where on reads as
 // Full and off as None. An on/off key has no middle tier, so none of its rows may promise an outcome there.
 const onOffKeys = new Set(PERMISSION_SECTIONS.flatMap((section) => section.permissions).filter((permission) => !permission.tier).map((permission) => permission.key))
 for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
