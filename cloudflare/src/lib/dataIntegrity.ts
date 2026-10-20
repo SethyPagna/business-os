@@ -85,40 +85,48 @@ async function checkStockQuantities(env: Env, repair: boolean): Promise<Integrit
   return { errors, repairs: statements.length, summary: `${repair ? 'Verified and repaired' : 'Checked'} stock quantities: ${statements.length} ${repair ? 'repairs made' : 'issues found'}` }
 }
 
+// Return TAGS only (owner, 20 Oct 2026: a return never changes sale_status).
+// The old check rewrote sale_status to returned/partial_return and so wiped a
+// Not Paid sale's payment state; this one compares the return tag the sale
+// reads (retired label or return_state) with the one its evidence gives --
+// live customer return lines plus units an import recorded as returned, per
+// line, as the returns writers derive it -- and repairs only return_state on
+// a row without a retired label. One aggregate read over sales that carry a
+// tag or any return evidence.
 async function checkSaleStatuses(env: Env, repair: boolean): Promise<IntegrityResult> {
   const db = getDb(env)
   const errors: string[] = []
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
 
   try {
-    const sales = await db.prepare(`SELECT id, sale_status FROM sales WHERE sale_status NOT IN ('cancelled')`).all<{ id: number; sale_status: string }>()
+    const active = `COALESCE(r.status, 'completed') != 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'`
+    const rows = await db.prepare(`
+      SELECT id, sale_status, stored, expected FROM (
+        SELECT s.id, s.sale_status,
+          CASE s.sale_status WHEN 'returned' THEN 'full' WHEN 'partial_return' THEN 'partial' ELSE s.return_state END AS stored,
+          CASE
+            WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id = s.id AND ${active})
+              AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id = s.id AND COALESCE(si.returned_quantity, 0) > 0) THEN NULL
+            WHEN NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id = s.id AND COALESCE((
+              SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id = ri.return_id
+              WHERE r.sale_id = s.id AND ${active} AND (ri.sale_item_id = si.id OR (ri.sale_item_id IS NULL AND ri.product_id = si.product_id))
+            ), 0) + MAX(COALESCE(si.returned_quantity, 0), 0) < si.quantity) THEN 'full'
+            ELSE 'partial' END AS expected
+        FROM sales s
+        WHERE COALESCE(s.sale_status, 'completed') != 'cancelled'
+          AND (s.return_state IS NOT NULL OR s.sale_status IN ('partial_return', 'returned')
+            OR EXISTS(SELECT 1 FROM returns r WHERE r.sale_id = s.id AND ${active})
+            OR EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id = s.id AND COALESCE(si.returned_quantity, 0) > 0))
+      ) WHERE stored IS NOT expected
+    `).all<{ id: number; sale_status: string | null; stored: string | null; expected: string | null }>()
 
-    for (const sale of sales) {
-      const saleItems = await db.prepare(`
-        SELECT product_id, SUM(quantity) as total_qty FROM sale_items WHERE sale_id = @sale_id GROUP BY product_id
-      `).all<{ product_id: number; total_qty: number }>({ sale_id: sale.id })
-      if (saleItems.length === 0) continue
-
-      const returnedItems = await db.prepare(`
-        SELECT ri.product_id, SUM(ri.quantity) as total_qty
-        FROM return_items ri
-        JOIN returns r ON r.id = ri.return_id
-        WHERE r.sale_id = @sale_id AND COALESCE(r.status, 'completed') != 'cancelled'
-        GROUP BY ri.product_id
-      `).all<{ product_id: number; total_qty: number }>({ sale_id: sale.id })
-
-      const returnedMap: Record<number, number> = {}
-      for (const row of returnedItems) returnedMap[row.product_id] = row.total_qty
-
-      const fullyReturned = saleItems.every((item) => (returnedMap[item.product_id] || 0) >= item.total_qty)
-      const hasPartialReturn = returnedItems.length > 0 && !fullyReturned
-      const correctStatus = fullyReturned ? 'returned' : hasPartialReturn ? 'partial_return' : sale.sale_status
-
-      if (correctStatus !== sale.sale_status) {
-        errors.push(`Sale ${sale.id}: status ${repair ? 'corrected' : 'mismatched'} from ${sale.sale_status} to ${correctStatus}`)
+    for (const sale of rows) {
+      const labelled = sale.sale_status === 'returned' || sale.sale_status === 'partial_return'
+      errors.push(`Sale ${sale.id}: return tag ${repair && !labelled ? 'corrected' : 'mismatched'} from ${sale.stored ?? 'none'} to ${sale.expected ?? 'none'}${labelled ? ' (retired status word; the held normalization rewrites it)' : ''}`)
+      if (!labelled) {
         statements.push({
-          sql: 'UPDATE sales SET sale_status = @status WHERE id = @id',
-          params: { status: correctStatus, id: sale.id },
+          sql: "UPDATE sales SET return_state = @returnState WHERE id = @id AND COALESCE(sale_status, '') NOT IN ('partial_return', 'returned')",
+          params: { returnState: sale.expected, id: sale.id },
         })
       }
     }

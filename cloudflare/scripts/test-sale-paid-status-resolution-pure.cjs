@@ -80,7 +80,7 @@ async function runTest(name, fn) {
 // The harness db takes named params; these reads use literals so the test
 // never depends on that binding convention.
 const saleRow = (f) => f.raw.prepare(
-  'SELECT sale_status,amount_paid_usd,amount_paid_khr,total_usd,is_delivery FROM sales WHERE id=1',
+  'SELECT sale_status,delivery_pending,amount_paid_usd,amount_paid_khr,total_usd,is_delivery FROM sales WHERE id=1',
 ).get()
 
 const branchStock = (f) => f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=1').get().quantity
@@ -141,7 +141,8 @@ async function patchStatus(db, id, body) {
     }))
     assert.equal(created.status, 200, JSON.stringify(created.body))
     const row = saleRow(f)
-    assert.equal(row.sale_status, 'awaiting_delivery', 'the delivery queue must survive the paid rule')
+    // Owner, 20 Oct 2026: stored as Completed with the delivery tag (migration 0263).
+    assert.deepEqual([row.sale_status, row.delivery_pending], ['completed', 1], 'the delivery queue must survive the paid rule')
     assert.equal(Number(row.is_delivery), 1)
   })
 
@@ -287,7 +288,7 @@ async function patchStatus(db, id, body) {
       is_delivery: 1, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer',
     })
     assert.equal(created.status, 200, JSON.stringify(created.body))
-    assert.equal(saleRow(f).sale_status, 'awaiting_delivery')
+    assert.deepEqual([saleRow(f).sale_status, saleRow(f).delivery_pending], ['completed', 1], 'Completed with the delivery tag (owner, 20 Oct 2026)')
   })
 
   await runTest('Completed with zero tender (A7) is still refused under the band', async () => {

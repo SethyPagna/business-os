@@ -236,14 +236,14 @@ async function main() {
     d1.exec(`
       CREATE TABLE products (id INTEGER PRIMARY KEY, stock_quantity REAL, cost_price_usd REAL, cost_price_khr REAL);
       CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL);
-      CREATE TABLE sales (id INTEGER PRIMARY KEY, sale_status TEXT);
-      CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER, quantity REAL, cost_price_usd REAL, cost_price_khr REAL);
-      CREATE TABLE returns (id INTEGER PRIMARY KEY, sale_id INTEGER, status TEXT);
-      CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, quantity REAL);
+      CREATE TABLE sales (id INTEGER PRIMARY KEY, sale_status TEXT, return_state TEXT);
+      CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER, quantity REAL, cost_price_usd REAL, cost_price_khr REAL, returned_quantity REAL);
+      CREATE TABLE returns (id INTEGER PRIMARY KEY, sale_id INTEGER, status TEXT, return_scope TEXT);
+      CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, sale_item_id INTEGER, product_id INTEGER, quantity REAL);
       CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, product_id INTEGER, movement_type TEXT, unit_cost_usd REAL, unit_cost_khr REAL);
       INSERT INTO products VALUES (1,0,9,36000);
-      INSERT INTO sales VALUES (1,'completed');
-      INSERT INTO sale_items VALUES (1,1,1,1,0,0),(2,1,1,1,NULL,NULL),(3,1,1,1,4,16000);
+      INSERT INTO sales(id,sale_status) VALUES (1,'completed');
+      INSERT INTO sale_items(id,sale_id,product_id,quantity,cost_price_usd,cost_price_khr) VALUES (1,1,1,1,0,0),(2,1,1,1,NULL,NULL),(3,1,1,1,4,16000);
       INSERT INTO inventory_movements VALUES (1,1,'sale',0,0),(2,1,'sale',NULL,NULL),(3,1,'return',NULL,NULL),(4,1,'sale',4,16000),(5,1,'add',NULL,NULL);
     `)
     const cdb = adapter(d1)

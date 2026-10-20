@@ -125,7 +125,7 @@ export function planReturnMoney(input: { sale: SaleReturnMoney['sale']; returns:
     if (refund > reduction) paysCash = true
   }
   if (owed() > 0) return { owedReductionUsd, paymentState: NOT_PAID_STATUS }
-  return { owedReductionUsd, paymentState: current === NOT_PAID_STATUS && paysCash ? 'completed' : current }
+  return { owedReductionUsd, paymentState: current }
 }
 
 /** Cash part of a split refund, for a refusal or a message. */

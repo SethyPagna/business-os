@@ -10,19 +10,12 @@
 // never compared the money to the status at all, so any client (including an
 // offline replay) could record the pair.
 //
-// WHY THE RULE IS NOT "paid => completed". `awaiting_delivery` is not a flag
-// beside the status, it IS a status, and its own help text defines it as a
-// PAID state ("Paid, not yet delivered -- stock deducted", both language
-// packs). Forcing every covered sale to `completed` would empty the delivery
-// queue -- the shop would lose the list of orders it still has to drive out.
-// So the rule is stated as a refusal of the one status that asserts a debt:
-//
-//   a sale whose recorded payment COVERS its total must never carry
-//   `awaiting_payment`; it resolves to `awaiting_delivery` when the sale is a
-//   delivery, and to `completed` otherwise.
-//
-// which gives the owner's sentence back unchanged for the counter sale, and
-// keeps the delivery queue intact for the rest.
+// THE RULE: a sale whose recorded payment COVERS its total must never carry
+// `awaiting_payment`; it resolves to `awaiting_delivery` when the sale is a
+// delivery, and to `completed` otherwise. `awaiting_delivery` is request
+// vocabulary only since 20 Oct 2026 (owner: two statuses, Not Paid and
+// Completed): the Worker stores it as `completed` plus the delivery-pending
+// tag (saleStoredState below), so the delivery queue survives.
 //
 // COVERAGE IS NOT RE-DERIVED ANYWHERE ELSE. paymentCoversSaleTotalUnits below
 // is THE coverage formula and saleOutstandingUsd is the same comparison read
@@ -96,20 +89,44 @@ export const NOT_PAID_STATUS = 'awaiting_payment'
 /** The statuses that assert the sale IS paid: the counter sale, and the paid order still waiting for its driver. */
 export const PAID_SALE_STATUSES: readonly string[] = ['completed', 'awaiting_delivery']
 
-const RETURN_SALE_STATUSES: readonly string[] = ['partial_return', 'returned']
+const LEGACY_DELIVERY_STATUS = 'awaiting_delivery'
 
-type SaleStatusRow = { sale_status?: unknown; status_before_return?: unknown }
+type SaleStatusRow = { sale_status?: unknown; status_before_return?: unknown; return_state?: unknown; delivery_pending?: unknown }
+
+export type SaleReturnState = 'partial' | 'full'
+/** A sale in the two-status model: the payment state, and the tags beside it. */
+export type SaleStoredState = { saleStatus: string; returnState: SaleReturnState | null; deliveryPending: boolean }
 
 /**
- * Does the sale read Not Paid? A return status replaces sale_status but not
- * the payment state (owner, 6 Oct 2026: the payment chip and the return
- * ribbon are independent), which it keeps in status_before_return. Every Not
- * Paid list, gate and chip asks this.
+ * A stored sale read in the two-status model (owner, 20 Oct 2026):
+ * sale_status is the payment state only (awaiting_payment, completed, or
+ * cancelled) and returns and delivery are tags beside it that never change
+ * it. Rows written before it carry a retired status until the held
+ * normalization rewrites them: partial_return/returned keep the payment state
+ * in status_before_return, and awaiting_delivery is a paid order not yet
+ * delivered. Both read here exactly as the new row would; a retired label
+ * outranks the tag column because the writer that set it ran last.
+ */
+export function saleStoredState(sale: SaleStatusRow): SaleStoredState {
+  const status = statusWord(sale.sale_status)
+  const legacyReturn: SaleReturnState | null = status === 'returned' ? 'full' : status === 'partial_return' ? 'partial' : null
+  const payment = legacyReturn ? statusWord(sale.status_before_return) : status
+  const legacyDelivery = payment === LEGACY_DELIVERY_STATUS
+  const returnColumn = sale.return_state === 'partial' || sale.return_state === 'full' ? sale.return_state : null
+  return {
+    saleStatus: legacyReturn ? (payment === NOT_PAID_STATUS ? NOT_PAID_STATUS : 'completed') : legacyDelivery ? 'completed' : payment,
+    returnState: legacyReturn ?? returnColumn,
+    deliveryPending: legacyDelivery || Number(sale.delivery_pending) === 1,
+  }
+}
+
+/**
+ * Does the sale read Not Paid? The payment state of saleStoredState, which a
+ * return never changes (owner, 6 Oct and 20 Oct 2026). Every Not Paid list,
+ * gate and chip asks this.
  */
 export function saleReadsNotPaid(sale: SaleStatusRow): boolean {
-  const status = statusWord(sale.sale_status)
-  return status === NOT_PAID_STATUS
-    || (RETURN_SALE_STATUSES.includes(status) && sale.status_before_return === NOT_PAID_STATUS)
+  return saleStoredState(sale).saleStatus === NOT_PAID_STATUS
 }
 
 /** The status a payment rule reads: Not Paid when saleReadsNotPaid, else the stored status. */
@@ -122,9 +139,10 @@ export function sumRefundsUsd(values: readonly FinancialDecimalInput[]): string 
   return formatScaledUnits(values.reduce<bigint>((sum, value) => sum + financialCalculationUnits(value), 0n), 4)
 }
 
-/** A return-status sale that still reads Not Paid: settling it changes only status_before_return. */
+/** A return-tagged sale that still reads Not Paid: what it owes is lowered by its returns. */
 export function returnSaleAwaitsPayment(sale: SaleStatusRow): boolean {
-  return RETURN_SALE_STATUSES.includes(statusWord(sale.sale_status)) && saleReadsNotPaid(sale)
+  const state = saleStoredState(sale)
+  return state.returnState !== null && state.saleStatus === NOT_PAID_STATUS
 }
 
 export type SaleCoverageInput = {

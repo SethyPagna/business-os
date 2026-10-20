@@ -136,7 +136,7 @@ const build = (user, overrides = {}) => telegram.formatSaleStatusTelegramLines({
   assert.ok(start > 0, 'routes/sales.ts must compose its status alert through lib/telegram.ts -- has the call moved?')
   const call = salesSrc.slice(start, salesSrc.indexOf('}),', start))
   for (const [field, value] of [
-    ['receipt', 'sale.receipt_number'], ['fromStatus', 'oldStatus'], ['toStatus', 'saleStatus'],
+    ['receipt', 'sale.receipt_number'], ['fromStatus', 'saleStatusWord'], ['fromStatus', 'current'], ['toStatus', 'target'],
     ['customer', 'sale.customer_name'], ['reason', 'cancelReasonLabel'], ['skippedUnits', 'totalSkippedUnits'],
     ['lostFeeUsd', 'cancelFeeUsd'], ['lostFeeKhr', 'cancelFeeKhr'], ['by', 'actorName'],
   ]) {

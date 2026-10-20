@@ -7,7 +7,12 @@
 // sale LOWERS THE DEBT, no cash leaves the drawer, and the sale STAYS Not Paid
 // until the rest is paid ($10 Not Paid, $4 returned -> owes $6, drawer pays
 // out nothing). Paying the $6 then settles it, exactly once, under replay.
-// The return state is a tag beside the payment state, never instead of it.
+// The return state is a tag beside the payment state, never instead of it
+// (owner, 20 Oct 2026: sale_status is Not Paid or Completed only; lane 6.0.890
+// writes the payment state to sale_status and the tag to return_state on every
+// write it owns -- the returns writers follow in lane S2a). Nothing turns Not
+// Paid into paid except tender: a return worth more than the debt refunds the
+// excess and the sale stays Not Paid ($0 owed) until it is marked paid.
 // Partial payment: $10 with $3 paid owes $7; a $4 return leaves $3 owed and
 // refunds $0; a return worth more than the debt refunds only the excess.
 //
@@ -110,14 +115,14 @@ async function main() {
     const due = mutation ? 10 : 6
     const settled = await settle(saleId, 'al-d-settle', due, `D settle $${due}`)
     const afterSettle = await saleRow(saleId)
-    const settledState = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', saleId)
-    r.check(`paying the remaining $${due} settles the sale (got ${settled.status} ${String(settled.body.error || '').slice(0, 110)}; status ${settledState.sale_status}/${settledState.status_before_return})`, () => {
+    const settledState = await h.one('SELECT sale_status,return_state FROM sales WHERE id=?', saleId)
+    r.check(`paying the remaining $${due} settles the sale (got ${settled.status} ${String(settled.body.error || '').slice(0, 110)}; status ${settledState.sale_status}/${settledState.return_state})`, () => {
       assert.equal(settled.status, 200)
       assert.equal(Number(afterSettle.amount_paid_usd), due, 'the tender recorded is exactly what was paid')
       assert.equal(Number(afterSettle.change_usd || 0), 0, 'no change is handed back on an exact payment')
       assert.equal(owed(afterSettle), 0)
       assert.ok(!(readsAsNotPaid(afterSettle)), 'a settled sale is no longer Not Paid')
-      if (!mutation) assert.deepEqual(settledState, { sale_status: 'partial_return', status_before_return: 'completed' }, 'the return status stays; only the payment state moves')
+      assert.deepEqual(settledState, { sale_status: 'completed', return_state: mutation ? null : 'partial' }, 'sale_status is the payment state; the return is the tag')
     })
     const replay = await settle(saleId, 'al-d-settle', due, 'D settle replay')
     const afterReplay = await saleRow(saleId)
@@ -137,18 +142,18 @@ async function main() {
       // re-applies the payment state beside the unchanged return status.
       const historyId = Number(settled.body.actionHistoryId)
       const undo = await H.historyStep(h, historyId, 'undo', 0, 'D undo settlement')
-      const undone = await h.one('SELECT sale_status,status_before_return,amount_paid_usd FROM sales WHERE id=?', saleId)
+      const undone = await h.one('SELECT sale_status,return_state,amount_paid_usd FROM sales WHERE id=?', saleId)
       const notPaidAfterUndo = await notPaidIds()
       r.check(`undoing the settlement puts the sale back to Not Paid with its return (got ${undo.status}; ${JSON.stringify(undone)}; in Not Paid list: ${notPaidAfterUndo.includes(saleId)})`, () => {
         assert.equal(undo.status, 200, JSON.stringify(undo.body).slice(0, 200))
-        assert.deepEqual({ ...undone, amount_paid_usd: Number(undone.amount_paid_usd) }, { sale_status: 'partial_return', status_before_return: 'awaiting_payment', amount_paid_usd: 0 })
+        assert.deepEqual({ ...undone, amount_paid_usd: Number(undone.amount_paid_usd) }, { sale_status: 'awaiting_payment', return_state: 'partial', amount_paid_usd: 0 })
         assert.ok(notPaidAfterUndo.includes(saleId))
       })
       const redo = await H.historyStep(h, historyId, 'redo', 1, 'D redo settlement')
-      const redone = await h.one('SELECT sale_status,status_before_return,amount_paid_usd FROM sales WHERE id=?', saleId)
+      const redone = await h.one('SELECT sale_status,return_state,amount_paid_usd FROM sales WHERE id=?', saleId)
       r.check(`redoing it settles again (got ${redo.status}; ${JSON.stringify(redone)})`, () => {
         assert.equal(redo.status, 200, JSON.stringify(redo.body).slice(0, 200))
-        assert.deepEqual({ ...redone, amount_paid_usd: Number(redone.amount_paid_usd) }, { sale_status: 'partial_return', status_before_return: 'completed', amount_paid_usd: 6 })
+        assert.deepEqual({ ...redone, amount_paid_usd: Number(redone.amount_paid_usd) }, { sale_status: 'completed', return_state: 'partial', amount_paid_usd: 6 })
       })
 
       // Sale 2: the return is cancelled, then restored, before settlement.
@@ -231,8 +236,8 @@ async function main() {
         assert.equal(fourthRefund, 1)
         assert.equal(Number((Number(drawerAfterFourth.refunds.usd) - Number(drawerBeforeFourth.refunds.usd)).toFixed(2)), 1)
       })
-      money(`over the debt: a sale whose debt the return cleared leaves Not Paid (status ${JSON.stringify(await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId))})`, () => {
-        assert.ok(!readsAsNotPaid(afterFourthReturn))
+      money(`over the debt: the cash refund does not mark the sale paid -- it stays Not Paid with $0 owed (status ${JSON.stringify(await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId))})`, () => {
+        assert.ok(readsAsNotPaid(afterFourthReturn))
       })
 
       // Cancelling that return brings the $3 debt back (and the $1 back into
@@ -251,10 +256,10 @@ async function main() {
       const fourthRestore = await H.bulkReturnStatus(h, 'al-d-restore-4', fourthReturnId, 'cancelled', 'completed', 'D restore the over-debt return')
       const afterFourthRestore = await saleRow(fourthId)
       const restoredMoney = await h.one('SELECT owed_reduction_usd,refund_currency FROM returns WHERE id=?', fourthReturnId)
-      money(`restoring it lowers the $3 debt and refunds $1 again, and the sale reads paid (got ${fourthRestore.status}; ${JSON.stringify(restoredMoney)}; ${afterFourthRestore.sale_status}/${afterFourthRestore.status_before_return})`, () => {
+      money(`restoring it lowers the $3 debt and refunds $1 again, and the sale stays Not Paid (got ${fourthRestore.status}; ${JSON.stringify(restoredMoney)}; ${afterFourthRestore.sale_status}/${afterFourthRestore.status_before_return})`, () => {
         assert.equal(fourthRestore.status, 200, JSON.stringify(fourthRestore.body).slice(0, 200))
         assert.deepEqual({ ...restoredMoney, owed_reduction_usd: Number(restoredMoney.owed_reduction_usd) }, { owed_reduction_usd: 3, refund_currency: 'USD' })
-        assert.ok(!readsAsNotPaid(afterFourthRestore))
+        assert.ok(readsAsNotPaid(afterFourthRestore))
       })
       const restoreUndo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'undo', 0, 'D undo the restore')
       const afterRestoreUndo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
@@ -264,9 +269,9 @@ async function main() {
       })
       const restoreRedo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'redo', 1, 'D redo the restore')
       const afterRestoreRedo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
-      money(`redoing the restore clears the debt again (got ${restoreRedo.status}; ${JSON.stringify(afterRestoreRedo)})`, () => {
+      money(`redoing the restore clears the debt again and the sale stays Not Paid (got ${restoreRedo.status}; ${JSON.stringify(afterRestoreRedo)})`, () => {
         assert.equal(restoreRedo.status, 200, JSON.stringify(restoreRedo.body).slice(0, 200))
-        assert.deepEqual(afterRestoreRedo, { sale_status: 'partial_return', status_before_return: 'completed' })
+        assert.deepEqual(afterRestoreRedo, { sale_status: 'partial_return', status_before_return: 'awaiting_payment' })
       })
 
       // Riel tender (owner, 29 Sep 2026): $10 with $7 paid, $4 returned and
@@ -334,19 +339,19 @@ async function main() {
         assert.ok(readsAsNotPaid(clearedRow))
       })
       const covered = await bulk('al-d-bulk-covered', await saleRow(fifth.body.id), 'D group-complete a covered returned Not Paid sale')
-      const coveredState = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fifth.body.id)
+      const coveredState = await h.one('SELECT sale_status,return_state FROM sales WHERE id=?', fifth.body.id)
       r.check(`group status marks a covered returned Not Paid sale paid beside its return (got ${covered.status}; ${JSON.stringify(coveredState)}; receipt ${JSON.stringify(covered.body.items)})`, () => {
         assert.equal(covered.status, 200, JSON.stringify(covered.body).slice(0, 200))
         assert.equal(covered.body.changedCount, 1)
-        assert.deepEqual(coveredState, { sale_status: 'partial_return', status_before_return: 'completed' })
+        assert.deepEqual(coveredState, { sale_status: 'completed', return_state: 'partial' })
         assert.equal(covered.body.items[0].before, 'awaiting_payment')
         assert.equal(covered.body.items[0].after, 'completed')
       })
       const bulkUndo = await H.historyStep(h, Number(covered.body.actionHistoryId), 'undo', 0, 'D undo the group status')
-      const bulkUndone = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fifth.body.id)
+      const bulkUndone = await h.one('SELECT sale_status,return_state FROM sales WHERE id=?', fifth.body.id)
       r.check(`undoing the group status puts it back to Not Paid (got ${bulkUndo.status}; ${JSON.stringify(bulkUndone)})`, () => {
         assert.equal(bulkUndo.status, 200, JSON.stringify(bulkUndo.body).slice(0, 200))
-        assert.deepEqual(bulkUndone, { sale_status: 'partial_return', status_before_return: 'awaiting_payment' })
+        assert.deepEqual(bulkUndone, { sale_status: 'awaiting_payment', return_state: 'partial' })
       })
     }
 

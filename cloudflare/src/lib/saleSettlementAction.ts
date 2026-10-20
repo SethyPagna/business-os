@@ -12,6 +12,8 @@ import {
   type SaleRecordEventStatement,
 } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords'
+import { SALE_STATE_SET_SQL, saleStateParams, saleStatusWord } from './salesStatus'
+import { saleStoredState, type SaleStoredState } from './saleStatusResolution'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
@@ -47,8 +49,11 @@ export type SaleSettlementState = {
   calculated_total_usd?: number | null
   rounding_adjustment_usd?: number
   sale_status: string | null
-  /** Absent on snapshots saved before a return-status sale could be settled; then it is never written. */
+  /** Read only: a retired return label keeps the payment state here. Absent on older snapshots. */
   status_before_return?: string | null
+  /** Tags (migration 0263). Absent on snapshots saved before them. */
+  return_state?: string | null
+  delivery_pending?: number
   exchange_rate: number | null
   subtotal_khr: number | null
   discount_khr: number | null
@@ -104,11 +109,9 @@ function paymentDetailsState(value: unknown): SaleRecordValueState {
   }
 }
 
-// A settled return-status sale keeps sale_status; its record shows the payment state that moved.
+// The record shows the payment state (and delivery) that moved; a return tag is not a status.
 function recordedStatus(state: SaleSettlementState): string | null {
-  const returnStatus = state.sale_status === 'partial_return' || state.sale_status === 'returned'
-  const paymentState = ['awaiting_payment', 'completed', 'awaiting_delivery'].includes(String(state.status_before_return))
-  return returnStatus && paymentState ? state.status_before_return ?? null : state.sale_status
+  return state.sale_status == null && state.status_before_return == null ? null : saleStatusWord(saleStoredState(state))
 }
 
 function settlementChanges(before: SaleSettlementState, after: SaleSettlementState): SaleRecordChange[] {
@@ -162,7 +165,7 @@ function nullableNumber(value: unknown): number | null {
 
 export async function readSaleSettlementState(db: D1Compat, saleId: number): Promise<SaleSettlementState | null> {
   const sale = await db.prepare(`
-    SELECT sale_status,status_before_return,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
+    SELECT sale_status,status_before_return,return_state,delivery_pending,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
            payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
            change_is_actual,change_exchange_rate,search_normalized,
@@ -181,6 +184,8 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     rounding_adjustment_usd: nullableNumber(sale.rounding_adjustment_usd) ?? 0,
     sale_status: sale.sale_status == null ? null : String(sale.sale_status),
     status_before_return: sale.status_before_return == null ? null : String(sale.status_before_return),
+    return_state: sale.return_state == null ? null : String(sale.return_state),
+    delivery_pending: Number(sale.delivery_pending) === 1 ? 1 : 0,
     exchange_rate: nullableNumber(sale.exchange_rate),
     subtotal_khr: nullableNumber(sale.subtotal_khr),
     discount_khr: nullableNumber(sale.discount_khr),
@@ -209,11 +214,18 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
   }
 }
 
-/** A snapshot saved before status_before_return was captured is compared and restored without it. */
+/**
+ * Compared in the two-status model: a snapshot holding a retired status (or
+ * saved before the tags or status_before_return existed) matches the row the
+ * settlement writer leaves for it.
+ */
 export function sameSettlementState(current: SaleSettlementState, expected: SaleSettlementState): boolean {
-  if (Object.prototype.hasOwnProperty.call(expected, 'status_before_return')) return samePrecisionCompatibleState(current, expected)
-  const { status_before_return: _ignored, ...legacy } = current
-  return samePrecisionCompatibleState(legacy, expected)
+  return samePrecisionCompatibleState(comparableState(current), comparableState(expected))
+}
+
+function comparableState(state: SaleSettlementState): object {
+  const { sale_status: _status, status_before_return: _beforeReturn, return_state: _returnState, delivery_pending: _deliveryPending, lines, ...money } = state
+  return { ...money, lines, state: saleStoredState(state) }
 }
 
 /**
@@ -224,11 +236,8 @@ export function sameSettlementState(current: SaleSettlementState, expected: Sale
 export function buildSaleSettlementAfterState(
   before: SaleSettlementState,
   sale: Record<string, unknown>,
-  targetStatus: string,
+  target: SaleStoredState,
   plan: SettlementPlan,
-  // A return-status sale that reads Not Paid keeps its return status; the
-  // payment state it settles to is status_before_return.
-  returnSale = false,
 ): SaleSettlementState {
   return {
     ...(before.money_precision_version === undefined ? {} : {
@@ -236,9 +245,10 @@ export function buildSaleSettlementAfterState(
       calculated_total_usd: before.calculated_total_usd,
       rounding_adjustment_usd: before.rounding_adjustment_usd,
     }),
-    sale_status: returnSale ? before.sale_status : targetStatus,
-    ...(Object.prototype.hasOwnProperty.call(before, 'status_before_return')
-      ? { status_before_return: returnSale ? targetStatus : before.status_before_return ?? null } : {}),
+    sale_status: target.saleStatus,
+    ...(Object.prototype.hasOwnProperty.call(before, 'status_before_return') ? { status_before_return: before.status_before_return ?? null } : {}),
+    return_state: target.returnState,
+    delivery_pending: target.deliveryPending ? 1 : 0,
     exchange_rate: before.exchange_rate,
     subtotal_khr: before.subtotal_khr,
     discount_khr: before.discount_khr,
@@ -267,10 +277,11 @@ export function buildSaleSettlementAfterState(
   }
 }
 
+// A retired status in an older snapshot is written in the two-status model; status_before_return is never written.
 export function saleSettlementStateStatements(saleId: number, state: SaleSettlementState, stamp: string): Statement[] {
-  const withBeforeReturn = Object.prototype.hasOwnProperty.call(state, 'status_before_return')
+  const { status_before_return: _beforeReturn, lines: _lines, ...columns } = state
   return [{
-    sql: `UPDATE sales SET sale_status=@sale_status,${withBeforeReturn ? 'status_before_return=@status_before_return,' : ''}exchange_rate=@exchange_rate,
+    sql: `UPDATE sales SET ${SALE_STATE_SET_SQL},exchange_rate=@exchange_rate,
           subtotal_khr=@subtotal_khr,discount_khr=@discount_khr,tax_khr=@tax_khr,
           total_khr=@total_khr,delivery_fee_khr=@delivery_fee_khr,
           membership_discount_khr=@membership_discount_khr,payment_method=@payment_method,
@@ -279,7 +290,7 @@ export function saleSettlementStateStatements(saleId: number, state: SaleSettlem
           change_usd=@change_usd,change_khr=@change_khr,change_is_actual=@change_is_actual,
           change_exchange_rate=@change_exchange_rate,search_normalized=@search_normalized,
           updated_at=@stamp WHERE id=@id`,
-    params: { id: saleId, stamp, ...state, lines: undefined },
+    params: { id: saleId, stamp, ...columns, ...saleStateParams(saleStoredState(state)) },
   }, ...state.lines.map((line) => ({
     sql: `UPDATE sale_items SET applied_price_khr=@applied_price_khr,total_khr=@total_khr,
           product_discount_khr=@product_discount_khr,base_price_khr=@base_price_khr,

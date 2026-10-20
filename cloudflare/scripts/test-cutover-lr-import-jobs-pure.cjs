@@ -335,8 +335,9 @@ async function main() {
       assert.equal(approved.status, 200, JSON.stringify(approved.body))
       await w.drain()
       assert.match(w.sql.prepare('SELECT status FROM import_jobs WHERE id=?').get(id).status, /^completed/)
-      const sale = w.sql.prepare('SELECT loyalty_accrual,sale_status,total_usd,branch_id FROM sales').get()
-      assert.deepEqual(sale, { loyalty_accrual: enabled ? 1 : 0, sale_status: 'partial_return', total_usd: 24, branch_id: 2 })
+      const sale = w.sql.prepare('SELECT loyalty_accrual,sale_status,return_state,total_usd,branch_id FROM sales').get()
+      // Owner, 20 Oct 2026: the CSV's partial_return is the return tag of a Completed sale.
+      assert.deepEqual(sale, { loyalty_accrual: enabled ? 1 : 0, sale_status: 'completed', return_state: 'partial', total_usd: 24, branch_id: 2 })
       assert.equal(w.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 4)
     })
   }
@@ -410,8 +411,10 @@ async function main() {
             // return restock movement carries that same unknown cost instead of the DEFAULT 0 the oracle left.
             ? {
               ...old.rows,
+              // Owner, 20 Oct 2026: the CSV's partial_return is stored as the return tag of a Completed sale.
               sales: old.rows.sales.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'string'
-                ? value.replace(/"cost_price_usd":[^,]*,"cost_price_khr":[^,}]*/g, '"cost_price_usd":null,"cost_price_khr":null') : value]))),
+                ? value.replace(/"cost_price_usd":[^,]*,"cost_price_khr":[^,}]*/g, '"cost_price_usd":null,"cost_price_khr":null').replace(/"sale_status":"partial_return"/g, '"sale_status":"completed"') : value])))
+                .map((row) => row.sale_status === 'partial_return' ? { ...row, sale_status: 'completed', return_state: 'partial' } : row),
               sale_items: old.rows.sale_items.map((row) => ({ ...row, cost_price_usd: null, cost_price_khr: null })),
               inventory_movements: old.rows.inventory_movements.map((row) => ({ ...row, unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null })),
             }

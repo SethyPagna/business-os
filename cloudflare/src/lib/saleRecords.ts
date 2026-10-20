@@ -623,8 +623,11 @@ export function reconstructSaleCreation(input: {
     .map((row) => ({ row, stamp: atMs(row.created_at) }))
     .filter((entry): entry is { row: SaleRecordReturnRow; stamp: number } => entry.stamp !== null)
     .sort((left, right) => left.stamp - right.stamp)[0]
-  if (firstReturnAt) {
-    rememberEarlierBefore(known, 'sale_status', beforeReturn.value ? beforeReturn.value.value : input.sale.status_before_return, firstReturnAt.row.created_at)
+  // Only a return that relabelled the sale (retired partial_return/returned)
+  // moved sale_status; since 20 Oct 2026 a return is a tag and moves nothing.
+  const relabelled = beforeReturn.value || input.sale.status_before_return != null || ['partial_return', 'returned'].includes(String(input.sale.sale_status))
+  if (firstReturnAt && relabelled) {
+    rememberEarlierBefore(known, 'sale_status', beforeReturn.value ? beforeReturn.value.value : input.sale.status_before_return ?? null, firstReturnAt.row.created_at)
   }
   if (text(input.sale.sale_status) === 'cancelled') {
     rememberEarlierBefore(known, 'sale_status', input.sale.status_before_cancel, input.sale.updated_at)
