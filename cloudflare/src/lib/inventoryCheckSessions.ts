@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { buildInventoryCheckStockQuery, readInventoryCheckStock, type InventoryCheckStockRow } from './inventoryCheckStock'
+import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
 import { stockVisibleProductSql } from './productStockGuard'
@@ -47,12 +47,17 @@ export async function currentInventoryCheckActor(db: D1Compat, principal: Invent
   if (!access.canView || write && !access.canCheck) fail(403, 'inventory_check_permission_required')
   return { ...actor, tokenHash: principal.tokenHash }
 }
+// Positive-only per-isolate memos: a miss re-probes, so a migration that lands later is seen on the next request.
+let checkSchemaReady = false
+let physicalSignature: string | undefined
 async function schemaReady(db: D1Compat): Promise<void> {
+  if (checkSchemaReady) return
   const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (
     'inventory_check_sessions','inventory_check_items','inventory_check_events','inventory_check_events_no_update',
     'inventory_check_events_no_delete','inventory_check_sessions_identity','inventory_check_sessions_no_delete',
     'inventory_check_items_baseline','inventory_check_items_no_delete')`).get<{ n: number }>()
   if (ready?.n !== 9) fail(503, 'inventory_check_schema_unavailable')
+  checkSchemaReady = true
 }
 const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
 function authorityGuard(actor: Actor): Statement {
@@ -193,7 +198,10 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
   catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
-    if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
+    if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
+      physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
+      fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
+    }
     try {
       const fresh = await currentInventoryCheckActor(db, principal, true)
       const recovered = await receipt(db, fresh, key, hash)
@@ -245,18 +253,25 @@ async function committedSessionProjection(db: D1Compat, principal: InventoryChec
     return {item:summary,observation:projectObservation(actor,item,session.created_by===actor.id,current)}
   } catch { return fail(503,'inventory_check_outcome_unknown') }
 }
+// One sqlite_master pass for the stock tables and the epoch guards; the write guards compare it inside the transaction.
 const PHYSICAL_SCHEMA_SQL = `SELECT json_object('epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'),
   'epoch_present',(SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch'),
-  'tables',(SELECT json_group_array(sql) FROM (SELECT sql FROM sqlite_master WHERE type='table' AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') ORDER BY name)),
-  'guards',(SELECT json_group_array(json_object('name',name,'sql',sql)) FROM (SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'stock_epoch_%_0243' ORDER BY name))) AS signature`
+  'objects',(SELECT json_group_array(json_array(type,name,sql)) FROM (SELECT type,name,sql FROM sqlite_master
+    WHERE type='table' AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') OR type='trigger' AND name LIKE 'stock_epoch_%_0243'
+    ORDER BY type,name))) AS signature`
+// The remembered signature was read with a full structure validation; a fresh one is read with a fresh validation too.
 async function validatedStockSnapshot(db: D1Compat, branchId: number, productIds: number[]) {
-  let signature: string | undefined
+  const known = physicalSignature
+  if (!known) resetInventoryCheckStockSchemaMemo()
+  let signature = known
   const rows = await readInventoryCheckStock({batch:async statements=>{
-    const results=await db.batch([...statements,{sql:PHYSICAL_SCHEMA_SQL}])
-    signature=(results[statements.length]?.results?.[0] as {signature?:string})?.signature
+    const results=await db.batch(known ? statements : [...statements,{sql:PHYSICAL_SCHEMA_SQL}])
+    if (!known) signature=(results[statements.length]?.results?.[0] as {signature?:string})?.signature
     return results.slice(0,statements.length)
   }},{branchId,productIds})
-  return {rows,signature:signature ?? fail(503,'inventory_check_stock_schema_unavailable')}
+  if (!signature) return fail(503,'inventory_check_stock_schema_unavailable')
+  physicalSignature = signature
+  return {rows,signature}
 }
 const LOW_STOCK_ROWS_SQL = `SELECT key,value FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_threshold_default') ORDER BY key`
 const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'value',value)) FROM (${LOW_STOCK_ROWS_SQL})`

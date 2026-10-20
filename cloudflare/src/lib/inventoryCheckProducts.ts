@@ -111,9 +111,10 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
     else if (query.groupState === 'standalone') conditions.push('(COALESCE(p.parent_id,0)=0 AND COALESCE(p.is_group,0)=0 AND COALESCE(p.is_grouped_cached,0)=0)')
     else invalid('groupState')
   }
-  if (query.stockState === 'in_stock') conditions.push('p.__quantity>p.__out')
-  if (query.stockState === 'low_stock') conditions.push('p.__quantity>p.__out AND p.__quantity<=p.__low')
-  if (query.stockState === 'out_of_stock') conditions.push('p.__quantity<=p.__out')
+  const stockConditions: string[] = []
+  if (query.stockState === 'in_stock') stockConditions.push('p.__quantity>p.__out')
+  if (query.stockState === 'low_stock') stockConditions.push('p.__quantity>p.__out AND p.__quantity<=p.__low')
+  if (query.stockState === 'out_of_stock') stockConditions.push('p.__quantity<=p.__out')
   const columns = ['p.id', 'p.name', 'p.image_path', 'p.unit', 'p.parent_id', 'p.is_group', 'p.is_grouped_cached', 'p.created_at']
   if (access.fields.barcode) columns.push('p.barcode', 'p.sku')
   if (access.fields.brand) columns.push('p.brand', 'p.brands')
@@ -122,26 +123,29 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   if (access.fields.cost) columns.push('p.cost_price_usd', 'p.cost_price_khr',
     `${costReviewKeyAvailable ? "(COALESCE(p.cost_review_key,'')<>'')" : '0'} AS cost_needs_review`)
   if (access.fields.received) columns.push('(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=p.id) AS latest_received_at')
-  const ctes = `stock AS (${stock.rowsSql}), base AS (
+  // Stock-free ranking keeps the stock columns as NULL so the caller can fill them for the page rows only.
+  const ctes = (withStock: boolean) => `${withStock ? `stock AS (${stock.rowsSql}), ` : ''}base AS (
     SELECT ${columns.join(',')}, ${FAMILY_ROOT_KEY_SQL} AS family_key, parent.name AS parent_name,
-      stock.quantity AS __quantity, COALESCE(p.out_of_stock_threshold,0) AS __out,
-      ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')} AS __low,
-      stock.invalid_quantity,stock.negative_quantity,stock.lot_exceeds_ordinary,stock.cache_mismatch,
-      stock.invalid_allocation,stock.unallocated_damaged,stock.missing_branch_allocation,
-      stock.recorded_ordinary_quantity,stock.recorded_lot_quantity,stock.recorded_damaged_quantity,stock.recorded_cache_quantity,stock.consistent AS stock_consistent,
+      COALESCE(p.out_of_stock_threshold,0) AS __out, ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')} AS __low,
+      ${stockColumnsSql(withStock ? 'stock' : null)},
       CASE WHEN parent.id IS NOT NULL THEN json_object('id',parent.id,'name',parent.name,'image_path',parent.image_path,'unit',parent.unit,'is_group',1) END AS __header
-    FROM products p LEFT JOIN products parent ON parent.id=p.parent_id LEFT JOIN stock ON stock.product_id=p.id
+    FROM products p LEFT JOIN products parent ON parent.id=p.parent_id${withStock ? ' LEFT JOIN stock ON stock.product_id=p.id' : ''}
     WHERE ${stockVisibleProductSql('p')} AND NOT EXISTS (SELECT 1 FROM products child WHERE child.parent_id=p.id AND child.id<>p.id)
       AND (@branchId IS NULL OR EXISTS (SELECT 1 FROM branches allowed WHERE allowed.id=@branchId AND allowed.is_active=1))
-  ), cohort AS MATERIALIZED (SELECT * FROM base p WHERE ${conditions.join(' AND ')}),
+  ), cohort AS MATERIALIZED (SELECT * FROM base p WHERE ${[...conditions, ...withStock ? stockConditions : []].join(' AND ')}),
     requested_ids(product_id) AS (SELECT id FROM cohort)`
-  return { query, page, pageSize, branchId, params, ctes, saleClauses }
+  return { query, page, pageSize, branchId, params, ctes, saleClauses, stockFiltered: stockConditions.length > 0 }
 }
+const STOCK_ROW_COLUMNS = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged',
+  'missing_branch_allocation', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
+const PAGE_STOCK_PREFIX = '__page_stock_'
+const stockColumnsSql = (source: string | null, prefix = '') => [['quantity', '__quantity'], ...STOCK_ROW_COLUMNS.map(column => [column, column]), ['consistent', 'stock_consistent']]
+  .map(([from, to]) => `${source ? `${source}.${from}` : 'NULL'} AS ${prefix}${to}`).join(',')
 
 export function buildInventoryCheckProductMembershipQuery(rawQuery: Record<string, unknown>, productIds: readonly number[], access: InventoryCheckAccess, lowStock: LowStockConfig) {
   if (!Array.isArray(productIds) || productIds.length > 500 || productIds.some(id => !Number.isSafeInteger(id) || id <= 0)) invalid('productIds')
   const plan = population(rawQuery, access, lowStock, productIds)
-  return { rowsSql: `WITH ${plan.ctes} SELECT id FROM cohort WHERE id IN (SELECT value FROM json_each(@membershipIds)) ORDER BY id`,
+  return { rowsSql: `WITH ${plan.ctes(plan.stockFiltered)} SELECT id FROM cohort WHERE id IN (SELECT value FROM json_each(@membershipIds)) ORDER BY id`,
     params: { ...plan.params, membershipIds: JSON.stringify([...new Set(productIds)]) } }
 }
 
@@ -176,7 +180,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   if (options.customerRanking && !access.canViewCustomerDetails) denied('customerRanking')
   const saleWhere = [recognizedExpr('s.'), ...plan.saleClauses, plan.branchId ? 'si.branch_id=@branchId' : ''].filter(Boolean).join(' AND ')
   const identity = identifiedCustomerExpr('s.')
-  const ctes = `${plan.ctes}, ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped: !!plan.branchId, saleClauses: plan.saleClauses })}),
+  const rankCtes = (withStock: boolean) => `${plan.ctes(withStock)}, ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped: !!plan.branchId, saleClauses: plan.saleClauses })}),
     buyers AS (SELECT DISTINCT si.product_id,${identity} AS customer_id,s.id AS sale_id
       FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN requested_ids wanted ON wanted.product_id=si.product_id
       WHERE ${saleWhere} AND ${identity} IS NOT NULL),
@@ -206,7 +210,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   const reasonFacets = options.observationFilter ? `(SELECT json_group_array(reason) FROM (SELECT DISTINCT i.reason FROM cohort c
     JOIN inventory_check_items i ON i.product_id=c.id JOIN inventory_check_sessions s ON s.id=i.session_id
     WHERE i.state='issue' AND ${observationWhere(options.observationFilter, plan.params)} ORDER BY i.reason COLLATE NOCASE,i.reason LIMIT 201))` : "'[]'"
-  const summarySql = `WITH ${ctes} SELECT
+  const summarySql = `WITH ${rankCtes(access.fields.stock)} SELECT
     (SELECT COUNT(*) FROM cohort) AS total_variants,
     (SELECT CASE WHEN COUNT(__quantity)=COUNT(*) THEN COALESCE(SUM(__quantity),0) END FROM cohort) AS stock_quantity,
     (SELECT COALESCE(SUM(__quantity),0) FROM cohort) AS known_stock_quantity,
@@ -220,17 +224,31 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
     (SELECT COUNT(*) FROM branches WHERE id=@branchId AND is_active=1) AS selected_branch_exists,
     ${productRanking} AS product_ranking,${customerRanking} AS customer_ranking,
     ${facets('brand')} AS brand_facets,${facets('category')} AS category_facets,${reasonFacets} AS reason_facets FROM family_metrics`
+  const familyOrder = (name: string, number: string) => numeric ? `(${number} IS NULL) ASC,${number} ${direction},${name} ASC` : `${name} ${direction}`
+  // Ranking by name, price, cost, date or sales needs no stock: rank stock-free, then read stock for the page rows only.
+  const rankWithStock = plan.stockFiltered || sort === 'stock'
+  const pageStock = access.fields.stock && !rankWithStock ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
   let summary: Record<string, unknown> = {}
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db: { batch: async statements => {
-      const result = await schemaBatch(db, [...statements.map((statement, index) => ({ ...statement, sql: index === 1 ? `${statement.sql}\nLIMIT 501` : statement.sql })),
+      const pageSql = `${statements[1].sql}\nLIMIT 501`
+      // Same snapshot, same order: a page family is complete on its page, so its window aggregates equal the ranking's
+      // family aggregates, and family_root_id then id are the helper's own terminal keys.
+      const stockedPageSql = pageStock && `WITH __page AS MATERIALIZED (${pageSql}), stock AS (${pageStock.rowsSql})
+        SELECT __page.*,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)} FROM __page LEFT JOIN stock ON stock.product_id=__page.id
+        WINDOW family AS (PARTITION BY __page.__family_root_id)
+        ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
+      const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: stockedPageSql || pageSql },
         { sql: summarySql, params: { ...plan.params, rankingLimit: limit } }])
       summary = (result[2].results?.[0] || {}) as Record<string, unknown>
+      if (stockedPageSql) for (const row of (result[1].results || []) as Array<Record<string, unknown>>) {
+        for (const key of Object.keys(row)) if (key.startsWith(PAGE_STOCK_PREFIX)) { row[key.slice(PAGE_STOCK_PREFIX.length)] = row[key]; delete row[key] }
+      }
       return result.slice(0, 2)
     } } as D1Compat,
-    rankCteSql: ctes, selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
+    rankCteSql: rankCtes(rankWithStock), selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
     params: plan.params, page: plan.page, pageSize: plan.pageSize,
-    familyOrderSql: numeric ? `(family_num_sort IS NULL) ASC,family_num_sort ${direction},family_name ASC` : `family_name ${direction}`,
+    familyOrderSql: familyOrder('family_name', 'family_num_sort'),
     familyNumericSortSql: numeric ? `f.${numeric}` : undefined, intraFamilyOrderSql: 'id ASC',
   })
   if (plan.branchId && Number(summary.selected_branch_exists) !== 1) invalid('branchId')
