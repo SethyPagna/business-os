@@ -6,7 +6,7 @@ import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
-import SignupConsentField, { CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM } from './legal/SignupConsentField.tsx'
+import SignupConsentField, { consentRequiredMessage } from './legal/SignupConsentField.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
@@ -90,7 +90,7 @@ export default function CatalogAccountSection({
   const onSignIn = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!consent) {
-      setConsentError(copy('portal_legal_consent_required', CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM))
+      setConsentError(consentRequiredMessage(copy, 'signin'))
       return
     }
     setConsentError('')
@@ -100,7 +100,7 @@ export default function CatalogAccountSection({
   const onSignUp = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!consent) {
-      setConsentError(copy('portal_legal_consent_required', CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM))
+      setConsentError(consentRequiredMessage(copy, 'signup'))
       return
     }
     setConsentError('')

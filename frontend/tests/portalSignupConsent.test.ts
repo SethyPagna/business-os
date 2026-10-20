@@ -73,7 +73,7 @@ test('the consent checkbox is required, unticked, labelled, and links to both po
   const id = checkbox[0].match(/id="([^"]+)"/)
   assert.ok(id, 'the checkbox needs an id for its label')
   assert.match(html, new RegExp(`<label[^>]*for="${id[1]}"`), 'the checkbox has no associated label')
-  assert.match(html, /I agree to the Terms &amp; Conditions and the Privacy Policy\./)
+  assert.match(html, /I am 16 or older, and I agree to the Terms &amp; Conditions and the Privacy Policy\./)
   assert.match(html, /href="[^"]*legal=terms"/, 'the consent line must link to the Terms')
   assert.match(html, /href="[^"]*legal=privacy"/, 'the consent line must link to the Privacy Policy')
 })

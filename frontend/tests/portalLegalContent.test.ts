@@ -223,8 +223,9 @@ for (const [key, value] of Object.entries(PORTAL_LEGAL_KM)) {
   assert.doesNotMatch(value, /ពិន្ទុ|រង្វាន់|ប្ដូរយក|ប្តូរយក|ស្មោះត្រង់|ភក្ដីភាព/, `km ${key} still promises points: ${value}`)
 }
 assert.ok(!('portal_legal_terms_membership_h' in PORTAL_LEGAL_EN), 'the "Membership and points" section is gone')
-assert.match(legalText('en', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /^Welcome/, 'the privacy policy opens with a welcome')
-assert.match(legalText('km', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /^សូមស្វាគមន៍/, 'the Khmer privacy policy opens with a welcome')
+// Owner, 20 Oct 2026: plain factual copy -- the welcome opener and the effort/gladness sentences are gone.
+assert.doesNotMatch(legalText('en', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /welcome/i, 'the privacy policy opens with a welcome')
+assert.doesNotMatch(legalText('km', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /ស្វាគមន៍/, 'the Khmer privacy policy opens with a welcome')
 // Account details exist only to know who is who and for safety; no billing details are kept or asked for.
 assert.match(privacyEn, /only[^.]*know who is who[^.]*safe/i, 'the privacy policy says account details are kept only to know who is who and for safety')
 assert.match(privacyKm, /ដឹងថានរណាជានរណា[^។]*សុវត្ថិភាព/, 'the Khmer privacy policy says the same')
@@ -244,9 +245,9 @@ for (const [text, where] of [[privacyKm, 'privacy'], [termsKm, 'terms']] as cons
 // The brand-enquiry route stays.
 assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /respective rights holders[\s\S]*Contact the store using the verified details above/)
 assert.match(PORTAL_LEGAL_KM.portal_legal_terms_ip_b, /ម្ចាស់សិទ្ធិ[\s\S]*សូមទាក់ទងហាង/)
-// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure (1,032 English words; the 7 Sep text was 1,148).
+// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure, the 7-day returns section and the age-16 wording (1,039 English words; the 7 Sep text was 1,148).
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length
-assert.ok(words(privacyEn) + words(termsEn) <= 1032, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
+assert.ok(words(privacyEn) + words(termsEn) <= 1039, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
 
 // Page keys
 assert.equal(isLegalPageKey('privacy'), true)

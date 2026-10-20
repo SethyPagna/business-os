@@ -180,13 +180,13 @@ export default function PortalFooter({
   )
 
   const details: LegalBusinessDetails = useMemo(() => ({
-    name: sanitizeBusinessDetail(businessName) || 'This business',
+    name: sanitizeBusinessDetail(businessName) || text('portal_legal_business_fallback'),
     legalName: sanitizeBusinessDetail(legalName),
     registrationNumber: sanitizeBusinessDetail(registrationNumber, 80),
     address: sanitizeBusinessDetail(address, 300),
     phone: sanitizeBusinessDetail(phone, 60),
     email: sanitizeBusinessDetail(email, 120),
-  }), [businessName, legalName, registrationNumber, address, phone, email])
+  }), [businessName, legalName, registrationNumber, address, phone, email, text])
 
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
@@ -391,7 +391,7 @@ export default function PortalFooter({
                   key={page}
                   href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
                   aria-current={activePage === page ? 'page' : undefined}
-                  className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  className="inline-flex min-h-11 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
                   onClick={(event) => {
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
                     event.preventDefault()
@@ -405,7 +405,10 @@ export default function PortalFooter({
           </nav>
         </div>
         <div className="mx-auto mt-6 flex max-w-5xl flex-wrap items-center justify-between gap-x-4 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
-          <span>{fill('portal_legal_footer_rights')}</span>
+          <div className="min-w-0">
+            <p>{fill('portal_legal_footer_rights')}</p>
+            <p data-portal-footer-independent="true">{text('portal_legal_footer_independent')}</p>
+          </div>
           <a
             href="/THIRD_PARTY_NOTICES.txt"
             target="_blank"
@@ -510,7 +513,7 @@ function LegalReader({
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <h1
             id={titleId}
-            className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900 dark:text-neutral-100"
+            className="min-w-0 flex-1 break-words text-base font-semibold leading-7 text-slate-900 dark:text-neutral-100"
             style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
           >
             {text(LEGAL_PAGE_TITLE_KEY[page])}
@@ -522,7 +525,7 @@ function LegalReader({
             onClick={onClose}
             aria-label={text('portal_legal_close')}
             title={text('portal_legal_close')}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
             <X className="h-5 w-5" />
           </button>
@@ -557,7 +560,7 @@ function LegalReader({
               key={other}
               type="button"
               onClick={() => onNavigate(other)}
-              className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              className="inline-flex min-h-11 items-center rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
             >
               {text(LEGAL_PAGE_TITLE_KEY[other])}
             </button>

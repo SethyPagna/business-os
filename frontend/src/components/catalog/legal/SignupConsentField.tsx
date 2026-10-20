@@ -15,10 +15,19 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 // Mirrors of the portal_legal_* keys in legalContent.ts, so the line still
 // reads correctly before the portal language pack has loaded.
-export const CONSENT_LABEL_EN = 'I agree to the Terms & Conditions and the Privacy Policy.'
-export const CONSENT_LABEL_KM = 'ខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។'
-export const CONSENT_REQUIRED_EN = 'Please agree to the Terms & Conditions and Privacy Policy to create an account.'
-export const CONSENT_REQUIRED_KM = 'សូមយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។'
+export const CONSENT_LABEL_EN = 'I am 16 or older, and I agree to the Terms & Conditions and the Privacy Policy.'
+export const CONSENT_LABEL_KM = 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។'
+export const CONSENT_REQUIRED_EN = 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.'
+export const CONSENT_REQUIRED_KM = 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។'
+export const CONSENT_REQUIRED_SIGNIN_EN = 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to sign in.'
+export const CONSENT_REQUIRED_SIGNIN_KM = 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។'
+
+/** The refusal shown when the box is unticked: it names the action being attempted. */
+export function consentRequiredMessage(copy: CopyFn, mode: 'signin' | 'signup'): string {
+  return mode === 'signin'
+    ? copy('portal_legal_consent_required_signin', CONSENT_REQUIRED_SIGNIN_EN, CONSENT_REQUIRED_SIGNIN_KM)
+    : copy('portal_legal_consent_required', CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM)
+}
 
 export default function SignupConsentField({
   copy,
