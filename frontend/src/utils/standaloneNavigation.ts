@@ -95,6 +95,8 @@ export type InstallRoute = 'native-prompt' | 'ios-share'
 const INSTALL_BAND_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:install-offer-dismissed-at-v2`
 const LEGACY_IOS_HINT_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`
 const APP_INSTALLED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:app-installed-at-v1`
+/** A closed band comes back after this long, so one stray tap does not hide the offer for good. */
+export const INSTALL_BAND_REOFFER_MS = 30 * 24 * 60 * 60 * 1000
 
 /** clientRuntime.ts spells these out in its logout preserve list; installOffer.test.ts keeps the two in step. */
 export const INSTALL_OFFER_DEVICE_KEYS = [INSTALL_BAND_DISMISSED_KEY, LEGACY_IOS_HINT_DISMISSED_KEY, APP_INSTALLED_KEY] as const
@@ -106,11 +108,18 @@ function isIosDevice(userAgent: string, maxTouchPoints: number): boolean {
   return /Macintosh/.test(userAgent) && maxTouchPoints > 1
 }
 
-function isIosSafariBrowser(userAgent: string): boolean {
-  // Chrome/Firefox/Edge/Opera for iOS embed Safari's engine but ship their
-  // own UA token, and none of them can Add to Home Screen the way this hint
-  // describes -- telling their users to tap Share would be wrong directions.
-  return /Safari/.test(userAgent) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(userAgent)
+// Chrome, Firefox and Edge on iOS 16.4+ can Add to Home Screen from their own
+// menu, so they get the same instructions as Safari. Opera and in-app browsers
+// (no Safari token) cannot, and older iOS builds of the three cannot either.
+function canAddToIosHomeScreen(userAgent: string): boolean {
+  if (/OPiOS/.test(userAgent)) return false
+  if (/CriOS|FxiOS|EdgiOS/.test(userAgent)) {
+    const version = /OS (\d+)_(\d+)/.exec(userAgent)
+    if (!version) return false
+    const major = Number(version[1])
+    return major > 16 || (major === 16 && Number(version[2]) >= 4)
+  }
+  return /Safari/.test(userAgent)
 }
 
 function isHandheldInstallTarget(): boolean {
@@ -207,10 +216,10 @@ export function installMenuRoute(): InstallRoute | null {
   if (isStandaloneDisplayMode() || readDeviceTimestamp(APP_INSTALLED_KEY) > 0) return null
   if (deferredInstallPrompt) return 'native-prompt'
   const userAgent = navigator.userAgent || ''
-  return isIosDevice(userAgent, Number(navigator.maxTouchPoints) || 0) && isIosSafariBrowser(userAgent) ? 'ios-share' : null
+  return isIosDevice(userAgent, Number(navigator.maxTouchPoints) || 0) && canAddToIosHomeScreen(userAgent) ? 'ios-share' : null
 }
 
-/** The band: phones and tablets only, and never again on a device where it was closed (owner default, 28 Sep 2026). */
+/** The band: phones and tablets only, and not for 30 days after it was closed (owner, 19 Oct 2026; was never again). */
 export function installBandRoute(): InstallRoute | null {
   if (!isHandheldInstallTarget() || isInstallBandDismissed()) return null
   return installMenuRoute()
@@ -218,8 +227,12 @@ export function installBandRoute(): InstallRoute | null {
 
 function isInstallBandDismissed(): boolean {
   return installBandDismissedThisPage
-    || readDeviceTimestamp(INSTALL_BAND_DISMISSED_KEY) > 0
-    || readDeviceTimestamp(LEGACY_IOS_HINT_DISMISSED_KEY) > 0
+    || isWithinReofferWindow(readDeviceTimestamp(INSTALL_BAND_DISMISSED_KEY))
+    || isWithinReofferWindow(readDeviceTimestamp(LEGACY_IOS_HINT_DISMISSED_KEY))
+}
+
+function isWithinReofferWindow(closedAt: number): boolean {
+  return closedAt > 0 && Date.now() - closedAt < INSTALL_BAND_REOFFER_MS
 }
 
 export function dismissInstallBand(): void {
@@ -228,7 +241,11 @@ export function dismissInstallBand(): void {
   notifyInstallOffer()
 }
 
-/** Replays the captured prompt. Resolves true only if the user accepted. */
+/**
+ * Replays the captured prompt. Resolves true only if the user accepted. A
+ * cancelled sheet spends this event and records nothing; the capture stays
+ * armed, so the offer returns when the browser fires a new beforeinstallprompt.
+ */
 export async function promptAppInstall(): Promise<boolean> {
   const event = deferredInstallPrompt
   if (!event) return false
