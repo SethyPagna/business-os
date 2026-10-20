@@ -3,6 +3,7 @@ import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import { getPortalPromotions } from '../../api/portalPublicTransport.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
+import { microLabelProps } from './catalogUi.tsx'
 
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -48,21 +49,21 @@ function normalizePromotions(payload: unknown): PortalPromotion[] {
     .filter((item) => item.title)
 }
 
-// A small, fixed rotation of on-brand gradients for cards with no image, so
-// an image-less card still looks designed (matching the rose/orange
-// gradient panel the existing "Promotions and posts" cards already use)
-// instead of looking like a broken/incomplete card. Picked deterministically
-// from the promotion id, so a given card's color doesn't shift on re-render.
+// A small, fixed rotation of brass and charcoal gradients for cards with no
+// image, so an image-less card still looks designed instead of broken.
+// Picked deterministically from the promotion id, so a given card's colour
+// doesn't shift on re-render.
 const FALLBACK_GRADIENTS = [
   // Every stop clears 4.5:1 against the white title these cards print on
-  // top of it: the old -400/-500 stops ran 1.81:1 (teal-400) to 4.23:1
-  // (violet-500), so the promotion's own name was the least legible text
-  // on the storefront.
-  'from-rose-700 via-rose-700 to-orange-700',
-  'from-sky-800 via-sky-800 to-cyan-700',
-  'from-violet-700 via-violet-700 to-fuchsia-700',
-  'from-emerald-800 via-emerald-800 to-teal-700',
+  // top of it (a -400/-500 stop ran 1.81:1 to 4.23:1).
+  'from-amber-800 via-amber-800 to-amber-700',
+  'from-stone-800 via-stone-800 to-stone-700',
+  'from-amber-900 via-amber-800 to-amber-700',
+  'from-stone-700 via-stone-800 to-amber-800',
 ]
+
+// One compact strip, not a wall of cards: the shopper came for products.
+const MAX_PROMOTION_CARDS = 2
 
 function fallbackGradientFor(id: number): string {
   return FALLBACK_GRADIENTS[Math.abs(id) % FALLBACK_GRADIENTS.length]
@@ -194,10 +195,25 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
         className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {!loaded
-          ? [0, 1, 2].map((key) => <SkeletonCard key={key} />)
-          : promotions.map((promo) => {
+          ? [0, 1].map((key) => <SkeletonCard key={key} />)
+          : promotions.map((promo, index) => {
               const clickable = (promo.link_type === 'product' && promo.link_product_id && (onOpenProduct || promo.image_path || promo.link_product_image)) || (promo.link_type === 'url' && promo.link_url)
               const imageUrl = promo.image_path ? resolvePublicAssetUrl(promo.image_path) : ''
+              // Past the second, a promotion is a compact chip in the same scrolling row: still reachable, not a wall of cards.
+              if (index >= MAX_PROMOTION_CARDS) {
+                return (
+                  <button
+                    key={promo.id}
+                    type="button"
+                    data-promotion-chip="true"
+                    onClick={clickable ? () => handleActivate(promo) : undefined}
+                    disabled={!clickable}
+                    className="inline-flex min-h-11 max-w-[16rem] shrink-0 snap-start items-center rounded-full border border-amber-300 bg-white px-4 py-2 text-left text-xs font-semibold text-amber-950 dark:border-amber-500/30 dark:bg-neutral-900 dark:text-amber-200"
+                  >
+                    <span className="break-words">{promo.title}</span>
+                  </button>
+                )
+              }
               // badge_color is typed by the merchant, so the ink cannot be a
               // hardcoded white -- pick it, and darken/lighten the fill only
               // as far as 4.5:1 requires.
@@ -209,7 +225,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                   onClick={clickable ? () => handleActivate(promo) : undefined}
                   disabled={!clickable}
                   className={`group relative flex min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm ring-1 ring-transparent transition-all duration-200 dark:border-neutral-700 dark:bg-neutral-900 ${
-                    clickable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:ring-slate-200 dark:hover:ring-neutral-600' : 'cursor-default'
+                    clickable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:ring-amber-300 dark:hover:ring-amber-500/40' : 'cursor-default'
                   }`}
                 >
                   {imageUrl ? (
@@ -224,25 +240,25 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                     </div>
                   ) : (
                     <div className={`flex h-28 w-full items-center justify-center bg-gradient-to-br ${fallbackGradientFor(promo.id)} px-4 text-center`}>
-                      <span className="line-clamp-2 text-sm font-semibold leading-tight text-white">{promo.title}</span>
+                      <span className="break-words text-sm font-semibold leading-snug text-white">{promo.title}</span>
                     </div>
                   )}
                   <div className="flex flex-1 flex-col gap-1 p-3">
                     {promo.badge_text ? (
                       <span
-                        className="inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide shadow-sm"
+                        {...microLabelProps(promo.badge_text, 'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 font-semibold shadow-sm', 'text-[11px] uppercase tracking-wide')}
                         style={{ backgroundColor: badgeSurface.background, color: badgeSurface.color }}
                       >
                         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: badgeSurface.color }} aria-hidden="true" />
                         {promo.badge_text}
                       </span>
                     ) : null}
-                    <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{promo.title}</div>
+                    <div className="break-words text-sm font-semibold leading-snug text-slate-900 dark:text-neutral-100">{promo.title}</div>
                     {promo.subtitle ? (
-                      <div className="line-clamp-2 text-xs text-slate-500 dark:text-neutral-400">{promo.subtitle}</div>
+                      <div className="break-words text-xs leading-snug text-slate-500 dark:text-neutral-400">{promo.subtitle}</div>
                     ) : null}
                     {promo.link_type === 'product' && promo.link_product_name ? (
-                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-700 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
+                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-amber-800 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
                         {copy('portalPromotionsViewProduct', 'View')} <span translate="no" className="notranslate">{promo.link_product_name}</span>
                         <span aria-hidden="true">→</span>
                       </div>

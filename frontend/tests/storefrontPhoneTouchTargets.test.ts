@@ -20,7 +20,7 @@ assert.match(publicPage, /className="flex h-10 w-10 shrink-0 items-center justif
 assert.match(flyout, /className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500/, 'product flyout close is 40px')
 assert.match(legal, /ref=\{closeRef\}[\s\S]{0,200}inline-flex h-10 w-10|inline-flex h-10 w-10[\s\S]{0,300}ref=\{closeRef\}/, 'policy reader close is 40px')
 assert.match(products, /inline-flex h-10 w-10 items-center justify-center rounded-lg[\s\S]{0,300}aria-label=\{copy\('closeFilters', 'Close filters'\)\}/, 'filter dialog close is 40px')
-assert.match(products, /<label htmlFor="portal-product-search" className="flex min-h-10/, 'search field is 40px tall')
+assert.match(products, /<label htmlFor="portal-product-search" className=\{`flex min-h-11/, 'search field is 44px tall')
 assert.match(products, /inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-xl border/, 'Filters trigger is 40px')
 assert.match(products, /inline-flex min-h-10 items-center rounded-full border px-3 py-1\.5 text-xs font-semibold leading-5/, 'stock chips are 40px and no longer leading-none (Khmer clipping)')
 assert.doesNotMatch(products, /className="text-xs font-semibold text-slate-500[^"]*" onClick=\{clearPortalFilters\}/, 'a bare-text (16px tall) Clear control is back')

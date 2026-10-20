@@ -328,8 +328,8 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
-    'search should stay sticky and use the same blue discovery accent as filters')
+  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-amber-700/,
+    'search should stay sticky and use the same brass discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
     'the brand index still needs its labelled, translated name')
   // The brand index used to be TWO controls: a scrolling 4-column letter grid
