@@ -416,6 +416,9 @@ function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionReq
 
 export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number }
 
+// Positive answer only: a missing table is re-checked, a present one stays for the isolate.
+let lotEditTableAvailable = false
+
 const sessionColumnCache = new WeakMap<object, Promise<Map<string, Set<string>>>>()
 
 async function sessionColumns(env: Env, db: D1Compat): Promise<Map<string, Set<string>>> {
@@ -1493,7 +1496,8 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   const num = (value: unknown) => Number(value) || 0
   const originalOf = (key: ReplayKey, row: Row) => (before[key] || []).find(r => r.id === row.id)
   const expectedOf = (key: ReplayKey, row: Row) => (expectedImage[key] || []).find(r => r.id === row.id)
-  const editsTable = await db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ok: number }>()
+  if (!lotEditTableAvailable) lotEditTableAvailable = Boolean(await db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ok: number }>())
+  const editsTable = lotEditTableAvailable
   const memberState = await db.prepare(`SELECT ${MEMBER_REVERTED_SQL} AS reverted, ${editsTable ? MEMBER_EDITED_SQL : '0'} AS edited, ${MEMBER_LOT_MOVED_SQL} AS moved`)
     .get<{ reverted: number; edited: number; moved: number }>({ id: op.id })
   if (Number(memberState?.reverted)) fail('A line of this stock-in session was reverted on its own in Stock Changes, so the session cannot be undone or redone as a whole. Revert that Revert first, or revert the other lines one by one. Nothing was changed.', 409, 'revert_session_line_reverted')

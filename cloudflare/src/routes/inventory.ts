@@ -8,13 +8,19 @@ import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTransaction'
 
+// Positive answers only: a missing schema is re-probed on the next call, a
+// present one stays present for the isolate (migrations only add).
+let operationWritesAvailable = false
+
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (operationWritesAvailable) return true
   try {
     const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
       WHERE (type='table' AND name='fee_operation_receipts')
          OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    return row?.ready === 2
+    operationWritesAvailable = row?.ready === 2
+    return operationWritesAvailable
   } catch {
     return false
   }

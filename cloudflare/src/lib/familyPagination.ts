@@ -173,6 +173,13 @@ export interface FamilyPaginationResult<T> {
 
 function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
+  // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
+  // this helper dependency-free). When matchRankSql reads its rank column,
+  // join the rank CTE (LEFT JOIN gets an automatic index) instead of a
+  // per-row subquery, which scanned the whole CTE per row. `matched` is then
+  // MATERIALIZED: the page statement reads it twice (families + result rows)
+  // and the planner re-ran the join in the second read without the index.
+  const rankJoin = opts.matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
   const matchTierSelect = opts.matchTierSql ? `, (${opts.matchTierSql}) AS __match_tier` : ''
   const matchTierAgg = opts.matchTierSql ? ', MIN(__match_tier) AS match_tier' : ''
@@ -199,7 +206,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     : ''
   return `
     WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
-    matched AS (
+    matched AS ${rankJoin ? 'MATERIALIZED ' : ''}(
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
@@ -207,6 +214,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
+      ${rankJoin}
       ${opts.whereSql}
     ),
     families AS (

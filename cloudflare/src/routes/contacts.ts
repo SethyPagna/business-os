@@ -575,10 +575,14 @@ function conflictResult(error: unknown) {
 // merge must repoint them WHEN present without throwing on a DB where they
 // have not been applied -- the same resilience the ar/ap read endpoints
 // already carry (see /customers/reports/ar-invoices).
+// Present tables are remembered for the isolate; a missing one is re-checked.
+const tablesPresent = new Set<string>()
 async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
+  if (tablesPresent.has(name)) return true
   const row = await db
     .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
     .get<{ ok: number }>({ name })
+  if (row) tablesPresent.add(name)
   return Boolean(row)
 }
 
@@ -2729,10 +2733,7 @@ app.get('/customers/reports/ar-invoices', async (c) => {
   const pageSize = clampInt(query.page_size, 25, 1, 100)
   const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
 
-  const ledgerExists = await db
-    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='customer_receivables' LIMIT 1")
-    .get<{ ok: number }>()
-  if (!ledgerExists) {
+  if (!await hasTable(db, 'customer_receivables')) {
     return c.json({
       invoices: [], totals: { invoices: 0, total_usd: 0, paid_usd: 0, outstanding_usd: 0, outstanding_count: 0 },
       page, page_size: pageSize, total_invoices: 0, meta: { customers: [] }, ledger_ready: false,

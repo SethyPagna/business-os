@@ -470,8 +470,12 @@ app.get('/money-precision-capability', async (c) => {
   return c.json({ money_precision_version: 1, schema_ready: await saleMoneySchemaReady(db), historical_edit_ready:await historicalEditSchemaReady(db) })
 })
 
+// Positive answer only (see operationWritesReady in routes/fees.ts).
+let historicalEditSchemaAvailable = false
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
-  return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  if (historicalEditSchemaAvailable) return true
+  historicalEditSchemaAvailable = !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  return historicalEditSchemaAvailable
 }
 
 const DELIVERY_FEE_PAYER_ERROR = 'Delivery fee must be paid by the customer or by the store.'
@@ -778,8 +782,8 @@ app.post('/', async (c) => {
   for (const [branchId, productIds] of unlottedRequestsByBranch.entries()) {
     const rows = await selectInChunks(productIds, 1, (chunk) => db.prepare(`
       SELECT pb.variant_product_id AS product_id, bbs.branch_id, SUM(bbs.quantity) AS quantity
-      FROM branch_batch_stock bbs
-      JOIN product_batches pb ON pb.id = bbs.batch_id
+      FROM product_batches pb
+      CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
       WHERE bbs.branch_id = ?
         AND pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
         AND bbs.quantity > 0
