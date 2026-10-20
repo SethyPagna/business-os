@@ -248,7 +248,11 @@ async function main() {
     assert.equal(statements('loyalty'), 0)
   })
 
+  // Since 6.0.888 the loyalty section costs nothing while the programme is off, so these two cases switch it on.
   await check("a sale/return/customer edit re-runs loyalty only (and does not touch inventory)", async () => {
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('loyalty_points_enabled', 'true') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
+    await cacheModule.bumpVersion(env, 'settings')
+    await summary()
     for (const namespace of ['sales', 'returns', 'customers']) {
       await cacheModule.bumpVersion(env, namespace)
       await summary()
@@ -263,6 +267,9 @@ async function main() {
     assert.equal(statements('inventory'), 1)
     assert.equal(statements('expiry'), 1)
     assert.ok(statements('loyalty') >= 1)
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('loyalty_points_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
+    await cacheModule.bumpVersion(env, 'settings')
+    await summary()
   })
 
   await check('changing the low-stock config changes the answer at once -- the config is part of the cache key, no bump needed', async () => {
