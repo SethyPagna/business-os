@@ -21,6 +21,7 @@
 // hand-rolling a padding on one of them again.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { PRODUCT_COLUMNS, productTableSpans } from '../src/components/products/config/productTableColumns.ts'
 
 let failed = 0
 
@@ -79,10 +80,11 @@ runTest("the full-width rows use REAL cells in the table's own columns, never a 
   // The group header spans the trailing columns (title on the NAME rail);
   // the category band spans one column further LEFT (label on the IMAGE
   // rail). Two different spans on purpose -- see the next test.
-  assert.match(surface, /<td colSpan=\{FULL_WIDTH_ROW_SPAN\}/, 'the group header must span the trailing columns via FULL_WIDTH_ROW_SPAN')
-  assert.match(surface, /<td colSpan=\{CATEGORY_BAND_SPAN\}/, 'the category band must span from the image column via CATEGORY_BAND_SPAN')
-  assert.match(surface, /const FULL_WIDTH_ROW_SPAN = 6/)
-  assert.match(surface, /const CATEGORY_BAND_SPAN = 7/)
+  // 6.0.873: the spans are no longer constants (6 / 7) -- the data columns are the
+  // user's choice, so productTableSpans() derives them from the rendered column list.
+  assert.match(surface, /<td colSpan=\{spans\.group\}/, 'the group header must span the trailing columns via spans.group')
+  assert.match(surface, /<td colSpan=\{spans\.band\}/, 'the category band must span from the image column via spans.band')
+  assert.match(surface, /const spans = productTableSpans\(columns\)/)
 })
 
 runTest('the category band sits on the IMAGE rail, one column left of the group title', () => {
@@ -90,25 +92,24 @@ runTest('the category band sits on the IMAGE rail, one column left of the group 
   // pictured products, so its label reads against the pictures, not the
   // names. CATEGORY_BAND_SPAN must therefore be exactly one MORE than
   // FULL_WIDTH_ROW_SPAN -- the extra column it eats is the image column.
-  const categorySpan = Number(surface.match(/const CATEGORY_BAND_SPAN = (\d+)/)![1])
-  const groupSpan = Number(surface.match(/const FULL_WIDTH_ROW_SPAN = (\d+)/)![1])
-  assert.strictEqual(categorySpan - groupSpan, 1, 'the category band must cover exactly one more column (the image column) than the group header')
+  for (const count of [0, 1, 3, 10]) {
+    const spans = productTableSpans(PRODUCT_COLUMNS.slice(0, count))
+    assert.strictEqual(spans.band - spans.group, 1, 'the category band must cover exactly one more column (the image column) than the group header')
+  }
 })
 
 runTest('desktop columns fit the available width and overflow remains reachable', () => {
   // Name and Details flex with the table while the four numeric columns stay
   // compact. This keeps Stock/Qty in the default viewport at xl widths.
   const colgroup = surface.slice(surface.indexOf('<colgroup>'), surface.indexOf('</colgroup>'))
-  // Name auto, Details bounded and immediately adjacent -- unchanged. The
-  // bound itself moved 10.5rem -> 15rem: both 10.5rem and 12.5rem sat under
-  // the two branch chips once Noto Sans Khmer widened them, so they wrapped
-  // and every row in the report grew (see the colgroup comment). The five
-  // bounded widths now sum to 44.5rem, still inside the 58rem table minimum
-  // asserted three lines below.
-  assert.match(colgroup, /<col \/>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<col style=\{\{ width: '15rem' \}\} \/>/)
-  assert.strictEqual((colgroup.match(/<col style=\{\{ width: '[\d.]+rem' \}\} \/>/g) || []).length, 5)
+  // 6.0.873: the Details column is gone (its chips are columns of their own).
+  // Name stays the ONE auto column; every data column is a bounded rem width
+  // from config/productTableColumns.ts, rendered by one <col> per column, and
+  // the table declares its own minimum width from that same list.
+  assert.match(colgroup, /<col \/>\s*\{columns\.map\(\(column\) => <col key=\{column\.key\} style=\{\{ width: `\$\{column\.widthRem\}rem` \}\} \/>\)\}/)
+  assert.strictEqual((colgroup.match(/<col\b/g) || []).length, 4, 'select, image, name and the one mapped data <col>')
   assert.match(surface, /<div className="relative overflow-x-auto">/)
-  assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed/)
+  assert.match(surface, /<table className="w-full table-fixed[^"]*" style=\{\{ minWidth: `\$\{productTableMinWidthRem\(columns\)\}rem` \}\}/)
   assert.match(surface, /card hidden min-w-0 max-w-full overflow-hidden xl:flex/)
   assert.match(surface, /min-w-0 max-w-full space-y-2 xl:hidden/)
 })
@@ -116,10 +117,10 @@ runTest('desktop columns fit the available width and overflow remains reachable'
 runTest('a product row uses the shared gutter for its name, so it lands on the same rail', () => {
   assert.match(
     products,
-    /<td className=\{`\$\{ROW_TEXT_GUTTER\} py-2`\}>/,
+    /<td className=\{`\$\{ROW_TEXT_GUTTER\} py-2 \$\{pinClass\}`\}/,
     "the name cell must use ROW_TEXT_GUTTER for every row -- a child aligns with the group title, no indent",
   )
-  assert.match(products, /import ProductsListSurface, \{ ROW_TEXT_GUTTER \}/)
+  assert.match(products, /import ProductsListSurface, \{[^}]*\bROW_TEXT_GUTTER\b/)
 })
 
 runTest('a grouped child row aligns with the group title -- no text indent (the empty image column is the offset)', () => {
@@ -147,9 +148,10 @@ runTest('11.2: the desktop header checkbox is the select-all (aligned with the o
 runTest('11.1: the checkbox column only takes space in select mode', () => {
   assert.match(surface, /const selectColWidth = selectionModeActive \? SELECT_COL_WIDTH : '0px'/)
   assert.match(surface, /const selectCellPad = selectionModeActive \? 'px-2' : 'px-0'/)
-  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2`\}>/, 'the category band checkbox cell collapses')
-  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2\.5`\}>/, 'the group header checkbox cell collapses')
-  assert.match(products, /<td className=\{`\$\{selectionModeActive \? 'px-2' : 'px-0'\} py-2`\} onClick=/, 'the product row checkbox cell collapses out of select mode')
+  // 6.0.873: the checkbox cells also pin (sticky + opaque) for the in-container horizontal scroll.
+  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2 \$\{PINNED_CELL\}[^`]*`\}/, 'the category band checkbox cell collapses')
+  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2\.5 \$\{PINNED_CELL\}[^`]*`\}/, 'the group header checkbox cell collapses')
+  assert.match(products, /<td className=\{`\$\{selectionModeActive \? 'px-2' : 'px-0'\} py-2 \$\{pinClass\}`\}/, 'the product row checkbox cell collapses out of select mode')
 })
 
 runTest('mobile keeps same-name products inside the grouped UI instead of flattening them', () => {

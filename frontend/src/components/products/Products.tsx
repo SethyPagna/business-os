@@ -29,7 +29,20 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
-import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
+import ProductsListSurface, { PINNED_BG, PINNED_BG_SELECTED, PINNED_CELL, ROW_TEXT_GUTTER, pinnedLeft } from './surfaces/ProductsListSurface'
+import ColumnChooser from '../shared/ColumnChooser.tsx'
+import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
+import {
+  buildStockCellModel,
+  productChooserColumns,
+  productColumnsFor,
+  productColumnsSurfaceKey,
+  visibleProductColumns,
+  type ProductColumn,
+} from './config/productTableColumns.ts'
+import { canChangeProductPrices } from '../../utils/productMergePriceAccess.ts'
+import { soleActiveBranch } from '../../utils/branchCollapse.ts'
+import { fmtDate } from '../../utils/formatters.ts'
 import { TaggedStockActionModal, TaggedStockDesktopRow, TaggedStockMobileCard } from './TaggedStockRows.tsx'
 import type { TaggedStockAction, TaggedStockRow } from './TaggedStockRows.tsx'
 import { getTaggedLots } from '../../api/damagedLotsTransport.ts'
@@ -55,8 +68,10 @@ import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import type { StockChangeHeaderActions } from './StockChangeSection'
 import {
   ProductBatchPreview,
-  ProductDetailsCell,
   ProductDiscountBadge,
+  ProductPriceCell,
+  ProductStockCell,
+  ProductSupplierCell,
 } from './surfaces/ProductRowParts'
 import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
@@ -694,7 +709,7 @@ function toLightboxState(value: ReturnType<typeof updateProductLightboxIndex>, f
 // shape/state); a completely separate lightweight view can't accidentally
 // break on a field this restricted role never receives.
 export default function Products() {
-  const { getPermissionTier, can } = useProductsApp()
+  const { getPermissionTier, can, user } = useProductsApp()
   // Mirrors AppContext.tsx's canAccessPage()/the backend's isImageOnlyUser()
   // shape: only the user whose ONE route into this page is
   // 'products_image_only' gets the restricted view. Anyone with real
@@ -709,7 +724,8 @@ export default function Products() {
       </Suspense>
     )
   }
-  return can('products', 'view') ? <ProductsFullEditor /> : null
+  // keyed by user: the column choice is stored per user and read once on mount.
+  return can('products', 'view') ? <ProductsFullEditor key={String(user?.id ?? 'anon')} /> : null
 }
 
 // ---------------------------------------------------------------------------
@@ -766,10 +782,14 @@ type ProductRowCtx = {
   setDetailProduct: (product: ProductRecord | null) => void
   // Owner, 25 Sep 2026: "clicking cost must open the cost details directly".
   openCostFloat: (product: ProductRecord) => void
+  // Excel-style table (19 Oct 2026): the data columns to draw, the role's price
+  // switch (a locked price is shown muted), and the one active branch if there is one.
+  columns: readonly ProductColumn[]
+  canEditPrices: boolean
+  soleBranchName: string
 }
 
 function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
-  const canViewCosts = canViewAcquisitionCosts(useProductsApp().user)
   const {
     branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
     getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
@@ -777,7 +797,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct, openCostFloat,
+    setDetailProduct, openCostFloat, columns, canEditPrices, soleBranchName,
   } = ctx
     const productId = p.id ?? 0
     const productName = String(p.name || '')
@@ -791,7 +811,6 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     const wholesaleUsd = Number(p.wholesale_price_usd || 0)
     const wholesaleKhr = Number(p.wholesale_price_khr || 0)
     const {
-      branchSummaryLabel,
       compactMeta,
       marginPct,
       marginUsd,
@@ -862,6 +881,109 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
       }
       toggleSelectionScope(rowScopeIds, !rowSelected)
     }
+    // Barcode, brand and category are columns when chosen; when a column is
+    // hidden its value moves back to the name cell's tag line so nothing
+    // disappears from the row.
+    const shownColumns = new Set<string>(columns.map((column) => column.key))
+    const pinClass = `${PINNED_CELL} ${rowSelected ? PINNED_BG_SELECTED : PINNED_BG}`
+    // Barcode and brand are two of the four copyable product fields.
+    // renderMetaPill stringifies its label, so the affordance cannot go inside
+    // the pill -- this is the same wrapper ProductRowParts uses for the
+    // supplier pill: an inline-flex span with no box of its own.
+    const renderIdentityPill = (item: (typeof compactMeta)[number]) => {
+      const pill = renderMetaPill(item ? {
+        key: String(item.key),
+        label: String(item.label || ''),
+        color: typeof item.color === 'string' ? item.color : undefined,
+        className: typeof item.className === 'string' ? item.className : undefined,
+      } : null)
+      const metaKey = String(item?.key || '')
+      if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
+      const focus = metaKey === 'brand'
+        ? { brand: String(item?.label || '') }
+        : metaKey === 'category'
+          ? { category: String(item?.label || '') }
+          : undefined
+      return (
+        <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
+          <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+            {pill}
+          </EntityLink>
+        </span>
+      )
+    }
+    const nameMeta = compactMeta.filter((item) => !shownColumns.has(String(item?.key)))
+    const dash = <span className="text-gray-300">—</span>
+    const identityCell = (key: string) => {
+      const item = compactMeta.find((entry) => String(entry?.key) === key)
+      return item ? renderIdentityPill(item) : dash
+    }
+    const priceLockTip = canEditPrices ? undefined : tr('product_price_read_only', 'You do not have permission to change product prices. Adjust the price per sale in the cart instead.', 'អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។')
+    // The table never edits a supplier, for anyone: it changes in the product sheet.
+    const supplierLockTip = tr('product_supplier_read_only', 'The supplier is not changed in the table. Open the product to change it.', 'អ្នកផ្គត់ផ្គង់មិនត្រូវបានកែនៅក្នុងតារាងទេ។ សូមបើកផលិតផលដើម្បីកែ។')
+    const promotionLine = promotion.active && !shownColumns.has('discount') ? (
+      <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
+        {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+      </div>
+    ) : null
+    const renderDataCell = (column: ProductColumn): ReactNode => {
+      switch (column.key) {
+        case 'barcode': return identityCell('barcode')
+        case 'category': return identityCell('category')
+        case 'brand': return identityCell('brand')
+        case 'unit': return renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined) || dash
+        case 'stock': return (
+          <ProductStockCell
+            qty={qty}
+            qtyClassName={stockStatusTextClass}
+            unitChip={shownColumns.has('unit') ? null : renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
+            model={buildStockCellModel(p, { branchFilter, selectedBranchName: selectedBranchName ? String(selectedBranchName) : '', soleBranchName })}
+            totalLabel={t('total')}
+            inactiveLabel={t('inactive')}
+          />
+        )
+        case 'selling': return (
+          <ProductPriceCell usd={sellingUsd} khr={sellingKhr} tone="selling" lockTip={priceLockTip} fmtUSD={fmtUSD} fmtKHR={fmtKHR}>{promotionLine}</ProductPriceCell>
+        )
+        case 'wholesale': return <ProductPriceCell usd={wholesaleUsd} khr={wholesaleKhr} tone="wholesale" lockTip={priceLockTip} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+        case 'supplier': return <ProductSupplierCell supplier={p.supplier || undefined} lockTip={supplierLockTip} tr={tr} navigateTo={navigateTo} />
+        case 'cost': return (
+          // The cost opens its own calculation, straight from the list (owner,
+          // 25 Sep 2026). The row opens the product on the RELEASE of a press
+          // (utils/longPress.ts), so the button stops the whole press -- the
+          // same four stoppers the thumbnail carries -- not just the click.
+          <button
+            type="button"
+            className="block w-full cursor-pointer text-right decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+            title={t('cost_breakdown_title') || 'Calculated cost price'}
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseUp={(event) => event.stopPropagation()}
+            onTouchStart={(event) => event.stopPropagation()}
+            onTouchEnd={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
+          >
+            <span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>
+            {costKhr !== null && <span {...getKhmerTextProps(fmtKHR(costKhr), 'block text-xs text-gray-400')}>{fmtKHR(costKhr)}</span>}
+            {p.cost_needs_review === true ? <span className="block text-xs text-amber-700 dark:text-amber-400">{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}
+          </button>
+        )
+        case 'margin': return costUsd !== null && marginUsd !== null && marginPct !== null && sellingUsd > 0
+          ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
+          : <span className="text-gray-300">N/A</span>
+        case 'sku': return p.sku ? <span className="detail-scroll-text font-mono text-xs text-indigo-700 dark:text-indigo-200">{p.sku}</span> : dash
+        case 'discount': return promotion.active ? <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} /> : dash
+        case 'lots': return <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
+        case 'lowStock': return p.low_stock_threshold === null || p.low_stock_threshold === undefined || p.low_stock_threshold === '' ? dash : <span className="tabular-nums">{String(p.low_stock_threshold)}</span>
+        case 'description': return p.description ? <span className="detail-scroll-text text-xs text-gray-600 dark:text-gray-300" title={p.description}>{p.description}</span> : dash
+        case 'updated': return <span className="tabular-nums text-xs text-gray-500">{fmtDate(p.updated_at)}</span>
+        default: return null
+      }
+    }
+    const dataCellClass = (column: ProductColumn) => {
+      const locked = (column.lock === 'price' && !canEditPrices) || column.lock === 'supplier'
+      const tone = column.key === 'cost' ? ' col-highlight-red' : column.key === 'selling' && !locked ? ' col-highlight-green' : ''
+      return `overflow-hidden px-3 py-2 ${column.align === 'right' ? 'text-right' : 'text-left'}${tone}`
+    }
     return (
       <tr
         key={productId}
@@ -879,7 +1001,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
-        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
+        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2 ${pinClass}`} style={{ left: pinnedLeft('select', selectionModeActive) }} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -913,7 +1035,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             without a tag, so the tag never changes the cell's box; it only
             reads the shared store, so the memoised row does not re-render when
             the pending list changes. */}
-        <td className="relative px-2 py-2">
+        <td className={`px-2 py-2 ${pinClass}`} style={{ left: pinnedLeft('image', selectionModeActive) }}>
           <PendingReviewTag section="products" entityType="product" ids={rowScopeIds} className="-left-px top-1" />
           {indented ? null : (
             <button
@@ -943,7 +1065,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             children, so an extra text indent on top would double the
             offset. The category band sits one column LEFT of this, on the
             image rail (see ProductsListSurface's geometry note). */}
-        <td className={`${ROW_TEXT_GUTTER} py-2`}>
+        <td className={`${ROW_TEXT_GUTTER} py-2 ${pinClass}`} style={{ left: pinnedLeft('name', selectionModeActive) }}>
           {/* Name cell previously forced align-top on the <td> itself, so
               a row with no meta pills (the common case) sat pinned to the
               top of the row instead of vertically centered like every
@@ -955,36 +1077,9 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
               above the name correctly, it just centers as one unit
               vertically within the row rather than pinning to the top. */}
           <div className="flex min-h-10 flex-col justify-center">
-            {compactMeta.length ? (
+            {nameMeta.length ? (
               <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
-                {compactMeta.map((item) => {
-                  const pill = renderMetaPill(item ? {
-                    key: String(item.key),
-                    label: String(item.label || ''),
-                    color: typeof item.color === 'string' ? item.color : undefined,
-                    className: typeof item.className === 'string' ? item.className : undefined,
-                  } : null)
-                  // Barcode and brand are two of the four copyable product
-                  // fields. renderMetaPill stringifies its label, so the
-                  // affordance cannot go inside the pill -- this is the same
-                  // wrapper ProductRowParts uses for the supplier pill: an
-                  // inline-flex span with no box of its own, so the meta line
-                  // lays out exactly as it did.
-                  const metaKey = String(item?.key || '')
-                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
-                  const focus = metaKey === 'brand'
-                    ? { brand: String(item?.label || '') }
-                    : metaKey === 'category'
-                      ? { category: String(item?.label || '') }
-                      : undefined
-                  return (
-                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
-                      <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                        {pill}
-                      </EntityLink>
-                    </span>
-                  )
-                })}
+                {nameMeta.map((item) => renderIdentityPill(item))}
               </div>
             ) : null}
             <div className="flex min-w-0 items-center gap-1.5">
@@ -1016,83 +1111,16 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             ) : null}
           </div>
         </td>
-        {/* border-l here (freed-up space between the Name and Details
-            columns) instead of a whole new column -- per the Aug 19 2026
-            ask for a divider before the details column. */}
-        <td className="border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700">
-          <ProductDetailsCell
-            product={p}
-            promotion={promotion}
-            branchLabel={String(branchSummaryLabel || '')}
-            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
-            selectedBranchId={branchFilter}
-            renderMetaPill={renderMetaPill}
-            tr={tr}
-            fmtUSD={fmtUSD}
-            navigateTo={navigateTo}
-          />
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-red">
-          {/* The cost opens its own calculation, straight from the list (owner,
-              25 Sep 2026). The row opens the product on the RELEASE of a press
-              (utils/longPress.ts), so the button stops the whole press -- the
-              same four stoppers the thumbnail carries -- not just the click. */}
-          {canViewCosts ? (
-            <button
-              type="button"
-              className="block w-full cursor-pointer text-right decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
-              title={t('cost_breakdown_title') || 'Calculated cost price'}
-              onMouseDown={(event) => event.stopPropagation()}
-              onMouseUp={(event) => event.stopPropagation()}
-              onTouchStart={(event) => event.stopPropagation()}
-              onTouchEnd={(event) => event.stopPropagation()}
-              onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
-            >
-              <span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>
-              {costKhr !== null && <span className="block text-xs text-gray-400">{fmtKHR(costKhr)}</span>}
-              {p.cost_needs_review === true ? <span className="block text-xs text-amber-700 dark:text-amber-400">{tr('merge_cost_needs_review', 'Cost needs review')}</span> : null}
-            </button>
-          ) : <span>—</span>}
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-green">
-          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
-          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
-          {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
-            <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              {fmtUSD(wholesaleUsd || sellingUsd)}
-              {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
-            </div>
-          ) : null}
-          {promotion.active ? (
-            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
-            </div>
-          ) : null}
-        </td>
-        <td className="px-3 py-2 text-right">
-          {canViewCosts && costUsd !== null && marginUsd !== null && marginPct !== null && sellingUsd > 0
-            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
-            : <span className="text-gray-300">N/A</span>}
-        </td>
-        <td className="px-3 py-2 text-right">
-          {/* Stock status convention (this session): the qty+unit value
-              itself is colored (red/yellow/green) instead of showing a
-              separate "In"/"Low"/"Out" badge underneath -- the badge is
-              still shown in the click-to-view-details panel (its own
-              "Status" row, see ProductDetailModal.tsx), just not
-              repeated here in the table. */}
-          {/* Was a plain inline-flex div -- the unit chip (whitespace-nowrap,
-              shrink-0) had nowhere to go but past the cell's right edge
-              once the qty number plus a longer/Khmer unit name didn't both
-              fit on one line ("stock qty overflowing its container" from
-              the Aug 19 2026 ask). flex-wrap lets the chip drop to its own
-              line inside the same right-aligned cell instead of spilling
-              out of it. */}
-          <div className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${stockStatusTextClass}`}>
-            <span>{String(qty || 0)}</span>
-            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
-          </div>
-        </td>
+        {/* One cell per chosen column, in the column list's own order, so the
+            body can never disagree with the header or the <colgroup>. */}
+        {columns.map((column) => {
+          const locked = (column.lock === 'price' && !canEditPrices) || column.lock === 'supplier'
+          return (
+            <td key={column.key} data-column={column.key} aria-readonly={locked ? true : undefined} className={dataCellClass(column)}>
+              {renderDataCell(column)}
+            </td>
+          )
+        })}
       </tr>
     )
 }
@@ -1376,11 +1404,14 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                   {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
                 </span>
               ) : null}
-              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Same as the desktop cost cell: the cost opens its calculation,
                   and the button owns the whole press so the card does not also
-                  open the product sheet underneath it. */}
+                  open the product sheet underneath it. The divider before it
+                  belongs to it: without cost access neither renders, so the
+                  strip reads "$5.00 | 12 pcs", never "$5.00 | | 12 pcs". */}
               {canViewCosts ? (
+                <>
+                <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
                 <button
                   type="button"
                   className="text-red-600 decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
@@ -1393,6 +1424,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 >
                   {costUsd === null ? '—' : fmtUSD(costUsd)}
                 </button>
+                </>
               ) : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
@@ -4725,6 +4757,28 @@ function ProductsFullEditor() {
   // above to include lowStockConfig (previously closed over without being
   // declared as a dependency of either useCallback -- a latent staleness
   // risk now that the row body only sees it through this memo).
+  // Excel-style columns (19 Oct 2026). The role decides what EXISTS (no cost
+  // access -> no Cost or Margin column, not even from a saved choice); the
+  // per-user, per-device choice decides which of those are shown. Nothing here
+  // reaches the request: hiding a column never changes a search, a filter or an include.
+  const productColumnDefs = useMemo(() => productColumnsFor({ canViewCosts }), [canViewCosts])
+  const columnPrefs = useColumnPreferences(productColumnsSurfaceKey(user?.id), productColumnDefs)
+  const productColumns = useMemo(() => visibleProductColumns(productColumnDefs, columnPrefs.isVisible), [productColumnDefs, columnPrefs.isVisible])
+  const productColumnKeys = useMemo(() => productColumns.map((column) => column.key), [productColumns])
+  const canEditPrices = canChangeProductPrices(user)
+  const soleBranchName = String(soleActiveBranch(branches)?.name || '')
+  const chooserColumns = useMemo(() => productChooserColumns(productColumnDefs, t), [productColumnDefs, t])
+  const columnChooser = (
+    <ColumnChooser
+      columns={chooserColumns}
+      isVisible={(key) => key === 'image' || key === 'name' || columnPrefs.isVisible(key)}
+      toggle={columnPrefs.toggle}
+      reset={columnPrefs.reset}
+      label={t('columns')}
+      resetLabel={t('reset')}
+    />
+  )
+
   const productRowCtx = useMemo<ProductRowCtx>(() => ({
     branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
     getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
@@ -4734,7 +4788,8 @@ function ProductsFullEditor() {
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
     setDetailProduct,
     openCostFloat: setCostFloatProduct,
-  }), [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
+    columns: productColumns, canEditPrices, soleBranchName,
+  }), [productColumns, canEditPrices, soleBranchName, branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
     <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />
@@ -4872,9 +4927,10 @@ function ProductsFullEditor() {
         canWrite={canAdjustInventoryStock}
         onAction={setTaggedAction}
         selectionModeActive={selectionModeActive}
+        columnKeys={productColumnKeys}
       />
     ))
-  }, [canAdjustInventoryStock, groupTaggedRows, selectionModeActive, tr])
+  }, [canAdjustInventoryStock, groupTaggedRows, productColumnKeys, selectionModeActive, tr])
 
   const renderGroupTaggedCards = useCallback((group: { ids?: Array<string | number> }) => {
     const rows = groupTaggedRows(group)
@@ -5488,6 +5544,8 @@ function ProductsFullEditor() {
           isSelectionScopeFullySelected={isSelectionScopeFullySelected}
           isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
           allVisibleIds={visibleIds}
+          columns={productColumns}
+          columnChooser={columnChooser}
           loading={loading}
           productSections={productSections}
           productTotal={productTotal}

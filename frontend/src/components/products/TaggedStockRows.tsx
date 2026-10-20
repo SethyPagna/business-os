@@ -4,6 +4,7 @@ import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import { disposeTaggedLot, restoreTaggedLot, type TaggedLotGroup } from '../../api/damagedLotsTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
+import { PINNED_CELL, ROW_TEXT_GUTTER, pinnedLeft } from './surfaces/ProductsListSurface'
 
 // P3-L6. The TAGGED child row: units the owner chose to keep inside the
 // product group instead of destroying ("Make it option chooseable to keep in
@@ -74,38 +75,44 @@ function TagPill({ row }: { row: TaggedStockRow }) {
 }
 
 /** Desktop: an ordinary child <tr> in the products table, so the excel-style
- *  columns line up with the sellable rows above it. Only the name rail, the
- *  branch and the quantity carry content -- a held row has no price, no margin
- *  and no catalog identity of its own. */
-function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selectionModeActive }: {
+ *  columns line up with the sellable rows above it. Only the name rail (tag and
+ *  branch) and the quantity carry content -- a held row has no price, no margin
+ *  and no catalog identity of its own. The cells follow the table's chosen
+ *  columns: the quantity sits under Stock, or under the last column when Stock
+ *  is hidden, or on the name rail when no data column is shown. */
+function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selectionModeActive, columnKeys }: {
   row: TaggedStockRow
   tr: Translate
   canWrite: boolean
   onAction: (action: TaggedStockAction) => void
   selectionModeActive: boolean
+  columnKeys: readonly string[]
 }) {
+  const quantityKey = columnKeys.includes('stock') ? 'stock' : columnKeys[columnKeys.length - 1]
+  const quantity = (
+    <div className="flex items-center justify-end gap-2">
+      <span className="tabular-nums text-sm font-semibold text-orange-700 dark:text-orange-300">{row.quantity}</span>
+      <ActionButtons row={row} tr={tr} canWrite={canWrite} onAction={onAction} compact />
+    </div>
+  )
+  const pin = `${PINNED_CELL} bg-orange-50 dark:bg-zinc-800`
   return (
     <tr className="table-row bg-orange-50/40 dark:bg-orange-950/10" data-tagged-stock-row={row.condition_tag}>
-      <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} />
-      <td className="px-2 py-2" />
-      <td className="px-3 py-2">
+      <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2 ${pin}`} style={{ left: pinnedLeft('select', selectionModeActive) }} />
+      <td className={`px-2 py-2 ${pin}`} style={{ left: pinnedLeft('image', selectionModeActive) }} />
+      <td className={`${ROW_TEXT_GUTTER} py-2 ${pin}`} style={{ left: pinnedLeft('name', selectionModeActive) }}>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <TagPill row={row} />
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
             {tr('stock_tagged_not_sellable', 'Not sellable', 'លក់មិនបាន')}
           </span>
+          {row.branch_name ? <span className="text-[11px] text-gray-500 dark:text-gray-400">{row.branch_name}</span> : null}
         </div>
+        {quantityKey ? null : quantity}
       </td>
-      <td className="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400">{row.branch_name || ''}</td>
-      <td className="px-3 py-2" />
-      <td className="px-3 py-2" />
-      <td className="px-3 py-2" />
-      <td className="px-3 py-2 text-right">
-        <div className="flex items-center justify-end gap-2">
-          <span className="tabular-nums text-sm font-semibold text-orange-700 dark:text-orange-300">{row.quantity}</span>
-          <ActionButtons row={row} tr={tr} canWrite={canWrite} onAction={onAction} compact />
-        </div>
-      </td>
+      {columnKeys.map((key) => (
+        <td key={key} className="overflow-hidden px-3 py-2 text-right">{key === quantityKey ? quantity : null}</td>
+      ))}
     </tr>
   )
 }

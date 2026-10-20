@@ -7627,5 +7627,6 @@
   "inventory_check_error_count_requires_issue": "Counted quantity differs from stock. Report it as an issue.",
   "inventory_check_error_baseline_changed": "Stock or products changed. Reload and try again.",
   "inventory_check_error_owner_required": "Only the session creator or an administrator can change this check.",
-  "inventory_check_error_product_not_eligible": "A product on this page cannot be checked. Reload and try again."
+  "inventory_check_error_product_not_eligible": "A product on this page cannot be checked. Reload and try again.",
+  "product_supplier_read_only": "The supplier is not changed in the table. Open the product to change it."
 }

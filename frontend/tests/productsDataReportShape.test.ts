@@ -24,6 +24,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { PRODUCT_COLUMNS, defaultProductColumns, productColumnsFor, visibleProductColumns } from '../src/components/products/config/productTableColumns.ts'
+import { headOf, renderSurface } from './productsSurfaceFixture.ts'
 import { buildProductFilterSections } from '../src/components/products/helpers/productMenuHelpers.ts'
 
 const surface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
@@ -45,34 +47,42 @@ function runTest(name: string, fn: () => void): void {
 // 1. The report's columns
 // ---------------------------------------------------------------------------
 
-// Header cells in source order, each as [alignment class, label expression].
-// The leading checkbox cell has no label and no alignment -- it collapses to
-// zero width out of select mode -- so it is matched separately below.
-const REPORT_COLUMNS: Array<{ align: 'left' | 'right'; label: RegExp }> = [
-  { align: 'left', label: /t\('receipt_image_short'\) \|\| t\('image'\)/ },
-  { align: 'left', label: /t\('product_name'\)/ },
-  { align: 'left', label: /t\('details'\)/ },
-  { align: 'right', label: /t\('cost'\)/ },
-  { align: 'right', label: /t\('selling_price_label'\)/ },
-  { align: 'right', label: /t\('margin'\)/ },
-  { align: 'right', label: /t\('stock'\)/ },
+// 6.0.873: the head is no longer a fixed JSX list -- the columns are config
+// (config/productTableColumns.ts) and the header is RENDERED from it, so these
+// two checks render the real list surface and read the header it produced.
+// Expected order = the pinned leading cells, then the default data columns.
+const REPORT_COLUMNS: Array<{ align: 'left' | 'right'; label: string }> = [
+  { align: 'left', label: 'receipt_image_short' },
+  { align: 'left', label: 'product_name' },
+  { align: 'left', label: 'barcode' },
+  { align: 'left', label: 'category' },
+  { align: 'left', label: 'brand' },
+  { align: 'left', label: 'unit' },
+  { align: 'right', label: 'stock' },
+  { align: 'right', label: 'selling_price_label' },
+  { align: 'right', label: 'wholesale_price' },
+  { align: 'left', label: 'supplier' },
+  { align: 'right', label: 'cost' },
+  { align: 'right', label: 'margin' },
 ]
 
+function renderDefaultHead(): string {
+  const columns = visibleProductColumns(productColumnsFor({ canViewCosts: true }), (key) => defaultProductColumns(productColumnsFor({ canViewCosts: true })).has(key))
+  return headOf(renderSurface(columns))
+}
+
 runTest('the desktop table head carries every report column, in order', () => {
-  const head = surface.slice(surface.indexOf('const renderDesktopTableHead'), surface.indexOf('const renderDesktopLoadingShell'))
-  assert.ok(head.length > 200, 'renderDesktopTableHead must exist')
+  const head = renderDefaultHead()
   let cursor = 0
   for (const column of REPORT_COLUMNS) {
-    const match = column.label.exec(head.slice(cursor))
-    assert.ok(match, `Products lost its ${column.label} column from the desktop report table`)
-    cursor += (match.index || 0) + match[0].length
+    const at = head.indexOf('>' + column.label + '<', cursor)
+    assert.ok(at >= 0, `Products lost its ${column.label} column from the desktop report table`)
+    cursor = at + 1
   }
 })
 
 runTest('money and quantity columns are right-aligned, identity columns left', () => {
-  const head = surface.slice(surface.indexOf('const renderDesktopTableHead'), surface.indexOf('const renderDesktopLoadingShell'))
-  // `<th ` only -- splitting on the bare `<th` would also cut at `<thead`.
-  const cells = head.split(/<th[\s>]/).slice(1)
+  const cells = renderDefaultHead().split(/<th[\s>]/).slice(1)
   // First cell is the select-all checkbox: no label, no alignment.
   assert.doesNotMatch(cells[0], /text-(left|right)/, 'the checkbox column must stay unlabelled and unaligned')
   const labelled = cells.slice(1)
@@ -86,24 +96,21 @@ runTest('money and quantity columns are right-aligned, identity columns left', (
   })
 })
 
-runTest('Name is the only auto column and Details stays bounded', () => {
+runTest('Name is the only auto column and every data column is bounded', () => {
   const colgroup = surface.slice(surface.indexOf('const desktopColGroup'), surface.indexOf('const renderDesktopTableHead'))
   // Annotated: `match() || []` widens to `RegExpMatchArray | never[]`, and
   // tsc then types indexOf's parameter as `never`.
   const cols: string[] = colgroup.match(/<col\b[^/]*\/>/g) || []
-  assert.equal(cols.length, REPORT_COLUMNS.length + 1, 'the colgroup must declare one <col> per column, checkbox included')
+  assert.equal(cols.length, 4, 'select, image, name, and the one mapped data <col> (one per chosen column)')
   const auto = cols.filter((col) => !/width/.test(col))
   assert.equal(auto.length, 1, 'exactly one column (Name) may be auto-sized; every other column must be bounded')
-  assert.equal(cols.indexOf(auto[0]), 2, 'the auto column must be Name (third), not Details or a numeric column')
-  // Details must have room for one chip per branch side by side, measured in
-  // KHMER -- lang-km puts the whole app on Noto Sans Khmer, which renders even
-  // these Latin chips wider, so an English-only width under-sizes the column
-  // and the report regrows a line for Khmer operators. "Main Store: 1000" plus
-  // "Branch 2: 250" plus the 4px gap needs 208px; 15rem leaves 216px. Anything
-  // below wraps them and inflates every row (measured at 1280, Sep 3).
-  const detailsWidth = /<col style=\{\{ width: '([\d.]+)rem' \}\} \/>/.exec(cols[3])
-  assert.ok(detailsWidth, 'the Details column must declare a rem width')
-  assert.ok(Number(detailsWidth[1]) >= 15, `Details is ${detailsWidth[1]}rem -- under 15rem the per-branch chips wrap in Khmer and every row grows`)
+  assert.equal(cols.indexOf(auto[0]), 2, 'the auto column must be Name (third), not a data column')
+  // The per-branch chips that needed 15rem in the old Details column now live in
+  // the Stock cell (one chip or a short list); Stock keeps room for a Khmer
+  // branch name beside a 4-digit quantity.
+  const stock = PRODUCT_COLUMNS.find((column) => column.key === 'stock')
+  assert.ok(stock && stock.widthRem >= 6, 'the Stock column must stay wide enough for its branch chip in Khmer')
+  assert.ok(PRODUCT_COLUMNS.every((column) => column.widthRem > 0 && column.widthRem <= 12), 'every data column declares a bounded rem width')
 })
 
 // ---------------------------------------------------------------------------

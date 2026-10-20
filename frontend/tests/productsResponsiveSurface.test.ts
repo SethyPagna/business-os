@@ -57,13 +57,13 @@ assert.doesNotMatch(products, /hideZeroStockGroupedChildRows\(buildProductCatego
 assert.match(products, /className="products-list-density-90"[\s\S]*<ProductsListSurface/, 'only the product-result surface should use the requested 90% density')
 assert.match(css, /\.products-list-density-90\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*max-width:\s*100%;/, 'the product surface must never exceed the clipped page width')
 assert.doesNotMatch(css, /\.products-list-density-90\s*\{[^}]*zoom:/, 'product density must not use zoom because mobile WebKit can clip the widened box')
-assert.match(productList, /<table className="w-full min-w-\[58rem\] table-fixed/, 'the desktop product table must use the compact responsive minimum width')
+assert.match(productList, /<table className="w-full table-fixed[^"]*" style=\{\{ minWidth: `\$\{productTableMinWidthRem\(columns\)\}rem` \}\}/, 'the desktop product table declares its own minimum width from the chosen columns and scrolls inside its container (6.0.873)')
 // Name is still the ONE auto column and Details is still bounded -- that
 // invariant is unchanged. The bound itself moved 10.5rem -> 15rem: 10.5rem was
 // far too narrow for the two branch chips, and 12.5rem was still too narrow
 // once Noto Sans Khmer widened them for lang-km, which is the font this column
 // has to be sized against (see the colgroup comment for the measurements).
-assert.match(productList, /Name is the one auto column[\s\S]*<col \/>[\s\S]*<col style=\{\{ width: '15rem' \}\} \/>/, 'name must consume the leftover space while Details stays compact')
+assert.match(productList, /Name is the one auto column[\s\S]*<col \/>[\s\S]*\{columns\.map\(\(column\) => <col key=\{column\.key\} style=\{\{ width: `\$\{column\.widthRem\}rem` \}\} \/>\)\}/, 'name must consume the leftover space while every data column stays bounded (6.0.873: Details became columns)')
 assert.match(productList, /card hidden min-w-0 max-w-full overflow-hidden xl:flex xl:flex-col/, 'the full table must only replace cards when enough post-sidebar width is available')
 assert.match(productList, /min-w-0 max-w-full space-y-2 xl:hidden/, 'cards must remain width-bounded through laptop and mobile layouts')
 assert.match(productList, /inline-flex shrink-0 items-center gap-1 whitespace-nowrap[\s\S]*t\('collapse'\)/, 'the section Collapse control must remain fully visible on narrow screens')

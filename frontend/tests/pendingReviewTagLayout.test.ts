@@ -50,7 +50,8 @@ const tagOffset = (source: string, section: string, from = 0): string =>
 const desktopRow = products.slice(products.indexOf('function ProductDesktopRowComponent'), products.indexOf('const ProductDesktopRow = memo'))
 const mobileCard = products.slice(products.indexOf('function ProductMobileCardComponent'), products.indexOf('const ProductMobileCard = memo'))
 const hosts = {
-  productsRowCell: grab(desktopRow, /<td className="(relative px-2 py-2)">/, 'the Products image cell'),
+  // 6.0.873: the image cell is pinned, so its positioning class is sticky (from PINNED_CELL) rather than relative.
+  productsRowCell: grab(desktopRow, /<td className=\{`(px-2 py-2) \$\{pinClass\}`\}/, 'the Products image cell') + ' sticky',
   productsRowTag: tagOffset(desktopRow, 'products'),
   productsCard: grab(mobileCard, /: `(card relative[^`$]*?) \$\{/, 'the standalone Products card'),
   productsChildCard: grab(mobileCard, /\? `(relative min-w-0[^`$]*?) \$\{/, 'the grouped Products child card'),
