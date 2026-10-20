@@ -1,8 +1,7 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
-import { fmtTime } from './utils/formatters.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
-import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -16,7 +15,6 @@ import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
-import InfoHint from './components/shared/InfoHint.tsx'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import { useBranchRedirectQueue } from './components/shared/useBranchRedirectQueue.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
@@ -35,9 +33,9 @@ import { SIGNOUT_RETRY_EVENT, isSignoutBlocked } from './api/unresolvedSignout.t
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from './api/offlineQueueOwnership.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
-import { runWhenVisible } from './utils/visibilityPolling.ts'
+import { visibleTimeout } from './utils/visibilityPolling.ts'
 import { CheckConnectionButton } from './components/shared/SavingBlockedNote.tsx'
-import { createPendingSyncPoll } from './app/pendingSyncPolling.ts'
+import { countLegacyQueuedRecords } from './api/legacyQueueProbe.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -121,27 +119,6 @@ interface SyncProblemDetail {
   waiting?: boolean
 }
 
-interface PendingSyncState {
-  owner?: unknown
-  review_token?: string | null
-  total?: number
-  syncing?: number
-  failed?: number
-  oldest_created_at?: string | number
-}
-
-interface OfflineSaleNoticeDetail {
-  offline_owner?: unknown
-  client_request_id?: string
-  receiptNumber?: string
-  ts?: number | string
-}
-
-interface WriteConflictDetail {
-  message?: string
-  ts?: number | string
-}
-
 interface SyncUpdateDetail {
   channel?: string
   reason?: string
@@ -157,10 +134,8 @@ interface SyncUpdateDetail {
 }
 
 interface AppShellApi {
-  getPendingSyncState?: () => Promise<PendingSyncState | null | undefined>
   getPendingAppUpdate?: () => SyncProblemDetail | null | undefined
   clearPendingAppUpdate?: () => void
-  retryPendingSyncNow?: (reviewToken?: string) => Promise<unknown>
 }
 
 interface AppContextValue {
@@ -217,17 +192,9 @@ interface AppUpdateBannerProps {
 }
 
 interface OfflineModeBannerProps {
-  pendingSync: PendingSyncState | null
   canWriteToServer: boolean
   syncUrl: string
   transientOutage: SyncProblemDetail | null
-  vaultLocked: SyncProblemDetail | null
-  conflictsNeedReview: WriteConflictDetail | null
-}
-
-interface StorageEvictionBandProps {
-  pendingSync: PendingSyncState | null
-  storagePersisted: boolean | null
 }
 
 interface PageSlotProps {
@@ -344,9 +311,7 @@ const PAGE_IMPORTERS = {
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
-const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000
-const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000
-const PENDING_SYNC_POLL_INTERVAL_MS = 20_000
+const LEGACY_QUEUE_PROBE_DELAY_MS = 5000
 const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000
 const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000
 const QUICK_PREFERENCES_INITIAL_MOUNT_DELAY_MS = 7000
@@ -553,6 +518,7 @@ const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./compo
 const NotesWidget = lazyWithRetry(asPageModule(() => import('./components/shared/NotesWidget')), 'notes-widget')
 const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
 const BranchRedirectHost = lazyWithRetry(asPageModule(() => import('./components/shared/BranchRedirectHost')), 'branch-redirect-host')
+const LegacyQueueNotice = lazyWithRetry(asPageModule(() => import('./components/server/LegacyQueueNotice.tsx')), 'legacy-queue-notice')
 const Sidebar = lazyWithRetry(asPageModule(() => import('./components/navigation/Sidebar')), 'sidebar')
 const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
@@ -615,39 +581,6 @@ function scheduleIntentChunkLoad(pageId: PageId, onDone: (pageId: PageId) => voi
     cancelled = true
     if (timerId != null) window.clearTimeout(timerId)
     if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
-  }
-}
-
-function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
-  if (typeof window === 'undefined') return () => {}
-
-  let cancelled = false
-  let idleId: number | null = null
-  let timerId: number | null = null
-  let cancelWaitForVisible: (() => void) | null = null
-  const run = () => {
-    if (cancelled) return
-    // A tab hidden at this point reads once it is shown. It used to drop the
-    // read and rely on the session-long 20 s interval, which F2 removed; the
-    // poll now starts from a completed read (createPendingSyncPoll).
-    cancelWaitForVisible = runWhenVisible(refresh)
-  }
-
-  timerId = window.setTimeout(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(run, { timeout: PENDING_SYNC_IDLE_TIMEOUT_MS })
-    } else {
-      run()
-    }
-  }, PENDING_SYNC_INITIAL_REFRESH_DELAY_MS)
-
-  return () => {
-    cancelled = true
-    if (timerId != null) window.clearTimeout(timerId)
-    if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-      window.cancelIdleCallback(idleId)
-    }
-    cancelWaitForVisible?.()
   }
 }
 
@@ -727,7 +660,9 @@ function useMountedPages(activePage: AdminPageId): AdminPageId[] {
   return mountedPages
 }
 
-function pendingSaleOwnerForUser(user: AppUser | null): OfflineSaleOwner | null {
+// The account, organization and server writes are signed for, when the shell
+// user is that account; null while signed out, quarantined or mid-switch.
+function writeOwnerForUser(user: AppUser | null): OfflineSaleOwner | null {
   if (!user || isActorSessionQuarantined()) return null
   try {
     const owner = captureOfflineSaleOwner()
@@ -735,22 +670,42 @@ function pendingSaleOwnerForUser(user: AppUser | null): OfflineSaleOwner | null 
   } catch { return null }
 }
 
-function acceptsOfflineSaleNotice(detail: OfflineSaleNoticeDetail, user: AppUser | null, scope: ActorReadScope): boolean {
-  return isActorReadScopeCurrent(scope, false) && offlineSaleOwnersMatch(detail.offline_owner, pendingSaleOwnerForUser(user))
+// Offline selling ended on 26 Sep 2026. Sales a device queued before then wait
+// for the one-time manual recovery (components/server/LegacyQueueNotice.tsx).
+// They are counted once per signed-in account, with plain IndexedDB
+// (api/legacyQueueProbe.ts): no request, no poll, and no Dexie unless rows
+// exist. A count belongs to the account it was read for.
+function useLegacyQueueCount(user: AppUser | null): { ownerKey: string; count: number; recount: () => void } {
+  const owner = writeOwnerForUser(user)
+  const ownerKey = owner ? JSON.stringify(owner) : ''
+  const ownerKeyRef = useRef(ownerKey)
+  ownerKeyRef.current = ownerKey
+  const [result, setResult] = useState({ ownerKey: '', count: 0 })
+
+  const probe = useCallback((forOwnerKey: string) => {
+    countLegacyQueuedRecords()
+      .then((count) => { if (ownerKeyRef.current === forOwnerKey) setResult({ ownerKey: forOwnerKey, count }) })
+      .catch((error) => console.warn('[legacy-queue] Retained sales on this device could not be counted:', error))
+  }, [])
+
+  useEffect(() => {
+    if (!ownerKey || typeof window === 'undefined') return undefined
+    return visibleTimeout(() => probe(ownerKey), LEGACY_QUEUE_PROBE_DELAY_MS)
+  }, [ownerKey, probe])
+
+  const recount = useCallback(() => { if (ownerKeyRef.current) probe(ownerKeyRef.current) }, [probe])
+  return { ownerKey, count: ownerKey && result.ownerKey === ownerKey ? result.count : 0, recount }
 }
 
 function useSyncErrorBanner(user: AppUser | null) {
   // Central listener for sync write/read failures that should surface globally.
   const [syncError, setSyncError] = useState<SyncProblemDetail | null>(null)
   const [transientOutage, setTransientOutage] = useState<SyncProblemDetail | null>(null)
-  const [pendingSync, setPendingSync] = useState<{ state: PendingSyncState; scope: ActorReadScope } | null>(null)
   const bannerScopeRef = useRef<ActorReadScope | null>(null)
-  const owner = pendingSaleOwnerForUser(user)
+  const owner = writeOwnerForUser(user)
   const ownerKey = owner ? JSON.stringify(owner) : ''
-  const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
   const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
   const dismissedAppUpdateRef = useRef('')
-  const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
   // App updates are independent of authentication. A waiting worker may
   // announce itself on the login screen, during session restoration, or in
@@ -784,38 +739,19 @@ function useSyncErrorBanner(user: AppUser | null) {
   useEffect(() => {
     setSyncError(null)
     setTransientOutage(null)
-    setPendingSync(null)
-    setVaultLocked(null)
-    setConflictsNeedReview(null)
     bannerScopeRef.current = null
     if (!owner || typeof window === 'undefined') return undefined
-    const scope = captureActorReadScope('pending-sales')
+    const scope = captureActorReadScope('sync-banner')
     bannerScopeRef.current = scope
     let disposed = false
-    let request = 0
     const isCurrent = () => !disposed && isActorReadScopeCurrent(scope, false)
-      && offlineSaleOwnersMatch(owner, pendingSaleOwnerForUser(user))
+      && offlineSaleOwnersMatch(owner, writeOwnerForUser(user))
 
-    // Polls only while a read shows something to watch drain (or could not
-    // confirm the owner), and never in a hidden tab -- see pendingSyncPolling.ts.
-    const pendingSyncPoll = createPendingSyncPoll(() => refreshPendingSync(), PENDING_SYNC_POLL_INTERVAL_MS)
-    const refreshPendingSync = () => {
-      if (!isCurrent()) return
-      const requestId = ++request
-      getAppShellApi().getPendingSyncState?.()
-        .then((state) => {
-          if (!isCurrent() || requestId !== request) return
-          setPendingSync(state && offlineSaleOwnersMatch(state.owner, owner) ? { state, scope } : null)
-          pendingSyncPoll.observe(state)
-        })
-        .catch(() => {})
-    }
     const onSyncError = (event: Event) => {
       if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
       if (detail?.transient) return
       setSyncError(detail)
-      refreshPendingSync()
     }
     const onTransientOutage = (event: Event) => {
       if (!isCurrent()) return
@@ -832,7 +768,6 @@ function useSyncErrorBanner(user: AppUser | null) {
       if (event.type === 'sync:reconnected' || detail?.connected) {
         setSyncError(null)
         setTransientOutage(null)
-        refreshPendingSync()
       }
     }
     const onSyncErrorResolved = (event: Event) => {
@@ -840,59 +775,34 @@ function useSyncErrorBanner(user: AppUser | null) {
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemReference : null
       setSyncError((current) => shouldClearResolvedSyncError(current, detail) ? null : current)
     }
-    const onQueueChanged = () => refreshPendingSync()
-    const onVaultLocked = (event: Event) => { if (isCurrent()) setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() }) }
-    const onConflictReview = (event: Event) => {
-      if (!isCurrent()) return
-      setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
-      refreshPendingSync()
-    }
     window.addEventListener('sync:error', onSyncError)
     window.addEventListener('sync:write-blocked', onSyncError)
     window.addEventListener('sync:transient-outage', onTransientOutage)
     window.addEventListener('sync:status', onSyncRecovered)
     window.addEventListener('sync:reconnected', onSyncRecovered)
     window.addEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
-    window.addEventListener('sync:queue-changed', onQueueChanged)
-    window.addEventListener('sync:offline-sale-queued', onQueueChanged)
-    window.addEventListener('sync:offline-sale-synced', onQueueChanged)
-    window.addEventListener('offline:vault-locked', onVaultLocked)
-    window.addEventListener('sync:write-conflict', onConflictReview)
-    const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     return () => {
       disposed = true
-      cancelInitialPendingSyncRefresh()
-      pendingSyncPoll.cancel()
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
       window.removeEventListener('sync:transient-outage', onTransientOutage)
       window.removeEventListener('sync:status', onSyncRecovered)
       window.removeEventListener('sync:reconnected', onSyncRecovered)
       window.removeEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
-      window.removeEventListener('sync:queue-changed', onQueueChanged)
-      window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
-      window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
-      window.removeEventListener('offline:vault-locked', onVaultLocked)
-      window.removeEventListener('sync:write-conflict', onConflictReview)
     }
   }, [user, ownerKey])
 
   // Fence the render itself: effects run after paint and cannot hide a prior
-  // actor's already-resolved count during an account/authority transition.
+  // actor's already-shown problem during an account/authority transition.
   const bannerCurrent = !!owner && !!bannerScopeRef.current && isActorReadScopeCurrent(bannerScopeRef.current, false)
   return {
     syncError: bannerCurrent ? syncError : null,
     transientOutage: bannerCurrent ? transientOutage : null,
-    pendingSync: owner && pendingSync && isActorReadScopeCurrent(pendingSync.scope, false) && offlineSaleOwnersMatch(pendingSync.state.owner, owner) ? pendingSync.state : null,
-    vaultLocked: bannerCurrent ? vaultLocked : null,
     appUpdate,
-    conflictsNeedReview: bannerCurrent ? conflictsNeedReview : null,
-    clearVaultLocked: () => setVaultLocked(null),
     clearAppUpdate: () => {
       if (appUpdate) dismissedAppUpdateRef.current = persistentNoticeFingerprint('app-update', appUpdate)
       setAppUpdate(null)
     },
-    clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
 }
@@ -1241,79 +1151,6 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
-// C5: the one place the browser's "I may delete your offline data" answer is
-// ever shown to the person it can cost money.
-//
-// web-api.ts already computed 'persistent' | 'eviction_possible' inside
-// unlockOfflineVault and wrote it to IndexedDB, where nothing read it back,
-// and the persist() request itself only ran once a sale was ALREADY queued
-// offline (saleWriteTransport.ts). AppContext now asks at boot instead and
-// hands the answer down as `storagePersisted`.
-//
-// BOTH conditions are required before this band appears:
-//   - storagePersisted === false: the browser refused (or has no Storage
-//     Manager). `null` means not asked yet and must stay silent -- a band
-//     that flashes on every boot before the answer arrives is noise.
-//   - a non-empty outbox: a granted-or-not origin with nothing queued has
-//     nothing to lose today, and on a shop till the band would then be
-//     permanent furniture. The count is the same pendingSync.total the
-//     offline indicator above already reads.
-//
-// Dismissal is per page session on purpose, not persisted: the risk is not a
-// one-time device fact, it is "there are unsynced sales on a device whose
-// storage can be evicted", and that comes back every time it is true. It is
-// component state, so signing out unmounts it and the next cashier starts
-// clean.
-//
-// SHARED DEVICE, SEVERAL ACCOUNTS. Both inputs are already session-scoped and
-// neither is stored: `storagePersisted` is re-measured per authenticated
-// session and reset to null on sign-out (AppContext), and `pendingSync` is
-// set to null and refetched whenever `user` changes (useSyncErrorBanner
-// above). The count itself is the device's IndexedDB outbox, which this app
-// deliberately preserves across sign-out (clearLocalBusinessState's
-// preserveOfflineWork) and which the existing OfflineModeBanner already shows
-// the same way -- this band reads the identical source rather than inventing
-// a second, differently-scoped count.
-function StorageEvictionBand({ pendingSync, storagePersisted }: StorageEvictionBandProps) {
-  const { t } = useApp()
-  const [dismissed, setDismissed] = useState(false)
-  const pending = Number(pendingSync?.total || 0)
-
-  if (storagePersisted !== false || pending <= 0 || dismissed) return null
-
-  return (
-    <div
-      className="pointer-events-auto flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-900 shadow-lg dark:border-amber-700 dark:bg-amber-950/90 dark:text-amber-100"
-      role="status"
-      aria-live="polite"
-    >
-      <span aria-hidden="true" className="shrink-0 text-sm leading-6">!</span>
-      {/* No truncation: Khmer is longer than the English here, and a clipped
-          warning is exactly the dead-end "..." the project forbids. The band
-          grows downward instead -- leading-6 gives Khmer glyphs their room. */}
-      <span className="min-w-0 flex-1 break-words font-semibold">
-        {t('storage_eviction_title') || 'Offline data may be cleared'}
-      </span>
-      <span className="shrink-0 rounded-full border border-current/30 px-2 leading-6">
-        {pending} {t('pending') || 'pending'}
-      </span>
-      <InfoHint
-        className="shrink-0"
-        label={t('storage_eviction_title') || 'Offline data may be cleared'}
-        text={t('storage_eviction_detail') || 'Add to Home Screen keeps sales safe: offline sales waiting to sync can be deleted by the browser when space runs low, but browsers keep data for installed apps.'}
-      />
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        aria-label={t('dismiss_notification') || 'Dismiss notification'}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-base leading-none opacity-70 hover:bg-current/10 hover:opacity-100"
-      >
-        <span aria-hidden="true">×</span>
-      </button>
-    </div>
-  )
-}
-
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
   const { t, canAccessPage, user } = useApp()
   const locallyPresented = useSyncExternalStore(subscribeSyncProblemPresentation,
@@ -1461,24 +1298,8 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
   )
 }
 
-function formatSyncTimestamp(value: unknown): string {
-  if (!value) return ''
-  if (!(typeof value === 'string' || typeof value === 'number' || value instanceof Date)) {
-    return String(value)
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  // Business time (Asia/Phnom_Penh), never the viewer's device zone -- a
-  // sync banner/toast read on a device set to another zone must still show
-  // the same house dd/mm/yyyy, HH:mm every other timestamp in the app uses.
-  // See utils/formatters.ts's fmtTime for why the parts are assembled by
-  // hand rather than left to a locale.
-  return fmtTime(date)
-}
-
-function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, conflictsNeedReview }: OfflineModeBannerProps) {
+function OfflineModeBanner({ canWriteToServer, syncUrl, transientOutage }: OfflineModeBannerProps) {
   const { t } = useApp()
-  const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
   const [showVerboseMessage, setShowVerboseMessage] = useState(false)
   const [dismissedNotice, setDismissedNotice] = useState('')
@@ -1505,46 +1326,27 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   }, [canWriteToServer, syncUrl])
 
   const offline = !!syncUrl && !canWriteToServer
-  const syncing = Number(pendingSync?.syncing || 0)
-  const failed = Number(pendingSync?.failed || 0)
   const ready = !!syncUrl && canWriteToServer
-  const oldest = formatSyncTimestamp(pendingSync?.oldest_created_at)
   const reconnecting = offline && !!transientOutage
   const label = ready
-    ? (total
-      ? (t('offline_mode_ready_sync') || 'Server is online. Review retained sales in their original account before recovery.')
-      : (t('server_back_online') || 'Server is back online. You can keep working.'))
+    ? (t('server_back_online') || 'Server is back online. You can keep working.')
     : reconnecting
       ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
       : (t('offline_mode_active') || 'Saving needs a connection. Your cart and drafts stay on this screen; nothing is saved until the connection returns.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
-  // appUpdate no longer feeds this banner's own "Update ready" priority
-  // state -- that used to pop this floating banner on effectively every
-  // login/reload (not just when a genuinely new build was waiting),
-  // which read as a redundant nag stacked on top of the top bar. A
-  // manual refresh/update-check action now lives as its own button in
-  // the sidebar (see Sidebar.tsx) instead; this banner still exists for
-  // conflicts-need-review/vault-locked/offline-sync states, just not
-  // app-update anymore.
-  const priority = conflictsNeedReview
-    ? { title: 'Conflicts need review', message: 'Retained records need ownership review before recovery.', tone: 'danger' }
-    : vaultLocked
-      ? { title: 'Vault locked', message: 'Encrypted records are retained. Unlocking does not send them; ownership review is required.', tone: 'warning' }
-      : null
-  const toneClass = priority?.tone === 'danger'
-    ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200'
-    : ready
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
-      : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
-  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : offline ? (t('offline_saving_blocked_title') || 'No connection — saving is blocked') : t('offline_mode') || 'Offline mode')
-  const message = priority?.message || `${label}${statusSuffix}`
-  const shouldShowVerboseImmediately = !!priority || total > 0 || offline
+  // App updates have their own top bar (AppUpdateBanner) and sidebar action;
+  // this banner is only the connection: no connection = saving is blocked.
+  const toneClass = ready
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+  const title = reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : offline ? (t('offline_saving_blocked_title') || 'No connection — saving is blocked') : t('offline_mode') || 'Offline mode'
+  const message = `${label}${statusSuffix}`
+  const shouldShowVerboseImmediately = offline
   const noticeFingerprint = persistentNoticeFingerprint(
     offline ? 'offline-outage' : 'offline-recovered',
     offline ? transientOutage : { reason: 'recovered' },
     outageEpoch,
   )
-  const hasBlockingError = failed > 0 || Boolean(priority)
 
   useEffect(() => {
     if (offline && !priorOfflineRef.current) {
@@ -1555,7 +1357,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   }, [offline])
 
   useEffect(() => {
-    if (!offline && !ready && !priority && !showRecovered) {
+    if (!offline && !ready && !showRecovered) {
       setShowVerboseMessage(false)
       return undefined
     }
@@ -1566,10 +1368,10 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
     setShowVerboseMessage(false)
     const timer = window.setTimeout(() => setShowVerboseMessage(true), 1400)
     return () => window.clearTimeout(timer)
-  }, [offline, ready, priority, showRecovered, shouldShowVerboseImmediately])
+  }, [offline, ready, showRecovered, shouldShowVerboseImmediately])
 
-  if (!offline && !total && !showRecovered && !vaultLocked && !conflictsNeedReview) return null
-  if (!shouldRenderPersistentNotice(noticeFingerprint, dismissedNotice, hasBlockingError)) return null
+  if (!offline && !showRecovered) return null
+  if (!shouldRenderPersistentNotice(noticeFingerprint, dismissedNotice, false)) return null
 
   return (
     <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
@@ -1589,44 +1391,14 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
                 {message}
               </div>
             ) : null}
-            {total ? (
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 opacity-80">
-                <span className="rounded-full border border-current/20 px-2 py-0.5">
-                  {total} {t('pending') || 'pending'}
-                </span>
-                {syncing ? (
-                  <span className="rounded-full border border-current/20 px-2 py-0.5">
-                    {syncing} {t('syncing') || 'syncing'}
-                  </span>
-                ) : null}
-                {failed ? (
-                  <span className="rounded-full border border-current/20 px-2 py-0.5">
-                    {failed} {t('failed') || 'failed'}
-                  </span>
-                ) : null}
-                {oldest ? <span className="truncate">since {oldest}</span> : null}
-              </div>
-            ) : null}
           </div>
-          {!hasBlockingError ? (
-            <button type="button" onClick={() => setDismissedNotice(noticeFingerprint)}
-              aria-label={t('dismiss_notification') || 'Dismiss notification'}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg leading-none opacity-70 hover:bg-current/10 hover:opacity-100">
-              <span aria-hidden="true">×</span>
-            </button>
-          ) : null}
-            <div className="flex shrink-0 items-center gap-2">
+          <button type="button" onClick={() => setDismissedNotice(noticeFingerprint)}
+            aria-label={t('dismiss_notification') || 'Dismiss notification'}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg leading-none opacity-70 hover:bg-current/10 hover:opacity-100">
+            <span aria-hidden="true">×</span>
+          </button>
+          <div className="flex shrink-0 items-center gap-2">
             {offline ? <CheckConnectionButton /> : null}
-            {total ? (
-              <button
-                type="button"
-                className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!ready}
-                onClick={() => getAppShellApi().retryPendingSyncNow?.(pendingSync?.review_token || undefined).catch(() => {})}
-              >
-                {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
-              </button>
-            ) : null}
           </div>
         </div>
       </div>
@@ -1909,17 +1681,16 @@ export default function App() {
   } = useApp()
   // A write addressed to a disabled branch waits here for the operator's redirect answer (api/branchRedirect.ts).
   const branchRedirect = useBranchRedirectQueue()
-  const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
     syncError,
     transientOutage,
-    pendingSync,
-    vaultLocked,
     appUpdate,
-    conflictsNeedReview,
     clearSyncError,
     clearAppUpdate,
   } = useSyncErrorBanner(authReady ? user : null)
+  const legacyQueue = useLegacyQueueCount(authReady ? user : null)
+  // Closing the notice hides it for this account until the app starts again.
+  const [legacyQueueClosedFor, setLegacyQueueClosedFor] = useState('')
   const mountedPages = useMountedPages(page)
   const mobileHeaderVisible = useMobileHeaderAutoHide(page)
   const inlineMobileNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
@@ -2037,45 +1808,6 @@ export default function App() {
       }
     }
   }, [])
-
-  useEffect(() => {
-    if (!user || typeof window === 'undefined') return undefined
-    const noticeScope = captureActorReadScope('offline-sale-notices')
-    const onQueued = (event: Event) => {
-      const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
-      if (!acceptsOfflineSaleNotice(detail, user, noticeScope)) return
-      const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
-      if (offlineNoticeRef.current.queued === key) return
-      offlineNoticeRef.current.queued = key
-      const receipt = detail.receiptNumber ? ` ${detail.receiptNumber}` : ''
-      const messageTemplate = t('offline_sale_saved_notice') || 'Retained sale {receipt}, saved at {time}, needs review in its original account.'
-      notify(messageTemplate
-        .replace('{receipt}', receipt.trim() || '')
-        .replace('{time}', formatSyncTimestamp(detail.ts || Date.now()))
-        .replace(/\s{2,}/g, ' ')
-        .replace(/\s+\./g, '.'), 'warning', 7000)
-    }
-    const onSynced = (event: Event) => {
-      const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
-      if (!acceptsOfflineSaleNotice(detail, user, noticeScope)) return
-      const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
-      if (offlineNoticeRef.current.synced === key) return
-      offlineNoticeRef.current.synced = key
-      const receipt = detail.receiptNumber ? ` ${detail.receiptNumber}` : ''
-      const messageTemplate = t('offline_sale_synced_notice') || 'Offline sale {receipt} synced at {time}.'
-      notify(messageTemplate
-        .replace('{receipt}', receipt.trim() || '')
-        .replace('{time}', formatSyncTimestamp(detail.ts || Date.now()))
-        .replace(/\s{2,}/g, ' ')
-        .replace(/\s+\./g, '.'), 'success', 6000)
-    }
-    window.addEventListener('sync:offline-sale-queued', onQueued)
-    window.addEventListener('sync:offline-sale-synced', onSynced)
-    return () => {
-      window.removeEventListener('sync:offline-sale-queued', onQueued)
-      window.removeEventListener('sync:offline-sale-synced', onSynced)
-    }
-  }, [notify, t, user])
 
   const [shellLocation, setShellLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
 
@@ -2255,12 +1987,9 @@ export default function App() {
             <div className="flex min-w-0 items-center gap-3">
             </div>
             <OfflineModeBanner
-              pendingSync={pendingSync}
               canWriteToServer={canWriteToServer}
               syncUrl={syncUrl}
               transientOutage={transientOutage}
-              vaultLocked={vaultLocked}
-              conflictsNeedReview={conflictsNeedReview}
             />
             {shouldMountImportTracker ? (
               <Suspense fallback={null}>
@@ -2288,10 +2017,20 @@ export default function App() {
           them can never land on top of each other, and so the clearance over
           the mobile bottom nav is decided once. Inert where empty. */}
       <div className={bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)}>
-        <StorageEvictionBand pendingSync={pendingSync} storagePersisted={storagePersisted} />
         <IosInstallHint />
       </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
+      {legacyQueue.count > 0 && legacyQueueClosedFor !== legacyQueue.ownerKey ? (
+        <Suspense fallback={null}>
+          <LegacyQueueNotice
+            key={legacyQueue.ownerKey}
+            recordCount={legacyQueue.count}
+            storagePersisted={storagePersisted}
+            onClose={() => setLegacyQueueClosedFor(legacyQueue.ownerKey)}
+            onChanged={legacyQueue.recount}
+          />
+        </Suspense>
+      ) : null}
       {branchRedirect ? (
         <Suspense fallback={null}>
           <BranchRedirectHost key={JSON.stringify(branchRedirect.request)} request={branchRedirect.request} onAnswer={branchRedirect.answer} />

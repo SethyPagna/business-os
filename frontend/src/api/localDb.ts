@@ -1,11 +1,14 @@
 /**
- * api/localDb.ts - Offline-first IndexedDB store (Dexie).
+ * api/localDb.ts - the device IndexedDB store (Dexie).
  *
  * Exports a ready-to-use `dexieDb` instance and thin helper functions
  * that mirror the server API shapes, used as fallbacks inside route().
  *
- * The DB name and version must match sw.js so the service worker shares
- * the same store when syncing in the background.
+ * sync_queue, sync_outbox, offline_vault and offline_file_chunks only hold
+ * work queued before offline selling ended (26 Sep 2026). Keep them declared:
+ * a version that drops a store deletes its rows on upgrade.
+ * api/legacyQueueProbe.ts counts those rows; LegacyQueueNotice.tsx exports
+ * and recovers the queued sales.
  */
 
 import Dexie from 'dexie'
@@ -21,7 +24,7 @@ type LocalDexie = Dexie & {
   settings_meta: Table<LocalRow, string>
 }
 
-// ─── Schema (must stay in sync with sw.js) ────────────────────────────────────
+// ─── Schema ───────────────────────────────────────────────────────────────────
 export const dexieDb = new Dexie('BusinessOS') as LocalDexie
 dexieDb.version(1).stores({
   settings:            'key',

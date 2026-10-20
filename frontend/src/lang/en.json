@@ -7685,5 +7685,19 @@
   "perm_user_exceptions_other": "{n} individual exceptions",
   "perm_switched_off_heading": "Switched off",
   "loyalty_points_enabled": "Loyalty points",
-  "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays."
+  "loyalty_points_enabled_desc": "When off, nothing earns or redeems points and balances are hidden. Sales made while off never earn points later. The membership ID stays.",
+  "legacy_queue_title": "Sales kept on this device",
+  "legacy_queue_intro": "These sales were saved on this device before offline selling ended. Export a copy, then upload them.",
+  "legacy_queue_own_count": "In this account",
+  "legacy_queue_other_records": "{count} more are kept on this device for another account or for support.",
+  "legacy_queue_export": "Export JSON",
+  "legacy_queue_upload": "Upload",
+  "legacy_queue_upload_title": "Upload these sales?",
+  "legacy_queue_on_device": "Kept on this device",
+  "legacy_queue_uploaded": "{synced} of {attempted} sales uploaded.",
+  "legacy_queue_exported": "{count} sales exported.",
+  "legacy_queue_cleared": "{count} sales cleared from this device.",
+  "legacy_queue_clear_after_export": "Export first, then clear",
+  "legacy_queue_load_failed": "The sales kept on this device could not be read. Close and open the app again.",
+  "legacy_queue_action_failed": "Nothing changed. Try again."
 }

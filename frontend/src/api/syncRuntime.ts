@@ -1,7 +1,6 @@
 import { STORAGE_KEYS, SYNC } from '../constants.ts'
 
-export const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
-export const DISCARD_SYNC_UPDATE_CHANNELS = ['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'] as const
+// Pages to refresh after the legacy drain uploads a queued sale (saleWriteTransport.ts).
 export const OFFLINE_SALE_SYNC_UPDATE_CHANNELS = ['sales', 'products', 'inventory', 'dashboard'] as const
 export const FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = [
   'settings',
@@ -27,8 +26,6 @@ export const FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = [
   'roles',
   'pendingActions',
 ] as const
-
-export type SyncQueueChangedDetail = Record<string, unknown>
 
 // A push from another device reaches the page as websocket.ts's { channel, payload }. Every local
 // dispatch (this tab's own writes, resume, reconnect, cache refresh) carries no `payload` key.
@@ -119,13 +116,6 @@ export function dispatchSyncUpdates(channels: readonly string[] = [], reason = '
   }
 }
 
-export function emitSyncQueueChanged(detail: SyncQueueChangedDetail = {}): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
-    detail: { ts: Date.now(), ...detail },
-  }))
-}
-
 export function hasStoredUserSession(): boolean {
   if (typeof window === 'undefined') return false
   try {
@@ -133,9 +123,4 @@ export function hasStoredUserSession(): boolean {
   } catch (_) {
     return false
   }
-}
-
-export function registerOutboxBackgroundSync(): void {
-  // Online-only writes. Existing offline work is retained for explicit,
-  // original-account recovery; never schedule an unattended replay.
 }

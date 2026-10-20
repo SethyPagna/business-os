@@ -22,7 +22,6 @@ let rfidTransportPromise = null
 let salesTransportPromise = null
 let settingsTransportPromise = null
 let returnsTransportPromise = null
-let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
 let notificationSummaryTransportPromise = null
 let systemJobsTransportPromise = null
@@ -127,11 +126,6 @@ function loadSettingsTransport() {
 function loadReturnsTransport() {
   if (!returnsTransportPromise) returnsTransportPromise = import('./returnsTransport.ts')
   return returnsTransportPromise
-}
-
-function loadPendingSyncTransport() {
-  if (!pendingSyncTransportPromise) pendingSyncTransportPromise = import('./pendingSyncTransport.ts')
-  return pendingSyncTransportPromise
 }
 
 function loadDriveSyncTransport() {
@@ -257,21 +251,6 @@ function scheduleSensitiveMirrorPurge() {
     }
     run()
   }, SENSITIVE_MIRROR_PURGE_DELAY_MS)
-}
-
-export async function discardPendingSyncQueue(reason = 'Reviewed pending sales were cleared.', reviewToken?: string) {
-  const { discardPendingSyncQueue: discardPendingSyncQueueRequest } = await loadPendingSyncTransport()
-  return discardPendingSyncQueueRequest(reason, reviewToken)
-}
-
-export async function getPendingSyncState() {
-  const { getPendingSyncState: getPendingSyncStateRequest } = await loadPendingSyncTransport()
-  return getPendingSyncStateRequest()
-}
-
-export async function retryPendingSyncNow(reviewToken?: string) {
-  const { retryPendingSyncNow: retryPendingSyncNowRequest } = await loadPendingSyncTransport()
-  return retryPendingSyncNowRequest(reviewToken)
 }
 
 // mirrorTables: when omitted, every local IndexedDB mirror table is wiped

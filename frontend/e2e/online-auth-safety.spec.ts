@@ -77,7 +77,6 @@ test.describe('online-only authentication safety in the built browser', () => {
     await page.evaluate(() => {
       window.dispatchEvent(new Event('online'))
       window.dispatchEvent(new Event('focus'))
-      navigator.serviceWorker.controller?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
     })
     await context.clearCookies({ name: 'e2e_logout_failure' })
     await page.getByRole('button', { name: /Finish signing out/ }).click()
@@ -86,15 +85,16 @@ test.describe('online-only authentication safety in the built browser', () => {
     await expect(page.locator(APP_ROOT)).toBeVisible()
     await page.reload()
     await expect(page.locator(APP_ROOT)).toBeVisible()
+    // The built worker has no sync handler since 6.0.880 and the foreground
+    // queue is gone (6.0.895): reconnect events must still send nothing.
     await page.evaluate(async () => {
       const registration = await navigator.serviceWorker.ready
       if (!registration.active) throw new Error('The built service worker must be active')
-      registration.active.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
       window.dispatchEvent(new Event('online'))
       window.dispatchEvent(new Event('focus'))
     })
-    // Allow the native worker message and foreground listeners to run before
-    // checking the absence of writes; this is a bounded observation window.
+    // Allow the foreground listeners to run before checking the absence of
+    // writes; this is a bounded observation window.
     await page.waitForTimeout(1500)
     expect(await page.evaluate(() => localStorage.getItem('e2e-retained-draft'))).toBe('cashier-a-draft')
     const retained = await page.evaluate(async () => {
