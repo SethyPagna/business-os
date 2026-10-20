@@ -35,6 +35,7 @@ import {
   PORTAL_INK_ON_LIGHT,
   PORTAL_LIGHT_SURFACE,
   PORTAL_MERCHANT_COLOR_DEFAULTS,
+  PORTAL_TOKENS,
   contrastRatio,
   ensureAccessibleSurface,
   meetsContrast,
@@ -365,6 +366,75 @@ runTest('the language-tools menu heading is legible on the dark menu surface', (
     'the "Language tools" heading needs a dark ink -- PortalMenu\'s own menu surface is dark:bg-neutral-900',
   )
   assert.ok(meetsContrast('#a3a3a3', '#171717', 'text'), 'dark:text-neutral-400 clears AA text contrast on that menu')
+})
+
+// ---------------------------------------------------------------------------
+// 4. Storefront design tokens (G1/G2/G4): the CSS must carry what the table audits.
+// ---------------------------------------------------------------------------
+const portalCss = fs.readFileSync(path.join(here, '..', 'src', 'styles', 'public-portal.css'), 'utf8')
+
+function cssBlock(selectorStart: string): string {
+  const at = portalCss.indexOf(selectorStart)
+  assert.ok(at >= 0, `missing CSS block ${selectorStart}`)
+  return portalCss.slice(at, portalCss.indexOf('}', at))
+}
+
+runTest('the design tokens in public-portal.css equal the audited PORTAL_TOKENS', () => {
+  const names: Record<string, string> = { ink: 'ink', ground: 'ground', card: 'card', brass: 'brass', brassText: 'brass-text', onInk: 'on-ink' }
+  const blocks = {
+    light: cssBlock("html[data-public-portal='true'],"),
+    dark: cssBlock(".dark[data-public-portal='true'],"),
+  }
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [key, cssName] of Object.entries(names)) {
+      const value = (PORTAL_TOKENS[theme] as Record<string, string>)[key]
+      assert.ok(blocks[theme].includes(`--portal-${cssName}: ${value};`), `${theme} --portal-${cssName} must be ${value}`)
+    }
+  }
+})
+
+runTest('the brand tokens are the owner-specified values and the ivory matches admin chrome', () => {
+  assert.equal(PORTAL_TOKENS.light.ink, '#23201b')
+  assert.equal(PORTAL_TOKENS.light.brass, '#9c7a3c')
+  assert.equal(PORTAL_TOKENS.light.ground, '#f4f1ea')
+  assert.equal(PORTAL_TOKENS.light.card, '#ffffff')
+  const navChrome = fs.readFileSync(path.join(here, '..', 'src', 'components', 'navigation', 'nav-chrome.css'), 'utf8')
+  assert.match(navChrome, /--nav-ground: #f4f1ea/)
+})
+
+runTest('brass splits by size: UI/large at 3:1, small text at 4.5:1 on ivory AND white', () => {
+  const { light, dark } = PORTAL_TOKENS
+  for (const ground of [light.ground, light.card]) {
+    assert.ok(meetsContrast(light.brass, ground, 'ui'), `brass UI on ${ground}`)
+    assert.ok(meetsContrast(light.brassText, ground, 'text'), `brass text on ${ground}`)
+  }
+  assert.ok(!meetsContrast(light.brass, light.ground, 'text'), 'the UI brass must NOT be used for small text on ivory')
+  for (const ground of [dark.ground, dark.card]) assert.ok(meetsContrast(dark.brassText, ground, 'text'))
+})
+
+runTest('every new token pair is registered in PORTAL_CONTRAST_PAIRS', () => {
+  const { light, dark } = PORTAL_TOKENS
+  const has = (fg: string, bg: string) => PORTAL_CONTRAST_PAIRS.some((p) => p.foreground === fg && p.background === bg)
+  for (const t of [light, dark]) {
+    assert.ok(has(t.ink, t.ground) && has(t.ink, t.card), 'ink on ground and card')
+    assert.ok(has(t.brassText, t.ground) && has(t.brassText, t.card), 'brass text on ground and card')
+    assert.ok(has(t.brass, t.ground) && has(t.brass, t.card), 'brass on ground and card')
+    assert.ok(has(t.onInk, t.ink), 'primary button label')
+  }
+})
+
+runTest("html[lang='km'] storefront rules carry font, line-height, letter-spacing, no uppercase, >=12px", () => {
+  const base = cssBlock("html[lang='km'][data-public-portal='true'] body,")
+  assert.match(base, /font-family:[^;]*Noto Sans Khmer/)
+  assert.ok(base.includes('line-height: var(--km-line-height, 1.6);'))
+  assert.match(base, /letter-spacing: 0;/)
+  assert.match(base, /text-transform: none;/)
+  const track = cssBlock("html[lang='km'][data-public-portal='true'] [class*='tracking-']")
+  assert.match(track, /letter-spacing: 0 !important/)
+  assert.match(track, /text-transform: none !important/)
+  const small = cssBlock("html[lang='km'][data-public-portal='true'] [class*='text-[9px]']")
+  assert.match(small, /font-size: 12px !important/)
+  assert.ok(portalCss.includes("[class*='text-[11px]']"))
 })
 
 if (failed > 0) {

@@ -392,3 +392,113 @@ body[data-public-portal='true'] :focus-visible,
     transform: none !important;
   }
 }
+
+/* ==========================================================================
+   Storefront design tokens (G1/G2) -- ink + brass on ivory, white cards.
+   Values mirror PORTAL_TOKENS in components/catalog/portalContrast.ts; the
+   contrast test pins both sides, so change them together.
+
+   Tokens (scoped to the storefront, never the admin shell):
+     --portal-ink          body/heading text
+     --portal-ground       ivory page background (same ivory as nav-chrome.css)
+     --portal-card         card / sheet surface (white in light)
+     --portal-brass        accent for UI parts and LARGE text only (>=3:1)
+     --portal-brass-text   darker brass for SMALL text (>=4.5:1 on ground + card)
+     --portal-on-ink       text on a charcoal (ink) fill
+   Utility classes for components to adopt instead of Tailwind colour classes:
+     .portal-page          ivory page ground + ink text
+     .portal-card          card surface
+     .portal-accent        brass colour (icons, rules, large text)
+     .portal-accent-bg / .portal-accent-border
+     .portal-accent-text   small-text brass
+     .portal-btn-primary   charcoal fill, ivory text (dark: ivory fill, charcoal text)
+   ========================================================================== */
+html[data-public-portal='true'],
+[data-portal-root='true'] {
+  --portal-ink: #23201b;
+  --portal-ground: #f4f1ea;
+  --portal-card: #ffffff;
+  --portal-brass: #9c7a3c;
+  --portal-brass-text: #7a5c22;
+  --portal-on-ink: #f4f1ea;
+}
+
+.dark[data-public-portal='true'],
+.dark [data-portal-root='true'],
+[data-portal-root='true'].dark,
+.dark[data-portal-root='true'] {
+  --portal-ink: #f5f1e8;
+  --portal-ground: #0b0b0c;
+  --portal-card: #171717;
+  --portal-brass: #d6b56b;
+  --portal-brass-text: #e3c887;
+  --portal-on-ink: #23201b;
+}
+
+.portal-page {
+  background-color: var(--portal-ground);
+  color: var(--portal-ink);
+}
+
+.portal-card {
+  background-color: var(--portal-card);
+  color: var(--portal-ink);
+}
+
+.portal-accent {
+  color: var(--portal-brass);
+}
+
+.portal-accent-bg {
+  background-color: var(--portal-brass);
+}
+
+.portal-accent-border {
+  border-color: var(--portal-brass);
+}
+
+.portal-accent-text {
+  color: var(--portal-brass-text);
+}
+
+.portal-btn-primary {
+  background-color: var(--portal-ink);
+  color: var(--portal-on-ink);
+}
+
+/* ==========================================================================
+   Khmer on the storefront (G4). main.css keys its Khmer rules on
+   body.lang-km / [lang='km']:not(html), but the storefront only sets
+   <html lang>, so none of them ever applied here.
+   ========================================================================== */
+html[lang='km'][data-public-portal='true'] body,
+html[lang='km'][data-public-portal='true'] button,
+html[lang='km'][data-public-portal='true'] input,
+html[lang='km'][data-public-portal='true'] textarea,
+html[lang='km'][data-public-portal='true'] select {
+  font-family: var(--ui-khmer-font-family, "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif);
+  line-height: var(--km-line-height, 1.6);
+  letter-spacing: 0;
+  text-transform: none;
+  font-synthesis: none;
+}
+
+html[lang='km'][data-public-portal='true'] [class*='tracking-'],
+html[lang='km'][data-public-portal='true'] .uppercase {
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+/* Tight Tailwind leading shears Khmer coeng subscripts. */
+html[lang='km'][data-public-portal='true'] .leading-none,
+html[lang='km'][data-public-portal='true'] .leading-tight,
+html[lang='km'][data-public-portal='true'] .leading-snug {
+  line-height: var(--km-line-height, 1.6) !important;
+}
+
+/* Khmer glyphs are unreadable below 12px. */
+html[lang='km'][data-public-portal='true'] [class*='text-[9px]'],
+html[lang='km'][data-public-portal='true'] [class*='text-[10px]'],
+html[lang='km'][data-public-portal='true'] [class*='text-[11px]'] {
+  font-size: 12px !important;
+}
