@@ -484,7 +484,9 @@ ${marker}`)
       reason: 'query parity', client_request_id: 'query-parity' }, app)
     assert.strictEqual(result.status, 200, JSON.stringify(result.json))
     await Promise.all(routeWaits)
-    counts.push(queryReads.length)
+    // 6.0.882 memoises the schema probe per isolate: the freshly loaded legacy module pays it once, the warmed handler does not.
+    // That is not part of the FIFO-read oracle, so it is excluded from the count.
+    counts.push(queryReads.filter(sql => !/sqlite_master/.test(sql)).length)
     assert.strictEqual(queryReads.filter(sql => /bbs\.quantity AS available/.test(sql)).length, app === legacyApp ? 2 : 1)
     assert.strictEqual(telegramInputs[0].items[0].lot, 'A')
     routeDb.close()

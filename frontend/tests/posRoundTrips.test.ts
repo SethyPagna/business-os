@@ -43,7 +43,7 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
 
 interface Calls { bootstrap: Array<Record<string, unknown>>; search: Array<Record<string, unknown>>; filters: number; categories: number; sales: number }
 
-async function mountTill(options: { filters?: Record<string, string>; cart?: boolean; capability?: 'ready' | 'refused' } = {}) {
+async function mountTill(options: { filters?: Record<string, string>; cart?: boolean; capability?: 'ready' | 'refused'; organizationId?: number } = {}) {
   capability = options.capability ?? 'ready'
   for (const key of DRAFT_KEYS) { browser.window.localStorage.removeItem(key); browser.window.sessionStorage.removeItem(key) }
   for (const key of FILTER_KEYS) browser.window.sessionStorage.removeItem(key)
@@ -53,7 +53,7 @@ async function mountTill(options: { filters?: Record<string, string>; cart?: boo
   const page = await harness.mount({
     component: '../tests/posSyncHost.tsx',
     app: {
-      t: (key: string) => key, notify: () => {}, user: { ...USER, role_permissions: { all: true } }, authReady: true, page: 'pos', settings: {}, language: 'en',
+      t: (key: string) => key, notify: () => {}, user: { ...USER, organization_id: options.organizationId ?? USER.organization_id, role_permissions: { all: true } }, authReady: true, page: 'pos', settings: {}, language: 'en',
       fmtUSD: (value: number) => `$${value}`, fmtKHR: (value: number) => `${value}`, usdSymbol: '$', khrSymbol: 'R', exchangeRate: 4100,
       can: () => true, hasPermission: () => true, getPermissionTier: () => 'all', canWriteToServer: true,
     },
@@ -107,8 +107,10 @@ try {
     assert.equal(till.calls.categories, 1)
   })
 
+  // A confirmed 'ready' is remembered for the actor/session it was read for (useSaleMoneyCapability, module state that outlives a mount).
+  // The harness window cannot deliver the runtime-mismatch event that forgets it, so this case is a different organisation's till.
   await check('capability read refused: one money version 0 bootstrap, no loop', async () => {
-    const till = await mountTill({ capability: 'refused' })
+    const till = await mountTill({ capability: 'refused', organizationId: 2 })
     assert.equal(till.calls.bootstrap.length, 1, `bootstrap versions: ${JSON.stringify(till.calls.bootstrap.map((q) => q.money_precision_version))}`)
     assert.equal(till.calls.bootstrap[0].money_precision_version, 0)
   })
