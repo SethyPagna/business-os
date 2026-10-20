@@ -55,7 +55,7 @@ import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLangua
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
-import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
+import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 
@@ -72,7 +72,7 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
 const STOREFRONT_NAME = 'Leang Cosmetics'
-const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
+const STOREFRONT_HOME_SCREEN_NAME = 'Leang Cosmetics'
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512-v2.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
@@ -612,23 +612,10 @@ export default function PublicCatalogPage() {
     return () => { document.documentElement.lang = previous }
   }, [pageLanguage])
 
-  // G5/B9: arm the same install-prompt capture and standalone external-link
-  // guard App.tsx arms at boot for the admin app. The storefront never mounts
-  // App.tsx (see PublicCatalogRoot.tsx), so neither installer ever ran here
-  // before -- an installed storefront PWA had no install offer of its own,
-  // AND (per standaloneNavigation.ts's own doc comment, written assuming
-  // this WAS already wired) a same-origin `target="_blank"` link on this
-  // exact page could still strand a shopper in a second chromeless window
-  // with no way back. Both installers are idempotent no-ops in an ordinary
-  // browser tab.
-  useEffect(() => {
-    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
-    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
-    return () => {
-      stopInstallPromptCapture()
-      stopExternalLinkGuard()
-    }
-  }, [])
+  // B9: the storefront never mounts App.tsx (see PublicCatalogRoot.tsx), so it arms the
+  // standalone external-link guard itself; a no-op in an ordinary browser tab. The install
+  // capture is armed earlier, in index.tsx.
+  useEffect(() => installStandaloneExternalLinkGuard(), [])
 
   const changePageLanguage = (next: string) => {
     const language = normalizePortalLanguage(next)

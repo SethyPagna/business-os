@@ -11,7 +11,7 @@ type IosInstallStepsProps = {
 
 export default function IosInstallSteps({ translate, onClose }: IosInstallStepsProps) {
   const steps = [
-    { Icon: Share, text: translate('ios_install_step_menu', 'In Safari, tap ••• or Share.', 'នៅក្នុង Safari ចុច ••• ឬ ចែករំលែក (Share)។') },
+    { Icon: Share, text: translate('ios_install_step_menu', 'Tap ••• or Share in your browser.', 'នៅក្នុងកម្មវិធីរុករក ចុច ••• ឬ ចែករំលែក (Share)។') },
     { Icon: PlusSquare, text: translate('ios_install_step_add', 'Tap Add to Home Screen.', 'ចុច បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។') },
     { Icon: AppWindow, text: translate('ios_install_step_web_app', 'Keep Open as Web App on, then tap Add.', 'ទុក បើកជាកម្មវិធីវេប (Open as Web App) ឱ្យនៅបើក រួចចុច បន្ថែម (Add)។') },
   ]

@@ -25,7 +25,7 @@ import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { optionalAppOperation, restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
 import { reportClientCrash } from './utils/clientCrashReport.ts'
-import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
+import { installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
@@ -1973,29 +1973,16 @@ export default function App() {
   // Mount once at the shell so truncated cells work on every route.
   useEffect(() => { ensureTextAffordances({ copy: t('copy'), copied: t('copied') }) }, [t])
 
-  // G5: arm the native install-prompt capture at boot, before IosInstallHint
-  // mounts. Chromium chooses when to fire beforeinstallprompt and the event
-  // is lost if nothing calls preventDefault() on it; capturing here (and not
-  // in the component) means an event that fires during sign-in is still
-  // replayable afterwards. Idempotent, so the effect re-running is harmless.
+  // The install-prompt capture is armed in index.tsx, before React mounts.
   //
-  // B9: the same boot moment installs the standalone external-link guard, so
+  // B9: the boot moment installs the standalone external-link guard, so
   // a same-origin _blank link cannot strand an installed-app user in a
   // chromeless second window with no back button. Also idempotent, and a
   // no-op in an ordinary browser tab. Deliberately above the
   // isPublicCatalogRoute early return: the storefront can be installed too,
   // and most of the affected links live on it.
-  // Both installers are idempotent and both return their own teardown, so
-  // the listeners are attached exactly once and removed on unmount rather
-  // than accumulating a pair per render.
-  useEffect(() => {
-    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
-    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
-    return () => {
-      stopInstallPromptCapture()
-      stopExternalLinkGuard()
-    }
-  }, [])
+  // Idempotent, with its own teardown, so the listener is attached once and removed on unmount.
+  useEffect(() => installStandaloneExternalLinkGuard(), [])
 
   // G10: hand appUpdate.ts the shell's own non-blocking notice, so the
   // unsaved-work refusal stops being a window.alert() that freezes the tab

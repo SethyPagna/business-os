@@ -158,7 +158,10 @@ check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
   // CATCHES telling a Chrome-for-iOS user to tap Share -> Add to Home Screen,
   // which that browser cannot do, and catches showing it on a real Mac after
   // iPadOS 13+ started reporting itself as "Macintosh".
-  assert.match(standaloneNavigation, /CriOS\|FxiOS\|EdgiOS\|OPiOS/, 'other iOS browsers must be excluded')
+  // Owner, 19 Oct 2026: Chrome, Firefox and Edge on iOS 16.4+ can Add to Home Screen, so they are
+  // version-gated instead of excluded; Opera and in-app browsers (no Safari token) stay out.
+  assert.match(standaloneNavigation, /\/OPiOS\/\.test\(userAgent\)\) return false/, 'Opera for iOS must be excluded')
+  assert.match(standaloneNavigation, /\/CriOS\|FxiOS\|EdgiOS\//, 'Chrome, Firefox and Edge on iOS are version-gated')
   assert.match(standaloneNavigation, /Macintosh\/\.test\(userAgent\) && maxTouchPoints > 1/, 'iPadOS must be separated from a real Mac by touch points')
 })
 
@@ -197,8 +200,7 @@ check('B9 the link guard is installed exactly once, and torn down', () => {
   // component body instead of an effect, which leaks a listener per render.
   assert.match(standaloneNavigation, /if \(externalLinkGuardInstalled\) return \(\) => \{\}/, 'a second call must not attach a second listener')
   assert.match(standaloneNavigation, /document\.removeEventListener\('click', handleStandaloneAnchorClick, true\)/, 'the guard must be removable')
-  assert.match(app, /const stopExternalLinkGuard = installStandaloneExternalLinkGuard\(\)/, 'App must keep the teardown')
-  assert.match(app, /stopExternalLinkGuard\(\)/, 'App must run the teardown on unmount')
+  assert.match(app, /useEffect\(\(\) => installStandaloneExternalLinkGuard\(\), \[\]\)/, 'App hands the teardown straight to its effect cleanup')
   assert.equal(
     (app.match(/installStandaloneExternalLinkGuard\(\)/g) || []).length,
     1,
@@ -211,7 +213,9 @@ check('B9 the beforeinstallprompt capture is installed once and torn down', () =
   // render means N preventDefault handlers racing for one single-use event.
   assert.match(standaloneNavigation, /if \(typeof window === 'undefined' \|\| installCaptureInstalled\) return \(\) => \{\}/, 'idempotent capture')
   assert.match(standaloneNavigation, /window\.removeEventListener\('beforeinstallprompt', handleBeforeInstallPrompt\)/, 'the capture must be removable')
-  assert.match(app, /const stopInstallPromptCapture = installBeforeInstallPromptCapture\(\)/, 'App must keep the teardown')
+  // Since 20 Oct 2026 the capture is armed once in index.tsx, before React mounts, and no component tears it down.
+  assert.doesNotMatch(app, /installBeforeInstallPromptCapture/, 'App must not own the capture: an unmount would drop the listener')
+  assert.match(read('src/index.tsx'), /^installBeforeInstallPromptCapture\(\)\r?$/m, 'index.tsx arms it before React mounts')
 })
 
 const { isSameOriginNewTabLink } = await import('../src/utils/standaloneNavigation.ts')

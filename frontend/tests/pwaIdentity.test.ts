@@ -3,7 +3,8 @@
 //
 // Owner, 28 Sep 2026: the staff app (admin.leangbeauty.com) installs as
 // "Leang Cosmetics Admin" / "Leang Admin" and keeps the blue BO icon; the
-// shop (leangbeauty.com) installs as "Leang Cosmetics" / "Leang".
+// shop (leangbeauty.com) installs as "Leang Cosmetics" / "Leang Cosmetics"
+// (owner, 19 Oct 2026: the full name on both home screens; was "Leang").
 //
 // Run: node tests/pwaIdentity.test.ts
 import assert from 'node:assert/strict'
@@ -70,16 +71,18 @@ runTest('the staff app installs as "Leang Cosmetics Admin", labelled "Leang Admi
   assert.equal(staff.short_name, 'Leang Admin')
 })
 
-runTest('the shop installs as "Leang Cosmetics", labelled "Leang"', () => {
+runTest('the shop installs as "Leang Cosmetics", labelled "Leang Cosmetics"', () => {
   assert.equal(shop.name, 'Leang Cosmetics')
-  assert.equal(shop.short_name, 'Leang')
+  assert.equal(shop.short_name, 'Leang Cosmetics')
 })
 
-runTest('both home-screen labels fit without being cut', () => {
-  for (const manifest of [staff, shop]) {
-    assert.ok(manifest.short_name.length <= HOME_SCREEN_LABEL_LIMIT, `"${manifest.short_name}" is longer than ${HOME_SCREEN_LABEL_LIMIT}`)
-  }
+runTest('the staff home-screen label fits without being cut', () => {
+  assert.ok(staff.short_name.length <= HOME_SCREEN_LABEL_LIMIT, `"${staff.short_name}" is longer than ${HOME_SCREEN_LABEL_LIMIT}`)
 })
+
+// The shop's full name (15 characters) is the owner's choice; whether a phone launcher truncates
+// it is a real-device check, so only the staff label is length-checked here.
+
 
 runTest('the rename updates the installed apps instead of adding second ones', () => {
   for (const manifest of [staff, shop]) {
@@ -113,7 +116,7 @@ runTest('no manifest promises offline use or carries a retired name', () => {
 runTest('the raw HTML head names the shop before the bootstrap overwrites it', () => {
   const html = read('../index.html')
   assert.match(html, /<title>Leang Cosmetics<\/title>/)
-  assert.match(html, /<meta name="apple-mobile-web-app-title" content="Leang" \/>/)
+  assert.match(html, /<meta name="apple-mobile-web-app-title" content="Leang Cosmetics" \/>/)
 })
 
 runTest('neither manifest names the other host\'s icons', () => {

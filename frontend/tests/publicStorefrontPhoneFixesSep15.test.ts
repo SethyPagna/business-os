@@ -258,14 +258,14 @@ check('4 the dead "Use quick filters" hint sentence is gone from source and both
 
 // --- 5. Install prompt on the storefront + admin parity ---------------------
 
-check('5 the storefront arms the install-prompt capture and link guard at mount', () => {
-  // CATCHES: neither installer ever running for the public route, because
-  // App.tsx (which arms them for admin) never mounts there -- see
-  // PublicCatalogRoot.tsx.
-  assert.match(publicCatalogPage, /const stopInstallPromptCapture = installBeforeInstallPromptCapture\(\)/, 'the storefront must arm the beforeinstallprompt capture')
-  assert.match(publicCatalogPage, /const stopExternalLinkGuard = installStandaloneExternalLinkGuard\(\)/, 'the storefront must arm the standalone external-link guard')
-  assert.match(publicCatalogPage, /stopInstallPromptCapture\(\)/, 'the capture teardown must run on unmount')
-  assert.match(publicCatalogPage, /stopExternalLinkGuard\(\)/, 'the guard teardown must run on unmount')
+check('5 the storefront arms the link guard at mount; the install capture is armed at app entry', () => {
+  // CATCHES: the guard never running for the public route, because App.tsx (which arms it for
+  // admin) never mounts there -- see PublicCatalogRoot.tsx. The beforeinstallprompt capture moved
+  // to src/index.tsx on 20 Oct 2026: a capture armed in this component misses an event that fires
+  // before the lazy root commits, and its unmount teardown would drop the listener.
+  assert.match(publicCatalogPage, /useEffect\(\(\) => installStandaloneExternalLinkGuard\(\), \[\]\)/, 'the storefront must arm the standalone external-link guard and return its teardown')
+  assert.doesNotMatch(publicCatalogPage, /installBeforeInstallPromptCapture/, 'the storefront must not own the capture')
+  assert.match(fs.readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8'), /^installBeforeInstallPromptCapture\(\)\r?$/m, 'index.tsx arms the capture before React mounts')
 })
 
 const SHOP_TRANSLATE = String.raw`translate=\{\(key, fallback, fallbackKm\) => copy\(key, fallback, fallbackKm\)\}`

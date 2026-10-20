@@ -1,14 +1,18 @@
-import { useSyncExternalStore } from 'react'
+import { Suspense, useState, useSyncExternalStore } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Share from 'lucide-react/dist/esm/icons/share.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { isAdminHostname } from '../../app/pathRouting.ts'
 import {
   dismissInstallBand,
   installBandRoute,
   promptAppInstall,
   subscribeInstallOffer,
 } from '../../utils/standaloneNavigation.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import InfoHint from './InfoHint.tsx'
+
+const IosInstallSteps = lazyRetry(() => import('../install/IosInstallSteps.tsx'), 'install-ios-steps')
 
 /** The storefront's copy() never resolves these top-level pack keys, so every call carries its own Khmer. */
 export type InstallPromptTranslate = (key: string, fallback: string, fallbackKm: string) => string
@@ -26,32 +30,45 @@ const noRouteOutsideBrowser = () => null
 
 export default function InstallPromptBand({ translate }: { translate: InstallPromptTranslate }) {
   const route = useSyncExternalStore(subscribeInstallOffer, installBandRoute, noRouteOutsideBrowser)
+  const [iosStepsOpen, setIosStepsOpen] = useState(false)
   if (!route) return null
 
   const installLabel = translate('install_app', 'Install app', 'ដំឡើងកម្មវិធី')
   const closeLabel = translate('dismiss_notification', 'Dismiss notification', 'បិទការជូនដំណឹង')
   const iosShare = route === 'ios-share'
+  // The admin host installs the staff app; every other host is the shop, which names itself.
+  const shop = !isAdminHostname()
+  const bandText = iosShare
+    ? (shop
+      ? translate('install_shop_ios_hint', 'Install Leang Cosmetics: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង Leang Cosmetics៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។')
+      : translate('ios_install_hint', 'Install: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។'))
+    : (shop ? translate('install_shop_band', 'Install Leang Cosmetics', 'ដំឡើង Leang Cosmetics') : installLabel)
+  const detail = shop
+    ? translate('install_shop_detail', 'Open Leang Cosmetics from its own icon on your home screen. It needs an internet connection.', 'បើក Leang Cosmetics ពីរូបតំណាងផ្ទាល់ខ្លួននៅលើអេក្រង់ដើម។ វាត្រូវការអ៊ីនធឺណិត។')
+    : translate(
+      'install_offer_detail',
+      'Opens from its own icon on your home screen. It still needs the internet, and the phone keeps its saved sign-in instead of clearing it.',
+      'បើកពីរូបតំណាងផ្ទាល់ខ្លួននៅលើអេក្រង់ដើម។ វានៅតែត្រូវការអ៊ីនធឺណិត ហើយទូរសព្ទរក្សាការចូលគណនីដែលបានរក្សាទុក ជំនួសឱ្យការលុបវា។',
+    )
 
   return (
     <div
       className="pointer-events-auto flex items-center gap-2 rounded-xl border border-blue-300 bg-blue-50 px-3 py-2 text-xs leading-6 text-blue-900 shadow-lg dark:border-blue-700 dark:bg-blue-950/90 dark:text-blue-100"
       role="status"
     >
-      {iosShare ? <Share className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
-      <span className="min-w-0 flex-1 break-words">
-        {iosShare
-          ? translate('ios_install_hint', 'Install: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។')
-          : installLabel}
-      </span>
-      <InfoHint
-        className="shrink-0"
-        label={installLabel}
-        text={translate(
-          'install_offer_detail',
-          'Opens from its own icon on your home screen. It still needs the internet, and the phone keeps its saved sign-in instead of clearing it.',
-          'បើកពីរូបតំណាងផ្ទាល់ខ្លួននៅលើអេក្រង់ដើម។ វានៅតែត្រូវការអ៊ីនធឺណិត ហើយទូរសព្ទរក្សាការចូលគណនីដែលបានរក្សាទុក ជំនួសឱ្យការលុបវា។',
-        )}
-      />
+      {iosShare ? (
+        <button
+          type="button"
+          onClick={() => setIosStepsOpen(true)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <Share className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{bandText}</span>
+        </button>
+      ) : (
+        <span className="min-w-0 flex-1 break-words">{bandText}</span>
+      )}
+      <InfoHint className="shrink-0" label={installLabel} text={detail} />
       {iosShare ? null : (
         <button
           type="button"
@@ -71,6 +88,11 @@ export default function InstallPromptBand({ translate }: { translate: InstallPro
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>
+      {iosStepsOpen ? (
+        <Suspense fallback={null}>
+          <IosInstallSteps translate={translate} onClose={() => setIosStepsOpen(false)} />
+        </Suspense>
+      ) : null}
     </div>
   )
 }
