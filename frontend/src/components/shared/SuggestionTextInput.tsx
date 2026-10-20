@@ -6,6 +6,7 @@ import {
   type SuggestionFilterMode,
   type SuggestionOption,
 } from '../../utils/suggestionMatching.ts'
+import { isImeComposingKey } from '../../utils/imeComposition.ts'
 
 // THE "type or select" field. One implementation, shared by every catalog
 // text field that has existing values worth offering: ProductForm's Category,
@@ -171,7 +172,7 @@ export default function SuggestionTextInput({
             setCursor((current) => nextSuggestionIndex(current, matches.length, event.key === 'ArrowDown' ? 1 : -1))
             return
           }
-          if (event.key === 'Enter' && open && cursor >= 0 && matches[cursor]) {
+          if (event.key === 'Enter' && !isImeComposingKey(event) && open && cursor >= 0 && matches[cursor]) {
             // Only swallow Enter when it is actually taking a suggestion --
             // otherwise Enter must keep reaching the form (submit/next line).
             event.preventDefault()

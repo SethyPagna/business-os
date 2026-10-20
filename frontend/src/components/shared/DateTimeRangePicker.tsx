@@ -328,6 +328,7 @@ export default function DateTimeRangePicker({
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
   const activePreset = activeStatsPreset(value)
+  const showClear = hasSelection && activePreset === null
   const quickRangeLabel = (key: string, fallback: string) => {
     const label = t(key)
     return label && label !== key ? label : fallback
@@ -459,10 +460,10 @@ export default function DateTimeRangePicker({
           style={panelPosition}
           className="fixed z-[1080] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         >
-          {/* Header: Clear (when anything is set) + the red close ✕. */}
+          {/* Header: Clear (only for a hand-typed range -- a preset, incl. All time, is its own way back) + the red close ✕. */}
           <div className="mb-2 flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t('date_time_range') || 'Date range'}</span>
-            {hasSelection ? (
+            {showClear ? (
               <button
                 type="button"
                 className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
@@ -473,7 +474,7 @@ export default function DateTimeRangePicker({
             ) : null}
             <button
               type="button"
-              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700 ${hasSelection ? '' : 'ml-auto'}`}
+              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700 ${showClear ? '' : 'ml-auto'}`}
               onClick={() => setOpen(false)}
               aria-label={t('close') || 'Close'}
             >
