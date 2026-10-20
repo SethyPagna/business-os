@@ -90,7 +90,7 @@ async function page(rawQuery, { pageNo = 1, pageSize = 15, mode, old = false } =
   const where = ['p.is_active = 1']
   if (q.whereClause) where.push(q.whereClause)
   let matchRankSql = q.matchRankSql
-  if (old && q.rankCteSql) matchRankSql = matchRankSql.replace(q.matchRankSql.match(/COALESCE\(\(SELECT __fts_rank[\s\S]*?\), 0\)/)[0], OLD_RANK())
+  if (old && q.rankCteSql) matchRankSql = matchRankSql.replace(q.matchRankSql.match(/COALESCE\(__fts_rank\.bm25_rank, 0\)/)[0], OLD_RANK())
   const result = await paginateProductFamilies({
     db,
     selectColumns: 'p.id, p.name, p.brand',
@@ -144,6 +144,23 @@ async function page(rawQuery, { pageNo = 1, pageSize = 15, mode, old = false } =
     assert.ok(/CORRELATED SCALAR SUBQUERY[^|]*\| SCAN products_fts VIRTUAL TABLE/.test(oldPlan), `control: old plan should correlate products_fts: ${oldPlan}`)
     assert.ok(!/CORRELATED SCALAR SUBQUERY[^|]*\| SCAN products_fts VIRTUAL TABLE/.test(newPlan), `new plan still correlates products_fts: ${newPlan}`)
     assert.ok(/MATERIALIZE __fts_rank/.test(newPlan), newPlan)
+  })
+
+  await check('plan: the rank CTE is joined through an automatic index in every read of matched, never scanned per row', async () => {
+    const captured = []
+    const spyDb = { ...db, batch: async (stmts) => { captured.push(...stmts); return db.batch(stmts) } }
+    const params = {}
+    const q = buildProductSearchQuery('glow', params)
+    await paginateProductFamilies({ db: spyDb, selectColumns: 'p.id, p.name', joinSql: '', whereSql: `WHERE ${q.whereClause}`, params, page: 1, pageSize: 10, familyOrderSql: 'match_rank ASC, family_name ASC', intraFamilyOrderSql: 'id ASC', matchRankSql: q.matchRankSql, rankCteSql: q.rankCteSql })
+    const s = captured[1]
+    assert.ok(/LEFT JOIN __fts_rank ON __fts_rank\.id = p\.id/.test(s.sql), 'the page statement joins the rank CTE')
+    assert.ok(/matched AS MATERIALIZED/.test(s.sql), 'matched is shared by both reads')
+    assert.ok(!/LEFT JOIN __fts_rank/.test(captured[0].sql), 'the COUNT carries no rank join')
+    const names = [...new Set([...s.sql.matchAll(/@(\w+)/g)].map((m) => m[1]))]
+    const bind = Object.fromEntries(names.map((n) => [n, s.params[n] ?? null]))
+    const plan = raw.prepare(`EXPLAIN QUERY PLAN ${s.sql}`).all(bind).map((r) => r.detail).join(' | ')
+    assert.ok(/SEARCH __fts_rank USING AUTOMATIC COVERING INDEX \(id=\?\)/.test(plan), plan)
+    assert.ok(!/SCAN __fts_rank/.test(plan), plan)
   })
 
   const probes = [

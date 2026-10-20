@@ -72,7 +72,7 @@ app.get('/picker-lots', async (c) => {
   const rows = await listBatchesForProduct(db, productId, branchId)
   const knownPositive = await db.prepare(`
     SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
-    FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id
+    FROM product_batches pb CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = ? AND bbs.branch_id = ? AND bbs.quantity > 0
   `).get<{ quantity: number }>([productId, branchId])
   c.header('Cache-Control', 'private, no-store')
@@ -157,8 +157,8 @@ app.get('/', async (c) => {
   // sales.ts rechecks the same remainder inside its stock write transaction.
   const knownPositive = await db.prepare(`
     SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
-    FROM branch_batch_stock bbs
-    JOIN product_batches pb ON pb.id = bbs.batch_id
+    FROM product_batches pb
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = ?
       AND bbs.branch_id = ?
       AND bbs.quantity > 0

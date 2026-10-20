@@ -1069,6 +1069,11 @@ export type FifoLotAvailability = {
   available: number
 }
 
+// CROSS JOIN pins product_batches (variant_product_id index) as the outer
+// loop: without table statistics SQLite otherwise walks every positive lot of
+// the branch (idx_branch_batch_stock_branch_qty) and probes product_batches
+// per lot. Same rows and ORDER BY either way.
+//
 // Active lots with sellable stock at the branch, oldest received_at first
 // (NULL received dates sort last -- an undated legacy lot is drawn only
 // after every dated one), then batch_number/id for a stable tiebreak.
@@ -1076,7 +1081,7 @@ export async function readFifoLotAvailability(db: D1Compat, productId: number, b
   const rows = await db.prepare(`
     SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
-    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
   `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
@@ -1109,7 +1114,7 @@ export async function readFifoLotAvailabilityForCart(
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
            pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
-    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
       AND bbs.branch_id IN (${branchIds.map(() => '?').join(',')})
       AND pb.is_active = 1 AND bbs.quantity > 0

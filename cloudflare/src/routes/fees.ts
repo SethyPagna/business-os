@@ -1,13 +1,19 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 
+// Positive answers only: a missing schema is re-probed on the next call, a
+// present one stays present for the isolate (migrations only add).
+let operationWritesAvailable = false
+
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (operationWritesAvailable) return true
   try {
     const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
       WHERE (type='table' AND name='fee_operation_receipts')
          OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    return row?.ready === 2
+    operationWritesAvailable = row?.ready === 2
+    return operationWritesAvailable
   } catch {
     return false
   }
@@ -368,18 +374,19 @@ app.get('/', async (c) => {
     LIMIT @limit OFFSET @offset
   `).all({ ...params, limit, offset })
 
-  const totalRow = await db.prepare(`SELECT COUNT(*) as count FROM fees f ${where}`).get<{ count: number }>(params)
-
   const summaryRows = await db.prepare(`
     SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as total_khr
     FROM fees f
     ${where}
     GROUP BY fee_type
-  `).all(params)
+  `).all<{ count: number }>(params)
+  // Every filtered row falls in exactly one fee_type group (NULL included),
+  // so the grouped counts add up to COUNT(*) without a second scan.
+  const total = (summaryRows || []).reduce((sum, row) => sum + (Number(row.count) || 0), 0)
 
   return c.json({
     fees: rows || [],
-    total: totalRow?.count || 0,
+    total,
     limit,
     offset,
     summary: summaryRows || [],

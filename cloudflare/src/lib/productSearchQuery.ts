@@ -174,8 +174,9 @@ export interface ProductSearchQuery {
   whereClause?: string
   // bm25 relevance (+ the exact-barcode offset), or undefined when nothing
   // was typed / nothing scored. ASC. When it reads the FTS rank it refers
-  // to the `rankCteSql` CTE, so it is only valid inside a statement whose
-  // WITH carries that CTE (lib/familyPagination.ts does this for you).
+  // to the `rankCteSql` CTE's columns, so it is only valid inside a statement
+  // whose WITH carries that CTE and whose FROM joins it (lib/familyPagination.ts
+  // does both for you).
   matchRankSql?: string
   // `__fts_rank AS MATERIALIZED (...)`: the products_fts MATCH run ONCE per
   // statement, yielding (id, rank) for every FTS hit. Set exactly when
@@ -211,8 +212,11 @@ export const MATCH_TIER_OTHER = 3
 // re-ran the whole MATCH for every candidate row: a common word ("glow",
 // 242 products) or a 2-letter prefix ("ro", 458) cost 216-358 ms per
 // statement on the seeded lab DB, twice per search (count + page).
-// MATERIALIZED runs the MATCH once and the per-row read becomes an indexed
-// lookup into that result: 13-25 ms, identical rows (I4-1).
+// MATERIALIZED runs the MATCH once (I4-1). The per-row read must be a
+// LEFT JOIN on the CTE (lib/familyPagination.ts adds it when matchRankSql
+// reads the CTE), never a correlated `SELECT ... FROM __fts_rank WHERE id =
+// p.id`: a CTE has no index, so that form scanned the whole table once per
+// candidate row (a join gets an automatic index built once).
 export const FTS_RANK_CTE_NAME = '__fts_rank'
 
 // The stored, already-normalized name column with a cheap fallback for any
@@ -395,12 +399,12 @@ export function buildProductSearchQuery(
   let matchRankSql: string | undefined
   let rankCteSql: string | undefined
   // The FTS rank is computed once per statement in rankCteSql (see
-  // FTS_RANK_CTE_NAME for why) and looked up per row. Rows that arrived via
-  // a trigram/LIKE fallback have no FTS hit, COALESCE to 0 and stay
-  // orderable rather than dropping out of the sort.
+  // FTS_RANK_CTE_NAME for why) and joined per row by familyPagination. Rows
+  // that arrived via a trigram/LIKE fallback have no FTS hit, COALESCE to 0
+  // and stay orderable rather than dropping out of the sort.
   if (!titleOnly && ftsMatch) {
     rankCteSql = `${FTS_RANK_CTE_NAME} AS MATERIALIZED (SELECT rowid AS id, ${PRODUCTS_FTS_BM25_SQL} AS bm25_rank FROM products_fts WHERE products_fts MATCH @${prefix}ftsQuery)`
-    matchRankSql = `COALESCE((SELECT ${FTS_RANK_CTE_NAME}.bm25_rank FROM ${FTS_RANK_CTE_NAME} WHERE ${FTS_RANK_CTE_NAME}.id = p.id), 0)`
+    matchRankSql = `COALESCE(${FTS_RANK_CTE_NAME}.bm25_rank, 0)`
   }
   // Kept for callers that order by match_rank alone; match_tier expresses
   // the same "exact barcode leads" rule as a discrete key, and the two
