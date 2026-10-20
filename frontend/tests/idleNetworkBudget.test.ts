@@ -10,7 +10,7 @@
 // tick; an offline server is re-probed every tick; the browser 'offline'
 // event flips health at once) pass before and after -- they are what keeps
 // the budget cut from being a disabled health check.
-// Sibling files: websocketStaleSocket.test.ts, pendingSyncPolling.test.ts,
+// Sibling files: websocketStaleSocket.test.ts,
 // cloudflare/scripts/test-broadcast-hub-autopong-pure.cjs.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

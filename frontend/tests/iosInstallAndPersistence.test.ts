@@ -91,27 +91,22 @@ check('C5 the request happens once per session and is cleared on sign-out', () =
   assert.match(appContext, /persistentStorageAskedForRef\.current = null\s*\n\s*setStoragePersisted\(null\)/, 'sign-out must clear both the ref and the answer')
 })
 
-check('C5 the eviction band needs persisted === false AND a non-empty outbox', () => {
-  // CATCHES the two independently wrong bands: one that fires on
+check('C5 the eviction warning needs persisted === false AND retained rows', () => {
+  // CATCHES the two independently wrong warnings: one that fires on
   // `!storagePersisted` (so `null`, meaning "not asked yet", flashes a
-  // warning on every single boot), and one that ignores the outbox (so a
-  // till with nothing queued carries a permanent scare it cannot act on).
-  const at = app.indexOf('function StorageEvictionBand(')
-  assert.ok(at > 0, 'StorageEvictionBand moved or was renamed')
-  const body = app.slice(at, app.indexOf('\n}', at))
-  assert.match(
-    body,
-    /if \(storagePersisted !== false \|\| pending <= 0 \|\| dismissed\) return null/,
-    'both conditions must gate the band, and `null` must stay silent',
-  )
-  assert.match(body, /Number\(pendingSync\?\.total \|\| 0\)/, 'the outbox count must be the shared pendingSync total')
+  // warning on every single boot), and one shown on a till with nothing
+  // retained (a permanent scare it cannot act on).
+  const notice = read('src/components/server/LegacyQueueNotice.tsx')
+  assert.doesNotMatch(app, /function StorageEvictionBand\(/, 'the bottom band is gone with the queue total it read')
+  assert.match(app, /\{legacyQueue\.count > 0 && legacyQueueClosedFor !== legacyQueue\.ownerKey \? \([\s\S]*?<LegacyQueueNotice[\s\S]*?storagePersisted=\{storagePersisted\}/, 'the notice mounts only when retained rows were counted')
+  assert.match(notice, /\{storagePersisted === false \? \(/, '`null` must stay silent')
 })
 
-check('C5 the band explains the fix behind an InfoHint, not as inline prose', () => {
-  // CATCHES growing a fixed band into a paragraph the user must read past to
-  // get back to work -- the project's density rule.
-  const at = app.indexOf('function StorageEvictionBand(')
-  const body = app.slice(at, app.indexOf('\n}', at))
+check('C5 the warning explains the fix behind an InfoHint, not as inline prose', () => {
+  // CATCHES growing the warning into a paragraph -- the project's density rule.
+  const notice = read('src/components/server/LegacyQueueNotice.tsx')
+  const at = notice.indexOf('{storagePersisted === false ? (')
+  const body = notice.slice(at, notice.indexOf(') : null}', at))
   assert.match(body, /<InfoHint/, 'the how-to-fix belongs behind an InfoHint')
   assert.match(body, /storage_eviction_detail/, 'the InfoHint must carry the detail key')
 })

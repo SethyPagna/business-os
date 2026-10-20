@@ -23,6 +23,7 @@ const pendingSyncTransportSource = fs.readFileSync(new URL('../src/api/pendingSy
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
+const legacyNoticeSource = fs.readFileSync(new URL('../src/components/server/LegacyQueueNotice.tsx', import.meta.url), 'utf8')
 
 await runTest('createSale retains the request identity but never queues new offline writes', () => {
   assert.match(methodsSource, /export async function createSale/)
@@ -43,9 +44,10 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
   assert.match(saleWriteTransportSource, /createSaleWithoutWriteDedupe\(payload\)/)
   assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
   assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)
-  const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(reviewToken\?: string\) \{([\s\S]*?)\n\}/)?.[1] || ''
-  assert.match(retryBody, /loadPendingSyncTransport\(\)/)
+  const retryBody = webApiSource.match(/async retryPendingSyncNow\(reviewToken\?: string\) \{([\s\S]*?)\n  \},/)?.[1] || ''
+  assert.match(retryBody, /import\('\.\/api\/pendingSyncTransport\.ts'\)/)
   assert.doesNotMatch(retryBody, /discardPendingSyncQueue/)
+  assert.doesNotMatch(methodsSource, /PendingSync/)
   assert.match(pendingSyncTransportSource, /export async function retryPendingSyncNow\(reviewToken\?: string\)[\s\S]*validatedReview\(reviewToken\)[\s\S]*syncPendingSalesQueue\(\{ force: true, manualRecovery: true, expectedOwner: review.owner, reviewedRows: review.rows \}\)/)
   assert.doesNotMatch(methodsSource, /syncPendingSalesQueue\(\{ force: true \}\)/)
 })
@@ -68,22 +70,18 @@ await runTest('the retired offline device snapshot has no transport, wrapper or 
   assert.doesNotMatch(webApiSource, /offlineSnapshotTransport|refreshOfflineDeviceSnapshot/)
 })
 
-await runTest('offline mode banner stays visible while offline and announces sync timestamps', () => {
+await runTest('offline mode banner stays visible while offline; no offline-sale event is announced any more', () => {
   assert.match(appSource, /function OfflineModeBanner/)
   assert.match(appSource, /syncUrl && !canWriteToServer/)
   assert.match(appSource, /server_back_online/)
-  assert.match(appSource, /formatSyncTimestamp/)
-  assert.match(appSource, /sync:offline-sale-queued/)
-  assert.match(appSource, /sync:offline-sale-synced/)
+  assert.doesNotMatch(appSource, /sync:offline-sale-queued|sync:offline-sale-synced|formatSyncTimestamp/)
 })
 
-await runTest('server diagnostics queue syncs pending offline work instead of calling it invalid', () => {
-  assert.match(serverPageSource, /retryPendingSyncNow/)
-  assert.match(serverPageSource, /Recover reviewed sales/)
-  assert.match(serverPageSource, /New sales require the server/)
-  assert.match(serverPageSource, /recovered only when you choose/)
-  assert.doesNotMatch(serverPageSource, /invalid pending client actions/)
-  assert.doesNotMatch(serverPageSource, /Discard invalid changes/)
+await runTest('retained sales are recovered by hand in the legacy notice, never called invalid', () => {
+  assert.match(legacyNoticeSource, /retryPendingSyncNow!\(reviewToken\)/)
+  assert.match(legacyNoticeSource, /t\('legacy_queue_upload'\)/)
+  assert.doesNotMatch(serverPageSource, /retryPendingSyncNow|discardPendingSyncQueue|getPendingSyncState/)
+  assert.doesNotMatch(legacyNoticeSource, /invalid pending client actions|Discard invalid changes/)
 })
 
 if (failed > 0) {

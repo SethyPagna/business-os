@@ -10,7 +10,6 @@ import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
 import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
-import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -21,16 +20,11 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
-import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
-import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
-import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { timeoutSignal } from '../../utils/abortTimeout.ts'
 
-const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
 const SERVER_BOOTSTRAP_TIMEOUT_MS = 10000
 const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000
-const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000
 const SERVER_SYNC_TEST_TIMEOUT_MS = 12000
 const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250
 
@@ -65,7 +59,7 @@ type InfoTabProps = {
 type DiagnosticsPanelProps = InfoTabProps & {
   initialDebugLog?: unknown
 }
-type DiagnosticsTab = 'client' | 'server' | 'queue' | 'sync-center' | 'info'
+type DiagnosticsTab = 'client' | 'server' | 'sync-center' | 'info'
 
 type CallLogEntry = {
   ts?: string
@@ -89,31 +83,6 @@ type WriteErrorEntry = {
   error?: string
 }
 
-type PendingSyncItem = {
-  _seq?: number | string
-  created_at?: string
-  updated_at?: string
-  retry_at?: string
-  retry_count?: number
-  status?: string
-  channel?: string
-  entity_name?: string
-  error?: string
-  error_code?: string
-}
-
-type PendingSyncState = {
-  total: number
-  pending: number
-  syncing: number
-  failed: number
-  items: PendingSyncItem[]
-  quarantined?: number
-  owner?: OfflineSaleOwner | null
-  review_token?: string | null
-  actor_scope?: ActorReadScope
-}
-
 type ServerInfo = {
   clients?: number
   uptime?: number
@@ -135,13 +104,10 @@ type SyncTestResult = {
 }
 
 type ServerApi = {
-  getPendingSyncState?: () => Promise<unknown>
   getCallLog?: () => CallLogEntry[]
   clearCallLog?: () => void
   getSystemBootstrap?: () => Promise<unknown>
   getSystemDebugLog: () => Promise<unknown>
-  retryPendingSyncNow?: (reviewToken?: string) => Promise<unknown>
-  discardPendingSyncQueue?: (reason?: string, reviewToken?: string) => Promise<unknown>
   getSystemConfig?: () => Promise<unknown>
   testSyncServer: (url: string) => Promise<SyncTestResult>
 }
@@ -155,20 +121,6 @@ function getServerApi(): ServerApi {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
-}
-
-function normalizePendingSyncState(value: unknown): PendingSyncState {
-  const candidate = typeof value === 'object' && value !== null ? value as Partial<PendingSyncState> : {}
-  return {
-    total: Number(candidate.total || 0),
-    pending: Number(candidate.pending || 0),
-    syncing: Number(candidate.syncing || 0),
-    failed: Number(candidate.failed || 0),
-    items: Array.isArray(candidate.items) ? candidate.items : [],
-    quarantined: Number(candidate.quarantined || 0),
-    owner: candidate.owner || null,
-    review_token: candidate.review_token || null,
-  }
 }
 
 function normalizeSystemDebugLog(value: unknown): { entries: ServerLogEntry[]; clients?: number; uptime?: number } {
@@ -381,48 +333,18 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
 
 function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
-  const { user, notify, t } = useApp()
-  const { askToConfirm, confirmDialog } = useConfirmDialog()
-  const queueStatusLabel = (status?: string) => (status === 'failed' || status === 'pending' || status === 'syncing' ? copy(status, status) : String(status || ''))
-  const actorKey = `${user?.id || ''}:${user?.organization_id ?? ''}:${syncUrl || ''}`
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
   const [writeErrors, setWriteErrors] = useState<WriteErrorEntry[]>([])
-  const [pendingSyncState, setPendingSync] = useState<PendingSyncState>({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
-  let currentOwner: OfflineSaleOwner | null = null
-  try { currentOwner = captureOfflineSaleOwner() } catch { /* Hide stale details immediately. */ }
-  const pendingSync = pendingSyncState.owner?.actor_id === user?.id && pendingSyncState.actor_scope
-    && isActorReadScopeCurrent(pendingSyncState.actor_scope, false) && offlineSaleOwnersMatch(pendingSyncState.owner, currentOwner)
-    ? pendingSyncState : { total: 0, pending: 0, syncing: 0, failed: 0, quarantined: 0, items: [], review_token: null }
-  const [retryingQueue, setRetryingQueue] = useState(false)
   const [tab, setTab] = useState<DiagnosticsTab>('client')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const mounted = useRef(true)
-  const queueRequestRef = useRef(0)
   const serverLogRequestRef = useRef(0)
-  const queueActionInFlightRef = useRef(false)
-
-  const loadQueueState = useCallback(async () => {
-    if (!active) return
-    const actorScope = captureActorReadScope()
-    const requestId = beginTrackedRequest(queueRequestRef)
-    try {
-      const state = await withLoaderTimeout(
-        () => getServerApi().getPendingSyncState?.(),
-        'Pending sync queue',
-        SERVER_PENDING_SYNC_TIMEOUT_MS,
-      )
-      if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && isActorReadScopeCurrent(actorScope, false) && state) {
-        setPendingSync({ ...normalizePendingSyncState(state), actor_scope: actorScope })
-      }
-    } catch {}
-  }, [active, actorKey])
 
   useEffect(() => {
     if (!active) {
       mounted.current = false
-      invalidateTrackedRequest(queueRequestRef)
       invalidateTrackedRequest(serverLogRequestRef)
       return undefined
     }
@@ -433,26 +355,15 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
       const detail = event instanceof CustomEvent && typeof event.detail === 'object' && event.detail !== null ? event.detail as Partial<WriteErrorEntry> : {}
       setWriteErrors((prev) => [{ ...detail, _id: Date.now() }, ...prev].slice(0, 20))
     }
-    const onQueueChanged = () => {
-      if (tab === 'queue') loadQueueState()
-    }
     window.addEventListener('sync:error', onErr)
     window.addEventListener('sync:write-blocked', onErr)
-    window.addEventListener('sync:queue-changed', onQueueChanged)
     return () => {
       mounted.current = false
-      invalidateTrackedRequest(queueRequestRef)
       invalidateTrackedRequest(serverLogRequestRef)
       window.removeEventListener('sync:error', onErr)
       window.removeEventListener('sync:write-blocked', onErr)
-      window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
-  }, [active, loadQueueState, tab])
-
-  useEffect(() => {
-    if (!active || tab !== 'queue') return
-    loadQueueState()
-  }, [active, loadQueueState, tab])
+  }, [active])
 
   const fetchServerLog = useCallback(async () => {
     if (!active || !syncUrl) return
@@ -493,56 +404,6 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
     local: 'bg-gray-100 text-gray-600',
   }
 
-  async function handleRetryQueue() {
-    const reviewToken = pendingSync.review_token
-    if (!reviewToken) return
-    if (!getServerApi().retryPendingSyncNow) return
-    if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
-    setRetryingQueue(true)
-    try {
-      await withLoaderTimeout(
-        () => getServerApi().retryPendingSyncNow?.(reviewToken),
-        'Retry pending sync queue',
-        SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
-      )
-      await loadQueueState()
-    } catch (error) {
-      notify(getErrorMessage(error, 'The pending sales are retained. Refresh and review them in the original account.'), 'error')
-    } finally {
-      finishSingleAction(queueActionInFlightRef)
-      setRetryingQueue(false)
-    }
-  }
-
-  async function handleDiscardQueue() {
-    const reviewToken = pendingSync.review_token
-    if (!reviewToken) return
-    if (!(await askToConfirm({
-      title: copy('server_clear_reviewed_title', 'Clear reviewed pending sales?', 'សម្អាតការលក់កំពុងរង់ចាំដែលបានពិនិត្យ?'),
-      message: copy('server_clear_reviewed_message', 'Only the pending sales reviewed in this account are cleared, and their local recovery copies are removed. Other accounts and unidentified records are kept.', 'មានតែការលក់កំពុងរង់ចាំដែលបានពិនិត្យក្នុងគណនីនេះប៉ុណ្ណោះដែលត្រូវសម្អាត ហើយច្បាប់ចម្លងសង្គ្រោះក្នុងឧបករណ៍ត្រូវលុប។ គណនីផ្សេង និងកំណត់ត្រាមិនស្គាល់ម្ចាស់ នៅដដែល។'),
-      items: [{ label: copy('server_reviewed_sales_count', 'Reviewed sales in this account', 'ការលក់ដែលបានពិនិត្យក្នុងគណនីនេះ'), value: `${pendingSync.total} → 0` }],
-      confirmLabel: copy('server_clear_reviewed_sales', 'Clear reviewed sales', 'សម្អាតការលក់ដែលបានពិនិត្យ'),
-      cancelLabel: copy('cancel', 'Cancel', 'បោះបង់'),
-      danger: true,
-    }))) return
-    if (!getServerApi().discardPendingSyncQueue) return
-    if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
-    setRetryingQueue(true)
-    try {
-      await withLoaderTimeout(
-        () => getServerApi().discardPendingSyncQueue?.('Reviewed pending sales were cleared.', reviewToken),
-        'Discard pending sync queue',
-        SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
-      )
-      await loadQueueState()
-    } catch (error) {
-      notify(getErrorMessage(error, 'Nothing was cleared. Refresh and review the original account’s pending sales.'), 'error')
-    } finally {
-      finishSingleAction(queueActionInFlightRef)
-      setRetryingQueue(false)
-    }
-  }
-
   return (
     <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800">
@@ -550,11 +411,6 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
           <span className="text-sm font-semibold text-gray-800 dark:text-white">{copy('diagnostics', 'Diagnostics', 'ការវិនិច្ឆ័យ')}</span>
           <span className={`h-2 w-2 rounded-full ${syncConnected ? 'bg-green-500' : syncUrl ? 'animate-pulse bg-yellow-400' : 'bg-gray-300'}`} />
           {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients ?? 0} {copy('devices', 'device(s)', 'ឧបករណ៍')} | {Math.round(serverInfo.uptime ?? 0)}s {copy('uptime', 'uptime', 'ពេលដំណើរការ')}</span> : null}
-          {pendingSync.total > 0 ? (
-            <span className={`rounded-full px-2 py-0.5 text-xs ${pendingSync.failed > 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-              {pendingSync.pending} pending / {pendingSync.failed} failed
-            </span>
-          ) : null}
           {writeErrors.length > 0 ? (
             <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
               {writeErrors.length} write error{writeErrors.length > 1 ? 's' : ''}
@@ -594,7 +450,6 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
         {[
           { id: 'client', label: `${copy('client', 'Client', 'ឧបករណ៍')} (${clientLog.length})` },
           { id: 'server', label: `${copy('server', 'Server', 'ម៉ាស៊ីនមេ')} (${serverLog.length})`, disabled: !syncUrl },
-          { id: 'queue', label: `${copy('queue', 'Queue', 'ជួរ')} (${pendingSync.total})` },
           { id: 'sync-center', label: 'Sync Center' },
           { id: 'info', label: copy('info', 'Info', 'ព័ត៌មាន') },
         ].map(({ id, label, disabled }) => (
@@ -641,75 +496,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
           </div>
         ) : null}
 
-        {tab === 'queue' ? (
-          <div className="px-3 py-2">
-            <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800">
-              <div className="flex flex-wrap gap-3 text-gray-600 dark:text-gray-300">
-                <span><strong>{pendingSync.pending}</strong> {queueStatusLabel('pending')}</span>
-                <span><strong>{pendingSync.syncing}</strong> {queueStatusLabel('syncing')}</span>
-                <span><strong>{pendingSync.failed}</strong> {queueStatusLabel('failed')}</span>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  onClick={handleRetryQueue}
-                  disabled={retryingQueue || !pendingSync.review_token || pendingSync.total === 0 || !syncConnected}
-                  className="text-blue-600 hover:underline disabled:opacity-40"
-                >
-                  {retryingQueue ? 'Recovering...' : 'Recover reviewed sales'}
-                </button>
-                <button
-                  onClick={handleDiscardQueue}
-                  disabled={retryingQueue || !pendingSync.review_token || pendingSync.total === 0 || !syncConnected}
-                  className="text-red-500 hover:underline disabled:opacity-40"
-                >
-                  {copy('server_clear_reviewed_sales', 'Clear reviewed sales', 'សម្អាតការលក់ដែលបានពិនិត្យ')}
-                </button>
-              </div>
-            </div>
-            {pendingSync.total > 0 ? (
-              <p className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                New sales require the server. These retained sales belong to this account and are recovered only when you choose. Keep the original records until their receipts are confirmed.
-              </p>
-            ) : null}
-            {(pendingSync.quarantined || 0) > 0 ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{pendingSync.quarantined} other or unidentified records are retained privately for their original account or support review.</p> : null}
-            {pendingSync.total === 0 ? (
-              <p className="py-4 text-center text-xs text-gray-400">No pending offline actions.</p>
-            ) : pendingSync.items.map((item) => {
-              const keptReason = saleSubmitRefusalText({ code: item.error_code }, t)
-              return (
-                <div key={item._seq} className="border-b border-gray-50 dark:border-gray-700/30">
-                  <div className="flex items-center gap-2 py-1 text-xs">
-                    <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
-                    <span className={`flex-shrink-0 rounded px-1 ${item.status === 'failed' ? 'bg-red-100 text-red-700' : item.status === 'syncing' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {queueStatusLabel(item.status)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">
-                      {item.channel}
-                      {item.entity_name ? ` - ${item.entity_name}` : ''}
-                    </span>
-                    {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {item.updated_at.slice(11, 19)}</span> : null}
-                    {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {item.retry_at.slice(11, 19)}</span> : null}
-                    {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
-                    {item.error && !keptReason ? <span className="truncate text-red-500">{item.error}</span> : null}
-                  </div>
-                  {keptReason ? <p className="break-words pb-1 text-xs leading-relaxed text-red-600 dark:text-red-400">{keptReason}</p> : null}
-                </div>
-              )
-            })}
-          </div>
-        ) : null}
-
         {tab === 'sync-center' ? (
           <div className="space-y-3 px-3 py-3 text-xs text-gray-700 dark:text-gray-200">
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-2 font-semibold text-gray-900 dark:text-white">Sync Center</div>
               <div className="grid gap-2 sm:grid-cols-3">
-                <span>Pending: <strong>{pendingSync.pending}</strong></span>
-                <span>Conflicts: <strong>{pendingSync.items.filter((item) => item.status === 'conflict').length}</strong></span>
-                <span>Failed: <strong>{pendingSync.failed}</strong></span>
-                <span>Files: encrypted chunks wait for vault unlock</span>
-                <span>Storage: persistent device storage is requested when offline mode is enabled</span>
-                <span>Security: HttpOnly cookie auth, encrypted vault, digest checks</span>
+                <span>Security: HttpOnly cookie auth</span>
               </div>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
@@ -720,7 +512,6 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
         {tab === 'info' ? <InfoTab syncUrl={syncUrl} syncConnected={syncConnected} active={active} /> : null}
       </div>
-      {confirmDialog}
     </div>
   )
 }

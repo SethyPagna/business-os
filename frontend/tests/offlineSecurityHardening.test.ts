@@ -49,12 +49,12 @@ await runTest('IndexedDB schema has encrypted vault, generic outbox, file chunks
   assert.match(localDbSource, /schema_version/)
 })
 
-await runTest('offline vault can no longer be unlocked: no PIN derivation, only persistence and relock remain', () => {
+await runTest('the offline vault is gone: no PIN derivation, no lock, no vault event; persistence is asked by AppContext', () => {
   assert.doesNotMatch(webApiSource, /deriveOfflineVaultKey|unlockOfflineVault/)
   assert.doesNotMatch(webApiSource, /PBKDF2|AES-GCM/)
-  assert.match(webApiSource, /OFFLINE_VAULT_IDLE_LOCK_MS = 15 \* 60_000/)
-  assert.match(webApiSource, /navigator\.storage\.persist/)
-  assert.match(webApiSource, /offline:vault-locked/)
+  assert.doesNotMatch(webApiSource, /OFFLINE_VAULT|lockOfflineVault|offline:vault-locked/)
+  assert.doesNotMatch(appSource, /offline:vault-locked|Vault locked/)
+  assert.match(appContextSource, /requestPersistentAppStorage\(\)/)
 })
 
 await runTest('legacy business format remains readable while new offline admission is denied', () => {
@@ -69,7 +69,7 @@ await runTest('legacy file format remains retained but foreground replay endpoin
   assert.doesNotMatch(webApiSource, /queueOfflineFileChunks|syncUnlockedOfflineOutbox|syncUnlockedOfflineFileChunks/)
   assert.doesNotMatch(webApiSource, /code: 'legacy_recovery_required'/)
   assert.doesNotMatch(webApiSource, /offline_file_chunks\.(put|update|delete)\(/)
-  assert.match(webApiSource, /String\(type\)\.startsWith\('BUSINESS_OS_OUTBOX_'\)/)
+  assert.doesNotMatch(webApiSource, /BUSINESS_OS_OUTBOX_/)
   assert.doesNotMatch(webApiSource, /OFFLINE_FILE_CHUNK_SIZE|encryptOfflineVaultValue|dispatchOutboxFileProgress/)
   // 6.0.880: the service worker no longer knows the file chunk endpoints.
   assert.doesNotMatch(swSource, /\/api\/sync\/files|offline_file_chunks/)
@@ -98,9 +98,8 @@ await runTest('worker upgrades retain one prior cache generation and never overw
   assert.match(appContextSource, /if \(hasDirtyWork\(\)\) \{[\s\S]*flushPendingWorkDrafts\(\)[\s\S]*An app update is ready/)
 })
 
-await runTest('UX exposes vault, conflicts, storage, security, and update states', () => {
-  assert.match(appSource, /Vault locked/)
-  assert.match(appSource, /Conflicts need review/)
+await runTest('UX exposes security and update states; no vault or queue-conflict banner is left', () => {
+  assert.doesNotMatch(appSource, /Vault locked|Conflicts need review/)
   assert.match(appSource, /New version ready/)
   assert.match(appSource, /sync:app-update-available/)
   assert.match(appSource, /function AppUpdateBanner/)
@@ -112,7 +111,7 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
   assert.match(appUpdateSource, /BUSINESS_OS_SKIP_WAITING/)
   assert.match(sidebarSource, /restartIntoLatestApp/)
   assert.match(serverPageSource, /Sync Center/)
-  assert.match(serverPageSource, /Storage/)
+  assert.doesNotMatch(serverPageSource, /encrypted vault|vault unlock|offline mode is enabled/)
   assert.match(serverPageSource, /Security/)
   assert.match(serverPageSource, /Cloudflare Access/)
 })

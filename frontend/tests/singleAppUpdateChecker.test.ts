@@ -217,13 +217,12 @@ await runTest('web-api no longer references the snapshot transport, a maintenanc
   }
   visit(parsed)
   assert.deepEqual(found, [])
-  // F1 leaves the BUSINESS_OS_OUTBOX_* / app-event forwarders alone. They are
-  // not the drain: the worker's replay functions have no caller and its sync
-  // handlers answer manual_recovery_required (service-worker.ts
-  // syncOutboxOnce). The drain is the manual review path, see the header.
-  assert.match(webApi, /navigator\.serviceWorker\?\.addEventListener\?\.\('message', forwardServiceWorkerOutboxEvent\)/)
+  // The app-event forwarder stays: it carries the "Restart now" announcement.
+  // The outbox forwarder is gone (6.0.895): the worker sends no outbox
+  // message since 6.0.880, and retained sales are recovered by hand from
+  // LegacyQueueNotice.tsx.
   assert.match(webApi, /navigator\.serviceWorker\?\.addEventListener\?\.\('message', forwardServiceWorkerAppEvent\)/)
-  assert.match(webApi, /startsWith\('BUSINESS_OS_OUTBOX_'\)/)
+  assert.doesNotMatch(webApi, /forwardServiceWorkerOutboxEvent|BUSINESS_OS_OUTBOX_/)
 })
 
 // The real watchForNewAppShell from index.tsx, bound to a fake browser.

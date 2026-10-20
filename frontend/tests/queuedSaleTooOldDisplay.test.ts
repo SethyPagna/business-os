@@ -1,5 +1,5 @@
-// The Server page Queue tab for a sale the Worker refused as too old (409 sale_created_at_too_old), mounted with the
-// REAL ServerPage. The row was kept and marked failed with its error_code (tests/queuedSaleTooOld.test.ts); what the
+// The retained-sales notice for a sale the Worker refused as too old (409 sale_created_at_too_old), mounted with the
+// REAL LegacyQueueNotice (6.0.895: it replaced the Server page Queue tab). The row was kept and marked failed with its error_code (tests/queuedSaleTooOld.test.ts); what the
 // owner reads must be in the language of the screen: the reason in the pack, the status badge in the pack, and never
 // the Worker's English sentence or the raw word 'failed'. The preview (api/syncPreview.ts) must carry the code.
 import assert from 'node:assert/strict'
@@ -38,20 +38,17 @@ const pendingState = (items: Array<Record<string, unknown>>) => ({
 async function openQueue(pack: Record<string, string>, language: string, items: Array<Record<string, unknown>>): Promise<MountedSurface> {
   ;(globalThis.window as unknown as { api: Record<string, unknown> }).api = {
     getPendingSyncState: async () => pendingState(items),
-    getSystemBootstrap: async () => ({ config: {}, debugLog: { entries: [] } }),
-    getSystemDebugLog: async () => ({ entries: [] }),
-    getCallLog: () => [],
   }
   const page = await harness.mount({
-    component: 'components/server/ServerPage.tsx',
+    component: 'components/server/LegacyQueueNotice.tsx',
+    props: { recordCount: items.length, storagePersisted: true, onClose: () => {}, onChanged: () => {} },
     app: {
-      page: 'server', language, settings: { language }, t: (key: string) => pack[key] ?? key, notify: () => {},
-      user: account, syncConnected: true, syncUrl: 'https://fixture.test', updateSyncUrl: () => {},
+      language, settings: { language }, t: (key: string) => pack[key] ?? key, notify: () => {},
+      user: account, canWriteToServer: true, formatDateTime: (value: unknown) => String(value),
     },
     doubles: {},
   })
   mounted.push(page)
-  await page.click(page.find((node) => node.tagName === 'BUTTON' && /border-b-2/.test(node.className) && /\(\d+\)$/.test(node.textContent) && !/Sync Center/.test(node.textContent) && node.textContent.startsWith(pack.queue ?? 'Queue'), 'the Queue tab'))
   await page.waitFor(() => page.text().includes('R-1'), 'the retained sale')
   return page
 }

@@ -34,9 +34,10 @@ await runTest('legacy service-worker triggers cannot replay retained business wr
   assert.doesNotMatch(swSource, new RegExp(`x-auth-${'session'}`))
 })
 
+// 6.0.895 (R2): the no-op registration hook and the outbox tag are deleted, not kept as stubs.
 await runTest('browser no longer registers or messages automatic business replay', () => {
   assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
-  assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
+  assert.doesNotMatch(syncRuntimeSource, /registerOutboxBackgroundSync|OUTBOX_SYNC_TAG/)
   assert.doesNotMatch(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.doesNotMatch(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
   assert.doesNotMatch(webApiSource, /queueBusinessOutboxOperation/)
@@ -50,8 +51,7 @@ await runTest('foreground replay does not exist: no decryption or network dispat
   assert.doesNotMatch(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
   assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\//)
   assert.doesNotMatch(webApiSource, /code: 'legacy_recovery_required'/)
-  assert.match(webApiSource, /String\(type\)\.startsWith\('BUSINESS_OS_OUTBOX_'\)/)
-  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_CONFLICT/)
+  assert.doesNotMatch(webApiSource, /BUSINESS_OS_OUTBOX_|forwardServiceWorkerOutboxEvent/)
   assert.doesNotMatch(webApiSource, /function dispatchOutbox(?:File)?Progress/)
 })
 
@@ -74,7 +74,7 @@ await runTest('legacy sale payloads retain their original identity and never dis
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
   assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
   assert.doesNotMatch(saleWriteTransportSource, /registerOutboxBackgroundSync/)
-  assert.match(saleWriteTransportSource, /emitSyncQueueChanged/)
+  assert.doesNotMatch(saleWriteTransportSource, /emitSyncQueueChanged|sync:write-conflict|sync:offline-sale-synced/)
   assert.match(saleWriteTransportSource, /payload.client_request_id !== row.id/)
   assert.match(saleWriteTransportSource, /options.manualRecovery !== true/)
   assert.doesNotMatch(saleWriteTransportSource, /queueOfflineSale\(/)

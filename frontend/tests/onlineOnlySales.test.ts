@@ -87,20 +87,20 @@ await test('manual recovery never invents a missing or inconsistent original req
 })
 await test('discard removes only exact reviewed A rows/mirrors; B, ownerless, new and syncing rows survive', async () => {
   reset(); rows.set(1, row(1, ownerA)); rows.set(2, row(2, ownerB)); rows.set(3, row(3, null)); rows.set(4, { ...row(4, ownerA), status: 'syncing' }); mirrors.set(-1, { client_request_id: 'sale-1', offline_owner: ownerA })
-  const state = await pending.getPendingSyncState(); rows.set(5, row(5, ownerA)); const result = await pending.discardPendingSyncQueue('explicit review', state.review_token); assert.equal(result.discarded, 1); assert.deepEqual([...rows.keys()], [2, 3, 4, 5]); assert.equal(mirrors.size, 0)
+  const state = await pending.getPendingSyncState(); await pending.exportPendingSyncReview(state.review_token); rows.set(5, row(5, ownerA)); const result = await pending.discardPendingSyncQueue('explicit review', state.review_token); assert.equal(result.discarded, 1); assert.deepEqual([...rows.keys()], [2, 3, 4, 5]); assert.equal(mirrors.size, 0)
 })
 await test('discard cannot clear replaced rows, foreign mirror collisions or a changed-account transaction', async () => {
-  reset(); rows.set(1, row(1, ownerA)); const state = await pending.getPendingSyncState(); rows.set(1, { ...row(1, ownerA), sync_lease: 'new-lease' }); assert.equal((await pending.discardPendingSyncQueue('', state.review_token)).discarded, 0)
-  reset(); rows.set(1, row(1, ownerA)); mirrors.set(-1, { client_request_id: 'sale-B', offline_owner: ownerB }); const own = await pending.getPendingSyncState(); assert.equal((await pending.discardPendingSyncQueue('', own.review_token)).discarded, 1); assert.equal(mirrors.size, 1)
-  reset(); rows.set(1, row(1, ownerA)); const stale = await pending.getPendingSyncState(); beforeTransaction = () => { scope++; actor = ownerB }; assert.equal((await pending.discardPendingSyncQueue('', stale.review_token)).discarded, 0); assert.equal(rows.size, 1)
+  reset(); rows.set(1, row(1, ownerA)); const state = await pending.getPendingSyncState(); await pending.exportPendingSyncReview(state.review_token); rows.set(1, { ...row(1, ownerA), sync_lease: 'new-lease' }); assert.equal((await pending.discardPendingSyncQueue('', state.review_token)).discarded, 0)
+  reset(); rows.set(1, row(1, ownerA)); mirrors.set(-1, { client_request_id: 'sale-B', offline_owner: ownerB }); const own = await pending.getPendingSyncState(); await pending.exportPendingSyncReview(own.review_token); assert.equal((await pending.discardPendingSyncQueue('', own.review_token)).discarded, 1); assert.equal(mirrors.size, 1)
+  reset(); rows.set(1, row(1, ownerA)); const stale = await pending.getPendingSyncState(); await pending.exportPendingSyncReview(stale.review_token); beforeTransaction = () => { scope++; actor = ownerB }; assert.equal((await pending.discardPendingSyncQueue('', stale.review_token)).discarded, 0); assert.equal(rows.size, 1)
 })
-await test('all automatic sale triggers are absent and background registration is a no-op', () => {
+await test('all automatic sale triggers are absent and background registration is gone', () => {
   const web = source('web-api.ts'); const sw = source('public-runtime/service-worker.ts'); const runtime = source('api/syncRuntime.ts')
   const functionBody = (text: string, name: string) => { const parsed = ts.createSourceFile('test.ts', text, ts.ScriptTarget.Latest, true); return parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(parsed) || '' }
   assert.doesNotMatch(functionBody(web, 'ensureSessionRecoveryListeners'), /syncPendingSalesQueue/)
   assert.doesNotMatch(functionBody(sw, 'syncOutbox'), /replayQueuedSale\(/)
   assert.doesNotMatch(functionBody(sw, 'syncOutboxOnce'), /syncOutbox\(/)
-  assert.doesNotMatch(functionBody(runtime, 'registerOutboxBackgroundSync'), /\.register\(|postMessage\(/)
+  assert.doesNotMatch(runtime, /registerOutboxBackgroundSync|OUTBOX_SYNC_TAG|\.register\(|postMessage\(/)
   assert.match(web, /module\.discardPendingSyncQueue\(reason, reviewToken\)/)
 })
 console.log(`${passed} online-only and private recovery checks passed`)
