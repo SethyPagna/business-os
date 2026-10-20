@@ -261,6 +261,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/productSupplierGate': loadReal('lib/productSupplierGate.ts'),
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
