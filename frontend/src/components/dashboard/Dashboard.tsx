@@ -22,7 +22,7 @@ import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
+import { getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
@@ -263,8 +263,6 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboard: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
-  getAnalytics: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
   getDashboardInsightList: (params: DashboardRangeQuery & { insight: DashboardInsightKind; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
@@ -276,8 +274,16 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
+// Summary and analytics are both halves of GET /api/dashboard/startup, which the Worker builds
+// from the same dashboardSummary/dashboardAnalytics calls /api/dashboard and /api/analytics answer
+// with. Loaders started together (re-activation, a sync refresh, Retry) share that one read through
+// route()'s in-flight de-duplication of the same range key.
+function startupHalf(data: unknown, half: 'summary' | 'analytics'): unknown {
+  return data && typeof data === 'object' ? (data as Record<string, unknown>)[half] : undefined
+}
+
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
+  return { getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -1028,11 +1034,11 @@ export default function Dashboard() {
     if (markLoading) setLoading(true)
     try {
       const query = getCurrentDashboardRange()
-      const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboard(query),
+      const data = startupHalf(await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStartup(query),
         label,
         DASHBOARD_SUMMARY_TIMEOUT_MS,
-      )
+      ), 'summary')
       if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
@@ -1048,7 +1054,7 @@ export default function Dashboard() {
         setSummaryError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getDashboard failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
+      console.error('[Dashboard] summary failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
       setSummaryError(getErrorMessage(error, 'Dashboard summary failed to load.'))
       return null
     } finally {
@@ -1136,11 +1142,11 @@ export default function Dashboard() {
     if (!silent) setAnalyticsLoading(true)
     const query = getCurrentDashboardRange()
     try {
-      const data = await withLoaderTimeout(
-        () => getDashboardApi().getAnalytics(query),
+      const data = startupHalf(await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStartup(query),
         'Dashboard analytics',
         DASHBOARD_ANALYTICS_TIMEOUT_MS,
-      )
+      ), 'analytics')
       if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       if (!isDashboardAnalyticsPayload(data)) {
         throw new Error('Dashboard analytics returned incomplete data.')
@@ -1156,7 +1162,7 @@ export default function Dashboard() {
         setAnalyticsError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getAnalytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
+      console.error('[Dashboard] analytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
       setAnalyticsError(getErrorMessage(error, 'Dashboard analytics failed to load.'))
       return null
     } finally {

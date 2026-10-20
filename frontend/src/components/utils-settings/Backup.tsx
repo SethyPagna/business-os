@@ -280,8 +280,12 @@ function getBackupApi(): BackupApi {
 // so the banner says that, and the way out is to clear maintenance and run the
 // same restore again right away. It is recognised from the state itself, so it
 // reads the same after a reload or a lost response. `refreshSignal` makes the
-// banner re-read the state at once after a restore request, instead of at its
-// next 15 s poll.
+// banner re-read the state at once after a restore request.
+//
+// Maintenance is off nearly always, so the state is read on arrival, after a
+// restore request and after a write refused with 503 (how a restore started on
+// another device shows up here); the 15 s poll runs only while it is on, to
+// follow its phase and notice it being cleared elsewhere.
 function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyFn; notify: NotifyFn; refreshSignal: number }) {
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
@@ -290,19 +294,33 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
   // Same page id the GoogleDriveSyncSection below uses -- Backup renders
   // under the Settings hub.
   const pageActive = useIsPageActive('settings')
+  const maintenanceOn = state != null
+  const aliveRef = useRef(true)
   useEffect(() => {
-    if (!pageActive) return undefined
-    let alive = true
-    const poll = async () => {
-      try {
-        const result = await getBackupMaintenance()
-        if (alive) setState(result?.maintenance || null)
-      } catch { /* transient -- keep the last known state */ }
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+  const readMaintenance = useCallback(async () => {
+    try {
+      const result = await getBackupMaintenance()
+      if (aliveRef.current) setState(result?.maintenance || null)
+    } catch { /* transient -- keep the last known state */ }
+  }, [])
+  useEffect(() => {
+    if (pageActive) void readMaintenance()
+  }, [pageActive, readMaintenance, refreshSignal])
+  useEffect(() => {
+    if (!pageActive || !maintenanceOn) return undefined
+    return startVisibleInterval(() => { void readMaintenance() }, 15000)
+  }, [maintenanceOn, pageActive, readMaintenance])
+  useEffect(() => {
+    if (!pageActive || maintenanceOn) return undefined
+    const onWriteRefused = (event: Event) => {
+      if (Number((event as CustomEvent<{ status?: unknown }>).detail?.status) === 503) void readMaintenance()
     }
-    void poll()
-    const stopPolling = startVisibleInterval(() => { void poll() }, 15000)
-    return () => { alive = false; stopPolling() }
-  }, [pageActive, refreshSignal])
+    window.addEventListener('sync:error', onWriteRefused)
+    return () => window.removeEventListener('sync:error', onWriteRefused)
+  }, [maintenanceOn, pageActive, readMaintenance])
   if (!state) return null
   const failed = state.phase === 'failed'
   const auditPending = isRestoreAuditNotRecordedState(state)

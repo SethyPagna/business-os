@@ -82,6 +82,7 @@ function harness() {
     withLoaderTimeout: (fn: () => any) => fn(), DASHBOARD_STARTUP_TIMEOUT_MS: 1, DASHBOARD_SUMMARY_TIMEOUT_MS: 1, DASHBOARD_ANALYTICS_TIMEOUT_MS: 1,
     isDashboardSummaryPayload: () => true, isDashboardAnalyticsPayload: () => true, normalizeDashboardSummaryPayload: (value: any) => value, normalizeDashboardAnalyticsPayload: (value: any) => value,
     isInvalidSessionError: () => false, getErrorMessage: (error: Error) => error.message, invalidateStockAlertPageRequests() {},
+    startupHalf: (data: any, half: string) => data?.[half],
     setSummary: (value: any) => writes.push({ kind: 'summary', value }), setAnalytics: (value: any) => writes.push({ kind: 'analytics', value }),
     setSummaryError: (value: any) => writes.push({ kind: 'summaryError', value }), setAnalyticsError: (value: any) => writes.push({ kind: 'analyticsError', value }),
     setLoading: (value: any) => writes.push({ kind: 'loading', value }), setAnalyticsLoading: (value: any) => writes.push({ kind: 'analyticsLoading', value }),

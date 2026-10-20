@@ -467,8 +467,10 @@ for (const range of [preset('today'), preset('all')]) {
     }
   }
   const canonical = evaluate(variable(dashboard, 'getCurrentDashboardRange'), { ...hooks, rangeQuery: dashboardRangeQuery(range) })()
-  for (const endpoint of ['getDashboardStartup', 'getDashboard', 'getAnalytics']) {
-    const params = evaluate(requestArgs(dashboard, endpoint)[0], { query: canonical })
+  const dashboardReads = requestArgs(dashboard, 'getDashboardStartup')
+  assert.equal(dashboardReads.length, 3, 'startup, summary and analytics loaders each send the range')
+  for (const args of dashboardReads) {
+    const params = evaluate(args, { query: canonical })
     const wire = withDashboardRangeScope(params)
     expectDates(wire, bounded ? day1 : '')
     assert.equal(wire.rangeScope, bounded ? undefined : 'all')

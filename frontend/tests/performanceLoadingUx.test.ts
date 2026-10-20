@@ -1365,7 +1365,7 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /import \{ getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
+  /import \{ getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
   'dashboard should use its narrow transport instead of the full app-api-methods registry',
 )
 assert.doesNotMatch(
@@ -1416,15 +1416,17 @@ function readDashboardTimeouts(node: ts.Node) {
   ts.forEachChild(node, readDashboardTimeouts)
 }
 readDashboardTimeouts(dashboardAst)
-for (const method of ['getDashboard', 'getAnalytics', 'getDashboardStartup']) {
-  let timeoutCall: ts.CallExpression | undefined
-  function visitDashboardTimeout(node: ts.Node) {
-    if (ts.isCallExpression(node) && node.expression.getText(dashboardAst) === 'withLoaderTimeout'
-      && node.arguments[0]?.getText(dashboardAst).includes(`.${method}(`)) timeoutCall = node
-    ts.forEachChild(node, visitDashboardTimeout)
-  }
-  visitDashboardTimeout(dashboardAst)
-  assert.ok(timeoutCall, `${method} must remain wrapped in withLoaderTimeout`)
+// Startup, summary and analytics all read GET /api/dashboard/startup (summary/analytics take one half).
+const method = 'getDashboardStartup'
+const dashboardTimeoutCalls: ts.CallExpression[] = []
+function visitDashboardTimeout(node: ts.Node) {
+  if (ts.isCallExpression(node) && node.expression.getText(dashboardAst) === 'withLoaderTimeout'
+    && node.arguments[0]?.getText(dashboardAst).includes(`.${method}(`)) dashboardTimeoutCalls.push(node)
+  ts.forEachChild(node, visitDashboardTimeout)
+}
+visitDashboardTimeout(dashboardAst)
+assert.equal(dashboardTimeoutCalls.length, 3, `every ${method} read must remain wrapped in withLoaderTimeout`)
+for (const timeoutCall of dashboardTimeoutCalls) {
   const query = { startDate: '2026-09-19', endDate: '2026-09-20', createdFrom: '2026-09-19 15:00:00', createdTo: '2026-09-19 19:01:00', granularity: 'day' }
   const result = Promise.resolve({ method })
   let dispatched = 0

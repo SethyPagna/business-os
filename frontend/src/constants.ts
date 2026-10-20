@@ -55,6 +55,8 @@ export const SYNC = {
   READ_SERVER_RETRY_DELAY_MS: 450,
   WS_RECONNECT_DELAY_MS: 5_000,
   EVENT_DEBOUNCE_MS: 150,
+  // Pushes from other devices for busy channels (see syncRuntime.ts) refresh a page once per this window.
+  REMOTE_EVENT_COALESCE_MS: 1_500,
 } as const
 
 export const LAYOUT = {
