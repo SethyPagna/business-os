@@ -95,6 +95,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
     './passwordHash': loadReal('lib/passwordHash.ts'),
     './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
+    './roleDefaults': loadReal('lib/roleDefaults.ts'),
   }),
   '../lib/backup': {
     createCloudflareBackup: async () => { backupCallLog.push('full'); if (backupShouldFail) throw new Error('simulated backup failure'); return { name: 'fake-backup' } },

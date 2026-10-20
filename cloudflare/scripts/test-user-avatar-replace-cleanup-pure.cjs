@@ -63,6 +63,7 @@ const noop = async () => {}
 const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {} }
 
 const app = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   bcryptjs: { hashSync: (v) => `hash:${v}`, compareSync: () => false },
   '../lib/imageAudit': { enqueueImageNormalization: noop },

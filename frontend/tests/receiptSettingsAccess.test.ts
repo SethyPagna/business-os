@@ -61,8 +61,8 @@ assert.match(
 )
 console.log('PASS receipt_settings keeps its avatar-dropdown entry point in addition to the page menu')
 
-// --- coreDataInvariants.ts: Employee default carries the key -------------
-const coreDataSource = readFileSync(new URL('../../cloudflare/src/lib/coreDataInvariants.ts', import.meta.url), 'utf8')
+// --- roleDefaults.ts: Employee default carries the key -------------
+const coreDataSource = readFileSync(new URL('../../cloudflare/src/lib/roleDefaults.ts', import.meta.url), 'utf8')
 const defaultRolePermissions = extractConst(coreDataSource, 'DEFAULT_ROLE_PERMISSIONS') as Record<string, Record<string, unknown>>
 assert.equal(defaultRolePermissions.employee?.receipt_settings, true, 'Employee must default to full receipt_settings access so front-line staff can change print modes')
 assert.equal(defaultRolePermissions.manager?.receipt_settings, undefined, "Manager stays seeded to {} like every other page -- this fix doesn't widen Manager's defaults")

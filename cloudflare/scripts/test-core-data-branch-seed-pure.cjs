@@ -66,6 +66,7 @@ const core = loadReal('lib/coreDataInvariants.ts', {
   '../index': {},
   './passwordHash': { hashPassword: async () => 'focused-test-hash' },
   './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
+  './roleDefaults': loadReal('lib/roleDefaults.ts'),
 })
 
 const env = {

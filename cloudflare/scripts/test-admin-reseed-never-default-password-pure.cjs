@@ -82,6 +82,7 @@ const core = loadReal('lib/coreDataInvariants.ts', {
   '../index': {},
   './passwordHash': { hashPassword: async (password) => { hashed.push(password); return `hash:${password.length}` } },
   './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
+  './roleDefaults': loadReal('lib/roleDefaults.ts'),
 })
 
 const baseEnv = { BUSINESS_OS_ORGANIZATION_NAME: 'Test OS', BUSINESS_OS_ORGANIZATION_SLUG: 'test-os' }

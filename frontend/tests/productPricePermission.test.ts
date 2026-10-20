@@ -67,7 +67,7 @@ test('PRESET: the Employee default keeps view, edit and image and loses price; c
 })
 
 test('PRESET: the Worker seed row switches the same price action off', () => {
-  const seed = readFileSync(new URL('../../cloudflare/src/lib/coreDataInvariants.ts', import.meta.url), 'utf8')
+  const seed = readFileSync(new URL('../../cloudflare/src/lib/roleDefaults.ts', import.meta.url), 'utf8')
   assert.match(seed, /'products:price': false,/)
 })
 

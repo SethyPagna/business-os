@@ -9,6 +9,7 @@ import { readProductMoneyPlan } from './productWrites'
 import { normalizeProductDiscountBody, productDiscountChanged, PRODUCT_DISCOUNT_PRICE_FIELDS } from './productDiscountGate'
 import { productImageFieldsChanged, productImageFieldsChangedResolved } from './productImagePermission'
 import { findSameIdentityProduct } from './productIdentity'
+import { productSupplierChanged } from './productSupplierGate'
 
 // Finding H (12 Oct 2026): approving a queued request replays its write with the REVIEWER's authority
 // (lib/reviewApply.ts), so the reviewer must hold, right now, the same grant the direct route demands for
@@ -85,10 +86,13 @@ export async function reviewApprovalPermissionError(env: Env, user: SessionUser,
 
   const checksPrice = priceDenied && [...PRICE_FIELDS, ...PRODUCT_DISCOUNT_PRICE_FIELDS].some(field => owns(body, field))
   const checksImages = imageDenied && (owns(body, 'image_path') || owns(body, 'image_gallery'))
-  if (!checksPrice && !checksImages) return null
+  // A queued supplier change is approved with the REVIEWER's grant, like a price (owner, 19 Oct 2026).
+  const checksSupplier = getActionTier(user, 'products', 'supplier') !== 'full' && owns(body, 'supplier')
+  if (!checksPrice && !checksImages && !checksSupplier) return null
   const db = getDb(env)
   const current = await db.prepare('SELECT * FROM products WHERE id = @id').get<Record<string, unknown>>({ id: row.entity_id })
   if (!current) return null
+  if (checksSupplier && productSupplierChanged(current.supplier, body)) return refusal('products:supplier')
   if (checksPrice) {
     // A saved plan is the direct route's own comparison (routes/products.ts productPriceChanged); updateRow
     // guards its before-image, so the plan's before IS the value being replaced.

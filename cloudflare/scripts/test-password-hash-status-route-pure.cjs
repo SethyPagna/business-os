@@ -63,6 +63,7 @@ function sessionUser(id) {
 }
 
 const app = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },

@@ -126,7 +126,7 @@ check('role presets: every preset that holds Sales has it, the Product Viewer (n
 })
 
 check('seeded roles: the Worker seeds the Employee with Sales and no switch, so it has the cost; nothing is written to existing roles', () => {
-  const source = fs.readFileSync(path.join(cloudflareRoot, 'src/lib/coreDataInvariants.ts'), 'utf8').split('\r\n').join('\n')
+  const source = fs.readFileSync(path.join(cloudflareRoot, 'src/lib/roleDefaults.ts'), 'utf8').split('\r\n').join('\n')
   const start = source.indexOf('const DEFAULT_ROLE_PERMISSIONS')
   const body = source.slice(source.indexOf('{', source.indexOf('=', start)), source.indexOf('\n}\n', start) + 2)
   const seeded = new Function(`return (${body})`)()

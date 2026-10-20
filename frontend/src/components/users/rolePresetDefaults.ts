@@ -41,9 +41,10 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard. Products: view, edit product information and upload images, with costs hidden. Inventory and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
+    description: 'Day-to-day front-line access: POS, individual Sales and Returns actions, and Contacts. Products: view, edit product information and upload images, with cost, prices and supplier locked. No dashboard, stock changes, bulk changes, imports, exports, contact financial history, supplier records, or administrative areas.',
     permissions: {
-      dashboard: true,
+      // Keep this map EQUAL to cloudflare/src/lib/roleDefaults.ts employee (tests/rolePresetDefaults.test.ts pins it):
+      // no dashboard (owner, 20 Oct 2026) and no inventory key (an Employee never writes physical stock).
       // No customer_portal: the live Employee row (MERGEPERM-REPORT section 5) has no Website Editor grant, and the
       // storefront announcement strip and posts are public content (release review P2-1). An admin can add one per user.
       pos: true,
@@ -57,7 +58,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       'sales:export': false,
       // Owner, 5 Oct 2026: product information edits and image upload, no costs. Full
       // tier with every other Products action off (keep in step with
-      // cloudflare/src/lib/coreDataInvariants.ts DEFAULT_ROLE_PERMISSIONS.employee).
+      // cloudflare/src/lib/roleDefaults.ts DEFAULT_ROLE_PERMISSIONS.employee).
       products: true,
       'products:add': false,
       'products:delete': false,
@@ -70,10 +71,10 @@ export const ROLE_PRESETS: RolePreset[] = [
       'products:zero_qty_cleanup': false,
       'products:manage_lookups': false,
       'products:price': false,
+      'products:supplier': false,
       'products:history': false,
       product_cost_view: false,
       product_cost_edit: false,
-      inventory: 'review',
       inventory_checks: true,
       inventory_check_show_price: true,
       inventory_check_show_barcode: true,
@@ -84,10 +85,11 @@ export const ROLE_PRESETS: RolePreset[] = [
       inventory_check_show_sales: true,
       inventory_check_show_customers: true,
       inventory_check_show_cost: false,
+      receipt_settings: true,
       returns: true,
       'returns:bulk': false,
       'returns:export': false,
-      contacts: 'review',
+      contacts: true,
       'contacts:bulk': false,
       'contacts:financial_history': false,
       contacts_suppliers: false,

@@ -6,6 +6,7 @@ import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
+import { DEFAULT_ROLE_PERMISSIONS } from '../lib/roleDefaults'
 import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -1009,6 +1010,14 @@ app.get('/roles', async (c) => {
     `SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles ORDER BY is_system DESC, lower(name) ASC`,
   ).all()
   return c.json(rows)
+})
+
+// The permissions a freshly seeded Admin, Manager and Employee start with: the same constant the seed inserts
+// (lib/roleDefaults.ts), so the role editor's "reset to defaults" cannot drift from the server. Read-only.
+app.get('/roles/defaults', (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  return c.json({ success: true, defaults: DEFAULT_ROLE_PERMISSIONS })
 })
 
 app.post('/roles', async (c) => {

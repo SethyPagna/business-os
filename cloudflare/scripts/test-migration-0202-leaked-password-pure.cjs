@@ -121,6 +121,7 @@ const auditSpy = async (_env, ...args) => { audits.push(JSON.stringify(args)) }
 let resetLinkConsumed = 0
 
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
