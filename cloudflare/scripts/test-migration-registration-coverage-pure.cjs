@@ -46,6 +46,8 @@ const NAMED_COMPANIONS = {
   259: 'test-inventory-check-sessions.cjs',
   260: 'test-migration-0260-return-refund-tender-native.cjs',
   261: 'test-migration-0261-trigger-index-plans-native.cjs',
+  262: 'test-portal-consent-renewal-pure.cjs',
+  263: 'test-migration-0263-sale-return-tags-native.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',
