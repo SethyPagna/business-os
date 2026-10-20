@@ -8,7 +8,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, productImportChangesSupplier, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -22,6 +22,7 @@ import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactR
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
+import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
 import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -284,6 +285,13 @@ function requireProductImageAction(c: any) {
 async function requireChangedProductImportImageAction(c: any, job: Record<string, unknown>) {
   if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'image') === 'full') return null
   return (await productImportChangesImages(c.env, job as any)) ? requireProductImageAction(c) : null
+}
+
+// Owner, 19 Oct 2026: a file that changes a matched product's supplier needs products:supplier (refused whole).
+async function requireChangedProductImportSupplierAction(c: any, job: Record<string, unknown>) {
+  if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'supplier') !== 'none') return null
+  if (!(await productImportChangesSupplier(c.env, job as any))) return null
+  return c.json({ success: false, ...PRODUCT_SUPPLIER_REFUSAL }, 403)
 }
 
 function serializeJob(job: Record<string, unknown>) {
@@ -1467,6 +1475,8 @@ app.post('/:id/approve', async (c) => {
   }
   const imageDenied = await requireChangedProductImportImageAction(c as any, job)
   if (imageDenied) return imageDenied
+  const supplierDenied = await requireChangedProductImportSupplierAction(c as any, job)
+  if (supplierDenied) return supplierDenied
 
   const body = await c.req.json().catch(() => ({}))
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
@@ -1680,6 +1690,8 @@ app.post('/:id/retry', async (c) => {
     if (destructivePermission) return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
     const imageDenied = await requireChangedProductImportImageAction(c as any, job)
     if (imageDenied) return imageDenied
+    const supplierDenied = await requireChangedProductImportSupplierAction(c as any, job)
+    if (supplierDenied) return supplierDenied
     // A re-apply is a fresh confirmation point (CUTOVER-LR): the same gate as /approve, before anything is queued.
     const branchRedirect = await importBranchRedirectGate(getDb(c.env), { id, type: String(job.type || '') }, branchRedirectTarget(c))
     if ('refusal' in branchRedirect) return c.json({ success: false, ...branchRedirect.refusal }, 409)

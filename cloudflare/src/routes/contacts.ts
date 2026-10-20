@@ -9,6 +9,7 @@ import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMEN
 import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { PRODUCT_SUPPLIER_REFUSAL, supplierContactChangeReachesProducts } from '../lib/productSupplierGate'
 import { audit, buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
@@ -750,6 +751,20 @@ function contactMergeRefusal(error: unknown, legacy: boolean, accounts: ContactM
 // Suppliers have no membership/portal/anonymous complexity, so this needs
 // none of those merge-route guards -- just the plan, the batch, and a cache
 // bump.
+// Owner rule (19 Oct 2026): the supplier of a product is changed only with products:supplier. A supplier contact
+// rename-with-carry or merge relabels or repoints products, so it is held to the same switch -- but only when a
+// product or lot actually uses the supplier. Conservative reading; the owner may relax it for a rename.
+async function refuseSupplierContactProductChange(
+  db: ReturnType<typeof getDb>,
+  user: SessionUser | undefined,
+  config: ContactConfig,
+  input: { names: string[]; supplierIds?: number[] },
+): Promise<{ body: typeof PRODUCT_SUPPLIER_REFUSAL; status: 403 } | null> {
+  if (config.table !== 'suppliers' || getActionTier(user, 'products', 'supplier') !== 'none') return null
+  if (!await supplierContactChangeReachesProducts(db, input)) return null
+  return { body: PRODUCT_SUPPLIER_REFUSAL, status: 403 }
+}
+
 async function mergeSupplierIntoExisting(
   env: Env,
   config: ContactConfig,
@@ -1447,6 +1462,13 @@ function registerContactRoutes(config: ContactConfig) {
       }, 409)
     }
 
+    const supplierMergeDenied = await refuseSupplierContactProductChange(db, user, config, {
+      // A chosen name for the kept supplier also relabels the products that carry its old name.
+      names: [...merged.map((row) => String(row.name || '')), ...(request.choices && 'name' in request.choices ? [String(keeper.name || '')] : [])],
+      supplierIds: merged.map((row) => Number(row.id)),
+    })
+    if (supplierMergeDenied) return c.json(supplierMergeDenied.body, supplierMergeDenied.status)
+
     const portalAccounts = config.table === 'customers'
       ? await db.prepare(`SELECT id, contact_id, membership_id, name FROM portal_accounts WHERE contact_id IN (${idList}) ORDER BY id`).all<ContactMergePortalAccount>(idParams)
       : []
@@ -1884,12 +1906,20 @@ function registerContactRoutes(config: ContactConfig) {
     if (duplicateDecision.resolvedExisting) {
       const keeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
       if (keeper) {
+        // The fold repoints this supplier's products and lots onto the kept one: a product supplier change.
+        const foldDenied = await refuseSupplierContactProductChange(db, user, config, { names: [String(current.name || '')], supplierIds: [Number(id)] })
+        if (foldDenied) return c.json(foldDenied.body, foldDenied.status)
         const mergedResult = await mergeSupplierIntoExisting(c.env, config, user, keeper, current)
         c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: Number(keeper.id), mergedId: Number(current.id) }).catch(() => {}))
         return c.json(mergedResult)
       }
       // The matched row vanished between the check above and now (a race) --
       // nothing left to fold into; fall through and save the edit normally.
+    }
+    // A carrying rename relabels products.supplier; "rename only this contact" leaves the products alone.
+    if (nameChanged && renameScope === 'carry') {
+      const renameDenied = await refuseSupplierContactProductChange(db, user, config, { names: [String(current.name || '')] })
+      if (renameDenied) return c.json(renameDenied.body, renameDenied.status)
     }
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 

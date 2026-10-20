@@ -305,6 +305,7 @@ const app = inventoryRoute.default
 // D4b: the Receive Batch route grows the same explicit-lot pick every
 // adjust surface has -- loaded with the same real kernel + real batchCode.
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/productSupplierGate': loadReal('lib/productSupplierGate.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },

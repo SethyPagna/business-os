@@ -7,7 +7,8 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, applierAlsoActionDenied, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -538,7 +539,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       ? !canReplayStockSessionPayload(user, payload)
       : applierPermissionTier(user, applier) !== 'full'
         || (replayChangesProductImages && getActionTier(user, 'products', 'image') !== 'full'))) {
-      return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+      return c.json({ success: false, error: 'You do not have permission to perform this action', ...(applierAlsoActionDenied(user, applier) ? { code: PRODUCT_SUPPLIER_REFUSAL.code } : {}) }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
     // itself (require_applied) and the Worker cannot either (no registered
