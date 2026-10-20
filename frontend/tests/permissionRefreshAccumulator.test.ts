@@ -14,6 +14,7 @@ import {
   permissionSnapshotKey,
 } from '../src/utils/permissionRefreshAccumulator.ts'
 import { isOwnSettingsWrite } from '../src/utils/settingsSave.ts'
+import { createSyncChannelScheduler, isRemoteSyncUpdate } from '../src/api/syncRuntime.ts'
 
 const subject = { userId: 'me', roleId: 'cashier' }
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -94,7 +95,7 @@ test('a late refresh from an old session cannot clear or reschedule the new sess
 test('AppContext records auth intent before the per-channel debounce can replace event detail', () => {
   const onUpdate = appContextSource.slice(appContextSource.indexOf('    const onUpdate = (e: Event) => {'), appContextSource.indexOf('    const onStatus = (e: Event) => {'))
   assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') >= 0)
-  assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') < onUpdate.indexOf('if (debounceRef.current[channel])'))
+  assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') < onUpdate.indexOf('syncScheduler.schedule('))
   assert.doesNotMatch(onUpdate, /affectsThisSession/)
   assert.match(appContextSource, /const accumulator = permissionRefreshRef\.current\n\s+if \(!beginPermissionRefresh\(accumulator\)\) return/)
   assert.match(appContextSource, /const needsAnotherRefresh = finishPermissionRefresh\(accumulator\)/)
@@ -126,7 +127,8 @@ async function runExtractedHandlerCounts(events: Array<{ channel: string; reason
   const clearTimer = (id: number) => { timers.delete(id) }
   const context = {
     eventDetail: (event: { detail: unknown }) => event.detail,
-    debounceRef: { current: {} },
+    createSyncChannelScheduler,
+    isRemoteSyncUpdate,
     permissionRefreshRef: { current: createPermissionRefreshAccumulator() },
     permissionRefreshTimerRef: { current: null },
     schedulePermissionRefreshRef: { current: () => {} },
