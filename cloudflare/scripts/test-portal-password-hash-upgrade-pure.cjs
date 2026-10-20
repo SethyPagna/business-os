@@ -114,7 +114,7 @@ async function run() {
   let accountId
   let membershipId
   await check('signup stores the current format', async () => {
-    const res = await signupPortalAccount({}, { name: 'Sophea', phone: '097 111 222', password: 'portal-pass-1', consent: true })
+    const res = await signupPortalAccount({}, { name: 'Sophea', phone: '097 111 222', password: 'portal-pass-1', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true, JSON.stringify(res))
     accountId = res.accountId
     membershipId = res.membershipId

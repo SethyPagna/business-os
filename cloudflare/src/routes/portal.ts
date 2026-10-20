@@ -1813,7 +1813,7 @@ app.post('/auth/signup', async (c) => {
   // consent is the visitor's agreement to the Terms and the Privacy Policy.
   // The checkbox on the storefront is the prompt; this endpoint is public and
   // unauthenticated, so the rule itself lives in signupPortalAccount.
-  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
+  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password, consent: body.consent, consentLocale: body.consentLocale, ageConfirmed: body.ageConfirmed })
   if (!result.ok) {
     // Only phone/membership-id probing counts toward the 10-fail cap; a benign
     // form error (missing field, short password) is retryable without locking.

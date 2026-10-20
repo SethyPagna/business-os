@@ -161,7 +161,7 @@ function portalFixture({ state, planTier }) {
   return { rawDb, portal, env, passwordHash }
 }
 async function portalAccount(f, name, phoneNumber, hash) {
-  const res = await f.portal.signupPortalAccount(f.env, { name, phone: phoneNumber, password: 'portal-pass-1', consent: true })
+  const res = await f.portal.signupPortalAccount(f.env, { name, phone: phoneNumber, password: 'portal-pass-1', consent: true, ageConfirmed: true })
   assert.equal(res.ok, true, JSON.stringify(res))
   if (hash !== undefined) f.rawDb.prepare('UPDATE portal_accounts SET password_hash = ? WHERE id = ?').run([hash, res.accountId])
   return res

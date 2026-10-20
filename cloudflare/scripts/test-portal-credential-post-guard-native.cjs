@@ -143,7 +143,7 @@ async function main() {
     }
     let phoneSeq = 0
     const freshPhone = () => `012 6${String(++phoneSeq).padStart(2, '0')} ${String(100 + phoneSeq).padStart(3, '0')}`
-    const signupPayload = (phone) => ({ name: 'Csrf Member', phone, password: PASSWORD, consent: true, consentLocale: 'en' })
+    const signupPayload = (phone) => ({ name: 'Csrf Member', phone, password: PASSWORD, consent: true, ageConfirmed: true, consentLocale: 'en' })
 
     // --- 3. sign-up default -------------------------------------------------
     await check('no saved setting: sign-up is paused (403 portal_signup_paused), nothing written, no cookie, /config says so', async () => {
