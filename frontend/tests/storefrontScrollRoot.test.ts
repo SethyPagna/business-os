@@ -140,12 +140,24 @@ runTest('the document is the sole public vertical scroll owner', () => {
 })
 
 runTest('nothing scrollable sits over the product list except the filters dialog', () => {
-  const scrollers = productsSection.match(/overflow-[xy]-auto/g) || []
+  // The only vertical scroller is the filters dialog. The one horizontal-only
+  // exception (owner, 6.0.865) is the further-offers chip row: its overscroll
+  // is contained on x only, so a vertical swipe or wheel on it still reaches
+  // the page -- unlike the brand-letter grid and the lg:hidden letter row,
+  // which ate page scrolling and stay banned.
+  const verticalScrollers = productsSection.match(/overflow-y-auto/g) || []
   assert.equal(
-    scrollers.length,
+    verticalScrollers.length,
     1,
-    `the products section may own exactly ONE inner scroller (the filters dialog); found ${scrollers.length}. The brand-letter grid and the lg:hidden letter row were the other two, and both ate page scrolling.`,
+    `the products section may own exactly ONE vertical inner scroller (the filters dialog); found ${verticalScrollers.length}. The brand-letter grid was the other, and it ate page scrolling.`,
   )
+  const horizontalScrollers = productsSection.match(/overflow-x-auto/g) || []
+  assert.equal(horizontalScrollers.length, 1, `the only permitted horizontal scroller is the offers chip row; found ${horizontalScrollers.length}. The lg:hidden letter row was a second one and ate page scrolling.`)
+  const offersRow = /<ul data-portal-promotion-extras="true" className="([^"]*)"/.exec(productsSection)
+  assert.ok(offersRow, 'the offers chip row must still be findable')
+  assert.match(offersRow[1], /\boverflow-x-auto\b/, 'the single horizontal scroller must be the offers chip row')
+  assert.match(offersRow[1], /\boverscroll-x-contain\b/, 'the chip row contains its overscroll on x only')
+  assert.doesNotMatch(offersRow[1], /\boverscroll-(contain|y-contain|none|y-none)\b/, 'a y-contained or y-blocked chip row would trap a vertical page swipe')
   const dialogAt = productsSection.indexOf('max-h-[min(32rem,calc(100dvh-1rem))] overflow-y-auto')
   assert.ok(dialogAt > 0, 'the one permitted scroller must be the filters dialog panel')
   assert.match(

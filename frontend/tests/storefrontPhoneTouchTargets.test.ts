@@ -18,7 +18,7 @@ const surface = read('src/components/catalog/CatalogPreviewSurface.tsx')
 
 assert.match(publicPage, /className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700[^"]*"\s*onClick=\{\(\) => \{\s*setContactOpen\(false\)\s*setContactMinimized\(true\)/, 'contact minimize X is a 40px control, not 24px')
 assert.match(flyout, /className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500/, 'product flyout close is 40px')
-assert.match(legal, /ref=\{closeRef\}[\s\S]{0,200}inline-flex h-10 w-10|inline-flex h-10 w-10[\s\S]{0,300}ref=\{closeRef\}/, 'policy reader close is 40px')
+assert.match(legal, /ref=\{closeRef\}[\s\S]{0,200}inline-flex h-1[01] w-1[01]|inline-flex h-1[01] w-1[01][\s\S]{0,300}ref=\{closeRef\}/, 'policy reader close is at least 40px (h-11 w-11 since 6.0.864)')
 assert.match(products, /inline-flex h-10 w-10 items-center justify-center rounded-lg[\s\S]{0,300}aria-label=\{copy\('closeFilters', 'Close filters'\)\}/, 'filter dialog close is 40px')
 assert.match(products, /<label htmlFor="portal-product-search" className=\{`flex min-h-11/, 'search field is 44px tall')
 assert.match(products, /inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-xl border/, 'Filters trigger is 40px')
