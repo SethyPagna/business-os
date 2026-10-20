@@ -320,7 +320,7 @@ check('PRE: an unknown sale_status, loyalty switched on, restore mode, a used le
   expectAbort('unknown status', c => c.exec("UPDATE sales SET sale_status = 'weird' WHERE id = 1"), 'pre_vocab_known')
   expectAbort('loyalty on', c => c.exec("INSERT INTO settings(key, value) VALUES ('loyalty_points_enabled', 'true') ON CONFLICT(key) DO UPDATE SET value = 'true'"), 'pre_loyalty_off')
   expectAbort('restore mode', c => restoreMode(c, true), 'pre_not_restore_mode')
-  expectAbort('ledger used', c => c.exec("INSERT INTO sale_status_normalization_ledger(sale_id) VALUES (1)"), 'pre_ledger_empty')
+  expectAbort('ledger used', c => c.exec("INSERT INTO sale_status_normalization_ledger(sale_id, sale_status_after) VALUES (1, 'completed')"), 'pre_ledger_empty')
   expectAbort('post-reset accrual', c => earningSale(c, { id: 62, receipt_number: 'S62', total_usd: 5, sale_status: 'returned', status_before_return: 'completed' }), 'pre_no_post_reset_accrual')
 })
 check('PRE: a sale the 0161 money-precision trigger would reject is named before any write', () => {
