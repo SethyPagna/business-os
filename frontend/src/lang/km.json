@@ -7683,5 +7683,7 @@
   "perm_user_exceptions_heading": "ករណីលើកលែងផ្ទាល់ខ្លួន",
   "perm_user_exceptions_one": "ករណីលើកលែងផ្ទាល់ខ្លួន 1",
   "perm_user_exceptions_other": "ករណីលើកលែងផ្ទាល់ខ្លួន {n}",
-  "perm_switched_off_heading": "បានបិទ"
+  "perm_switched_off_heading": "បានបិទ",
+  "loyalty_points_enabled": "ពិន្ទុសមាជិក",
+  "loyalty_points_enabled_desc": "ពេលបិទ គ្មានអ្វីទទួលបាន ឬប្តូរពិន្ទុទេ ហើយសមតុល្យត្រូវបានលាក់។ ការលក់ក្នុងពេលបិទ មិនទទួលបានពិន្ទុនៅពេលក្រោយទេ។ លេខសម្គាល់សមាជិកនៅដដែល។"
 }
