@@ -405,6 +405,28 @@ const mixedAdditiveUnread = (text, repairText) => {
   return columns.size > 0 && indexes > 0 && guards > 0
 }
 
+// A schema-only file (lane 6.0.890, 0263 sale tags): new columns the repair
+// never names, indexes, new tables the repair never names, and read-only
+// SELECT CASE ... json_extract assertions. It changes no row and no column the
+// repair reads or writes, so both orders agree. Any other statement fails it.
+const schemaOnlyUnread = (text, repairText) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const named = namedIn(repairText)
+  let added = 0
+  for (const statement of statements) {
+    let match
+    if ((match = /^ALTER TABLE \w+ ADD COLUMN (\w+) /i.exec(`${statement} `))) {
+      if (named(match[1])) return false
+      added++
+    } else if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
+      if (named(match[1])) return false
+    } else if (!/^CREATE (UNIQUE )?INDEX /i.test(statement)
+      && !(/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
+        && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement.replace(/pragma_table_info/gi, '')))) return false
+  }
+  return added > 0
+}
+
 // ---- RET-B 0235 rule (begin) ------------------------------------------------
 // Self-contained; the LA cutover lane adds its own rule elsewhere in this file.
 //
@@ -884,12 +906,19 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
   assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
   assert.ok(!indexOnly('CREATE INDEX i ON sale_items(id); UPDATE sale_items SET cost_price_usd = 0;') && !indexOnly('ALTER TABLE sale_items ADD COLUMN z INTEGER;'), 'control: a file that also changes rows or columns is still a dependency')
   assert.ok(additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz_unread INTEGER NOT NULL DEFAULT 0;', migrationText), 'control: a new column the repair never names is skipped')
+  if (chain.includes('0263_sale_return_tags.sql')) {
+    const tags = chainText('0263_sale_return_tags.sql')
+    assert.ok(schemaOnlyUnread(tags, migrationText), 'control: the schema-only 0263 is independent')
+    for (const wrong of [`${tags}\nUPDATE sales SET return_state = 'full';`, `${tags}\nALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`,
+      `${tags}\nCREATE TABLE IF NOT EXISTS sale_items (id INTEGER);`, `${tags}\nSELECT CASE WHEN (SELECT 1) THEN 1 ELSE json_extract('[]','$[x]') END; DELETE FROM sale_items;`,
+      'CREATE INDEX i ON sale_items(id);']) assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  }
   assert.ok(!additiveUnread('ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;', migrationText) && !additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz INTEGER; UPDATE sale_items SET zzz = 1;', migrationText), 'control: a column the repair names, or any row change, is still a dependency')
   assert.ok(indexOnly('-- UPDATE sale_items SET cost_price_usd = 0;\n/* DELETE FROM sale_items; */\nCREATE INDEX i ON sale_items(id);'), 'control: SQL inside a comment never executes, so it is not a statement')
   assert.ok(!indexOnly("CREATE INDEX i ON sale_items(id) WHERE '--' <> ''; UPDATE sale_items SET cost_price_usd = 0;")

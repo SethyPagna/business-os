@@ -92,9 +92,10 @@ export type StockStatement = { sql: string; params: Record<string, unknown> }
 //                      sale, which is what the Returns page already does.
 //
 // A sale that has ANY recorded return is refused as well, whatever its
-// status says -- the route passes hasRecordedReturns, so an imported or
-// legacy row still labelled 'completed' underneath real return records
-// cannot slip past the status check.
+// status says -- the route passes hasRecordedReturns, the return evidence
+// (salesStatus.ts SALE_RETURN_EVIDENCE_SQL: return lines, imported returned
+// units or a return tag), so a sale whose status is only its payment state
+// (owner, 20 Oct 2026) cannot slip past the status check.
 // ---------------------------------------------------------------------------
 export const SALE_STATUSES_ACCEPTING_NEW_LINES: ReadonlySet<string> = new Set<string>([
   'completed',

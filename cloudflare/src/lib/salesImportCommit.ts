@@ -3,7 +3,7 @@ import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
 import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
-import { RETURN_STATUSES } from './salesStatus'
+import { saleStoredState } from './saleStatusResolution'
 import { branchCanSell } from './branchRoles'
 import { actorSnapshot, type ActorLike } from './actorSnapshot'
 import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branchRoleGuards'
@@ -317,6 +317,11 @@ export async function applyHistoricalSaleImport(
     || importedMembershipDiscountUsd !== 0
     || importedMembershipDiscountKhr !== 0
     || importedMembershipPoints !== 0)
+  // The CSV word (prepared jobs carry it too) stored in the two-status model
+  // (owner, 20 Oct 2026): returned/partial_return become the return tag of a
+  // Completed sale and awaiting_delivery the delivery tag. History raises no
+  // return-review flag.
+  const stored = saleStoredState(d)
   // A function of the receipt number: a receipt-race retry rebuilds it.
   const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
     origin: 'sales_import',
@@ -326,7 +331,7 @@ export async function applyHistoricalSaleImport(
     actor: input.actor,
     cashierId: d.cashier_id,
     cashierName: d.cashier_name,
-    saleStatus: d.sale_status,
+    saleStatus: stored.saleStatus,
     items: normalizedItems,
     totalUsd: d.total_usd,
     paymentMethod: d.payment_method,
@@ -424,7 +429,7 @@ export async function applyHistoricalSaleImport(
             delivery_actual_cost_usd, delivery_actual_cost_khr,
             loyalty_accrual, sale_status, items, created_at, client_request_id,
             legacy_receipt_number, creation_snapshot_json,
-            stock_skipped, stock_skipped_at, stock_skipped_by_name
+            stock_skipped, stock_skipped_at, stock_skipped_by_name, return_state, delivery_pending
           )
           SELECT
             @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
@@ -438,7 +443,7 @@ export async function applyHistoricalSaleImport(
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
             ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @items_json, @created_at, @client_request_id,
             @legacy_receipt_number, @creation_snapshot_json,
-            1, @stock_skipped_at, @stock_skipped_by_name
+            1, @stock_skipped_at, @stock_skipped_by_name, @return_state, @delivery_pending
           WHERE ${writeGuard}`,
     // RET-B F4 / LH-2 (5 Oct 2026): an imported sale never took units off the
     // shelf (the real-world sale did, long before the file existed, and the
@@ -455,6 +460,9 @@ export async function applyHistoricalSaleImport(
     params: {
       ...common,
       ...d,
+      sale_status: stored.saleStatus,
+      return_state: stored.returnState,
+      delivery_pending: stored.deliveryPending ? 1 : 0,
       customer_id: effectiveImportedCustomerId,
       customer_name: effectiveImportedCustomerName,
       customer_phone: effectiveImportedCustomerPhone,
@@ -479,7 +487,7 @@ export async function applyHistoricalSaleImport(
     `Imported as ${d.sale_status} (receipt ${reasonReceiptNumber}${legacyReceiptNumber ? `, source ${legacyReceiptNumber}` : ''})`
   const returnStockParams: Array<Record<string, unknown>> = []
 
-  const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
+  const isReturnGroup = stored.returnState !== null
   for (const item of normalizedItems) {
     statements.push({
       sql: `INSERT INTO sale_items (

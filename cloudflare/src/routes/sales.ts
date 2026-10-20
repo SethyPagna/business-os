@@ -133,9 +133,9 @@ import {
   type SaleRecordEventRow,
   type SaleRecordChange,
 } from '../lib/saleRecords'
-import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, notPaidSaleSql } from '../lib/salesStatus'
+import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, RETURN_STATUSES, SALE_RETURN_EVIDENCE_SQL, SALE_STATE_SET_SQL, requestedSaleState, sameSaleState, saleStateParams, saleStatusFilterSql, saleStatusWord } from '../lib/salesStatus'
 import { returnDebtLoweredSql } from '../lib/returnRefundSplit'
-import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, returnSaleAwaitsPayment, saleReadsNotPaid, salePaymentStatus, statusChangeNeedsPayment, sumRefundsUsd, PAID_SALE_STATUSES, type RecordedSaleMoney } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, saleReadsNotPaid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -1155,6 +1155,10 @@ app.post('/', async (c) => {
       }, 400)
     }
   }
+  // Owner, 20 Oct 2026: a paid order still to be delivered is Completed with
+  // the delivery-pending tag; awaiting_delivery is request vocabulary only.
+  const deliveryPending = saleStatus === 'awaiting_delivery' ? 1 : 0
+  if (deliveryPending) saleStatus = 'completed'
 
   let nativeChange
   try {
@@ -1304,7 +1308,7 @@ app.post('/', async (c) => {
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, search_normalized, items, creation_snapshot_json, created_at, updated_at
+        loyalty_accrual, sale_status, delivery_pending, search_normalized, items, creation_snapshot_json, created_at, updated_at
       ) SELECT @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -1315,7 +1319,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @delivery_pending, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1420,6 +1424,7 @@ app.post('/', async (c) => {
       delivery_actual_cost_usd: deliveryActualCostUsd,
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
+      delivery_pending: deliveryPending,
     },
   }
 
@@ -2106,14 +2111,14 @@ app.post('/:id/line-receipt/:kind', async (c) => {
   return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
 })
 
-// The list's status filter. Not Paid reads the payment state, so a sale whose
-// returns kept it Not Paid is listed there as well as under its return status.
+// The list's status filter, on the two-status model: Not Paid and Completed
+// read the payment state, and the retired values select their tag, so a
+// returned or delivery-pending sale is listed under its payment state too.
 function saleStatusFilterClause(raw: string, params: Record<string, unknown>): string | null {
   const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)
   const terms = statuses.map((status, index) => {
-    if (status === 'awaiting_payment') return notPaidSaleSql('s')
     params[`status${index}`] = status
-    return `s.sale_status = @status${index}`
+    return saleStatusFilterSql('s', status, `status${index}`)
   })
   return terms.length ? `(${terms.join(' OR ')})` : null
 }
@@ -2239,15 +2244,21 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
+  // oldStatus is the stored word (stock math: every status but cancelled
+  // holds the same units). The write is the two-status model (owner, 20 Oct
+  // 2026): the payment state in sale_status and the return and delivery tags
+  // beside it; a retired status on the row is translated, never written back.
   const oldStatus = sale.sale_status || 'completed'
-  // A return-status sale that still reads Not Paid keeps its return status
-  // when it is paid: only its payment state (status_before_return) moves.
-  // Stock is untouched: a return status and a paid status hold the same units.
-  const settlesReturnSale = PAID_SALE_STATUSES.includes(saleStatus) && returnSaleAwaitsPayment(sale)
-  const writtenStatus = settlesReturnSale ? oldStatus : saleStatus
-  const paymentFromStatus = salePaymentStatus(sale)
-  if (oldStatus === saleStatus && !paymentFieldsSent) {
-    return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
+  const current = saleStoredState(sale)
+  const paymentFromStatus = current.saleStatus
+  // Un-cancel goes back to where the sale was, tags included.
+  const beforeCancel = current.saleStatus === 'cancelled' ? saleStoredState({ ...sale, sale_status: sale.status_before_cancel || 'completed' }) : null
+  const target = beforeCancel && saleStatus !== 'cancelled' ? beforeCancel : requestedSaleState(current, saleStatus)
+  const requestedPayment = beforeCancel && saleStatus === (sale.status_before_cancel || 'completed') ? beforeCancel.saleStatus : requestedSaleState(beforeCancel ?? current, saleStatus).saleStatus
+  const writtenStatus = target.saleStatus
+  // A request for the retired return word the row already carries is a no-op too.
+  if ((sameSaleState(current, target) || (RETURN_STATUSES.has(saleStatus) && oldStatus === saleStatus)) && !paymentFieldsSent) {
+    return c.json({ id: Number(id), sale_status: sale.sale_status, updated_at: sale.updated_at || null })
   }
   if (!paymentFieldsSent && !statusRequestId) {
     return c.json({
@@ -2260,7 +2271,7 @@ app.patch('/:id/status', async (c) => {
   // Which transitions are legal at all (returns-flow ownership of
   // partial_return/returned; un-cancel only back to where the sale was) --
   // see lib/saleTransitions.ts.
-  const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null, settlesReturnSale)
+  const guard = guardSaleStatusTransition(current.saleStatus, RETURN_STATUSES.has(saleStatus) && !beforeCancel ? saleStatus : requestedPayment, beforeCancel?.saleStatus ?? null, current.returnState !== null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
 
   // What a Not Paid sale owes is its total less the debt its active customer
@@ -2458,12 +2469,8 @@ app.patch('/:id/status', async (c) => {
   // identity; actor/status/timestamp proximity is not proof of one act.
   const statusOperationId = statusSourceId || crypto.randomUUID()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
-  const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
-  const updateParams: Record<string, unknown> = { sale_status: writtenStatus, id, updated_at: mutationStamp }
-  if (settlesReturnSale) {
-    updates.push('status_before_return = @status_before_return')
-    updateParams.status_before_return = saleStatus
-  }
+  const updates = [SALE_STATE_SET_SQL, 'updated_at = @updated_at']
+  const updateParams: Record<string, unknown> = { ...saleStateParams(target), id, updated_at: mutationStamp }
   const emptySettlementNote = paymentFieldsSent && body.notes !== undefined && !String(body.notes ?? '').trim()
   if (body.notes !== undefined && !emptySettlementNote) {
     updates.push('notes = @notes')
@@ -2557,7 +2564,7 @@ app.patch('/:id/status', async (c) => {
     }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
-    const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan, settlesReturnSale)
+    const after = buildSaleSettlementAfterState(before, sale, target, settlementPlan)
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2577,14 +2584,15 @@ app.patch('/:id/status', async (c) => {
       'change_exchange_rate = @change_exchange_rate',
       'search_normalized = @search_normalized',
     )
-    Object.assign(updateParams, { ...after, lines: undefined })
+    Object.assign(updateParams, { ...after, lines: undefined, status_before_return: undefined, ...saleStateParams(target) })
     settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp).slice(1)
     settlementOperationId = crypto.randomUUID()
     settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
     settlementResponse = {
       id: Number(id),
       sale_status: writtenStatus,
-      ...(settlesReturnSale ? { status_before_return: saleStatus } : {}),
+      return_state: target.returnState,
+      delivery_pending: target.deliveryPending ? 1 : 0,
       updated_at: mutationStamp,
       exchange_rate: after.exchange_rate,
       payment_method: after.payment_method,
@@ -2623,7 +2631,7 @@ app.patch('/:id/status', async (c) => {
     updateParams.cancel_reason = cancelReason
     updateParams.cancel_note = cancelNote
     updateParams.cancelled_by_name = actorSnapshot(user)
-    updateParams.status_before_cancel = oldStatus
+    updateParams.status_before_cancel = current.saleStatus
   } else if (oldStatus === 'cancelled') {
     // Un-cancel: the cancellation record clears, and its linked lost-fee
     // expense row (if any) is removed WITH it, atomically -- money
@@ -2696,8 +2704,8 @@ app.patch('/:id/status', async (c) => {
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   if (!paymentFieldsSent && statusSourceId && statusDigest) {
     directStatusResponse = {
+      // Replay responses are whitelisted (saleRecordEvents.ts RESPONSE_KEYS); tags are read from the sale.
       id: Number(id), sale_status: writtenStatus, updated_at: mutationStamp,
-      ...(settlesReturnSale ? { status_before_return: saleStatus } : {}),
       ...(skipStock ? { stock_skipped: 1 } : {}),
     }
     const statusChanges: Array<{
@@ -2706,8 +2714,8 @@ app.patch('/:id/status', async (c) => {
       after: { state: 'known_value'; value: string } | { state: 'known_none' }
     }> = [{
       field: 'sale_status',
-      before: { state: 'known_value', value: settlesReturnSale ? paymentFromStatus : oldStatus },
-      after: { state: 'known_value', value: saleStatus },
+      before: { state: 'known_value', value: saleStatusWord(current) },
+      after: { state: 'known_value', value: saleStatusWord(target) },
     }]
     const cancellationTransition = oldStatus === 'cancelled' || saleStatus === 'cancelled'
     if (cancellationTransition) {
@@ -2736,7 +2744,7 @@ app.patch('/:id/status', async (c) => {
     statusEventBytes = statusEvent.eventsBytes
     statements.push(statusEvent.statement)
   }
-  if (saleStatus === 'awaiting_payment' && (oldStatus === 'completed' || oldStatus === 'awaiting_delivery')) {
+  if (target.saleStatus === 'awaiting_payment' && current.saleStatus === 'completed') {
     statements.push({
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
             VALUES(@actor,@actorName,'sale_payment_correction_opened','sale',@saleId,@details,'sale',@saleId,@details)`,
@@ -2746,7 +2754,7 @@ app.patch('/:id/status', async (c) => {
         saleId: String(id),
         details: JSON.stringify({
           operationId: statusOperationId,
-          oldStatus,
+          oldStatus: saleStatusWord(current),
           newStatus: saleStatus,
           reason: 'completed_sale_reopened_for_payment_correction',
         }),
@@ -2885,7 +2893,7 @@ app.patch('/:id/status', async (c) => {
   if (!writesStock) statements.push(ordinaryBusinessMaintenanceGuard)
   if (settlementSnapshot || directStatusResponse) {
     assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
-      saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
+      saleId: Number(id), before: oldStatus, after: writtenStatus, response: directStatusResponse,
     }, settlementEventBytes + statusEventBytes)
   }
   try {
@@ -2941,10 +2949,9 @@ app.patch('/:id/status', async (c) => {
       ...(!paymentFieldsSent && statusSourceId ? { record_event: {
         source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
       } } : {}),
-      // A settled return-status sale keeps sale_status (returnStatus); its payment state moved.
-      oldStatus: settlesReturnSale ? paymentFromStatus : oldStatus,
-      newStatus: saleStatus,
-      ...(settlesReturnSale ? { returnStatus: oldStatus } : {}),
+      oldStatus: saleStatusWord(current),
+      newStatus: saleStatusWord(target),
+      ...(current.returnState ? { returnState: current.returnState } : {}),
       ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
       ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
       restoredUnits: plan.restoredUnits,
@@ -2986,8 +2993,8 @@ app.patch('/:id/status', async (c) => {
     type: 'status',
     lines: formatSaleStatusTelegramLines({
       receipt: sale.receipt_number || id,
-      fromStatus: settlesReturnSale ? paymentFromStatus : oldStatus,
-      toStatus: saleStatus,
+      fromStatus: saleStatusWord(current),
+      toStatus: saleStatusWord(target),
       customer: sale.customer_name,
       reason: cancelReason ? cancelReasonLabel(cancelReason) : null,
       skippedUnits: skipStock ? totalSkippedUnits : 0,
@@ -3401,12 +3408,7 @@ app.post('/:id/items', async (c) => {
   // A sale can carry real return records while its status row says something
   // else (imported/legacy rows), so the guard is given the evidence, not
   // just the label -- see guardSaleLineAddition's own comment.
-  const returnedRow = await db.prepare(`
-    SELECT 1 AS found FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
-    LIMIT 1
-  `).get<{ found: number }>([saleId])
+  const returnedRow = await db.prepare(SALE_RETURN_EVIDENCE_SQL).get<{ found: number }>({ saleId })
   const guard = guardSaleLineAddition(saleStatus, !!returnedRow)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
 
@@ -4301,12 +4303,7 @@ app.post('/:id/amendments', async (c) => {
   // else (imported/legacy rows), so the guard is given the EVIDENCE, not the
   // label -- the identical read S4-24b's addition guard uses, applied to every
   // amendment kind rather than only to additions.
-  const returnedRow = await db.prepare(`
-    SELECT 1 AS found FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
-    LIMIT 1
-  `).get<{ found: number }>([saleId])
+  const returnedRow = await db.prepare(SALE_RETURN_EVIDENCE_SQL).get<{ found: number }>({ saleId })
 
   const windowRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>([AMENDMENT_WINDOW_SETTING_KEY])
   const guard = guardSaleAmendment({

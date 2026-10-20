@@ -42,15 +42,16 @@ check('Not Paid $10, nothing paid, $4 back: all $4 lowers the debt, still Not Pa
 check('owner example: $10, $3 paid, $4 back -> $4 lowers the $7 debt, $3 still owed, no cash', () => {
   assert.deepEqual(plan(sale({ amount_paid_usd: 3 }), [fresh(4)]), { owed: { 0: 4 }, payment: 'awaiting_payment' })
 })
-check('over the debt: $10, $7 paid, $4 back -> $3 lowers the debt, $1 cash, the sale reads paid', () => {
-  assert.deepEqual(plan(sale({ amount_paid_usd: 7 }), [fresh(4)]), { owed: { 0: 3 }, payment: 'completed' })
+// Owner, 20 Oct 2026: nothing turns Not Paid into paid except tender; a cash refund of the excess does not.
+check('over the debt: $10, $7 paid, $4 back -> $3 lowers the debt, $1 cash, the sale stays Not Paid ($0 owed)', () => {
+  assert.deepEqual(plan(sale({ amount_paid_usd: 7 }), [fresh(4)]), { owed: { 0: 3 }, payment: 'awaiting_payment' })
   assert.equal(split.refundCashUsd(4, 3), 1)
 })
 check('exactly the debt: $10, $6 paid, $4 back -> all of it lowers the debt, no money moves, so the sale stays Not Paid ($0 owed) until marked paid', () => {
   assert.deepEqual(plan(sale({ amount_paid_usd: 6 }), [fresh(4)]), { owed: { 0: 4 }, payment: 'awaiting_payment' })
-  // a later return on that $0 debt is all cash and settles it
+  // a later return on that $0 debt is all cash and leaves it Not Paid
   const cleared = sale({ sale_status: 'partial_return', status_before_return: 'awaiting_payment', amount_paid_usd: 6 })
-  assert.deepEqual(plan(cleared, [{ id: 1, active: true, refundUsd: 4, owedReductionUsd: 4, currency: 'USD' }, fresh(2)]), { owed: { 0: 0 }, payment: 'completed' })
+  assert.deepEqual(plan(cleared, [{ id: 1, active: true, refundUsd: 4, owedReductionUsd: 4, currency: 'USD' }, fresh(2)]), { owed: { 0: 0 }, payment: 'awaiting_payment' })
 })
 check('a sale paid at the counter never carries a debt: the refund is all cash, the status untouched', () => {
   assert.deepEqual(plan(sale({ sale_status: 'completed', amount_paid_usd: 10 }), [fresh(4)]), { owed: { 0: 0 }, payment: 'completed' })
@@ -62,7 +63,7 @@ check('an imported Completed sale with no tender recorded is paid, not owing: it
 check('a pre-0260 return on a Not Paid sale reads as lowering its whole value (6.0.872), so the next return sees $6 owed', () => {
   const legacy = { id: 7, active: true, refundUsd: 4, owedReductionUsd: 0, currency: null }
   assert.deepEqual(plan(sale({ sale_status: 'partial_return', status_before_return: 'awaiting_payment' }), [legacy, fresh(4)]), { owed: { 0: 4 }, payment: 'awaiting_payment' })
-  assert.deepEqual(plan(sale({ sale_status: 'partial_return', status_before_return: 'awaiting_payment' }), [legacy, fresh(8)]), { owed: { 0: 6 }, payment: 'completed' })
+  assert.deepEqual(plan(sale({ sale_status: 'partial_return', status_before_return: 'awaiting_payment' }), [legacy, fresh(8)]), { owed: { 0: 6 }, payment: 'awaiting_payment' })
 })
 check('cancelling an earlier return brings its debt back beside a later cash refund ($10, $7 paid, A $2 lowered, B $2 = $1 lowered + $1 cash)', () => {
   const rows = [{ id: 1, active: false, refundUsd: 2, owedReductionUsd: 2, currency: 'USD' }, { id: 2, active: true, refundUsd: 2, owedReductionUsd: 1, currency: 'USD' }]
@@ -75,7 +76,7 @@ check('a return restored after the sale was settled is all cash', () => {
 })
 check('riel tender counts at the sale rate and the debt lowered is whole cents ($10, 12,345 riel at 4,000 paid, $8 back)', () => {
   const result = plan(sale({ amount_paid_khr: 12345 }), [fresh(8)])
-  assert.deepEqual(result, { owed: { 0: 6.91 }, payment: 'completed' })
+  assert.deepEqual(result, { owed: { 0: 6.91 }, payment: 'awaiting_payment' })
 })
 check('unreadable sale money refuses rather than guessing the debt', () => {
   assert.throws(() => split.planReturnMoney({ sale: sale({ exchange_rate: null }), returns: [fresh(4)], recompute: [0] }), error => error.code === 'customer_return_owed_unreadable')

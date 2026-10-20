@@ -50,11 +50,12 @@ export async function checkContactSaleSource(
   customerId: number | null,
 ): Promise<ContactSaleCheckError | null> {
   if (source.kind !== 'sale') return null
-  const sale = await db.prepare('SELECT id, customer_id, sale_status FROM sales WHERE id = @saleId')
-    .get<{ id: number; customer_id: number | null; sale_status: string | null }>({ saleId: source.saleId })
+  const sale = await db.prepare('SELECT id, customer_id, sale_status, return_state FROM sales WHERE id = @saleId')
+    .get<{ id: number; customer_id: number | null; sale_status: string | null; return_state: string | null }>({ saleId: source.saleId })
   if (!sale) return { status: 404, body: { error: 'sale not found', code: 'sale_not_found' } }
   const status = String(sale.sale_status || 'completed')
-  if (status === 'cancelled' || status === 'returned') {
+  // Fully returned is the return tag (owner, 20 Oct 2026), or the retired label on an older row.
+  if (status === 'cancelled' || status === 'returned' || sale.return_state === 'full') {
     return { status: 409, body: { error: 'This sale is cancelled or fully returned, so its customer cannot be edited from it.', code: 'sale_not_editable' } }
   }
   if (customerId !== null && Number(sale.customer_id) !== customerId) {

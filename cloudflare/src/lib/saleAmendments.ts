@@ -206,7 +206,7 @@ export function parseSqliteTimestampMs(raw: unknown): number {
 
 export type AmendmentGuardInput = {
   saleStatus: string
-  /** Proved with a real return_items JOIN returns read, never the status label. */
+  /** Return EVIDENCE, never the status word: return lines, imported returned units or a return tag (salesStatus.ts SALE_RETURN_EVIDENCE_SQL). */
   hasRecordedReturns: boolean
   /** sales.created_at. */
   saleCreatedAt: unknown
