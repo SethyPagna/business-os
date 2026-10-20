@@ -7,7 +7,7 @@ type TranslateFn = (key: string) => string | undefined
 /** One stable control row; presets remain reachable while Stats is folded. */
 export default function StatsRangeRow({
   range, onRangeChange, t, leading, actions, showTime = false, continuous = false,
-  showPresets = true, compactRange = false, layout = 'wrap', className = '',
+  showPresets = true, compactRange = false, layout = 'wrap', disabled = false, className = '',
 }: {
   range: DateTimeRange
   onRangeChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
@@ -19,6 +19,8 @@ export default function StatsRangeRow({
   showPresets?: boolean
   compactRange?: boolean
   layout?: 'wrap' | 'scroll'
+  /** Dates and presets stay visible but inert; `leading` and `actions` keep working. */
+  disabled?: boolean
   className?: string
 }) {
   const active = activeStatsPreset(range)
@@ -28,8 +30,8 @@ export default function StatsRangeRow({
       {STATS_PRESETS.map(({ id, key, fallback }) => {
         const label = t(key)
         return (
-          <button key={id} type="button" aria-pressed={active === id}
-            className={`h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${active === id ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
+          <button key={id} type="button" aria-pressed={active === id} disabled={disabled}
+            className={`h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs font-medium disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${active === id ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
             onClick={() => {
               const next = statsPresetRange(id)
               onRangeChange(showTime ? next : { ...next, startTime: '', endTime: '' }, id)
@@ -46,7 +48,7 @@ export default function StatsRangeRow({
       <div className={scrolling ? 'stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1' : 'flex min-w-0 flex-wrap items-center gap-1'} data-stats-range-controls>
         {leading}
         <DateTimeRangePicker
-          value={range} onChange={onRangeChange} t={t} showTime={showTime} continuous={continuous}
+          value={range} onChange={onRangeChange} t={t} showTime={showTime} continuous={continuous} disabled={disabled}
           showCalendarIcon={false}
           compactTriggerLabels={compactRange}
           showQuickRanges={!showPresets}

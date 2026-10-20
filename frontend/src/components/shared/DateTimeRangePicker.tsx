@@ -83,6 +83,8 @@ interface DateTimeRangePickerProps {
   continuous?: boolean
   align?: 'left' | 'right'
   className?: string
+  /** Keep the trigger visible but inert (a host that cannot honour the range right now). */
+  disabled?: boolean
   // Layout/shape utilities for the trigger button. Omitted => the default
   // compact "Start → End" pill (rounded-md). Surfaces that want the trigger
   // to read as a prominent rectangular field (e.g. the dashboard range box)
@@ -135,6 +137,7 @@ export default function DateTimeRangePicker({
   continuous = false,
   align = 'left',
   className = '',
+  disabled = false,
   triggerClassName,
 }: DateTimeRangePickerProps) {
   const [open, setOpen] = useState(false)
@@ -432,12 +435,13 @@ export default function DateTimeRangePicker({
           NOT set their own min-h on the trigger (it would fight this one). */}
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((current) => {
           // A fresh open always starts a fresh day-click sequence.
           if (!current) setPickPhase('start')
           return !current
         })}
-        className={`min-h-10 min-w-0 max-w-full overflow-hidden ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
+        className={`min-h-10 min-w-0 max-w-full overflow-hidden disabled:opacity-50 ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}

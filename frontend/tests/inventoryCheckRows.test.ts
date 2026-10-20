@@ -53,7 +53,7 @@ try {
         assert.equal(action.getAttribute('aria-pressed'), String(savedState === 'done'))
         assert.equal(glyph.getAttribute('aria-hidden'), 'true')
       }
-      if (savedState !== 'unstarted') assert.ok(visual.text().includes(`${pack.inventory_check_counted}: 0`), 'a saved zero remains visible')
+      if (savedState !== 'unstarted') assert.ok(visual.text().includes(`${pack.inventory_check_counted} 0`), 'a saved zero remains visible')
       if (savedState === 'issue') assert.ok(visual.text().includes('Saved issue reason'))
       await visual.unmount()
     }
@@ -68,7 +68,7 @@ try {
   const done = { product_id: 11, state: 'done', counted_quantity: 0, reason: null, revision: 3 } satisfies InventoryCheckObservation
   await surface.render({ ...base, observations: { 11: done }, canViewPrice: true, canViewCost: true })
   assert.equal(state(surface, 11), 'Done')
-  assert.ok(row(surface, 11).textContent.includes('Counted: 0'), 'checked zero is visible and distinct from unstarted')
+  assert.ok(row(surface, 11).textContent.includes('Counted 0'), 'checked zero is visible and distinct from unstarted')
   assert.ok(surface.text().includes('192.75') && surface.text().includes('87.25'), 'explicit grants expose their own values')
   await surface.click(surface.button('Clear check', row(surface, 11)))
   assert.deepEqual(calls.at(-1), { productId: 11, patch: { state: 'unstarted', counted_quantity: null, reason: null }, revision: 3 })
@@ -174,9 +174,9 @@ try {
   const money = await mount({ products: [{ ...products[1], selling_price_usd: 0, cost_price_usd: null }], canViewPrice: true, canViewCost: true,
     fmtUSD: (value: number) => { formatCalls.push(value); return `APP[${value}]` } })
   assert.deepEqual(formatCalls, [0], 'only genuine known money reaches the app formatter; unknown cost never becomes zero')
-  assert.ok(money.text().includes('Price: APP[0]') && money.text().includes('Cost: —'))
+  assert.ok(money.text().includes('APP[0]') && money.text().includes('Cost —'), 'a known zero price shows, an unknown cost is a dash and never $0')
   await money.render({ ...base, products: [products[1]], fmtUSD: () => { throw new Error('denied money must not be formatted') } })
-  assert.ok(!money.text().includes('Price:') && !money.text().includes('Cost:'))
+  assert.ok(!money.text().includes('Price') && !money.text().includes('Cost') && !money.text().includes('APP['), 'denied money shows no price or cost at all')
   await money.unmount()
   const review = await mount({ products: [{ ...products[1], cost_needs_review: true }], canViewCost: true })
   assert.ok(review.text().includes('87.25') && review.text().includes('Cost needs review'), 'a saved known fallback cost still displays its review tag')
@@ -187,23 +187,26 @@ try {
   await review.unmount()
   const blind = await mount({ products: [{ id: 91, name: 'Synthetic blind check', quantity: 4444, damaged_quantity: 3333 }],
     canViewStock: false, observations: { 91: { product_id: 91, state: 'done', counted_quantity: 0, reason: null, revision: 1, baseline_quantity: 2222 } } })
-  assert.ok(!blind.text().includes('Stock:') && !blind.text().includes('Damaged:') && !blind.text().includes('4444') && !blind.text().includes('3333') && !blind.text().includes('2222'), 'blind checks hide stock, damage and baseline without deriving mismatch signals')
-  assert.ok(blind.text().includes('Counted: 0'), 'the checker can still read their own observation metadata')
+  assert.ok(!blind.text().includes('Now') && !blind.text().includes('Start') && !blind.text().includes('Damaged') && !blind.text().includes('4444') && !blind.text().includes('3333') && !blind.text().includes('2222'), 'blind checks hide stock, damage and baseline without deriving mismatch signals')
+  assert.ok(blind.text().includes('Counted 0'), 'the checker can still read their own observation metadata')
   await blind.click(blind.button('Clear check', row(blind, 91)))
   assert.equal(calls.at(-1)?.productId, 91, 'blind stock permission does not disable metadata checks')
   await blind.render({ ...base, products: [{ id: 91, name: 'Synthetic omitted stock' }] })
-  assert.ok(blind.text().includes('Stock: —') && !blind.text().includes('Stock: 0') && !blind.text().includes('Sold:') && !blind.text().includes('Customers:'), 'absent stock/metrics never become fabricated zeros')
+  assert.ok(blind.text().includes('Now —') && !blind.text().includes('Now 0') && !blind.text().includes('Sold') && !blind.text().includes('Cust'), 'absent stock/metrics never become fabricated zeros')
+  assert.ok(blind.button('Stock is not known'), 'an unknown stock dash explains itself in an InfoHint')
   await blind.unmount()
   const headerOnly = await mount({ products: [{ id: 92, name: 'Filtered family header', is_group: true, checkable: false }] })
   assert.equal(headerOnly.findAll(node => node.getAttribute('data-check-action') === 'done').length, 0, 'server-ineligible family headers cannot be checked when every child is filtered out')
   await headerOnly.unmount()
   const drift = await mount({ products: [{ id: 93, name: 'Changed stock', quantity: 2 }], observations: { 93: { product_id: 93, state: 'done', counted_quantity: null, reason: null, revision: 1, baseline_quantity: 0, stock_changed: true } } })
-  assert.ok(drift.text().includes('Starting stock: 0') && drift.text().includes('Stock: 2') && drift.text().includes('Stock changed'), 'fixed zero baseline and current quantity are distinct and drift is visible')
+  assert.ok(drift.text().includes('Start 0') && drift.text().includes('Now 2'), 'fixed zero baseline and current quantity are distinct')
+  assert.equal(drift.find(node => node.getAttribute('role') === 'img', 'drift marker').getAttribute('aria-label'), 'Stock changed +2', 'drift shows its size and says what it is')
+  assert.ok(drift.text().indexOf('Now 2') < drift.text().indexOf('Start 0'), 'Now comes before Start')
   await drift.render({ ...base, products: [{ id: 93, name: 'Changed stock', quantity: 2 }], canViewStock: false, observations: { 93: { product_id: 93, state: 'done', counted_quantity: null, reason: null, revision: 1, baseline_quantity: 0, stock_changed: true } } })
-  assert.ok(!drift.text().includes('Starting stock') && !drift.text().includes('Stock changed'), 'hidden stock must not leak a derived drift flag')
+  assert.ok(!drift.text().includes('Start') && drift.findAll(node => node.getAttribute('role') === 'img').length === 0, 'hidden stock must not leak a derived drift flag')
   await drift.unmount()
   const otherBlind = await mount({ canCheck: false, canViewStock: false, canViewCounts: false, products: [{ id: 94, name: 'Another staff session' }], observations: { 94: { product_id: 94, state: 'done', counted_quantity: 9876, reason: null, revision: 1 } } })
-  assert.ok(!otherBlind.text().includes('9876') && !otherBlind.text().includes('Counted:'), 'a blind viewer cannot infer stock from another staff member’s count')
+  assert.ok(!otherBlind.text().includes('9876') && !otherBlind.text().includes('Counted'), 'a blind viewer cannot infer stock from another staff member’s count')
   await otherBlind.unmount()
   const editing: Array<[number | string, boolean]> = []
   const guarded = await mount({ products: [{ id: 95, name: 'Unsaved physical count' }], onEditingChange: (id: number | string, value: boolean) => { editing.push([id, value]) } })
@@ -217,6 +220,30 @@ try {
   await guarded.click(guarded.button('Report issue', row(guarded, 95)))
   await guarded.unmount()
   assert.ok(!dirtyWork.getRegisteredWork().some(entry => entry.label === 'Unsaved physical count'), 'scope teardown removes the old row’s registry entry')
+  // Board A-M5/A-M6/A-R3: one compact metric line, a drift that shows its size, copyable identity, icon-only buttons, one Retry.
+  const full = await mount({ products: [{ id: 301, name: 'Full line product', barcode: '885000111', brand: 'Brand B', category: 'Cat C', quantity: 10, damaged_quantity: 1, qty_sold: 4, customer_count: 3, selling_price_usd: 2.5, cost_price_usd: 1.2 }],
+    canViewPrice: true, canViewCost: true, fmtUSD: (value: number) => `$${value}`,
+    observations: { 301: { product_id: 301, state: 'done', counted_quantity: 9, reason: null, revision: 2, baseline_quantity: 12, stock_changed: true } } })
+  const meta = full.find(node => node.getAttribute('data-inventory-check-meta') !== null, 'metric line').textContent
+  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').replace(/Done$/, '').trim(), 'Now 10 · Start 12 (−2) · Damaged 1 · Sold 4 · Cust 3 · Price $2.5 · Cost $1.2 · Counted 9','Now, Start with drift size, Damaged, Sold, Cust, price, cost and count read in one line')
+  assert.equal(full.find(node => node.getAttribute('role') === 'img', 'drift marker').getAttribute('aria-label'), 'Stock changed −2')
+  const copyValues = full.findAll(node => node.getAttribute('data-copy-value') !== null).map(node => node.getAttribute('data-copy-value'))
+  assert.deepEqual(copyValues, ['Full line product', '885000111', 'Brand B'], 'name, barcode and brand open the shared copy float')
+  const identityLine = full.find(node => node.getAttribute('data-copy-value') === '885000111', 'barcode').parentNode!
+  assert.equal(identityLine.textContent.replace(/\s+/g, ''), '885000111·BrandB·CatC', 'barcode, brand and category share line two')
+  for (const button of full.findAll(node => node.tagName === 'BUTTON' && row(full, 301).contains(node))) {
+    assert.equal(button.textContent.trim(), '', 'a row button is an icon: no visible text')
+    assert.ok((button.getAttribute('aria-label') || '').length > 0 && button.getAttribute('title'), 'and it carries a translated aria-label and tooltip')
+  }
+  await full.unmount()
+  const retry = await mount({ products: [products[2]], errors: { 12: 'Not confirmed' }, frozen: { 12: { patch: { state: 'issue', counted_quantity: 1, reason: 'Frozen reason' }, revision: 5 } } })
+  assert.equal(retry.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Retry').length, 1, 'one Retry per failed row')
+  await retry.click(retry.button('Retry', row(retry, 12)))
+  assert.deepEqual(calls.at(-1), { productId: 12, patch: { state: 'issue', counted_quantity: 1, reason: 'Frozen reason' }, revision: 5 }, 'the row Retry resends the page-frozen request even when the row itself lost its draft')
+  await retry.unmount()
+  const badge = await mount({ products: [products[2]], adornments: { 12: 'RENAMED-BADGE' } })
+  assert.ok(row(badge, 12).textContent.includes('RENAMED-BADGE'), 'page-supplied badges sit on the row')
+  await badge.unmount()
   assert.equal(JSON.stringify(products), originalProducts, 'row interaction never mutates stock/product input records')
 } finally { await harness.close() }
 console.log('PASS mounted Inventory check rows: real variants, blank/zero, explicit issue save/cancel/retry, invalid count/reason, pending/permissions and long Khmer names')

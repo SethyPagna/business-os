@@ -82,6 +82,8 @@ export default function StatsStrip({
   showPresets = true,
   iconOnly = false,
   compactRange = false,
+  layout = 'wrap',
+  rangeDisabled = false,
   summary,
   className = '',
 }: {
@@ -105,6 +107,10 @@ export default function StatsStrip({
   iconOnly?: boolean
   /** Use full, smaller range labels without decorative calendar chrome. */
   compactRange?: boolean
+  /** 'scroll' keeps chip, dates, presets and actions on one horizontally scrolling row. */
+  layout?: 'wrap' | 'scroll'
+  /** Dates and presets inert; the Stats chip and the actions stay live. */
+  rangeDisabled?: boolean
   /** A one-line headline (e.g. "42 sales · $1,204") shown next to the Stats
    * chip and visible whether the cards are folded or open — "stats can show
    * outside button stats" (user, Aug 31): the key figure stays on screen
@@ -152,7 +158,8 @@ export default function StatsStrip({
       {range && onRangeChange ? (
         <StatsRangeRow range={range} onRangeChange={onRangeChange} t={t}
           leading={statsTrigger} actions={toolbarActions}
-          showTime={showTime} continuous={continuous} showPresets={showPresets} compactRange={compactRange} />
+          showTime={showTime} continuous={continuous} showPresets={showPresets} compactRange={compactRange}
+          layout={layout} disabled={rangeDisabled} />
       ) : (
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {statsTrigger}
