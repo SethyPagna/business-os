@@ -209,12 +209,14 @@ SELECT 'sale_not_paid_stock_recovery_members.sale_id->sales' AS relation, COUNT(
 SELECT 'sale_not_paid_stock_recovery_receipts.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_stock_recovery_receipts c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_record_events.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM sale_record_events c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_record_events.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_record_events c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_status_normalization_ledger.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_status_normalization_ledger c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_write_revisions.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_write_revisions c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.cancel_fee_id->fees' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN fees p ON p.id = c.cancel_fee_id WHERE c.cancel_fee_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.cashier_id->users' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN users p ON p.id = c.cashier_id WHERE c.cashier_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.customer_id->customers' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN customers p ON p.id = c.customer_id WHERE c.customer_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.delivery_contact_id->delivery_contacts' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN delivery_contacts p ON p.id = c.delivery_contact_id WHERE c.delivery_contact_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sales.return_reviewed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN users p ON p.id = c.return_reviewed_by_id WHERE c.return_reviewed_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sales.source_return_id->returns' AS relation, COUNT(*) AS orphan_count FROM sales c LEFT JOIN returns p ON p.id = c.source_return_id WHERE c.source_return_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_close_figures.shift_session_id->shift_sessions' AS relation, COUNT(*) AS orphan_count FROM shift_close_figures c LEFT JOIN shift_sessions p ON p.id = c.shift_session_id WHERE c.shift_session_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_session_amendments.actor_user_id->users' AS relation, COUNT(*) AS orphan_count FROM shift_session_amendments c LEFT JOIN users p ON p.id = c.actor_user_id WHERE c.actor_user_id IS NOT NULL AND p.id IS NULL;
