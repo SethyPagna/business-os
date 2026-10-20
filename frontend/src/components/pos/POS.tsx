@@ -206,7 +206,7 @@ type AppContextValue = {
 }
 
 type SyncContextValue = {
-  syncChannel?: { channel?: string; ts?: unknown } | null
+  syncChannel?: { channel?: string; ts?: unknown; source?: string | null } | null
 }
 
 async function parseContactOptions(raw: unknown): Promise<ContactOption[]> {
@@ -733,12 +733,21 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
   return methods.join(' + ') || 'Cash'
 }
 
+const POS_CHECKOUT_SYNC_SOURCE = 'pos-checkout'
+
 export default function POS() {
   const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate, can } = useApp() as AppContextValue
   const { blocked: savingBlocked, reason: savingBlockedText } = useSavingGate()
   const canAddCustomer = can('contacts', 'add')
   const canEditCustomer = can('contacts', 'edit')
-  const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
+  const moneyCapabilityEnabled = Boolean(user && authReady)
+  const moneyCapability = useSaleMoneyCapability(moneyCapabilityEnabled, saleSecurityFingerprint(user, authReady))
+  // The first catalog read waits for the capability answer (ready or failed) so
+  // it asks for the right money version once instead of v0 then v1.
+  // Latched: a later retry must not reload. Settling renews loadCatalogData, which re-runs the load effect once.
+  const moneyCapabilitySettledRef = useRef(false)
+  if (!moneyCapabilityEnabled || moneyCapability.ready || moneyCapability.failed) moneyCapabilitySettledRef.current = true
+  const moneyCapabilitySettled = moneyCapabilitySettledRef.current
   // Settings > Stock Alerts. The till colours its grid and answers its stock
   // pills by the owner's number, offline included (the config rides the
   // settings map, which the offline snapshot already carries).
@@ -1284,6 +1293,7 @@ export default function POS() {
   const catalogMetadataLoadedRef = useRef(false)
   const catalogMetadataScopeRef = useRef('')
   const catalogLoadedOnceRef = useRef(false)
+  const handledSyncRef = useRef(syncChannel)
   const categoryOptionsLoadedRef = useRef(false)
   const categoryOptionsRequestRef = useRef(0)
   const filterMetaLoadedRef = useRef(false)
@@ -1560,7 +1570,7 @@ export default function POS() {
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, productSearchParamsKey, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion])
+  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, productSearchParamsKey, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion, moneyCapabilitySettled])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
@@ -1696,6 +1706,7 @@ export default function POS() {
       return
     }
 
+    if (!moneyCapabilitySettledRef.current) return
     void loadCatalogData('POS catalog')
   }, [isActive, loadCatalogData])
 
@@ -1719,10 +1730,12 @@ export default function POS() {
       setCategoryOptionsReady(false)
       return undefined
     }
-    if (!catalogLoadedOnceRef.current || catalogRefreshing || categoryOptionsLoadedRef.current) return undefined
+    // Categories feed the filter panel and the stale-filter prune. Closed panel
+    // and no persisted category filter: nothing reads them, so do not fetch.
+    if (!catalogLoadedOnceRef.current || catalogRefreshing || categoryOptionsLoadedRef.current || categoryFilter === 'all') return undefined
     setCategoryOptionsReady(true)
     return undefined
-  }, [catalogRefreshing, isActive])
+  }, [catalogRefreshing, categoryFilter, isActive])
 
   useEffect(() => {
     if (!isActive || !filterOpen || categoryOptionsLoadedRef.current) return
@@ -1809,7 +1822,13 @@ export default function POS() {
 // Sync-push reload when another device changes data
   useEffect(() => {
     if (!isActive || !syncChannel) return
+    // This effect also re-runs on filter/panel changes with the same stale event;
+    // each pushed event is acted on once.
+    if (handledSyncRef.current === syncChannel) return
+    handledSyncRef.current = syncChannel
     const { channel } = syncChannel
+    // This till's own completed sale already reloaded the catalog in finishRecorded.
+    if (syncChannel.source === POS_CHECKOUT_SYNC_SOURCE && (channel === 'inventory' || channel === 'sales')) return
     if (channel === 'products' || channel === 'branches' || channel === 'categories' || channel === 'settings') {
       filterMetaLoadedRef.current = false
       setFilterMetaReady(false)
@@ -3262,9 +3281,11 @@ export default function POS() {
         setReceiptQueue(queue => [...queue, receipt])
         checkoutRequestIdsRef.current.delete(orderKey)
         if (resolvedActiveId) closeOrder(resolvedActiveId, true)
+        // Announce first so read caches drop before the one authoritative reload;
+        // POS skips its own echo (POS_CHECKOUT_SYNC_SOURCE), other pages hear it.
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory', source: POS_CHECKOUT_SYNC_SOURCE } }))
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales', source: POS_CHECKOUT_SYNC_SOURCE } }))
         void loadCatalogData('POS catalog after checkout')
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       } catch {
         // A confirmed commit with an incomplete snapshot is not a new sale.
         // Keep the exact pending request for receipt recovery; never print the
