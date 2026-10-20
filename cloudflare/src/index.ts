@@ -125,6 +125,12 @@ export type Env = {
   SYNC_UPLOADS: DurableObjectNamespace
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
+  // wrangler.toml [[ratelimits]]: per-network limit on cold storefront searches
+  // (routes/portal.ts). Optional: absent means only the per-isolate cap applies.
+  PORTAL_SEARCH_LIMITER?: RateLimit
+  // wrangler.toml [version_metadata]: the deployed version's id keys the
+  // storefront's edge cache entries. Optional: absent (local, tests) reads 'dev'.
+  CF_VERSION_METADATA?: WorkerVersionMetadata
   // Secret (wrangler secret put BRANCH_CUTOVER_OPERATOR_TOKEN, 32+ characters) that switches on the branch-cutover
   // operator endpoints (routes/branchCutoverOperator.ts). Absent or shorter: the endpoints answer 404.
   BRANCH_CUTOVER_OPERATOR_TOKEN?: string

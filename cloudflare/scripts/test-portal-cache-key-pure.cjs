@@ -9,7 +9,8 @@ const assert = require('node:assert/strict')
 const { load } = require('./test-request-body-guard-pure.cjs')
 
 async function main() {
-  const portal = load('routes/portal.ts')
+  // The search text is keyed on the real normalizeSearchText fold.
+  const portal = load('routes/portal.ts', { '../lib/searchMatch': load('lib/searchMatch.ts') })
   const { canonicalPortalQuery: canon, portalEdgeKey, PORTAL_SEARCH_CACHE_PARAMS, PORTAL_QUERY_MAX_CHARS } = portal
   const key = (route, search) => {
     const result = canon(route, search)
@@ -46,7 +47,29 @@ async function main() {
   ]) assert.notEqual(key('search', left), key('search', right), `${left} != ${right}`)
   // The producer receives exactly the canonical object.
   assert.deepEqual(canon('search', 'q=+Serum++Cream&branch_id=3,1&brand=B,a&page=02').params,
-    { query: 'Serum Cream', branchId: '1,3', brand: 'a,b', page: '2' })
+    { query: 'serum cream', branchId: '1,3', brand: 'a,b', page: '2' })
+
+  // 6.0.896: search text keys on the normalizeSearchText fold every word consumer applies, per comma group.
+  for (const [left, right] of [
+    ['query=SERUM', 'query=serum'], ['query=serum!!!', 'query=serum'], ['query=Cr%C3%A8me', 'query=creme'],
+    ['query=anti-aging', 'query=anti+aging'], ['query=serum,+cream', 'query=serum,cream'], ['query=!!!', ''],
+    ['query=O8Y+lip', 'query=08y+lip'], ['query=ABC123', 'query=abc123'],
+  ]) assert.equal(key('search', left), key('search', right), `${left} == ${right}`)
+  for (const [left, right] of [
+    // A lone code keeps its raw form: the exact-barcode probe reads hyphens and leading zeros.
+    ['query=0123-4567', 'query=0123+4567'], ['query=00123456', 'query=123456'],
+    ['query=serum,cream', 'query=serum+cream'],
+  ]) assert.notEqual(key('search', left), key('search', right), `${left} != ${right}`)
+  // At most 3 comma groups and 12 words reach the query builder (about four bound parameters a word).
+  assert.equal(canon('search', 'query=a1x,b,c,d').params.query, 'a1x,b,c')
+  assert.equal(canon('search', 'query=' + Array.from({ length: 15 }, (_, i) => 'w' + 'abcdefghijklmno'[i]).join('+')).params.query.split(' ').length, 12)
+  // Khmer is measured decoded: 150 characters and five Khmer categories fit (each Khmer character is 9 encoded).
+  const khmer = 'ថែរក្សាស្បែកមុខ'
+  const khmerQuery = khmer.repeat(Math.ceil(150 / khmer.length)).slice(0, 150)
+  const khmerCategories = Array.from({ length: 5 }, (_, index) => `${khmer}${index}`).join(',')
+  const khmerSearch = canon('search', `query=${encodeURIComponent(khmerQuery)}&category=${encodeURIComponent(khmerCategories)}`)
+  assert.equal(khmerSearch.ok, true, khmerSearch.reason)
+  assert.equal(khmerSearch.params.category.split(',').length, 5)
 
   // Unknown, repeated and oversized input is refused before any I/O.
   for (const route of ['config', 'bootstrap', 'meta', 'products', 'promotions']) {
@@ -71,7 +94,7 @@ async function main() {
   assert.equal(canon('search', 'query=' + 'x'.repeat(PORTAL_QUERY_MAX_CHARS)).ok, true)
   refused('search', 'brand=' + Array.from({ length: 21 }, (_, i) => 'b' + i).join(','), /too many/)
   refused('search', 'brand=' + 'b'.repeat(101), /too long/)
-  refused('search', 'query=x&brand=' + 'b,'.repeat(600), /too long/)
+  refused('search', 'query=x&brand=' + 'b,'.repeat(5000), /too long/)
   // Every name the producer reads is accepted.
   for (const name of PORTAL_SEARCH_CACHE_PARAMS) assert.equal(canon('search', `${name}=1`).ok, true, name)
 

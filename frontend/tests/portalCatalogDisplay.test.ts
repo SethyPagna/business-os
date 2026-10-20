@@ -277,6 +277,17 @@ runTest('productMatchesPortalBranches understands redacted branch_availability r
   assert.equal(productMatchesPortalBranches(legacy, ['4']), true)
 })
 
+runTest('stock withheld by the Worker (stock status off) is never read as out of stock', () => {
+  // 6.0.896: with the switch off the Worker publishes no stock field at all and has already
+  // applied every stock rule to the list, so nothing may hide or badge the product here.
+  const withheld = { id: 7, name: 'Glow Serum' }
+  assert.equal(resolvePortalStockStatus(withheld, 'all'), 'in_stock')
+  assert.equal(resolvePortalStockStatus(withheld, 3), 'in_stock')
+  assert.equal(productMatchesPortalBranches(withheld, ['3']), true, 'the Worker already applied the branch filter')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'out_of_stock', 'a legacy row with a quantity still counts')
+  assert.equal(productMatchesPortalBranches({ branch_stock: [] }, ['3']), false, 'a legacy row with a ledger still counts')
+})
+
 runTest('portal editor compacts compatible controls into responsive rows with mobile clearance', () => {
   assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-hidden[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
   assert.match(catalogEditorSource, /data-testid="portal-visibility-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)

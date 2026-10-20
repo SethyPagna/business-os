@@ -20,6 +20,7 @@ const GENERIC_REJECTION_DETAIL: RejectionDetail = ['write_rejected_details', 'Th
 // Keyed by the Worker's refusal code (cloudflare/src/routes/settings.ts).
 const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, RejectionDetail>([
   ['invalid_portal_language', ['write_rejected_portal_language', 'The website language must be English or Khmer.']],
+  ['portal_translation_private_key', ['write_rejected_portal_translation_key', 'A translation entry name cannot be published. Rename it, then save again.']],
 ])
 
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {

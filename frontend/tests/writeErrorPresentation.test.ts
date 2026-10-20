@@ -41,6 +41,12 @@ assert.match(portalLanguageKhmer.detail, /[ក-៿]/)
 const settingsRouteSource = readFileSync(new URL('../../cloudflare/src/routes/settings.ts', import.meta.url), 'utf8')
 assert.match(settingsRouteSource, /code: 'invalid_portal_language'/, 'the Worker still refuses a website language with the code this presenter translates')
 
+// 6.0.896: a translation entry named like a private field is refused at save.
+const privateKey = presentWriteError({ code: 'portal_translation_private_key' }, translate(en))
+assert.equal(privateKey.detail, en.write_rejected_portal_translation_key)
+assert.match(presentWriteError({ code: 'portal_translation_private_key' }, translate(km)).detail, /[ក-៿]/)
+assert.match(settingsRouteSource, /code: 'portal_translation_private_key'/, 'the Worker refuses with the code this presenter translates')
+
 for (const inheritedName of ['constructor', '__proto__', 'toString']) {
   assert.equal(presentWriteError({ code: inheritedName }, translate(en)).detail, en.write_rejected_details, inheritedName)
 }

@@ -74,7 +74,7 @@ function backups(user = { id: 7, username: 'owner', grants: ['backup', 'backup_r
     '../lib/permissions': { hasPermission: (actor, key) => actor.grants.includes(key) },
     '../lib/acquisitionCostAccess': { canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true },
     '../lib/destructiveStepUp': { denyUnlessDefaultAdmin: async () => { backupCalls.push('step-up-admin'); return null }, denyUnlessCurrentPassword: async () => { backupCalls.push('step-up-password'); return null } },
-    '../lib/backup': backup, '../lib/maintenance': maintenance,
+    '../lib/backup': backup, '../lib/maintenance': maintenance, '../lib/cache': { bumpVersions: async () => {} },
   }).default
 }
 let failures = 0

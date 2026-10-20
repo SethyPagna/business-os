@@ -92,6 +92,15 @@ const PORTAL_STOCK_STATUS_RANK: Record<PortalStockStatus, number> = {
   in_stock: 2,
 }
 
+// With the merchant's stock-status switch off the Worker publishes no stock
+// data at all (no status, no quantity) and has already applied every stock
+// rule to the list, so the browser has nothing to judge and must not hide or
+// badge the product as out of stock.
+function portalStockWithheld(product: PortalProduct): boolean {
+  return product?.stock_status == null && product?.branch_availability == null
+    && product?.stock_quantity == null && product?.branch_stock == null
+}
+
 function normalizePortalStockStatus(value: unknown): PortalStockStatus | null {
   return value === 'in_stock' || value === 'low_stock' || value === 'out_of_stock' ? value : null
 }
@@ -114,6 +123,7 @@ export function resolvePortalStockStatus(
   branchId: unknown = 'all',
   config: PortalStockConfig = {},
 ): PortalStockStatus {
+  if (portalStockWithheld(product)) return 'in_stock'
   const wholeStore = !branchId || branchId === 'all'
   if (wholeStore) {
     const served = normalizePortalStockStatus(product?.stock_status)
@@ -183,7 +193,7 @@ export function getPortalMobileGridClass(mobileColumns: unknown): string {
 }
 
 export function productMatchesPortalBranches(product: PortalProduct = {}, branchFilter: unknown): boolean {
-  if (!Array.isArray(branchFilter) || !branchFilter.length) return true
+  if (!Array.isArray(branchFilter) || !branchFilter.length || portalStockWithheld(product)) return true
   // Server-shaped rows carry redacted per-branch statuses; a branch matches
   // when the product isn't out of stock there. Legacy rows (editor preview
   // drafts, pre-deploy caches) keep the old entry-existence check.

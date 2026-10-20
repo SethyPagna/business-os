@@ -17,6 +17,24 @@ import {
   validateCloudflareBackup,
 } from '../lib/backup'
 import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, MaintenanceAdmissionConflictError } from '../lib/maintenance'
+import { bumpVersions } from '../lib/cache'
+
+// Every cache version a reader keys on. Leaving maintenance after a restore
+// (finished or force-cleared) moves them all, so nothing cached from before or
+// during the restore is served afterwards (the storefront stores nothing while
+// maintenance is held; see routes/portal.ts portalMaintenanceHeld).
+const RESTORED_CACHE_NAMESPACES = [
+  'products', 'settings', 'stock', 'promotions', 'sales', 'returns',
+  'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log',
+]
+
+async function invalidateRestoredCaches(env: Env): Promise<void> {
+  try {
+    await bumpVersions(env, RESTORED_CACHE_NAMESPACES)
+  } catch (error) {
+    console.error('[backups] cache versions not advanced after maintenance ended', error)
+  }
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -99,6 +117,7 @@ app.post('/maintenance/clear', async (c) => {
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
+  await invalidateRestoredCaches(c.env)
   await audit(c.env, user.id, user.username || null, 'update', 'backup', 'maintenance-clear', {
     cleared_state: maintenanceStatus(maintenance),
   })
@@ -257,6 +276,7 @@ app.post('/', async (c) => {
         return c.json({ job_id: job.id, item: job, error: message, code: 'restore_audit_not_recorded', data_restored: true }, 503)
       }
       const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
+      if (maintenanceReleased) await invalidateRestoredCaches(c.env)
       if (!maintenanceReleased) {
         await audit(c.env, user.id, user.username || null, 'maintenance_release_failed', 'backup', sourceDir, {
           restored_key: restore.key,

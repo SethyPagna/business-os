@@ -116,8 +116,12 @@ global.caches = { default: {
 } }
 
 const kv = new Map()
-const bump = (namespace) => kv.set(`v2:${namespace}`, String(Number(kv.get(`v2:${namespace}`) || 0) + 1))
-const env = { DB: realDb, CACHE: { get: async (key) => kv.get(key) ?? null }, BUSINESS_OS_PUBLIC_URL: 'https://shop.test' }
+// Through the real writer: a bump also drops this isolate's remembered versions (6.0.896 memo).
+const bump = (namespace) => cache.bumpVersions(env, [namespace])
+const env = {
+  DB: realDb, BUSINESS_OS_PUBLIC_URL: 'https://shop.test',
+  CACHE: { get: async (key) => kv.get(key) ?? null, put: async (key, value) => { kv.set(key, String(value)) }, delete: async (key) => { kv.delete(key) } },
+}
 
 async function request(url, headers = {}) {
   const pending = []
@@ -168,7 +172,7 @@ async function check(name, fn) {
 
 async function run() {
   seed()
-  ;['products', 'settings', 'stock', 'promotions'].forEach(bump)
+  await cache.bumpVersions(env, ['products', 'settings', 'stock', 'promotions'])
 
   await check('first open builds body + stock; second open is served from the edge with zero D1 statements', async () => {
     const first = await shop('/bootstrap')
@@ -183,7 +187,7 @@ async function run() {
 
   await check('a sale (stock bump) keeps the catalog body and updates the badge at once', async () => {
     sellOut(soldId)
-    bump('stock')
+    await bump('stock')
     const after = await shop('/bootstrap')
     assert.equal(builtCatalogBody(after.sql), false, 'the sale did not rebuild the catalog body')
     assert.ok(readStock(after.sql), 'only the small stock entry was rebuilt')
@@ -205,7 +209,7 @@ async function run() {
 
   await check('a catalog edit (products bump) rebuilds the body', async () => {
     write(() => realDb.prepare(`UPDATE products SET name = 'Last Serum Pro' WHERE id = @id`).run({ id: soldId }))
-    bump('products')
+    await bump('products')
     const edited = await shop('/bootstrap')
     assert.ok(builtCatalogBody(edited.sql))
     assert.ok(edited.json.products.some((p) => p.name === 'Last Serum Pro'))
@@ -218,7 +222,7 @@ async function run() {
       realDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id IN (@a, @b)').run({ a: soldId, b: otherId })
       realDb.prepare('UPDATE branch_stock SET quantity = 7 WHERE product_id IN (@a, @b)').run({ a: soldId, b: otherId })
     })
-    bump('settings')
+    await bump('settings')
     assert.equal((await shop('/catalog/products/search')).json.items.length, 2)
     sellOut(otherId)
     clockMs += (PORTAL_STOCK_TTL_SECONDS - 1) * 1000
