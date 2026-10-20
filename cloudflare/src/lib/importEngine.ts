@@ -65,6 +65,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE
 // existing logic -- see buildSalesGroups() below.
 
 import type { Env } from '../index'
+import { productSupplierChanged } from './productSupplierGate'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, isRetryableD1Error, type D1Compat } from './db'
 import { purgeImportIncomingFiles } from './importIncomingFiles'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
@@ -366,11 +367,71 @@ export function stripProductImportImageFields(results: ImportRowResult[]): void 
   }
 }
 
+// Owner, 19 Oct 2026: the supplier of an existing product changes only with products:supplier. An import is a
+// whole-file write, so a file that would CHANGE a matched product's supplier is refused whole (the approval route
+// before anything is queued, the apply again if the grant went away meanwhile) rather than dropping the supplier
+// column silently. A supplier that equals the stored one (any case or spacing) is not a change.
+export async function productImportSupplierRows(
+  db: D1Compat,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<Array<{ result: ImportRowResult; stored: string | null }>> {
+  const policy = parsePolicyObject(policyJson)
+  const replaceColumns = policy.import_mode === 'replace_columns' ? getProductImportReplaceColumns(policyJson) : []
+  if (policy.import_mode === 'replace_columns' && replaceColumns.length && !replaceColumns.includes('supplier')) return []
+  const rows = results.filter((result) => result.action === 'update' && result.plannedMode !== 'merge_stock'
+    && Number.isInteger(Number(result.existingId)) && Number(result.existingId) > 0)
+  const stored = new Map<number, string | null>()
+  const ids = [...new Set(rows.map((result) => Number(result.existingId)))]
+  for (let offset = 0; offset < ids.length; offset += 90) {
+    const chunk = ids.slice(offset, offset + 90)
+    const found = await db.prepare(`SELECT id, supplier FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; supplier: string | null }>(chunk)
+    for (const row of found) stored.set(Number(row.id), row.supplier)
+  }
+  return rows.map((result) => ({ result, stored: stored.get(Number(result.existingId)) ?? null }))
+}
+
+export async function productImportResultsChangeSupplier(
+  db: D1Compat,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<boolean> {
+  const rows = await productImportSupplierRows(db, results, policyJson)
+  return rows.some(({ result, stored }) => productSupplierChanged(stored, { supplier: result.data?.supplier ?? null }))
+}
+
+/** Keeps the stored spelling of an unchanged supplier, so a role without products:supplier never rewrites it. */
+export async function lockProductImportSupplier(db: D1Compat, results: ImportRowResult[], policyJson: string | null): Promise<void> {
+  for (const { result, stored } of await productImportSupplierRows(db, results, policyJson)) {
+    if (result.data && typeof result.data === 'object') result.data.supplier = stored
+  }
+}
+
+/** Approval-time form: would this job's analyzed plan change any matched product's supplier? */
+export async function productImportChangesSupplier(env: Env, job: ImportApplyJob): Promise<boolean> {
+  if (job.type !== 'products') return false
+  const db = getDb(env)
+  const decisions = parsePolicyObject(job.policy_json).decisionsByRowNumber
+  const skipped = decisions && typeof decisions === 'object' ? decisions : {}
+  const rows = await db.staging.prepare(`SELECT row_number, action, result_json FROM import_job_rows
+    WHERE job_id = @id AND phase = 'analyze' AND action = 'update'`).all<{ row_number: number; action: string; result_json: string }>({ id: job.id })
+  const results: ImportRowResult[] = []
+  for (const row of rows) {
+    if ((skipped as Record<string, { action?: string }>)[String(row.row_number)]?.action === 'skip') continue
+    const result = parsePolicyObject(row.result_json) as ImportRowResult
+    if (!result?.data) continue
+    result.action = 'update'
+    results.push(result)
+  }
+  return productImportResultsChangeSupplier(db, results, job.policy_json)
+}
+
 export async function assertCurrentImportApplyAuthority(
   env: Env,
   job: ImportApplyJob,
   db = getDb(env),
-): Promise<{ actor: SessionUser; allowProductImageWrites: boolean }> {
+): Promise<{ actor: SessionUser; allowProductImageWrites: boolean; allowProductSupplierWrites: boolean }> {
   const policy = parsePolicyObject(job.policy_json)
   const actorId = Number(policy.apply_authorized_by_id)
   if (!Number.isInteger(actorId) || actorId <= 0) {
@@ -400,7 +461,8 @@ export async function assertCurrentImportApplyAuthority(
   }
 
   const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
-  return { actor, allowProductImageWrites }
+  const allowProductSupplierWrites = job.type !== 'products' || getActionTier(actor, 'products', 'supplier') !== 'none'
+  return { actor, allowProductImageWrites, allowProductSupplierWrites }
 }
 
 function withProductImportCommitAuthority(db: D1Compat, job: ImportApplyJob, actor: SessionUser): D1Compat {
@@ -6693,6 +6755,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // permission to continue the non-image import, not permission to
       // rewrite an alias-equivalent path or touch image bookkeeping.
       stripProductImportImageFields(results)
+    }
+    if (job.type === 'products' && !authority.allowProductSupplierWrites) {
+      if (await productImportResultsChangeSupplier(db, results, job.policy_json)) {
+        throw new ImportApplyAuthorizationError('products:supplier', 'The user who authorized this import does not have permission to change product suppliers.')
+      }
+      await lockProductImportSupplier(db, results, job.policy_json)
     }
     sw.lap('classifyChunkMs')
 

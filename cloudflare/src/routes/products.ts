@@ -9992,6 +9992,10 @@ app.post('/lookups/replace', async (c) => {
   const type = String(body.type || '').trim().toLowerCase()
   const field = ({ brand: 'brand', category: 'category', unit: 'unit', supplier: 'supplier' } as Record<string, string>)[type]
   if (!field) return c.json({ success: false, error: 'Invalid lookup type' }, 400)
+  // Renaming, merging or clearing a supplier rewrites products.supplier on every matching product: a supplier change.
+  if (type === 'supplier' && getActionTier(user, 'products', 'supplier') === 'none') {
+    return c.json({ success: false, ...PRODUCT_SUPPLIER_REFUSAL }, 403)
+  }
 
   const rawFrom = Array.isArray(body.from) ? body.from : [body.from]
   const sourceEntries: string[] = []

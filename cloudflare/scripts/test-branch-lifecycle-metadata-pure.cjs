@@ -170,9 +170,10 @@ test('branch Undo record and operate use the current granular edit grant', () =>
   const registry = undoTree.statements.flatMap(node => ts.isVariableStatement(node) ? [...node.declarationList.declarations] : []).find(node => node.name.getText(undoTree) === 'APPLIERS')
   const entry = registry.initializer.properties.find(node => node.name?.text === 'branch.update')
   const applier = evaluate(`const definition = ${entry.initializer.getText(undoTree)}`, {}, '({name:"branch.update", ...definition})')
-  const tier = evaluate(functionSource(undoTree, 'applierPermissionTier'), permissions, 'applierPermissionTier')
+  const alsoDenied = evaluate(functionSource(undoTree, 'applierAlsoActionDenied'), permissions, 'applierAlsoActionDenied')
+  const tier = evaluate(functionSource(undoTree, 'applierPermissionTier'), { ...permissions, applierAlsoActionDenied: alsoDenied }, 'applierPermissionTier')
   const route = sourceTree('routes/actionHistory.ts')
-  const deps = { ...permissions, resolveUndoApplier: () => applier, applierPermissionTier: tier,
+  const deps = { ...permissions, resolveUndoApplier: () => applier, applierPermissionTier: tier, applierAlsoActionDenied: alsoDenied, PRODUCT_SUPPLIER_REFUSAL: { code: 'product_supplier_edit_required' },
     TRANSFER_OPERATION_KIND: 'transfer', STOCK_SESSION_KIND: 'stock', CUSTOMER_GENDER_RESTORATION_KIND: 'gender',
     hasAcquisitionCostInput: () => false, historyPayloadObject: value => value, isServerManagedPayload: () => false }
   const canRecord = evaluate(`${functionSource(route, 'canUseNamedAppliers')}\n${functionSource(route, 'canRecordHistory')}`, deps, 'canRecordHistory')

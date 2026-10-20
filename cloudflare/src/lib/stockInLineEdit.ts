@@ -73,6 +73,7 @@ import { getDb } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
+import { PRODUCT_SUPPLIER_REFUSAL } from './productSupplierGate'
 import { canEditAcquisitionCosts } from './acquisitionCostAccess'
 import { actorSnapshot } from './actorSnapshot'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
@@ -509,6 +510,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     }
   }
   const supplierChanged = request.supplierProvided && supplierKey(supplier.id, supplier.name) !== supplierKey(A.supplierId, A.supplierName)
+  // Owner, 19 Oct 2026: another supplier on a received line is a supplier change (products:supplier), like the backfill.
+  if (supplierChanged && getActionTier(user, 'products', 'supplier') === 'none') refuse(403, PRODUCT_SUPPLIER_REFUSAL.error, PRODUCT_SUPPLIER_REFUSAL.code)
   const costChanged = request.unitCostProvided && !sameMoney(request.unitCostUsd, A.unitCostUsd)
   const sourceDate = A.receivedAt ? String(A.receivedAt).slice(0, 10) : null
   const dateChanged = request.receivedDate != null && request.receivedDate !== sourceDate
@@ -653,7 +656,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     targetCreated, targetBatchKey: targetKey, productCostBefore: { cost: num(facts.cost_price_usd), purchase: num(facts.purchase_price_usd) },
     lineBefore, lineAfter, requiresCostEdit: request.unitCostProvided, reason: reasonText,
   }
-  const payload = JSON.stringify({ applier: STOCK_IN_LINE_EDIT_KIND, operation_id: operationId, generation: 0, requires_cost_edit: request.unitCostProvided ? 1 : 0 })
+  const payload = JSON.stringify({ applier: STOCK_IN_LINE_EDIT_KIND, operation_id: operationId, generation: 0, requires_cost_edit: request.unitCostProvided ? 1 : 0, requires_supplier_edit: supplierChanged ? 1 : 0 })
   const label = `Edit stock-in line: ${String(facts.product_name)} (${q0} → ${q1})`
   const response = {
     success: true, operation_id: operationId, generation: 0, movementId, productId, branchId,
@@ -880,6 +883,7 @@ export async function replayStockInLineEdit(
 ): Promise<void> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') throw new StockInLineEditReplayError('Editing a stock-in line requires Full Access to adjust inventory.', 403)
   if (Number(payload.requires_cost_edit) === 1 && !canEditAcquisitionCosts(user)) throw new StockInLineEditReplayError('Cost-entry permission is required to reverse a cost change.', 403)
+  if (Number(payload.requires_supplier_edit) === 1 && getActionTier(user, 'products', 'supplier') === 'none') throw new StockInLineEditReplayError(PRODUCT_SUPPLIER_REFUSAL.error, 403, PRODUCT_SUPPLIER_REFUSAL.code)
   const db = getDb(env)
   const row = await db.prepare('SELECT * FROM stock_lot_adjustment_operations WHERE id=@operation AND history_id=@history')
     .get<OperationRow>({ operation: String(payload.operation_id || ''), history: historyId })

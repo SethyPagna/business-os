@@ -5,6 +5,7 @@ import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostIn
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
+import { PRODUCT_SUPPLIER_REFUSAL, lotSupplierChanged } from '../lib/productSupplierGate'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -467,8 +468,15 @@ app.patch('/:id', async (c) => {
   if (!canEditAcquisitionCosts(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
     return c.json({ error: 'Cost-entry permission is required to change stored receipt costs.', code: 'product_cost_edit_required' }, 403)
   }
-  const existing = await db.prepare('SELECT id, variant_product_id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id, updated_at, supplier_id, supplier_name FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null; supplier_id: number | null; supplier_name: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
+  // Owner, 19 Oct 2026: re-attributing a received lot to another supplier is a supplier change (as the backfill route is).
+  // The editor posts the stored supplier back on every save; only a different one is refused.
+  if (getActionTier(user, 'products', 'supplier') === 'none') {
+    if (lotSupplierChanged(existing, body as Record<string, unknown>)) return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
+    delete (body as Record<string, unknown>).supplier_name
+    delete (body as Record<string, unknown>).supplier_id
+  }
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
   // No-op when the editor sends no token; a stale token means someone else
