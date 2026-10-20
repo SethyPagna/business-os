@@ -47,6 +47,13 @@ const SELECT_REM = 2
 const IMAGE_REM = 4
 const NAME_MIN_REM = 14
 
+/** Whether a column renders muted with a lock: its action (price or supplier) is switched off for this user. */
+export function isProductColumnLocked(column: ProductColumn, access: { canEditPrices: boolean; canEditSupplier: boolean }): boolean {
+  if (column.lock === 'price') return !access.canEditPrices
+  if (column.lock === 'supplier') return !access.canEditSupplier
+  return false
+}
+
 /** What this user may be offered. Cost and Margin do not exist for a user without cost access. */
 export function productColumnsFor(options: { canViewCosts: boolean }): ProductColumn[] {
   return PRODUCT_COLUMNS.filter((column) => options.canViewCosts || !column.requiresCost)

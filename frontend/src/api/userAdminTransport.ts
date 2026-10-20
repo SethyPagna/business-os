@@ -25,6 +25,11 @@ export function getRoles(): Promise<unknown> {
   )
 }
 
+// What a freshly seeded Admin, Manager and Employee start with (admin only). Never offline: a stale copy could reset a role to the wrong keys.
+export function getRoleDefaults(): Promise<unknown> {
+  return route('roles:defaults', () => apiFetch('GET', '/api/roles/defaults'), null)
+}
+
 export function getUserProfile(id: string | number): Promise<unknown> {
   return route(
     `users:profile:${id}`,
