@@ -62,6 +62,28 @@ runCase('Facebook and Instagram are inline SVG marks that take their colour and 
   assert.notEqual(render(brand.FacebookIcon), render(brand.InstagramIcon))
 })
 
+runCase('Telegram, WhatsApp and TikTok are inline SVG marks with the same contract, each distinct from every other mark', () => {
+  const marks = [
+    [brand.TelegramIcon, 'M11.944 0A12 12 0 0 0 0 12', 'telegram'],
+    [brand.WhatsAppIcon, 'M17.472 14.382c-.297-.149', 'whatsapp'],
+    [brand.TikTokIcon, 'M12.525.02c1.31-.02', 'tiktok'],
+  ] as const
+  for (const [component, start, mark] of marks) {
+    const markup = render(component, { className: 'h-4 w-4 shrink-0' })
+    assert.match(markup, /^<svg /)
+    assert.match(markup, /viewBox="0 0 24 24"/)
+    assert.match(markup, /fill="currentColor"/)
+    assert.match(markup, /class="h-4 w-4 shrink-0"/)
+    assert.match(markup, /aria-hidden="true"/)
+    assert.ok(markup.includes(`data-brand-mark="${mark}"`))
+    assert.ok(markup.includes(`d="${start}`), `${mark}: not the brand's own mark`)
+    assert.equal((markup.match(/<path /g) || []).length, 1)
+    assert.match(render(component, { size: 40, color: '#111' }), /width="40" height="40"[^>]*fill="#111"/)
+  }
+  const all = [brand.FacebookIcon, brand.InstagramIcon, ...marks.map(([component]) => component)].map((component) => render(component))
+  assert.equal(new Set(all).size, all.length, 'every brand mark renders differently')
+})
+
 runCase('the storefront footer shows the Facebook and Instagram marks beside their labels, and nothing else changed in the link', () => {
   const copy = (_key: string, fallbackEn?: string) => fallbackEn ?? _key
   const markup = render(legal.default, {
