@@ -64,7 +64,7 @@ function test(name: string, fn: () => void): void {
   try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-const ENGLISH_ONLY = ['None', 'Full Access', 'Custom', 'View and search', 'Add contact', 'Edit contact (name only; more in POS/sales)', 'On while Add or Edit is on.']
+const ENGLISH_ONLY = ['None', 'Full', 'Custom', 'View and search', 'Add contact', 'Edit contact (name only; more in POS/sales)', 'On while Add or Edit is on.']
 
 test('CONTROL: without a translator the editor is English in any language', () => {
   const { html } = render(null)

@@ -2455,7 +2455,7 @@ assert.match(
 )
 assert.match(
   userDetailSheet,
-  /from '\.\/permissionDefinitions'/,
+  /from '\.\/(?:permissionDefinitions|rolePermissionLabel\.ts)'/,
   'UserDetailSheet should read shared permission metadata without importing the permission editor',
 )
 assert.match(
