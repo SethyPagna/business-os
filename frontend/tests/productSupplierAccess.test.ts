@@ -20,7 +20,13 @@ import { loadSource } from './productsSurfaceFixture.ts'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
 import { PERMISSION_ACTIONS } from '../src/utils/permissionActions.ts'
 import { getActionTier } from '../../cloudflare/src/lib/permissions.ts'
-import { productSupplierChanged as workerSupplierChanged } from '../../cloudflare/src/lib/productSupplierGate.ts'
+
+// productSupplierGate.ts also imports the Worker's D1 types (db.ts), which the frontend tsc program has no ambient types for;
+// a computed specifier keeps the Worker module out of that program while the test still runs it.
+const workerGateUrl = '../../cloudflare/src/lib/productSupplierGate.ts'
+const { productSupplierChanged: workerSupplierChanged } = await import(workerGateUrl) as {
+  productSupplierChanged: (stored: unknown, body: Record<string, unknown>) => boolean
+}
 
 const { ProductSupplierCell } = await loadSource('components/products/surfaces/ProductRowParts.tsx')
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
