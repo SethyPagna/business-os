@@ -15,6 +15,7 @@ type PortalMethodName =
   | 'signinPortalAccount'
   | 'signoutPortalAccount'
   | 'getPortalAccountMe'
+  | 'renewPortalConsent'
   | 'getPortalCart'
   | 'savePortalCart'
   | 'getPortalWishlist'
@@ -51,6 +52,7 @@ const publicApi: PublicPortalApi = {
   signinPortalAccount: getPortalMethod('signinPortalAccount'),
   signoutPortalAccount: getPortalMethod('signoutPortalAccount'),
   getPortalAccountMe: getPortalMethod('getPortalAccountMe'),
+  renewPortalConsent: getPortalMethod('renewPortalConsent'),
   getPortalCart: getPortalMethod('getPortalCart'),
   savePortalCart: getPortalMethod('savePortalCart'),
   getPortalWishlist: getPortalMethod('getPortalWishlist'),

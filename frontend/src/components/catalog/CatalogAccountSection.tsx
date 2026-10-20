@@ -94,7 +94,7 @@ export default function CatalogAccountSection({
       return
     }
     setConsentError('')
-    await signIn({ identifier, phone: signinPhone, password: signinPassword, consent, consentLocale })
+    await signIn({ identifier, phone: signinPhone, password: signinPassword, ...signupConsentFields(consent, consentLocale) })
   }
 
   const onSignUp = async (event: React.FormEvent) => {

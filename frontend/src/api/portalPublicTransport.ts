@@ -169,6 +169,10 @@ export function signoutPortalAccount(): Promise<unknown> {
   return portalAuthRequest('/api/portal/auth/signout', 'POST', {})
 }
 
+export function renewPortalConsent(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/account/consent/renew', 'POST', payload)
+}
+
 export function getPortalAccountMe(): Promise<unknown> {
   return portalAuthRequest('/api/portal/auth/me', 'GET')
 }

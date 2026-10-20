@@ -60,6 +60,7 @@ const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
 const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'public-catalog-secondary-tabs')
+const ConsentRenewalPrompt = lazyRetry(() => import('./legal/ConsentRenewalPrompt'), 'public-catalog-consent-renewal')
 const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
 
@@ -1686,6 +1687,19 @@ export default function PublicCatalogPage() {
     {contactPopover}
     {bucketDrawer}
     {accountDrawer}
+    {portalAccount.consentRenewal ? (
+      <Suspense fallback={null}>
+        <ConsentRenewalPrompt
+          copy={copy}
+          busy={portalAccount.busy}
+          error={portalAccount.error}
+          consentLocale={String(displayConfig.language || 'en')}
+          onAgree={portalAccount.renewConsent}
+          onSignOut={portalAccount.signOut}
+          onClose={portalAccount.dismissConsentRenewal}
+        />
+      </Suspense>
+    ) : null}
     {wishlistDrawer}
     <PullToRefreshIndicator pullDistance={publicPullDistance} refreshing={publicPullRefreshing} />
     <CatalogPreviewSurface

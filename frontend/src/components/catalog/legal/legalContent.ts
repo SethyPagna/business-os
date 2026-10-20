@@ -25,11 +25,11 @@ export type LegalPageKey = 'privacy' | 'terms' | 'cookies'
 
 // Bump this (and the pack copies of the section text) whenever the wording
 // changes materially. It is also the value stored on a portal account as
-// `consent_version` at sign-up, so a later policy change is auditable. The
-// Worker (lib/portalAccounts.ts) moves with it and keeps accepting the
-// earlier versions it lists, so existing accounts stay valid; the new text
-// applies to new sign-ups.
-export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-09-30'
+// `consent_version`, so a later policy change is auditable. The Worker
+// (lib/portalAccounts.ts) moves with it and accepts only this version: since
+// 20 Oct 2026 (age-16 wording) every earlier account agrees again through the
+// re-consent prompt (ConsentRenewalPrompt).
+export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-10-20'
 export const PORTAL_LEGAL_CONSENT_VERSION = `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`
 
 export function formatLegalLastUpdated(iso: string = PORTAL_LEGAL_LAST_UPDATED_ISO): string {
@@ -246,6 +246,10 @@ const EN: Record<string, string> = {
   portal_legal_consent_required_signin: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to sign in.',
   portal_legal_consent_read_terms: 'Read the Terms & Conditions',
   portal_legal_consent_read_privacy: 'Read the Privacy Policy',
+  portal_legal_renew_title: 'Confirm to keep using your account',
+  portal_legal_renew_body: 'Our terms now set a minimum age of 16. Please confirm to keep using your account.',
+  portal_legal_renew_agree: 'Agree',
+  portal_legal_renew_required: 'Please tick the box to continue.',
   portal_legal_map_consent_b: 'The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.',
   portal_legal_map_consent_load: 'Load the map',
   portal_legal_map_consent_link: 'Open in Google Maps instead',
@@ -372,6 +376,10 @@ const KM: Record<string, string> = {
   portal_legal_consent_required_signin: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។',
   portal_legal_consent_read_terms: 'អានលក្ខខណ្ឌប្រើប្រាស់',
   portal_legal_consent_read_privacy: 'អានគោលការណ៍ឯកជនភាព',
+  portal_legal_renew_title: 'បញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក',
+  portal_legal_renew_body: 'លក្ខខណ្ឌរបស់យើងកំណត់អាយុអប្បបរមា ១៦ ឆ្នាំ។ សូមបញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក។',
+  portal_legal_renew_agree: 'យល់ព្រម',
+  portal_legal_renew_required: 'សូមធីកប្រអប់ដើម្បីបន្ត។',
   portal_legal_map_consent_b: 'ផែនទីផ្ទុកពី Google Maps ដែលកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។',
   portal_legal_map_consent_load: 'ផ្ទុកផែនទី',
   portal_legal_map_consent_link: 'បើកក្នុង Google Maps ជំនួសវិញ',

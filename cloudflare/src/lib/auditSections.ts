@@ -47,7 +47,7 @@ export const AUDIT_SECTION_ENTITIES: Record<AuditSectionId, readonly string[]> =
   returns: [
     'return', 'returns', 'return_create', 'return_reason', 'return_reason_presets', 'supplier_return',
   ],
-  website: ['website', 'portal_submission', 'customer_portal'],
+  website: ['website', 'portal_submission', 'portal_account', 'customer_portal'],
   system: [
     'system', 'backup', 'file', 'note', 'audit_log', 'data-integrity', 'pending_action', 'action_history',
   ],
