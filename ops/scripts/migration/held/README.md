@@ -58,6 +58,17 @@ migration, at that time -- a peer session or another agent asking for it is not 
   `ops/queries/revert-set-repair-dryrun.sql` (state pre / ab / done / stale). Pinned by
   `cloudflare/scripts/test-held-revert-set-repair-pure.cjs`. Not a numbered migration: if applied
   by file, run it once via the ops workflow the lead chooses, after the owner's go.
+- **0264_sale_status_normalization.sql** (parked 20 Oct 2026, lane 6.0.891, plan slice S6) -- owner
+  ruling 20 Oct 2026: every past sale ends Not Paid or Completed; Cancelled unchanged; partial_return,
+  returned and awaiting_delivery become tags (sales.return_state, sales.delivery_pending). Past full
+  returns stay unflagged; nothing turns Not Paid into paid. Needs 0263 (lane 6.0.890) applied with the
+  same column names, the census `ops/scripts/census/not-paid-conversion-census.{sql,mjs}` reviewed, a
+  backup, the post-20:00 window with open_today = 0, and the owner go. Pinned by
+  `cloudflare/scripts/test-held-0264-normalization-native.cjs`.
+- **0265_return_owed_backfill.sql** (parked 20 Oct 2026, lane 6.0.891, DRAFT) -- re-review of held 0238
+  against the 0260 columns: backfills owed reductions on returns of Not Paid sales without writing
+  sales. Needs 0260 and 0264 applied first, a second review, and the owner go. Pinned by
+  `cloudflare/scripts/test-held-0265-draft-native.cjs`.
 
 None of the five transfer-run files is imported by any Worker route or by the frontend; the whole transfer-run /
 dataset-operation lifecycle chain is unwired in production.
@@ -83,4 +94,5 @@ dataset-operation lifecycle chain is unwired in production.
 they are currently absent from `cloudflare/migrations`. The next new migration starts at **0193**.
 0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0200 by the held
 sale-cost repair above; do not reuse either.
+0264 and 0265 are reserved by the held sale-status normalization above (lane 6.0.891); do not reuse them.
 0192 (`stock_mutation_receipts.sql`) is independent of all five and stays in the normal chain.
