@@ -831,9 +831,9 @@ check('held: outside deploy chain, after dependencies including0195; independent
     const triggers = new Map(fresh.prepare("SELECT name,tbl_name FROM sqlite_master WHERE type='trigger'").all().map(row => [row.name, row.tbl_name]))
     while (remaining) {
       const column = /^ALTER TABLE (\w+) ADD COLUMN (\w+) [\s\S]*?;\s*/i.exec(remaining)
-      const index = /^CREATE(?: UNIQUE)? INDEX \w+ ON (\w+)[\s\S]*?;\s*/i.exec(remaining)
+      const index = /^CREATE(?: UNIQUE)? INDEX (?:IF NOT EXISTS )?\w+ ON (\w+)[\s\S]*?;\s*/i.exec(remaining)
       const create = /^CREATE TRIGGER (\w+)\s+(?:BEFORE|AFTER)\s+(?:INSERT|DELETE|UPDATE(?: OF [\w,\s]+)?)\s+ON (\w+)\s+[\s\S]*?\bBEGIN\b[\s\S]*?\bEND\s*;\s*/i.exec(remaining)
-      const drop = /^DROP TRIGGER (\w+);\s*/i.exec(remaining)
+      const drop = /^DROP TRIGGER (?:IF EXISTS )?(\w+);\s*/i.exec(remaining)
       const metadata = /^(?:INSERT INTO system_flags\(key,value,updated_at\)\s+SELECT|SELECT CASE WHEN)[\s\S]*?;\s*/i.exec(remaining)
       if (column) {
         if (column[1] !== 'products' || column[2] !== 'cost_review_key' || namedIn(migrationText)(column[2]) || flagContext.indirectWrites.has(column[1])) return false
@@ -857,7 +857,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     }
     return true
   }
-  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql']
+  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql', '0261_trigger_index_plans.sql']
   for (const file of costReviewDdl) {
     assert.equal(costReviewDdlOnly(chainText(file)), true, `${file} changes only unread metadata and triggers on tables the repair never writes`)
     assert.equal(costReviewDdlOnly(chainText(file) + '\nUPDATE sale_items SET cost_price_usd=123;'), false)

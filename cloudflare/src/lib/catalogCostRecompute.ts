@@ -182,9 +182,15 @@ const RESTORE_MODE_OFF_SQL = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key =
  * never sold. Stands down in backup-restore mode, like the 0124 revision
  * triggers.
  * test-migration-0195-on-hand-cost-pure.cjs pins the migration text to this.
+ *
+ * `+is_active` keeps the planner on the products primary key: with no
+ * statistics a bare `is_active = 1` picks an (is_active, ...) index and walks
+ * every active product per stock write (0261). `primaryKeyPlan: false`
+ * reproduces the text 0195, 0255 and 0256 shipped, for their pins.
  */
-export function catalogCostOnHandTriggerSql({ reviewMarker = false, inputPolicy = 'validated' }: { reviewMarker?: boolean; inputPolicy?: CatalogCostInputPolicy } = {}): string {
-  const lotProducts = (ids: string) => `is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (${ids}))`
+export function catalogCostOnHandTriggerSql({ reviewMarker = false, inputPolicy = 'validated', primaryKeyPlan = true }: { reviewMarker?: boolean; inputPolicy?: CatalogCostInputPolicy; primaryKeyPlan?: boolean } = {}): string {
+  const active = primaryKeyPlan ? '+is_active = 1' : 'is_active = 1'
+  const lotProducts = (ids: string) => `${active} AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (${ids}))`
   const trigger = (name: string, event: string, when: string, idPredicate: string) => `CREATE TRIGGER ${name}
 ${event}
 WHEN ${when}
@@ -202,9 +208,9 @@ END;
     trigger('catalog_cost_on_hand_stock_delete_0195', 'AFTER DELETE ON branch_batch_stock',
       'COALESCE(OLD.quantity, 0) > 0', lotProducts('OLD.batch_id')),
     trigger('catalog_cost_on_hand_lot_insert_0195', 'AFTER INSERT ON product_batches',
-      'NEW.variant_product_id IS NOT NULL', 'is_active = 1 AND id = NEW.variant_product_id'),
+      'NEW.variant_product_id IS NOT NULL', `${active} AND id = NEW.variant_product_id`),
     trigger('catalog_cost_on_hand_lot_delete_0195', 'AFTER DELETE ON product_batches',
-      'OLD.variant_product_id IS NOT NULL', 'is_active = 1 AND id = OLD.variant_product_id'),
+      'OLD.variant_product_id IS NOT NULL', `${active} AND id = OLD.variant_product_id`),
   ].join('\n')
 }
 
@@ -214,14 +220,15 @@ export function catalogCostReviewClearSql(idPredicateSql: string, inputPolicy: C
     AND ${formula.hasRecordedLot} AND cost_price_usd IS (${formula.derive})`
 }
 
-export function catalogCostReviewTriggersSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
-  return catalogCostOnHandTriggerSql({ reviewMarker: true, inputPolicy }) + `
+export function catalogCostReviewTriggersSql({ inputPolicy = 'validated', primaryKeyPlan = true }: { inputPolicy?: CatalogCostInputPolicy; primaryKeyPlan?: boolean } = {}): string {
+  const lotProducts = `${primaryKeyPlan ? '+' : ''}is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)`
+  return catalogCostOnHandTriggerSql({ reviewMarker: true, inputPolicy, primaryKeyPlan }) + `
 CREATE TRIGGER catalog_cost_review_lot_update_0255
 AFTER UPDATE OF unit_cost_usd,is_active,variant_product_id,received_at ON product_batches
 WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
 BEGIN
-  ${catalogCostRecomputeIfChangedSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', { stampUpdatedAt: false, inputPolicy })};
-  ${catalogCostReviewClearSql('is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id)', inputPolicy)};
+  ${catalogCostRecomputeIfChangedSql(lotProducts, { stampUpdatedAt: false, inputPolicy })};
+  ${catalogCostReviewClearSql(lotProducts, inputPolicy)};
 END;
 `
 }
