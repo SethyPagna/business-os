@@ -20,6 +20,7 @@ export type PortalAccountProfile = { membershipId: string; name: string; email: 
 
 type PortalApi = {
   getPortalAccountMe?: () => Promise<unknown>
+  renewPortalConsent?: (payload: Record<string, unknown>) => Promise<unknown>
   signinPortalAccount?: (payload: Record<string, unknown>) => Promise<unknown>
   signupPortalAccount?: (payload: Record<string, unknown>) => Promise<unknown>
   signoutPortalAccount?: () => Promise<unknown>
@@ -45,6 +46,10 @@ function readProfile(result: unknown): PortalAccountProfile | null {
 // The Worker's refusal code (portalPublicTransport sets error.code from the
 // JSON body), so the drawer can say a known refusal in the visitor's language
 // instead of showing the server's English sentence.
+// The Worker answers 428 portal_consent_required to a session whose account has
+// not agreed to the current wording yet (owner, 20 Oct 2026).
+export const CONSENT_RENEWAL_CODE = 'portal_consent_required'
+
 export function readPortalErrorCode(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code
   return typeof code === 'string' ? code : ''
@@ -64,6 +69,8 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
+  // True while a live session waits for the renewal prompt; Close/sign-out/Agree/sign-in all clear it.
+  const [consentRenewal, setConsentRenewal] = useState(false)
 
   // Live refs so the debounced saver always reads the latest lists/account
   // without re-subscribing the effect on every keystroke.
@@ -113,7 +120,11 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
         setAccount(profile)
         if (profile) await hydrate()
       })
-      .catch(() => { if (!cancelled) setAccount(null) })
+      .catch((err) => {
+        if (cancelled) return
+        setAccount(null)
+        setConsentRenewal(readPortalErrorCode(err) === CONSENT_RENEWAL_CODE)
+      })
       .finally(() => { if (!cancelled) setReady(true) })
     return () => { cancelled = true }
     // hydrate is stable enough; run once on mount.
@@ -156,6 +167,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
       const profile = readProfile(result)
       if (!profile) throw new Error('The account response was incomplete. Please try again.')
       setAccount(profile)
+      setConsentRenewal(false)
       await hydrate()
       return true
     } catch (err) {
@@ -167,6 +179,33 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
     }
   }, [hydrate])
 
+  // Agree on the renewal prompt. The profile comes back in the answer itself, so
+  // success never depends on a second /auth/me round trip (no loop if it differs).
+  const renewConsent = useCallback(async (payload: Record<string, unknown>): Promise<boolean> => {
+    const fn = api().renewPortalConsent
+    if (!fn) { setError('Accounts are unavailable right now.'); setErrorCode(''); return false }
+    setBusy(true)
+    setError('')
+    setErrorCode('')
+    try {
+      const profile = readProfile(await fn(payload))
+      if (!profile) throw new Error('The account response was incomplete. Please try again.')
+      setAccount(profile)
+      setConsentRenewal(false)
+      await hydrate()
+      return true
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      setErrorCode(readPortalErrorCode(err))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [hydrate])
+
+  // Keep browsing as a guest: nothing is signed out, the prompt just stops asking until the next visit.
+  const dismissConsentRenewal = useCallback(() => { setConsentRenewal(false); setError(''); setErrorCode('') }, [])
+
   const signIn = useCallback((payload: Record<string, unknown>) => authenticate('signinPortalAccount', payload), [authenticate])
   const signUp = useCallback((payload: Record<string, unknown>) => authenticate('signupPortalAccount', payload), [authenticate])
 
@@ -175,10 +214,11 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
     hydratedRef.current = false
     try { await a.signoutPortalAccount?.() } catch { /* ignore */ }
     setAccount(null)
+    setConsentRenewal(false)
     // The local list stays as the guest's list — it is not cleared on sign-out.
   }, [])
 
   const clearError = useCallback(() => { setError(''); setErrorCode('') }, [])
 
-  return { account, ready, busy, error, errorCode, signIn, signUp, signOut, clearError }
+  return { account, ready, busy, error, errorCode, consentRenewal, renewConsent, dismissConsentRenewal, signIn, signUp, signOut, clearError }
 }

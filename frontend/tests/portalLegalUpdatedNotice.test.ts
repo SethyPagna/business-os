@@ -16,8 +16,8 @@ import { LEGAL_PAGE_ORDER, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/compo
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.join(here, '..', 'src')
 const EXPECTED = {
-  en: 'We updated our privacy policy and terms on 30/09/2026.',
-  km: 'យើងបានធ្វើបច្ចុប្បន្នភាពគោលការណ៍ឯកជនភាព និងលក្ខខណ្ឌប្រើប្រាស់ នៅ 30/09/2026។',
+  en: 'We updated our privacy policy and terms on 20/10/2026.',
+  km: 'យើងបានធ្វើបច្ចុប្បន្នភាពគោលការណ៍ឯកជនភាព និងលក្ខខណ្ឌប្រើប្រាស់ នៅ 20/10/2026។',
 }
 const KEY = 'portal_legal_updated_notice'
 
@@ -53,7 +53,7 @@ for (const language of ['en', 'km'] as const) {
       assert.match(notices[0][0], /leading-6/, `the ${language} ${page} update line has room for Khmer glyphs`)
       assert.match(html, /<p\b[^>]*data-portal-legal-last-updated="true"[^>]*leading-6/, `the ${language} ${page} "Last updated" line has room for Khmer glyphs`)
       const text = visible(html)
-      const lastUpdated = text.indexOf(language === 'en' ? 'Last updated 30/09/2026' : 'ធ្វើបច្ចុប្បន្នភាពចុងក្រោយ 30/09/2026')
+      const lastUpdated = text.indexOf(language === 'en' ? 'Last updated 20/10/2026' : 'ធ្វើបច្ចុប្បន្នភាពចុងក្រោយ 20/10/2026')
       assert.ok(lastUpdated >= 0 && text.indexOf(EXPECTED[language]) > lastUpdated, `the ${language} ${page} update line sits under "Last updated"`)
     } finally {
       delete globals.window

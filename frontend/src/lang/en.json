@@ -7683,5 +7683,9 @@
   "perm_user_exceptions_heading": "Individual exceptions",
   "perm_user_exceptions_one": "1 individual exception",
   "perm_user_exceptions_other": "{n} individual exceptions",
-  "perm_switched_off_heading": "Switched off"
+  "perm_switched_off_heading": "Switched off",
+  "portal_legal_renew_title": "Confirm to keep using your account",
+  "portal_legal_renew_body": "Our terms now set a minimum age of 16. Please confirm to keep using your account.",
+  "portal_legal_renew_agree": "Agree",
+  "portal_legal_renew_required": "Please tick the box to continue."
 }

@@ -24,7 +24,7 @@ import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
+import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount, renewPortalConsent } from '../lib/portalAccounts'
 import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
@@ -1864,7 +1864,7 @@ app.post('/auth/signin', async (c) => {
     if (!phoneWide.allowed) return portalSigninLocked(c, phoneWide.retryAfterSeconds)
   }
 
-  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
+  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale, ageConfirmed: body.ageConfirmed })
   if (!result.ok) {
     await recordPortalFailure(c.env, 'signin', lockKey)
     if (phoneWideKey) await recordRateLimitEvent(c.env, 'portal:signin:phone-wide', phoneWideKey)
@@ -1890,6 +1890,31 @@ app.get('/auth/me', async (c) => {
   }
   if (!state.account) return c.json({ account: null })
   return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
+})
+
+// An account signed in before the current wording agrees again (owner, 20 Oct
+// 2026). Unlike every other /account route this one answers a session that is
+// waiting for renewal -- it is the way through the 428 the others return.
+// Sign-in, sign-out, /auth/me, /config and the public catalog never wait.
+app.post('/account/consent/renew', async (c) => {
+  const key = await portalAbuseKey(c.env, 'portal:consent-renew:ip', getClientNetworkKey(c.req.raw))
+  if (!key) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const rate = await checkRateLimit(c.env, 'portal:consent-renew', key, 12, 15 * 60 * 1000)
+  if (!rate.allowed) {
+    c.header('Retry-After', String(rate.retryAfterSeconds))
+    return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const state = await getPortalAccountState(c)
+  if (state.status === 'unauthenticated') return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const accountId = state.status === 'reconsent_required' ? state.accountId : state.account.id
+  const membershipId = state.status === 'reconsent_required' ? state.membershipId : state.account.membership_id
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const result = await renewPortalConsent(c.env, accountId, { consent: body.consent, ageConfirmed: body.ageConfirmed, consentLocale: body.consentLocale })
+  if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status)
+  if (result.renewed) {
+    await audit(c.env, null, `portal:${membershipId}`, 'consent_renew', 'portal_account', accountId, { consentVersion: PORTAL_CONSENT_VERSION, ageConfirmed: true })
+  }
+  return c.json({ ok: true, renewed: result.renewed, account: await loadAccountProfile(c.env, accountId) })
 })
 
 // Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by

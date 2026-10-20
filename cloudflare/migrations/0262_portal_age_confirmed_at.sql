@@ -1,0 +1,27 @@
+-- 0262: record WHEN a website account confirmed the minimum age (16).
+--
+-- Owner, 20 Oct 2026: the storefront tick reads "I am 16 or older, and I agree
+-- to the Terms & Conditions and the Privacy Policy." Until now the age half was
+-- only implied by consent_version. age_confirmed_at stores it, written in the
+-- same statement as the consent record at sign-up, sign-in with the tick and
+-- POST /api/portal/account/consent/renew.
+--
+-- Additive only: one nullable column, no default, no rewrite of any row. Every
+-- existing account stays NULL, which means exactly "not asked about age yet";
+-- back-filling it would record a confirmation nobody gave. The Worker treats
+-- NULL as consent renewal required (together with the bumped consent version).
+--
+-- PRE-ASSERTIONS:
+--   SELECT COUNT(*) AS account_rows FROM portal_accounts;
+--   SELECT COUNT(*) FROM pragma_table_info('portal_accounts') WHERE name = 'age_confirmed_at';  -- expect 0
+--
+-- POST-ASSERTIONS:
+--   SELECT COUNT(*) FROM portal_accounts;  -- equals account_rows
+--   SELECT COUNT(*) FROM pragma_table_info('portal_accounts') WHERE name = 'age_confirmed_at';  -- expect 1
+--   SELECT COUNT(*) FROM portal_accounts WHERE age_confirmed_at IS NOT NULL;  -- expect 0 at apply time
+--
+-- RECOVERY: append-only and touches no existing row. To back out, revert the
+-- Worker; the column can stay (older code ignores it) and keeps any
+-- confirmations already recorded.
+
+ALTER TABLE portal_accounts ADD COLUMN age_confirmed_at TEXT;

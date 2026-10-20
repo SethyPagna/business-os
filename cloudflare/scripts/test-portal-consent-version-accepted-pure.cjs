@@ -1,6 +1,7 @@
-// Storefront consent versions (owner, 30 Sep 2026). The policy text moved to
-// portal-legal-2026-09-30; customers who agreed to portal-legal-2026-09-07 stay
-// signed in and are not asked again, while an unknown version is refused.
+// Storefront consent versions. Owner, 20 Oct 2026: the age-16 wording moved the
+// version to portal-legal-2026-10-20 and nothing earlier is accepted, so every
+// account agrees again; an account is current only with that exact version AND
+// a stored age confirmation (age_confirmed_at, migration 0262).
 //
 // Runs the REAL lib/portalAccounts.ts and lib/portalSession.ts, transpiled,
 // against in-memory SQLite with every migration applied.
@@ -16,8 +17,9 @@ const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations')
-const CURRENT = 'portal-legal-2026-09-30'
-const EARLIER = 'portal-legal-2026-09-07'
+const CURRENT = 'portal-legal-2026-10-20'
+const EARLIER = 'portal-legal-2026-09-30'
+const OLDEST = 'portal-legal-2026-09-07'
 
 function wrap(rawDb) {
   return {
@@ -89,11 +91,11 @@ const ctx = { env: {}, executionCtx: { waitUntil: (p) => { pending.push(p) } } }
 const settle = async () => { while (pending.length) await pending.shift() }
 
 let seq = 0
-async function signedInWith(version, consentAt = 'CURRENT_TIMESTAMP') {
+async function signedInWith(version, consentAt = 'CURRENT_TIMESTAMP', ageAt = 'CURRENT_TIMESTAMP') {
   seq += 1
   const inserted = rawDb.prepare(
-    `INSERT INTO portal_accounts (membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale)
-     VALUES (@m, 'Consent Version', @p, 'x', @v, ${consentAt}, 'km')`,
+    `INSERT INTO portal_accounts (membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale, age_confirmed_at)
+     VALUES (@m, 'Consent Version', @p, 'x', @v, ${consentAt}, 'km', ${ageAt})`,
   ).run({ m: `LC-8${String(seq).padStart(4, '0')}`, p: `0708887${String(seq).padStart(2, '0')}`, v: version })
   const accountId = Number(inserted.meta?.last_row_id ?? 0)
   const { token } = await session.createPortalSession(ctx.env, accountId)
@@ -107,48 +109,44 @@ let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
 async function run() {
-  await check('the Worker records the 30 Sep 2026 policy version', () => {
+  await check('the Worker records the 20 Oct 2026 policy version', () => {
     assert.strictEqual(accounts.PORTAL_CONSENT_VERSION, CURRENT)
   })
 
-  await check('the current version and the 7 Sep 2026 version are accepted; anything else is refused', () => {
+  await check('only the current version is accepted; every earlier or unknown one is refused', () => {
     assert.strictEqual(accounts.portalConsentVersionAccepted(CURRENT), true)
-    assert.strictEqual(accounts.portalConsentVersionAccepted(EARLIER), true)
-    for (const unknown of ['portal-legal-2026-01-01', 'portal-legal-older', ` ${EARLIER}`, EARLIER.toUpperCase(), '', null, undefined, 20260907]) {
+    for (const unknown of [EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older', ` ${CURRENT}`, CURRENT.toUpperCase(), '', null, undefined, 20261020]) {
       assert.strictEqual(accounts.portalConsentVersionAccepted(unknown), false, `${String(unknown)} must be refused`)
     }
   })
 
-  await check('a customer who agreed to the 7 Sep 2026 text stays signed in without being asked again', async () => {
-    const { accountId, state } = await signedInWith(EARLIER)
+  await check('a customer who agreed to the current text with an age confirmation is signed in', async () => {
+    const { accountId, state } = await signedInWith(CURRENT)
     assert.strictEqual(state.status, 'authenticated')
     assert.strictEqual(state.account.id, accountId)
-    const row = rawDb.prepare('SELECT consent_version FROM portal_accounts WHERE id = ?').get([accountId])
-    assert.strictEqual(row.consent_version, EARLIER, 'reading a session never rewrites the recorded consent')
   })
 
-  await check('a customer who agreed to the 30 Sep 2026 text is signed in', async () => {
-    const { state } = await signedInWith(CURRENT)
-    assert.strictEqual(state.status, 'authenticated')
-  })
-
-  await check('an unknown consent version is refused and asked to agree again', async () => {
-    for (const version of ['portal-legal-2026-01-01', 'portal-legal-older']) {
-      const { state } = await signedInWith(version)
-      assert.deepStrictEqual(state, { status: 'reconsent_required', account: null })
+  await check('an account on any earlier or unknown version must agree again, and reading never rewrites the record', async () => {
+    for (const version of [EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older']) {
+      const { accountId, state } = await signedInWith(version)
+      assert.strictEqual(state.status, 'reconsent_required')
+      assert.strictEqual(state.account, null)
+      assert.strictEqual(state.accountId, accountId)
+      assert.strictEqual(rawDb.prepare('SELECT consent_version FROM portal_accounts WHERE id = ?').get([accountId]).consent_version, version)
     }
   })
 
-  await check('an accepted version without a consent time is still refused', async () => {
-    const { state } = await signedInWith(EARLIER, 'NULL')
-    assert.deepStrictEqual(state, { status: 'reconsent_required', account: null })
+  await check('the current version without a consent time or without an age confirmation is still refused', async () => {
+    assert.strictEqual((await signedInWith(CURRENT, 'NULL')).state.status, 'reconsent_required')
+    assert.strictEqual((await signedInWith(CURRENT, 'CURRENT_TIMESTAMP', 'NULL')).state.status, 'reconsent_required')
   })
 
   await check('a new sign-up records the current version', async () => {
     const result = await accounts.signupPortalAccount(ctx.env, { name: 'New Consent', phone: '012 777 888', password: 'sup3rsecret', consent: true, ageConfirmed: true })
     assert.strictEqual(result.ok, true, `signup failed: ${result.error || ''}`)
-    const row = rawDb.prepare('SELECT consent_version FROM portal_accounts WHERE id = ?').get([result.accountId])
+    const row = rawDb.prepare('SELECT consent_version, age_confirmed_at FROM portal_accounts WHERE id = ?').get([result.accountId])
     assert.strictEqual(row.consent_version, CURRENT)
+    assert.ok(row.age_confirmed_at, 'the age confirmation is stored with the consent')
   })
 
   console.log(`\nALL ${passed} CHECKS PASSED`)

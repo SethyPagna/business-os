@@ -204,8 +204,8 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-09-30', 'the 30 Sep 2026 rewrite is a new policy version')
-assert.equal(formatLegalLastUpdated(), '30/09/2026')
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-10-20', 'the 20 Oct 2026 age-16 wording is a new policy version')
+assert.equal(formatLegalLastUpdated(), '20/10/2026')
 assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
 
 // 8. Owner, 30 Sep 2026: welcoming privacy and terms texts that stay safe for the shop.

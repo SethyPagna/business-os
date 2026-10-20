@@ -7683,5 +7683,9 @@
   "perm_user_exceptions_heading": "ករណីលើកលែងផ្ទាល់ខ្លួន",
   "perm_user_exceptions_one": "ករណីលើកលែងផ្ទាល់ខ្លួន 1",
   "perm_user_exceptions_other": "ករណីលើកលែងផ្ទាល់ខ្លួន {n}",
-  "perm_switched_off_heading": "បានបិទ"
+  "perm_switched_off_heading": "បានបិទ",
+  "portal_legal_renew_title": "បញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក",
+  "portal_legal_renew_body": "លក្ខខណ្ឌរបស់យើងកំណត់អាយុអប្បបរមា ១៦ ឆ្នាំ។ សូមបញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក។",
+  "portal_legal_renew_agree": "យល់ព្រម",
+  "portal_legal_renew_required": "សូមធីកប្រអប់ដើម្បីបន្ត។"
 }

@@ -259,6 +259,7 @@ const ROWS = [
   ['telegram_summary', 'send', PURGED],
   ['telegram_webhook', 'connect', PURGED],
   ['portal_submission', 'review', PURGED],
+  ['portal_account', 'consent_renew', PURGED],
 ]
 
 // The rule itself, written by hand and NOT derived from ROWS or from the SQL, so a table that drifts from the rule is
