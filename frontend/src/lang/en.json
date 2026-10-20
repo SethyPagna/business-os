@@ -3624,7 +3624,7 @@
           "question": "How do I choose products for my skin type?"
         },
         "2": {
-          "answer": "The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.",
+          "answer": "The products shown come from our current catalogue. Stock can change during busy periods, so contact the store for a final confirmation before visiting.",
           "question": "Are the products shown here available in store?"
         },
         "3": {
@@ -3637,7 +3637,7 @@
         },
         "5": {
           "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Beauty for more accurate advice?"
+          "question": "How can I contact Leang Cosmetics for more accurate advice?"
         },
         "6": {
           "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
@@ -3648,7 +3648,7 @@
           "question": "Can I ask whether a product is original or from a specific brand line?"
         },
         "8": {
-          "answer": "Yes. Leang Beauty carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
+          "answer": "Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
           "question": "Do you sell skincare, makeup, hair care, and body care together?"
         },
         "9": {
@@ -3656,7 +3656,7 @@
           "question": "Can the store help me build a full routine?"
         },
         "10": {
-          "answer": "If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.",
+          "answer": "If an item is unavailable, message the store through the contact links on this page so the team can suggest alternatives or confirm when stock changes.",
           "question": "What should I do if an item is out of stock?"
         },
         "11": {
@@ -3684,8 +3684,8 @@
           "question": "What details help the AI recommend better products?"
         },
         "17": {
-          "answer": "Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.",
-          "question": "Does the AI only recommend products available at Leang Beauty?"
+          "answer": "Yes. The assistant is designed to prioritize products from our current catalogue, then explain why those items fit your question.",
+          "question": "Does the AI only recommend products available at Leang Cosmetics?"
         },
         "18": {
           "answer": "No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.",
@@ -3700,7 +3700,7 @@
           "question": "Can the assistant explain why a product was suggested?"
         },
         "21": {
-          "answer": "We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.",
+          "answer": "Contact the store with your location to confirm available delivery or collection options, timing, and fees before ordering.",
           "question": "Do you offer delivery, or is it pickup only?"
         },
         "22": {
@@ -3708,7 +3708,7 @@
           "question": "What payment methods do you accept?"
         },
         "23": {
-          "answer": "Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.",
+          "answer": "Opening hours are listed in the branch details on this page. Contact the store to confirm the hours for today.",
           "question": "What are your store hours?"
         },
         "24": {
@@ -3718,6 +3718,10 @@
         "25": {
           "answer": "Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.",
           "question": "Where can I see current promotions and discounts?"
+        },
+        "26": {
+          "answer": "Returns are accepted within 7 days for unopened items with the receipt.",
+          "question": "What is your returns policy?"
         }
       },
       "stockStatus": "Stock status",
