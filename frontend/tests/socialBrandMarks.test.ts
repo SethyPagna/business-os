@@ -21,6 +21,7 @@ const reactOnly = (name: string) => (id: string) => {
 }
 const brand = compile('../src/components/shared/BrandIcons.tsx', reactOnly('BrandIcons.tsx'))
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
+const aiProviderDisclosure = await import('../src/components/catalog/legal/aiProviderDisclosure.ts') as Record<string, any>
 const Icon = () => null
 const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
 const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
@@ -37,6 +38,7 @@ const legal = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => 
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
   if (id.endsWith('/legalContent.ts')) return legalContent
+  if (id.endsWith('/aiProviderDisclosure.ts')) return aiProviderDisclosure
   if (id.endsWith('/PortalSocialRow.tsx')) return socialRow
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
