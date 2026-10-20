@@ -785,7 +785,7 @@ export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: Rece
   }
 }
 
-// Thrown by removeStockFromBatch when the chosen batch doesn't have enough
+// Thrown when the chosen batch doesn't have enough
 // at this branch -- distinct from a generic Error so routes/inventory.ts
 // can report the batch's own available figure, not just "insufficient
 // stock" (which would be misleading if the *product* has plenty of stock
@@ -897,56 +897,6 @@ export function planUnreceiveBatchStock(input: { batchId: number; quantity: numb
       params,
     },
   ]
-}
-
-// Mirror of receiveBatchStock for the remove side of mandatory batch
-// selection (Inventory's "Adjust stock" > Remove, see routes/inventory.ts's
-// /adjust). Validates against the BATCH's own quantity at this branch, not
-// just the product's overall total -- a product can have plenty of total
-// stock while the specific lot the person picked has less than they're
-// trying to remove, and that's a real error, not something to silently
-// satisfy from a different batch behind their back. Same three-way atomic
-// write as receiveBatchStock, decrementing instead of incrementing, with
-// the same MAX(0, ...) floor guard routes/inventory.ts's own decrement
-// path already uses so a race can never push either figure negative.
-export async function removeStockFromBatch(db: D1Compat, input: {
-  batchId: number
-  productId: number
-  branchId: number
-  quantity: number
-}): Promise<{ productName: string | null; lotCode: string | null; batchNumber: number | null }> {
-  const batch = await db.prepare(`
-    SELECT pb.id AS id, p.name AS productName, pb.lot_code AS lotCode, pb.batch_number AS batchNumber, COALESCE(bbs.quantity, 0) AS available
-    FROM product_batches pb
-    JOIN products p ON p.id = pb.variant_product_id
-    LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
-    WHERE pb.id = @batchId AND pb.variant_product_id = @productId
-  `).get<{ id: number; productName: string | null; lotCode: string | null; batchNumber: number | null; available: number }>({
-    batchId: input.batchId,
-    productId: input.productId,
-    branchId: input.branchId,
-  })
-  if (!batch) throw new Error('Selected received date does not belong to this product')
-  const available = Number(batch.available) || 0
-  if (input.quantity > available) throw new InsufficientBatchStockError(available)
-
-  await executeStockTransaction(db, [
-    {
-      sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
-            WHERE batch_id = @batchId AND branch_id = @branchId`,
-      params: { batchId: input.batchId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,
-      params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: input.productId, quantity: input.quantity },
-    },
-  ], 'retry')
-
-  return { productName: batch.productName, lotCode: batch.lotCode, batchNumber: batch.batchNumber }
 }
 
 // Resolves which batch a transferred lot should land in at the

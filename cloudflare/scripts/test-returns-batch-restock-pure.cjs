@@ -158,6 +158,10 @@ const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
 const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+// Fixture helper: drain a lot through the strict plan inside the stock transaction.
+async function drainLot(database, input) {
+  await stockTransaction.executeStockTransaction(database, productBatches.planRemoveStockFromBatch(input).statements, 'retry')
+}
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 // P4-3: real, pure -- used by the new damaged-return-disposition tests below
@@ -364,7 +368,7 @@ async function main() {
   await check('v1 customer return writes exact net entitlement, snapshots and stock under one stale-graph guard', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 2, lotCode: 'V1-LOT' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 1 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 1 })
     const pricingPool = { version: 1, pool_key: 'return-v1-pool', evaluation_time: '2026-09-13T00:00:00.000Z',
       exchange_rate: 4000, rules: [], lines: [{ line_key: 'return-v1-line', source: 'selling',
         product: { id: 1, selling_price_usd: 10, selling_price_khr: 40000, wholesale_price_usd: null,
@@ -628,7 +632,7 @@ async function main() {
     // A prior sale drew 5 units from a specific batch (as sales.ts's own
     // lot picker would have recorded on sale_items.batch_id).
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-A' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const beforeBatchQty = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity
@@ -672,7 +676,7 @@ async function main() {
   await check('editing a return reverses the SAME batch it originally restocked, not the aggregate blindly', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-B' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const created = await req('POST', '/', {
@@ -710,8 +714,8 @@ async function main() {
     const batchA = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-01-05' })
     const batchB = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-03-20' })
     assert.notStrictEqual(batchA.batchId, batchB.batchId, 'sanity: the two receives must be distinct lots')
-    await productBatches.removeStockFromBatch(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
-    await productBatches.removeStockFromBatch(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
+    await drainLot(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
+    await drainLot(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, NULL)').run())
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @a, 1, 3, 0)').run({ a: batchA.batchId }))
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @b, 1, 2, 0)').run({ b: batchB.batchId }))
@@ -756,7 +760,7 @@ async function main() {
     const b1 = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 5, receivedDate: '2026-01-02' })
     const b2 = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 5, receivedDate: '2026-02-02' })
     for (const [batchId, productId, quantity] of [[a1.batchId, 1, 2], [a2.batchId, 1, 1], [b1.batchId, 2, 1], [b2.batchId, 2, 2]]) {
-      await productBatches.removeStockFromBatch(db, { batchId, productId, branchId: 1, quantity })
+      await drainLot(db, { batchId, productId, branchId: 1, quantity })
     }
     seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3),(2,1,2,'Different Serum',3)").run())
     for (const [saleItemId, batchId, quantity] of [[1, a1.batchId, 2], [1, a2.batchId, 1], [2, b1.batchId, 1], [2, b2.batchId, 2]]) {
@@ -1705,7 +1709,7 @@ async function main() {
     // while an impossible replacement is requested. The compiled action must
     // refuse before its single batch; there is no compensation phase.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-R' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const { status, json } = await req('POST', '/', {
@@ -1780,7 +1784,7 @@ async function main() {
     seed()
     // A lot-backed sale and a return that restocked into that lot.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
     const created = await req('POST', '/', {
       sale_id: 1,

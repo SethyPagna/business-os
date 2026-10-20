@@ -301,12 +301,6 @@ export function buildZipInWorker(files: ZipFileInput[] = [], options: { timeoutM
   })
 }
 
-export async function downloadZipFiles(filename: string, files: ZipFileInput[] = []): Promise<void> {
-  const blob = await buildZip(files)
-  if (!blob) return
-  downloadBlob(filename, blob)
-}
-
 export async function downloadZipFilesAsync(
   filename: string,
   files: ZipFileInput[] = [],

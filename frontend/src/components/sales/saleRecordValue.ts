@@ -81,10 +81,6 @@ function paymentLine(value: unknown, fmtUSD: FormatUsd, fmtKHR: FormatKhr): stri
  * their JSON transport representation in the before/after table. A legacy
  * scalar or malformed JSON value remains visible verbatim.
  */
-export function formatSaleRecordValueLines(field: string, value: unknown, fmtUSD: FormatUsd): string[] {
-  return formatSaleRecordValueLinesLocalized(field, value, fmtUSD, (amount) => `${Number(amount).toLocaleString('en-US')}៛`)
-}
-
 export function formatSaleRecordValueLinesLocalized(
   field: string,
   value: unknown,
