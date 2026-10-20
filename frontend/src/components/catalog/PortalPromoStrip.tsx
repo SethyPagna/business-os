@@ -29,6 +29,8 @@ type StripItem =
   | { kind: 'product'; key: string; product: PortalProduct; label: string; priceText: string; color: string }
 
 const MAX_PRODUCT_ITEMS = 12
+// Brass (amber-800) when a rule carries no colour of its own.
+const PROMO_FALLBACK_COLOR = '#92400e'
 const DRIFT_PX_PER_FRAME = 0.4
 
 export default function PortalPromoStrip({
@@ -67,7 +69,7 @@ export default function PortalPromoStrip({
       if (!rule.show_title) continue
       const label = rule.title || promotionAutoLabel(rule)
       if (!label) continue
-      out.push({ kind: 'rule', key: `rule-${rule.id}`, ruleId: rule.id, label, color: rule.badge_color || '#e11d48' })
+      out.push({ kind: 'rule', key: `rule-${rule.id}`, ruleId: rule.id, label, color: rule.badge_color || PROMO_FALLBACK_COLOR })
     }
     let taken = 0
     for (const product of products) {
@@ -83,7 +85,7 @@ export default function PortalPromoStrip({
         priceText: showPrices && evaluation.active
           ? formatPrice(evaluation.unit_price_usd, evaluation.unit_price_khr)
           : (evaluation.title || copy('promotionBadge', 'Promo')),
-        color: evaluation.badge_color || '#e11d48',
+        color: evaluation.badge_color || PROMO_FALLBACK_COLOR,
       })
     }
     return out
@@ -170,7 +172,7 @@ export default function PortalPromoStrip({
             key={item.key}
             type="button"
             onClick={() => openProductDetail?.(item.product)}
-            className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200 hover:ring-rose-300 dark:bg-neutral-800 dark:ring-neutral-700"
+            className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200 hover:ring-amber-400 dark:bg-neutral-800 dark:ring-neutral-700"
           >
             <span translate="no" className="notranslate detail-scroll-text font-medium text-slate-700 dark:text-neutral-100">{item.label}</span>
             {/* Same merchant colour, used here as INK on the chip rather than
@@ -197,7 +199,7 @@ export default function PortalPromoStrip({
               type="button"
               aria-label={`${copy('promoStripJump', 'Jump to promotion')} ${index + 1}`}
               onClick={() => jumpTo(index)}
-              className={`h-3 w-3 leading-none text-base ${index === activeDot ? 'text-rose-700 dark:text-rose-300' : 'text-slate-500 hover:text-slate-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
+              className={`h-3 w-3 leading-none text-base ${index === activeDot ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 hover:text-slate-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
             >
               ·
             </button>

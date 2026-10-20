@@ -22,7 +22,8 @@
 //
 // Run: node tests/portalBrowse.test.ts
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { posix } from 'node:path'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import {
@@ -201,11 +202,25 @@ check('the Worker enforces the same allowlists and defaults, and never interpola
 
 type AnyProps = Record<string, any>
 
-function loadRow(): (props: AnyProps) => any {
-  const compiled = transformSync(read('src/components/catalog/PortalBrowseRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+// Compiles a source file and, recursively, the relative imports it makes
+// (PortalBrowseRow pulls its Khmer-aware label helper from catalogUi).
+function loadModule(relative: string): Record<string, unknown> {
+  const compiled = transformSync(read(relative), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
   const mod = { exports: {} as Record<string, unknown> }
-  new Function('require', 'module', 'exports', compiled)((id: string) => nodeRequire(id), mod, mod.exports)
-  return mod.exports.default as (props: AnyProps) => any
+  const dir = relative.slice(0, relative.lastIndexOf('/'))
+  const requireFrom = (id: string): unknown => {
+    if (!id.startsWith('.')) return nodeRequire(id)
+    const joined = posix.normalize(posix.join(dir, id))
+    const target = [joined, `${joined}.tsx`, `${joined}.ts`].find((candidate) => /.tsx?$/.test(candidate) && existsSync(new URL(`../${candidate}`, import.meta.url)))
+    if (!target) throw new Error(`cannot resolve ${id} from ${relative}`)
+    return loadModule(target)
+  }
+  new Function('require', 'module', 'exports', compiled)(requireFrom, mod, mod.exports)
+  return mod.exports
+}
+
+function loadRow(): (props: AnyProps) => any {
+  return loadModule('src/components/catalog/PortalBrowseRow.tsx').default as (props: AnyProps) => any
 }
 
 // Every element in the tree the component returned, depth first.

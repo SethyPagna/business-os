@@ -255,13 +255,13 @@ export default function PortalFilterCombobox({
       onMouseEnter={() => setActiveIndex(index + 1)}
       className={`mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium ${row.indent ? 'pl-6' : ''} ${
         row.active
-          ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
+          ? 'bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-300'
           : 'text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-      } ${activeIndex === index + 1 ? 'ring-1 ring-blue-300 dark:ring-amber-400/60' : ''}`}
+      } ${activeIndex === index + 1 ? 'ring-1 ring-amber-400 dark:ring-amber-400/60' : ''}`}
       role="option"
       aria-selected={row.active}
     >
-      <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${row.active ? 'border-blue-600 bg-blue-600 dark:border-amber-400 dark:bg-amber-400' : 'border-slate-300 dark:border-neutral-600'}`} aria-hidden="true">
+      <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${row.active ? 'border-amber-700 bg-amber-700 dark:border-amber-400 dark:bg-amber-400' : 'border-slate-300 dark:border-neutral-600'}`} aria-hidden="true">
         {row.active ? <span className="h-1.5 w-1.5 rounded-sm bg-white" /> : null}
       </span>
       <span className="min-w-0 detail-scroll-text">{row.label}</span>
@@ -283,12 +283,12 @@ export default function PortalFilterCombobox({
             type="button"
             className={`flex min-h-8 w-full min-w-[7rem] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition sm:w-auto ${
               selected.length
-                ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/40 dark:hover:text-amber-300'
+                ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-amber-400 hover:text-amber-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/40 dark:hover:text-amber-300'
             }`}
             aria-label={`${label}: ${selectionText}`}
           >
-            <span className="truncate">
+            <span className="min-w-0 break-words text-left">
               {label}: {selectionText}
             </span>
             <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
@@ -317,11 +317,11 @@ export default function PortalFilterCombobox({
               // This popup is createPortal()ed to document.body by
               // shared/PortalMenu, so it is NOT a descendant of any portal
               // root and public-portal.css's :focus-visible ring can never
-              // reach it. focus:ring-blue-100 is #dbeafe on white = 1.16:1,
+              // reach it. a pale focus:ring-*-100 halo is ~1.1:1 on white,
               // i.e. no visible indicator at all on the one field a keyboard
               // shopper lands in first. The outline utilities below are the
               // same 3px sky-700 / amber-300 ring the stylesheet paints.
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15 dark:focus-visible:outline-[#fcd34d]"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15 dark:focus-visible:outline-[#fcd34d]"
             />
           </div>
           <div ref={listRef} className="max-h-56 overflow-y-auto p-1.5" id={listboxId} role="listbox" aria-multiselectable="true" aria-label={label}>
@@ -337,7 +337,7 @@ export default function PortalFilterCombobox({
                 !selected.length
                   ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950'
                   : 'text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-              } ${activeIndex === 0 ? 'ring-1 ring-blue-300 dark:ring-amber-400/60' : ''}`}
+              } ${activeIndex === 0 ? 'ring-1 ring-amber-400 dark:ring-amber-400/60' : ''}`}
             >
               {allLabel}
             </button>

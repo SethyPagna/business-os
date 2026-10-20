@@ -349,7 +349,7 @@ runTest('the product search field has a name, not just a placeholder', () => {
   // Base tree: <label> wrapped the input but contained only the magnifier
   // icon, so the computed accessible name was empty.
   assert.match(products, /htmlFor="portal-product-search"/, 'the label points at the field')
-  assert.match(products, /<span className="sr-only">\{copy\('searchPlaceholder', 'Search products'\)\}<\/span>/, 'and carries real label text')
+  assert.match(products, /<span className="sr-only">\{searchLabel\}<\/span>/, 'and carries real label text')
 })
 
 // ---------------------------------------------------------------------------
@@ -452,8 +452,8 @@ runTest('storefront heading levels run in order under the one h1', () => {
   // the promotions group title was a styled <div> while each promotion card
   // inside it was an <h3>, so heading navigation entered the offers with no
   // heading naming the run of them.
-  assert.match(products, /<h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">\{promotionsTitle/, 'the promotions group is a heading')
-  assert.match(products, /<h4 className="text-2xl font-semibold leading-tight">\{item\.title\}<\/h4>/, 'and each offer sits one level below it')
+  assert.match(products, /<h3 className="m-0">\s*<button[\s\S]*?\{promotionsHeading\}/, 'the promotions group is a heading (its collapse toggle)')
+  assert.match(products, /<h4 \{\.\.\.getKhmerTextProps\(item\.title, '[^']*'\)\}>\{item\.title\}<\/h4>/, 'and each offer sits one level below it')
   const ui = read('catalogUi.tsx')
   assert.match(ui, /<h2 className="text-lg font-semibold[^"]*">\{title\}<\/h2>/, 'every portal section title is the h2 under the storefront h1')
   // No level may be skipped anywhere on the public route.
@@ -528,7 +528,7 @@ runTest('browser pinch zoom is allowed on the storefront while image zoom stays 
 runTest('stock status is not carried by colour alone', () => {
   const ui = read('catalogUi.tsx')
   // The dot is colour; the text beside it is what actually says the status.
-  assert.match(ui, /\{copy\(labelKey, fallback\)\}/, 'the badge prints its status in words')
+  assert.match(ui, /const label = copy\(labelKey, fallback\)[\s\S]*?\{label\}\n?\s*<\/span>/, 'the badge prints its status in words')
   assert.match(ui, /aria-hidden="true"/, 'and the colour dot is decorative')
 })
 
