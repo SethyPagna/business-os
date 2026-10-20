@@ -176,3 +176,56 @@ export function buildPortalContactChannels(input: {
   }
   return groups
 }
+
+/** One account of a platform as the About chips and the footer list it (no picker there). */
+export type PortalFlatSocialLink = {
+  key: string
+  platform: SocialPlatform
+  value: string
+  label: string
+  accessibleName: string
+  latin: boolean
+}
+
+export function flattenPortalSocialGroups(groups: readonly PortalSocialGroup[]): PortalFlatSocialLink[] {
+  return groups.flatMap((group) => group.links.map((link, index) => ({
+    key: `${group.platform}-${index}`,
+    platform: group.platform,
+    value: link.href,
+    label: link.visibleText,
+    accessibleName: link.accessibleName,
+    latin: link.latin,
+  })))
+}
+
+type PortalSocialConfig = {
+  links?: PortalAccountMap
+  linkLabels?: PortalLabelMap
+  contactLinks?: PortalAccountMap
+  contactLinkLabels?: PortalLabelMap
+  showWebsite?: unknown
+  showFacebook?: unknown
+  showInstagram?: unknown
+  showTelegram?: unknown
+  showContactMessenger?: unknown
+  showContactTelegram?: unknown
+  showContactWhatsapp?: unknown
+  showContactPhone?: unknown
+  showContactInstagram?: unknown
+}
+
+/** Both page builders (live and editor preview) read the portal config through this one function. */
+export function buildPortalSocialFromConfig(config: PortalSocialConfig, language: string): { social: PortalSocialGroup[]; contact: PortalSocialGroup[] } {
+  const show: PortalShowMap = { website: config.showWebsite, facebook: config.showFacebook, instagram: config.showInstagram, telegram: config.showTelegram }
+  return {
+    social: buildPortalSocialLinks({ links: config.links, labels: config.linkLabels, show, language }),
+    contact: buildPortalContactChannels({
+      contactLinks: config.contactLinks,
+      contactLabels: config.contactLinkLabels,
+      showContact: { messenger: config.showContactMessenger, telegram: config.showContactTelegram, whatsapp: config.showContactWhatsapp, phone: config.showContactPhone, instagram: config.showContactInstagram },
+      links: config.links,
+      show,
+      language,
+    }),
+  }
+}

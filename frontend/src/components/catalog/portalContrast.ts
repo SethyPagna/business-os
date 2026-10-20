@@ -216,7 +216,7 @@ export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
   { name: 'heading text (slate-900)', foreground: '#0f172a', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi SectionShell title, product name' },
   { name: 'body text (slate-600)', foreground: '#475569', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'product detail body copy' },
   { name: 'muted text (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'hints, empty states, list-drawer prices' },
-  { name: 'promotions card link (sky-700)', foreground: '#0369a1', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'PortalPromotionsBanner view-product line' },
+  { name: 'promotions card link (amber-800)', foreground: '#92400e', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'PortalPromotionsBanner view-product line' },
   { name: 'account submit button label', foreground: '#ffffff', background: '#047857', kind: 'text', where: 'CatalogAccountSection sign in / create account' },
   { name: 'primary button label (slate-900 ground)', foreground: '#ffffff', background: '#0f172a', kind: 'text', where: 'add to list, copy list, bucket FAB' },
   { name: 'stock badge: in stock (emerald-700 on the white pill)', foreground: '#047857', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi StatusPill' },

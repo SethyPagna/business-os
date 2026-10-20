@@ -17,20 +17,12 @@ const scan = scanStorefrontCopy()
 assertCompleteScan(scan)
 const { entries } = scan
 
-// Proper names, spelled the same in every language.
-const PROPER_NAME_KEYS: Record<string, string> = {
-  messenger: 'Facebook Messenger, a product name',
-  facebook: 'Facebook, a brand name',
-  instagram: 'Instagram, a brand name',
-  telegram: 'Telegram, a brand name',
-  whatsapp: 'WhatsApp, a brand name',
-}
+// Brand names (Messenger, Facebook, Instagram, Telegram, WhatsApp) no longer pass through the
+// translator: the storefront shows the account handle, and utils/socialHandles.ts owns the Latin names.
 const renderedKeys = new Set(entries.map((entry) => entry.key))
-for (const key of Object.keys(PROPER_NAME_KEYS)) assert.ok(renderedKeys.has(key), `${key} is allow-listed but the storefront no longer renders it`)
 
 const gaps = new Map<string, { english: string; khmer: string; sites: Set<string> }>()
 for (const entry of entries) {
-  if (entry.key in PROPER_NAME_KEYS) continue
   const english = resolveStorefrontCopy('en', STOREFRONT_T, entry.key, entry.en, entry.km)
   if (!/[A-Za-z]/.test(english.replace(PLACEHOLDER, ''))) continue
   const khmer = resolveStorefrontCopy('km', STOREFRONT_T, entry.key, entry.en, entry.km)

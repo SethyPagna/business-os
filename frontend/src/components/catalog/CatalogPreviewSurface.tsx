@@ -13,6 +13,8 @@ import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
+import PortalSocialRow from './PortalSocialRow.tsx'
+import type { PortalSocialGroup } from './portalSocialLinks.ts'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -73,14 +75,6 @@ type FilePickerModalProps = FilePickerState & {
   onSelect: (asset: unknown) => void
 }
 
-type HeaderLink = {
-  key: string
-  label: string
-  value: string
-  icon: ComponentType<{ className?: string }>
-  accentClassName?: string
-}
-
 type CatalogPreviewSurfaceProps = {
   publicView: boolean
   darkMode: boolean
@@ -107,10 +101,11 @@ type CatalogPreviewSurfaceProps = {
   onOpenWishlist?: () => void
   wishlistCount?: number
   accountSignedIn?: boolean
-  headerLinks?: HeaderLink[]
+  // Social accounts for the header's own row, grouped by platform, plus the map link.
+  socialGroups?: PortalSocialGroup[]
+  mapLink?: string
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
-  promotionsSection?: ReactNode
   // N45 legal lane: the storefront <footer> (business details, quick links,
   // social links and the policy links). Rendered here so the live site and
   // the admin preview show the SAME footer from one place; the caller
@@ -125,7 +120,7 @@ type CatalogPreviewSurfaceProps = {
   // the type/render plumbing existed here but neither caller actually
   // passed it, so the product-detail flyout could never open from either
   // surface. Still optional/undefined-safe, same pattern the rest of this
-  // shared surface uses for e.g. promotionsSection.
+  // shared surface uses for e.g. footer.
   productDetailView?: ProductDetailViewState
   closeProductDetailView?: () => void
   productDetailShopName?: string
@@ -172,10 +167,10 @@ export default function CatalogPreviewSurface({
   onOpenWishlist,
   wishlistCount = 0,
   accountSignedIn = false,
-  headerLinks = [],
+  socialGroups = [],
+  mapLink = '',
   catalogSection,
   secondaryTabSection,
-  promotionsSection,
   footer,
   publicScrollButtonsVisible,
   scrollPublicPortal,
@@ -393,22 +388,6 @@ export default function CatalogPreviewSurface({
                       single-row layout at `sm` and up, where all three sit
                       side by side and there is no "first" to reorder. */}
                   <div data-portal-header-icons="" className="row-start-2 flex min-w-0 flex-nowrap items-center gap-0.5 sm:row-start-auto sm:gap-1">
-                    {headerLinks.map((item) => {
-                      const Icon = item.icon
-                      return (
-                        <a
-                          key={item.key}
-                          href={item.value}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
-                          aria-label={item.label}
-                          title={item.label}
-                        >
-                          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                        </a>
-                      )
-                    })}
                     {!publicView ? (
                       <div className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                         {copy('previewBadge', 'Website Editor')}
@@ -529,6 +508,8 @@ export default function CatalogPreviewSurface({
                     </button>
                   </div>
                 </div>
+                {/* Owner rule: social icons + handles on their OWN row that scrolls sideways. The left cell above is kept (empty on the live shop) so the grid columns do not shift. */}
+                <PortalSocialRow groups={socialGroups} mapLink={mapLink} pageLanguage={pageLanguage} copy={copy} />
               </div>
             </header>
 
@@ -581,7 +562,6 @@ export default function CatalogPreviewSurface({
                 fields are still named to the owner inside the editor
                 (CatalogEditorSurface.tsx's publication summary). */}
             <main id="portal-main-content" tabIndex={-1}>
-              {promotionsSection}
               {catalogSection}
               {secondaryTabSection}
             </main>

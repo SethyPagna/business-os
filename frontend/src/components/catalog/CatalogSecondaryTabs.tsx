@@ -16,7 +16,8 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import { FacebookIcon, InstagramIcon } from '../shared/BrandIcons.tsx'
+import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
+import type { SocialPlatform } from '../../utils/socialHandles.ts'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
@@ -71,6 +72,9 @@ interface SocialLink {
   key: string
   label: string
   value: string
+  platform?: string
+  accessibleName?: string
+  latin?: boolean
 }
 
 interface AboutBlock {
@@ -423,25 +427,19 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             {socialLinks?.length ? (
               <div className="flex flex-wrap gap-2">
                 {socialLinks.map((item) => {
-                  const Icon = item.key === 'facebook'
-                    ? FacebookIcon
-                    : item.key === 'instagram'
-                      ? InstagramIcon
-                      : item.key === 'telegram'
-                        ? Send
-                        : Globe
+                  const Icon = PORTAL_SOCIAL_ICONS[(item.platform ?? item.key) as SocialPlatform] || Globe
                   return (
                     <a
                       key={item.key}
                       href={item.value}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
-                      aria-label={item.label}
-                      title={item.label}
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                      aria-label={item.accessibleName || item.label}
+                      title={item.accessibleName || item.label}
                     >
-                      <Icon className="h-4 w-4" />
-                      <span className="sr-only sm:not-sr-only">{item.label}</span>
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <PortalSocialText text={item.label} latin={item.latin ?? true} />
                     </a>
                   )
                 })}

@@ -30,6 +30,8 @@ const legalPages = compile('../src/components/catalog/legal/LegalPages.tsx', (id
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
   if (id.endsWith('/legalContent.ts')) return legalContent
   if (id.endsWith('/BrandIcons.tsx')) return brandIcons
+  // This footer renders no social links, so the shared icon map and text are not exercised here.
+  if (id.endsWith('/PortalSocialRow.tsx')) return { PORTAL_SOCIAL_ICONS: {}, PortalSocialText: () => null }
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 }, 'tsx')

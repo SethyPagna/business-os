@@ -879,10 +879,15 @@ function manualChunks(id: string): string | undefined {
       // portalMotion.ts (reduced-motion scroll behaviour) is imported by PublicCatalogPage,
       // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
       || normalized.includes('/src/components/catalog/portalMotion.ts')
+      // PortalSocialRow.tsx (the one social icon map + header row) and
+      // portalSocialLinks.ts (its builders) are imported by the storefront page and
+      // its surface (catalog-public), the editor preview (catalog), About
+      // (catalog-secondary-tabs) and the footer (catalog-legal), so they live here.
+      || normalized.includes('/src/components/catalog/PortalSocialRow.tsx')
+      || normalized.includes('/src/components/catalog/portalSocialLinks.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
-      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PublicCatalogPage
-      // -> catalog-public, CatalogPage -> catalog, CatalogSecondaryTabs,
-      // LegalPages -> catalog-legal). Left to the generic
+      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PortalSocialRow
+      // -> catalog-public-core). Left to the generic
       // '/src/components/shared/' catch-all further down, it lands in 'app-shared' --
       // and since PublicCatalogPage (catalog-public) statically imports it, that
       // creates a catalog-public -> app-shared back-edge with no corresponding

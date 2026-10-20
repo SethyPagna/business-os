@@ -13,10 +13,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { FacebookIcon, InstagramIcon } from '../../shared/BrandIcons.tsx'
+import { PORTAL_SOCIAL_ICONS, PortalSocialText } from '../PortalSocialRow.tsx'
+import type { SocialPlatform } from '../../../utils/socialHandles.ts'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
@@ -76,7 +76,7 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 /** A storefront section the footer can jump to (the nav's own tabs). */
 export type PortalFooterQuickLink = { key: string; label: string; onSelect: () => void }
 /** An already-normalised external profile link (website/facebook/...). */
-export type PortalFooterSocialLink = { key: string; label: string; value: string }
+export type PortalFooterSocialLink = { key: string; label: string; value: string; platform?: string; accessibleName?: string; latin?: boolean }
 
 export type PortalFooterProps = {
   copy: CopyFn
@@ -98,8 +98,8 @@ const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-se
 const FOOTER_LINK_CLASS = 'inline-flex min-h-10 items-center text-sm leading-6 text-slate-700 underline-offset-2 transition hover:text-slate-900 hover:underline dark:text-neutral-200 dark:hover:text-white'
 
 function SocialIcon({ kind }: { kind: string }) {
-  const Icon = kind === 'facebook' ? FacebookIcon : kind === 'instagram' ? InstagramIcon : kind === 'telegram' ? Send : Globe
-  return <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+  const Icon = PORTAL_SOCIAL_ICONS[kind as SocialPlatform] || Globe
+  return <Icon className="h-4 w-4 shrink-0" />
 }
 
 /**
@@ -190,7 +190,7 @@ export default function PortalFooter({
 
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
-  const telegramLink = socialLinks.find((link) => link.key === 'telegram')
+  const telegramLink = socialLinks.find((link) => (link.platform ?? link.key) === 'telegram')
   const [concernsBefore, concernsAfter = ''] = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM).split('{contact}')
 
   const openPage = useCallback((page: LegalPageKey) => {
@@ -367,9 +367,9 @@ export default function PortalFooter({
               <ul className="flex flex-col">
                 {socialLinks.map((link) => (
                   <li key={link.key}>
-                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer">
-                      <SocialIcon kind={link.key} />
-                      <span className="notranslate break-words" translate="no">{link.label}</span>
+                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer" aria-label={link.accessibleName}>
+                      <SocialIcon kind={link.platform ?? link.key} />
+                      <PortalSocialText text={link.label} latin={link.latin ?? true} />
                     </a>
                   </li>
                 ))}
