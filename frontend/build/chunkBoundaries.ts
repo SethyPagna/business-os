@@ -16,6 +16,12 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // Reports. Unpinned, Rollup hoisted it (with all of reportModel.ts) into the
   // 'returns-read-api' manual chunk, which the storefront then had to fetch.
   ['/src/utils/businessTimeBounds.ts', 'shared-formatters'],
+  // Exact sale/report money helpers used by POS, Sales, Receipt and Reports.
+  // Unpinned, Rollup filed financialPrecision.ts inside 'dashboard-export',
+  // so every one of those pages statically loaded the export code and SheetJS.
+  ['/src/utils/financialPrecision.ts', 'money-core'],
+  ['/src/utils/reportMoney.ts', 'money-core'],
+  ['/src/utils/saleStatusResolution.ts', 'money-core'],
   ['/src/utils/permissions.ts', 'permissions-core'],
   ['/src/utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['/src/utils/workDrafts.ts', 'work-drafts'],

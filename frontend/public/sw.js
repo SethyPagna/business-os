@@ -3,11 +3,12 @@
  * Run: npm.cmd --prefix frontend run build:public-runtime
  */
 /**
- * Business OS offline app shell service worker.
+ * Business OS app shell service worker.
  *
  * This caches only the application shell and static build assets. API calls,
  * uploads, and user media always go to the live server or fail so business data
- * cannot be silently replaced by stale HTTP responses.
+ * cannot be silently replaced by stale HTTP responses. Offline selling is
+ * cancelled (26 Sep 2026): this worker never reads or replays queued writes.
  */
 const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
@@ -24,11 +25,6 @@ function isAdminHost(hostname) {
 function appShellUrlsForHost(hostname) {
     return [...APP_SHELL_URLS, ...(isAdminHost(hostname) ? STAFF_IDENTITY_URLS : SHOP_IDENTITY_URLS)];
 }
-const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
-const DB_NAME = 'BusinessOS';
-const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
-const RETRY_DELAY_MS = 30_000;
-const SYNC_LEASE_MS = 60_000;
 // How long the stale-asset recovery will wait for a newly requested build to
 // finish installing before it gives up on handing control over (see
 // releaseNewBuildForRecovery). Bounded so a worker stuck in its own install
@@ -44,54 +40,10 @@ const RECOVERY_TAKEOVER_TIMEOUT_MS = 30_000;
 // expensive mistake here); short enough that the fallback still beats a
 // browser's own navigation patience and the user never sees a blank tab.
 const RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS = 8_000;
-const OFFLINE_OWNER_REVIEW_MESSAGE = 'Keep this pending sale. Sign in to its original account and server to sync it. Older unowned sales need review in the current app; do not recreate or discard them.';
-// Standalone public runtime: parity-tested against offlineQueueOwnership.ts.
-function normalizeOfflineSaleOwner(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-        return null;
-    const owner = value;
-    if (owner.version !== 1 || !Number.isSafeInteger(owner.actor_id) || Number(owner.actor_id) <= 0)
-        return null;
-    if (owner.organization_id !== null && (!Number.isSafeInteger(owner.organization_id) || Number(owner.organization_id) <= 0))
-        return null;
-    if (owner.runtime !== 'cloudflare-workers' || typeof owner.authority !== 'string')
-        return null;
-    try {
-        const url = new URL(owner.authority);
-        if (!/^https?:$/.test(url.protocol) || url.origin !== owner.authority)
-            return null;
-    }
-    catch {
-        return null;
-    }
-    return { version: 1, actor_id: Number(owner.actor_id), organization_id: owner.organization_id, authority: owner.authority, runtime: 'cloudflare-workers' };
-}
-function offlineSaleOwnersMatch(left, right) {
-    const a = normalizeOfflineSaleOwner(left);
-    const b = normalizeOfflineSaleOwner(right);
-    return Boolean(a && b && a.actor_id === b.actor_id && a.organization_id === b.organization_id && a.authority === b.authority && a.runtime === b.runtime);
-}
-function sameQueuedSaleRevision(left, right) {
-    return Boolean(left && left._seq === right._seq && left.id === right.id && left.updated_at === right.updated_at
-        && left.status === right.status && left.sync_lease === right.sync_lease
-        && JSON.stringify(left.payload) === JSON.stringify(right.payload));
-}
-async function currentSaleReplayOwner(base) {
-    const response = await fetch(`${base}/api/sync/owner`, { credentials: 'include', cache: 'no-store', redirect: 'error' });
-    if (!response.ok)
-        return null;
-    const owner = normalizeOfflineSaleOwner((await response.json()).owner);
-    return owner?.authority === new URL(base).origin ? owner : null;
-}
-async function saleReplayAuthorityUnchanged(db, base) {
-    const current = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '');
-    return current === base;
-}
-const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024;
 const PRECACHE_CONCURRENCY = 4;
 // P4-4b fix 5: the deferred (non-eager) chunks are never a paint-blocking or
-// install-blocking gate -- they only need to be ready before the user
-// happens to open that route offline -- so they run at a lower concurrency
+// install-blocking gate -- they only make a not-yet-opened staff route open
+// from cache -- so they run at a lower concurrency
 // than the install-time precache to leave more of a constrained iOS
 // connection free for whatever the user is actually doing right after an
 // update installs.
@@ -99,6 +51,12 @@ const DEFERRED_PRECACHE_CONCURRENCY = 2;
 const CACHE_METADATA_URL = '/__business_os_cache_metadata__';
 const SHELL_POLICY = 1;
 const INCUMBENT_METADATA_URL = '/__business_os_incumbent__';
+// The UI language whose pack the staff app last loaded. A worker cannot read
+// the page's device settings, so it learns the language from the pack the page
+// requests and precaches only that pack at the next install; the other pack
+// stays on demand.
+const UI_LANGUAGE_URL = '/__business_os_ui_language__';
+const LANGUAGE_PACK_PATH = /^\/assets\/lang-([a-z]{2,3})-[A-Za-z0-9_-]{8}\.js$/;
 function validShellVersion(version) {
     return typeof version === 'string' && /^business-os-app-shell-[A-Za-z0-9_-]{1,128}$/.test(version);
 }
@@ -147,142 +105,22 @@ async function retainedStaticCaches() {
     return [incumbent, ...(Array.isArray(proof.migrationStaticCaches) ? proof.migrationStaticCaches : [])]
         .filter((name, index, names) => typeof name === 'string' && /^business-os-static-[A-Za-z0-9_-]{1,128}$/.test(name) && names.indexOf(name) === index);
 }
-const FILE_CHUNK_ENDPOINTS = {
-    init: '/api/sync/files/chunks/init',
-    chunk: '/api/sync/files/chunks/:uploadId/chunk',
-    complete: '/api/sync/files/chunks/:uploadId/complete',
-};
-function openBusinessDb() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME);
-        request.onerror = () => reject(request.error || new Error('IndexedDB unavailable'));
-        request.onsuccess = () => resolve(request.result);
-    });
-}
-function txDone(tx) {
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve(undefined);
-        tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
-        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-    });
-}
-function requestResult(request) {
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
-    });
-}
-async function readSetting(db, key) {
-    if (!db.objectStoreNames.contains('settings'))
-        return '';
-    const tx = db.transaction('settings', 'readonly');
-    const row = await requestResult(tx.objectStore('settings').get(key)).catch(() => null);
-    return row?.value || '';
-}
-function stableStringify(value) {
-    if (value == null || typeof value !== 'object')
-        return JSON.stringify(value);
-    if (Array.isArray(value))
-        return `[${value.map(stableStringify).join(',')}]`;
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
-}
-async function sha256(value) {
-    const bytes = new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value));
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-async function readQueuedBusinessOutbox(db) {
-    if (!db.objectStoreNames.contains('sync_outbox'))
-        return [];
-    const tx = db.transaction('sync_outbox', 'readonly');
-    const rows = await requestResult(tx.objectStore('sync_outbox').getAll());
-    return (Array.isArray(rows) ? rows : [])
-        .filter((row) => isReplayEligible(row))
-        .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-}
-async function putBusinessOutboxRow(db, row, updates = {}) {
-    if (!db.objectStoreNames.contains('sync_outbox'))
+async function rememberUiLanguage(language) {
+    const cache = await caches.open(APP_SHELL_CACHE);
+    const saved = await cache.match(UI_LANGUAGE_URL).then((response) => response?.json()).catch(() => null);
+    if (saved?.language === language)
         return;
-    const tx = db.transaction('sync_outbox', 'readwrite');
-    tx.objectStore('sync_outbox').put({ ...row, ...updates, updated_at: new Date().toISOString() });
-    await txDone(tx);
+    await cache.put(UI_LANGUAGE_URL, new Response(JSON.stringify({ language, at: Date.now() }), { headers: { 'Content-Type': 'application/json' } }));
 }
-async function deleteBusinessOutboxRow(db, row) {
-    if (!db.objectStoreNames.contains('sync_outbox') || row?._seq == null)
-        return;
-    const tx = db.transaction('sync_outbox', 'readwrite');
-    tx.objectStore('sync_outbox').delete(row._seq);
-    await txDone(tx);
-}
-async function readPendingFileChunks(db) {
-    if (!db.objectStoreNames.contains('offline_file_chunks'))
-        return [];
-    const tx = db.transaction('offline_file_chunks', 'readonly');
-    const rows = await requestResult(tx.objectStore('offline_file_chunks').getAll());
-    return (Array.isArray(rows) ? rows : [])
-        .filter((row) => ['pending', 'failed', 'manifest'].includes(String(row.status || 'pending')))
-        .sort((a, b) => String(a.upload_id || '').localeCompare(String(b.upload_id || '')) || Number(a.chunk_index || 0) - Number(b.chunk_index || 0));
-}
-async function readQueuedSales(db) {
-    if (!db.objectStoreNames.contains('sync_queue'))
-        return [];
-    const tx = db.transaction('sync_queue', 'readonly');
-    const store = tx.objectStore('sync_queue');
-    const rows = store.indexNames.contains('channel')
-        ? await requestResult(store.index('channel').getAll(OFFLINE_SALE_QUEUE_CHANNEL))
-        : await requestResult(store.getAll());
-    return (Array.isArray(rows) ? rows : [])
-        .filter((row) => row?.channel === OFFLINE_SALE_QUEUE_CHANNEL && row.payload)
-        .filter((row) => isReplayEligible(row))
-        .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-}
-function isReplayEligible(row) {
-    const status = String(row?.status || 'pending');
-    if (!['pending', 'failed', 'retry', 'syncing', 'quarantined'].includes(status))
-        return false;
-    if (status === 'syncing') {
-        const claimedAt = Date.parse(String(row?.updated_at || row?.created_at || ''));
-        if (Number.isFinite(claimedAt) && Date.now() - claimedAt < SYNC_LEASE_MS)
-            return false;
-    }
-    if (row?.retryable === false)
-        return false;
-    const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0;
-    return !Number.isFinite(retryAt) || retryAt <= Date.now();
-}
-async function putQueueRow(db, row, updates = {}, tableName = 'sync_queue') {
-    if (!db.objectStoreNames.contains(tableName) || row?._seq == null)
-        return null;
-    const tx = db.transaction(tableName, 'readwrite');
-    const done = txDone(tx);
-    const store = tx.objectStore(tableName);
-    let next = null;
-    const request = store.get(row._seq);
-    request.onsuccess = () => {
-        if (!sameQueuedSaleRevision(request.result, row))
-            return;
-        next = { ...request.result, ...updates, updated_at: new Date().toISOString() };
-        store.put(next);
-    };
-    await done;
-    return next;
-}
-async function deleteQueueRow(db, row) {
-    if (!db.objectStoreNames.contains('sync_queue') || row?._seq == null)
-        return false;
-    const tx = db.transaction('sync_queue', 'readwrite');
-    const done = txDone(tx);
-    const store = tx.objectStore('sync_queue');
-    let deleted = false;
-    const request = store.get(row._seq);
-    request.onsuccess = () => {
-        if (!sameQueuedSaleRevision(request.result, row))
-            return;
-        store.delete(row._seq);
-        deleted = true;
-    };
-    await done;
-    return deleted;
+// The newest choice across every shell generation: the incumbent's cache holds
+// it while a new build installs.
+async function rememberedUiLanguage() {
+    const names = (await caches.keys().catch(() => [])).filter(validShellVersion);
+    const saved = await Promise.all(names.map((name) => caches.open(name)
+        .then((cache) => cache.match(UI_LANGUAGE_URL)).then((response) => response?.json()).catch(() => null)));
+    const newest = saved.filter((entry) => typeof entry?.language === 'string' && /^[a-z]{2,3}$/.test(entry.language) && Number.isFinite(entry.at))
+        .sort((a, b) => b.at - a.at)[0];
+    return newest?.language || '';
 }
 function broadcastSyncEvent(type, detail = {}) {
     return self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
@@ -428,36 +266,34 @@ async function precacheAppShell() {
     const precachePayload = precacheResponse
         ? await precacheResponse.clone().json().catch(() => null)
         : null;
-    const generatedAssets = Array.isArray(precachePayload?.assets)
-        ? precachePayload.assets.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
-        : [];
+    // Each host precaches its own plan: the storefront only its startup
+    // closure, the staff host its shell plus the remembered UI language pack.
+    // A manifest without host plans (a rollback, a test fixture) is one plan.
+    const adminHost = isAdminHost(self.location.hostname);
+    const plan = precachePayload?.hosts?.[adminHost ? 'admin' : 'shop'] || precachePayload;
+    const assetUrls = (value) => (Array.isArray(value)
+        ? value.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+        : []);
     // P4-4b fix 5: an older/degraded manifest without eager/deferred fields
-    // (a manifest fetched before this worker's own build, or a manifest a
-    // future rollback serves) falls back to treating every generated asset as
-    // eager -- the pre-fix behaviour -- rather than silently dropping the
-    // deferred half of the app forever.
-    const eagerAssets = Array.isArray(precachePayload?.eager)
-        ? precachePayload.eager.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
-        : generatedAssets;
-    const deferredAssets = Array.isArray(precachePayload?.deferred)
-        ? precachePayload.deferred.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
-        : [];
+    // falls back to treating every generated asset as eager -- the pre-fix
+    // behaviour -- rather than silently dropping the deferred half forever.
+    const eagerAssets = Array.isArray(plan?.eager) ? assetUrls(plan.eager) : assetUrls(plan?.assets);
+    const deferredAssets = assetUrls(plan?.deferred);
     const staticCache = await caches.open(STATIC_CACHE);
-    const requiredStartupAssets = Array.isArray(precachePayload?.required)
-        ? precachePayload.required.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
-        : [];
+    const requiredStartupAssets = assetUrls(plan?.required);
+    const uiLanguage = adminHost ? await rememberedUiLanguage() : '';
+    const languagePack = uiLanguage ? assetUrls([precachePayload?.languagePacks?.[uiLanguage]]) : [];
+    if (uiLanguage)
+        await rememberUiLanguage(uiLanguage).catch(() => { });
     const requiredEntryAssets = [...new Set([...htmlEntryAssets, ...requiredStartupAssets])];
     const entryResults = await mapWithConcurrency(requiredEntryAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
     if (entryResults.some((result) => result.status === 'rejected')) {
         throw new Error('Application entry assets could not be cached');
     }
-    // The eager set (app shell + entry + active language packs + the routes an
-    // offline POS needs) makes install take a little longer than the bare
-    // shell, but still nowhere near the old "every generated chunk" precache --
-    // and it must not be a hard install gate either: a single optional/missing
-    // chunk should never prevent a new worker from installing on a memory- or
-    // network-constrained iPhone.
-    const optionalEagerAssets = [...new Set(eagerAssets.filter((url) => !requiredEntryAssets.includes(url)))];
+    // The eager set (staff shell + the active language pack) must not be a hard
+    // install gate: a single optional/missing chunk should never prevent a new
+    // worker from installing on a memory- or network-constrained iPhone.
+    const optionalEagerAssets = [...new Set([...eagerAssets, ...languagePack].filter((url) => !requiredEntryAssets.includes(url)))];
     await mapWithConcurrency(optionalEagerAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
     await cache.put(CACHE_METADATA_URL, new Response(JSON.stringify({
         version: APP_SHELL_VERSION,
@@ -483,268 +319,6 @@ async function cacheNamesToRetain(keys) {
         retained.add(previous.replace('business-os-app-shell-', 'business-os-static-'));
     }
     return retained;
-}
-function nextRetryAt(row) {
-    const retryCount = Math.max(0, Number(row?.retry_count || 0) + 1);
-    const delay = Math.min(5 * 60_000, RETRY_DELAY_MS * Math.max(1, retryCount));
-    return {
-        retry_count: retryCount,
-        retry_at: new Date(Date.now() + delay).toISOString(),
-    };
-}
-async function markQueueFailure(db, row, error, reason = 'sync_failed') {
-    await putQueueRow(db, row, {
-        status: 'failed',
-        error: error?.message || String(error || 'Sync failed'),
-        reason,
-        ...nextRetryAt(row),
-    });
-}
-async function replayQueuedSale(db, row, base) {
-    const quarantine = (target) => putQueueRow(db, target, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE });
-    const owner = normalizeOfflineSaleOwner(row.payload?.offline_owner);
-    if (!owner || owner.authority !== new URL(base).origin || !await saleReplayAuthorityUnchanged(db, base)) {
-        await quarantine(row);
-        return false;
-    }
-    const before = await currentSaleReplayOwner(base).catch(() => null);
-    if (!offlineSaleOwnersMatch(owner, before)) {
-        await quarantine(row);
-        return false;
-    }
-    const claimed = await putQueueRow(db, row, { status: 'syncing', error: null, sync_lease: crypto.randomUUID() });
-    if (!claimed)
-        return false;
-    row = claimed;
-    try {
-        if (!await saleReplayAuthorityUnchanged(db, base)) {
-            await quarantine(row);
-            return false;
-        }
-        // Round-trip through JSON so the digest is computed over the SAME bytes the
-        // server will re-digest from the parsed request body. A structured-clone of
-        // the sale keeps undefined-valued keys (POS sets `delivery_actual_cost_usd:
-        // undefined` on every non-delivery sale), but `JSON.stringify` on the wire
-        // drops them -- so digesting `row.payload` directly produced a hash the
-        // server could never reproduce and EVERY such sale came back
-        // `payload_digest_failed`. Cleaning first makes both sides agree.
-        const payload = JSON.parse(JSON.stringify(row.payload || {}));
-        const operation = {
-            id: row.id,
-            client_request_id: row.client_request_id || row.id || `legacy_sale_${row._seq || Date.now()}`,
-            operation_id: 'sales.create',
-            schema_version: 1,
-            base_updated_at: row.base_updated_at || row.created_at || new Date().toISOString(),
-            payload_digest: await sha256(payload),
-            payload,
-        };
-        const response = await fetch(`${base}/api/sync/outbox`, {
-            method: 'POST',
-            credentials: 'include',
-            redirect: 'error',
-            headers: {
-                'Content-Type': 'application/json',
-                'bypass-tunnel-reminder': 'true',
-            },
-            body: JSON.stringify({ operations: [operation] }),
-        });
-        const text = await response.text().catch(() => '');
-        const responsePayload = (() => { try {
-            return JSON.parse(text);
-        }
-        catch (_) {
-            return null;
-        } })();
-        const status = Number(response.status || 0);
-        // CRITICAL: the outbox endpoint returns HTTP 200 with { success:false,
-        // results:[...] } for a per-operation rejection or failure -- only a true
-        // write conflict is 409. So `response.ok` is NOT proof the sale was applied.
-        // Inspect the per-operation result and delete the queued sale ONLY when it
-        // genuinely landed (status === 'applied'); otherwise the sale is preserved
-        // and retried. Deleting on a bare 200 discarded digest-rejected/validation-
-        // rejected sales as "synced" and lost the revenue with no trace.
-        const result = Array.isArray(responsePayload?.results) ? responsePayload.results.find((entry) => entry.client_request_id === operation.client_request_id && entry.operation_id === 'sales.create') : null;
-        const applied = response.ok && result?.status === 'applied'
-            && result.response?.client_request_id === operation.client_request_id && offlineSaleOwnersMatch(owner, result.response?.offline_owner);
-        if (applied) {
-            const after = await currentSaleReplayOwner(base).catch(() => null);
-            if (!offlineSaleOwnersMatch(owner, after) || !await saleReplayAuthorityUnchanged(db, base)) {
-                await quarantine(row);
-                return false;
-            }
-            if (!await deleteQueueRow(db, row))
-                return false;
-            broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', {
-                channel: row.channel,
-                entity_name: row.entity_name || responsePayload?.receiptNumber || responsePayload?.receipt_number || null,
-            });
-            return true;
-        }
-        if (status === 401 || status === 403 || result?.code === 'auth_required' || String(result?.code || '').startsWith('offline_owner_')) {
-            await quarantine(row);
-            return false;
-        }
-        // The server refused this sale for good (for example a claim older than its
-        // window). Keep the row, mark it failed with the server's code and stop: a
-        // rejected result is not a transient error, so it must never reach the
-        // retry-with-backoff path below.
-        if (result?.status === 'rejected') {
-            await putQueueRow(db, row, {
-                status: 'failed',
-                retry_at: null,
-                retryable: false,
-                reason: String(result.code || 'rejected'),
-                error: result.error || result.code || 'The server refused this sale.',
-            });
-            return false;
-        }
-        if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
-            await putQueueRow(db, row, {
-                status: 'conflict',
-                retry_at: null,
-                conflict: true,
-                reason: 'server_newer_version',
-                error: result?.error || responsePayload?.error || text || 'Server has a newer version. Review before syncing.',
-            });
-            broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
-                channel: row.channel,
-                entity_name: row.entity_name || null,
-            });
-            return false;
-        }
-        // Anything else -- a digest rejection, a validation failure, a transient
-        // error -- keeps the sale queued (markQueueFailure preserves the row with
-        // backoff), so it is retried rather than silently dropped.
-        throw new Error(result?.error || result?.code || responsePayload?.error || text || `Sync failed with HTTP ${status || 'error'}`);
-    }
-    catch (error) {
-        // Only the exact claimed revision may be failed; never resurrect a row
-        // that another runtime completed or replaced while this request waited.
-        await markQueueFailure(db, row, error);
-        return false;
-    }
-}
-async function syncOutbox() {
-    let db;
-    try {
-        db = await openBusinessDb();
-        const base = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '');
-        if (!base) {
-            broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
-                reason: 'server_required',
-            });
-            return;
-        }
-        const businessRows = await readQueuedBusinessOutbox(db);
-        if (businessRows.some((row) => row.encrypted_payload)) {
-            broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
-                reason: 'vault_locked',
-                error: 'Unlock the offline vault to sync encrypted offline edits.',
-            });
-        }
-        const plaintextRows = businessRows.filter((row) => row.payload && !row.encrypted_payload);
-        for (const row of plaintextRows) {
-            // Current sale admission uses sales:create in sync_queue, with its
-            // owner-scoped lease and exact receipt checks above. Never send a legacy
-            // generic outbox sale through the less strict generic acknowledgement.
-            if (row.operation_id === 'sales.create') {
-                await putQueueRow(db, row, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE }, 'sync_outbox');
-                continue;
-            }
-            await putBusinessOutboxRow(db, row, { status: 'syncing', error: null });
-            const response = await fetch(`${base}/api/sync/outbox`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'bypass-tunnel-reminder': 'true',
-                },
-                body: JSON.stringify({
-                    operations: [{
-                            id: row.id,
-                            client_request_id: row.client_request_id || row.id,
-                            operation_id: row.operation_id,
-                            schema_version: row.schema_version || 1,
-                            base_updated_at: row.base_updated_at || row.created_at || new Date().toISOString(),
-                            payload_digest: row.payload_digest || await sha256(row.payload || {}),
-                            payload: row.payload || {},
-                        }],
-                }),
-            });
-            const responseText = await response.text().catch(() => '');
-            const responsePayload = (() => { try {
-                return JSON.parse(responseText);
-            }
-            catch (_) {
-                return null;
-            } })();
-            const result = Array.isArray(responsePayload?.results) ? responsePayload.results[0] : null;
-            const status = Number(response.status || 0);
-            const applied = status < 400 && (result
-                ? result.status === 'applied'
-                : response.ok && responsePayload?.success !== false);
-            if (applied) {
-                await deleteBusinessOutboxRow(db, row);
-                broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', { channel: row.operation_id, entity_name: row.entity_label || null });
-            }
-            else if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
-                await putBusinessOutboxRow(db, row, { status: 'conflict', conflict: true, retry_at: null, reason: 'write_conflict' });
-                broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', { channel: row.operation_id, entity_name: row.entity_label || null });
-            }
-            else if (status === 401 || status === 403 || result?.code === 'auth_required') {
-                await putBusinessOutboxRow(db, row, {
-                    status: 'failed',
-                    error: result?.error || responsePayload?.error || responseText || 'Sign in again before background sync can continue.',
-                    retry_at: null,
-                    reason: 'auth_required',
-                });
-                broadcastSyncEvent('BUSINESS_OS_OUTBOX_AUTH_REQUIRED', { channel: row.operation_id });
-            }
-            else if (result?.status === 'rejected') {
-                await putBusinessOutboxRow(db, row, {
-                    status: 'failed',
-                    retry_at: null,
-                    retryable: false,
-                    reason: String(result.code || 'rejected'),
-                    error: result.error || result.code || 'The server refused this operation.',
-                });
-            }
-            else {
-                await putBusinessOutboxRow(db, row, {
-                    status: 'failed',
-                    error: result?.error || result?.code || responsePayload?.error || responseText || `Sync failed with HTTP ${status || 'error'}`,
-                    ...nextRetryAt(row),
-                });
-            }
-        }
-        const fileChunks = await readPendingFileChunks(db);
-        if (fileChunks.length) {
-            broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
-                reason: 'file_chunks_waiting',
-                chunkSize: OFFLINE_FILE_CHUNK_SIZE,
-                error: 'Encrypted file chunks are queued and will sync after vault unlock.',
-            });
-        }
-        // Do not replay legacy POS sales in a background event. Keep sync_queue
-        // intact for explicit original-account recovery in the foreground.
-    }
-    catch (error) {
-        broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
-            reason: 'sync_failed',
-            error: error?.message || String(error || 'Sync failed'),
-        });
-    }
-    finally {
-        try {
-            db?.close?.();
-        }
-        catch (_) { }
-    }
-}
-function syncOutboxOnce() {
-    // Registrations/messages left by older clients must not replay ANY business
-    // writes after this upgrade. Existing rows remain available for review.
-    return Promise.resolve({ success: false, manual_recovery_required: true });
 }
 // Installation never reloads documents. Legacy shell-policy migration can
 // replace the controller while old documents and drafts keep running; their
@@ -825,15 +399,7 @@ self.addEventListener('activate', (event) => {
     // here is a correctness requirement the way the app shell is.
     precacheDeferredAssets().catch(() => { });
 });
-self.addEventListener('sync', (event) => {
-    if (event.tag === OUTBOX_SYNC_TAG) {
-        event.waitUntil(syncOutboxOnce());
-    }
-});
 self.addEventListener('message', (event) => {
-    if (event?.data?.type === 'BUSINESS_OS_SYNC_NOW') {
-        event.waitUntil?.(syncOutboxOnce());
-    }
     if (event?.data?.type === 'BUSINESS_OS_SKIP_WAITING') {
         event.waitUntil?.(self.skipWaiting());
     }
@@ -1208,6 +774,9 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(appShellFallback(request, event));
         return;
     }
+    const language = url.pathname.match(LANGUAGE_PACK_PATH)?.[1];
+    if (language && isAdminHost(self.location.hostname))
+        event.waitUntil(rememberUiLanguage(language).catch(() => { }));
     if (!isCacheableStaticPath(url.pathname))
         return;
     // P4-4b: every cacheable static path (hashed build assets AND the

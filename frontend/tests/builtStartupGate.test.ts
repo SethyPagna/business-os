@@ -38,7 +38,9 @@ try {
   assert.match(missing.stdout + missing.stderr, /ENOENT/)
   const assets = path.join(fixtureFrontend, 'dist/assets')
   fs.mkdirSync(assets, { recursive: true })
-  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs']) {
+  // The till, sales and report pages and the scanner vendor are closure-checked too (6.0.880).
+  const staticChecked = ['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales', 'vendor-zxing']
+  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...staticChecked]) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
   // The validator also checks the language packs (I6-1): JSON text behind a
@@ -54,7 +56,15 @@ try {
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 7 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 19 chunks, zero cycles/)
+  // A till page that statically imports SheetJS must fail the gate.
+  fs.writeFileSync(path.join(assets, 'vendor-xlsx-12345678.js'), 'export const xlsx = 1;')
+  fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'import { xlsx } from "./vendor-xlsx-12345678.js"; export const value = xlsx;')
+  const xlsxOnTill = verify()
+  assert.notEqual(xlsxOnTill.status, 0)
+  assert.match(xlsxOnTill.stdout + xlsxOnTill.stderr, /POS statically pulls vendor-xlsx/)
+  fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'export const value = 1;')
+  fs.rmSync(path.join(assets, 'vendor-xlsx-12345678.js'))
   fs.writeFileSync(path.join(assets, 'cycle-a.js'), 'export { value } from "./cycle-b.js";')
   fs.writeFileSync(path.join(assets, 'cycle-b.js'), 'export { value } from "./cycle-a.js";')
   const cyclic = verify()
