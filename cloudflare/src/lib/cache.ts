@@ -132,9 +132,25 @@ export async function getVersion(kv: KVNamespace, namespace: string): Promise<st
   return cacheVersionToken('kv', value)
 }
 
+/// A KV outage is not an absent key: an absent key may mean "never bumped" (the
+// zero token), an unreadable one may not. `failed` lets the readers below fall
+// through to D1 and, when D1 does not hold the namespace either, refuse to
+// invent a version (callers treat a throw as "no safe key").
+async function readKvVersion(env: Env, namespace: string): Promise<{ value: string | null; failed: boolean }> {
+  try {
+    return { value: await env.CACHE.get(cacheVersionKey(namespace)), failed: false }
+  } catch {
+    return { value: null, failed: true }
+  }
+}
+
+function unreadableVersion(namespace: string): Error {
+  return new Error(`Cache version for ${namespace} is unreadable: KV failed and D1 does not hold it`)
+}
+
 export async function getVersionWithFallback(env: Env, namespace: string): Promise<string> {
-  const fromKv = await env.CACHE.get(cacheVersionKey(namespace))
-  if (fromKv != null) return cacheVersionToken('kv', fromKv)
+  const fromKv = await readKvVersion(env, namespace)
+  if (fromKv.value != null) return cacheVersionToken('kv', fromKv.value)
   try {
     const row = await getDb(env)
       .prepare(`SELECT version FROM cache_versions WHERE namespace = @namespace`)
@@ -145,20 +161,37 @@ export async function getVersionWithFallback(env: Env, namespace: string): Promi
     // source available, use the generation-qualified zero token; the cache
     // remains correct, merely less likely to hit until the next mutation.
   }
+  if (fromKv.failed) throw unreadableVersion(namespace)
   return cacheVersionToken('kv', '0')
 }
 
+const versionMemo = new Map<string, { token: string; at: number }>()
+
 // Several namespaces at once, same answer per namespace as getVersionWithFallback: KV first, then ONE D1 read for
 // every namespace KV does not hold, so a reader of N namespaces costs at most one statement instead of up to N.
-export async function getVersionsWithFallback(env: Env, namespaces: readonly string[]): Promise<string[]> {
-  const fromKv = await Promise.all(namespaces.map((namespace) => env.CACHE.get(cacheVersionKey(namespace))))
-  const fromD1 = await readD1Versions(env, namespaces.filter((_, index) => fromKv[index] == null))
-  return namespaces.map((namespace, index) => {
-    const kv = fromKv[index]
-    if (kv != null) return cacheVersionToken('kv', kv)
-    const d1 = fromD1.get(namespace)
-    return d1 != null ? cacheVersionToken('d1', d1) : cacheVersionToken('kv', '0')
+// `memoMs` lets a hot anonymous reader reuse this isolate's answer briefly instead of paying N KV reads per request;
+// a bump in this isolate drops the memo at once, other isolates see it within memoMs on top of KV's own lag.
+export async function getVersionsWithFallback(env: Env, namespaces: readonly string[], options: { memoMs?: number } = {}): Promise<string[]> {
+  const now = Date.now()
+  const memoMs = options.memoMs ?? 0
+  const remembered = namespaces.map((namespace) => {
+    const entry = memoMs > 0 ? versionMemo.get(namespace) : undefined
+    return entry && now - entry.at < memoMs ? entry.token : null
   })
+  const missing = namespaces.filter((_, index) => remembered[index] == null)
+  const fromKv = await Promise.all(missing.map((namespace) => readKvVersion(env, namespace)))
+  const fromD1 = await readD1Versions(env, missing.filter((_, index) => fromKv[index].value == null))
+  const read = new Map<string, string>()
+  missing.forEach((namespace, index) => {
+    const kv = fromKv[index]
+    const d1 = fromD1.get(namespace)
+    const token = kv.value != null ? cacheVersionToken('kv', kv.value) : d1 != null ? cacheVersionToken('d1', d1) : null
+    if (!token && kv.failed) throw unreadableVersion(namespace)
+    // Neither source holds it (never bumped): the zero token, not remembered.
+    if (token && memoMs > 0) versionMemo.set(namespace, { token, at: now })
+    read.set(namespace, token ?? cacheVersionToken('kv', '0'))
+  })
+  return namespaces.map((namespace, index) => remembered[index] ?? read.get(namespace) as string)
 }
 
 export async function versionedKey(kv: KVNamespace, namespace: string, suffix: string): Promise<string> {
@@ -199,9 +232,29 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 
 // Missing KV versions share one D1 lookup and one set-based upsert. KV quota
 // admission covers all KV candidates once; per-key writes remain sequential.
+// Every cache version a reader keys on. Leaving maintenance (a finished or force-cleared restore, a
+// completed or aborted branch cutover) moves them all, so nothing cached from before or during it is
+// served afterwards (the storefront stores nothing while maintenance is held; see routes/portal.ts
+// portalMaintenanceHeld).
+export const MAINTENANCE_CACHE_NAMESPACES = [
+  'products', 'settings', 'stock', 'promotions', 'sales', 'returns',
+  'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log',
+]
+
+// Never throws: the hold is already released and the caches age out by TTL regardless. Callers invoke
+// it only after maintenance was actually released.
+export async function invalidateCachesAfterMaintenance(env: Env, source: string): Promise<void> {
+  try {
+    await bumpVersions(env, MAINTENANCE_CACHE_NAMESPACES)
+  } catch (error) {
+    console.error(`[${source}] cache versions not advanced after maintenance ended`, error)
+  }
+}
+
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return
+  for (const namespace of unique) versionMemo.delete(namespace)
 
   const d1Upserts: Array<{ namespace: string; minimumVersion: number }> = []
 
@@ -261,6 +314,8 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
   }
 
   if (d1Upserts.length) await bumpVersionsInD1(env, d1Upserts)
+  // Again after the writes: a reader that ran while they were in flight may have remembered the old value.
+  for (const namespace of unique) versionMemo.delete(namespace)
 }
 
 async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; minimumVersion: number }>): Promise<void> {

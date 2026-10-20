@@ -2,7 +2,7 @@ import { loyaltyAccrualSql, loyaltyPointsEnabled, LOYALTY_DISABLED_CODE, LOYALTY
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, getVersionsWithFallback } from '../lib/cache'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -12,7 +12,7 @@ import { getPlanLimits } from '../lib/planTier'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday } from '../lib/businessDateWindow'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
-import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, isPrivateStorefrontFieldName, normalizePortalImageAlt, plainText, portalLanguageCode, PORTAL_TRANSLATED_COLLECTION_NAMES, type PortalTranslatedCollectionName } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -20,7 +20,7 @@ import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse, listPortalAiProviderDisclosures } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { limitSearchTermGroups, normalizeSearchText, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -39,6 +39,17 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 // runFuzzyFallbackMatch for why/when this runs.
 const PORTAL_FUZZY_FALLBACK_CANDIDATE_LIMIT = 3000
 const PORTAL_FUZZY_FALLBACK_MATCH_CAP = 500
+// A typo is worth the 3,000-row scan only for text a shopper types: a word or
+// a short phrase. Longer or many-word text that matched nothing is not a typo.
+const PORTAL_FUZZY_MIN_CHARS = 3
+const PORTAL_FUZZY_MAX_CHARS = 40
+const PORTAL_FUZZY_MAX_WORDS = 4
+
+export function portalFuzzyFallbackAllowed(searchText: string): boolean {
+  const text = normalizeSearchText(searchText)
+  return text.length >= PORTAL_FUZZY_MIN_CHARS && text.length <= PORTAL_FUZZY_MAX_CHARS
+    && tokenizeSearchWords(text, PORTAL_FUZZY_MAX_WORDS + 1).length <= PORTAL_FUZZY_MAX_WORDS
+}
 
 function toNumber(value: unknown, fallback = 0): number {
   const num = Number(value)
@@ -211,14 +222,15 @@ const PORTAL_TRANSLATED_CONFIG_FIELDS = [
 ]
 const PORTAL_TRANSLATED_LINK_LABELS = ['website', 'facebook', 'instagram', 'telegram']
 const PORTAL_TRANSLATED_PRODUCT_FIELDS = ['name', 'description', 'category', 'brand']
-const PORTAL_TRANSLATED_COLLECTIONS: ReadonlyArray<[name: string, fields: readonly string[], maxEntries: number]> = [
-  ['aboutBlocks', ['title', 'body'], MAX_PORTAL_ABOUT_BLOCKS],
-  ['promoItems', ['eyebrow', 'title', 'subtitle', 'body', 'ctaLabel'], MAX_PORTAL_PROMO_ITEMS],
-  ['faqItems', ['question', 'answer'], MAX_PORTAL_FAQ_ITEMS],
-  ['products', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
-  ['catalogProducts', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
-  ['catalog', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
-]
+// Keyed by the name list the settings save checks entry keys against (lib/portalText.ts), so the two cannot drift.
+const PORTAL_TRANSLATED_COLLECTION_SHAPES: Record<PortalTranslatedCollectionName, [fields: readonly string[], maxEntries: number]> = {
+  aboutBlocks: [['title', 'body'], MAX_PORTAL_ABOUT_BLOCKS],
+  promoItems: [['eyebrow', 'title', 'subtitle', 'body', 'ctaLabel'], MAX_PORTAL_PROMO_ITEMS],
+  faqItems: [['question', 'answer'], MAX_PORTAL_FAQ_ITEMS],
+  products: [PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+  catalogProducts: [PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+  catalog: [PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+}
 
 type PlainRecord = Record<string, unknown>
 
@@ -257,7 +269,8 @@ function normalizeTranslatedCollection(value: unknown, fields: readonly string[]
   }
   if (!isPlainRecord(value)) return null
   const entries = Object.entries(value)
-    .filter(([key]) => PORTAL_TRANSLATION_ENTRY_KEY.test(key))
+    // A key naming a private field would fail the publish scan and take the storefront down with it.
+    .filter(([key]) => PORTAL_TRANSLATION_ENTRY_KEY.test(key) && !isPrivateStorefrontFieldName(key))
     .map(([key, entry]): [string, PlainRecord] => [key, pickTranslatedTexts(entry, fields)])
     .filter(([, entry]) => hasEntries(entry))
     .slice(0, maxEntries)
@@ -268,7 +281,8 @@ function normalizeTranslationBlock(block: PlainRecord): PlainRecord {
   const normalized = pickTranslatedTexts(block, PORTAL_TRANSLATED_CONFIG_FIELDS)
   const linkLabels = pickTranslatedTexts(block.linkLabels, PORTAL_TRANSLATED_LINK_LABELS)
   if (hasEntries(linkLabels)) normalized.linkLabels = linkLabels
-  for (const [name, fields, maxEntries] of PORTAL_TRANSLATED_COLLECTIONS) {
+  for (const name of PORTAL_TRANSLATED_COLLECTION_NAMES) {
+    const [fields, maxEntries] = PORTAL_TRANSLATED_COLLECTION_SHAPES[name]
     const collection = normalizeTranslatedCollection(block[name], fields, maxEntries)
     if (collection) normalized[name] = collection
   }
@@ -822,9 +836,11 @@ function portalStockStatusFor(quantity: number, outThreshold: number, lowThresho
   return 'in_stock'
 }
 
-async function attachPortalStockStatus(env: Env, products: Array<Record<string, unknown>>) {
+// With the merchant's stock-status switch off the statuses are not computed or
+// published at all (hidden: true); membership filtering stays server-side.
+async function attachPortalStockStatus(env: Env, products: Array<Record<string, unknown>>): Promise<{ hidden: boolean; products: Array<Record<string, unknown>> }> {
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
-  if (!ids.length) return products
+  if (!ids.length) return { hidden: false, products }
   const db = getDb(env)
   const [branchRows, thresholdRows] = await Promise.all([
     db.prepare(`
@@ -832,10 +848,11 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
     `).all<{ id: number }>(),
     db.prepare(`
       SELECT key, value FROM settings
-      WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold')
+      WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold', 'customer_portal_show_stock_status')
     `).all<{ key: string; value: string }>(),
   ])
   const thresholdSettings = Object.fromEntries((thresholdRows || []).map((row) => [row.key, row.value]))
+  if (!normalizeBoolean(thresholdSettings.customer_portal_show_stock_status, true)) return { hidden: true, products: [] }
   const useGlobalThresholds = String(thresholdSettings.customer_portal_stock_threshold_mode || '') === 'global'
   const globalLow = Number(thresholdSettings.customer_portal_low_stock_threshold ?? 10)
   const globalOut = Number(thresholdSettings.customer_portal_out_of_stock_threshold ?? 0)
@@ -850,7 +867,7 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
   const quantityByProductBranch = new Map<string, number>()
   for (const row of stockRows) quantityByProductBranch.set(`${row.product_id}:${row.branch_id}`, row.quantity)
 
-  return products.map((product) => {
+  return { hidden: false, products: products.map((product) => {
     const {
       stock_quantity: rawQuantity,
       low_stock_threshold: rawLow,
@@ -869,7 +886,7 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
         status: portalStockStatusFor(quantityByProductBranch.get(`${productId}:${branch.id}`) || 0, outThreshold, lowThreshold),
       })),
     }
-  })
+  }) }
 }
 
 async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
@@ -985,8 +1002,10 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // catalog page from attachPortalStockStatus) the moment this query alone
   // failed, turning one degraded facet into a 500 for the entire storefront.
   // Settle it independently and fall back to an empty rail.
-  const [itemsWithStockStatus, initials] = await Promise.all([
-    attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>),
+  // 6.0.889: the page leaves here WITHOUT stock -- it is the cacheable body;
+  // withLivePortalStock attaches statuses per response (see Public read caching).
+  const [itemsWithoutStock, initials] = await Promise.all([
+    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>),
     // Wrapped in Promise.resolve() before .catch() so this settles
     // independently of the fixture's exact return shape (a real D1
     // PreparedStatement.all() is already a Promise, but this must not
@@ -1001,7 +1020,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     `).all<{ value: string; count: number }>()).catch(() => [] as { value: string; count: number }[]),
   ])
   return {
-    items: itemsWithStockStatus,
+    items: itemsWithoutStock,
     total,
     page,
     pageSize,
@@ -1016,70 +1035,499 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Public read caching
+// Public read caching (6.0.889)
 // ---------------------------------------------------------------------------
-// Nothing on this router was cached: every storefront page load ran the full
-// settings + meta + catalog query set against D1. With ~10,000 products and
-// real visitor traffic that is the single largest avoidable load in the app,
-// and it scales with visitors rather than with data changes.
+// Workers Cache API (`caches.default`), not KV: populating a KV entry costs a
+// write and KV writes are capped per day (lib/quotaGuard.ts); the Cache API is
+// the per-PoP HTTP cache with no such cap. Every endpoint here is anonymous
+// and returns nothing visitor-specific.
 //
-// These use the Workers Cache API (via cachedJsonResponse), NOT KV, and the
-// distinction matters. KV *reads* are generous at 100,000/day, but populating
-// a KV cache entry costs a WRITE, and writes are capped at 1,000/day -- with
-// per-PoP cache misses that budget disappears fast, which is exactly the
-// ceiling lib/quotaGuard.ts exists to protect. The Cache API has no
-// comparable daily write cap: it is the same HTTP cache every Worker already
-// has, keyed by request URL.
-//
-// Safe to share between visitors because every endpoint below is
-// unauthenticated and returns nothing visitor-specific. Membership lookup and
-// the submission endpoints are deliberately NOT cached for that reason.
-//
-// Keyed on the products cache version, so any product/stock/price mutation
-// invalidates the whole storefront at once through the same bumpVersion path
-// admin already uses -- no separate invalidation to keep in sync.
-const PORTAL_CONFIG_TTL_SECONDS = 60
-const PORTAL_CATALOG_TTL_SECONDS = 30
+// A catalog response is two edge entries:
+//   body  -- the page/search/meta/config payload with every stock field
+//            removed, keyed on the products + settings versions. Sales bump
+//            only 'stock', so a sale no longer forces the expensive rebuild
+//            (48k + 36k + 12k rows cold @3,000 products, AUDIT-D1-COST row 11).
+//   stock -- stock_status + branch_availability for that body's ids, keyed on
+//            products + settings + stock versions and kept at most
+//            PORTAL_STOCK_TTL_SECONDS whatever any version says.
+// Staleness a shopper can see (the browser revalidates every use, 304 when
+// unchanged):
+//   - stock badge: <= 30 s after a sale/stock change (stock entry TTL; usually
+//     sooner, as the stock version changes the key);
+//   - membership that depends on stock (out-of-stock hidden, stock or branch
+//     filter): <= 30 s, those bodies use the same TTL;
+//   - catalog/config edits: as soon as the bumped version reaches the PoP
+//     (KV, typically < 60 s), never more than 300 s;
+//   - promotion rules: a body never outlives the next rule start/end. A
+//     per-product discount window may reorder "featured" up to 300 s late;
+//     prices are computed in the browser against its own clock.
+// Nothing is sold on the storefront (no checkout, no payment), so a stale
+// "in stock" badge cannot oversell: the sale itself is made at POS, which
+// checks live lot stock.
+export const PORTAL_BODY_TTL_SECONDS = 300
+export const PORTAL_STOCK_TTL_SECONDS = 30
+export const PORTAL_PROMOTIONS_TTL_SECONDS = 60
+export const PORTAL_QUERY_MAX_CHARS = 200
+// Percent-encoded: a Khmer character costs 9 characters here, so this only stops absurd URLs. The decoded
+// per-field caps below are the real bounds.
+const PORTAL_RAW_QUERY_MAX_CHARS = 8192
+// Version reads are remembered this long per isolate (lib/cache.ts getVersionsWithFallback).
+const PORTAL_VERSION_MEMO_MS = 2000
+// Cold searches (an edge miss that would run the producer) one isolate runs at once; more answer 503.
+export const PORTAL_COLD_SEARCH_MAX_CONCURRENT = 4
+const PORTAL_LIST_MAX_VALUES = 20
+const PORTAL_FACET_VALUE_MAX_CHARS = 100
+const PORTAL_PAGE_MAX = 10_000
+const PORTAL_ID_MAX = 2_147_483_647
+export const PORTAL_PUBLIC_CACHE_CONTROL = 'public, no-cache'
+export const PORTAL_PRIVATE_CACHE_CONTROL = 'private, no-store'
 
-const PORTAL_SEARCH_CACHE_PARAMS = [
+export type PortalPublicRoute = 'config' | 'bootstrap' | 'meta' | 'products' | 'search' | 'promotions'
+
+export const PORTAL_PUBLIC_ROUTES: Readonly<Record<string, PortalPublicRoute>> = {
+  '/api/portal/config': 'config',
+  '/api/portal/bootstrap': 'bootstrap',
+  '/api/portal/catalog/meta': 'meta',
+  '/api/portal/catalog/products': 'products',
+  '/api/portal/catalog/products/search': 'search',
+  '/api/portal/promotions': 'promotions',
+}
+
+// Every name the search producer reads; `q` and `branch_id` fold into `query`
+// and `branchId`. The other public routes take no parameters at all.
+export const PORTAL_SEARCH_CACHE_PARAMS = [
   'page', 'pageSize', 'query', 'q', 'brand', 'category', 'branchId', 'branch_id',
   'stockState', 'initial', 'promo', 'productId', 'view', 'sort',
 ] as const
 
-// Consume Hono's SAME parsed first-value query object as the producer. Keep
-// alias precedence, empty values and duplicate branch-list values unchanged.
-// Only these five public GET producers ignore unknown query parameters.
-export function portalCacheRequest(request: Request, query: Record<string, string>, routePath: string): Request {
-  const url = new URL(request.url)
-  const search = routePath === '/api/portal/catalog/products/search'
-  if (!search && !['/api/portal/config', '/api/portal/bootstrap', '/api/portal/catalog/meta', '/api/portal/catalog/products'].includes(routePath)) return request
-  // Hono decodes encoded literal path characters before matching routes.
-  url.pathname = routePath
-  url.search = ''
-  if (search) {
-    for (const key of PORTAL_SEARCH_CACHE_PARAMS) {
-      if (Object.prototype.hasOwnProperty.call(query, key)) url.searchParams.set(key, query[key])
-    }
-  }
-  return new Request(url.toString(), request)
+const PORTAL_STOCK_STATES = ['in_stock', 'low_stock', 'out_of_stock']
+
+export type PortalCanonicalQuery =
+  | { ok: true; params: Record<string, string>; search: string }
+  | { ok: false; reason: string }
+
+function portalBoundedInt(raw: string, min: number, max: number): number | null {
+  if (!/^\s*\d{1,12}\s*$/.test(raw)) return null
+  const value = Number(raw.trim())
+  return value >= min && value <= max ? value : null
 }
 
-async function portalCacheVersion(c: { env: Env }): Promise<string> {
-  // 6.3: the portal's responses depend on PRODUCTS and on SETTINGS (the
-  // whole storefront config lives in settings rows) -- composing both
-  // versions means a save on either side invalidates immediately instead
-  // of hiding behind the TTL. Reproduced live: stale at +30s, fresh only
-  // after the 60s TTL, on every portal-editor save.
-  // I2-1: sales bump 'stock' rather than 'products'. The storefront's
-  // membership (out-of-stock hiding) and stock_status read stock, so the
-  // stock version is part of its key too.
-  const [productsVersion, settingsVersion, stockVersion] = await Promise.all([
-    getVersionWithFallback(c.env, 'products'),
-    getVersionWithFallback(c.env, 'settings'),
-    getVersionWithFallback(c.env, 'stock'),
-  ])
-  return `portal-query-v1:${productsVersion}:${settingsVersion}:${stockVersion}`
+function portalList(raw: string): string[] {
+  return raw.split(',').map((value) => value.trim()).filter(Boolean)
 }
+
+// The ONE parse of a public query string. The cache key AND the producer both
+// consume its output, so no value can reach a query the key did not see
+// (poisoning), and spellings with one meaning share one entry (busting).
+// Unknown or repeated names and oversized values are refused before any I/O.
+export function canonicalPortalQuery(route: PortalPublicRoute, rawSearch: string): PortalCanonicalQuery {
+  const reject = (reason: string): PortalCanonicalQuery => ({ ok: false, reason })
+  const raw = String(rawSearch || '').replace(/^\?/, '')
+  if (raw.length > PORTAL_RAW_QUERY_MAX_CHARS) return reject('query string too long')
+  const entries = Array.from(new URLSearchParams(raw).entries())
+  const names = new Set<string>()
+  for (const [name] of entries) {
+    if (names.has(name)) return reject(`repeated parameter ${name}`)
+    names.add(name)
+  }
+  const allowed: readonly string[] = route === 'search' ? PORTAL_SEARCH_CACHE_PARAMS : []
+  for (const name of names) if (!allowed.includes(name)) return reject(`unknown parameter ${name}`)
+  if (route !== 'search') return { ok: true, params: {}, search: '' }
+
+  const input = Object.fromEntries(entries) as Record<string, string>
+  if (input.query?.trim() && input.q?.trim()) return reject('query and q both set')
+  if (input.branchId != null && input.branch_id != null) return reject('branchId and branch_id both set')
+  const params: Record<string, string> = {}
+
+  if (input.page) {
+    const page = portalBoundedInt(input.page, 1, PORTAL_PAGE_MAX)
+    if (page == null) return reject('page out of range')
+    if (page !== 1) params.page = String(page)
+  }
+  if (input.pageSize) {
+    const size = portalBoundedInt(input.pageSize, 1, 100)
+    if (size == null) return reject('pageSize out of range')
+    if (size !== 50) params.pageSize = String(size)
+  }
+
+  const text = String(input.query || input.q || '').replace(/\s+/g, ' ').trim()
+  if (text.length > PORTAL_QUERY_MAX_CHARS) return reject('query too long')
+  const searchText = portalSearchKeyText(text)
+  if (searchText) params.query = searchText
+
+  for (const field of ['brand', 'category'] as const) {
+    if (input[field] == null) continue
+    const values = portalList(input[field]).filter((value) => value.toLowerCase() !== 'all')
+    if (values.length > PORTAL_LIST_MAX_VALUES) return reject(`${field} has too many values`)
+    if (values.some((value) => value.length > PORTAL_FACET_VALUE_MAX_CHARS)) return reject(`${field} value too long`)
+    // The filter compares lower(trim(...)), so case and order carry no meaning.
+    const canonical = Array.from(new Set(values.map((value) => value.toLowerCase()))).sort()
+    if (canonical.length) params[field] = canonical.join(',')
+  }
+
+  const branchRaw = input.branchId ?? input.branch_id
+  if (branchRaw) {
+    const ids = portalList(branchRaw).map((part) => portalBoundedInt(part, 1, PORTAL_ID_MAX))
+    if (ids.length > PORTAL_LIST_MAX_VALUES) return reject('too many branches')
+    if (ids.some((id) => id == null)) return reject('branchId must be positive integers')
+    const unique = Array.from(new Set(ids as number[])).sort((a, b) => a - b)
+    if (unique.length) params.branchId = unique.join(',')
+  }
+
+  if (input.stockState != null) {
+    const states = Array.from(new Set(portalList(input.stockState.toLowerCase()).filter((state) => PORTAL_STOCK_STATES.includes(state)))).sort()
+    if (states.length) params.stockState = states.join(',')
+  }
+
+  if (input.initial != null) {
+    const initial = input.initial.trim()
+    if (initial.length > 8) return reject('initial too long')
+    if (initial && initial.toLowerCase() !== 'all') params.initial = initial.toUpperCase()
+  }
+
+  if (input.promo != null) {
+    const promo = input.promo.trim().toLowerCase()
+    const rule = /^rule:(\d{1,10})$/.exec(promo)
+    if (promo === 'promoted') params.promo = promo
+    else if (rule) params.promo = `rule:${Number(rule[1])}`
+  }
+
+  if (input.productId) {
+    const id = portalBoundedInt(input.productId, 1, PORTAL_ID_MAX)
+    if (id == null) return reject('productId must be a positive integer')
+    params.productId = String(id)
+  }
+
+  const view = String(input.view ?? '').trim().toLowerCase()
+  if ((PORTAL_BROWSE_VIEWS as readonly string[]).includes(view) && view !== DEFAULT_PORTAL_BROWSE_VIEW) params.view = view
+  const sort = String(input.sort ?? '').trim().toLowerCase()
+  if ((PORTAL_BROWSE_SORTS as readonly string[]).includes(sort) && sort !== DEFAULT_PORTAL_BROWSE_SORT) params.sort = sort
+
+  const search = Object.keys(params).sort()
+    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+    .join('&')
+  return { ok: true, params, search }
+}
+
+// Spellings with one search meaning share one key: each comma group is folded by normalizeSearchText, the fold
+// every word-matching consumer applies anyway, and words past the shared search caps (lib/productSearchQuery.ts,
+// the ones the query builder applies) are dropped. A lone token holding a digit stays as typed (lowercased): the
+// exact-barcode probe reads it raw, hyphens and leading zeros included.
+export function portalSearchKeyText(text: string): string {
+  if (!/[\s,]/.test(text) && /\d/.test(text)) return text.toLowerCase()
+  const groups = text.split(',').map((group) => normalizeSearchText(group).split(' ').filter(Boolean))
+  return limitSearchTermGroups(groups, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS).map((words) => words.join(' ')).join(',')
+}
+
+export function portalSearchDependsOnStock(params: Record<string, string>, showOutOfStockProducts: boolean, allowStockStateFilter: boolean): boolean {
+  return !showOutOfStockProducts || Boolean(params.branchId) || (allowStockStateFilter && Boolean(params.stockState))
+}
+
+// Seconds to the earliest future window edge among rows. The date-only reading
+// counts too: the banner SQL compares text, so '2026-10-20 08:00:00' already
+// matches from that date's start.
+export function secondsUntilNextWindowEdge(rows: ReadonlyArray<{ starts_at?: unknown; ends_at?: unknown }>, nowMs: number): number | null {
+  let next = Infinity
+  for (const row of rows) {
+    for (const value of [row.starts_at, row.ends_at]) {
+      const text = String(value ?? '').trim()
+      if (!text) continue
+      for (const candidate of [text, text.slice(0, 10)]) {
+        const at = new Date(candidate).getTime()
+        if (Number.isFinite(at) && at > nowMs && at < next) next = at
+      }
+    }
+  }
+  return Number.isFinite(next) ? Math.max(1, Math.ceil((next - nowMs) / 1000)) : null
+}
+
+export function cappedTtl(ttlSeconds: number, capSeconds: number | null): number {
+  return capSeconds == null ? ttlSeconds : Math.max(1, Math.min(ttlSeconds, capSeconds))
+}
+
+async function portalPromotionEdgeSeconds(env: Env, table: 'promotion_rules' | 'promotions' = 'promotion_rules'): Promise<number | null> {
+  const rows = await getDb(env).prepare(`SELECT starts_at, ends_at FROM ${table} WHERE is_active = 1`).all<{ starts_at: unknown; ends_at: unknown }>()
+  return secondsUntilNextWindowEdge(Array.isArray(rows) ? rows : [], Date.now())
+}
+
+// Checked on every body before it is stored (lib/portalText.ts names the private fields).
+export function findForbiddenPublicKey(value: unknown, path = '$'): string | null {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = findForbiddenPublicKey(value[index], `${path}[${index}]`)
+      if (found) return found
+    }
+    return null
+  }
+  if (!value || typeof value !== 'object') return null
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (isPrivateStorefrontFieldName(key)) return `${path}.${key}`
+    const found = findForbiddenPublicKey(child, `${path}.${key}`)
+    if (found) return found
+  }
+  return null
+}
+
+// Shared-cache headers only on the configured storefront host; the admin host
+// (and anything else) gets the same data as private, no-store.
+export function isPublicStorefrontHost(requestUrl: string, publicUrl: string | undefined): boolean {
+  try {
+    const request = new URL(requestUrl)
+    const configured = new URL(String(publicUrl || ''))
+    return request.protocol === configured.protocol && request.host === configured.host
+  } catch {
+    return false
+  }
+}
+
+// Edge keys never take the request's Host or headers: origin from config, path
+// from a fixed route name, query from canonicalPortalQuery, generation from
+// the version tokens.
+export function portalEdgeKey(publicUrl: string | undefined, kind: 'body' | 'stock', route: string, search: string, version: string): Request {
+  let origin = 'https://storefront.invalid'
+  try { origin = new URL(String(publicUrl || '')).origin } catch { /* fixed fallback */ }
+  const query = `${search}${search ? '&' : ''}_v=${encodeURIComponent(version)}`
+  return new Request(`${origin}/__portal-edge/${kind}/${route}?${query}`, { method: 'GET' })
+}
+
+function portalEdgeCache(): Cache | null {
+  return (globalThis as { caches?: { default?: Cache } }).caches?.default ?? null
+}
+
+async function readPortalEdge<T>(key: Request): Promise<T | null> {
+  const hit = await portalEdgeCache()?.match(key)
+  return hit ? hit.json<T>() : null
+}
+
+function writePortalEdge(ctx: { waitUntil(promise: Promise<unknown>): void }, key: Request, value: unknown, ttlSeconds: number): void {
+  const cache = portalEdgeCache()
+  if (!cache) return
+  const response = new Response(JSON.stringify(value), {
+    headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${Math.max(1, Math.floor(ttlSeconds))}` },
+  })
+  ctx.waitUntil(cache.put(key, response).catch((error) => console.error('[portal-cache] edge write failed', key.url, error)))
+}
+
+async function sha256Hex(text: string, bytes = 32): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+  return Array.from(digest.slice(0, bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// Weak comparison (RFC 9110 13.1.2): W/ is ignored on both sides.
+export function etagMatches(ifNoneMatch: string | null | undefined, etag: string): boolean {
+  const header = String(ifNoneMatch || '').trim()
+  if (!header) return false
+  if (header === '*') return true
+  const opaque = (tag: string) => tag.trim().replace(/^W\//, '')
+  return header.split(',').some((tag) => opaque(tag) === opaque(etag))
+}
+
+export async function portalPublicJsonResponse(request: Request, value: unknown, publicHost: boolean): Promise<Response> {
+  const body = JSON.stringify(value)
+  const headers = new Headers({ 'content-type': 'application/json; charset=UTF-8' })
+  if (!publicHost) {
+    headers.set('cache-control', PORTAL_PRIVATE_CACHE_CONTROL)
+    return new Response(body, { status: 200, headers })
+  }
+  const etag = `W/"${await sha256Hex(body, 16)}"`
+  headers.set('cache-control', PORTAL_PUBLIC_CACHE_CONTROL)
+  headers.set('etag', etag)
+  if (etagMatches(request.headers.get('if-none-match'), etag)) return new Response(null, { status: 304, headers })
+  return new Response(body, { status: 200, headers })
+}
+
+type PortalVersions = { body: string; stock: string }
+type PortalBodyResult = { value: Record<string, unknown>; ttl: number }
+type PortalContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+// The body depends on PRODUCTS (promotion rules and branches bump it too) and
+// SETTINGS -- banners add PROMOTIONS; the stock entry additionally on STOCK,
+// which every sale bumps and which therefore never keys a body. The deploy's
+// version id keys both, so a new build never reads an older build's shapes.
+async function portalCacheVersion(c: { env: Env }, scope: { stock: boolean; promotions: boolean }): Promise<PortalVersions> {
+  const namespaces = ['products', 'settings', ...(scope.stock ? ['stock'] : []), ...(scope.promotions ? ['promotions'] : [])]
+  const tokens = await getVersionsWithFallback(c.env, namespaces, { memoMs: PORTAL_VERSION_MEMO_MS })
+  const version = (namespace: string) => tokens[namespaces.indexOf(namespace)] ?? '-'
+  const deploy = c.env.CF_VERSION_METADATA?.id || 'dev'
+  return {
+    body: ['portal-body-v2', deploy, version('products'), version('settings'), version('promotions')].join(':'),
+    stock: ['portal-stock-v1', deploy, version('products'), version('settings'), version('stock')].join(':'),
+  }
+}
+
+// Removes the raw stock columns the paging queries select; the cached body
+// never carries them (withLivePortalStock attaches statuses per response).
+function withoutPortalStockFields(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return items.map(({ stock_quantity: _quantity, low_stock_threshold: _low, out_of_stock_threshold: _out, branch_stock: _ledger, ...publicFields }) => publicFields)
+}
+
+type PortalStockState = { stock_status: PortalStockStatus; branch_availability: Array<{ branch_id: number; status: PortalStockStatus }> }
+type PortalStockEntry = { ids: string; hidden: boolean; states: Record<string, PortalStockState> }
+// A product gone from the table since its body was cached shows as unavailable.
+const PORTAL_UNKNOWN_STOCK: PortalStockState = { stock_status: 'out_of_stock', branch_availability: [] }
+
+async function loadPortalStockStates(env: Env, ids: number[], idList: string): Promise<PortalStockEntry> {
+  const db = getDb(env)
+  const rows = await selectInChunks(ids, 0, (chunk) => db.prepare(`
+    SELECT id, stock_quantity, low_stock_threshold, out_of_stock_threshold
+    FROM products WHERE id IN (${inlineIntegerIds(chunk)})
+  `).all<Record<string, unknown>>())
+  const attached = await attachPortalStockStatus(env, rows)
+  const states: Record<string, PortalStockState> = {}
+  if (!attached.hidden) {
+    for (const row of attached.products) {
+      states[String(row.id)] = { stock_status: row.stock_status as PortalStockStatus, branch_availability: row.branch_availability as PortalStockState['branch_availability'] }
+    }
+  }
+  return { ids: idList, hidden: attached.hidden, states }
+}
+
+// `versions` null: the cache versions are unreadable, so nothing is read from or stored at the edge.
+async function withLivePortalStock(c: PortalContext, rawItems: unknown, versions: PortalVersions | null): Promise<Array<Record<string, unknown>>> {
+  const items = (Array.isArray(rawItems) ? rawItems : []) as Array<Record<string, unknown>>
+  const ids = Array.from(new Set(items.map((item) => Number(item.id)).filter((id) => Number.isSafeInteger(id) && id > 0))).sort((a, b) => a - b)
+  if (!ids.length) return items
+  const idList = ids.join(',')
+  const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'stock', 'ids', `ids=${await sha256Hex(idList)}`, versions.stock)
+  const cached = key ? await readPortalEdge<PortalStockEntry>(key) : null
+  const entry = cached?.ids === idList
+    ? cached
+    : !key
+      ? await loadPortalStockStates(c.env, ids, idList)
+      : await coalescePortalBuild(key.url, async () => {
+        const loaded = await loadPortalStockStates(c.env, ids, idList)
+        writePortalEdge(c.executionCtx, key, loaded, PORTAL_STOCK_TTL_SECONDS)
+        return loaded
+      })
+  // Stock status switched off: the badge data is not published at all.
+  if (entry.hidden) return items
+  return items.map((item) => ({ ...item, ...(entry.states[String(item.id)] ?? PORTAL_UNKNOWN_STOCK) }))
+}
+
+function portalQueryRejection(c: PortalContext, reason: string): Response {
+  return c.json({ error: 'This storefront request is not supported.', code: 'portal_bad_query', reason }, 400, { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL })
+}
+
+// One rebuild per key per isolate: concurrent misses for the same entry share the first one's work.
+const portalBuildsInFlight = new Map<string, Promise<unknown>>()
+
+function coalescePortalBuild<T>(key: string, build: () => Promise<T>): Promise<T> {
+  const running = portalBuildsInFlight.get(key)
+  if (running) return running as Promise<T>
+  const started = build()
+  portalBuildsInFlight.set(key, started)
+  const forget = () => { if (portalBuildsInFlight.get(key) === started) portalBuildsInFlight.delete(key) }
+  started.then(forget, forget)
+  return started
+}
+
+let portalColdSearches = 0
+
+// A cold search is the one storefront request whose cost an anonymous visitor
+// picks (every query string is its own entry), so it is limited per network
+// before any D1 work, through the PORTAL_SEARCH_LIMITER binding (no D1, no KV).
+// A cache hit never reaches this.
+async function portalSearchRateLimited(c: PortalContext): Promise<boolean> {
+  const limiter = c.env.PORTAL_SEARCH_LIMITER
+  if (!limiter) return false
+  try {
+    return !(await limiter.limit({ key: getClientNetworkKey(c.req.raw) })).success
+  } catch (error) {
+    // The limiter is a guard, not a dependency: its outage must not close the storefront.
+    console.error('[portal-cache] search rate limiter unavailable', error)
+    return false
+  }
+}
+
+// A restore deletes and reinserts every table over minutes; nothing read
+// while it holds maintenance may be stored. Absent table = no maintenance (the
+// same rule as lib/maintenance.ts); any other failure counts as held.
+async function portalMaintenanceHeld(env: Env): Promise<boolean> {
+  try {
+    return Boolean(await getDb(env).prepare(`SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'`).get())
+  } catch (error) {
+    return !/no such table/i.test(error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function buildPortalBody(
+  c: PortalContext,
+  key: Request | null,
+  params: Record<string, string>,
+  produce: (params: Record<string, string>) => Promise<PortalBodyResult>,
+): Promise<Record<string, unknown>> {
+  const [produced, maintenanceHeld] = await Promise.all([produce(params), key ? portalMaintenanceHeld(c.env) : true])
+  const leaked = findForbiddenPublicKey(produced.value)
+  if (leaked) throw new Error(`Refusing to publish a private storefront field: ${leaked}`)
+  if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, produced.value, produced.ttl)
+  return produced.value
+}
+
+// Unreadable cache versions (KV down and D1 does not hold them) leave no safe
+// key: the request is answered uncached rather than refused.
+async function readPortalCacheVersion(c: PortalContext, scope: { stock: boolean; promotions: boolean }): Promise<PortalVersions | null> {
+  try {
+    return await portalCacheVersion(c, scope)
+  } catch (error) {
+    console.error('[portal-cache] cache versions unreadable; serving uncached', error)
+    return null
+  }
+}
+
+async function servePortalPublic(
+  c: PortalContext,
+  route: PortalPublicRoute,
+  withStock: boolean,
+  produce: (params: Record<string, string>) => Promise<PortalBodyResult>,
+  overlay: ((body: Record<string, unknown>, versions: PortalVersions | null) => Promise<Record<string, unknown>>) | null,
+): Promise<Response> {
+  const canonical = canonicalPortalQuery(route, new URL(c.req.url).search)
+  if (!canonical.ok) return portalQueryRejection(c, canonical.reason)
+  const versions = await readPortalCacheVersion(c, { stock: withStock, promotions: route === 'promotions' })
+  const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'body', route, canonical.search, versions.body)
+  let body = key ? await readPortalEdge<Record<string, unknown>>(key) : null
+  if (!body) {
+    const cold = route === 'search' && !(key && portalBuildsInFlight.has(key.url))
+    if (cold) {
+      if (await portalSearchRateLimited(c)) {
+        return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
+          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '60' })
+      }
+      if (portalColdSearches >= PORTAL_COLD_SEARCH_MAX_CONCURRENT) {
+        return c.json({ error: 'The store is busy. Try again in a moment.', code: 'portal_search_busy' }, 503,
+          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '2' })
+      }
+      portalColdSearches += 1
+    }
+    try {
+      const build = () => buildPortalBody(c, key, canonical.params, produce)
+      body = key ? await coalescePortalBuild(key.url, build) : await build()
+    } finally {
+      if (cold) portalColdSearches -= 1
+    }
+  }
+  const value = overlay ? await overlay(body, versions) : body
+  return portalPublicJsonResponse(c.req.raw, value, isPublicStorefrontHost(c.req.url, c.env.BUSINESS_OS_PUBLIC_URL))
+}
+
+// Session-bound or identity-bound responses are never stored by a browser or
+// a shared cache, and the shared public routes never carry a cookie (HEAD is
+// a GET without the body, so the same rule applies). Registered before every
+// route so it wraps all of them.
+const PORTAL_PRIVATE_PATH = /^\/api\/portal\/(auth|account|membership|submissions|ai)(\/|$)/
+app.use('*', async (c, next) => {
+  await next()
+  const publicRead = (c.req.method === 'GET' || c.req.method === 'HEAD') && Boolean(PORTAL_PUBLIC_ROUTES[c.req.path])
+  if (!publicRead && !PORTAL_PRIVATE_PATH.test(c.req.path)) return
+  try {
+    if (publicRead) c.res.headers.delete('set-cookie')
+    else c.res.headers.set('cache-control', PORTAL_PRIVATE_CACHE_CONTROL)
+  } catch {
+    c.res = new Response(c.res.body, c.res)
+    if (publicRead) c.res.headers.delete('set-cookie')
+    else c.res.headers.set('cache-control', PORTAL_PRIVATE_CACHE_CONTROL)
+  }
+})
 
 // The anonymous storefront's view of the config (FX-sec, 27 Sep 2026).
 // buildPortalConfig() also carries two INTERNAL AI settings the server needs
@@ -1109,34 +1557,38 @@ async function withActiveRecommendedProducts(env: Env, publicConfig: PublicPorta
   return publicConfig
 }
 
-app.get('/config', async (c) => {
-  const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
-    const settings = await loadSettingsMap(c.env)
-    return withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env))
-  }))
-})
+function portalShowsOutOfStock(settings: SettingsMap): boolean {
+  return normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
+}
 
-app.get('/bootstrap', async (c) => {
-  const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
-    const settings = await loadSettingsMap(c.env)
-    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-    const [config, meta, catalog] = await Promise.all([
-      withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
-      buildPortalMeta(c.env, showOutOfStockProducts),
-      buildPortalCatalog(c.env, showOutOfStockProducts),
-    ])
-    return {
-      config,
-      meta,
-      catalog,
-      products: catalog.items,
-      reviewItems: [],
-      promotions: { items: [] },
-    }
-  }))
-})
+// Membership of meta/catalog depends on stock only when out-of-stock products are hidden.
+function portalCatalogTtl(showOutOfStockProducts: boolean): number {
+  return showOutOfStockProducts ? PORTAL_BODY_TTL_SECONDS : PORTAL_STOCK_TTL_SECONDS
+}
+
+app.get('/config', (c) => servePortalPublic(c, 'config', false, async () => {
+  const settings = await loadSettingsMap(c.env)
+  return { value: await withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)), ttl: PORTAL_BODY_TTL_SECONDS }
+}, null))
+
+app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () => {
+  const settings = await loadSettingsMap(c.env)
+  const showOutOfStockProducts = portalShowsOutOfStock(settings)
+  const [config, meta, catalog, promotionEdgeSeconds] = await Promise.all([
+    withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
+    buildPortalMeta(c.env, showOutOfStockProducts),
+    buildPortalCatalog(c.env, showOutOfStockProducts),
+    portalPromotionEdgeSeconds(c.env),
+  ])
+  return {
+    value: { config, meta, catalog, reviewItems: [], promotions: { items: [] } },
+    ttl: cappedTtl(portalCatalogTtl(showOutOfStockProducts), promotionEdgeSeconds),
+  }
+}, async (body, versions) => {
+  const catalog = (body.catalog || {}) as Record<string, unknown>
+  const items = await withLivePortalStock(c, catalog.items, versions)
+  return { config: body.config, meta: body.meta, catalog: { ...catalog, items }, products: items, reviewItems: body.reviewItems, promotions: body.promotions }
+}))
 
 // GET /catalog/meta and GET /catalog/products -- previously only reachable
 // bundled inside /bootstrap's response; legacy backend/src/routes/portal.ts
@@ -1145,22 +1597,19 @@ app.get('/bootstrap', async (c) => {
 // promotions update without a full bootstrap round trip). No new query
 // logic needed -- both reuse the same buildPortalMeta/buildPortalCatalog
 // helpers /bootstrap above already calls.
-app.get('/catalog/meta', async (c) => {
-  const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
-    const settings = await loadSettingsMap(c.env)
-    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-    return buildPortalMeta(c.env, showOutOfStockProducts)
-  }))
-})
-app.get('/catalog/products', async (c) => {
-  const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
-    const settings = await loadSettingsMap(c.env)
-    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-    return buildPortalCatalog(c.env, showOutOfStockProducts)
-  }))
-})
+app.get('/catalog/meta', (c) => servePortalPublic(c, 'meta', false, async () => {
+  const showOutOfStockProducts = portalShowsOutOfStock(await loadSettingsMap(c.env))
+  return { value: await buildPortalMeta(c.env, showOutOfStockProducts), ttl: portalCatalogTtl(showOutOfStockProducts) }
+}, null))
+
+app.get('/catalog/products', (c) => servePortalPublic(c, 'products', true, async () => {
+  const showOutOfStockProducts = portalShowsOutOfStock(await loadSettingsMap(c.env))
+  const [catalog, promotionEdgeSeconds] = await Promise.all([
+    buildPortalCatalog(c.env, showOutOfStockProducts),
+    portalPromotionEdgeSeconds(c.env),
+  ])
+  return { value: catalog, ttl: cappedTtl(portalCatalogTtl(showOutOfStockProducts), promotionEdgeSeconds) }
+}, async (body, versions) => ({ ...body, items: await withLivePortalStock(c, body.items, versions) })))
 
 // GET /ai/status -- whether the portal's AI shopping assistant is turned
 // on and has a usable provider behind it. Ported the "is it available"
@@ -1479,7 +1928,9 @@ app.post('/ai/chat', async (c) => {
 // portal.ts) this was ported from -- the portal never has to trust a
 // client-side date check for what's allowed to show. No Postgres-specific
 // syntax in the original here, so this is a direct, unmodified port.
-app.get('/promotions', async (c) => {
+// Banner edits bump 'promotions' (routes/promotions.ts); linked product names
+// and images follow 'products'. TTL never crosses a banner's start or end.
+app.get('/promotions', (c) => servePortalPublic(c, 'promotions', false, async () => {
   const db = getDb(c.env)
   const nowIso = new Date().toISOString()
   const rows = await db.prepare(`
@@ -1498,8 +1949,8 @@ app.get('/promotions', async (c) => {
     // again at the public boundary so it never reaches a visitor as a target.
     link_url: normalizeSafeLinkUrl((row as Record<string, unknown>).link_url),
   }))
-  return c.json({ items })
-})
+  return { value: { items }, ttl: cappedTtl(PORTAL_PROMOTIONS_TTL_SECONDS, await portalPromotionEdgeSeconds(c.env, 'promotions')) }
+}, null))
 
 // ---- Customer membership lookup + share-submission workflow ----
 // Ported from backend/src/routes/portal.ts. Previously had no real route
@@ -2264,13 +2715,10 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     // More than one branch selected: sellable if ANY selected branch has
     // it. EXISTS keeps one row per product regardless of match count,
     // instead of needing a JOIN + GROUP BY threaded through every query
-    // in this function just to support the multi-branch case.
-    const keys = branchIds.map((id, index) => {
-      const key = `branch${index}`
-      params[key] = id
-      return `@${key}`
-    })
-    where.push(`EXISTS (SELECT 1 FROM branch_stock mb WHERE mb.product_id = p.id AND mb.branch_id IN (${keys.join(', ')}) AND mb.quantity > 0)`)
+    // in this function just to support the multi-branch case. Each list is
+    // ONE bound JSON parameter, so no filter combination nears D1's 100.
+    params.branchIds = JSON.stringify(branchIds)
+    where.push(`EXISTS (SELECT 1 FROM branch_stock mb WHERE mb.product_id = p.id AND mb.branch_id IN (SELECT value FROM json_each(@branchIds)) AND mb.quantity > 0)`)
   }
 
   // The flat word list, kept for the JS fuzzy (typo-tolerant) fallback in
@@ -2341,12 +2789,8 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
       params[field] = values[0].toLowerCase()
       where.push(`lower(trim(COALESCE(p.${field}, ''))) = @${field}`)
     } else if (values.length > 1) {
-      const keys = values.map((value, index) => {
-        const key = `${field}${index}`
-        params[key] = value.toLowerCase()
-        return `@${key}`
-      })
-      where.push(`lower(trim(COALESCE(p.${field}, ''))) IN (${keys.join(', ')})`)
+      params[`${field}List`] = JSON.stringify(values.map((value) => value.toLowerCase()))
+      where.push(`lower(trim(COALESCE(p.${field}, ''))) IN (SELECT value FROM json_each(@${field}List))`)
     }
   }
 
@@ -2389,9 +2833,10 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
 // visitors rather than with catalog size. Search results are high-cardinality
 // (every distinct query string is its own key), which is precisely the shape
 // cachedJsonResponse's own docstring says the Cache API suits and KV does not.
-async function runPortalProductSearch(c: { env: Env; req: { query(): Record<string, string> } }) {
-  const db = getDb(c.env)
-  const query = c.req.query()
+// `query` is canonicalPortalQuery's output -- the object the cache key was
+// built from -- never the raw request.
+async function runPortalProductSearch(env: Env, query: Record<string, string>): Promise<PortalBodyResult> {
+  const db = getDb(env)
   const page = Math.max(1, Number.parseInt(query.page || '1', 10) || 1)
   // Default page size is 50 across the app (Part 151's decision, extended
   // here to the public portal's own search endpoint per Part 202 -- this
@@ -2552,7 +2997,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // Scoped to name/sku/barcode, matching this endpoint's own ftsMatch
   // column list above (brand/category dropped for the same reasoning --
   // see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
-  if (total === 0 && filters.searchTerms.length) {
+  if (total === 0 && filters.searchTerms.length && portalFuzzyFallbackAllowed(query.query || query.q || '')) {
     const fallbackBaseWhere = [...filters.baseWhere, ...postFilterClauses]
     const candidateRows = await db.prepare(`
       SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
@@ -2628,8 +3073,8 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // rejected initials query must not turn a real search-results page into a
   // whole-request 500. Settle it independently and fall back to an empty
   // rail.
-  const [itemsWithStockStatus, initials] = await Promise.all([
-    attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>),
+  const [itemsWithoutStock, initials, promotionEdgeSeconds] = await Promise.all([
+    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>),
     // See buildPortalCatalog's rail above for why this is wrapped in
     // Promise.resolve() before .catch().
     Promise.resolve(db.prepare(`
@@ -2641,10 +3086,12 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
       GROUP BY value
       ORDER BY value ASC
     `).all<{ value: string; count: number }>(initialsParams)).catch(() => [] as { value: string; count: number }[]),
+    portalPromotionEdgeSeconds(env),
   ])
 
-  return {
-    items: itemsWithStockStatus,
+  const stockDependent = portalSearchDependsOnStock(query, showOutOfStockProducts, allowStockStateFilter)
+  return { ttl: cappedTtl(stockDependent ? PORTAL_STOCK_TTL_SECONDS : PORTAL_BODY_TTL_SECONDS, promotionEdgeSeconds), value: {
+    items: itemsWithoutStock,
     total,
     page,
     pageSize,
@@ -2658,18 +3105,11 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     // lib/promotionRules.ts) -- the active rule set rides the catalog
     // payload so the portal never invents its own promotion math.
     promotion_rules: searchRules,
-  }
+  } }
 }
 
-app.get('/catalog/products/search', async (c) => {
-  const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(
-    portalCacheRequest(c.req.raw, c.req.query(), c.req.path),
-    c.executionCtx,
-    version,
-    PORTAL_CATALOG_TTL_SECONDS,
-    () => runPortalProductSearch(c),
-  ))
-})
+app.get('/catalog/products/search', (c) => servePortalPublic(c, 'search', true,
+  (params) => runPortalProductSearch(c.env, params),
+  async (body, versions) => ({ ...body, items: await withLivePortalStock(c, body.items, versions) })))
 
 export default app

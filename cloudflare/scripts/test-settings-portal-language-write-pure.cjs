@@ -182,6 +182,25 @@ async function main() {
     }
   })
 
+  await check('a translation entry named like a private field is refused at save (6.0.896, P3-2)', async () => {
+    for (const [privateKey, block] of [
+      ['shipping-cost', { faqItems: { 'shipping-cost': { question: 'Q', answer: 'A' } } }],
+      ['supplier-deal', { promoItems: { 'supplier-deal': { title: 'T' } } }],
+      ['quantity', { products: { quantity: { name: 'N' } } }],
+    ]) {
+      seed(TRANSLATIONS_KEY, '{}')
+      seed(TAGLINE_KEY, 'before')
+      const res = await save(PORTAL_EDITOR, { [TRANSLATIONS_KEY]: JSON.stringify({ km: block }), [TAGLINE_KEY]: 'after' })
+      assert.equal(res.status, 400, JSON.stringify(res.body))
+      assert.equal(res.body.code, 'portal_translation_private_key')
+      assert.equal(res.body.key, privateKey)
+      assert.equal(stored(TRANSLATIONS_KEY), '{}', 'nothing is stored')
+      assert.equal(stored(TAGLINE_KEY), 'before', 'the rest of the save is refused with it')
+    }
+    const fine = await save(PORTAL_EDITOR, { [TRANSLATIONS_KEY]: JSON.stringify({ km: { faqItems: { 'opening-hours': { question: 'Q', answer: 'A' } } } }) })
+    assert.equal(fine.status, 200, JSON.stringify(fine.body))
+  })
+
   console.log(`\ntest-settings-portal-language-write-pure.cjs: ${passed} passed, ${failures.length} failed`)
   if (failures.length) {
     console.log(`FAILED: ${failures.join(' | ')}`)
