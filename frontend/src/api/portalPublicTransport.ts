@@ -85,13 +85,34 @@ export function getPortalCatalogProducts(): Promise<unknown> {
   return fetchPortalJson('/api/portal/catalog/products', 'Portal catalog products')
 }
 
-export function getPortalPromotions(): Promise<unknown> {
-  return fetchPortalJson('/api/portal/promotions', 'Portal promotions')
+// The banner remounts on every Products-tab visit; it reads once per page load
+// and again only after a minute. A failed read is not kept.
+const PORTAL_PROMOTIONS_REUSE_MS = 60_000
+let portalPromotionsRead: { at: number; promise: Promise<unknown> } | null = null
+
+export function getPortalPromotions(now = Date.now()): Promise<unknown> {
+  if (portalPromotionsRead && now - portalPromotionsRead.at < PORTAL_PROMOTIONS_REUSE_MS) return portalPromotionsRead.promise
+  const read = { at: now, promise: fetchPortalJson('/api/portal/promotions', 'Portal promotions') }
+  portalPromotionsRead = read
+  read.promise.catch(() => {
+    if (portalPromotionsRead === read) portalPromotionsRead = null
+  })
+  return read.promise
+}
+
+// The Worker refuses a search text longer than this (routes/portal.ts
+// PORTAL_QUERY_MAX_CHARS), so a pasted essay searches its start instead of failing.
+export const PORTAL_SEARCH_MAX_CHARS = 200
+
+export function boundPortalSearchParams(params: QueryParams): QueryParams {
+  return typeof params.query === 'string' && params.query.length > PORTAL_SEARCH_MAX_CHARS
+    ? { ...params, query: params.query.slice(0, PORTAL_SEARCH_MAX_CHARS) }
+    : params
 }
 
 export async function searchPortalCatalogProducts(params: QueryParams = {}): Promise<unknown> {
   const base = getPortalBaseUrl()
-  const query = buildQueryString(params)
+  const query = buildQueryString(boundPortalSearchParams(params))
   const res = await fetchJsonWithTimeout(`${base}${appendQuery('/api/portal/catalog/products/search', query)}`, {
     headers: PORTAL_HEADERS,
   })

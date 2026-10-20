@@ -481,6 +481,8 @@ app.post('/', requireWebsiteEditor, async (c) => {
   }
   const newId = Number(results[0].meta?.last_row_id ?? 0)
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'create', id: newId }))
+  // The storefront's /api/portal/promotions edge entry is keyed on this version.
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   const created = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([newId])
   return c.json(created)
 })
@@ -544,6 +546,7 @@ app.put('/:id', requireWebsiteEditor, async (c) => {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
 })
@@ -597,6 +600,7 @@ app.put('/reorder/all', requireWebsiteEditor, async (c) => {
     return c.json({ error: 'The new order could not be confirmed. Reload the list before retrying.', code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'reorder' }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   // The answer is every card in its stored order, so the editor lands on what the server holds.
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)
@@ -638,6 +642,7 @@ app.delete('/:id', requireWebsiteEditor, async (c) => {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   return c.json({ deleted: true })
 })
 

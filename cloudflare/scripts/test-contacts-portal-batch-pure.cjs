@@ -62,14 +62,16 @@ check('generic contact-merge handler uses one bumpVersions call, not a per-names
 })
 
 // ---- 2. portal.ts public catalog paths ----
-check('buildPortalCatalog fans out attachPortalStockStatus with the initials rail query', () => {
+// 6.0.889: stock statuses left the cached body (withLivePortalStock attaches
+// them per response), so the page and the rail fan out without a stock read.
+check('buildPortalCatalog fans out the stock-free page with the initials rail query', () => {
   const block = sliceBetween(portalSource, 'async function buildPortalCatalog', "app.get('/config'", 'buildPortalCatalog')
-  assert.match(block, /const \[itemsWithStockStatus, initials\] = await Promise\.all\(\[\s*attachPortalStockStatus\(env,/, 'expected attachPortalStockStatus and the initials query fanned out together')
+  assert.match(block, /const \[itemsWithoutStock, initials\] = await Promise\.all\(\[\s*withoutPortalStockFields\(/, 'expected the page and the initials query fanned out together')
 })
 
-check('runPortalProductSearch fans out attachPortalStockStatus with its own initials rail query', () => {
+check('runPortalProductSearch fans out the stock-free page with its own initials rail query', () => {
   const block = sliceBetween(portalSource, 'async function runPortalProductSearch', "app.get('/catalog/products/search'", 'runPortalProductSearch')
-  assert.match(block, /const \[itemsWithStockStatus, initials\] = await Promise\.all\(\[\s*attachPortalStockStatus\(c\.env,/, 'expected attachPortalStockStatus and the initials query fanned out together')
+  assert.match(block, /const \[itemsWithoutStock, initials, promotionEdgeSeconds\] = await Promise\.all\(\[\s*withoutPortalStockFields\(/, 'expected the page and the initials query fanned out together')
 })
 
 check('runPortalProductSearch batches the fuzzy-fallback COUNT+page pair', () => {

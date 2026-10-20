@@ -701,9 +701,12 @@ export default function PublicCatalogPage() {
     setBrowseSort(sort)
   }
 
+  // A boolean, not loading + products.length: the response itself changes the
+  // grid's length, and that re-ran this effect into a second identical request.
+  const productSearchReady = !(loading && products.length === 0)
   useEffect(() => {
     if (!config.showCatalog || loadFailed) return undefined
-    if (loading && products.length === 0) return undefined
+    if (!productSearchReady) return undefined
     if (skipNextProductSearchRef.current) {
       skipNextProductSearchRef.current = false
       return undefined
@@ -777,7 +780,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, productInitial, productPage, productPageSize, productSearchReady, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
