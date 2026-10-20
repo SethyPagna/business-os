@@ -48,7 +48,7 @@ test('UTIL: a merge price override also needs FULL tier; the rule itself needs n
   assert.equal(canOverrideMergePrice(EMPLOYEE), false)
   assert.equal(canOverrideMergePrice(NO_PRICE), false)
   assert.equal(canOverrideMergePrice(MERGER), false)
-  assert.equal(canOverrideMergePrice(PARTIAL), false, 'Partial access queues edits; the Worker needs FULL')
+  assert.equal(canOverrideMergePrice(PARTIAL), false, 'Review queues edits; the Worker needs FULL')
   assert.equal(canOverrideMergePrice(NO_PRODUCTS), false)
   assert.equal(canOverrideMergePrice(null), false)
   assert.equal(canOverrideMergePrice({ role_code: 'manager', role_permissions: { products: true }, permissions: { 'products:price': false } }), false, 'a user override beats the role')

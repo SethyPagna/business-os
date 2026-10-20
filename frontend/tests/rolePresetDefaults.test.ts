@@ -18,7 +18,7 @@ assert.equal(employee.permissions.returns, true, 'Employee must receive individu
 for (const action of ['bulk', 'export']) {
   assert.equal(employee.permissions[`returns:${action}`], false, `Employee must not receive returns action ${action}`)
 }
-assert.equal(employee.permissions.contacts, 'review', 'Employee contact changes remain Partial Access')
+assert.equal(employee.permissions.contacts, 'review', 'Employee contact changes remain Review')
 assert.equal(employee.permissions['contacts:bulk'], false)
 assert.equal(employee.permissions['contacts:financial_history'], false)
 assert.equal(employee.permissions.contacts_suppliers, false)

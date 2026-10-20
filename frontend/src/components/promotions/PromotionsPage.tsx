@@ -338,7 +338,7 @@ export default function PromotionsPage() {
   }
 
   const saveRule = async () => {
-    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
+    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View access: you do not have permission to make this change.', 'error'); return }
     if (!draft || savingRule) return
     const payload: PromotionRuleWrite = {
       title: draft.title.trim(),
@@ -375,7 +375,7 @@ export default function PromotionsPage() {
   }
 
   const removeRule = async (row: PromotionRuleRow) => {
-    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
+    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View access: you do not have permission to make this change.', 'error'); return }
     const rule = row.normalized
     const label = rule?.title || `#${row.id}`
     if (!(await askToConfirm({
@@ -410,7 +410,7 @@ export default function PromotionsPage() {
   }
 
   const saveDiscount = async () => {
-    if (!canManageDiscounts) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
+    if (!canManageDiscounts) { notify(t('perm_view_only_generic') || 'View access: you do not have permission to make this change.', 'error'); return }
     if (!discountDraft || savingDiscount) return
     setSavingDiscount(true)
     try {

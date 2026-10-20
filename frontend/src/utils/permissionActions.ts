@@ -2,7 +2,7 @@
 //
 // `permissions.ts`/`permissionDefinitions.ts` answer "does this role have
 // the products key, and at which tier". This file answers the next question
-// down, the one an admin actually asks: "with Partial Access on Products,
+// down, the one an admin actually asks: "with Review on Products,
 // can this person still hit the Export button?"
 //
 // One table drives both the rows PermissionEditor.tsx renders and the real
@@ -128,18 +128,18 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // PUT /reasons queues (maybeQueueForReview). The only Inventory write with
     // no live-state staleness risk, so the only one that queues.
     { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', review: 'queue' },
-    // POST /reasons/replace answers 403 full_access_required for Partial Access.
+    // POST /reasons/replace answers 403 full_access_required for Review.
     { key: 'rename_reasons', tKey: 'perm_control_rename_reasons', label: 'Renaming a saved reason', review: 'block', follows: 'edit_reasons' },
-    // POST /adjust answers 403 for Partial Access. Also covers batches.ts's
+    // POST /adjust answers 403 for Review. Also covers batches.ts's
     // write routes (receive batch stock, fast stock-in, edit/deactivate a
     // lot): strict Full Access writes that mutate the same live stock this
     // action names.
     { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', review: 'block' },
-    // POST /transfer answers 403 for Partial Access.
+    // POST /transfer answers 403 for Review.
     { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', review: 'block' },
-    // POST /move-row answers 403 for Partial Access.
+    // POST /move-row answers 403 for Review.
     { key: 'move_row', tKey: 'perm_act_inventory_move_row', label: 'Move stock between rows', review: 'block' },
-    // POST /dated-stock-count/* answers 403 for Partial Access.
+    // POST /dated-stock-count/* answers 403 for Review.
     { key: 'stock_count', tKey: 'perm_act_inventory_stock_count', label: 'Dated stock count', review: 'block' },
     // routes/importJobs.ts: the 'inventory' and 'stock_actions' import
     // types -- strict full-grant checks there ('stock_actions' needs
@@ -156,11 +156,11 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   branches: [
     { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', review: 'allow' },
     { key: 'edit', tKey: 'perm_act_branches_edit', label: 'Edit branch', review: 'queue' },
-    // POST /transfer and /transfer-bulk answer 403 for Partial Access.
+    // POST /transfer and /transfer-bulk answer 403 for Review.
     { key: 'transfer', tKey: 'perm_act_branches_transfer', label: 'Transfer stock between branches', review: 'block' },
-    // POST /stock-integrity/repair answers 403 for Partial Access.
+    // POST /stock-integrity/repair answers 403 for Review.
     { key: 'repair_stock', tKey: 'perm_act_branches_repair_stock', label: 'Repair misplaced stock', review: 'block' },
-    // Browser-only export: Partial Access keeps it, and the switch lets an
+    // Browser-only export: Review keeps it, and the switch lets an
     // administrator narrow it.
     { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
   ],
@@ -171,7 +171,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // POST / and POST /supplier carry no tier check beyond the router-wide
     // gate, so a review-tier user creates returns directly, by design.
     { key: 'add', tKey: 'perm_act_returns_add', label: 'Create return', review: 'allow' },
-    // PATCH /:id answers 403 for Partial Access: editing reverses and
+    // PATCH /:id answers 403 for Review: editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', review: 'block' },
     // Multi-return field/status updates and their grouped Undo/Redo share
@@ -205,17 +205,17 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'view', tKey: 'perm_act_contacts_view', label: 'View and search', review: 'allow' },
     { key: 'add', tKey: 'perm_act_contacts_add', label: 'Add contact', review: 'allow' },
     // PUT applies directly, but every column except `name` is dropped for a
-    // Partial Access user.
+    // Review user.
     { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only; more in POS/sales)', review: 'limited' },
-    // DELETE answers 403 for Partial Access.
+    // DELETE answers 403 for Review.
     { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', review: 'block' },
     // Selection mode, multi-row mutations, merge/import workflows, and their
     // replay entry points require this umbrella capability in addition to
     // any narrower action switch below.
     { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', review: 'block' },
-    // POST /bulk-delete-jobs answers 403 for Partial Access.
+    // POST /bulk-delete-jobs answers 403 for Review.
     { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', review: 'block' },
-    // POST /merge answers 403 for Partial Access.
+    // POST /merge answers 403 for Review.
     { key: 'merge', tKey: 'perm_act_contacts_merge', label: 'Merge duplicates', review: 'block' },
     // The Conflicts tab can also persist keep/reopen decisions and rewrite
     // historical sale-to-customer links. Keep those controls behind one
@@ -233,7 +233,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', review: 'block' },
     // Export on all three contact tabs (Customers/Suppliers/Delivery) is
     // browser-only, like Products export: it is assembled from rows already
-    // loaded into the page (each tab's visibleContacts) and a Partial Access
+    // loaded into the page (each tab's visibleContacts) and a Review
     // user may view those rows, so hiding the button enforces the stated
     // policy but is NOT a confidentiality boundary.
     { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
