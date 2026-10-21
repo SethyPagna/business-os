@@ -32,6 +32,10 @@ import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError }
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
+import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
+import {
+  readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
+} from '../lib/supplierReturnReceipt'
 import {
   planReturnMoney, readSalesReturnMoney, refundCashOut, refundCashUsd, RETURN_REOPENS_PAID_SALE_DEBT, RETURN_REOPENS_PAID_SALE_DEBT_ERROR,
   ReturnMoneyError, saleReturnMoney, saleReturnMoneySql, saleReturnTagWrite,
@@ -1758,11 +1762,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // A return against a sale is priced from that sale's own lines, matched the
   // same way the quantity cap matched them: by sale_item_id, else by product_id.
   // Only a return with no sale at all falls back to the posted price.
-  let refundPrices: Array<{ unitUsd: number; unitKhr: number }>
+  let refundPrices: Array<{ unitUsd: number; unitKhr: number; fromSaleLine: boolean }>
   try {
     refundPrices = returnItems.map((item) => {
       const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
-      if (exact) return { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr }
+      if (exact) return { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr, fromSaleLine: true }
       if (!saleMeta) {
         return resolveRefundUnitPrice({
           saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
@@ -1782,6 +1786,24 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
+  }
+  // A replacement line is an ordinary sale line, so only a caller who may set a price on a sale may price it under the
+  // catalog / promotion / original-sale price (lib/returnReplacementPrice.ts). Decided in memory unless a line is
+  // posted below both its catalog price and the price it was sold at.
+  if (replacementLines.length && !canSetSalePrice(user)) {
+    const soldPrices = (productId: number) => returnItems.flatMap((item, index) =>
+      Number(item.product_id) === productId && refundPrices[index].fromSaleLine ? [refundPrices[index]] : [])
+    const offender = await firstDisallowedReplacementPrice(db, replacementLines.map((line) => {
+      const sold = soldPrices(line.productId)
+      const meta = productMap.get(line.productId)!
+      return {
+        productId: line.productId, quantity: line.quantity, priceUsd: line.priceUsd, priceKhr: line.priceKhr,
+        catalogUsd: toNumber(meta.selling_price_usd), catalogKhr: toNumber(meta.selling_price_khr),
+        soldUsd: sold.length ? Math.min(...sold.map((price) => price.unitUsd)) : null,
+        soldKhr: sold.length ? Math.min(...sold.map((price) => price.unitKhr)) : null,
+      }
+    }), returnExchangeRate)
+    if (offender) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId }, 403)
   }
   const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
@@ -2608,9 +2630,23 @@ app.post('/supplier', async (c) => {
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
 
+  // A request with an id is recorded under the actor's immutable receipt, exactly like a customer return: the same
+  // request replays, a changed one or another account's id is refused (lib/supplierReturnReceipt.ts). A request
+  // without an id (older callers) has nothing to replay and writes no receipt.
+  let receipt: { actorId: number; requestId: string; json: string; digest: string } | null = null
   if (clientRequestId) {
-    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
-    if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
+    const receiptActorId = actorId(user)
+    if (!receiptActorId) return c.json({ error: 'Authenticated employee identity required' }, 403)
+    const returnNumberBytes = utf8ByteLength(String(body.return_number ?? '').trim())
+    if (utf8ByteLength(clientRequestId) > SUPPLIER_RETURN_ID_MAX_BYTES || returnNumberBytes > SUPPLIER_RETURN_ID_MAX_BYTES) {
+      return c.json({ error: 'The request id and return number must each be at most 120 bytes.', code: 'invalid_client_request_id' }, 400)
+    }
+    const request = await supplierReturnRequest(body as Record<string, unknown>)
+    if (utf8ByteLength(request.json) > RETURN_CREATE_REQUEST_BYTES) return c.json({ error: 'This supplier return is too large. Submit fewer items.', code: 'return_too_large' }, 400)
+    receipt = { actorId: receiptActorId, requestId: clientRequestId, json: request.json, digest: request.digest }
+    const prior = await readSupplierReturnReceipt(db, receipt.actorId, receipt.requestId, receipt.digest)
+    if (prior.kind === 'replay') return c.json({ id: prior.id, returnNumber: prior.returnNumber, duplicate: true })
+    if (prior.kind === 'conflict') return c.json(prior.body, 409)
   }
 
   const settlement = ['refund', 'credit', 'replacement', 'writeoff'].includes(String(body.settlement || '').toLowerCase())
@@ -2888,6 +2924,13 @@ app.post('/supplier', async (c) => {
         params: { productId },
       })
     }
+    if (receipt) {
+      statements.push(supplierReturnReceiptStatement({
+        returnId: { sql: returnIdExpression, params: { supplier_write_key: supplierWriteKey } },
+        receiptId: crypto.randomUUID(), actorId: receipt.actorId, requestId: receipt.requestId,
+        requestDigest: receipt.digest, requestJson: receipt.json, returnNumber, occurredAt: new Date().toISOString(),
+      }))
+    }
     if (touchedProductIds.size) await executeStockTransaction(db, statements, 'retry')
     else await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
     const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
@@ -2897,18 +2940,23 @@ app.post('/supplier', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    if (clientRequestId) {
-      const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-        .get<{ id: number; return_number: string }>([clientRequestId])
-      if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+    // A lost acknowledgement or a racing twin: the receipt is committed with the return, so it answers for both.
+    if (receipt) {
+      const settled = await readSupplierReturnReceipt(db, receipt.actorId, receipt.requestId, receipt.digest)
+      if (settled.kind === 'replay') return c.json({ id: settled.id, returnNumber: settled.returnNumber, duplicate: true })
+      if (settled.kind === 'conflict') return c.json(settled.body, 409)
     }
     const transactionRefusal = stockTransactionRefusal(error)
     if (transactionRefusal) return c.json(transactionRefusal, 503)
     // An availability refusal is the caller's input problem (400), not a
     // server failure -- everything composed after it never ran (the one
-    // atomic batch at the end is all-or-nothing).
-    const status = (error as Error)?.name === 'SupplierReturnStockError' ? 400 : 500
-    return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, status)
+    // atomic batch at the end is all-or-nothing). Its sentence is written above from the product name and counts;
+    // any other failure is logged and answered with fixed text, never the database's own message.
+    if ((error as Error)?.name === 'SupplierReturnStockError') {
+      return c.json({ error: (error as Error).message, code: 'supplier_return_insufficient_stock' }, 400)
+    }
+    console.error('[returns] supplier return failed', error)
+    return c.json({ error: 'The supplier return could not be recorded. Nothing was saved. Try again.', code: 'supplier_return_failed' }, 500)
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
@@ -3730,9 +3778,8 @@ app.patch('/:id', async (c) => {
     if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
       return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }
-    return c.json({
-      error: `Failed to update return: ${(error as Error).message}`,
-    }, 500)
+    console.error('[returns] return edit failed', error)
+    return c.json({ error: 'The return could not be updated. Nothing was saved. Try again.', code: 'return_edit_failed' }, 500)
   }
 
   // The row used to carry the submitted reason and nothing else, so the

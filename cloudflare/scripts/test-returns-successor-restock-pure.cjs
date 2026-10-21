@@ -257,6 +257,12 @@ const returnsRouteOverrides = {
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // Security follow-up B: the replacement-price floor and the supplier-return receipt the route now imports, REAL over the same kernels.
+  '../lib/returnReplacementPrice': loadReal('lib/returnReplacementPrice.ts', {
+    './permissions': permissions, './moneyPrecision': moneyPrecisionKernel, './promotionRules': promotionRulesKernel,
+    './saleItemPricing': saleItemPricingKernel, './sqlBinding': loadReal('lib/sqlBinding.ts'),
+  }),
+  '../lib/supplierReturnReceipt': loadReal('lib/supplierReturnReceipt.ts', { './saleRecordEvents': saleRecordEventsKernel }),
   // routes/returns.ts counts imported returned units through saleTransitions (N1 / finding C).
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.

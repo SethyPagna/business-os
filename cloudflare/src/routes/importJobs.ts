@@ -8,7 +8,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, productImportChangesSupplier, productImportChangesPrice, productImportChangesStock, PRODUCT_IMPORT_STOCK_REFUSAL, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, productImportChangesSupplier, productImportChangesPrice, productImportChangesStock, isStockAdjustImportType, PRODUCT_IMPORT_STOCK_REFUSAL, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -304,8 +304,9 @@ async function requireChangedProductImportPriceAction(c: any, job: Record<string
 }
 
 // Security audit P2-c: a file that adds or changes stock needs inventory:adjust (Full), refused whole like the price gate.
+// Release review a77883c78, should-fix 6: that holds for an inventory or stock-actions file too, not only a products one.
 async function requireChangedProductImportStockAction(c: any, job: Record<string, unknown>) {
-  if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'inventory', 'adjust') === 'full') return null
+  if (!isStockAdjustImportType(String(job.type || '')) || getActionTier(c.get('user'), 'inventory', 'adjust') === 'full') return null
   if (!(await productImportChangesStock(c.env, job as any))) return null
   return c.json({ success: false, ...PRODUCT_IMPORT_STOCK_REFUSAL }, 403)
 }
