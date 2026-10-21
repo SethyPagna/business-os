@@ -158,6 +158,7 @@ function ClusterCard({
               onClick={() => setPendingAction({ kind: 'dismiss' })}
               disabled={busy}
               title={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
+              aria-label={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
               className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
             >
               <EyeOff className="h-3.5 w-3.5" />

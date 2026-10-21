@@ -272,6 +272,8 @@ const LABELS = {
     totalDiscount: 'Total Discount:',
     visitWebsite: 'Visit our website',
     followUs: 'Follow us',
+    taxId: 'Tax ID:',
+    receivedPayment: 'Received payment',
   },
   km: {
     receipt: 'បង្កាន់ដៃ',
@@ -307,6 +309,8 @@ const LABELS = {
     totalDiscount: 'សរុបបញ្ចុះតម្លៃ:',
     visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
     followUs: 'តាមដានពួកយើង',
+    taxId: 'លេខអត្តសញ្ញាណកម្មពន្ធ:',
+    receivedPayment: 'បានទទួលប្រាក់',
   },
 }
 
@@ -566,7 +570,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         {tpl.show_address && settings?.business_address ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_address}</div> : null}
         {tpl.show_phone && settings?.business_phone ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_phone}</div> : null}
         {tpl.show_email && settings?.business_email ? <div data-receipt-line="true" className={`${headerAlignClass} break-all text-[11px]`}>{settings.business_email}</div> : null}
-        {tpl.show_tax_id && settings?.tax_id ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>Tax ID: {settings.tax_id}</div> : null}
+        {tpl.show_tax_id && settings?.tax_id ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{labelFor(lang, 'taxId')} {settings.tax_id}</div> : null}
         <div data-receipt-line="true" data-receipt-align="center" className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
       </div>
     ),
@@ -939,8 +943,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           {tpl.sales_receipt_aba_account_number ? <div>{tpl.sales_receipt_aba_account_number}</div> : null}
         </div>
       ) : null}
-      {tpl.sales_receipt_aba_qr_image ? <ReceiptPaymentQr key={tpl.sales_receipt_aba_qr_image} src={tpl.sales_receipt_aba_qr_image} alt="ABA payment QR" /> : null}
-      {tpl.sales_receipt_note === 'received_payment' ? <div className="text-center font-semibold">Received payment</div> : null}
+      {tpl.sales_receipt_aba_qr_image ? <ReceiptPaymentQr key={tpl.sales_receipt_aba_qr_image} src={tpl.sales_receipt_aba_qr_image} alt={t?.('receipt_aba_payment_qr_alt') || 'ABA payment QR'} /> : null}
+      {tpl.sales_receipt_note === 'received_payment' ? <div className="text-center font-semibold">{labelFor(lang, 'receivedPayment')}</div> : null}
     </div>
   ) : null
 
@@ -991,7 +995,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     const message = isReceiptQrError(error)
       ? qrRefusalMessage(error)
       : getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF')
-    if (message) window.alert(message)
+    if (message) notify?.(message, 'error')
   }
 
   // The running export's control reads "Waiting for QR codes..." while the

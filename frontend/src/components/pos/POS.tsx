@@ -4221,7 +4221,7 @@ export default function POS() {
                   <span className="ml-auto text-[10px] text-gray-400">{showDelivery ? t('hide') : t('show')}</span>
                 </button>
                 {/* Toggle switch */}
-                <button onClick={() => { patchActive({ isDelivery: !active.isDelivery }); if (!active.isDelivery) setShowDelivery(true) }}
+                <button type="button" role="switch" aria-checked={Boolean(active.isDelivery)} title={t('pos_delivery') || t('delivery_fees') || 'Delivery'} aria-label={t('pos_delivery') || t('delivery_fees') || 'Delivery'} onClick={() => { patchActive({ isDelivery: !active.isDelivery }); if (!active.isDelivery) setShowDelivery(true) }}
                   className={`relative ml-2 w-9 h-5 rounded-full transition-colors flex-shrink-0 ${active.isDelivery ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${active.isDelivery ? 'translate-x-4' : 'translate-x-0.5'}`} />
                 </button>

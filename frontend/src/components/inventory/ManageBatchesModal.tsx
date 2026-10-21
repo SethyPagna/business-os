@@ -294,7 +294,7 @@ export default function ManageBatchesModal({
             <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{product.name}</div>
             {soleBranchName ? <SoleBranchLabel name={soleBranchName} label={t('branch') || 'Branch'} className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" /> : null}
           </div>
-          <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId}>
+          <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId} title={t('close') || 'Close'} aria-label={t('close') || 'Close'}>
             <X className="h-4 w-4" />
           </button>
         </div>
