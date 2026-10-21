@@ -11,10 +11,15 @@ const permissionsUtil = fs.readFileSync(new URL('../src/utils/permissions.ts', i
 const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
 const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 
-assert.match(source, /PERMISSION_SECTIONS/)
+// The access grid reads its rows from the permission table through the pure summary model, so the table stays the
+// single source and a new section shows up without a second list.
+const summarySource = fs.readFileSync(new URL('../src/components/users/permissionSummary.ts', import.meta.url), 'utf8')
+assert.match(summarySource, /for \(const section of PERMISSION_SECTIONS\)/)
+assert.match(summarySource, /export const MODULE_ROWS: ModuleRow\[\] = buildRows\(\)/)
+assert.match(source, /MODULE_ROWS/)
 assert.match(source, /from '\.\/permissionDefinitions'/)
 assert.match(source, /permission_sensitive_critical/)
-assert.match(source, /section\.permissions\.map/)
+assert.match(source, /visibleRows\.map\(renderRow\)/, 'every module row is drawn by one renderer')
 assert.doesNotMatch(source, /<select\b/, 'permission choices use the shared dropdown, not a forbidden native select')
 assert.match(source, /<AppSelect[\s\S]*ariaLabel=\{translate\('perm_sales_customer_mode'/, 'customer mode uses an accessible shared AppSelect')
 const parsedEditor = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -43,7 +48,7 @@ for (const nameOnly of [false, true]) {
 }
 assert.match(
   source,
-  /translate\(`\$\{section\.tKey\}_desc`, section\.description\)/,
+  /translate\(`\$\{row\.section\.tKey\}_desc`, row\.section\.description\)/,
   'section descriptions must resolve their dynamic language-pack key before using the English fallback',
 )
 assert.match(definitions, /backup_restore/)
@@ -83,14 +88,13 @@ for (const key of [
 
 console.log('PASS PermissionEditor exposes page/action-sensitive permission groups with English/Khmer labels')
 
-// The per-section tier picker. PermissionEditor.tsx must render a 3-way control
-// (None/Review/Full) for a `tier: true` permission instead of the plain checkbox,
-// and must keep a stored 'review' value through parsePermissionState instead of
+// The per-module level picker. The access grid offers None / View-or-Review / Full for a `tier: true` permission
+// (the pure model reads the flag), and must keep a stored 'review' value through parsePermissionState instead of
 // collapsing it to Boolean(value), as Users.tsx's normalizePermissionState does.
 assert.match(source, /from '\.\.\/\.\.\/utils\/permissions\.ts'/)
 assert.match(source, /normalizePermissionState/)
-assert.match(source, /permission\.tier/)
-assert.match(source, /setTier/)
+assert.match(summarySource, /middle: main\?\.tier \? \(main\.middleTier === 'view' \? 'view' : 'review'\) : null/, 'the middle level exists only for a tier:true permission')
+assert.match(source, /setLevel/)
 const ast = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const parser = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'parsePermissionState')!
 const compiled = ts.transpileModule(parser.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
@@ -104,6 +108,8 @@ assert.deepEqual(parseEditor({ products: 'review', sales: 'view', pos: true }), 
 assert.deepEqual(parseEditor('[true]'), {})
 assert.match(source, /review_required/)
 assert.match(source, /label_full_access/)
+assert.match(source, /translate\('view', 'View'\)/)
+assert.match(source, /translate\('none'/)
 
 for (const key of ['none', 'review_required', 'label_full_access']) {
   assert.ok(en[key], `English tier-picker label missing: ${key}`)
@@ -159,20 +165,22 @@ console.log('PASS PermissionEditor renders None/Review|View/Full tier pickers, k
 // explanation would be unreachable there, and a second panel would overlap InfoHint's.
 assert.match(source, /import InfoHint from '\.\.\/shared\/InfoHint\.tsx'/)
 assert.match(source, /reviewDescriptionFor/)
-assert.match(source, /text=\{reviewDescriptionFor\(permission\)\}/)
+assert.match(source, /reviewDescriptionFor\(row\.lead\)/, 'the module hint appends the tier explanation')
+assert.match(source, /<InfoHint[^>]*text=\{description\}/, 'the explanation travels through the shared InfoHint')
 assert.doesNotMatch(
   source,
-  /title=\{reviewDescriptionFor\(permission\)\}/,
+  /title=\{reviewDescriptionFor\(/,
   'the tier explanation must not also be a native title tooltip -- that is the black duplicate',
 )
 
-// The tier picker is the primary control on this screen; it was px-2.5/py-1
-// text-xs, which is what "very tiny various buttons" referred to.
+// The level dot is the primary control on this screen; "very tiny various buttons" once referred to text-xs
+// tier buttons. A dot is 28px on a mouse and a 44px square on a touch screen.
 assert.match(
   source,
-  /min-w-\[3\.75rem\] px-2\.5 py-1\.5 text-sm font-semibold/,
-  'tier buttons should be comfortably sized rather than text-xs',
+  /mx-auto flex h-7 w-7 items-center justify-center rounded-full disabled:cursor-not-allowed \$\{TOUCH_SQUARE\}/,
+  'level dots keep a comfortable hit area',
 )
+assert.match(source, /TOUCH_SQUARE = '\[@media\(pointer:coarse\)\]:h-11 \[@media\(pointer:coarse\)\]:w-11'/)
 assert.match(definitions, /reviewTKey\?:\s*string/)
 assert.match(definitions, /reviewDescription\?:\s*string/)
 assert.match(definitions, /reviewTKey:\s*'perm_fees_review_desc'/)
@@ -211,15 +219,18 @@ assert.match(dashboardSource, /hasPermission\('dashboard_export'\)/, 'Dashboard 
 
 console.log('PASS Dashboard has its own page-access permission (default None for every non-admin role) plus an independent export-button permission')
 
-// Action rows render under on/off keys (POS) through the same helper as under three-way sections, so the two
-// branches cannot drift. Behaviour is pinned by the render cases in permissionEditorKhmer.test.ts.
-assert.equal((source.match(/const renderActionRows = /g) || []).length, 1, 'one definition of the action panel')
-assert.match(source, /renderActionRows\(permission, tier, 'mt-2'\)/, 'the three-way branch uses it')
-assert.match(source, /renderActionRows\(permission, active \? 'full' : 'none'/, 'the on/off branch uses it, reading on as Full and off as None')
-assert.equal((source.match(/renderActionRows\(permission, /g) || []).length, 2, 'exactly the two branches call it')
-assert.match(source, /block break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
-assert.doesNotMatch(source, /truncate text-xs \$\{overriddenOff/)
-console.log('PASS both editor branches share one action panel')
+// Action chips render under on/off keys (POS) and under three-way modules through the same model and the same
+// renderer, so the two kinds of row cannot drift. Behaviour is pinned by the mounted cases in
+// permissionEditorMatrix.test.ts and permissionEditorKhmer.test.ts.
+assert.equal((source.match(/const renderActionChip = /g) || []).length, 1, 'one definition of the action chip')
+assert.equal((source.match(/chipStates\(/g) || []).length, 1, 'one place asks the model for the chips of a row')
+assert.equal((source.match(/renderActionChip\(row, /g) || []).length, 1, 'one call draws every chip of every row')
+assert.match(summarySource, /const tier = actionTierOf\(row, perms\)/, 'the model reads an on/off module as Full and an off one as None')
+assert.match(summarySource, /perms\[row\.lead\.key\] === true \? 'full' : 'none'/)
+// A chip carries its full words as the accessible name and the tooltip, so the short word on the chip loses nothing.
+assert.match(source, /aria-label=\{label\}/)
+assert.match(source, /<span aria-hidden="true">\{translate\(chip\.action\.shortTKey, chip\.action\.short\)\}<\/span>/, 'the chip shows the short word and hides it from the accessible name')
+console.log('PASS both module kinds share one action chip')
 
 // The English fallback in the tables must be the pack's English, or the editor reads differently with and
 // without a translator.
@@ -254,19 +265,36 @@ assert.doesNotMatch(en.perm_products_review_desc, /approving it (?:performs|comp
 assert.ok(km.perm_products_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន') && km.perm_products_review_desc.includes('កម្រិតពិនិត្យ'))
 assert.ok(!km.perm_products_review_desc.includes('ការអនុម័តការបញ្ចូលគ្នា'), 'the Khmer text drops the approval requirement too')
 
-// The Review description states what approving needs.
+// The Review module's own description is one short line. What approving needs lives in the tier text the module's
+// info hint appends, so the longer facts stay one tap away instead of on the row.
 assert.equal(sectionOf('review').description, en.perm_section_review_desc)
 assert.equal(permissionOf('review').reviewDescription, en.perm_review_view_desc)
-for (const fragment of [/Full Review access/, /own section and its exact action/, /price, image or cost permission/, /approve their own request/, /Rejecting needs only Full Review access/]) {
-  assert.match(en.perm_section_review_desc, fragment)
+for (const fragment of [/Acting on requests needs Full Access here/, /own section and action/, /price, image or cost permission/, /approve their own request/, /Rejecting needs only Full Access here/]) {
+  assert.match(en.perm_review_view_desc, fragment)
 }
-assert.doesNotMatch(en.perm_section_review_desc, /Merge duplicates/, 'approval does not check the merge permission on this branch')
+for (const text of [en.perm_section_review_desc, en.perm_review_view_desc]) {
+  assert.doesNotMatch(text, /Merge duplicates/, 'approval does not check the merge permission on this branch')
+}
 assert.match(en.perm_review_view_desc, /approving also needs Full access to each request’s own section and action/)
-for (const key of ['perm_section_review_desc', 'perm_review_view_desc']) {
-  assert.ok(km[key].includes('សិទ្ធិពេញលេញ'), `${key}: Khmer keeps Full Access as សិទ្ធិពេញលេញ`)
+assert.ok(km.perm_review_view_desc.includes('សិទ្ធិពេញលេញ'), 'Khmer keeps Full Access as សិទ្ធិពេញលេញ')
+assert.ok(km.perm_review_view_desc.includes('ថ្លៃដើម') && !km.perm_review_view_desc.includes('តម្លៃដើម'), 'cost is ថ្លៃដើម, as the pack’s glossary pins')
+assert.ok(!km.perm_review_view_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'))
+assert.equal(en.perm_section_review, 'Review queue', 'the module name no longer clashes with the Review level')
+assert.equal(sectionOf('review').label, en.perm_section_review)
+assert.equal(km.perm_section_review, 'ជួរត្រួតពិនិត្យ')
+assert.notEqual(km.perm_section_review, km.review_required, 'the module and the level are different words in Khmer')
+
+// Module descriptions are one plain line: 120 characters at most, no developer words, and the table's fallback is
+// the pack's English so an untranslated editor reads the same.
+for (const section of PERMISSION_SECTIONS) {
+  const key = `${section.tKey}_desc`
+  assert.equal(section.description, en[key], `${section.key}: the table fallback must equal the English pack`)
+  for (const [name, text] of [['English', en[key]], ['Khmer', km[key]]] as const) {
+    assert.ok([...text].length <= 120, `${section.key} ${name} description is ${[...text].length} characters`)
+    assert.doesNotMatch(text, /Part \d|server|capability|flags?\b|^None \/ View \/ Full/i, `${section.key} ${name} description has developer wording`)
+  }
+  assert.notEqual(km[key], en[key], `${section.key}: Khmer description is not the English text`)
 }
-assert.ok(km.perm_section_review_desc.includes('ថ្លៃដើម') && !km.perm_section_review_desc.includes('តម្លៃដើម'), 'cost is ថ្លៃដើម, as the pack’s glossary pins')
-assert.ok(!km.perm_section_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'))
 
 // The replace-import refusal names the permission by the label the editor shows for it.
 assert.ok(en.csv_replace_permission_required.includes(`“${en.perm_destructive_delete}”`), 'the English message quotes the editor label')

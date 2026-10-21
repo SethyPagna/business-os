@@ -1,96 +1,105 @@
-// The role editor must read in Khmer: section headers, None / Full Access / Custom, every
-// action row and the View-is-on lock tooltip. It is rendered for real here in Khmer and
-// English with a translator that records every key the pack cannot answer, and the Users
-// call site must pass that translator.
+// The role editor must read in Khmer: module names, None / View / Review / Full, every action chip and the
+// View-is-on lock tooltip. It is mounted for real here (every row open, since a row's chips live in its panel) in
+// Khmer and in English with a translator that records every key the pack cannot answer, and the Users call site
+// must pass that translator.
 //
 // Run: node tests/permissionEditorKhmer.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
+import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitions.ts'
 
-const nodeRequire = createRequire(import.meta.url)
-const React = nodeRequire('react')
-const renderToStaticMarkup = nodeRequire('react-dom/server').renderToStaticMarkup as (node: unknown) => string
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+const usersSource = read('../src/components/users/Users.tsx')
 
-const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
-const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-const usersSource = readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
+const harness = await createHarness()
+const live: MountedSurface[] = []
 
-// The shared InfoHint / AppSelect pull in portals and layout code; the editor's own
-// text is what this test is about, so they render their label and nothing else.
-const stubs: Record<string, string> = {
-  InfoHint: `export default function InfoHint(props) { return null }`,
-  AppSelect: `export default function AppSelect(props) { return null }`,
+type Definition = { key: string; tier?: boolean; middleTier?: string }
+const definitions: Definition[] = PERMISSION_SECTIONS.flatMap((section) => section.permissions as Definition[])
+// Every module at its middle level (Review or View), so queued chips, limited chips and the per-module tier text
+// all render; contacts is at Full with Add on and View off, so the View chip shows locked.
+const mixed: Record<string, unknown> = {}
+for (const permission of definitions) mixed[permission.key] = permission.tier ? (permission.middleTier === 'view' ? 'view' : 'review') : true
+delete mixed.all
+Object.assign(mixed, { contacts: true, 'contacts:add': true, 'contacts:view': false })
+// Every module at Full: the chips a middle level hides show, and so do the followed controls.
+const everything: Record<string, unknown> = {}
+for (const permission of definitions) everything[permission.key] = true
+delete everything.all
+
+const ancestors = (node: MemoryNode): MemoryNode[] => {
+  const chain: MemoryNode[] = []
+  for (let current = node.parentNode; current; current = current.parentNode) chain.push(current)
+  return chain
 }
-const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url))],
-  bundle: true, write: false, format: 'cjs', platform: 'node', jsx: 'automatic', logLevel: 'silent',
-  external: ['react', 'react/jsx-runtime', 'react-dom'],
-  plugins: [{
-    name: 'stub-shared-widgets',
-    setup(b) {
-      b.onResolve({ filter: /shared\/(InfoHint|AppSelect)\.tsx$/ }, (args) => ({ path: args.path.replace(/.*shared\/(\w+)\.tsx$/, '$1'), namespace: 'stub' }))
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (args) => ({ contents: stubs[args.path], loader: 'js' }))
-    },
-  }],
-})
-const mod = { exports: {} as Record<string, unknown> }
-new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(nodeRequire, mod, mod.exports)
-const PermissionEditor = mod.exports.default as React.ComponentType<Record<string, unknown>>
+const within = (node: MemoryNode, root: MemoryNode) => node === root || ancestors(node).includes(root)
 
-const { PERMISSION_SECTIONS } = await import('../src/components/users/permissionDefinitions.ts')
-
-// Every section has exactly one key on and the rest off, so each one is "custom"
-// and renders its per-key controls; contacts has Add on so View is shown locked.
-const permissions: Record<string, unknown> = {}
-for (const section of PERMISSION_SECTIONS) {
-  section.permissions.forEach((permission: { key: string }, index: number) => { permissions[permission.key] = index === 0 })
-}
-Object.assign(permissions, { contacts: true, 'contacts:add': true, 'contacts:view': false })
-
-function render(pack: Record<string, string> | null, overrides: Record<string, unknown> = {}) {
+async function render(pack: Record<string, string> | null, base: Record<string, unknown> = mixed, overrides: Record<string, unknown> = {}) {
+  // The harness reads one shared document, so a second editor would be found beside the first: one at a time.
+  for (const previous of live.splice(0)) await previous.unmount()
   const missing = new Set<string>()
-  const html = renderToStaticMarkup(React.createElement(PermissionEditor, {
-    permissions: { ...permissions, ...overrides }, onChange: () => {},
-    ...(pack ? { t: (key: string) => { if (!(key in pack)) missing.add(key); return pack[key] } } : {}),
-  }))
-  return { html, missing }
+  const t = pack ? (key: string) => { if (!(key in pack)) missing.add(key); return pack[key] } : undefined
+  const surface = await harness.mount({
+    component: 'components/users/PermissionEditor.tsx',
+    props: { permissions: { ...base, ...overrides }, onChange: () => {}, ...(t ? { t } : {}) },
+    app: { t: t ?? (() => undefined) },
+    doubles: {},
+  })
+  live.push(surface)
+  for (const id of surface.findAll((node) => node.getAttribute('data-perm-module') !== null).map((node) => node.getAttribute('data-perm-module') as string)) {
+    const root = surface.find((node) => node.getAttribute('data-perm-module') === id, `module ${id}`)
+    const toggle = surface.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-expanded') !== null && within(node, root), `${id} expander`)
+    if (toggle.getAttribute('aria-expanded') !== 'true') await surface.click(toggle)
+  }
+  // Every string a person can read or hear: text nodes, accessible names, tooltips and placeholders.
+  const strings = surface.findAll(() => true).flatMap((node) => [
+    node.childNodes.length === 1 && node.childNodes[0].nodeType === 3 ? node.textContent : '',
+    node.getAttribute('aria-label') ?? '', node.getAttribute('title') ?? '', node.getAttribute('placeholder') ?? '',
+  ].filter(Boolean))
+  return { surface, strings, missing }
 }
+// A phrase is shown when a string is it, or a tooltip made of it and other parts ("Full · ...").
+const shows = (strings: string[], phrase: string) => strings.some((text) => text === phrase || text.split(/ · |, |: |\n/).includes(phrase))
+const chipFor = (surface: MountedSurface, key: string) => surface.findAll((node) => node.tagName === 'BUTTON' && node.getAttribute('data-perm-action') === key)
 
 let failed = 0
-function test(name: string, fn: () => void): void {
-  try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
+async function test(name: string, fn: () => Promise<void>): Promise<void> {
+  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) } finally {
+    for (const surface of live.splice(0)) await surface.unmount()
+  }
 }
 
-const ENGLISH_ONLY = ['None', 'Full', 'Custom', 'View and search', 'Add contact', 'Edit contact (name only; more in POS/sales)', 'On while Add or Edit is on.']
+const ENGLISH_ONLY = ['None', 'Full', 'Administrator', 'Find permission', 'View and search', 'Add contact', 'Edit contact (name only; more in POS/sales)', 'On while Add or Edit is on.']
 
-test('CONTROL: without a translator the editor is English in any language', () => {
-  const { html } = render(null)
-  for (const phrase of ENGLISH_ONLY) assert.ok(html.includes(phrase), `the fallback text "${phrase}" is what an untranslated editor shows`)
+await test('CONTROL: without a translator the editor is English in any language', async () => {
+  const { strings } = await render(null)
+  for (const phrase of ENGLISH_ONLY) assert.ok(shows(strings, phrase) || strings.some((text) => text.includes(phrase)), `the fallback text "${phrase}" is what an untranslated editor shows`)
 })
 
-test('Khmer: no English fallback string is rendered', () => {
-  const { html } = render(km)
-  for (const phrase of ENGLISH_ONLY) {
-    assert.ok(!html.includes(`>${phrase}<`) && !html.includes(`"${phrase}`) && !html.includes(`${phrase}"`), `Khmer render still shows English "${phrase}"`)
-  }
-  assert.ok(html.includes(km.perm_view_implied), 'the View lock tooltip is the Khmer string')
-  assert.ok(html.includes(km.none) && html.includes(km.label_full_access) && html.includes(km.permission_custom))
+await test('Khmer: no English fallback string is rendered', async () => {
+  const { strings } = await render(km)
+  for (const phrase of ENGLISH_ONLY) assert.ok(!shows(strings, phrase) && !strings.some((text) => text.includes(phrase)), `Khmer render still shows English "${phrase}"`)
+  assert.ok(strings.some((text) => text.includes(km.perm_view_implied)), 'the View lock tooltip is the Khmer string')
+  assert.ok(shows(strings, km.none) && shows(strings, km.label_full_access) && shows(strings, km.review_required) && shows(strings, km.view), 'the four level words are Khmer')
+  assert.ok(!strings.some((text) => /\bCustom\b/.test(text)), 'there is no Custom state to translate')
 })
 
-test('every key the editor looks up exists in the Khmer pack (fails loudly with the key names)', () => {
-  const { missing } = render(km)
-  assert.deepEqual([...missing].sort(), [], `PermissionEditor asks for keys with no Khmer entry: ${[...missing].join(', ')}`)
-})
+for (const [label, base] of [['mixed levels', mixed], ['every module at Full', everything]] as const) {
+  await test(`every key the editor looks up exists in the Khmer pack, ${label} (fails loudly with the key names)`, async () => {
+    const { missing } = await render(km, base)
+    assert.deepEqual([...missing].sort(), [], `PermissionEditor asks for keys with no Khmer entry: ${[...missing].join(', ')}`)
+  })
 
-test('every key the editor looks up exists in the English pack too', () => {
-  const { missing } = render(en)
-  assert.deepEqual([...missing].sort(), [], `PermissionEditor asks for keys with no English entry: ${[...missing].join(', ')}`)
-})
+  await test(`every key the editor looks up exists in the English pack too, ${label}`, async () => {
+    const { missing } = await render(en, base)
+    assert.deepEqual([...missing].sort(), [], `PermissionEditor asks for keys with no English entry: ${[...missing].join(', ')}`)
+  })
+}
 
-test('every permission definition label, section and description key has a Khmer entry that is not the English text', () => {
+await test('every permission definition label, section and description key has a Khmer entry that is not the English text', async () => {
   const absent: string[] = []
   for (const section of PERMISSION_SECTIONS) {
     for (const key of [section.tKey, `${section.tKey}_desc`, ...section.permissions.map((permission: { tKey: string }) => permission.tKey)]) {
@@ -100,54 +109,54 @@ test('every permission definition label, section and description key has a Khmer
   assert.deepEqual(absent, [], `missing Khmer permission keys: ${absent.join(', ')}`)
 })
 
-test('every per-action key in permissionActions.ts has an entry in both packs', () => {
-  const source = readFileSync(new URL('../src/utils/permissionActions.ts', import.meta.url), 'utf8')
-  const keys = [...source.matchAll(/tKey: '([a-z0-9_]+)'/g)].map((match) => match[1])
-  assert.ok(keys.length > 40, 'the action table was found')
+await test('every label, short-word and hint key in the permission tables has an entry in both packs', async () => {
+  const sources = ['../src/utils/permissionActions.ts', '../src/components/users/permissionDefinitions.ts'].map(read)
+  const keys = sources.flatMap((source) => [...source.matchAll(/\b(?:t|shortT|hintT|reviewT)Key: '([a-z0-9_]+)'/g)].map((match) => match[1]))
+  assert.ok(keys.length > 120, 'the action and definition tables were found')
+  assert.ok(keys.includes('perm_short_count') && keys.includes('perm_backup_restore_desc'), 'short words and hints are read too')
   for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
     const absent = keys.filter((key) => !pack[key])
     assert.deepEqual(absent, [], `${name} pack lacks action labels: ${absent.join(', ')}`)
   }
 })
 
-// POS is an on/off key, not a three-way section, and the Worker checks pos:manage_address_presets, so the
-// editor draws its action row too. The row's own markup is cut out of the rendered editor so each assertion
-// reads that one control.
-const posRow = (html: string): string => {
-  const label = en.manage_address_presets
-  const found = html.match(new RegExp(`<button(?:(?!</button>)[\\s\\S])*?${label}(?:(?!</button>)[\\s\\S])*?</button>`))
-  assert.ok(found, `the editor renders no "${label}" row`)
-  return found[0]
-}
-
-test('POS, an on/off key, lists its saved-address action row in Khmer and in English', () => {
-  assert.ok(render(km).html.includes(km.manage_address_presets), 'the Khmer row label is rendered')
-  assert.ok(!render(km).html.includes(en.manage_address_presets), 'no English label remains in the Khmer editor')
-  assert.ok(render(en).html.includes(en.manage_address_presets), 'the English row label is rendered')
+// POS is an on/off key, not a three-way module, and the Worker checks pos:manage_address_presets, so the editor
+// draws its action chip too: its full words are the accessible name, so each assertion reads that one control.
+await test('POS, an on/off key, lists its saved-address action chip in Khmer and in English', async () => {
+  const khmer = await render(km)
+  assert.equal(chipFor(khmer.surface, 'manage_address_presets')[0]?.getAttribute('aria-label'), km.manage_address_presets, 'the Khmer chip name is rendered')
+  assert.ok(!khmer.strings.some((text) => text.includes(en.manage_address_presets)), 'no English label remains in the Khmer editor')
+  const english = await render(en)
+  assert.equal(chipFor(english.surface, 'manage_address_presets')[0]?.getAttribute('aria-label'), en.manage_address_presets, 'the English chip name is rendered')
 })
 
-test('the POS row follows the POS switch and an explicit false on the role', () => {
-  const on = posRow(render(en).html)
-  assert.ok(on.includes(`>${en.perm_outcome_allow}<`) && !on.includes('disabled'), 'POS on: the row is Allowed and can be switched off')
-  assert.ok(on.includes('aria-pressed="true"'))
-  const off = posRow(render(en, { pos: false }).html)
-  assert.ok(off.includes(`>${en.perm_outcome_block}<`) && off.includes('disabled'), 'POS off: the row is Hidden and inert')
-  const narrowed = posRow(render(en, { 'pos:manage_address_presets': false }).html)
-  assert.ok(narrowed.includes(`>${en.perm_action_off}<`) && narrowed.includes('line-through'), 'an explicit false is shown as switched off')
-  assert.ok(narrowed.includes('aria-pressed="false"'))
-  assert.ok(!narrowed.includes('disabled'), 'a switched-off row can be handed back')
+await test('the POS chip follows the POS switch and an explicit false on the role', async () => {
+  const on = chipFor((await render(en)).surface, 'manage_address_presets')[0]
+  assert.ok(on, 'POS on: the chip renders')
+  assert.equal(on.getAttribute('data-perm-mark'), 'allow', 'POS on: Allowed')
+  assert.equal(on.getAttribute('aria-pressed'), 'true')
+  assert.ok(on.getAttribute('aria-disabled') !== 'true', 'it can be switched off')
+  const off = await render(en, mixed, { pos: false })
+  assert.equal(chipFor(off.surface, 'manage_address_presets').length, 0, 'POS off: the module is at None, so no action is offered at all')
+  const narrowed = chipFor((await render(en, mixed, { 'pos:manage_address_presets': false })).surface, 'manage_address_presets')[0]
+  assert.equal(narrowed.getAttribute('data-perm-mark'), 'off', 'an explicit false is shown as switched off')
+  assert.ok(/line-through/.test(narrowed.className), 'and struck through')
+  assert.equal(narrowed.getAttribute('aria-pressed'), 'false')
+  assert.ok(narrowed.getAttribute('aria-disabled') !== 'true', 'a switched-off chip can be handed back')
 })
 
-test('CONTROL: an on/off key with no action table gets no action panel', () => {
-  const library = render(en).html.match(/<section[^>]*>(?:(?!<\/section>)[\s\S])*?Library(?:(?!<\/section>)[\s\S])*?<\/section>/)
-  assert.ok(library, 'the Library section renders')
-  assert.ok(!library[0].includes(en.perm_actions_heading), 'Library has no action rows, so it must not grow an empty panel')
+await test('CONTROL: an on/off key with no action table gets no action chips', async () => {
+  const { surface } = await render(en)
+  const library = surface.find((node) => node.getAttribute('data-perm-module') === 'library', 'library module')
+  assert.ok(library, 'the Library module renders')
+  assert.equal(surface.findAll((node) => node.getAttribute('data-perm-action') !== null && within(node, library)).length, 0, 'Library has no action chips, so its panel must not grow an empty chip row')
 })
 
-test('the Users role form passes the translator to the lazy editor', () => {
+await test('the Users role form passes the translator to the lazy editor', async () => {
   const call = usersSource.match(/<LazyPermissionEditor[\s\S]*?\/>/)?.[0] ?? ''
   assert.match(call, /\bt=\{t\}/, 'Users.tsx must hand its translator to <LazyPermissionEditor>')
 })
 
+await harness.close()
 console.log(failed ? `\n${failed} test(s) FAILED` : '\nall tests passed')
 if (failed) process.exitCode = 1

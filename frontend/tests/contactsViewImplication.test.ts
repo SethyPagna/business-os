@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { isActionOverriddenOff, isViewImpliedByWrite, toggleActionOverrideMap } from '../src/utils/permissionActions.ts'
+import { MODULE_ROWS, chipStates } from '../src/components/users/permissionSummary.ts'
 
 function workerModule(relative: string): any {
   const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
@@ -74,9 +75,18 @@ console.log('PASS role editor toggles: View refused while Add/Edit on, released 
 const editor = readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
 assert.match(editor, /toggleActionOverrideMap\(perms, permissionKey, actionKey\)/, 'the editor toggles through the shared helper')
 assert.match(editor, /if \(toggled === perms\) return/, 'a refused toggle does not call onChange')
-assert.match(editor, /const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite\(/, 'the View row locks only when the tier offers it')
-assert.match(editor, /disabled=\{!canToggle\}/)
-assert.match(editor, /viewLocked\s*\?\s*translate\('perm_view_implied'/, 'the locked row carries the tooltip')
+// The access grid draws the chip; the lock decision lives in the pure summary model so the editor cannot drift from it.
+const summary = readFileSync(new URL('../src/components/users/permissionSummary.ts', import.meta.url), 'utf8')
+assert.match(summary, /const viewLocked = outcome !== 'block' && isViewImpliedByWrite\(/, 'the View chip locks only when the level offers it')
+assert.match(summary, /canToggle: !blocked && !viewLocked && !setBy/, 'a locked chip cannot be toggled')
+assert.match(editor, /disabled=\{!chip\.canToggle\}/, 'the editor disables the chip the model locks')
+assert.match(editor, /chip\.viewLocked\) parts\.push\(translate\('perm_view_implied'/, 'the locked chip carries the tooltip')
+{
+  const viewChip = (perms: Record<string, unknown>) => chipStates(MODULE_ROWS.find((row) => row.actionKey === 'contacts' && !row.sub)!, perms as never).find((chip) => chip.action.key === 'view')!
+  assert.equal(viewChip({ contacts: true }).viewLocked, true, 'Add and Edit on: the View chip is locked')
+  assert.equal(viewChip({ contacts: true }).canToggle, false)
+  assert.equal(viewChip({ contacts: true, 'contacts:add': false, 'contacts:edit': false }).canToggle, true, 'both writes off: View is free')
+}
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 for (const key of ['perm_view_implied', 'perm_act_contacts_edit']) {

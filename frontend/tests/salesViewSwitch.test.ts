@@ -11,6 +11,7 @@ import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { actionsForKey, actionAllowed, isActionOverriddenOff, outcomeAt, toggleActionOverrideMap } from '../src/utils/permissionActions.ts'
 import { rolePermissionLabel } from '../src/components/users/rolePermissionLabel.ts'
+import { MODULE_ROWS, chipStates } from '../src/components/users/permissionSummary.ts'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const worker: any = (() => {
@@ -63,8 +64,14 @@ assert.equal(worker.getActionTier({ ...admin, permissions: JSON.stringify(admin.
 
 // 4. The Worker refuses on the surfaces the key is meant to hide (reports.ts is in the deployed base).
 assert.match(read('../../cloudflare/src/routes/reports.ts'), /getActionTier\(user, 'sales', 'view'\) !== 'none'/)
-// The editor renders every row of the table except the one it draws as a dropdown.
-assert.match(read('../src/components/users/PermissionEditor.tsx'), /action\.key !== 'customer_reassign'/)
+// The access grid draws a chip for every action in the table except the one it draws as a dropdown.
+assert.match(read('../src/components/users/permissionSummary.ts'), /permissionKey === 'sales' && action\.key === 'customer_reassign'/)
+{
+  const salesChips = chipStates(MODULE_ROWS.find((row) => row.actionKey === 'sales' && !row.sub)!, { sales: true } as never).map((chip) => chip.action.key)
+  assert.ok(salesChips.includes('view'), 'the Sales View switch is a chip of its own')
+  assert.ok(!salesChips.includes('customer_reassign'), 'the customer mode is the dropdown, not a chip')
+  assert.deepEqual(salesChips, actionsForKey('sales').filter((action) => !action.follows && action.key !== 'customer_reassign').map((action) => action.key), 'every other action of the table is a chip, in table order')
+}
 
 // 5. Labels: both packs, a real Khmer string, and the Roles card tag reads as a label not a raw key.
 assert.ok(en.perm_act_sales_view && km.perm_act_sales_view, 'perm_act_sales_view in both packs')
