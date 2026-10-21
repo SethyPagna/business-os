@@ -1473,7 +1473,6 @@ function ProductFormContent({
     const nextValue = String(value || '').trim()
     if (!nextValue || !scannerField) return
     setField(scannerField, nextValue)
-    closeScanner()
   }
 
   const scanningLabel = tr('scanner_state_starting', 'Opening camera...', 'កំពុងបើកកាមេរ៉ា...')

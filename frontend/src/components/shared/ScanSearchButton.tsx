@@ -88,7 +88,6 @@ export default function ScanSearchButton({ onDetected, t, title, className = '',
             onClose={() => setOpen(false)}
             onDetected={handleDetected}
             t={t}
-            hideManualEntry
           />
         </Suspense>
       ) : null}

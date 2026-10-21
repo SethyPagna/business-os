@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { scanBarcodeFromImageFile, type PhotoImage } from '../src/components/products/scanning/barcodeImageScanner.ts'
+import { PhotoScanError, scanBarcodeFromImageFile, type PhotoImage } from '../src/components/products/scanning/barcodeImageScanner.ts'
 import { createReadConfirmer, isAcceptableBarcodeRead, type PixelFrame } from '../src/components/products/scanning/barcodeFrameDecoder.ts'
 import { rotateQuarter, runDecodeLadder } from '../src/components/products/scanning/barcodeLadder.ts'
 import type { DecodeClient, DecodeFrames } from '../src/components/products/scanning/decodeWorkerClient.ts'
@@ -248,6 +248,34 @@ await runTest('when createImageBitmap rejects the photo, the DOM image decoder r
     globals.Image = originalImage
     URL.createObjectURL = originalCreate
     URL.revokeObjectURL = originalRevoke
+  }
+})
+
+await runTest('every way a photo gives no barcode names its reason, so the sheet can show a translated sentence (the message is for logs)', async () => {
+  const failureOf = async (run: () => Promise<unknown>) => {
+    try { await run() } catch (error) { return error }
+    throw new Error('expected the scan to fail')
+  }
+  const { openImage } = fakePhoto()
+  const { acquireClient } = fakeClient(async () => null)
+  const noBarcode = await failureOf(() => scanBarcodeFromImageFile({ name: 'p.png' }, { ...noNative, openImage, grabRegions, acquireClient }))
+  assert.ok(noBarcode instanceof PhotoScanError)
+  assert.equal(noBarcode.failure, 'no-barcode')
+
+  const noPhoto = await failureOf(() => scanBarcodeFromImageFile(null))
+  assert.ok(noPhoto instanceof PhotoScanError)
+  assert.equal(noPhoto.failure, 'no-photo')
+
+  const globals = globalThis as unknown as { createImageBitmap?: unknown; Image?: unknown }
+  const original = { createImageBitmap: globals.createImageBitmap, Image: globals.Image }
+  globals.createImageBitmap = async () => { throw new Error('HEIC not supported') }
+  globals.Image = class { onload: (() => void) | null = null; onerror: (() => void) | null = null; set src(_value: string) { queueMicrotask(() => this.onerror?.()) } }
+  try {
+    const unreadable = await failureOf(() => scanBarcodeFromImageFile(new Blob(['x']), { ...noNative }))
+    assert.ok(unreadable instanceof PhotoScanError)
+    assert.equal(unreadable.failure, 'unreadable', 'neither decoder could open the file')
+  } finally {
+    Object.assign(globals, original)
   }
 })
 

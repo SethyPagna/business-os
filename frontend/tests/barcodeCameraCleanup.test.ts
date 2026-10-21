@@ -190,13 +190,16 @@ try {
 
   await runTest('the photo picker releases the camera and parks on "Camera paused" (no stale message), without restarting it', async () => {
     stage.liveVideoFrames = true
-    // The fallback path sets a "compatibility mode" message while scanning; parking must not leave it behind.
     const running = await mountProbe('granted', { native: false })
     await waitFor(() => isScanning(running))
-    assert.match(running.view(), /\|fallback$/, 'the fallback path does set a message while scanning')
     await act(async () => { running.camera().parkCamera() })
     assertReleased(running, 1, 'photo picker')
     assert.equal(running.view(), 'manual|', 'parked, with no message left over from the run')
+    // A photo that could not be read leaves its message; opening the picker again must not park behind it.
+    await act(async () => { running.camera().showManualError('photo failed') })
+    assert.equal(running.view(), 'manual|photo failed')
+    await act(async () => { running.camera().parkCamera() })
+    assert.equal(running.view(), 'manual|', 'parking again clears the photo message')
     await settle(60)
     assert.equal(running.probe.getUserMediaCalls, 1, 'nothing restarts the camera behind the picker')
     await running.mounted.unmount()

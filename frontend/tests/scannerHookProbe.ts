@@ -10,7 +10,6 @@ export const MESSAGES = {
   cameraPermissionBlocked: 'blocked',
   scanPermissionDenied: 'denied',
   scanFailed: 'failed',
-  scanFallbackActive: 'fallback',
   scanPromptDismissed: 'dismissed',
 }
 

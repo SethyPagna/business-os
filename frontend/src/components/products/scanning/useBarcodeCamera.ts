@@ -21,6 +21,7 @@ import {
   viewOf,
   zxingHeadStartOver,
 } from './barcodeFrameDecoder.ts'
+import { listCameras, nextCameraId, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
 import { acquireDecodeClient, type DecodeClient, type DecodeFrames } from './decodeWorkerClient.ts'
 import { createScanIdlePolicy, scanIntervalMs } from './scanIdlePolicy.ts'
 import {
@@ -61,7 +62,6 @@ export interface CameraMessages {
   cameraPermissionBlocked: string
   scanPermissionDenied: string
   scanFailed: string
-  scanFallbackActive: string
   scanPromptDismissed: string
 }
 
@@ -70,6 +70,8 @@ interface UseBarcodeCameraOptions {
   messages: CameraMessages
   onDetected: (value: string) => void
   onClose: () => void
+  /** How long after an accepted read `onClose` waits, so the sheet's flash is seen. Closing by hand is never delayed. */
+  closeDelayMs?: number
 }
 
 // Torch and focus are not in the DOM lib's track types yet.
@@ -110,7 +112,7 @@ function openDecodeClient(): DecodeClient | null {
   }
 }
 
-export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBarcodeCameraOptions) {
+export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDelayMs = 0 }: UseBarcodeCameraOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const cancelFrameRef = useRef<(() => void) | null>(null)
@@ -126,6 +128,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
   const startTokenRef = useRef(0)
   const startSequenceRef = useRef(0)
   const detectionHandledRef = useRef(false)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const nextScanAtRef = useRef(0)
   // Seeded from `open` rather than 'idle': the modal is only ever mounted by
   // the tap on a scanner button, and that tap already starts the camera (see
@@ -139,6 +142,11 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
   const [torchAvailable, setTorchAvailable] = useState(false)
   const [torchOn, setTorchOn] = useState(false)
   const [torchFailed, setTorchFailed] = useState(false)
+  const [readOk, setReadOk] = useState(false)
+  const [cameraCount, setCameraCount] = useState(0)
+  // The front camera is shown as a mirror, as a selfie view is. Only the picture on screen flips; the frames the
+  // decoders read are the camera's own, so a printed code is never read back to front.
+  const [mirrored, setMirrored] = useState(false)
 
   useEffect(() => { statusRef.current = status }, [status])
 
@@ -200,12 +208,13 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
     detectionHandledRef.current = true
     markScanner('read')
     cleanup()
+    setReadOk(true)
     try {
       onDetected(nextValue)
     } finally {
-      onClose()
+      closeTimerRef.current = setTimeout(onClose, closeDelayMs)
     }
-  }, [cleanup, onClose, onDetected])
+  }, [cleanup, closeDelayMs, onClose, onDetected])
 
   // Sends one frame to the worker, unless the last one is still being decoded.
   // A ZXing read must agree twice in a row (createReadConfirmer) and EAN/UPC
@@ -365,7 +374,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
       // the 446 KB ZXing chunk -- the prompt arrived a download later than the
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
-      const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
+      const stream = await navigator.mediaDevices.getUserMedia(withRememberedCamera(CAMERA_CONSTRAINTS))
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
         return
@@ -382,6 +391,9 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
       trackRef.current = track || null
       const capabilities = (track?.getCapabilities?.() || {}) as CameraTrackCapabilities
       setTorchAvailable(capabilities.torch === true)
+      setMirrored(track?.getSettings?.().facingMode === 'user')
+      // Cameras can only be listed with names once permission is granted, which it now is.
+      void listCameras().then((cameras) => { if (startTokenRef.current === startToken) setCameraCount(cameras.length) })
       if (capabilities.focusMode?.includes('continuous')) {
         // Best effort: a camera that refuses keeps its default focus, which is
         // how every scan worked before this hint existed.
@@ -416,9 +428,6 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
       await client.ready
       if (startTokenRef.current !== startToken) return
       beginScanning(video)
-      // permissionState was already set to 'granted' by the single acquisition
-      // above -- both decoders share it now, so it is not repeated per branch.
-      setError(messages.scanFallbackActive)
     } catch (scanError) {
       const scanErrorText = getScanErrorText(scanError)
       const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
@@ -444,12 +453,21 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
     messages.cameraDocumentBlocked,
     messages.cameraPermissionBlocked,
     messages.scanFailed,
-    messages.scanFallbackActive,
     messages.scanPermissionDenied,
     messages.scanPromptDismissed,
     messages.scanUnsupported,
     waitForVideoElement,
   ])
+
+  // Moves on to the next camera the device lists and remembers it. The camera is reopened from scratch (the same
+  // path as a retry), so every guard on a new start applies.
+  const switchCamera = useCallback(async (): Promise<void> => {
+    const cameras = await listCameras()
+    const nextId = nextCameraId(cameras.map((camera) => camera.deviceId), trackRef.current?.getSettings?.().deviceId)
+    if (!nextId || cameras.length < 2) return
+    saveCameraChoice(nextId)
+    await startCamera()
+  }, [startCamera])
 
   const prepareScanner = useCallback(async (): Promise<void> => {
     cleanup()
@@ -485,6 +503,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
 
   const closeScanner = useCallback((): void => {
     detectionHandledRef.current = true
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     cleanup()
     onClose()
   }, [cleanup, onClose])
@@ -508,6 +527,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
   useEffect(() => {
     if (!open) return undefined
     detectionHandledRef.current = false
+    setReadOk(false)
     // Owner rule (2026-09-14): pressing the scanner button opens the camera
     // directly. The click that mounted this modal IS the user gesture, so the
     // request happens here instead of behind a second "Start camera" tap; the
@@ -516,6 +536,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
     void startCameraRef.current()
     return () => {
       detectionHandledRef.current = true
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
       cleanup()
       setStatus('idle')
       setError('')
@@ -556,7 +577,9 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
         setError(messages.cameraDocumentBlocked)
         return
       }
-      setPermissionState(nextState)
+      // A browser with no camera API still answers the permission query; that answer must not turn "this
+      // browser cannot scan" back into a camera button that can never work.
+      setPermissionState((current) => (current === 'unsupported' ? current : nextState))
       if (nextState === 'denied' && (statusRef.current === 'scanning' || statusRef.current === 'starting')) {
         cleanup()
         setStatus('blocked')
@@ -584,7 +607,11 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose }: UseBar
     torchAvailable,
     torchOn,
     torchFailed,
+    readOk,
+    cameraCount,
+    mirrored,
     startCamera,
+    switchCamera,
     toggleTorch,
     closeScanner,
     parkCamera,
