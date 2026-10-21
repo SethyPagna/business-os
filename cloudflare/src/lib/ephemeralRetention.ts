@@ -145,6 +145,73 @@ export interface EphemeralRetentionResult {
   deleted?: Record<string, number>
 }
 
+// ---------------------------------------------------------------------------
+// action_history is a PARENT table. Operation receipts point at it through
+// `REFERENCES action_history(id)` columns (NO ACTION for the bulk / session /
+// receipt / recovery tables, ON DELETE SET NULL for the product-conflict and
+// product-remove tables). D1 enforces foreign keys and a NO ACTION violation
+// aborts the WHOLE bounded DELETE: one referenced id inside a slice meant the
+// slice deleted nothing, the step's error was swallowed, and the next sweep
+// picked the same slice again -- so one old receipt stalled retention forever.
+//
+// Every referenced id is kept, not only the NO ACTION ones: receipts are
+// idempotency evidence, and a SET NULL cascade would silently cut an
+// operation's undo link to its history row. Ids named by a top-level
+// `history_id` inside an undo_snapshots payload are kept too (customer
+// gender restoration joins through it).
+//
+// The referencing columns are DISCOVERED from the live schema each run (one
+// sqlite_master x pragma_foreign_key_list read), so a future migration that
+// adds another reference cannot reintroduce the stall. Internal D1 (_cf_*) and
+// sqlite_* tables are filtered first (MATERIALIZED): D1 does not authorize
+// reading their foreign keys.
+// ---------------------------------------------------------------------------
+export type ForeignReference = { table_name: string; column_name: string }
+
+function quoteIdent(name: string): string {
+  return `"${String(name).replace(/"/g, '""')}"`
+}
+
+export async function discoverActionHistoryReferences(db: Db): Promise<ForeignReference[]> {
+  const rows = await db.prepare(`
+    WITH candidate AS MATERIALIZED (
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+        AND name NOT LIKE '!_cf!_%' ESCAPE '!'
+        AND name NOT LIKE 'sqlite!_%' ESCAPE '!'
+    )
+    SELECT candidate.name AS table_name, f."from" AS column_name
+    FROM candidate JOIN pragma_foreign_key_list(candidate.name) AS f
+    WHERE lower(f."table") = 'action_history'
+    ORDER BY candidate.name, f."from"
+  `).all<ForeignReference>({})
+  return (Array.isArray(rows) ? rows : []).filter((row) => row?.table_name && row?.column_name)
+}
+
+// Snapshot payloads are large: instr() skips the JSON parse for any payload
+// that cannot name a history row, and json_valid() keeps one malformed legacy
+// payload from erroring the statement (which would recreate the stall).
+// CASE, not AND: SQLite does not promise left-to-right AND evaluation.
+const SNAPSHOT_HISTORY_ID = `CASE WHEN instr(payload_json, '"history_id"') > 0 AND json_valid(payload_json)
+      THEN CAST(json_extract(payload_json, '$.history_id') AS INTEGER) END`
+const SNAPSHOT_HISTORY_EXCLUSION = ` AND id NOT IN (SELECT ${SNAPSHOT_HISTORY_ID} FROM undo_snapshots
+    WHERE (${SNAPSHOT_HISTORY_ID}) IS NOT NULL)`
+
+// One non-correlated NOT IN per referencing column, built once per statement.
+// `IS NOT NULL` is load-bearing: a single NULL in the set makes NOT IN unknown
+// for every row and silently stops all pruning.
+export function actionHistoryReferenceExclusion(references: ForeignReference[]): string {
+  return references.map(({ table_name, column_name }) => {
+    const column = quoteIdent(column_name)
+    return ` AND id NOT IN (SELECT ${column} FROM ${quoteIdent(table_name)} WHERE ${column} IS NOT NULL)`
+  }).join('') + SNAPSHOT_HISTORY_EXCLUSION
+}
+
+async function pruneActionHistory(env: Env, db: Db): Promise<number> {
+  const references = await discoverActionHistoryReferences(db)
+  return batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) })
+}
+
 // Collect the R2 keys a set of submission rows points at. Only keys under
 // this app's own private prefix are returned: a legacy `/uploads/...` value
 // is a public catalogue-bucket path that other rows may share, and this
@@ -248,7 +315,7 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
   await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
   const aiLogCutoff = mixedFormatOlderThan('created_at', AI_LOG_TTL_DAYS) // portal.ts writes toISOString()
   await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', aiLogCutoff.where, aiLogCutoff.params))
-  await step('action_history', () => batchDeleteById(env, db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
+  await step('action_history', () => pruneActionHistory(env, db))
   await step('share_submission_images', () => pruneSubmissionImages(env, db))
   await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
   await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
