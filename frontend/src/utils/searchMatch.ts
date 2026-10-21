@@ -366,8 +366,22 @@ export function runFuzzyFallbackMatch<TId extends number | string = number>(
 // literal placeholder "0").
 export const MIN_REAL_BARCODE_LENGTH = 4
 
+// The Windows Khmer keyboard layout makes a scanner gun type ០-៩ for 0-9, so a
+// barcode key folds them to ASCII before anything else (leading-zero and UPC
+// folding then run on the folded value). Barcode keys and probes only: name
+// matching never calls this, so Khmer digits in a product name stay as typed.
+const KHMER_ZERO_CODE = 0x17e0
+
+export function foldNativeDigits(value: unknown): string {
+  return String(value ?? '').replace(/[\u17E0-\u17E9]/g, (digit) => String(digit.charCodeAt(0) - KHMER_ZERO_CODE))
+}
+
+function compactBarcodeText(value: unknown): string {
+  return foldNativeDigits(value).trim().toLowerCase().replace(/[\s-]+/g, '')
+}
+
 export function normalizeBarcodeKey(value: unknown): string {
-  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  const raw = compactBarcodeText(value)
   if (raw.length < MIN_REAL_BARCODE_LENGTH) return ''
   const stripped = raw.replace(/^0+/, '')
   return stripped
@@ -448,8 +462,7 @@ function barcodeSearchKeySetsMatch(leftKeys: readonly string[], rightKeys: reado
 export function barcodeSearchKeys(value: unknown): string[] {
   const primary = normalizeBarcodeKey(value)
   if (!primary) return []
-  const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
-  return [...new Set([primary, ...upcPairKeys(digits)])]
+  return [...new Set([primary, ...upcPairKeys(compactBarcodeText(value))])]
 }
 
 export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
