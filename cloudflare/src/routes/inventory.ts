@@ -41,7 +41,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildIssueStateClauses, buildLikeAliasClause, foldNativeDigits, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planRemovalLotRecord, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
@@ -1898,7 +1898,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
       costUsd: explicitCostUsd ?? source.cost_price_usd ?? null,
       costKhr: explicitCostKhr ?? source.cost_price_khr ?? null,
-      barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
+      // Khmer-layout scanner digits become ASCII: this barcode is compared with the source row's and, when it is new, stored.
+      barcode: pricing.barcode != null ? (foldNativeDigits(pricing.barcode).trim() || null) : source.barcode,
     }
     // The unlocked block is the same price edit as the single sellingPrice field above: a changed selling or wholesale
     // price, or a changed product discount (a price too -- lib/productDiscountGate.ts), needs Edit product and the price

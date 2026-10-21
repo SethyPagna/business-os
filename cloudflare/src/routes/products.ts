@@ -254,7 +254,7 @@ import {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct, isImageOnlyWritePayload, restrictToImageOnlyFields,
-  normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
+  normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError, foldBarcodeInput,
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
 import { branchRedirectTarget } from '../lib/branchRedirectWrite'
@@ -2275,6 +2275,9 @@ app.post('/', async (c) => {
   if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  // Khmer-layout scanner digits become ASCII before the scientific-notation check, the identity lookup, the fold, the
+  // review queue's payload and the insert all read the barcode.
+  foldBarcodeInput(body)
   const createBarcode = String(body.barcode ?? '').trim()
   if (SCIENTIFIC_NOTATION_BARCODE.test(createBarcode)) {
     return c.json(scientificBarcodeError(createBarcode), 400)
@@ -2583,6 +2586,9 @@ app.put('/:id', async (c) => {
   // the permission check, so neither the audit diff, the edit-fold nor the
   // review queue ever sees the form's stale figure.
   delete body.stock_quantity
+  // Khmer-layout scanner digits become ASCII before the identity lookup, the edit-fold, the review queue's payload and
+  // the update read the barcode.
+  foldBarcodeInput(body)
   // OPUS-H-1: canonical before the money plan, the price gate, the review queue and the writer see it.
   const invalidDiscount = normalizeProductDiscountBody(body)
   if (invalidDiscount) return c.json(invalidDiscount, 400)

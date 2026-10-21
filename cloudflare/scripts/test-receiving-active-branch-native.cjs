@@ -118,6 +118,8 @@ const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  // routes/inventory.ts folds Khmer-layout scanner digits in an edited barcode (lane 6.0.938): the REAL fold, every other export still unwired.
+  '../lib/searchMatch': new Proxy(autoStub(), { get: (target, prop) => (prop === 'foldNativeDigits' ? loadReal('lib/searchMatch.ts').foldNativeDigits : target[prop]) }),
   '../lib/receivingBranch': receivingBranchMod,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/acquisitionCostAccess': acquisitionMod,

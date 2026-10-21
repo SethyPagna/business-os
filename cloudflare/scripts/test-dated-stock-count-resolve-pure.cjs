@@ -73,6 +73,8 @@ const relMap = {
   './moneyPrecision': () => loadReal('lib/moneyPrecision.ts'),
   './moneyPrecision.ts': () => loadReal('lib/moneyPrecision.ts'),
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
+  // lib/datedStockCount*.ts fold Khmer-layout scanner digits in a barcode (lane 6.0.938).
+  './searchMatch': () => loadReal('lib/searchMatch.ts'),
   './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),

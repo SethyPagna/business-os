@@ -4,7 +4,7 @@ import type { D1Compat } from './db'
 import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { normalizeSearchText } from './searchMatch'
+import { foldNativeDigits, normalizeSearchText } from './searchMatch'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
@@ -259,7 +259,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
     `, params: {
       productName,
       nameNormalized: normalizeSearchText(productName),
-      barcode: String(input.barcode || '').trim() || null,
+      barcode: foldNativeDigits(String(input.barcode || '').trim()) || null, // a plan sealed before the fold may carry Khmer digits
       sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true) ?? 0,
       wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,
       costPriceUsd: optionalMoney(input.costPriceUsd),

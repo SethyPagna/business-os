@@ -93,7 +93,7 @@ import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
-import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { normalizeSearchText, compactSearchText, foldNativeDigits } from './searchMatch'
 import { getActionTier, hasPermission, isActionBlocked, type PermissionUser } from './permissions'
 import type { SessionUser } from './auth'
 import { sanitizeMediaPath } from './media'
@@ -1863,7 +1863,8 @@ export async function classifyProducts(
     // strategy.
     const name = str(row.name || row.product_name || row.product)
     const sku = str(row.sku || row.code || row.product_code)
-    const barcode = str(row.barcode || row.upc || row.ean)
+    // Khmer-layout scanner digits become ASCII here: matching, collision warnings and the INSERT/UPDATE all read this value.
+    const barcode = foldNativeDigits(str(row.barcode || row.upc || row.ean))
     try {
       const status = typeof row.is_active === 'string' ? row.is_active.trim() : row.is_active
       assertProductStatusInput({ is_active: status === '' ? null : status })

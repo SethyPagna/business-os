@@ -41,6 +41,7 @@ const branchEffect = loadCompiled('branchEffect.ts', { './branchRoles': branchRo
 const importBranchAuthority = loadCompiled('importBranchAuthority.ts', { './branchRoles': branchRoles, './branchEffect': branchEffect })
 const subject = loadCompiled('stockActionImport.ts', {
   './importBranchAuthority': importBranchAuthority,
+  './searchMatch': loadCompiled('searchMatch.ts', {}), // the barcode fold (lane 6.0.938)
   './batchCode': batchCode,
   './importNumbers': importNumbers,
   './stockActionResolver': resolver,
