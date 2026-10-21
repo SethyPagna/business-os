@@ -9,6 +9,7 @@ import { indexCanonicalImportBranches, resolveImportBranchRequest, type Canonica
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
 import { identityBarcodeKey, identityBarcodeClassKey, barcodeIdentityMatches } from './productDetailRule'
+import { foldNativeDigits } from './searchMatch'
 import {
   resolveStockActions,
   type StockActionMode,
@@ -223,7 +224,8 @@ export function resolveUnifiedStockImportRows(
   rawRows.forEach((raw, index) => {
     const rowNumber = Number(raw._rowNumber) > 0 ? Number(raw._rowNumber) : index + 2
     const name = text(raw.name)
-    const barcode = text(raw.barcode)
+    // Khmer-layout scanner digits become ASCII, so matching, the new-product identity and the created barcode agree.
+    const barcode = foldNativeDigits(text(raw.barcode))
     // The sheet's bare `date` header names no format, so it keeps the only
     // meaning it has ever had -- month-first -- and says so explicitly rather
     // than leaning on a default. This is a FILE the shop already owns, not a

@@ -24,7 +24,7 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
+import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput } from './productWrites'
 import { foldCreateIntoExisting, foldCreateWithStockInWrite, type FoldDuplicate } from './createFold'
 import type { RedirectTarget } from './branchRedirectWrite'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
@@ -300,6 +300,7 @@ async function applyApprovedCreateFold(
 // --- products / create / product -----------------------------------
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  foldBarcodeInput(body) // a request queued before the barcode fold carries the typed digits
   assertProductStatusInput(body)
   delete body.is_active
   readProductMoneyPlan(body)
@@ -328,6 +329,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  foldBarcodeInput(body)
   assertProductStatusInput(body)
   delete body.is_active
   await assertProductsActive(getDb(env), [Number(id)])

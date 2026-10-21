@@ -34,6 +34,7 @@ import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
+import { foldNativeDigits } from './searchMatch'
 import {
   IMPORT_BRANCH_COLUMNS_SQL, importBranchRedirectRequired, indexCanonicalImportBranches, resolveImportBranchRequest,
   type CanonicalImportBranchRow, type ImportBranchRequestOptions,
@@ -392,7 +393,8 @@ export function parseRawDatedCountRows(body: Record<string, unknown>): { rows: R
       date: String(row.date ?? ''),
       branchName: String(row.branchName ?? '').trim(),
       sku: row.sku != null ? String(row.sku).trim() || null : null,
-      barcode: row.barcode != null ? String(row.barcode).trim() || null : null,
+      // Khmer-layout scanner digits become ASCII, so the sheet row matches the catalog's barcode and a created product keeps it.
+      barcode: row.barcode != null ? foldNativeDigits(String(row.barcode).trim()) || null : null,
       productName: row.productName != null ? String(row.productName).trim() || null : null,
       // Left NaN on purpose when unparseable -- resolveDatedStockCountRows's
       // own `Number.isFinite(row.count)` check reports this per-row as

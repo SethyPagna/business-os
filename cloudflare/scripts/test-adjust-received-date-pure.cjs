@@ -272,6 +272,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     buildFamilyRelevanceOrderSql: (tail) => tail,
   },
   '../lib/searchMatch': {
+    // routes/inventory.ts folds Khmer-layout scanner digits in an edited barcode (lane 6.0.938): the REAL fold, not a stand-in.
+    foldNativeDigits: loadReal('lib/searchMatch.ts').foldNativeDigits,
     buildFtsMatchExpression: () => "''",
     buildHybridMatchClause: () => '1=1',
     buildIssueStateClauses: () => [],

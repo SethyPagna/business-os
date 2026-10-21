@@ -52,7 +52,7 @@ function extractMoneyKey(name) {
 
 const combinedSource = extractMoneyKey('PRODUCT_MONEY_VERSION') + '\n'
   + extractMoneyKey('PRODUCT_MONEY_PLAN') + '\n' + extractConst('PRODUCT_SKIP_KEYS') + '\n'
-  + extractFunction('clampNegativeStockQuantity') + '\n' + extractFunction('cleanPayload')
+  + extractFunction('clampNegativeStockQuantity') + '\n' + extractFunction('foldBarcodeInput') + '\n' + extractFunction('cleanPayload')
 const { outputText } = ts.transpileModule(combinedSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   fileName: 'products-pure.ts',
@@ -63,7 +63,12 @@ const discountGate = { exports: {} }
 new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productDiscountGate.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText)(discountGate, discountGate.exports)
-new Function('exports', 'canonicalProductDiscountColumns', outputText)(moduleObj.exports, discountGate.exports.canonicalProductDiscountColumns)
+// ...and folds a written barcode's Khmer-layout scanner digits through the real (import-free) searchMatch.foldNativeDigits.
+const searchMatch = { exports: {} }
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'searchMatch.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText)(searchMatch, searchMatch.exports)
+new Function('exports', 'canonicalProductDiscountColumns', 'foldNativeDigits', outputText)(moduleObj.exports, discountGate.exports.canonicalProductDiscountColumns, searchMatch.exports.foldNativeDigits)
 const { clampNegativeStockQuantity, cleanPayload, PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN } = moduleObj.exports
 
 let passed = 0

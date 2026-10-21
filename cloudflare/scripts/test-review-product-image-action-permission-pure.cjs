@@ -172,6 +172,7 @@ function loadReviewApply(state, updateChanges = 1) {
     syncProductImageGallery: async (_env, _id, gallery) => { state.synced.push([...gallery]); return [...gallery] },
     seedBranchStockForNewProduct: async () => {},
     seedInitialBatchForNewProduct: async () => {},
+    foldBarcodeInput: () => {}, // the barcode fold is proved by test-barcode-write-fold-pure.cjs; no case here carries a barcode
   }
   return loadTs('lib/reviewApply.ts', {
     // Real module: an approved plan-less cost edit records its typed-cost entry (U-cost).

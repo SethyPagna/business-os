@@ -15,7 +15,7 @@ import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
 import { businessToday } from './businessDateWindow'
-import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { normalizeSearchText, compactSearchText, foldNativeDigits } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
@@ -214,6 +214,13 @@ export function omitProductUpdateStock(body: Record<string, unknown>): void {
   delete body.stock_quantity
 }
 
+// A scanner gun on the Windows Khmer keyboard layout types ០-៩ for 0-9; the shop prints and stores ASCII digits, so a
+// barcode being WRITTEN folds them. Only that mapping: no trim, case, zero or separator change (the code is kept as
+// typed). Entry points call it before any duplicate check so the check sees the value that will be stored.
+export function foldBarcodeInput(body: Record<string, unknown>): void {
+  if (typeof body.barcode === 'string') body.barcode = foldNativeDigits(body.barcode)
+}
+
 export function cleanPayload(body: Record<string, unknown>, columns: Set<string>) {
   const payload: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(body || {})) {
@@ -221,6 +228,7 @@ export function cleanPayload(body: Record<string, unknown>, columns: Set<string>
     const boolNormalized = typeof value === 'boolean' ? (value ? 1 : 0) : value
     payload[key] = clampNegativeStockQuantity(key, boolNormalized)
   }
+  foldBarcodeInput(payload)
   // OPUS-H-1: every product writer (create, PUT and its fold, variant, review apply, stock-session insert)
   // passes here, so the discount columns are stored exactly as the price gate compared them; a spelling with
   // no canonical form throws ProductDiscountInputError (400) instead of being stored raw.

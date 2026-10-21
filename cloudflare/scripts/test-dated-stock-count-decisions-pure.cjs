@@ -91,6 +91,8 @@ const relMap = {
   // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
   './branchEffect': () => loadReal('lib/branchEffect.ts'),
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
+  // lib/datedStockCount*.ts fold Khmer-layout scanner digits in a barcode (lane 6.0.938).
+  './searchMatch': () => loadReal('lib/searchMatch.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile
