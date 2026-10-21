@@ -172,7 +172,7 @@ const stockTransaction = loadReal('lib/stockTransaction.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 // Fixture helper: drain a lot through the strict plan inside the stock transaction.
 async function drainLot(database, input) {
   await stockTransaction.executeStockTransaction(database, productBatches.planRemoveStockFromBatch(input).statements, 'retry')

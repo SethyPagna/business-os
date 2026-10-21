@@ -110,6 +110,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': { getTrackedProductIds: async () => [], listBatchesForProduct: async () => [], receiveBatchStock: async () => { throw new Error('not used') } },
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/conflictControl': conflictControl,
   '../lib/stockReceiptGate': { appendReceiptNotes: (value) => value, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: () => null, stockReceiptGateMessage: () => '' },
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
@@ -181,6 +182,7 @@ const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './saleCreationSnapshot': saleCreationSnapshot,
   './productBatches': loadReal('lib/productBatches.ts', {
     './batchCode': batchCode,
+    './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     './receivingBranch': receivingBranch,
     './sqlBinding': loadReal('lib/sqlBinding.ts'),
   }),

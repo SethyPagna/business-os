@@ -18,12 +18,13 @@ export function getSystemDebugLog(): Promise<unknown> {
 }
 
 export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean } = {}): Promise<unknown> {
-  const params = new URLSearchParams()
-  if (options.deep || options.write) params.set('deep', '1')
-  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const deep = Boolean(options.deep || options.write)
   return route(
     'system:integrationDoctor',
-    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, undefined, SYNC.REQUEST_TIMEOUT_MS),
+    // The deep check writes a probe object to R2, so it is a POST; the plain check stays a read.
+    () => (deep
+      ? apiFetch('POST', '/api/system/integration-doctor', {}, SYNC.REQUEST_TIMEOUT_MS)
+      : apiFetch('GET', '/api/system/integration-doctor', undefined, SYNC.REQUEST_TIMEOUT_MS)),
     undefined,
   )
 }

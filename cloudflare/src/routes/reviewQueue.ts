@@ -349,7 +349,10 @@ app.post('/:id/approve', async (c) => {
     if (err instanceof FeeReviewStaleError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
     // K6: another decision won; nothing applied.
     if (err instanceof ReviewDecisionConflictError) return c.json({ error: err.message, code: err.code }, 409)
-    return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
+    // The one operator-worded refusal that still travels as a 500; every other unexpected failure keeps its detail server-side.
+    if (err instanceof Error && (err as { code?: unknown }).code === 'canonical_branch_identity_locked') return c.json({ error: err.message, code: 'canonical_branch_identity_locked' }, 500)
+    console.error('[review-queue] apply failed', err)
+    return c.json({ error: 'Failed to apply the approved change' }, 500)
   }
 
   if (!pendingActionMarkedAtomically) {

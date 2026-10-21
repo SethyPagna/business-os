@@ -495,10 +495,11 @@ await runTest('read routes return fallback on transient gateway errors without s
   }
 })
 
-await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
+await runTest('integration doctor reads by GET with no null body; only the deep R2 write probe is a POST', () => {
   const source = fs.readFileSync(new URL('../src/api/systemRuntime.ts', import.meta.url), 'utf8')
   const block = source.match(/export function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
-  assert.match(block, /apiFetch\('GET',\s*`\/api\/system\/integration-doctor\$\{suffix\}`,\s*undefined,/)
+  assert.match(block, /apiFetch\('GET',\s*'\/api\/system\/integration-doctor',\s*undefined,/)
+  assert.match(block, /deep\s*\?\s*apiFetch\('POST',\s*'\/api\/system\/integration-doctor',\s*\{\},/)
   assert.doesNotMatch(block, /apiFetch\('GET'[\s\S]*,\s*null\s*,/)
   assert.doesNotMatch(block, /\n\s*true,\s*\n\s*\)/)
 })
@@ -1144,7 +1145,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(userAdminTransportSource, /import \{ getUsers as getUsersRequest \} from '\.\/userReadTransport\.ts'/)
   assert.match(userAdminTransportSource, /export function getUserProfile/)
   assert.match(userAdminTransportSource, /export function getUserAuthMethods/)
-  assert.match(userAdminTransportSource, /provider-disconnect/)
+  assert.doesNotMatch(userAdminTransportSource, /provider-disconnect/)
   assert.match(userAdminTransportSource, /export function resetPassword/)
   assert.match(userAdminTransportSource, /export function getRoles/)
   assert.match(userAdminTransportSource, /import\('\.\/lazyLocalDb\.ts'\)/)

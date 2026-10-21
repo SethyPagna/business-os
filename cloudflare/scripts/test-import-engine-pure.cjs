@@ -295,6 +295,7 @@ function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
+  if (request === './businessDateWindow') return loadPureSibling('businessDateWindow')
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
   return require(request)

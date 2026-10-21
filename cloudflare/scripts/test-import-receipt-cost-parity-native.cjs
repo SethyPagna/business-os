@@ -20,7 +20,7 @@ const money = compile(read('moneyPrecision'))
 const stockTransaction = compile(read('stockTransaction'))
 const batches = compile(read('productBatches'), {
   './stockTransaction': stockTransaction,
-  './batchCode': compile(read('batchCode')), './moneyPrecision': money,
+  './batchCode': compile(read('batchCode')), './businessDateWindow': compile(read('businessDateWindow')), './moneyPrecision': money,
   './sqlBinding': compile(read('sqlBinding')),
   './receivingBranch': compile(read('receivingBranch')),
 })

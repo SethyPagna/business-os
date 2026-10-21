@@ -34,6 +34,7 @@
 import type { D1Compat } from './db'
 import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { executeStockTransaction } from './stockTransaction'
@@ -188,7 +189,7 @@ export async function prepareReceiptLotTarget(db: D1Compat, input: {
     FROM (SELECT 1) LEFT JOIN product_batches pb ON pb.variant_product_id=@productId`)
     .all<ReceiptLotCandidate & { received_cost_usd: number | null; baseline_batch_id: number; maximum_batch_id: number }>({ productId: input.productId })
   const lots = rows.filter(row => row.id != null)
-  const target = resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
+  const target = resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || businessToday(),
     unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(rows[0]?.baseline_batch_id) || 0, input.batchId)
   return { ...target, maximumBatchId: Number(rows[0]?.maximum_batch_id) || 0,
     existingReceivedCostUsd: lots.find(lot => lot.id === target.existingBatchId)?.received_cost_usd ?? null }
@@ -293,7 +294,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
@@ -686,7 +687,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // @batchKey), so it can be dropped into a statement's own VALUES list.
   buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   let receiptLotTarget: ReceiptLotTarget | undefined
   if (input.historicalReceiptReplay && input.batchId == null) throw new Error('Historical receipt replay requires its recorded batch')
   if (!input.provenanceKey && !input.historicalReceiptReplay) receiptLotTarget = await prepareReceiptLotTarget(db, input)

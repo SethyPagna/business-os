@@ -1,5 +1,5 @@
 // Runs the real Library rewire route. Product references require current
-// product-image authority, while avatar-only rewires remain Library actions.
+// product-image authority; other users' avatars are repointed by an admin only.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -107,9 +107,21 @@ async function main() {
     const state = { cover: false, gallery: false, avatar: true, batches: 0 }
     const response = await rewire(state, { library: true, products: true, 'products:image': false })
     assert.equal(response.status, 200, await response.clone().text())
+    assert.equal(state.batches, 0, 'a Library user must not repoint other users avatars')
+    console.log('PASS avatar-only rewire writes nothing for a non-admin Library user')
+  }
+
+  {
+    const state = { cover: false, gallery: false, avatar: true, batches: 0 }
+    const response = await loadRoute(state).request('http://local/1/rewire', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_file_id: 2 }),
+    }, { TEST_USER: { id: 1, username: 'owner', role_code: 'admin', permissions: '{}', role_permissions: null } }, { waitUntil() {}, passThroughOnException() {} })
+    assert.equal(response.status, 200, await response.clone().text())
     assert.equal(state.batches, 1)
-    assert.equal(state.batchSql.some((sql) => /products|product_images/i.test(sql)), false)
-    console.log('PASS avatar-only rewire remains available with Full Library access')
+    assert.equal(state.batchSql.some((sql) => /UPDATE users/i.test(sql)), true)
+    console.log('PASS an admin rewire repoints avatars')
   }
 
   for (const grants of [

@@ -93,15 +93,6 @@ export function removeUserAvatar(id: string | number): Promise<unknown> {
   )
 }
 
-export function disconnectUserAuthProvider(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  return route(
-    'users:disconnectProvider',
-    () => apiFetch('POST', `/api/users/${encodeId(id)}/provider-disconnect`, payload),
-    null,
-    true,
-  )
-}
-
 export function changeUserPassword(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:changePassword',

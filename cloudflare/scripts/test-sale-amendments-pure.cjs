@@ -74,6 +74,7 @@ const productBatches = compile('productBatches.ts', { './receivingBranch': compi
   './stockTransaction': stockTransaction,
   './db': {},
   './batchCode': compile('batchCode.ts'),
+  './businessDateWindow': compile('businessDateWindow.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': moneyPrecision,
 })

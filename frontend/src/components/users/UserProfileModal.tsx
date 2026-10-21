@@ -130,7 +130,6 @@ interface ProfileApi {
   changeUserPassword: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   startGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
   unlinkGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
-  disconnectUserAuthProvider: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   uploadUserAvatar: (payload: { file?: File; filePath?: string; fileName?: string }) => Promise<MutationResult>
   setUserAvatar: (id: EntityId, avatarPath: string) => Promise<ProfileResult>
   removeUserAvatar: (id: EntityId) => Promise<ProfileResult>
@@ -977,7 +976,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const handleStartOauthLink = async (provider: string): Promise<void> => {
     if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
-    if (!normalizedProvider) return
+    if (normalizedProvider !== 'google') return
     if (!verificationCaps.googleLoginAuth) {
       notify(tr('google_oauth_not_ready', 'Google login is not ready yet.'), 'error')
       return
@@ -1031,14 +1030,11 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
     setDisconnectingProvider(normalizedProvider)
     try {
-      const result = await withLoaderTimeout(() => (
-        normalizedProvider === 'google'
-          ? getProfileApi().unlinkGoogleOauth({ currentPassword })
-          : getProfileApi().disconnectUserAuthProvider(requireCurrentUserId(), {
-            provider: normalizedProvider,
-            currentPassword,
-          })
-      ), 'Disconnect sign-in provider', PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS)
+      const result = await withLoaderTimeout(
+        () => getProfileApi().unlinkGoogleOauth({ currentPassword }),
+        'Disconnect sign-in provider',
+        PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS,
+      )
       if (result?.success === false) {
         notify(currentPasswordRateLimitMessage(result, tr) || result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
