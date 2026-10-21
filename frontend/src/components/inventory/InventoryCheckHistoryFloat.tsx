@@ -1,8 +1,10 @@
 import { Fragment, type ReactNode } from 'react'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Modal from '../shared/Modal.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import type { InventoryCheckHistoryEvent } from '../../api/inventoryChecksTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 type Translator = (key: string) => string | undefined
 export type InventoryCheckHistoryResult = { items: InventoryCheckHistoryEvent[]; total: number; page: number; pageSize: number }
@@ -58,7 +60,7 @@ export default function InventoryCheckHistoryFloat({ page, history, error, onPag
   return <Modal title={label(t, 'history', 'History')} onClose={onClose} keyboard size="sm" unsavedChanges="read-only">
     {error ? <div role="alert" className="flex items-center justify-between gap-2 text-xs text-red-700">
       <span className="min-w-0 break-words">{error}</span>
-      <button type="button" className="btn-secondary min-h-10 shrink-0 px-2 text-xs" onClick={onRetry}>{label(t, 'retry', 'Retry')}</button>
+      <button type="button" className={toolbarIconButtonClassName} aria-label={label(t, 'retry', 'Retry')} title={label(t, 'retry', 'Retry')} onClick={onRetry}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
     </div> : !history
       ? <ul className="divide-y" aria-busy="true" data-inventory-check-history-skeleton>
         <li className="sr-only" role="status">{label(t, 'loading', 'Loading...')}</li>

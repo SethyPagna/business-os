@@ -28,7 +28,9 @@ window.history.replaceState = (_state, _unused, url) => { entries[entryIndex] = 
 window.history.back = () => { if (entryIndex > 0) { entryIndex -= 1; applyLocation(entries[entryIndex]); window.dispatchEvent(new Event('popstate')); publishLocation() } }
 window.history.forward = () => { if (entryIndex < entries.length - 1) { entryIndex += 1; applyLocation(entries[entryIndex]); window.dispatchEvent(new Event('popstate')); publishLocation() } }
 applyLocation(entries[0])
-const product = { id: 12, name: 'Test variant', quantity: 8, cost_price_usd: 913.27, selling_price_usd: 17, brand: 'Test brand', qty_sold: 4 }
+// Sort is a section of the Filters menu: its choices are {field}-templated, so these four read with their field key in them.
+const SORT_WORDS: Record<string, string> = { sort_field_high_low: '{field}: high → low', sort_field_low_high: '{field}: low → high', sort_name_az: 'Name A–Z', sort_name_za: 'Name Z–A' }
+const product = { id: 12, name: 'Test variant', quantity: 8, unit: 'pcs', latest_received_at: '2026-10-01 09:00:00', next_expiry_date: '2027-03-15', cost_price_usd: 913.27, selling_price_usd: 17, brand: 'Test brand', qty_sold: 4 }
 let selected: InventoryCheckSession = { id: 'check-1', branch_id: 1, created_by: 7, title: 'Test check', status: 'open', revision: 1, scope: {}, started_at: '2026-10-19 02:30:00', updated_at: '2026-10-19 02:30:00', progress: { total: 1, done: 0, issue: 0, unstarted: 1 }, branch_name: 'Test branch', creator_name: 'alice' }
 let observation: InventoryCheckSessionItem = { product_id: 12, state: 'unstarted', revision: 0, counted_quantity: null, reason: null, baseline_quantity: 9, current_quantity: 8, stock_changed: true, product_snapshot: product }
 const productRequests: Array<Record<string, unknown>> = []
@@ -49,7 +51,7 @@ const bootstrapReads: Array<{ params: Record<string, unknown>; resolve: (value: 
 const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_cost: false } as Record<string, boolean> },
-  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key,
+  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => SORT_WORDS[key] ?? key,
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
     if (blockNavigation || dirtyWork.hasDirtyWork()) return
@@ -95,6 +97,8 @@ const clickSessionRow = async (surface: Surface) => { await surface.click(surfac
 const openSession = async (surface: Surface, tab = 'sessions') => { await surface.click(surface.button(tab)); await clickSessionRow(surface) }
 // Buttons by exact visible text: 'Count' is a prefix of the 'Count sessions' chip, and a dialog's Confirm repeats its action's label.
 const exactButtons = (surface: Surface, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
+// The page's own Count button carries a pill with how many products it counts, so it is found by its "Count (n)" name.
+const countButton = (surface: Surface) => surface.find(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith('Count ('), 'page Count button')
 const confirmInDialog = async (surface: Surface, text: string) => { await surface.click(exactButtons(surface, text).at(-1)!) }
 // The Filters menu (FilterMenu): open it once, expand a section, tick an option.
 const chooseFilter = async (surface: Surface, section: string, option: string) => {
@@ -108,7 +112,7 @@ try {
   const bootstrap = await mount()
   await bootstrap.type(bootstrap.field('inventory-check-search'), 'Typed before branch discovery')
   await bootstrap.click(bootstrap.button('Today'))
-  await bootstrap.click(bootstrap.button('inventory_check_ascending'))
+  await chooseFilter(bootstrap, 'sort', 'stock: high → low')
   const newestBootstrap = bootstrapReads.at(-1)!
   delayBootstrap = false
   await act(async () => { newestBootstrap.resolve(response()) })
@@ -129,28 +133,28 @@ try {
   for (const [section, label, value, key] of [
     ['brand', 'Off-page brand', 'Off-page brand', 'brand'], ['category', 'Off-page category', 'Off-page category', 'category'],
     ['reason', 'Off-page reason', 'Off-page reason', 'reason'], ['stockState', 'low_stock', 'low_stock', 'stockState'],
-    ['state', 'issues', 'issue', 'state'], ['sort_by', '', 'qty_sold', 'sortBy'],
+    ['state', 'issues', 'issue', 'state'], ['sort', 'qty_sold: high → low', 'qty_sold', 'sortBy'],
   ]) {
     const beforeFilter = productRequests.length
-    if (section === 'sort_by') {
-      // Sorting is a display order, not a filter: it keeps its own select outside the Filters menu.
-      await filtering.click(filtering.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'sort_by', 'sort'))
-      await filtering.click(filtering.find(node => node.getAttribute('data-app-select-option') === value, value))
-    } else await chooseFilter(filtering, section, label)
+    await chooseFilter(filtering, section, label)
     retainedFilters[key] = value
     assert.ok(productRequests.length > beforeFilter, `${key} changes the request key and dispatches a fresh query`)
     for (const [field, expected] of Object.entries(retainedFilters)) assert.equal(productRequests.at(-1)?.[field], expected, `${field} survives the next filter change`)
   }
-  await filtering.click(filtering.button('inventory_check_ascending'))
-  assert.equal(productRequests.at(-1)?.sortDirection, 'desc')
-  assert.equal(filtering.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger').getAttribute('title'), 'filters (5)', 'the Filters trigger counts the five chosen filters; sorting is not one')
+  assert.equal(productRequests.at(-1)?.sortDirection, 'desc', 'a Sort choice sends its field and its direction together')
+  await chooseFilter(filtering, 'sort', 'qty_sold: low → high')
+  assert.deepEqual([productRequests.at(-1)?.sortBy, productRequests.at(-1)?.sortDirection], ['qty_sold', 'asc'], 'the other direction of the same field is one more choice in the same section')
+  assert.equal(filtering.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger').getAttribute('title'), 'filters (6)', 'the Filters trigger counts the five chosen filters and the non-default Sort')
   await filtering.unmount()
   const surface = await mount()
   assert.ok(surface.text().includes('Test variant'))
-  assert.ok(!surface.text().includes('inventory_check_filter_options_limited'), 'the capped-facet note is a hint, not a line of prose')
-  await surface.click(surface.button('inventory_check_filter_options_limited'))
-  assert.ok(surface.text().includes('inventory_check_filter_options_limited'), 'bounded full-cohort facets advertise how to find remaining options')
+  assert.ok(!surface.text().includes('inventory_check_filter_options_limited'), 'the capped-facet note is not a line of prose in the toolbar')
+  assert.equal(surface.findAll(node => node.getAttribute('aria-label') === 'inventory_check_filter_options_limited').length, 0, 'and it is no hint button beside Filters any more')
+  await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+  await surface.click(surface.button(/./, surface.find(node => node.getAttribute('data-filter-menu-section') === 'category', 'category section')))
+  assert.ok(!surface.find(node => node.getAttribute('data-filter-menu-section') === 'category', 'category section').textContent.includes('inventory_check_filter_options_limited'), 'a list the server did not cap carries no note')
   await chooseFilter(surface, 'brand', 'Off-page brand')
+  assert.ok(surface.find(node => node.getAttribute('data-filter-menu-section') === 'brand', 'brand section').textContent.includes('inventory_check_filter_options_limited'), 'a capped list says so inside its own Filters section, where the person is choosing')
   assert.ok(surface.text().includes('Off-page brand'), 'filter options come from the complete cohort facet response, never the visible products')
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.textContent === 'all' && surface.find(n => n.getAttribute('data-filter-menu-section') === 'brand', 'brand section').contains(node), 'brand All row'))
   assert.ok(!surface.text().includes('913.27'), 'denied cost never renders')
@@ -181,7 +185,11 @@ try {
   await surface.render({})
   assert.ok(surface.text().includes('@alice') && surface.text().includes('Shelf differs'), 'ordinary own-write channel invalidation preserves the selected session')
   await surface.click(surface.button('Test variant'))
-  assert.ok(surface.text().includes('Starting stock') && surface.text().includes('Stock changed since'), 'read-only details show fixed baseline and drift')
+  const detailText = surface.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'detail list').textContent
+  assert.ok(detailText.includes('Current stock8 pcs') && detailText.includes('Starting stock9') && detailText.includes('Difference−1'), 'the detail float shows stock with its unit, the fixed baseline and the drift: ' + detailText)
+  assert.ok(detailText.includes('Received date01/10/2026') && detailText.includes('Expiry15/03/2027'), 'and the latest received date and the next expiry: ' + detailText)
+  assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusIssue · Shelf differs') && detailText.includes('Sold4') && detailText.includes('BrandTest brand'), 'and the count against stock, the check status with its reason, sales and brand: ' + detailText)
+  assert.ok(!detailText.includes('Cost') && !surface.text().includes('913.27'), 'cost never reaches the float for a role that may not see it')
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Close', 'detail close'))
   await surface.click(surface.button('Close session'))
   assert.ok(surface.text().includes('Close this count session?'), 'Close first shows the shared review')
@@ -217,13 +225,13 @@ try {
   Object.defineProperty(crypto, 'randomUUID', { configurable: true, writable: true, value: undefined })
   await openSession(creation)
   await creation.click(creation.button('Leave session'))
-  await creation.click(exactButtons(creation, 'Count')[0])
+  await creation.click(countButton(creation))
   const reviewRows = creation.find(node => node.tagName === 'DL', 'count review').textContent
   assert.ok(creation.text().includes('Start a count session?') && reviewRows.includes('products1') && reviewRows.includes('Test branch'), 'Count reviews the product count and branch before anything is created: ' + reviewRows)
   assert.equal(creates.length, 0, 'nothing is created until the review is confirmed')
   await creation.click(creation.button('Cancel', creation.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!))
   assert.equal(creates.length, 0, 'Cancel creates nothing')
-  await creation.click(exactButtons(creation, 'Count')[0])
+  await creation.click(countButton(creation))
   await confirmInDialog(creation, 'Count')
   const input = creates.at(-1)?.[1] as { productIds: number[]; scope: Record<string, unknown>; requestId: string }
   assert.deepEqual(input.productIds, [12])
@@ -311,6 +319,8 @@ try {
   const admin = await mount()
   await openSession(admin)
   assert.equal(admin.findAll(node => node.getAttribute('data-check-action') === 'done').length, 1, 'administrator authority can edit another creator session')
+  await admin.click(admin.button('Test variant'))
+  assert.ok(admin.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'detail list').textContent.includes('Cost$913.2700'), 'cost shows in the detail float for a role allowed to see it')
   await admin.unmount()
 
   window.history.replaceState(null, '', '/inventory?retained=1#hub:inventory:issues')

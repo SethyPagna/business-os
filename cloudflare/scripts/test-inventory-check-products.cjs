@@ -344,6 +344,29 @@ async function main() {
     await assert.rejects(() => read(db, { searchFields: 'barcode' }, blind), error => error.status === 403)
     db.close()
   })
+  await check('a code typed or scanned with Khmer digits finds the same product, and name matching keeps the text as typed', async () => {
+    const db = fixture()
+    product(db, 990001, 'Alpha cream', 2, { barcode: '8850001112223', sku: 'SKU-77' })
+    product(db, 990002, 'Beta ១២ soap', 3, { barcode: '9990001110000' })
+    product(db, 990003, 'Zeta lotion', 4, { barcode: '7770001110000' })
+    const visible = blindViewer({ inventory_check_show_barcode: true })
+    const blind = blindViewer({})
+    const ids = async (viewer, query) => (await read(db, { query, pageSize: 100 }, viewer)).result.items.filter(row => row.checkable).map(row => row.id).sort()
+    const full = '៨៨៥០០០១១១២២២៣', part = '១១១២២២៣'
+    for (const [viewer, label] of [[admin, 'admin'], [visible, 'barcode-visible employee']]) {
+      assert.deepEqual(await ids(viewer, full), [990001], `${label}: the whole code in Khmer digits`)
+      assert.deepEqual(await ids(viewer, part), [990001], `${label}: a code fragment in Khmer digits`)
+      assert.deepEqual(await ids(viewer, 'sku-៧៧'), [990001], `${label}: a SKU with Khmer digits`)
+    }
+    assert.deepEqual(await ids(blind, full), [990001], 'a barcode-hidden viewer finds the exact code typed in Khmer digits')
+    assert.deepEqual(await ids(blind, part), [], 'and a Khmer-digit fragment still finds nothing for them')
+    assert.deepEqual(await ids(admin, 'Beta ១២'), [990002], 'a name containing Khmer digits matches as typed')
+    assert.deepEqual(await ids(admin, 'Beta 12'), [], 'names are not folded: Latin 12 is not the Khmer ១២ in the name')
+    const membership = api.buildInventoryCheckProductMembershipQuery({ query: full }, [990001, 990002, 990003], api.getInventoryCheckProductsAccess(admin), lowStock)
+    const statement = db.prepare(membership.rowsSql); statement.setAllowUnknownNamedParameters(true)
+    assert.deepEqual(statement.all(membership.params).map(row => row.id), [990001], 'a session created from a Khmer-digit scan admits the product its code selects')
+    db.close()
+  })
   await check('next expiry is the earliest dated lot holding stock in the branch scope, and only for viewers who see received dates and stock', async () => {
     const db = fixture()
     product(db, 991001, 'Expiry cream', 20)

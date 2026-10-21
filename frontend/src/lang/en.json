@@ -7592,8 +7592,6 @@
   "inventory_check_cancel": "Cancel",
   "inventory_check_save_issue": "Save issue",
   "inventory_check_state": "Check status",
-  "inventory_check_ascending": "Ascending",
-  "inventory_check_descending": "Descending",
   "inventory_check_sessions": "Count sessions",
   "perm_inventory_check_show_price": "Show selling prices",
   "perm_inventory_check_show_barcode": "Show barcodes and SKUs",
@@ -7780,5 +7778,13 @@
   "perm_full_includes_some": "Full gives the main access plus the extras shown as included. The others stay separate switches.",
   "perm_follow_inventory_tip": "Tap to drop this role’s own setting and follow Inventory again",
   "scan_moved_to_search": "Barcode moved to search",
-  "sale_mark_delivered": "Mark delivered"
+  "sale_mark_delivered": "Mark delivered",
+  "sort_field_high_low": "{field}: high → low",
+  "sort_field_low_high": "{field}: low → high",
+  "sort_field_newest": "{field}: newest first",
+  "sort_field_oldest": "{field}: oldest first",
+  "inventory_check_progress": "Checked",
+  "inventory_check_session_details": "Session details",
+  "inventory_check_scan_no_match": "No product with this code.",
+  "inventory_check_scan_not_in_session": "Not in this session."
 }

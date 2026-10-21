@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { launchResolveFixture } from './resolveBrowserFixture.ts'
 
-// Board 6.0.859 AC-A4: the real Inventory page (Products, Sessions, an open session) in a real browser at phone
-// widths, English and Khmer: no horizontal page scroll, controls never taller than their row allows, Khmer text clipped nowhere.
+// Board 6.0.859 AC-A4 + lane 6.0.933: the real Inventory page (Products, Sessions, an open session) in a real browser at phone
+// and desktop widths, English and Khmer: no horizontal page scroll, controls never taller than their row allows, Khmer text clipped nowhere,
+// the hub chips outside the scroller (one inset, not two), the open session's bar ONE line of at most 48px, and the sheet header pinned over aligned columns.
 const fixture = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
@@ -32,6 +33,7 @@ const fixture = String.raw`
   const nativeFetch = window.fetch.bind(window)
   window.fetch = async (input, init) => {
     const url = new URL(String(input && input.url || input), location.href)
+    if (url.pathname === '/api/inventory/reasons') return respond({ items: [{ id: 1, type: 'adjust', label: 'Shelf mismatch' }] })
     if (!url.pathname.startsWith('/api/inventory-checks/')) return nativeFetch(input, init)
     if (url.pathname.endsWith('/products')) return respond({ items: products, total: 3, page: 1, pageSize: 20, branches: [{ id: 1, name: branchName }], stats: { total_products: 3, stock_quantity: 30, low_stock: 0, out_of_stock: 0, qty_sold: 12, unique_customer_count: 9 }, facets: { brands: ['Synthetic brand'], categories: [], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, rankings: { products: [] }, issues: [] })
     if (url.pathname.endsWith('/history')) return respond({ items: [], total: 0, page: 1, pageSize: 20 })
@@ -56,21 +58,63 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
       const measured = await browser.evaluate<{ document: number; page: number }>(overflow)
       assert.ok(measured.document <= 0 && measured.page <= 0, `${lang} ${width} ${section}: no horizontal scroll (${JSON.stringify(measured)})`)
       assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('[data-inventory-check-pinned]')).position`), 'sticky', `${lang} ${width}: dates, search and Filters stay pinned`)
+      const hub = await browser.evaluate<{ chipsInside: boolean; chips: boolean; pageLeft: number; pinnedInset: number; rows: number; searchCentre: number | null; contextCentre: number | null; searchWidth: number | null; contextTop: number | null; searchBottom: number | null }>(`(() => {
+        const page = document.querySelector('[data-inventory-check-page]'), chips = document.querySelector('.hub-section-pills'), pinned = document.querySelector('[data-inventory-check-pinned]')
+        const search = document.querySelector('#inventory-check-search'), context = document.querySelector('[data-inventory-check-context]')
+        const centre = node => node ? node.getBoundingClientRect().top + node.getBoundingClientRect().height / 2 : null
+        return { chipsInside: !!chips && page.contains(chips), chips: !!chips, pageLeft: page.getBoundingClientRect().left, pinnedInset: pinned.firstElementChild.getBoundingClientRect().left - page.getBoundingClientRect().left,
+          rows: Array.from(pinned.children).filter(child => child.getBoundingClientRect().height > 0).length, searchCentre: centre(search), contextCentre: centre(context),
+          searchWidth: search ? search.closest('fieldset').getBoundingClientRect().width : null, contextTop: context ? context.getBoundingClientRect().top : null, searchBottom: search ? search.getBoundingClientRect().bottom : null }
+      })()`)
+      // A phone uses the layered "pages" navigation and draws no chips; wider screens must show them, outside the scroller.
+      assert.ok(!hub.chipsInside && (hub.chips || width < 768), `${lang} ${width} ${section}: the section chips sit above the scroller, so they stay put and the inset is not doubled`)
+      assert.ok(hub.pinnedInset >= 11 && hub.pinnedInset <= 13, `${lang} ${width} ${section}: one 12px inset inside the scroller (${hub.pinnedInset})`)
+      if (section === 'sessions') assert.equal(hub.rows, 1, `${lang} ${width}: the Sessions tab pins a single row (Filters, dates, presets, Refresh)`)
+      else if (width >= 1024) {
+        assert.ok(Math.abs((hub.searchCentre ?? 0) - (hub.contextCentre ?? 99)) < 3, `${lang} ${width}: from 1024px the search group and the context bar share one line`)
+        assert.ok(Math.abs((hub.searchWidth ?? 0) - 416) < 2, `${lang} ${width}: the search group is 26rem wide (${hub.searchWidth})`)
+      } else assert.ok((hub.contextTop ?? 0) >= (hub.searchBottom ?? 999) - 1, `${lang} ${width}: on a phone the context bar sits under the search row`)
       if (section === 'sessions') {
         const rows = await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-inventory-check-session]'), node => node.textContent)`)
         assert.ok(rows[0].includes('09:30') && rows[1].includes('09:31'), `${lang} ${width}: sessions a minute apart read differently`)
       }
       if (lang === 'km') await browser.khmerRoom(`${width}px ${section}`, '[data-inventory-check-page]', 3)
     }
-    // An open session: the bar wraps at phone width but never scrolls the page; every bar action is an icon.
+    // An open session: the bar is ONE line (never wraps, never scrolls the page); every bar action is an icon.
     await browser.open(width, `lang=${lang}&section=sessions`, `document.querySelector('[data-inventory-check-session]')`, 700)
     await browser.mouseClick('[data-inventory-check-session="check-1"] button')
     await browser.waitFor('session bar', async () => await browser.evaluate(`document.querySelector('[data-inventory-check-session-bar]') !== null && document.querySelector('[data-inventory-check-row]') !== null`) ? true : null)
     const measured = await browser.evaluate<{ document: number; page: number }>(overflow)
     assert.ok(measured.document <= 0 && measured.page <= 0, `${lang} ${width} session: no horizontal scroll (${JSON.stringify(measured)})`)
     const actions = await browser.evaluate<Array<{ label: string | null; text: string; width: number; height: number }>>(`Array.from(document.querySelectorAll('[data-inventory-check-actions] button'), node => ({ label: node.getAttribute('aria-label'), text: node.textContent, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height }))`)
-    assert.deepEqual(actions.map(action => action.label), [pack.inventory_check_leave_session, pack.history, pack.inventory_check_close_session, pack.refresh], `${lang} ${width}: bar actions`)
-    assert.ok(actions.every(action => action.text === '' && action.width >= 40 && action.height >= 40), `${lang} ${width}: bar actions are touch-sized icons`)
+    assert.deepEqual(actions.map(action => action.label), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session, pack.refresh], `${lang} ${width}: bar actions (the details hint exists below 640px only through its own button)`)
+    assert.ok(actions.every(action => action.text === '' && (action.label === pack.inventory_check_session_details || (action.width >= 40 && action.height >= 40))), `${lang} ${width}: bar actions are touch-sized icons (the small hint trigger aside)`)
+    const bar = await browser.evaluate<{ height: number; spread: number; ring: number; counts: number; middle: { left: number; right: number }; ringBox: { left: number; right: number }; countsBox: { left: number; right: number }; details: string; detailsShown: boolean; hint: boolean }>(`(() => {
+      const actions = document.querySelector('[data-inventory-check-actions]'), box = node => node.getBoundingClientRect()
+      const visible = Array.from(actions.children).filter(child => box(child).height > 0)
+      const centres = visible.map(child => box(child).top + box(child).height / 2)
+      const middle = box(actions.querySelector('[data-inventory-check-session-bar]')), ring = actions.querySelector('[data-session-progress]'), counts = actions.querySelector('[data-session-counts]'), details = actions.querySelector('[data-session-details]')
+      const hint = Array.from(actions.querySelectorAll('button')).find(node => node.getAttribute('aria-label') === ${JSON.stringify(pack.inventory_check_session_details)})
+      return { height: box(actions).height, spread: Math.max(...centres) - Math.min(...centres), ring: box(ring).height, counts: box(counts).height, middle: { left: middle.left, right: middle.right }, ringBox: { left: box(ring).left, right: box(ring).right }, countsBox: { left: box(counts).left, right: box(counts).right }, details: details.textContent, detailsShown: box(details).width > 0, hint: box(hint).width > 0 }
+    })()`)
+    assert.ok(bar.height <= 48, `${lang} ${width}: the session bar is at most 48px tall (${bar.height})`)
+    assert.ok(bar.spread < 3, `${lang} ${width}: every part of the session bar sits on one line (centres differ by ${bar.spread})`)
+    assert.ok(bar.ringBox.left >= bar.middle.left - 1 && bar.countsBox.right <= bar.middle.right + 1, `${lang} ${width}: the ring and both counts are in view without scrolling the bar`)
+    assert.match(bar.details, /^19\/10\/2026 09:30 · .+ · @alice$/, `${lang} ${width}: the details read date, branch, creator`)
+    assert.equal(bar.detailsShown, width >= 640, `${lang} ${width}: the details text shows inline from 640px`)
+    assert.equal(bar.hint, width < 640, `${lang} ${width}: below 640px the same text sits behind the details hint`)
+    if (width >= 1024) {
+      const sheet = await browser.evaluate<{ pinned: boolean; header: boolean; aligned: boolean; detail: string }>(`(() => {
+        const header = document.querySelector('[data-inventory-check-sheet-header]'), row = document.querySelector('[data-inventory-check-row]')
+        const cells = Array.from(row.querySelectorAll('[data-cell]')).filter(cell => cell.getAttribute('data-cell') !== 'count' && cell.getBoundingClientRect().width > 0)
+        const titles = Array.from(header.children).slice(1).filter(node => node.getBoundingClientRect().width > 0)
+        const right = node => Math.round(node.getBoundingClientRect().right)
+        const pairs = cells.slice(0, 3).map((cell, index) => [right(cell), right(titles[index])])
+        return { pinned: document.querySelector('[data-inventory-check-pinned]').contains(header), header: getComputedStyle(header).display !== 'none', aligned: pairs.every(([cell, title]) => Math.abs(cell - title) <= 1), detail: JSON.stringify(pairs) }
+      })()`)
+      assert.ok(sheet.pinned && sheet.header, `${lang} ${width}: the column header is pinned with the controls`)
+      assert.ok(sheet.aligned, `${lang} ${width}: the rows' Now, Start and Damaged cells end where the header titles end ${sheet.detail}`)
+    }
     const rowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
     assert.ok(rowsFit, `${lang} ${width}: product rows wrap inside their own box`)
     if (lang === 'km') await browser.khmerRoom(`${width}px session`, '[data-inventory-check-page]', 3)

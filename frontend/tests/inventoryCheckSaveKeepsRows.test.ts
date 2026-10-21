@@ -92,8 +92,9 @@ const openSessionRow = async (surface: Surface, tab = 'sessions') => {
   await surface.click(surface.button(/./, surface.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'session row')))
 }
 const openSession = (surface: Surface) => openSessionRow(surface)
-// Buttons by exact visible text: 'Count' is also a prefix of the 'Count sessions' chip.
+// Buttons by exact visible text: 'Count' is also a prefix of the 'Count sessions' chip. The page's own Count button carries a pill with how many products it counts, so it is found by its "Count (n)" name.
 const exactButtons = (surface: Surface, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
+const countButton = (surface: Surface, text: string) => surface.find(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${text} (`), 'page Count button')
 const confirmInDialog = async (surface: Surface, text: string) => { await surface.click(exactButtons(surface, text).at(-1)!) }
 const attached = (node: MemoryNode) => { let at: MemoryNode | null = node; while (at && at !== at.ownerDocument.body) at = at.parentNode; return at !== null }
 
@@ -101,6 +102,11 @@ try {
   // A-R1 + A-R8: a tick save keeps the rows mounted; Issue -> Done sends no count.
   const surface = await mount()
   await openSession(surface)
+  // Lane 6.0.933: under a Check status filter the saved row still stays where it is -- a tick reads neither the products nor the session again.
+  await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+  const stateSection = surface.find(node => node.getAttribute('data-filter-menu-section') === 'state', 'Check status section')
+  if (!stateSection.querySelectorAll('[role="option"]').length) await surface.click(surface.button(/./, stateSection))
+  await surface.click(surface.find(node => node.getAttribute('role') === 'option' && stateSection.contains(node) && node.textContent === 'issues', 'Issues option'))
   const root = surface.find(node => node.getAttribute('data-inventory-check-page') !== null, 'page root') as MemoryNode & { scrollTop?: number }
   const row12 = rowOf(surface, 12), row13 = rowOf(surface, 13)
   const tick13 = action(surface, 13, 'done')
@@ -195,7 +201,7 @@ try {
     // Create and Close/Resume surfaces map the same codes.
     const page = await mount()
     createRefusal = 'inventory_check_product_not_eligible'
-    await page.click(exactButtons(page, pack.inventory_check_start_page)[0])
+    await page.click(countButton(page, pack.inventory_check_start_page))
     assert.ok(page.text().includes(pack.inventory_check_count_review_title), `${language}: Count opens a review before anything is created`)
     await confirmInDialog(page, pack.inventory_check_start_page)
     assert.ok(page.text().includes(pack.inventory_check_error_product_not_eligible), `${language}: create refusal message`)

@@ -7592,8 +7592,6 @@
   "inventory_check_cancel": "បោះបង់",
   "inventory_check_save_issue": "រក្សាទុកបញ្ហា",
   "inventory_check_state": "ស្ថានភាពត្រួតពិនិត្យ",
-  "inventory_check_ascending": "លំដាប់ឡើង",
-  "inventory_check_descending": "លំដាប់ចុះ",
   "inventory_check_sessions": "វគ្គរាប់ស្តុក",
   "perm_inventory_check_show_price": "បង្ហាញតម្លៃលក់",
   "perm_inventory_check_show_barcode": "បង្ហាញបាកូដ និង SKU",
@@ -7780,5 +7778,13 @@
   "perm_full_includes_some": "ពេញលេញ ផ្តល់សិទ្ធិចូលប្រើចម្បង រួមទាំងជម្រើសបន្ថែមដែលបង្ហាញថារួមបញ្ចូល។ ជម្រើសផ្សេងទៀតជាកុងតាក់ដាច់ដោយឡែក។",
   "perm_follow_inventory_tip": "ចុចដើម្បីឈប់កំណត់ដោយឡែកសម្រាប់តួនាទីនេះ ហើយតាមសិទ្ធិស្តុកវិញ",
   "scan_moved_to_search": "បាកូដត្រូវបានផ្លាស់ទៅប្រអប់ស្វែងរក",
-  "sale_mark_delivered": "សម្គាល់ថាបានដឹកជញ្ជូន"
+  "sale_mark_delivered": "សម្គាល់ថាបានដឹកជញ្ជូន",
+  "sort_field_high_low": "{field}៖ ច្រើន → តិច",
+  "sort_field_low_high": "{field}៖ តិច → ច្រើន",
+  "sort_field_newest": "{field}៖ ថ្មីៗមុន",
+  "sort_field_oldest": "{field}៖ ចាស់ៗមុន",
+  "inventory_check_progress": "បានពិនិត្យ",
+  "inventory_check_session_details": "ព័ត៌មានវគ្គ",
+  "inventory_check_scan_no_match": "គ្មានផលិតផលមានលេខកូដនេះទេ។",
+  "inventory_check_scan_not_in_session": "មិនមានក្នុងវគ្គនេះទេ។"
 }
