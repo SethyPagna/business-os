@@ -66,6 +66,22 @@ export interface PermissionDefinition {
   // stored permissions.
   alsoClearsKeys?: string[]
   defaultFromFull?: string
+  // The key that opens the module on an on/off section (no `tier`). The editor's Full level sets this key and
+  // nothing else, so a module's costs, destructive imports and similar extras stay separate switches.
+  lead?: true
+  // A second lead key drawn as its own row under the module's main row, with its own None / Full cells.
+  subRow?: true
+  // The switch chip's word (`short` is the English pack text) and, for a grant that needs a warning, the
+  // tooltip that goes with it.
+  shortTKey?: string
+  short?: string
+  hintTKey?: string
+  hint?: string
+  // The Worker's hasPermission() answers true for this key whenever the named key is Full
+  // (cloudflare/src/lib/permissions.ts, mirrored by hasPermission in utils/permissions.ts), so the editor shows it
+  // as included in that module's Full and locked on rather than as a separate switch it cannot truly turn off.
+  // Delete the flag when the Worker stops falling back; the catalog parity test fails until you do.
+  coveredBy?: string
 }
 
 export function permissionDefinitionValue(permission: PermissionDefinition, permissions: Record<string, boolean | 'review' | 'view'>): boolean | 'review' | 'view' | undefined {
@@ -102,7 +118,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'full_access',
     tKey: 'perm_section_full_access',
     label: 'Full Administrator Access',
-    description: 'Overrides every section below. Administrator control also manages all Shifts, including cancellation and cross-account review; server capability flags remain authoritative.',
+    description: 'Every module and action, including all Shifts. Turn it off to set each module.',
     permissions: [
       { key: 'all', tKey: 'perm_all', label: 'Administrator (full access)', sensitivity: 'critical' },
     ],
@@ -111,9 +127,9 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'dashboard',
     tKey: 'perm_section_dashboard',
     label: 'Dashboard',
-    description: 'The Dashboard page and its export tools. Full Access or None for the page itself, plus an independent export toggle so a role can view without being able to export.',
+    description: 'The Dashboard page. Export is a separate switch.',
     permissions: [
-      { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal' },
+      { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal', lead: true },
       // Independent of the page-access key above -- a role can have
       // dashboard: true, dashboard_export: false ("View, no export")
       // as well as the usual true/true ("Full access") and false/*
@@ -121,33 +137,33 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // Not a tier: true / Review Required key -- Dashboard has no
       // create/edit/delete workflow to queue, this is a plain second
       // boolean grant, same shape as e.g. 'backup' vs 'backup_restore'.
-      { key: 'dashboard_export', tKey: 'perm_dashboard_export', label: 'Export dashboard data', sensitivity: 'normal' },
+      { key: 'dashboard_export', tKey: 'perm_dashboard_export', label: 'Export dashboard data', sensitivity: 'normal', shortTKey: 'export', short: 'Export' },
     ],
   },
   {
     key: 'customer_portal',
     tKey: 'perm_section_customer_portal',
     label: 'Website Editor',
-    description: 'The storefront editor, broken into per-area grants (Part 557) so a role can be given exactly the content it should manage. Reading the public website needs no grant; each grant below opens the Website Editor page and unlocks only its own area. Holding full Settings is a superset of all four.',
+    description: 'Edit the public website in four separate areas: Posts, FAQ, About and site setup. Full turns all four on.',
     permissions: [
       // Per-area write grants -- mirror cloudflare/src/routes/settings.ts's
       // PORTAL_*_KEYS buckets. Each is plain Full/None (no tier): the editor
       // section + its save self-gate on the matching key, and the backend
       // POST /settings rejects any customer_portal_* key the caller lacks.
-      { key: 'portal_posts', tKey: 'perm_portal_posts', label: 'Manage posts & promos', sensitivity: 'normal' },
-      { key: 'portal_faq', tKey: 'perm_portal_faq', label: 'Manage FAQ', sensitivity: 'normal' },
-      { key: 'portal_about', tKey: 'perm_portal_about', label: 'Manage About section', sensitivity: 'normal' },
+      { key: 'portal_posts', tKey: 'perm_portal_posts', label: 'Manage posts & promos', sensitivity: 'normal', shortTKey: 'perm_short_posts', short: 'Posts' },
+      { key: 'portal_faq', tKey: 'perm_portal_faq', label: 'Manage FAQ', sensitivity: 'normal', shortTKey: 'faq', short: 'FAQ' },
+      { key: 'portal_about', tKey: 'perm_portal_about', label: 'Manage About section', sensitivity: 'normal', shortTKey: 'about', short: 'About' },
       // The catch-all "portal config": branding, media, theme, catalog display,
       // social links, AI assistant, maps, translations, publishing, loyalty,
       // and submission moderation.
-      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Manage portal config', sensitivity: 'normal' },
+      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Manage portal config', sensitivity: 'normal', shortTKey: 'perm_short_site_setup', short: 'Site setup' },
     ],
   },
   {
     key: 'promotions',
     tKey: 'perm_section_promotions',
     label: 'Promotions',
-    description: 'None / View / Full. View shows the promotion rule list but blocks creating, editing or deleting rules. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules. (Per-product discounts self-gate on the Products permission, not this one.)',
+    description: 'View: see the rules. Full: create, edit and delete them.',
     permissions: [
       // View-tier section (Part 557 slice 4): the promotion RULE list read
       // (routes/promotions.ts GET /rules) admits a 'view' grant; every write
@@ -171,16 +187,16 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'pos',
     tKey: 'perm_section_pos',
     label: 'POS',
-    description: 'Full Access or None for checkout. Full POS also opens Shifts: staff can close, reopen or amend their own eligible shifts, and see shop-wide shifts when configured. Cancellation and cross-account review require administrator control; server capability flags decide each action.',
+    description: 'Checkout. Also opens Shifts: close, reopen or amend your own shifts.',
     permissions: [
-      { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal' },
+      { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal', lead: true },
     ],
   },
   {
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Review) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
+    description: 'Products and imports. Costs and destructive imports are separate. Opening stock also needs Inventory › Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -194,11 +210,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_products_review_desc',
         reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
-      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high' },
-      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high' },
+      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs' },
+      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs' },
       // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
       // (lib/importEngine.ts missingDestructiveImportPermission).
-      { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical' },
+      { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical', shortTKey: 'perm_short_destructive_imports', short: 'Destructive imports' },
       // Part 241: a genuinely different SHAPE of access than the
       // Full/Review/None tier above (field-restricted, not a gradient on
       // the same full view) -- deliberately a plain boolean, not part of
@@ -228,6 +244,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tKey: 'perm_products_image_only',
         label: 'Products (conditions hidden \u2014 image only)',
         sensitivity: 'normal',
+        shortTKey: 'perm_short_image_only',
+        short: 'Image-only access',
         exclusiveWithTier: 'products',
         alsoClearsKeys: [
           'products_image_only_show_price',
@@ -278,7 +296,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'inventory',
     tKey: 'perm_section_inventory',
     label: 'Inventory',
-    description: 'Stock levels, adjustments, and branch transfers.',
+    description: 'Stock levels, adjustments and transfers. Counting is set by Inventory check sessions.',
     permissions: [
       // tier: true -- Inventory's Review Required tier is wired end to
       // end, in the same mixed shape Branches uses: editing the saved
@@ -299,7 +317,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_inventory_review_desc',
         reviewDescription: 'Under Review, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
-      { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal' },
+      { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal', lead: true, subRow: true },
       ...[
         ['price', 'Show selling prices'], ['barcode', 'Show barcodes and SKUs'],
         ['category', 'Show categories'], ['brand', 'Show brands'], ['stock', 'Show recorded stock'],
@@ -315,7 +333,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'branches',
     tKey: 'perm_section_branches',
     label: 'Branches',
-    description: 'Canonical Shop and Warehouse records, their editable details, exports, and inter-branch stock movement.',
+    description: 'Branch details, exports and stock transfers between branches.',
     permissions: [
       // Canonical branch identities are fixed: the editor therefore exposes
       // no create/delete claim. Review Required can view/export and submit
@@ -335,7 +353,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'sales',
     tKey: 'perm_section_sales',
     label: 'Sales',
-    description: 'None / View / Full. View permits reading Sales but blocks writes and does not open Shifts. Full Sales also opens Shifts with own-shift actions and configured shop-wide visibility; administrator control is required for cancellation and cross-account review. Server capability flags remain authoritative.',
+    description: 'View: read sales and reports. Full: change sales and open Shifts.',
     permissions: [
       // View-tier section (Part 557 slice 2): all sales READS
       // (list/stats/reports/export) admit a 'view' grant; the writes
@@ -359,7 +377,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'returns',
     tKey: 'perm_section_returns',
     label: 'Returns',
-    description: 'Its own permission key, independent of Sales.',
+    description: 'Customer returns. Has its own switch, separate from Sales.',
     permissions: [
       // tier: true -- Returns' Review Required tier is wired end to end:
       // the router-wide gate admits a review-tier user for reads, POST /
@@ -386,7 +404,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'fees',
     tKey: 'perm_section_fees',
     label: 'Expenses',
-    description: 'Tax, delivery, and other charges.',
+    description: 'Expenses: tax, delivery and other charges.',
     permissions: [
       // tier: true -- 'fees' is the one section whose Review Required tier
       // is actually wired end to end today (DELETE /api/fees/:id queues
@@ -411,7 +429,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'contacts',
     tKey: 'perm_section_contacts',
     label: 'Contacts',
-    description: 'Covers all three Contacts tabs: Customers, Suppliers, and Delivery.',
+    description: 'The Customers, Suppliers and Delivery tabs. The Suppliers section is a separate switch.',
     permissions: [
       // tier: true -- Contacts' Review Required tier is wired end to end,
       // narrower than Products/Inventory/Returns: POST (create) has no
@@ -440,7 +458,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // supplier NAMES on batches and in the supplier pickers (the
       // fields=names read stays open) -- this key gates the contact
       // records themselves.
-      { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high' },
+      { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high', shortTKey: 'suppliers', short: 'Suppliers' },
     ],
   },
   // Users & roles management is DELIBERATELY admin-only (Part 557 slice 3):
@@ -456,8 +474,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'review',
     tKey: 'perm_section_review',
-    label: 'Review',
-    description: 'None / View / Full. The Review/Approval queue for every section’s Review tier above. View shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Review access.',
+    label: 'Review queue',
+    description: 'Approve or refuse changes waiting for review. View shows the queue only.',
     permissions: [
       // View-tier section (Part 557 slice 5): reading the pending queue
       // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the
@@ -473,7 +491,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action.',
+        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Access here.',
       },
     ],
   },
@@ -481,7 +499,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'audit_log',
     tKey: 'perm_section_audit_log',
     label: 'Audit Log',
-    description: 'None / View / Full. Read-only action history. View shows a person their OWN actions; Full shows everyone’s (plus the legacy deleted-sales evidence ledger).',
+    description: 'View: your own actions. Full: everyone’s. The log cannot be reset.',
     permissions: [
       // View-tier section (Part 557 slice 7), where 'view' is OWN-scoped rather
       // than read-only (the whole page is read-only anyway): 'view' = see only
@@ -505,17 +523,17 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'backup',
     tKey: 'perm_section_backup',
     label: 'Backup',
-    description: 'Exporting a backup and restoring/resetting from one are separate, independently-grantable actions -- restoring or resetting is far more dangerous than exporting.',
+    description: 'Export a backup. Restore / reset is a separate switch.',
     permissions: [
-      { key: 'backup', tKey: 'perm_backup', label: 'Backup export', sensitivity: 'high' },
-      { key: 'backup_restore', tKey: 'perm_backup_restore', label: 'Backup restore and reset', sensitivity: 'critical' },
+      { key: 'backup', tKey: 'perm_backup', label: 'Backup export', sensitivity: 'high', lead: true },
+      { key: 'backup_restore', tKey: 'perm_backup_restore', label: 'Backup restore and reset', sensitivity: 'critical', shortTKey: 'perm_short_restore_reset', short: 'Restore / reset', hintTKey: 'perm_backup_restore_desc', hint: 'Restores a backup or resets business data. The audit log is never reset.' },
     ],
   },
   {
     key: 'settings',
     tKey: 'perm_section_settings',
     label: 'Settings',
-    description: "The standalone Receipt Settings page has its own grant below ('receipt_settings'), not the plain Settings grant -- it defaults ON for Employee so front-line staff can change print/paper modes without the rest of Settings. The other detail rows are this page's own finer-grained areas -- each currently mirrors the plain Settings grant one-for-one (see cloudflare/src/lib/permissions.ts) until they're each wired to their own independent check.",
+    description: 'View: read. Full: change settings. Identity, policies, Receipts, Security and Drive are separate switches.',
     permissions: [
       // View-tier section (Part 557): reading settings is open to any signed-in
       // user already (routes/settings.ts GET / strips secrets and serves the
@@ -532,8 +550,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_settings_view_desc',
         reviewDescription: 'View: this person can open Settings and see every value, but the Save button is disabled and any save is refused. Full Access is required to change settings.',
       },
-      { key: 'business_identity', tKey: 'perm_business_identity', label: 'Business identity, logo, public profile', sensitivity: 'high' },
-      { key: 'sales_policy', tKey: 'perm_sales_policy', label: 'Sales, return, and financial policy', sensitivity: 'high' },
+      { key: 'business_identity', tKey: 'perm_business_identity', label: 'Business identity, logo, public profile', sensitivity: 'high', shortTKey: 'perm_short_identity', short: 'Business identity', coveredBy: 'settings' },
+      { key: 'sales_policy', tKey: 'perm_sales_policy', label: 'Sales, return, and financial policy', sensitivity: 'high', shortTKey: 'perm_short_policies', short: 'Policies', coveredBy: 'settings' },
       // Own key (Sep 16 2026 owner request), separate from the plain
       // `settings` grant -- the standalone Receipt Settings page (print
       // modes, footer, template) is an operational tool for whoever prints
@@ -543,16 +561,16 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // routes/settings.ts's settingsBucketPermissionFor() on
       // receipt_template/receipt_footer/receipt_print_settings, and gates
       // the page itself via AppContext.tsx's PAGE_PERMISSIONS.
-      { key: 'receipt_settings', tKey: 'perm_receipt_settings', label: 'Receipt / print settings', sensitivity: 'normal' },
-      { key: 'security_settings', tKey: 'perm_security_settings', label: 'Security and sign-in settings', sensitivity: 'critical' },
-      { key: 'drive_credentials', tKey: 'perm_drive_credentials', label: 'Google Drive credentials', sensitivity: 'critical' },
+      { key: 'receipt_settings', tKey: 'perm_receipt_settings', label: 'Receipt / print settings', sensitivity: 'normal', shortTKey: 'receipts', short: 'Receipts' },
+      { key: 'security_settings', tKey: 'perm_security_settings', label: 'Security and sign-in settings', sensitivity: 'critical', shortTKey: 'security', short: 'Security' },
+      { key: 'drive_credentials', tKey: 'perm_drive_credentials', label: 'Google Drive credentials', sensitivity: 'critical', shortTKey: 'google_drive', short: 'Google Drive', coveredBy: 'settings' },
     ],
   },
   {
     key: 'library',
     tKey: 'perm_section_library',
     label: 'Library',
-    description: 'Uploaded files and media assets. Browsing/searching/previewing the Library needs no permission at all -- any authenticated user can reach the page. This grant controls management actions only: upload, bulk download, rename, and delete. The page still falls back to the Settings grant as a transitional OR (Part 156, kept deliberately so no existing installation is locked out) -- grant this key directly going forward.',
+    description: 'Uploaded files and media. Anyone can browse; this switch allows upload, download, rename and delete.',
     permissions: [
       // Full Access / None only -- deliberately no three-way tier flag
       // here. This section had a Review Required middle tier through Part
@@ -568,6 +586,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tKey: 'perm_library',
         label: 'Library',
         sensitivity: 'normal',
+        lead: true,
       },
     ],
   },

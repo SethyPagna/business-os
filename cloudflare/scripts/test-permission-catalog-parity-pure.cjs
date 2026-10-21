@@ -442,13 +442,50 @@ const FOLLOWED_CONTROLS = {
     file: 'routes/inventory.ts',
     proof: [/app\.post\('\/reasons\/replace'[\s\S]{0,700}?getActionTier\(user, 'inventory', 'edit_reasons'\) === 'none'[\s\S]{0,400}?getPermissionTier\(user, 'inventory'\) !== 'full'[\s\S]{0,300}?full_access_required/],
   },
+  // A starting quantity on a new product is a stock-in: POST / and POST /variant refuse it through openingStockRefusal.
+  'products:opening_stock': {
+    file: 'routes/products.ts',
+    proof: [
+      /const openingStockRefusal = \(user, body\) =>\s*Number\(body\.stock_quantity\) > 0 \? foldStockInPermissionRefusal\(user\) : null/,
+      /app\.post\('\/'[\s\S]{0,12000}?openingStockRefusal\(user, body\)/,
+      /app\.post\('\/variant'[\s\S]{0,4000}?openingStockRefusal\(user, body\)/,
+    ],
+  },
+  // A products import file that adds or changes stock is refused whole unless its author holds Adjust / receive at Full.
+  'products:import_stock': {
+    file: 'lib/importEngine.ts',
+    proof: [
+      /const allowProductStockWrites = job\.type !== 'products' \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/,
+      /if \(job\.type === 'products' && !authority\.allowProductStockWrites\) \{[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
+    ],
+  },
 }
 // Second grants a row or followed control names (`requires`), each proved against the Worker code that demands it.
 const SALE_LINK_GRANTS = [
   /app\.post\('\/customers\/link-conflicts\/relink'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
   /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
 ]
+// An entry is one { file, proof } or a list of them when the Worker demands the grant in more than one file.
 const REQUIREMENT_PROOFS = {
+  'contacts:bulk': [
+    {
+      file: 'routes/contacts.ts',
+      proof: [
+        /app\.post\(`\$\{config\.path\}\/merge`[\s\S]{0,1500}?getActionTier\(user, 'contacts', 'bulk'\) === 'none'/,
+        /app\.post\(`\$\{config\.path\}\/bulk-delete-jobs`[\s\S]{0,1500}?getActionTier\(user, 'contacts', 'bulk'\) === 'none'/,
+      ],
+    },
+    { file: 'routes/importJobs.ts', proof: [/overrideSection === 'contacts' && isActionBlocked\(user, 'contacts', 'bulk'\)/] },
+    { file: 'lib/importEngine.ts', proof: [/section === 'contacts' && isActionBlocked\(actor, 'contacts', 'bulk'\)/] },
+  ],
+  'products:add': {
+    file: 'routes/products.ts',
+    proof: [/app\.post\('\/variant'[\s\S]{0,700}?getActionTier\(user, 'products', 'variant'\) !== 'full' \|\| getActionTier\(user, 'products', 'add'\) !== 'full'/],
+  },
+  'inventory:adjust': [
+    { file: 'lib/createFold.ts', proof: [/function foldStockInPermissionRefusal\(user\) \{\s*if \(user && getActionTier\(user, 'inventory', 'adjust'\) === 'full'\)\s*return null/] },
+    { file: 'lib/importEngine.ts', proof: [/const allowProductStockWrites = job\.type !== 'products' \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/] },
+  ],
   product_cost_edit: { file: 'routes/importJobs.ts', proof: [/const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/, /code: isRead \? 'product_cost_view_required' : 'product_cost_edit_required'/] },
   product_cost_view: { file: 'routes/importJobs.ts', proof: [/const isRead = c\.req\.method === 'GET' \|\| c\.req\.method === 'HEAD'/, /const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/] },
   destructive_delete: { file: 'lib/importEngine.ts', proof: [/!hasPermission\(user, 'destructive_delete'\)\)\s*return 'destructive_delete'/] },
@@ -588,6 +625,16 @@ check('a listed Review refusal is still true', () => {
   assert.deepEqual(problems, [])
 })
 
+// A key hasPermission() answers true for whenever another key is Full is included in that key's Full, whatever the
+// role stores for it. The editor shows exactly those keys as included and locked (`coveredBy`), so a Full tap
+// never looks like it left an extra separate when the Worker grants it.
+check('the extras the editor shows as included in a module\'s Full are the ones hasPermission() falls back for', () => {
+  const fallbacks = quoted(textOf(HELPERS_FILE), /normalized === '([a-z_]+)' && permissions\.([a-z_]+) === true\)\s*return true/g).map((m) => `${m[1]}<-${m[2]}`).sort()
+  assert.ok(fallbacks.length >= 3, `only ${fallbacks.length} hasPermission fallbacks found; the scan is broken`)
+  const declared = [...definitionByKey.values()].filter((def) => def.coveredBy).map((def) => `${def.key}<-${def.coveredBy}`).sort()
+  assert.deepEqual(declared, fallbacks, 'permissionDefinitions.ts `coveredBy` must list exactly the keys lib/permissions.ts hasPermission() falls back for')
+})
+
 check('every editor action row has a Worker check, or is listed as browser-only', () => {
   const unexplained = [...editorRows].filter((pair) => !workerActions.has(pair) && !BROWSER_ONLY[pair]).sort()
   assert.deepEqual(unexplained, [], `The editor offers these rows but no Worker route checks them (a fake control):\n${unexplained.join('\n')}`)
@@ -675,7 +722,9 @@ check('every second grant a row names is one the Worker demands', () => {
       used.add(requirement.key)
       const entry = REQUIREMENT_PROOFS[requirement.key]
       if (!entry) { problems.push(`${pair} requires ${requirement.key} but REQUIREMENT_PROOFS has no Worker proof for it`); continue }
-      for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair} requires ${requirement.key} but ${entry.file} no longer demands it (${proof})`)
+      for (const part of [entry].flat()) {
+        for (const proof of part.proof) if (!proof.test(textOf(part.file))) problems.push(`${pair} requires ${requirement.key} but ${part.file} no longer demands it (${proof})`)
+      }
     }
   }
   for (const key of Object.keys(REQUIREMENT_PROOFS)) if (!used.has(key)) problems.push(`${key} is in REQUIREMENT_PROOFS but no editor row requires it any more; remove it`)

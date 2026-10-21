@@ -19,6 +19,7 @@ import { isProductColumnLocked, PRODUCT_COLUMNS } from '../src/components/produc
 import { loadSource } from './productsSurfaceFixture.ts'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
 import { PERMISSION_ACTIONS } from '../src/utils/permissionActions.ts'
+import { MODULE_ROWS, chipStates } from '../src/components/users/permissionSummary.ts'
 import { getActionTier } from '../../cloudflare/src/lib/permissions.ts'
 
 // productSupplierGate.ts also imports the Worker's D1 types (db.ts), which the frontend tsc program has no ambient types for;
@@ -122,7 +123,10 @@ test('FORM: the supplier input is disabled behind the util, with the translated 
 test('EDITOR: the supplier switch is listed under Products and the editor renders switches from that table', () => {
   const action = PERMISSION_ACTIONS.products.find((entry) => entry.key === 'supplier')
   assert.equal(action?.tKey, 'perm_act_products_supplier')
-  assert.match(read('../src/components/users/PermissionEditor.tsx'), /actionsForKey\(/)
+  // The access grid builds its chips from that same table (permissionSummary.chipStates), so the switch cannot go missing.
+  assert.match(read('../src/components/users/permissionSummary.ts'), /actionsForKey\(/)
+  const productsChips = chipStates(MODULE_ROWS.find((row) => row.actionKey === 'products' && !row.sub)!, { products: true } as never)
+  assert.ok(productsChips.some((chip) => chip.action.key === 'supplier'), 'Products Full lists the supplier switch')
 })
 
 test('PACKS: the supplier switch label and tooltip exist in both packs, Khmer is not English', () => {

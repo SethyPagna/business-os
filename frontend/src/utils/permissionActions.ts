@@ -5,7 +5,7 @@
 // down, the one an admin actually asks: "with Review on Products,
 // can this person still hit the Export button?"
 //
-// One table drives both the rows PermissionEditor.tsx renders and the real
+// One table drives both the chips PermissionEditor.tsx's access grid renders and the real
 // runtime gating of the buttons (via `actionAllowed()` below), so the two
 // cannot drift apart. Every row is read off the real route handler, not
 // inferred from a section's prose description, and
@@ -40,6 +40,9 @@ export interface PermissionAction {
   key: string
   tKey: string
   label: string
+  /** The one word the editor's chip shows; `label` stays the chip's accessible name. `short` is the English pack text. */
+  shortTKey: string
+  short: string
   /** Outcome under the Review Required tier. */
   review: ActionOutcome
   /**
@@ -49,8 +52,8 @@ export interface PermissionAction {
    */
   full?: ActionOutcome
   /**
-   * Second grants the Worker also demands, even at Full Access. The row is unavailable until every one is held, in
-   * the editor badge and in `can()`.
+   * Second grants the Worker also demands, even at Full Access. Until every one is held the editor draws the chip
+   * as "needs" and names the missing grants under the module's chips, and `can()` answers false.
    */
   requires?: ActionRequirement[]
   /**
@@ -59,8 +62,9 @@ export interface PermissionAction {
    */
   controlReview?: ActionOutcome
   /**
-   * Marks a page control that rides another row's switch but is gated more tightly than that row. It has no row of
-   * its own in the editor: the parent row names it in a note, and `can()` answers for it.
+   * Marks a page control that rides another row's switch but is gated more tightly than that row. It has no switch
+   * of its own: the editor draws it as a small mark right after its parent chip (it follows the parent's switch),
+   * and `can()` answers for it.
    */
   follows?: string
 }
@@ -70,6 +74,13 @@ const COST_VIEW: ActionRequirement = { key: 'product_cost_view', tKey: 'perm_pro
 // A products, inventory or sales import file carries costs: the Worker creates the job with Edit product costs and
 // reads it back with View product costs (routes/importJobs.ts, requireImportPermission).
 const IMPORT_COSTS = [COST_EDIT, COST_VIEW]
+// Contacts merge, server-side bulk delete and contact imports all stop at the umbrella `contacts:bulk` switch
+// (routes/contacts.ts, routes/importJobs.ts, lib/importEngine.ts).
+const CONTACTS_BULK: ActionRequirement = { key: 'contacts:bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts' }
+// Add variant creates a product row, so the Worker demands Add as well (routes/products.ts POST /variant).
+const PRODUCTS_ADD: ActionRequirement = { key: 'products:add', tKey: 'perm_act_products_add', label: 'Add product' }
+// Opening stock and stock-changing product imports are stock-ins: the Worker demands Adjust / receive at Full.
+const INVENTORY_ADJUST: ActionRequirement = { key: 'inventory:adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock' }
 
 /**
  * Actions per permission key, in the order they appear on the page.
@@ -87,38 +98,42 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // section ("Add product" vs "Add fee"), so a shared key would render one
   // section's label on every sibling row the moment the packs translate it.
   products: [
-    { key: 'view', tKey: 'perm_act_products_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_products_add', label: 'Add product', review: 'queue' },
+    { key: 'view', tKey: 'perm_act_products_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'add', tKey: 'perm_act_products_add', label: 'Add product', shortTKey: 'add', short: 'Add', review: 'queue' },
+    // POST / and POST /variant refuse a starting quantity without Adjust / receive at Full, whatever Add says.
+    { key: 'opening_stock', tKey: 'perm_control_opening_stock', label: 'Opening stock on a new product', shortTKey: 'opening_stock', short: 'Opening stock', review: 'block', follows: 'add', requires: [INVENTORY_ADJUST] },
     // An edit that would merge two products is queued too; switching merge_duplicates off refuses it instead.
-    { key: 'edit', tKey: 'perm_act_products_edit', label: 'Edit product', review: 'queue' },
-    { key: 'delete', tKey: 'perm_act_products_delete', label: 'Delete product', review: 'queue' },
+    { key: 'edit', tKey: 'perm_act_products_edit', label: 'Edit product', shortTKey: 'edit', short: 'Edit', review: 'queue' },
+    { key: 'delete', tKey: 'perm_act_products_delete', label: 'Delete product', shortTKey: 'delete', short: 'Delete', review: 'queue' },
     // Refused, never queued: the review queue cannot replay a delete of thousands of rows.
-    { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', review: 'block' },
-    // Also needs the Add action at Full.
-    { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', review: 'block' },
-    { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', review: 'queue', controlReview: 'block' },
-    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', review: 'block', requires: IMPORT_COSTS },
+    { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_products_bulk_delete', short: 'Bulk delete', review: 'block' },
+    { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', shortTKey: 'perm_short_variant', short: 'Variant', review: 'block', requires: [PRODUCTS_ADD] },
+    { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', shortTKey: 'images', short: 'Images', review: 'queue', controlReview: 'block' },
+    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    // A products file that adds or changes stock is refused whole without Adjust / receive at Full (routes/importJobs.ts,
+    // lib/importEngine.ts), however Import is set.
+    { key: 'import_stock', tKey: 'perm_control_import_stock', label: 'Stock quantities in product imports', shortTKey: 'perm_short_import_stock', short: 'Stock in imports', review: 'block', follows: 'import', requires: [INVENTORY_ADJUST] },
     // Covers replace-all and replace-columns imports, which are products imports that also need destructive_delete.
-    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', review: 'block', requires: [
+    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', shortTKey: 'perm_short_replace_import', short: 'Replace import', review: 'block', requires: [
       { key: 'products:import', tKey: 'perm_act_products_import', label: 'Import' },
       ...IMPORT_COSTS,
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns' },
     ] },
     // Browser-only: the file is built from rows the page already loaded, so this hides the button but is not a data
     // boundary; the products API returns the same rows to anyone who can view.
-    { key: 'export', tKey: 'perm_act_products_export', label: 'Export', review: 'block' },
-    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates and edits that merge', review: 'queue', controlReview: 'block' },
-    { key: 'zero_qty_cleanup', tKey: 'perm_act_products_zero_qty', label: 'Zero-quantity cleanup', review: 'block' },
-    { key: 'manage_lookups', tKey: 'perm_act_products_manage_lookups', label: 'Manage brands, categories, units', review: 'block' },
+    { key: 'export', tKey: 'perm_act_products_export', label: 'Export', shortTKey: 'export', short: 'Export', review: 'block' },
+    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates and edits that merge', shortTKey: 'merge', short: 'Merge', review: 'queue', controlReview: 'block' },
+    { key: 'zero_qty_cleanup', tKey: 'perm_act_products_zero_qty', label: 'Zero-quantity cleanup', shortTKey: 'perm_short_zero_cleanup', short: 'Zero-stock cleanup', review: 'block' },
+    { key: 'manage_lookups', tKey: 'perm_act_products_manage_lookups', label: 'Manage brands, categories, units', shortTKey: 'perm_short_lookups', short: 'Brands, categories, units', review: 'block' },
     // The DEFAULT selling and wholesale price, off for the Employee default. PUT /:id, /bulk-price-adjust, the
     // receipt-time selling price and a merge price choice other than the rule all require it.
-    { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'queue' },
+    { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', shortTKey: 'price', short: 'Price', review: 'queue' },
     // Owner, 19 Oct 2026: the supplier of an existing product, off for the Employee default. PUT /:id, the supplier
     // backfill and approving a queued supplier change require it; a supplier on a NEW product follows Add. Absent = allowed.
-    { key: 'supplier', tKey: 'perm_act_products_supplier', label: 'Change supplier', review: 'queue' },
+    { key: 'supplier', tKey: 'perm_act_products_supplier', label: 'Change supplier', shortTKey: 'supplier', short: 'Supplier', review: 'queue' },
     // The Products sub-pages: Stock Changes, Stock-in Sessions and a product's sales and supplier history. Off for
     // the Employee default, who see only the main Products page.
-    { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', review: 'allow' },
+    { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', shortTKey: 'history', short: 'History', review: 'allow' },
   ],
 
   // cloudflare/src/routes/inventory.ts, plus routes/batches.ts (receive/
@@ -126,63 +141,63 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // canReceiveStock already reads can('inventory', 'adjust')) and
   // routes/importJobs.ts for the import row.
   inventory: [
-    { key: 'view', tKey: 'perm_act_inventory_view', label: 'View and search', review: 'allow' },
-    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', review: 'allow' },
+    { key: 'view', tKey: 'perm_act_inventory_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', shortTKey: 'perm_short_count', short: 'Count', review: 'allow' },
     // PUT /reasons queues (maybeQueueForReview). The only Inventory write with
     // no live-state staleness risk, so the only one that queues.
-    { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', review: 'queue' },
+    { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', shortTKey: 'reasons', short: 'Reasons', review: 'queue' },
     // POST /reasons/replace answers 403 full_access_required for Review.
-    { key: 'rename_reasons', tKey: 'perm_control_rename_reasons', label: 'Renaming a saved reason', review: 'block', follows: 'edit_reasons' },
+    { key: 'rename_reasons', tKey: 'perm_control_rename_reasons', label: 'Renaming a saved reason', shortTKey: 'perm_short_rename_reasons', short: 'Rename reasons', review: 'block', follows: 'edit_reasons' },
     // POST /adjust answers 403 for Review. Also covers batches.ts's
     // write routes (receive batch stock, fast stock-in, edit/deactivate a
     // lot): strict Full Access writes that mutate the same live stock this
     // action names.
-    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', review: 'block' },
+    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', shortTKey: 'perm_short_adjust_receive', short: 'Adjust / receive', review: 'block' },
     // POST /transfer answers 403 for Review.
-    { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', review: 'block' },
+    { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', shortTKey: 'transfer', short: 'Transfer', review: 'block' },
     // POST /move-row answers 403 for Review.
-    { key: 'move_row', tKey: 'perm_act_inventory_move_row', label: 'Move stock between rows', review: 'block' },
+    { key: 'move_row', tKey: 'perm_act_inventory_move_row', label: 'Move stock between rows', shortTKey: 'perm_short_move_rows', short: 'Move rows', review: 'block' },
     // POST /dated-stock-count/* answers 403 for Review.
-    { key: 'stock_count', tKey: 'perm_act_inventory_stock_count', label: 'Dated stock count', review: 'block' },
+    { key: 'stock_count', tKey: 'perm_act_inventory_stock_count', label: 'Dated stock count', shortTKey: 'perm_short_dated_count', short: 'Dated count', review: 'block' },
     // routes/importJobs.ts: the 'inventory' and 'stock_actions' import
     // types -- strict full-grant checks there ('stock_actions' needs
     // products+inventory+sales all at Full Access).
-    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', review: 'block', requires: IMPORT_COSTS },
+    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
   ],
 
   inventory_checks: [
-    { key: 'view', tKey: 'perm_act_inventory_checks_view', label: 'View all count sessions', review: 'block' },
-    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', review: 'block' },
+    { key: 'view', tKey: 'perm_act_inventory_checks_view', label: 'View all count sessions', shortTKey: 'perm_short_all_sessions', short: 'All sessions', review: 'block' },
+    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', shortTKey: 'perm_short_count', short: 'Count', review: 'block' },
   ],
 
   // cloudflare/src/routes/branches.ts
   branches: [
-    { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', review: 'allow' },
-    { key: 'edit', tKey: 'perm_act_branches_edit', label: 'Edit branch', review: 'queue' },
+    { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'edit', tKey: 'perm_act_branches_edit', label: 'Edit branch', shortTKey: 'edit', short: 'Edit', review: 'queue' },
     // POST /transfer and /transfer-bulk answer 403 for Review.
-    { key: 'transfer', tKey: 'perm_act_branches_transfer', label: 'Transfer stock between branches', review: 'block' },
+    { key: 'transfer', tKey: 'perm_act_branches_transfer', label: 'Transfer stock between branches', shortTKey: 'transfer', short: 'Transfer', review: 'block' },
     // POST /stock-integrity/repair answers 403 for Review.
-    { key: 'repair_stock', tKey: 'perm_act_branches_repair_stock', label: 'Repair misplaced stock', review: 'block' },
+    { key: 'repair_stock', tKey: 'perm_act_branches_repair_stock', label: 'Repair misplaced stock', shortTKey: 'repair', short: 'Repair', review: 'block' },
     // Browser-only export: Review keeps it, and the switch lets an
     // administrator narrow it.
-    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
+    { key: 'export', tKey: 'export', label: 'Export', shortTKey: 'export', short: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/returns.ts
   returns: [
-    { key: 'view', tKey: 'perm_act_returns_view', label: 'View and search', review: 'allow' },
+    { key: 'view', tKey: 'perm_act_returns_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
     // POST / and POST /supplier carry no tier check beyond the router-wide
     // gate, so a review-tier user creates returns directly, by design.
-    { key: 'add', tKey: 'perm_act_returns_add', label: 'Create return', review: 'allow' },
+    { key: 'add', tKey: 'perm_act_returns_add', label: 'Create return', shortTKey: 'add', short: 'Add', review: 'allow' },
     // PATCH /:id answers 403 for Review: editing reverses and
     // re-applies batch restocking against live state.
-    { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', review: 'block' },
+    { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', shortTKey: 'edit', short: 'Edit', review: 'block' },
     // Multi-return field/status updates and their grouped Undo/Redo share
     // one explicit capability. Individual create/edit remain independent.
-    { key: 'bulk', tKey: 'perm_act_returns_bulk', label: 'Change multiple returns at once', review: 'block' },
+    { key: 'bulk', tKey: 'perm_act_returns_bulk', label: 'Change multiple returns at once', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
     // Export packages rows already visible to the caller; the action
     // controls whether the UI offers it.
-    { key: 'export', tKey: 'perm_act_returns_export', label: 'Export returns', review: 'block' },
+    { key: 'export', tKey: 'perm_act_returns_export', label: 'Export returns', shortTKey: 'export', short: 'Export', review: 'block' },
     // There is no returns import or price-difference action: a return does not
     // net against its replacement, so there is nothing to gate, and a
     // permission nobody can exercise would lie to whoever reads the role
@@ -191,59 +206,59 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
 
   // cloudflare/src/routes/fees.ts
   fees: [
-    { key: 'view', tKey: 'perm_act_fees_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_fees_add', label: 'Add expense', review: 'allow' },
-    { key: 'edit', tKey: 'perm_act_fees_edit', label: 'Edit expense', review: 'allow' },
+    { key: 'view', tKey: 'perm_act_fees_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'add', tKey: 'perm_act_fees_add', label: 'Add expense', shortTKey: 'add', short: 'Add', review: 'allow' },
+    { key: 'edit', tKey: 'perm_act_fees_edit', label: 'Edit expense', shortTKey: 'edit', short: 'Edit', review: 'allow' },
     // DELETE /:id queues (maybeQueueForReview): the only Fees action that
     // does not apply directly.
-    { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete expense', review: 'queue' },
+    { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete expense', shortTKey: 'delete', short: 'Delete', review: 'queue' },
     // Export packages rows the caller may already read; an explicit false
     // narrows it.
-    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
+    { key: 'export', tKey: 'export', label: 'Export', shortTKey: 'export', short: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/contacts.ts (all three tabs share this key),
   // plus routes/importJobs.ts for the import row.
   contacts: [
-    { key: 'view', tKey: 'perm_act_contacts_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_contacts_add', label: 'Add contact', review: 'allow' },
+    { key: 'view', tKey: 'perm_act_contacts_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'add', tKey: 'perm_act_contacts_add', label: 'Add contact', shortTKey: 'add', short: 'Add', review: 'allow' },
     // PUT applies directly, but every column except `name` is dropped for a
     // Review user.
-    { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only; more in POS/sales)', review: 'limited' },
+    { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only; more in POS/sales)', shortTKey: 'edit', short: 'Edit', review: 'limited' },
     // DELETE answers 403 for Review.
-    { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', review: 'block' },
+    { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', shortTKey: 'delete', short: 'Delete', review: 'block' },
     // Selection mode, multi-row mutations, merge/import workflows, and their
     // replay entry points require this umbrella capability in addition to
     // any narrower action switch below.
-    { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', review: 'block' },
+    { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
     // POST /bulk-delete-jobs answers 403 for Review.
-    { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', review: 'block' },
+    { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_contacts_bulk_delete', short: 'Bulk delete', review: 'block', requires: [CONTACTS_BULK] },
     // POST /merge answers 403 for Review.
-    { key: 'merge', tKey: 'perm_act_contacts_merge', label: 'Merge duplicates', review: 'block' },
+    { key: 'merge', tKey: 'perm_act_contacts_merge', label: 'Merge duplicates', shortTKey: 'merge', short: 'Merge', review: 'block', requires: [CONTACTS_BULK] },
     // The Conflicts tab can also persist keep/reopen decisions and rewrite
     // historical sale-to-customer links. Keep those controls behind one
     // explicit Full-only capability instead of exposing buttons that a
     // review-tier user can click only to receive a 403.
-    { key: 'resolve_conflicts', tKey: 'perm_act_contacts_resolve_conflicts', label: 'Resolve contact and sale-link conflicts', review: 'block' },
+    { key: 'resolve_conflicts', tKey: 'perm_act_contacts_resolve_conflicts', label: 'Resolve contact and sale-link conflicts', shortTKey: 'conflicts', short: 'Conflicts', review: 'block' },
     // Keeping or reopening a conflict and merging need only the row above; rewriting sale-to-customer links is a
     // sales write, so POST /customers/link-conflicts/relink and /resolve-missing also demand these two.
-    { key: 'relink_sales', tKey: 'perm_control_relink_sales', label: 'Relinking sales to another customer', review: 'block', follows: 'resolve_conflicts', requires: [
+    { key: 'relink_sales', tKey: 'perm_control_relink_sales', label: 'Relinking sales to another customer', shortTKey: 'perm_short_relink_sales', short: 'Relink sales', review: 'block', follows: 'resolve_conflicts', requires: [
       { key: 'sales:customer', tKey: 'perm_req_sales_customer', label: 'Sales: change linked customer' },
       { key: 'sales:customer_reassign', tKey: 'perm_req_sales_customer_reassign', label: 'Sales: edit customer mode, choose another customer' },
     ] },
     // routes/importJobs.ts: the customers/suppliers/delivery_contacts
     // import types -- strict full-grant checks there.
-    { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', review: 'block' },
+    { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', shortTKey: 'import', short: 'Import', review: 'block', requires: [CONTACTS_BULK] },
     // Export on all three contact tabs (Customers/Suppliers/Delivery) is
     // browser-only, like Products export: it is assembled from rows already
     // loaded into the page (each tab's visibleContacts) and a Review
     // user may view those rows, so hiding the button enforces the stated
     // policy but is NOT a confidentiality boundary.
-    { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
+    { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', shortTKey: 'export', short: 'Export', review: 'block' },
     // Customer invoices, purchase history, and delivery-contact reports reveal
     // financial activity. Keep this independent from the directory/search
     // grant so a cashier can find a customer without opening their history.
-    { key: 'financial_history', tKey: 'perm_act_contacts_financial_history', label: 'View contact invoices and purchase history', review: 'block' },
+    { key: 'financial_history', tKey: 'perm_act_contacts_financial_history', label: 'View contact invoices and purchase history', shortTKey: 'invoices', short: 'Invoices', review: 'block' },
   ],
 
   // View-tier sections also need action rows: the middle tier is still
@@ -255,17 +270,17 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // 'sales:view': false, one-way like every override: an absent key leaves
     // the tier's answer standing, so a role keeps Sales until an admin
     // switches it off. review:'allow' keeps the View tier reading.
-    { key: 'view', tKey: 'perm_act_sales_view', label: 'View sales and reports', review: 'allow' },
-    { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', review: 'allow' },
-    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block', requires: IMPORT_COSTS },
-    { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
-    { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', review: 'block' },
-    { key: 'customer_reassign', tKey: 'perm_act_sales_customer_reassign', label: 'Reassign customer (off: sale name only)', review: 'block' },
+    { key: 'view', tKey: 'perm_act_sales_view', label: 'View sales and reports', shortTKey: 'view', short: 'View', review: 'allow' },
+    { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', shortTKey: 'export', short: 'Export', review: 'allow' },
+    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', shortTKey: 'status', short: 'Status', review: 'block' },
+    { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', shortTKey: 'customer', short: 'Customer', review: 'block' },
+    { key: 'customer_reassign', tKey: 'perm_act_sales_customer_reassign', label: 'Reassign customer (off: sale name only)', shortTKey: 'customer', short: 'Customer', review: 'block' },
     // POST /:id/items answers 403 unless Full. Adding goods to a recorded
     // sale moves stock and raises what the customer owes, so it has its own
     // switch rather than riding the coarse 'sales' grant or `status`, and it
     // can never be queued for review: the stock movement is immediate.
-    { key: 'add_items', tKey: 'perm_act_sales_add_items', label: 'Add items to a recorded sale', review: 'block' },
+    { key: 'add_items', tKey: 'perm_act_sales_add_items', label: 'Add items to a recorded sale', shortTKey: 'perm_short_add_items', short: 'Add items', review: 'block' },
     // POST /:id/amendments answers 403 unless Full. Amending changes a
     // recorded sale's contents, customer fee, or actual courier cost, may move
     // stock in either direction, and changes what the customer owes. It is
@@ -273,24 +288,24 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // a forgotten item but cannot take one back off a paid sale. Like
     // add_items it can never be queued for review: the stock movement is
     // immediate.
-    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale', review: 'block' },
+    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale', shortTKey: 'perm_short_amend', short: 'Amend', review: 'block' },
     // Multi-sale status/field updates and their grouped Undo/Redo share this
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.
-    { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', review: 'block' },
+    { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
     // Owner, 14 Oct 2026: the courier's actual cost (what the shop paid the driver) on a sale, its history, the reports
     // and the dashboard. On by default for every role that holds Sales; the Worker's canViewCourierCost
     // (lib/courierCostAccess.ts) reads the same `sales:view_courier_cost` switch, and an administrator always sees it.
-    { key: 'view_courier_cost', tKey: 'perm_act_sales_view_courier_cost', label: 'View actual delivery cost', review: 'allow' },
+    { key: 'view_courier_cost', tKey: 'perm_act_sales_view_courier_cost', label: 'View actual delivery cost', shortTKey: 'perm_short_courier_cost', short: 'Courier cost', review: 'allow' },
   ],
 
   promotions: [
-    { key: 'manage', tKey: 'perm_act_promotions_manage', label: 'Create, edit, and delete promotion rules', review: 'block' },
+    { key: 'manage', tKey: 'perm_act_promotions_manage', label: 'Create, edit, and delete promotion rules', shortTKey: 'manage', short: 'Manage', review: 'block' },
   ],
 
   // POS is an on/off key: on reads as Full, off as None.
   pos: [
-    { key: 'manage_address_presets', tKey: 'manage_address_presets', label: 'Manage saved address options', review: 'block' },
+    { key: 'manage_address_presets', tKey: 'manage_address_presets', label: 'Manage saved address options', shortTKey: 'perm_short_addresses', short: 'Saved addresses', review: 'block' },
   ],
 }
 

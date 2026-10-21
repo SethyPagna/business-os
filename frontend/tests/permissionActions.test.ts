@@ -65,6 +65,24 @@ for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
   }
 }
 
+// Every row names the one word its editor chip shows: in both packs, English equal to the table's fallback, short
+// enough for a chip, and different from its siblings' so two chips on one module never read alike. The Sales
+// customer-mode dropdown has no chip of its own.
+const kmPack = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
+  const words = new Map<string, string>()
+  for (const action of actions) {
+    const where = `${permissionKey}.${action.key}`
+    assert.ok(action.shortTKey && action.short, `${where} has no short word`)
+    assert.equal(enPack[action.shortTKey], action.short, `${where}: the English fallback must equal the pack text`)
+    assert.ok(kmPack[action.shortTKey], `${where}: the Khmer short word is missing`)
+    assert.ok([...action.short].length <= 26, `${where}: "${action.short}" is too long for a chip`)
+    if (permissionKey === 'sales' && action.key === 'customer_reassign') continue
+    assert.ok(!words.has(action.short.toLowerCase()), `${where} reads "${action.short}" like ${words.get(action.short.toLowerCase())}`)
+    words.set(action.short.toLowerCase(), where)
+  }
+}
+
 console.log('PASS per-action tables are structurally sound and cover every review-tier key')
 
 // --- 2. tier semantics --------------------------------------------------
