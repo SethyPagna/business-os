@@ -327,10 +327,6 @@ export const logout = async () => {
   const { logout: logoutRequest } = await loadAuthTransport()
   return logoutRequest()
 }
-export const resetPasswordWithOtp = async (payload) => {
-  const { resetPasswordWithOtp: resetPasswordWithOtpRequest } = await loadAuthTransport()
-  return resetPasswordWithOtpRequest(payload)
-}
 export const requestPasswordResetEmail = async (payload) => {
   const { requestPasswordResetEmail: requestPasswordResetEmailRequest } = await loadAuthTransport()
   return requestPasswordResetEmailRequest(payload)

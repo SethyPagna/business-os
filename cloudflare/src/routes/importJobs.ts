@@ -8,7 +8,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, productImportChangesSupplier, productImportChangesPrice, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, productImportChangesSupplier, productImportChangesPrice, productImportChangesStock, PRODUCT_IMPORT_STOCK_REFUSAL, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, isImportApplyAuthorizationError, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -301,6 +301,13 @@ async function requireChangedProductImportPriceAction(c: any, job: Record<string
   if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'price') !== 'none') return null
   if (!(await productImportChangesPrice(c.env, job as any))) return null
   return c.json({ success: false, ...PRODUCT_DISCOUNT_PRICE_REFUSAL }, 403)
+}
+
+// Security audit P2-c: a file that adds or changes stock needs inventory:adjust (Full), refused whole like the price gate.
+async function requireChangedProductImportStockAction(c: any, job: Record<string, unknown>) {
+  if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'inventory', 'adjust') === 'full') return null
+  if (!(await productImportChangesStock(c.env, job as any))) return null
+  return c.json({ success: false, ...PRODUCT_IMPORT_STOCK_REFUSAL }, 403)
 }
 
 function serializeJob(job: Record<string, unknown>) {
@@ -1488,6 +1495,8 @@ app.post('/:id/approve', async (c) => {
   if (supplierDenied) return supplierDenied
   const priceDenied = await requireChangedProductImportPriceAction(c as any, job)
   if (priceDenied) return priceDenied
+  const stockDenied = await requireChangedProductImportStockAction(c as any, job)
+  if (stockDenied) return stockDenied
 
   const body = await c.req.json().catch(() => ({}))
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
@@ -1705,6 +1714,8 @@ app.post('/:id/retry', async (c) => {
     if (supplierDenied) return supplierDenied
     const priceDenied = await requireChangedProductImportPriceAction(c as any, job)
     if (priceDenied) return priceDenied
+    const stockDenied = await requireChangedProductImportStockAction(c as any, job)
+    if (stockDenied) return stockDenied
     // A re-apply is a fresh confirmation point (CUTOVER-LR): the same gate as /approve, before anything is queued.
     const branchRedirect = await importBranchRedirectGate(getDb(c.env), { id, type: String(job.type || '') }, branchRedirectTarget(c))
     if ('refusal' in branchRedirect) return c.json({ success: false, ...branchRedirect.refusal }, 409)

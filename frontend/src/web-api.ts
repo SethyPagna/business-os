@@ -367,7 +367,6 @@ function forwardServiceWorkerAppEvent(event: MessageEvent): void {
 const staticApi = {
   login: getAuthTransportMethod('login'),
   logout: getAuthTransportMethod('logout'),
-  resetPasswordWithOtp: getAuthTransportMethod('resetPasswordWithOtp'),
   requestPasswordResetEmail: getAuthTransportMethod('requestPasswordResetEmail'),
   completePasswordReset: getAuthTransportMethod('completePasswordReset'),
   updateSessionDuration: getAuthTransportMethod('updateSessionDuration'),

@@ -256,17 +256,6 @@ const REFUSED = [
     }
   })
 
-  await check('authenticator reset refuses each problem with its code, before the code is checked', async () => {
-    for (const { password, code } of REFUSED) {
-      const { h } = resetHarness()
-      const res = await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: await h.codeAt(OTP_SECRET), newPassword: password })
-      assert.equal(res.status, 400, `${JSON.stringify(password)} -> ${JSON.stringify(res.body)}`)
-      assert.equal(res.body.success, false)
-      assert.equal(res.body.code, code, JSON.stringify(password))
-      assert.equal(await passwordIs(h, 'old-pass-21'), true)
-    }
-  })
-
   await check('valid resets store the new password exactly as typed and answer the canonical username', async () => {
     let { h, consumed } = resetHarness()
     let res = await h.request('/password-reset/complete', 'POST', { accessToken: 'link-token', newPassword: 'fresh link 22' })
@@ -274,11 +263,6 @@ const REFUSED = [
     assert.equal(res.body.username, 'dara')
     assert.deepEqual(consumed, ['link-token'])
     assert.equal(await passwordIs(h, 'fresh link 22'), true)
-    ;({ h } = resetHarness())
-    res = await h.request('/password-reset/otp', 'POST', { identifier: 'DARA', otp: await h.codeAt(OTP_SECRET), newPassword: KHMER_KA.repeat(24) })
-    assert.equal(res.status, 200, JSON.stringify(res.body))
-    assert.equal(res.body.username, 'dara', 'the account username, not what was typed')
-    assert.equal(await passwordIs(h, KHMER_KA.repeat(24)), true)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

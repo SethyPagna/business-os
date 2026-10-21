@@ -689,25 +689,22 @@ app.post('/reset-data', async (c) => {
 // interacting options (includeMovements/includeSales/includeImages), and
 // keeping them apart means this endpoint can never regress the existing,
 // already-load-bearing reset-data contract just by adding a section here.
-// Users is deliberately NOT one of the four sections this endpoint
+// Users is deliberately NOT one of the three sections this endpoint
 // supports -- Part 262 found it needs real product decisions first (does
 // it exclude the acting admin's own row, does it force-invalidate other
 // users' sessions, does it need the same reseed factory-reset calls) that
 // aren't guessable from the backlog note's wording alone.
 // ---------------------------------------------------------------------------
-const RESETTABLE_SECTIONS = ['customers', 'suppliers', 'delivery_contacts', 'audit_log'] as const
+// The audit log is not resettable: wiping it needed only backup_restore (security audit P2-d). Pruning goes through the
+// retention route, which keeps the keep-forever classes.
+const AUDIT_LOG_RESET_REMOVED_CODE = 'audit_log_reset_removed'
+const RESETTABLE_SECTIONS = ['customers', 'suppliers', 'delivery_contacts'] as const
 type ResettableSection = typeof RESETTABLE_SECTIONS[number]
 
 const SECTION_CONFIG: Record<ResettableSection, { tables: string[]; label: string; phrase: string; broadcastChannel: import('../durable-objects/broadcastHub').BroadcastChannel | null }> = {
   customers: { tables: ['customer_share_submissions', 'customers'], label: 'Customers', phrase: 'RESET CUSTOMERS', broadcastChannel: 'customers' },
   suppliers: { tables: ['suppliers'], label: 'Suppliers', phrase: 'RESET SUPPLIERS', broadcastChannel: 'suppliers' },
   delivery_contacts: { tables: ['delivery_contacts'], label: 'Delivery contacts', phrase: 'RESET DELIVERY CONTACTS', broadcastChannel: 'deliveryContacts' },
-  // No real-time broadcast channel exists for the audit log (see
-  // BroadcastChannel's own union in broadcastHub.ts) -- the Audit Log page
-  // already re-fetches on its own navigation/action-history triggers, so
-  // this is left null rather than broadcasting on an invented channel name
-  // no client listens for.
-  audit_log: { tables: ['audit_logs'], label: 'Audit log', phrase: 'RESET AUDIT LOG', broadcastChannel: null },
 }
 
 type ResetSectionBody = { section?: string; confirm?: string; acknowledged?: boolean; currentPassword?: unknown }
@@ -721,6 +718,9 @@ app.post('/reset-section', async (c) => {
 
   const body = await c.req.json<ResetSectionBody>().catch(() => ({}) as ResetSectionBody)
   const section = body.section as ResettableSection
+  if (body.section === 'audit_log') {
+    return c.json({ success: false, code: AUDIT_LOG_RESET_REMOVED_CODE, error: 'The audit log can no longer be reset. Old entries are pruned from the audit log retention settings.' }, 410)
+  }
   if (!RESETTABLE_SECTIONS.includes(section)) {
     return c.json({ error: `Unknown section. Must be one of: ${RESETTABLE_SECTIONS.join(', ')}` }, 400)
   }
@@ -751,10 +751,6 @@ app.post('/reset-section', async (c) => {
 
   try {
     await db.batch([
-      ...(section === 'audit_log' ? [{ sql: `SELECT CASE WHEN NOT EXISTS (
-        SELECT 1 FROM audit_logs WHERE action='cost_override' AND entity='product'
-          AND json_extract(CASE WHEN json_valid(details) THEN details ELSE '{}' END,'$.cost_review.version')=1
-      ) THEN 1 ELSE json_extract('[1]', '$[merge_cost_review_history_required]') END` }] : []),
       ...config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })),
     ])
 
@@ -773,9 +769,6 @@ app.post('/reset-section', async (c) => {
       message: `${config.label} reset complete - all ${config.label.toLowerCase()} records deleted. Everything else kept. A fresh backup was taken first.`,
     })
   } catch (error) {
-    if (section === 'audit_log' && String(error).includes('merge_cost_review_history_required')) {
-      return c.json({ success: false, code: 'merge_cost_review_history_required', error: 'Audit history is required for merged product cost review. No records were deleted.' }, 409)
-    }
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
   }
 })

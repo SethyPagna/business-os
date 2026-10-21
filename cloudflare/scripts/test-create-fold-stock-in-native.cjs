@@ -604,7 +604,7 @@ async function mainBody() {
       t.eq('the resend is not a fold', retry.body && retry.body.folded_into, undefined)
       t.eq('still one product with this name, holding the typed quantity ONCE', [(await H.q1('SELECT COUNT(*) n FROM products WHERE name=?', body.name)).n, (await H.q1('SELECT stock_quantity s FROM products WHERE id=?', afterFirst.id)).s], [1, 6])
       t.eq('no product added by the resend', (await H.q1('SELECT COUNT(*) n FROM products')).n, productsBefore)
-      t.eq('no fold audit row, no add movement for the resend', [(await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE action='fold' AND CAST(entity_id AS INTEGER)=?", afterFirst.id)).n, (await H.q1("SELECT COUNT(*) n FROM inventory_movements WHERE product_id=?", afterFirst.id)).n], [0, 0])
+      t.eq('no fold audit row, and no add movement beyond the opening-stock movement of the create itself (audit P2-b), for the resend', [(await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE action='fold' AND CAST(entity_id AS INTEGER)=?", afterFirst.id)).n, (await H.q1("SELECT COUNT(*) n FROM inventory_movements WHERE product_id=?", afterFirst.id)).n], [0, 1])
       t.eq('one completed receipt for the request', (await H.q('SELECT written, response_status st FROM stock_mutation_receipts WHERE request_id=?', body.client_request_id)).map(x => [x.written, x.st]), [[1, 200]])
     })
 
@@ -623,8 +623,8 @@ async function mainBody() {
       t.eq('the first answer is "outcome unknown" (the create committed)', [first.status, first.body && first.body.code], [503, 'product_create_outcome_unknown'])
       t.eq('the create committed with its quantity', made && made.s, 4)
       t.eq('the resend replays the create (200)', [retry.status, retry.body && retry.body.replayed, retry.body && retry.body.id], [200, true, made.id])
-      t.eq('one product, the quantity once, no movement and no fold from the resend', [(await H.q1('SELECT COUNT(*) n FROM products WHERE name=?', body.name)).n, (await H.q1('SELECT stock_quantity s FROM products WHERE id=?', made.id)).s,
-        (await H.q1('SELECT COUNT(*) n FROM inventory_movements WHERE product_id=?', made.id)).n, (await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE action='fold' AND CAST(entity_id AS INTEGER)=?", made.id)).n], [1, 4, 0, 0])
+      t.eq('one product, the quantity once, only the opening-stock movement of the create itself and no fold from the resend', [(await H.q1('SELECT COUNT(*) n FROM products WHERE name=?', body.name)).n, (await H.q1('SELECT stock_quantity s FROM products WHERE id=?', made.id)).s,
+        (await H.q1('SELECT COUNT(*) n FROM inventory_movements WHERE product_id=?', made.id)).n, (await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE action='fold' AND CAST(entity_id AS INTEGER)=?", made.id)).n], [1, 4, 1, 0])
     })
 
     await check('F13', 'the same request id with a DIFFERENT product (changed intent) is a new create, not a replay', 'medium', async (t) => {

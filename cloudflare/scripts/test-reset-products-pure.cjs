@@ -354,26 +354,19 @@ async function check(name, fn) {
 }
 
 async function main() {
-  await check('audit reset refuses merge evidence inserted after its backup and preserves every row', async () => {
+  await check('reset-section audit_log is removed: 410, no backup taken, every audit row and product kept (audit P2-d)', async () => {
     seed()
-    const snapshot = () => rawDbHandle.prepare('SELECT * FROM audit_logs ORDER BY id').all()
-    let before
-    sectionBackupHook = () => {
-      rawDbHandle.prepare("INSERT INTO audit_logs(action,entity,details) VALUES('cost_override','product',?)")
-        .run([JSON.stringify({ cost_review: { version: 1, kind: 'merge_undo' } })])
-      before = snapshot()
-    }
-    try {
-      const { status, json } = await req('POST', '/reset-section', { section: 'audit_log' })
-      assert.strictEqual(status, 409, JSON.stringify(json))
-      assert.strictEqual(json.code, 'merge_cost_review_history_required')
-      assert.deepStrictEqual(backupCallLog, ['called'])
-      assert.deepStrictEqual(snapshot(), before)
-      assert.strictEqual(count('products'), 2)
-    } finally {
-      sectionBackupHook = null
-      exec("DELETE FROM audit_logs WHERE action='cost_override' AND entity='product'")
-    }
+    rawDbHandle.prepare("INSERT INTO audit_logs(action,entity,details) VALUES('cost_override','product',?)")
+      .run([JSON.stringify({ cost_review: { version: 1, kind: 'merge_undo' } })])
+    const before = rawDbHandle.prepare('SELECT * FROM audit_logs ORDER BY id').all()
+    backupCallLog = []
+    const { status, json } = await req('POST', '/reset-section', { section: 'audit_log', confirm: 'RESET AUDIT LOG', acknowledged: true, currentPassword: 'x' })
+    assert.strictEqual(status, 410, JSON.stringify(json))
+    assert.strictEqual(json.code, 'audit_log_reset_removed')
+    assert.deepStrictEqual(backupCallLog, [])
+    assert.deepStrictEqual(rawDbHandle.prepare('SELECT * FROM audit_logs ORDER BY id').all(), before)
+    assert.strictEqual(count('products'), 2)
+    exec("DELETE FROM audit_logs WHERE action='cost_override' AND entity='product'")
   })
   await check('reset-data (every mode) and reset-section refuse a missing or wrong current password before any backup or delete', async () => {
     seed()

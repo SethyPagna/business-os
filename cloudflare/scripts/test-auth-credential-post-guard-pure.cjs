@@ -158,7 +158,7 @@ async function check(name, fn) {
     assert.match(http, /const headers: Record<string, string> = \{ 'Content-Type': 'application\/json'/, 'apiFetch always declares JSON')
     assert.match(http, /requestInit\.body = JSON\.stringify\(body\)/)
     const transport = fs.readFileSync(path.join(root, 'authTransport.ts'), 'utf8')
-    for (const route of ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/password-reset/otp', '/api/auth/password-reset/email', '/api/auth/password-reset/admin-request', '/api/auth/password-reset/complete', '/api/auth/oauth/start']) {
+    for (const route of ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/password-reset/email', '/api/auth/password-reset/admin-request', '/api/auth/password-reset/complete', '/api/auth/oauth/start']) {
       assert.ok(transport.includes(`apiFetch('POST', '${route}'`), `${route} goes through apiFetch`)
     }
   })

@@ -1,33 +1,23 @@
-// P1-1 (Release 1 auth audit). POST /auth/password-reset/otp sets a new
-// password from nothing but an identifier and a six-digit TOTP code. Before
-// the fix it:
-//   - rate-limited only on `<ip>:<raw typed identifier>`, so letter case,
-//     email-vs-username, or a new IP each bought a fresh 10 guesses;
-//   - fed no lockout;
-//   - accepted the same code again for its whole validity window;
-//   - answered "unknown account" / "no 2FA" (400 Invalid reset request)
-//     differently from "wrong code" (401 Invalid OTP code).
+// Security audit P2-a. POST /auth/password-reset/otp set a new password from
+// nothing but an identifier and one six-digit authenticator code, which
+// contradicts the owner rule that resets go through the administrator reset
+// code (14 Oct 2026). The route is retired: every call answers 410 with a
+// stable code and changes nothing, whatever the code or the account.
 //
-// Drives the REAL routes/auth.ts (harness/load_auth_route.cjs). Every check
-// below fails on a04da325.
+// Drives the REAL routes/auth.ts (harness/load_auth_route.cjs). On the base
+// commit a valid code answers 200 and replaces the password hash.
 //
 // Run: node scripts/test-password-reset-otp-hardening-pure.cjs
 
 const assert = require('node:assert/strict')
-const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
 const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
 const SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
-// Rows are legacy bcrypt (harness addUser) or PBKDF2 (a reset); the real
-// lib/passwordHash.ts reads both.
-const { verifyPassword } = loadRealPasswordHash()
-const passwordIs = async (plain, stored) => (await verifyPassword(plain, stored)).ok
+const CODE = 'PASSWORD_RESET_OTP_RETIRED'
 let passed = 0
 const failures = []
 let ipCounter = 0
 const freshIp = () => `192.0.2.${++ipCounter % 250}`
-// Runs every check even after a failure, so a run at the pre-fix commit
-// shows each one failing on its own.
 async function check(name, fn) {
   try {
     await fn()
@@ -46,102 +36,44 @@ function seeded() {
   return h
 }
 
-async function wrongCode(h) {
-  const good = await h.codeAt(SECRET)
-  return good === '000000' ? '111111' : '000000'
-}
+const reset = (h, identifier, otp) => h.request('/password-reset/otp', 'POST', { identifier, otp, newPassword: 'new-password-1' }, { ip: freshIp() })
 
 async function main() {
-  await check('unknown account, account without 2FA and wrong code get one identical answer', async () => {
+  await check('a valid authenticator code answers 410 with the stable code and leaves the password hash alone', async () => {
     const h = seeded()
-    const bad = await wrongCode(h)
-    const unknown = await h.request('/password-reset/otp', 'POST', { identifier: 'ghost', otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
-    const noOtp = await h.request('/password-reset/otp', 'POST', { identifier: 'nootp', otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
-    const wrong = await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
-    assert.deepEqual({ s: unknown.status, b: unknown.body }, { s: wrong.status, b: wrong.body }, 'unknown account must look like a wrong code')
-    assert.deepEqual({ s: noOtp.status, b: noOtp.body }, { s: wrong.status, b: wrong.body }, 'an account without 2FA must look like a wrong code')
-    assert.equal(wrong.status, 401)
+    const before = h.userRow(701).password
+    const res = await reset(h, 'dara', await h.codeAt(SECRET))
+    assert.equal(res.status, 410, JSON.stringify(res.body))
+    assert.equal(res.body.code, CODE)
+    assert.equal(res.body.success, false)
+    assert.equal(h.userRow(701).password, before, 'the stored hash is unchanged')
+    const login = await h.request('/login', 'POST', { username: 'dara', password: 'old-password' }, { ip: freshIp() })
+    assert.equal(login.status, 200, 'the old password still signs in')
   })
 
-  await check('rotating case, alias and IP does not reset the per-account ceiling', async () => {
+  await check('unknown account, account without 2FA and wrong code give the same 410 (no account oracle)', async () => {
     const h = seeded()
-    const bad = await wrongCode(h)
-    const identifiers = ['dara', 'DARA', 'dara@shop.test', 'Dara@Shop.Test', ' dara ', 'DaRa']
-    const statuses = []
-    for (const identifier of identifiers) {
-      const res = await h.request('/password-reset/otp', 'POST', { identifier, otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
-      statuses.push(res.status)
-    }
-    assert.deepEqual(statuses.slice(0, 5), [401, 401, 401, 401, 401])
-    assert.equal(statuses[5], 429, 'the 6th guess at one account inside 15 minutes is refused whatever is typed')
-    // Even the RIGHT code is refused now -- the attacker cannot finish.
-    const good = await h.codeAt(SECRET)
-    const res = await h.request('/password-reset/otp', 'POST', { identifier: 'dara@shop.test', otp: good, newPassword: 'new-password-1' }, { ip: freshIp() })
-    assert.equal(res.status, 429)
-    assert.ok(await passwordIs('old-password', h.userRow(701).password), 'the password did not change')
+    const answers = [
+      await reset(h, 'ghost', '000000'),
+      await reset(h, 'nootp', '000000'),
+      await reset(h, 'dara', '000000'),
+    ]
+    for (const res of answers) assert.deepEqual({ s: res.status, b: res.body }, { s: 410, b: answers[0].body })
+    assert.equal(answers[0].body.code, CODE)
   })
 
-  await check('a per-IP ceiling holds across many accounts', async () => {
+  await check('repeated calls are never rate-limited into a different answer and never lock the account', async () => {
     const h = seeded()
-    const bad = await wrongCode(h)
-    let last
-    for (let i = 0; i < 26; i++) {
-      last = await h.request('/password-reset/otp', 'POST', { identifier: `probe-${i}`, otp: bad, newPassword: 'new-password-1' }, { ip: '198.18.0.1' })
-    }
-    assert.equal(last.status, 429)
+    for (let i = 0; i < 8; i += 1) assert.equal((await reset(h, 'dara', '000000')).status, 410)
+    const login = await h.request('/login', 'POST', { username: 'dara', password: 'old-password' }, { ip: freshIp() })
+    assert.equal(login.status, 200)
   })
 
-  await check('failed reset codes feed the sign-in lockout by account id', async () => {
-    const h = seeded()
-    const bad = await wrongCode(h)
-    // One network: the lockout is per account AND network since S-auth4d.
-    const network = freshIp()
-    for (const identifier of ['dara', 'dara@shop.test', 'DARA', 'Dara@shop.test', 'dara']) {
-      await h.request('/password-reset/otp', 'POST', { identifier, otp: bad, newPassword: 'new-password-1' }, { ip: network })
-    }
-    const login = await h.request('/login', 'POST', { username: 'Dara Sok', password: 'wrong' }, { ip: network })
-    assert.equal(login.status, 429, 'the 6th failure against the account (5 at reset + 1 at login) locks it')
-    assert.equal(login.body.locked, true)
-  })
-
-  await check('a code is spent once: the same step cannot reset twice, nor follow a sign-in', async () => {
-    const h = seeded()
-    const good = await h.codeAt(SECRET)
-    const first = await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: good, newPassword: 'new-password-1' }, { ip: freshIp() })
-    assert.equal(first.status, 200)
-    assert.equal(first.body.success, true)
-    assert.ok(await passwordIs('new-password-1', h.userRow(701).password))
-
-    const replay = await h.request('/password-reset/otp', 'POST', { identifier: 'dara@shop.test', otp: good, newPassword: 'attacker-password' }, { ip: freshIp() })
-    assert.equal(replay.status, 401, 'the replayed code is refused')
-    assert.equal(replay.body.error, (await h.request('/password-reset/otp', 'POST', { identifier: 'ghost', otp: good, newPassword: 'x-password-1' }, { ip: freshIp() })).body.error)
-    assert.ok(await passwordIs('new-password-1', h.userRow(701).password), 'the replay did not change the password')
-
-    // Same guard across endpoints: a code used to sign in cannot then reset.
-    const h2 = seeded()
-    const code = await h2.codeAt(SECRET)
-    const step1 = await h2.request('/login', 'POST', { username: 'dara', password: 'old-password' }, { ip: freshIp() })
-    const verify = await h2.request('/otp/verify', 'POST', { userId: 701, token: code, otpChallenge: step1.body.otpChallenge }, { ip: freshIp() })
-    assert.equal(verify.status, 200)
-    const afterLogin = await h2.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: code, newPassword: 'attacker-password' }, { ip: freshIp() })
-    assert.equal(afterLogin.status, 401, 'a code spent on sign-in is refused at reset')
-  })
-
-  await check('a genuine reset succeeds and clears the lockout it accumulated', async () => {
-    const h = seeded()
-    const bad = await wrongCode(h)
-    for (let i = 0; i < 3; i++) await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
-    const ok = await h.request('/password-reset/otp', 'POST', { identifier: 'DARA', otp: await h.codeAt(SECRET), newPassword: 'new-password-1' }, { ip: freshIp() })
-    assert.equal(ok.status, 200)
-    assert.equal(h.raw.prepare("SELECT COUNT(*) AS n FROM login_lockouts WHERE username = '#uid:701'").get().n, 0)
-  })
-
-  if (failures.length) throw new Error(`${failures.length} check(s) failed`)
+  if (failures.length) {
+    console.error(`test-password-reset-otp-hardening-pure.cjs FAILED: ${failures.length} check(s)`)
+    process.exit(1)
+  }
   console.log(`test-password-reset-otp-hardening-pure.cjs: ${passed} checks passed`)
 }
 
-main().catch((error) => {
-  console.error('test-password-reset-otp-hardening-pure.cjs FAILED')
-  console.error(error)
-  process.exitCode = 1
-})
+main().catch((error) => { console.error(error); process.exit(1) })

@@ -14,6 +14,7 @@ import { getDb } from './db'
 import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
@@ -373,12 +374,14 @@ export async function createProductWithInitialStock(
   // this same batch (lib/createFold.ts startingStockFingerprint), so a resend of the SAME request replays this
   // create instead of folding into it and recording the quantity twice.
   receipt?: { actorId: number | null; fingerprint: Record<string, unknown> },
+  // Recorded on the opening-stock movement and audit row of a direct create; an approval records its reviewer.
+  actor?: { id: number | null; name: string | null },
 ) {
   const db = getDb(env)
   const { branchId, quantity, landing } = await productCreateDestination(env, body, redirectTarget)
   const gallery = 'image_gallery' in body ? validateProductImageGallery(body.image_gallery, maxImages) : null
   const key = `product-create:${crypto.randomUUID()}`
-  const params = { key, branchId, quantity, lotCode: dateToBatchCode(new Date().toISOString().slice(0, 10)) }
+  const params = { key, branchId, quantity, lotCode: dateToBatchCode(businessToday()) }
   const statements: Array<{ sql: string; params?: import('./db').BindParams }> = [
     planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, is_active: 1, stock_quantity: quantity, client_request_id: key }),
     { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
@@ -391,6 +394,26 @@ export async function createProductWithInitialStock(
   if (branchId != null) statements.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
     SELECT pb.id,@branchId,@quantity FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id
     WHERE p.client_request_id=@key AND pb.batch_key='initial:'||p.id AND pb.is_active=1`, params })
+  if (quantity > 0 && branchId != null) {
+    // Opening stock is a stock-in like any other: it leaves the movement and audit row a receipt leaves (Stock
+    // received, the 'add' movement, batch_receive), in the batch that creates the stock, not after it.
+    const stockActor = approval ? { id: approval.reviewer.reviewedBy ?? null, name: approval.reviewer.reviewedByName ?? null } : (actor ?? { id: null, name: null })
+    const initialBatchSql = "(SELECT pb.id FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE p.client_request_id=@key AND pb.batch_key='initial:'||p.id)"
+    statements.push({
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,
+          total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
+        SELECT p.id,p.name,@branchId,(SELECT name FROM branches WHERE id=@branchId),'add',@quantity,p.cost_price_usd,
+          CASE WHEN p.cost_price_usd=0 THEN 0 END,
+          CASE WHEN p.cost_price_usd IS NULL THEN NULL ELSE ROUND(p.cost_price_usd*@quantity,4) END,
+          CASE WHEN p.cost_price_usd=0 THEN 0 END,
+          'Stock received ('||@lotCode||')',NULL,@userId,@userName,CURRENT_TIMESTAMP,${initialBatchSql}
+        FROM products p WHERE p.client_request_id=@key`,
+      params: { ...params, userId: stockActor.id, userName: stockActor.name },
+    })
+    const receive = buildAuditStatement(stockActor.id, stockActor.name, 'batch_receive', 'product_batch', null,
+      { product_create: true, branch_id: branchId, quantity, lot_code: params.lotCode, source: 'product_create_initial_stock' })
+    statements.push({ sql: receive.sql.replace(/@entity_id\b/g, initialBatchSql), params: { ...receive.params, key } })
+  }
   for (const [order, path] of (gallery ?? []).entries()) statements.push({
     sql: `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,@path,@order FROM products WHERE client_request_id=@key`,
     params: { key, path, order },
@@ -707,7 +730,7 @@ export async function seedInitialBatchForNewProduct(
   const db = getDb(env)
   const id = Number(productId)
   if (!Number.isFinite(id) || id <= 0) return
-  const addedOn = new Date().toISOString().slice(0, 10)
+  const addedOn = businessToday()
   const batchKey = `initial:${id}`
   // batch_key stays `initial:<id>` (not the date code) so this insert
   // remains idempotent regardless of what day it's retried on. A retry may

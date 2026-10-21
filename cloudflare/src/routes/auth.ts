@@ -51,14 +51,8 @@ const OTP_IP_LIMIT_MAX = 25
 const OTP_IP_LIMIT_WINDOW_MS = OTP_LIMIT_WINDOW_MS
 const OTP_RECOVERY_LIMIT_MAX = 5
 const OTP_RECOVERY_LIMIT_WINDOW_MS = 15 * 60 * 1000
-// POST /password-reset/otp (P1-1): a per-ACCOUNT ceiling that no choice of
-// alias, letter case or source IP resets, on top of the per-IP bucket.
-const OTP_RESET_ACCOUNT_LIMIT_MAX = 5
-const OTP_RESET_ACCOUNT_LIMIT_WINDOW_MS = 15 * 60 * 1000
-// One answer for "no such account", "account has no 2FA" and "wrong code",
-// so the endpoint cannot be used to learn which accounts exist or which
-// have an authenticator enrolled.
-const OTP_RESET_INVALID_ERROR = 'Invalid account or authenticator code.'
+// Stable code of the retired /password-reset/otp route (security audit P2-a).
+const PASSWORD_RESET_OTP_RETIRED_CODE = 'PASSWORD_RESET_OTP_RETIRED'
 const ADMIN_APP_NAME = 'Leang Cosmetics Admin'
 
 // Brute-force / credential-stuffing protection on POST /login. Previously
@@ -1104,92 +1098,14 @@ app.post('/otp/recover', requireAuth, async (c) => {
   return c.json({ success: true, otpEnabled: false })
 })
 
-// POST /api/auth/password-reset/otp -- account-recovery path for users who
-// have TOTP enabled but lost email access: prove control via a valid TOTP
-// code instead of a magic link, then set a new password directly.
-app.post('/password-reset/otp', async (c) => {
-  const body = await c.req.json<{ identifier?: string; otp?: string; newPassword?: string }>().catch(() => ({} as { identifier?: string; otp?: string; newPassword?: string }))
-  const identifier = String(body.identifier || '').trim()
-  if (!identifier) return c.json({ error: 'Username or email is required' }, 400)
-  if (!body.otp) return c.json({ error: 'OTP code is required' }, 400)
-  const newPassword = String(body.newPassword || '')
-  const passwordProblem = newPasswordProblem(newPassword)
-  if (passwordProblem) return c.json({ success: false, error: newPasswordProblemError(passwordProblem), code: passwordProblem }, 400)
-  if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
-
-  // P1-1. This used to rate-limit only on `<ip>:<raw typed identifier>`,
-  // so changing the letter case, typing the email instead of the username,
-  // or moving to another IP each bought a fresh 10 guesses at a six-digit
-  // code; failures fed no lockout; a code seen once could be replayed for
-  // its whole validity window; and the three failure answers differed, so
-  // the endpoint told a caller which accounts exist and which have 2FA.
-  const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', clientNetworkKey(ip), OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
-  if (!ipLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
-
-  const db = getDb(c.env)
-  const user = await db.prepare(`
-    SELECT id, username, otp_enabled, otp_secret
-    FROM users
-    WHERE (lower(username) = lower(@identifier) OR lower(email) = lower(@identifier))
-      AND deleted_at IS NULL AND is_active = 1
-    LIMIT 1
-  `).get<{ id: number; username: string; otp_enabled: number; otp_secret: string | null }>({ identifier })
-
-  // Global per-account bucket, keyed on the RESOLVED id. An unresolved
-  // identifier gets a bucket of its normalised text, so an unknown account
-  // throttles exactly like a real one.
-  const accountBucket = user ? `uid:${user.id}` : `unknown:${identifier.toLowerCase()}`
-  const accountLimit = await checkRateLimit(c.env, 'auth:password_reset_otp', accountBucket, OTP_RESET_ACCOUNT_LIMIT_MAX, OTP_RESET_ACCOUNT_LIMIT_WINDOW_MS)
-  if (!accountLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
-
-  // Failures feed the same escalating lockout as sign-in (lib/loginLockout.ts),
-  // on the typed value and on the account id, so a guessed-at account also
-  // waits at /login and /otp/verify.
-  // Scoped to this network like /login (S-auth4d); the account bucket above
-  // stays account-wide (P1-1).
-  const identifierLockoutKey = perNetworkLockoutKey(identifier, ip)
-  const accountLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
-  const lockedAnswer = (state: { retryAfterSeconds: number }) => c.json({
-    error: `Too many failed attempts. Please wait ${state.retryAfterSeconds} seconds and try again.`,
-    locked: true,
-    retryAfterSeconds: state.retryAfterSeconds,
-  }, 429)
-  const lockoutState = worstLockoutState(
-    await getLoginLockoutState(c.env, identifierLockoutKey),
-    ...(accountLockoutKey ? [await getLoginLockoutState(c.env, accountLockoutKey)] : []),
-  )
-  if (lockoutState.locked) return lockedAnswer(lockoutState)
-
-  const invalidReset = async () => {
-    const failure = worstLockoutState(
-      await recordFailedLogin(c.env, identifierLockoutKey),
-      ...(accountLockoutKey ? [await recordFailedLogin(c.env, accountLockoutKey)] : []),
-    )
-    if (failure.locked) return lockedAnswer(failure)
-    return c.json({ error: OTP_RESET_INVALID_ERROR }, 401)
-  }
-
-  if (!user || !user.otp_enabled) return invalidReset()
-  const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
-  if (!otpSecret) return invalidReset()
-  const matchedStep = await verifyTotpStep(otpSecret, String(body.otp || ''))
-  if (matchedStep === null) return invalidReset()
-  if (await isOtpStepReplayed(c.env, user.id, matchedStep)) return invalidReset()
-  // Spend the step BEFORE the password write, so a racing replay of the same
-  // code sees it as used as early as possible.
-  await markOtpStepUsed(c.env, user.id, matchedStep)
-
-  const passwordHash = await hashPassword(newPassword, c.env)
-  await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
-  await setPasswordMustChange(db, user.id, false)
-  await revokeUserSessions(c.env, user.id)
-  await clearLoginLockout(c.env, identifierLockoutKey)
-  if (accountLockoutKey) await clearLoginLockout(c.env, accountLockoutKey)
-  await audit(c.env, user.id, user.username, 'password_reset_complete', 'user', user.id, { method: 'otp' })
-
-  return c.json({ success: true, message: 'Password reset successfully.', username: user.username })
-})
+// POST /api/auth/password-reset/otp is retired (security audit P2-a): an
+// identifier plus one authenticator code must not set a password. Recovery is
+// the emailed link or the administrator reset code (/password-reset/admin-request).
+app.post('/password-reset/otp', (c) => c.json({
+  success: false,
+  error: 'Resetting a password with an authenticator code is no longer available. Ask an administrator for a reset code.',
+  code: PASSWORD_RESET_OTP_RETIRED_CODE,
+}, 410))
 
 // Google can only FINISH on the host its callback is registered on
 // (GOOGLE_LOGIN_REDIRECT_URI, admin.leangbeauty.com). The PKCE cookie that
@@ -1600,7 +1516,9 @@ app.get('/oauth/callback', async (c) => {
       : String(successPayload.error || `Please return to ${ADMIN_APP_NAME} and try again.`)
     return c.html(buildOauthCallbackHtml({ payload: successPayload, targetUrl: returnTarget.url, title, message }), status)
   } catch (error) {
-    return fail(500, error instanceof Error ? error.message : 'Google sign-in failed.')
+    // The detail stays in the Worker log; the page the browser renders is generic.
+    console.error('[auth] Google callback failed', error)
+    return fail(500, 'Google sign-in failed. Please try again.')
   }
 })
 

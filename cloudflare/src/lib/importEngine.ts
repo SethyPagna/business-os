@@ -105,6 +105,7 @@ import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES, planHistoricalSaleReceiptNumbers } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import { branchCanSell, branchRole } from './branchRoles'
+import { businessToday } from './businessDateWindow'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import {
   IMPORT_BRANCH_COLUMNS_SQL,
@@ -465,6 +466,50 @@ export async function lockProductImportPrice(db: D1Compat, results: ImportRowRes
   }
 }
 
+export const PRODUCT_IMPORT_STOCK_REFUSAL = {
+  error: 'You do not have permission to adjust stock, so this import cannot add or change stock',
+  code: 'product_import_stock_adjust_required',
+} as const
+
+/**
+ * True when the file would add or change stock (security audit P2-c): a new product with a starting quantity, an
+ * additive receipt (merge_stock / override_add) on a matched product, or an absolute branch snapshot (no planned
+ * mode) whose quantity differs from the stored branch quantity. Field-only modes (fill_blank, a column replace,
+ * override_replace) and a snapshot equal to the stored quantity change none. Stock is an inventory:adjust write.
+ */
+export async function productImportResultsChangeStock(
+  db: D1Compat,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<boolean> {
+  const quantity = (result: ImportRowResult) => Number((result.data as Record<string, unknown> | undefined)?.stock_quantity) || 0
+  if (results.some((result) => result.action === 'create' && quantity(result) > 0)) return true
+  const mode = getProductImportMode(policyJson)
+  if (mode === 'fill_blank' || (mode === 'replace_columns' && getProductImportReplaceColumns(policyJson).length)) return false
+  const writers = results.filter((result) => {
+    const data = (result.data ?? {}) as Record<string, unknown>
+    return result.action === 'update' && result.plannedMode !== 'override_replace'
+      && Number.isInteger(Number(result.existingId)) && Number(result.existingId) > 0
+      && Boolean(data.branch_id_explicit) && data.branch_id != null
+  })
+  const snapshots: ImportRowResult[] = []
+  for (const result of writers) {
+    if (result.plannedMode === 'merge_stock' || result.plannedMode === 'override_add') {
+      if (quantity(result) > 0) return true
+    } else snapshots.push(result)
+  }
+  if (!snapshots.length) return false
+  const stored = new Map<string, number>()
+  const ids = [...new Set(snapshots.map((result) => Number(result.existingId)))]
+  for (let offset = 0; offset < ids.length; offset += 90) {
+    const chunk = ids.slice(offset, offset + 90)
+    const found = await db.prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ product_id: number; branch_id: number; quantity: number | null }>(chunk)
+    for (const row of found) stored.set(`${Number(row.product_id)}:${Number(row.branch_id)}`, Number(row.quantity) || 0)
+  }
+  return snapshots.some((result) => Math.abs(quantity(result) - (stored.get(`${Number(result.existingId)}:${Number((result.data as Record<string, unknown>).branch_id)}`) ?? 0)) > 1e-9)
+}
+
 /** Approval-time form: the job's analyzed, non-skipped rows of one product import, as the apply would see them. */
 async function analyzedProductImportRows(env: Env, job: ImportApplyJob, actions: readonly ('update' | 'create')[]): Promise<ImportRowResult[]> {
   const db = getDb(env)
@@ -490,6 +535,12 @@ export async function productImportChangesSupplier(env: Env, job: ImportApplyJob
   return productImportResultsChangeSupplier(getDb(env), await analyzedProductImportRows(env, job, ['update']), job.policy_json)
 }
 
+/** Approval-time form: would this job's analyzed plan add or change stock? */
+export async function productImportChangesStock(env: Env, job: ImportApplyJob): Promise<boolean> {
+  if (job.type !== 'products') return false
+  return productImportResultsChangeStock(getDb(env), await analyzedProductImportRows(env, job, ['update', 'create']), job.policy_json)
+}
+
 /** Approval-time form: would this job's analyzed plan change a price or discount (or create a discounted product)? */
 export async function productImportChangesPrice(env: Env, job: ImportApplyJob): Promise<boolean> {
   if (job.type !== 'products') return false
@@ -500,7 +551,7 @@ export async function assertCurrentImportApplyAuthority(
   env: Env,
   job: ImportApplyJob,
   db = getDb(env),
-): Promise<{ actor: SessionUser; allowProductImageWrites: boolean; allowProductSupplierWrites: boolean; allowProductPriceWrites: boolean }> {
+): Promise<{ actor: SessionUser; allowProductImageWrites: boolean; allowProductSupplierWrites: boolean; allowProductPriceWrites: boolean; allowProductStockWrites: boolean }> {
   const policy = parsePolicyObject(job.policy_json)
   const actorId = Number(policy.apply_authorized_by_id)
   if (!Number.isInteger(actorId) || actorId <= 0) {
@@ -532,7 +583,9 @@ export async function assertCurrentImportApplyAuthority(
   const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
   const allowProductSupplierWrites = job.type !== 'products' || getActionTier(actor, 'products', 'supplier') !== 'none'
   const allowProductPriceWrites = job.type !== 'products' || getActionTier(actor, 'products', 'price') !== 'none'
-  return { actor, allowProductImageWrites, allowProductSupplierWrites, allowProductPriceWrites }
+  // Stock is an inventory adjust, which only a full grant holds (like a fold's starting quantity and a stock session).
+  const allowProductStockWrites = job.type !== 'products' || getActionTier(actor, 'inventory', 'adjust') === 'full'
+  return { actor, allowProductImageWrites, allowProductSupplierWrites, allowProductPriceWrites, allowProductStockWrites }
 }
 
 function withProductImportCommitAuthority(db: D1Compat, job: ImportApplyJob, actor: SessionUser): D1Compat {
@@ -873,13 +926,13 @@ export function buildDescriptionFromColumns(row: Record<string, unknown>): strin
   return parts.join('\n\n')
 }
 
-// YYYY-MM-DD for today, matching the frontend's own
+// YYYY-MM-DD for today in the Cambodia business day (UTC+7, not the UTC date), matching the frontend's own
 // CreatedDateFilterOptions.tsx todayIso() and the date-only shape every
 // other date column here (expiry_date, discount_starts_at/ends_at) already
 // stores. Used as the default for a new product's received_date when the
 // CSV leaves that column blank (see normalizeProductImportRow below).
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  return businessToday()
 }
 
 // Customer gender -- free-text CSV cell normalized to the same three
@@ -6837,6 +6890,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         throw new ImportApplyAuthorizationError('products:price', 'The user who authorized this import does not have permission to change product prices.')
       }
       await lockProductImportPrice(db, results, job.policy_json)
+    }
+    if (job.type === 'products' && !authority.allowProductStockWrites) {
+      if (await productImportResultsChangeStock(db, results, job.policy_json)) {
+        throw new ImportApplyAuthorizationError('inventory:adjust', 'The user who authorized this import does not have permission to adjust stock.')
+      }
     }
     sw.lap('classifyChunkMs')
 
