@@ -117,6 +117,12 @@ function makeWorld(oracleSha = null) {
       text = text.replaceAll('await db.batch(', 'await executeHistoricalStockTransaction(db, ')
     }
     if (oracleSha && rel === 'lib/importEngine.ts') {
+      // 6.0.910 moved the blank received_date default (and the lot code derived from it) to the Cambodia business
+      // day; the oracle still took the UTC date, so from 00:00 to 07:00 Cambodia the two worlds stamped different lot
+      // codes. Give the oracle today's business date so only the behaviour under test differs.
+      const utcToday = "return new Date().toISOString().slice(0, 10)"
+      assert.equal(text.split(utcToday).length - 1, 1)
+      text = text.replace(utcToday, "return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)")
       for (const [call, receiver, count] of [['runD1BatchGroupsInChunks', 'importWriteDb', 2], ['runD1BatchInChunks', 'importWriteDb', 1], ['runD1BatchGroupsInChunks', 'guardedDb', 1]]) {
         const prefix = call + '(' + receiver + ','
         assert.equal(text.split(prefix).length - 1, count)
