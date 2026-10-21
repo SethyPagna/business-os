@@ -300,7 +300,7 @@ const ORDER = [
   'Total',
   // 2. Sales -- Not Paid is the last of the header totals and is a positive
   // figure, never a deduction.
-  'Revenue', 'Profit', 'Delivery fee', 'Not Paid', 'Refunds',
+  'Revenue', 'Profit', 'Delivery fee', 'Still owed', 'Refunds',
   // 3. Cash count -- opening, the change used, closing, then the one
   // informational expected/difference pair.
   'Opening cash', 'Additional change used', 'Closing cash', 'Expected cash', 'Difference',
@@ -389,7 +389,7 @@ assert.equal(Math.round((FIGURES.otherExpenseUsd + FIGURES.deliveryCostUsd) * 10
 // THE CREDIT RULING, on the value: positive, the word "credit", and NOT
 // removed from any total above it. Revenue stays $210.00 with an $18.00
 // credit in the window; a report that subtracted credit would print $192.00.
-assert.equal(valueOf('Not Paid'), '$18.00')
+assert.equal(valueOf('Still owed'), '$18.00')
 assert.ok(!/-\$|\$-/.test(report), `credit (or anything else) rendered as a negative dollar amount:\n${report}`)
 assert.notEqual(valueOf('Revenue'), '$192.00', 'credit was subtracted from revenue -- it is revenue, it was simply not collected')
 assert.ok(!/\bCredit\b|ឥណទាន/.test(report), 'the superseded Credit wording must not render')
@@ -663,7 +663,7 @@ assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken v
 // -- while every optional line is gone.
 assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Revenue${SEP}`)).endsWith(': $0.00'))
 assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Profit${SEP}`)).endsWith(': $0.00'))
-for (const dropped of ['Delivery fee', 'Not Paid', 'Refunds']) {
+for (const dropped of ['Delivery fee', 'Still owed', 'Refunds']) {
   assert.ok(!emptyLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
 }
 // The Invoices row drops its zero-valued Cancelled/Edited qualifiers but
@@ -834,7 +834,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     delivery_actual_cost_count: 2,
     delivery_sale_count: 2,
     recognized_net_usd: 222,
-    pending_revenue_usd: 18,
+    pending_revenue_usd: 18, not_paid_owed_usd: 18,
     recognized_tax_usd: 7,
     recognized_delivery_usd: 6,
     recognized_store_delivery_usd: 0,
@@ -929,7 +929,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // here would show up as a different number.
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
   assert.equal(mappedBulletValue('Example expense'), '$4.00', 'the per-expense bullet comes from the grouped query, by its own label')
-  assert.equal(mappedValue('Not Paid'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
+  assert.equal(mappedValue('Still owed'), '$18.00', 'credit must read not_paid_owed_usd (owner, 21 Oct 2026), not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
   assert.equal(mappedBulletValue(lang.label('deliveryCost')), '$3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two bullets above it.

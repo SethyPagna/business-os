@@ -133,6 +133,9 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Period', Value: ctx.periodShort, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Gross Sales (USD)', Value: priceCsv(metricTotals.gross_sales_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Revenue (USD)', Value: priceCsv(metricTotals.revenue_usd), Period: ctx.rangeLabel },
+    // Owner, 20 Oct 2026: the same revenue without Not Paid sales, and what those still owe; absent when an older Worker sent none.
+    ...(typeof metricTotals.revenue_without_not_paid_usd === 'number' ? [{ Section: 'KPI', Metric: 'Revenue paid only (USD)', Value: priceCsv(metricTotals.revenue_without_not_paid_usd), Period: ctx.rangeLabel }] : []),
+    ...(typeof metricTotals.not_paid_owed_usd === 'number' ? [{ Section: 'KPI', Metric: 'Still owed (USD)', Value: priceCsv(metricTotals.not_paid_owed_usd), Period: ctx.rangeLabel }] : []),
     { Section: 'KPI', Metric: 'Discounts (USD)', Value: priceCsv(metricTotals.discount_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Store Discounts (USD)', Value: priceCsv(metricTotals.store_discount_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Tax (USD)', Value: priceCsv(metricTotals.tax_usd), Period: ctx.rangeLabel },
@@ -142,6 +145,7 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     ...(hasCost ? [{ Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel }] : []),
     // L4: a cost viewer's profit arrives on goods alone (revenue - cost), and is named so.
     ...(hasProfit ? [{ Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel }] : []),
+    ...(typeof metricTotals.profit_without_not_paid_usd === 'number' ? [{ Section: 'KPI', Metric: 'Est. Profit paid only (USD)', Value: priceCsv(metricTotals.profit_without_not_paid_usd), Period: ctx.rangeLabel }] : []),
     { Section: 'KPI', Metric: 'Transactions', Value: metricTotals.tx_count || 0, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Avg Order (USD)', Value: priceCsv(metricTotals.avg_order_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Returns', Value: returns.return_count || 0, Period: ctx.rangeLabel },

@@ -415,6 +415,8 @@ export default function GroupedReport(p: ReportViewProps) {
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: options.basis === 'revenue' },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(basisValue(r, options.basis), totalBasis) },
     { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'revenue_without_not_paid_usd', label: tr('revenue_paid_only', 'Revenue (paid only)'), kind: 'money', value: (r) => r.revenue_without_not_paid_usd, defaultVisible: false },
+    { key: 'not_paid_owed_usd', label: tr('not_paid_owed', 'Still owed'), kind: 'money', value: (r) => r.not_paid_owed_usd, defaultVisible: false },
     { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
     { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
     ...(showProfit

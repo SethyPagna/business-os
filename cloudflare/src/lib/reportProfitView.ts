@@ -36,7 +36,7 @@ export function costViewProfit(row: Record<string, unknown>): Record<string, unk
   const out: Record<string, unknown> = { ...row }
   for (const key of COURIER_COST_KEYS) delete out[key]
   const has = (key: string) => typeof out[key] === 'number'
-  const restated = has('profit_usd') || has('pending_profit_usd') || has('gross_profit_usd')
+  const restated = has('profit_usd') || has('pending_profit_usd') || has('gross_profit_usd') || has('profit_without_not_paid_usd')
   if (has('profit_usd') && has('cost_usd')) {
     const revenue = num(out.revenue_usd)
     const profit = exact(revenue - num(out.cost_usd))
@@ -45,6 +45,10 @@ export function costViewProfit(row: Record<string, unknown>): Record<string, unk
     if (has('profit_after_losses_usd')) out.profit_after_losses_usd = exact(profit - num(out.removal_loss_usd))
   }
   if (has('pending_profit_usd')) out.pending_profit_usd = exact(num(out.pending_revenue_usd) - num(out.pending_cost_usd))
+  // Paid-only goods profit: the paid sales' revenue less their cost, so with - without stays the pending figure above.
+  if (has('profit_without_not_paid_usd') && has('cost_usd')) {
+    out.profit_without_not_paid_usd = exact(num(out.revenue_without_not_paid_usd) - (num(out.cost_usd) - num(out.pending_cost_usd)))
+  }
   // A business-summary receipt row: net revenue less its own cost.
   if (has('gross_profit_usd') && has('cost_usd') && has('net_revenue_usd')) {
     out.gross_profit_usd = exact(num(out.net_revenue_usd) - num(out.cost_usd))

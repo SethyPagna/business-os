@@ -6177,6 +6177,8 @@ app.get('/stats', async (c) => {
       revenue_count: snapshot.sales.length,
       revenue_usd: totals.revenue_usd,
       pending_revenue_usd: totals.pending_revenue_usd,
+      revenue_without_not_paid_usd: totals.revenue_without_not_paid_usd,
+      not_paid_owed_usd: totals.not_paid_owed_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
@@ -6201,7 +6203,7 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,
   // recovered by subtraction (AL finding L4, lib/reportProfitView.ts).
   if(canViewCosts)return costViewProfit(row)
   const courierMoney=canViewCourier?Object.fromEntries(COURIER_COST_KEYS.filter(key=>key in row).map(key=>[key,row[key]])):{}
-  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
+  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,profit_without_not_paid_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
     returned_cost_shortfall_usd,cost_missing_snapshot_lines,cost_known_lines,cost_complete,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
     // Stock removed entirely, priced at COST, and the two figures derived from
@@ -6565,7 +6567,7 @@ app.get('/export', async (c) => {
     total_transactions: 0, completed_transactions: 0, revenue_usd: 0,
     cogs_usd: 0, gross_profit_usd: 0, gross_margin_pct: 0,
     total_discounts_usd: 0, total_tax_usd: 0, total_delivery_usd: 0,
-    total_refunds_usd: 0, net_revenue_usd: 0, avg_order_usd: 0,
+    total_refunds_usd: 0, net_revenue_usd: 0, net_revenue_without_not_paid_usd: 0, not_paid_owed_usd: 0, avg_order_usd: 0,
   }
   if (!snapshotMaxId) {
     return c.json({
@@ -6751,6 +6753,9 @@ app.get('/export', async (c) => {
     total_delivery_usd: salesTotals.delivery_usd,
     total_refunds_usd: totalRefundsUsd,
     net_revenue_usd: netRevenueUsd,
+    // Owner, 20-21 Oct 2026: the same net revenue without Not Paid sales, and what those still owe.
+    net_revenue_without_not_paid_usd: salesTotals.revenue_without_not_paid_usd,
+    not_paid_owed_usd: salesTotals.not_paid_owed_usd,
     avg_order_usd: salesTotals.avg_order_usd,
   }
   // AL finding L4: the summary carries COGS, the delivery fee and net revenue,

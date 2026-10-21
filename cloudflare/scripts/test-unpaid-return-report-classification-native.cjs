@@ -240,7 +240,8 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
       if (paid) assert.ok(totals.collected_total_usd > 0, 'actual paid return remains eligible for recorded collection')
       else assert.equal(totals.collected_total_usd, 0)
       const customer = await analytics.getCustomerSalesTotals({ DB: delivery.route }, { ...filters, customerId: 7 })
-      assert.equal(customer.collected_usd, paid ? 21 : 0, 'customer eligibility changes without adding refund subtraction to its recorded payable basis')
+      // Lane 6.0.909 (audit P2): the customer's "Collected total" is the kernel's, refunds out.
+      assert.equal(customer.collected_usd, totals.collected_total_usd, 'the customer report collects exactly what the kernel collects')
       h.setUser({ ...h.USER, permissions: '{"sales":"view"}' })
       const employee = await send(reports, delivery, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
       assert.equal(employee.totals.collected_total_usd, totals.collected_total_usd)

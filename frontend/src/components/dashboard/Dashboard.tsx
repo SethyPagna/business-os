@@ -532,11 +532,10 @@ function ChartFallback({ className = 'h-52' }: { className?: string }) {
   )
 }
 
+// Owner rule: 24-hour clock everywhere ("17:00", never "5 PM").
 function formatDashboardHourLabel(hourValue: unknown): string {
   const hour = ((Number(hourValue) % 24) + 24) % 24
-  if (hour === 0) return '12 AM'
-  if (hour === 12) return '12 PM'
-  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
+  return `${String(hour).padStart(2, '0')}:00`
 }
 
 function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
@@ -1418,6 +1417,15 @@ export default function Dashboard() {
   // profit by the server kernel. Showing it here must never add or subtract
   // it from either headline.
   const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Owner, 20 Oct 2026: revenue and profit WITH and WITHOUT Not Paid, each
+  // rounded once by the kernel (revenue - paid only = Not Paid to the cent),
+  // and what Not Paid sales still owe. Presence-signalled: an older Worker
+  // sends none, and the lines are left out rather than derived here.
+  const aRevenuePaidOnly = analytics?.totals?.revenue_without_not_paid_usd
+  const aProfitPaidOnly = analytics?.totals?.profit_without_not_paid_usd
+  const aNotPaidOwed = analytics?.totals?.not_paid_owed_usd
+  const aShowPaidOnly = typeof aRevenuePaidOnly === 'number' && aRevenuePaidOnly !== aRevenue
+  const revenuePaidOnlyLabel = translateOr('revenue_paid_only', 'Revenue (paid only)')
   // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
   // stat a break down of revenue/profit excluding the losses caused by this.
   // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
@@ -1654,7 +1662,8 @@ export default function Dashboard() {
 ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, revenueTerms(aFormulaTotals), fmtUSD, translateOr)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
-      sub: aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
+      sub: aShowPaidOnly ? `${revenuePaidOnlyLabel} ${fmtUSD(aRevenuePaidOnly)}`
+        : aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
       color: 'text-green-600',
       trend: calcTrend(aRevenue, aPrevRevenue),
       // Slimmed (user, Aug 29 -- "too many folded stats inside, i want it
@@ -1663,6 +1672,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
       // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
+        ...(aShowPaidOnly ? [{ label: revenuePaidOnlyLabel, value: fmtUSD(aRevenuePaidOnly) }] : []),
         // The equation's own two terms, in order, so the drill and the info
         // formula are the same arithmetic. Refunds here is the SALE-basis
         // reversal already taken off revenue -- not the Returns card's
@@ -1671,6 +1681,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
         ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Not Paid'), value: fmtUSD(aCredit) }] : []),
+        ...(typeof aNotPaidOwed === 'number' && aNotPaidOwed > 0 ? [{ label: translateOr('not_paid_owed', 'Still owed'), value: fmtUSD(aNotPaidOwed) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
@@ -1725,6 +1736,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       // headlines its own card) -- the profit formula's own parts remain.
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
+        ...(aShowPaidOnly && typeof aProfitPaidOnly === 'number' ? [{ label: translateOr('profit_paid_only', 'Profit (paid only)'), value: fmtUSD(aProfitPaidOnly) }] : []),
         { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
         // The two delivery terms profit actually carries. Store-paid delivery
         // is NOT one of them and moved to the Delivery card, where it is a

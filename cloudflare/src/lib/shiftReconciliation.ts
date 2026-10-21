@@ -648,6 +648,9 @@ export type ShiftFigures = {
   sales_usd: number
   cogs_usd: number
   profit_usd: number
+  /** Sales and profit without Not Paid sales (owner, 20 Oct 2026); profit absent when the kernel sent none. */
+  sales_without_not_paid_usd: number
+  profit_without_not_paid_usd?: number
   /**
    * Sold lines (and restocked returned lines) whose cost is UNKNOWN (NULL
    * snapshot). cogs_usd and profit_usd above are the known lines only, so a
@@ -658,9 +661,9 @@ export type ShiftFigures = {
   /** What customers were charged for delivery. */
   delivery_fee_usd: number
   /**
-   * Unpaid (credit) sales in the window. A POSITIVE amount owed, never a
-   * deduction: it is already inside sales/profit above (owner ruling, Sep 6
-   * 2026) and the report prints it as a note, not as a subtraction.
+   * What the window's Not Paid sales still owe, after deposits and the debt
+   * their returns lowered (owner, 21 Oct 2026). A POSITIVE note, never a
+   * deduction from sales/profit above.
    */
   credit_usd: number
   /** One refunds total. The report shows no per-return breakdown. */
@@ -700,7 +703,8 @@ export type ShiftFiguresInput = {
   counted: Partial<ShiftCount> | null | undefined
   totals: {
     revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown; cost_missing_snapshot_lines?: unknown
-    delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
+    delivery_usd?: unknown; not_paid_owed_usd?: unknown; refund_usd?: unknown
+    revenue_without_not_paid_usd?: unknown; profit_without_not_paid_usd?: unknown
     removal_loss_usd?: unknown
     revenue_after_losses_usd?: unknown; profit_after_losses_usd?: unknown
     removal_loss_unvalued_rows?: unknown
@@ -726,13 +730,15 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
     sales_usd: round2(finite(totals.revenue_usd)),
     cogs_usd: round2(finite(totals.cost_usd)),
     profit_usd: round2(finite(totals.profit_usd)),
+    sales_without_not_paid_usd: round2(finite(totals.revenue_without_not_paid_usd)),
+    ...(totals.profit_without_not_paid_usd === undefined ? {} : { profit_without_not_paid_usd: round2(finite(totals.profit_without_not_paid_usd)) }),
     ...(totals.cost_missing_snapshot_lines === undefined ? {} : {
       cost_missing_snapshot_lines: Math.max(0, Math.round(finite(totals.cost_missing_snapshot_lines))),
     }),
     delivery_fee_usd: round2(finite(totals.delivery_usd)),
     // Never negative: an amount owed cannot be less than nothing, and a
     // negative here would be a data defect printed as a business fact.
-    credit_usd: Math.max(0, round2(finite(totals.pending_revenue_usd))),
+    credit_usd: Math.max(0, round2(finite(totals.not_paid_owed_usd))),
     refunds_usd: round2(finite(totals.refund_usd)),
     // Present only when the kernel sent the block. Never floored at 0 on the
     // profit side: "including the losses" is allowed to be negative.

@@ -106,7 +106,11 @@ export type ShiftFiguresShape = {
   sales_usd: number
   cogs_usd: number
   profit_usd: number
+  /** Owner, 20 Oct 2026: sales and profit without Not Paid sales. Optional: an older Worker sends none. */
+  sales_without_not_paid_usd?: number
+  profit_without_not_paid_usd?: number
   delivery_fee_usd: number
+  /** What Not Paid sales still owe (owner, 21 Oct 2026). */
   credit_usd: number
   refunds_usd: number
   delivery_cost: { usd: number; khr: number }
@@ -252,7 +256,7 @@ export type ShiftFigureRow = {
   unvaluedCount?: number
 }
 
-/** Business results in reading order. Credit is a positive memo already inside sales/profit. */
+/** Business results in reading order. Still owed is a positive memo, subtracted from nothing. */
 export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): ShiftFigureRow[] {
   if (!figures) return []
   // Stock removed entirely, at cost -- the owner's "one row below unpaid"
@@ -274,15 +278,19 @@ export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): 
       tone: (figures.profit_after_losses_usd > 0 ? 'positive' : figures.profit_after_losses_usd < 0 ? 'negative' : undefined) as ShiftFigureRow['tone'],
     }] : []),
   ]
+  // The paid-only pair prints only when Not Paid sales moved the figure.
+  const paidOnly = typeof figures.sales_without_not_paid_usd === 'number' && figures.sales_without_not_paid_usd !== figures.sales_usd
   return [
     { key: 'sales', usd: figures.sales_usd },
+    ...(paidOnly ? [{ key: 'revenue_paid_only', usd: figures.sales_without_not_paid_usd as number, hintKey: 'rpt_hint_revenue_paid_only' }] : []),
     { key: 'cogs', usd: figures.cogs_usd },
     { key: 'profit', usd: figures.profit_usd, tone: figures.profit_usd > 0 ? 'positive' : figures.profit_usd < 0 ? 'negative' : undefined },
+    ...(paidOnly && typeof figures.profit_without_not_paid_usd === 'number' ? [{ key: 'profit_paid_only', usd: figures.profit_without_not_paid_usd }] : []),
     { key: 'delivery_fees', usd: figures.delivery_fee_usd },
     { key: 'delivery_actual_cost', usd: figures.delivery_cost.usd, khr: figures.delivery_cost.khr },
     { key: 'shift_other_expenses', usd: figures.other_expenses.usd, khr: figures.other_expenses.khr },
     { key: 'refunds', usd: figures.refunds_usd },
-    { key: 'credit_awaiting_payment', usd: Math.max(0, figures.credit_usd), hintKey: 'shift_credit_hint' },
+    { key: 'not_paid_owed', usd: Math.max(0, figures.credit_usd), hintKey: 'shift_credit_hint' },
     ...losses,
   ]
 }
