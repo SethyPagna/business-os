@@ -411,6 +411,7 @@ type MergeDuplicateProductsResult = ProductApiResponse & {
 
 type ProductSearchResponse = {
   filters?: Partial<ProductFilterMeta>
+  tagged_lots?: TaggedStockRow[]
   initials?: unknown[]
   items?: ProductRecord[]
   total?: number
@@ -1627,6 +1628,8 @@ function ProductsFullEditor() {
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [productTotal, setProductTotal] = useState(0)
+  // Held-stock groups the list read carried for the rows it returned (see the tagged effect).
+  const [foldedTagged, setFoldedTagged] = useState<{ ids: Set<string>; items: TaggedStockRow[] } | null>(null)
   const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], categories: [], suppliers: [], initials: [] })
   // Horizontal A-Z filter UI removed (Aug 19 2026) -- initialFilter locked
   // to 'all' (no letter narrows the list anymore). Left in place rather
@@ -2039,7 +2042,8 @@ function ProductsFullEditor() {
             : productSortDirection === 'name_asc' ? 'name_asc'
             : productSortDirection === 'name_desc' ? 'name_desc'
             : 'created_desc',
-          include: 'branch_stock,images,batches',
+          // tagged_lots folds the held-stock groups for this page into the answer (no second request).
+          include: 'branch_stock,images,batches,tagged_lots',
         }
         const result = await settleLoaderMap({
           products: () => productApi.searchProducts(productQuery),
@@ -2065,6 +2069,11 @@ function ProductsFullEditor() {
           throw versionMismatchError
         }
         setProductsRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
+        // Set in the same batch as the rows so a page never renders without its held stock. Absent when the
+        // account lacks Inventory view: the tagged effect then falls back to the separate read and its refusal.
+        setFoldedTagged(Array.isArray(productPayloadObject?.tagged_lots)
+          ? { ids: new Set(prods.map((p) => String(p.id))), items: productPayloadObject.tagged_lots }
+          : null)
         if (Array.isArray(prods)) {
           // Re-insert any pinned just-edited products the fresh server
           // page no longer contains (see pinnedEditedProductsRef's own
@@ -3332,23 +3341,23 @@ function ProductsFullEditor() {
   // --- Exact-duplicate (same barcode + same name) flagging for list rows ---
   // (user spec item #3). Reuses the SAME server sweep the Duplicates review
   // tab renders (GET /api/products/possible-duplicates) as the single source
-  // of truth, refined to the members that also share a name. Refetch whenever
-  // the loaded catalog's identity fields change -- any load() replaces
-  // `products`, so a product edited/merged/deleted elsewhere updates the flags
-  // without a manual refresh (the signature ignores unrelated churn so a
-  // silent poll returning the same rows doesn't refetch). Gated by the same
-  // permission as the Duplicates tab and the merge tool.
-  const productDuplicateSignature = useMemo(
-    () => (canMergeDuplicates
-      ? products.map((p) => `${p.id}:${String(p.barcode ?? '')}:${String(p.name ?? '')}`).join('|')
-      : ''),
-    [products, canMergeDuplicates],
-  )
+  // of truth, refined to the members that also share a name. The sweep covers
+  // the WHOLE catalog, so a page turn, search or filter cannot change its
+  // answer: it runs once per products sync generation (a product edited,
+  // merged or deleted anywhere broadcasts 'products'), not once per loaded
+  // page. It waits for a non-empty list and for this page to be active.
+  // Gated by the same permission as the Duplicates tab and the merge tool.
+  const [duplicateScanGeneration, setDuplicateScanGeneration] = useState(0)
+  const scannedDuplicateGenerationRef = useRef(-1)
+  useEffect(() => {
+    if (!syncChannelTs || syncChannelReason === 'cache-refresh' || syncChannelName !== 'products') return
+    setDuplicateScanGeneration((generation) => generation + 1)
+  }, [syncChannelName, syncChannelReason, syncChannelTs])
 
-  const refreshDuplicateClusters = useCallback(async () => {
+  const refreshDuplicateClusters = useCallback(async (fresh = false) => {
     if (!canMergeDuplicates) { setDuplicateClusters([]); return }
     try {
-      const payload = await getPossiblySameProducts()
+      const payload = await getPossiblySameProducts({ fresh })
       setDuplicateClusters(extractDuplicateClusters(payload))
     } catch {
       // Non-fatal: flags simply don't appear this pass. The Duplicates tab
@@ -3356,12 +3365,13 @@ function ProductsFullEditor() {
     }
   }, [canMergeDuplicates])
 
+  const hasLoadedProducts = products.length > 0
   useEffect(() => {
+    if (!canMergeDuplicates) { scannedDuplicateGenerationRef.current = -1; setDuplicateClusters([]); return }
+    if (!isActive || !hasLoadedProducts || scannedDuplicateGenerationRef.current === duplicateScanGeneration) return
+    scannedDuplicateGenerationRef.current = duplicateScanGeneration
     void refreshDuplicateClusters()
-    // productDuplicateSignature is the intended trigger; refreshDuplicateClusters
-    // is stable per canMergeDuplicates.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productDuplicateSignature, refreshDuplicateClusters])
+  }, [canMergeDuplicates, duplicateScanGeneration, hasLoadedProducts, isActive, refreshDuplicateClusters])
 
   const exactDuplicateIndex = useMemo(
     () => (canMergeDuplicates
@@ -3392,7 +3402,7 @@ function ProductsFullEditor() {
       if (!merged) return
       notify(t('product_duplicate_merged') || 'Merged — stock, received-date records and images were carried onto the kept product')
       await load(true)
-      await refreshDuplicateClusters()
+      await refreshDuplicateClusters(true)
     } catch (e) {
       notify(getErrorMessage(e, t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
@@ -3408,7 +3418,7 @@ function ProductsFullEditor() {
     try {
       await dismissProductDuplicateCluster('barcode', info.barcode)
       notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
-      await refreshDuplicateClusters()
+      await refreshDuplicateClusters(true)
     } catch (e) {
       notify(getErrorMessage(e, t('dismiss_duplicate_failed') || 'Could not update this duplicate'), 'error')
     } finally {
@@ -3823,13 +3833,20 @@ function ProductsFullEditor() {
   // this separate read is the ONLY thing on the page that can see them.
   const [taggedLots, setTaggedLots] = useState<TaggedStockRow[]>([])
   const [taggedAction, setTaggedAction] = useState<TaggedStockAction | null>(null)
-  const [taggedReloadToken, setTaggedReloadToken] = useState(0)
+  // The list read already carries the held stock of the rows it returned (foldedTagged). Only visible rows it did
+  // not cover -- pinned just-edited products re-inserted from a snapshot, or a caller refused the fold -- are read
+  // from the separate endpoint.
   useEffect(() => {
     const ids = visibleIdsSignature ? visibleIdsSignature.split(',').filter(Boolean) : []
     if (!ids.length) { setTaggedLots([]); return }
+    const folded = foldedTagged?.items ?? []
+    const uncovered = foldedTagged ? ids.filter((id) => !foldedTagged.ids.has(id)) : ids
+    const wanted = new Set(ids)
+    const foldedRows = folded.filter((row) => wanted.has(String(row.product_id)))
+    if (!uncovered.length) { setTaggedLots(foldedRows); return }
     let cancelled = false
-    getTaggedLots(ids)
-      .then((response) => { if (!cancelled) setTaggedLots(Array.isArray(response?.items) ? response.items : []) })
+    getTaggedLots(uncovered)
+      .then((response) => { if (!cancelled) setTaggedLots([...foldedRows, ...(Array.isArray(response?.items) ? response.items : [])]) })
       .catch((error: unknown) => {
         // A failed read must never render as "no held stock" -- that reads
         // as units that were quietly written off. Keep the last known rows
@@ -3844,7 +3861,7 @@ function ProductsFullEditor() {
         notify(describeTaggedLotsLoadFailure(error, tr), 'error')
       })
     return () => { cancelled = true }
-  }, [notify, taggedReloadToken, tr, visibleIdsSignature])
+  }, [foldedTagged, notify, tr, visibleIdsSignature])
   const taggedLotsByProduct = useMemo(() => {
     const map = new Map<string, TaggedStockRow[]>()
     for (const row of taggedLots) {
@@ -5582,7 +5599,7 @@ function ProductsFullEditor() {
           tr={tr}
           notify={notify}
           onClose={() => setTaggedAction(null)}
-          onDone={() => { setTaggedReloadToken((token) => token + 1); void load(true) }}
+          onDone={() => { void productApi.invalidateProductReadCacheForReconciliation().catch(() => undefined).then(() => load(true)) }}
         />
       ) : null}
 

@@ -107,22 +107,23 @@ try {
   root.scrollTop = 321
   tick13.focus()
   assert.equal(status(surface, 13), 'Not started')
-  const readsBefore = productReads.length, sessionReadsBefore = sessionReads
+  const readsBefore = productReads.length, sessionReadsBefore = sessionReads, savesBefore = saves.length
   let releaseSave!: () => void
   holdSave = new Promise<void>(resolve => { releaseSave = resolve })
   await surface.click(tick13)
   assert.ok(rowOf(surface, 13).textContent.includes('Saving'), 'the row being saved says so')
   assert.ok(!rowOf(surface, 12).textContent.includes('Saving'), 'other rows never claim to be saving')
   assert.equal(propsOf(action(surface, 12, 'done')).disabled, true, 'the single in-flight write keeps other actions from racing it')
-  holdReloadNext = true
   holdSave = null
   releaseSave()
   await surface.settle()
   assert.deepEqual(saves.at(-1)?.slice(1, 3), [13, { state: 'done', counted_quantity: null, reason: null }])
-  assert.ok(productReads.length > readsBefore && sessionReads > sessionReadsBefore, 'stats and session progress are refreshed after the save')
-  assert.ok(holdReload, 'the background reload is still in flight for this assertion')
-  assert.equal(rowOf(surface, 12), row12, 'unsaved row keeps its DOM node while the reload is in flight')
-  assert.equal(rowOf(surface, 13), row13, 'saved row keeps its DOM node while the reload is in flight')
+  // Lane 6.0.894: the PATCH answer carries the saved item and session, so a count save is ONE request (it was PATCH + products + session).
+  assert.equal(productReads.length, readsBefore, 'a saved count does not refetch products')
+  assert.equal(sessionReads, sessionReadsBefore, 'a saved count does not refetch the session')
+  assert.equal(saves.length, savesBefore + 1, 'exactly one PATCH')
+  assert.equal(rowOf(surface, 12), row12, 'unsaved row keeps its DOM node after the save')
+  assert.equal(rowOf(surface, 13), row13, 'saved row keeps its DOM node after the save')
   assert.equal(action(surface, 13, 'done'), tick13, 'the tick button is the same node')
   assert.equal(tick13.ownerDocument.activeElement, tick13, 'focus stays on the tick that was pressed')
   assert.ok(attached(tick13), 'the focused tick is still attached')
@@ -133,10 +134,28 @@ try {
   assert.equal(propsOf(action(surface, 12, 'done')).disabled, false, 'other rows stay enabled during the reload')
   assert.equal(propsOf(action(surface, 13, 'done')).disabled, false)
   assert.ok(!surface.findAll(node => node.getAttribute('role') === 'status').some(node => node.textContent.includes('loading')), 'no loading line is inserted above the rows')
+  // The explicit Refresh button still reloads both reads; the held reload proves rows stay mounted through it.
+  holdReloadNext = true
+  await surface.click(surface.button('refresh'))
+  assert.ok(holdReload, 'the Refresh reload is in flight')
+  assert.equal(rowOf(surface, 12), row12, 'rows survive the Refresh reload')
+  assert.equal(rowOf(surface, 13), row13)
   holdReload!(productsBody())
   await surface.settle()
-  assert.equal(rowOf(surface, 12), row12, 'rows survive the completed reload too')
-  assert.equal(rowOf(surface, 13), row13)
+  assert.equal(productReads.length, readsBefore + 1, 'Refresh reads products once')
+  assert.equal(sessionReads, sessionReadsBefore + 1, 'Refresh reads the session once')
+
+  // A definite 409 means the page is behind the server: one reload of both reads. A permission refusal is not staleness.
+  const beforeConflict = [productReads.length, sessionReads]
+  saveRefusal = 'inventory_check_baseline_changed'
+  await surface.click(surface.button('Mark done', rowOf(surface, 12)))
+  await surface.settle()
+  assert.deepEqual([productReads.length, sessionReads], [beforeConflict[0] + 1, beforeConflict[1] + 1], 'a 409 conflict reloads products and the session once')
+  saveRefusal = 'inventory_check_owner_required'
+  await surface.click(surface.button('Mark done', rowOf(surface, 12)))
+  await surface.settle()
+  assert.deepEqual([productReads.length, sessionReads], [beforeConflict[0] + 1, beforeConflict[1] + 1], 'an owner refusal does not reload')
+  saveRefusal = null
 
   // A-R8: Issue -> Done must not resend the old counted quantity (3 differs from stock 8).
   await surface.click(surface.button('Mark done', rowOf(surface, 12)))

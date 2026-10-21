@@ -205,7 +205,7 @@ await runTest('stock cell renders the sole-branch chip, and an inactive branch g
 const products = src('components/products/Products.tsx')
 
 await runTest('hiding a column changes no request: the list load never reads the column state', () => {
-  const includes = [...products.matchAll(/include: 'branch_stock,images,batches'/g)].map((match) => match.index ?? 0)
+  const includes = [...products.matchAll(/include: 'branch_stock,images,batches[a-z_,]*'/g)].map((match) => match.index ?? 0)
   assert.ok(includes.length >= 2, 'positive control: the product requests are findable')
   for (const at of includes) {
     const around = products.slice(Math.max(0, at - 3500), at + 600)

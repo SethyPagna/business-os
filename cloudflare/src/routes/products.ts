@@ -89,6 +89,7 @@ import {
   type ProductConflictActionStockRow,
 } from '../lib/productConflictActionGroups'
 import { attachBatchCounts } from '../lib/productBatches'
+import { readTaggedLotGroups } from '../lib/damagedLotActions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { ProductRemoveError, parseProductRemovePlan, prepareProductRemovePlan, prepareProductRemoveReviewPlans,
   productRemoveApplyStatements, productRemovePlanDigest, productRemoveQueueStatements, productRemoveReviewQueueStatements,
@@ -1150,7 +1151,8 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   // A present-but-unusable `ids` resolves to "no rows", never "everything":
   // returning the whole catalog to a by-id lookup is exactly the failure
   // being fixed.
-  // Not every unread param is a bug: `include` is also never parsed here, and
+  // Not every unread param is a bug: `include` is never parsed HERE (the one
+  // opt-in, tagged_lots, is read by GET /search -- productSearchIncludes), and
   // that is deliberate and harmless -- attachBranchStock/attachImageGallery/
   // attachBatchCounts run unconditionally for every product read, and the
   // Products page, POS and the branch stock column all depend on that data
@@ -1338,6 +1340,23 @@ async function searchImageOnlyProductsWithIndexFallback(env: Env, query: Record<
   }
 }
 
+function productSearchIncludes(query: Record<string, string>): Set<string> {
+  return new Set(String(query.include || '').split(',').map((part) => part.trim()).filter(Boolean))
+}
+
+// include=tagged_lots folds the held-stock groups for exactly this page's rows
+// into the answer (the Products list used to make a second request for them).
+// Read live, after the page cache: held lots move without every writer bumping
+// the products version. Same gate and same reader as GET
+// /api/inventory/tagged-lots; they sit beside `items`, never inside a row, so
+// they still cannot reach a group total or a picker. A caller without
+// Inventory view gets no key and keeps the separate request's refusal.
+async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, query: Record<string, string>, payload: T): Promise<T & { tagged_lots?: unknown[] }> {
+  if (!productSearchIncludes(query).has('tagged_lots') || getActionTier(user, 'inventory', 'view') === 'none') return payload
+  const pageIds = (payload.items as Array<Record<string, unknown>>).map((row) => Number(row.id))
+  return { ...payload, tagged_lots: await readTaggedLotGroups(getDb(env), pageIds) }
+}
+
 app.get('/search', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
@@ -1366,7 +1385,7 @@ app.get('/search', async (c) => {
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
-  return c.json(payload)
+  return c.json(await attachFoldedTaggedLots(c.env, user, query, payload))
 })
 
 // ---- G37: the client search index ------------------------------------
