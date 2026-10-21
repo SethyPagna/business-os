@@ -1,3 +1,5 @@
+import { saleStatusChipWords } from '../../utils/saleStatusDisplay.ts'
+
 type SaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery' | 'cancelled' | 'partial_return' | 'returned'
 type TranslateFn = (key: string) => string
 
@@ -51,11 +53,23 @@ export function getStatusBadgeLabel(status: unknown, t?: TranslateFn) {
   return getStatusLabel(status, t).replace(STATUS_DECORATION_PREFIX, '').trim()
 }
 
+type SaleStatusRow = Parameters<typeof saleStatusChipWords>[0]
+
 type StatusBadgeProps = {
+  /** A sale row, shown in the two-status model: its status, then its tags (utils/saleStatusDisplay.ts). */
+  sale?: SaleStatusRow
+  /** A bare status word with no row behind it (a report bucket): one chip. */
   status?: unknown
-  /** A return status that still reads Not Paid (saleReadsNotPaid): its payment chip shows beside it. */
-  notPaid?: boolean
   t?: TranslateFn
+}
+
+function saleStatusChips(sale: SaleStatusRow): SaleStatus[] {
+  return saleStatusChipWords(sale).map((word) => isSaleStatus(word) ? word : 'completed')
+}
+
+/** The badge as text, for a label or a detail row: "Completed · Returned". */
+export function getSaleStatusText(sale: SaleStatusRow, t?: TranslateFn) {
+  return saleStatusChips(sale).map((s) => getStatusBadgeLabel(s, t)).join(' · ')
 }
 
 function Chip({ s, t }: { s: SaleStatus; t?: TranslateFn }) {
@@ -66,13 +80,12 @@ function Chip({ s, t }: { s: SaleStatus; t?: TranslateFn }) {
   )
 }
 
-export default function StatusBadge({ status, notPaid = false, t }: StatusBadgeProps) {
-  const s = isSaleStatus(status) ? status : 'completed'
-  if (!notPaid || (s !== 'partial_return' && s !== 'returned')) return <Chip s={s} t={t} />
+export default function StatusBadge({ sale, status, t }: StatusBadgeProps) {
+  const chips = sale ? saleStatusChips(sale) : [isSaleStatus(status) ? status : 'completed']
+  if (chips.length === 1) return <Chip s={chips[0]} t={t} />
   return (
     <span className="inline-flex flex-nowrap items-center gap-1">
-      <Chip s={s} t={t} />
-      <Chip s="awaiting_payment" t={t} />
+      {chips.map((s) => <Chip key={s} s={s} t={t} />)}
     </span>
   )
 }

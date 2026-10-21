@@ -30,8 +30,9 @@ import {
   type AmendmentDisplayRow,
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
-import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
+import { receiptTotalsFigures, returnOwedReductionUsd } from '../../utils/receiptTotals.ts'
 import { recordedSaleOutstandingUsd, saleReadsNotPaid } from '../../utils/saleStatusResolution.ts'
+import { saleStatusDestinations, saleStatusDisplay } from '../../utils/saleStatusDisplay.ts'
 import { saleOwnExchangeRate, saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
 import { CURRENCY } from '../../constants'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
@@ -45,7 +46,7 @@ import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import StatusBadge, { getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
+import StatusBadge, { getSaleStatusText, getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
@@ -152,6 +153,7 @@ interface SaleDetail {
   total_khr?: number | string | null
   refund_usd?: number | string | null
   refund_khr?: number | string | null
+  return_owed_reduction_usd?: number | string | null
   membership_discount_usd?: number | string | null
   membership_discount_khr?: number | string | null
   membership_points_redeemed?: number | string | null
@@ -480,14 +482,15 @@ export default function SaleDetailModal({
     // The sale's own booked rate, legacy or v1 -- never today's setting. A
     // sale with none shows the 4100 default; the Worker refuses to settle it.
     const exchangeRate = saleOwnExchangeRate(selectedSale) ?? CURRENCY.DEFAULT_EXCHANGE_RATE
+    const owedReductionUsd = selectedSale ? returnOwedReductionUsd(selectedSale) : 0
     const rows = initialSettlementRows({
       paymentDetails: selectedSale?.payment_details,
       paymentMethod: selectedSale?.payment_method,
       amountPaidUsd: selectedSale?.amount_paid_usd,
       amountPaidKhr: selectedSale?.amount_paid_khr,
-      // A return lowers what is owed (owner, 29 Sep 2026): settle the total less its refunds.
-      totalUsd: toNumber(selectedSale?.refund_usd) > 0
-        ? subtractMoney4(toNumber(selectedSale?.total_usd || selectedSale?.total), toNumber(selectedSale?.refund_usd))
+      // A return lowers what is owed by its debt part (returnOwedReductionUsd): settle the total less that.
+      totalUsd: owedReductionUsd > 0
+        ? subtractMoney4(toNumber(selectedSale?.total_usd || selectedSale?.total), owedReductionUsd)
         : toNumber(selectedSale?.total_usd || selectedSale?.total),
       exchangeRate,
       moneyPrecisionVersion: savedRate ? 1 : 0,
@@ -1420,6 +1423,9 @@ export default function SaleDetailModal({
   const currentStatus = sale.sale_status || 'completed'
   // Payment state is independent of the return status (owner, 6 Oct 2026).
   const saleNotPaid = saleReadsNotPaid(sale)
+  // What the sale shows and may be moved from: Awaiting Delivery for a paid
+  // order not yet delivered, the return beside the payment state.
+  const statusView = saleStatusDisplay(sale)
   // The Return action reuses the Returns section's own guards rather than
   // inventing new ones -- see utils/saleReturnGuard.ts, shared with the
   // receipt view so the two surfaces never disagree. The reason is stated up
@@ -1442,7 +1448,8 @@ export default function SaleDetailModal({
   const totalUsd = totals.totalUsd
   const totalKhr = totals.totalKhr
   const refundUsd = totals.refundUsd
-  const payableUsd = refundUsd > 0 ? subtractMoney4(totalUsd, refundUsd) : totalUsd
+  // What the tender must cover: the total less the debt the returns lowered, as the Worker's settlement.
+  const payableUsd = totals.owedReductionUsd > 0 ? subtractMoney4(totalUsd, totals.owedReductionUsd) : totalUsd
   const refundKhr = totals.refundKhr
   const membershipDiscountUsd = totals.membershipDiscountUsd
   const baseDiscountUsd = totals.discountUsd
@@ -1700,7 +1707,7 @@ export default function SaleDetailModal({
 
   const handleStatusUpdate = async (): Promise<void> => {
     if (pendingLineMutation?.actor === lineMutationActor || lineRecoveryError) return
-    if (!authReady || !onStatusChange || newStatus === currentStatus || settlementFrozenRef.current) return
+    if (!authReady || !onStatusChange || newStatus === statusView.status || settlementFrozenRef.current) return
     if (needsPaymentEntry && !paymentConfigReady) return
     const requestScope = detailScope
     let extra: Record<string, unknown> | null = null
@@ -1827,7 +1834,7 @@ export default function SaleDetailModal({
                   valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
                 />
               </div>
-              <StatusBadge status={currentStatus} notPaid={saleNotPaid} t={t} />
+              <StatusBadge sale={sale} t={t} />
             </div>
             <div data-sale-detail-secondary-meta="" className="mt-1 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
               <span>{fmtTime(sale.created_at)}</span>
@@ -1934,7 +1941,7 @@ export default function SaleDetailModal({
                   </DetailRow>
                 )}
                 <div className="hidden sm:block"><DetailRow label={t('branch') || 'Branch'}>{sale.branch_name ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{sale.branch_name}</EntityLink> : null}</DetailRow></div>
-                <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
+                <DetailRow label={t('status') || 'Status'} value={getSaleStatusText(sale, t)} />
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
@@ -2994,13 +3001,14 @@ export default function SaleDetailModal({
             </section>
           ) : null}
 
-          {pendingStatus || (onStatusChange && (saleNotPaid || !['returned', 'cancelled'].includes(currentStatus))) ? (
+          {pendingStatus || (onStatusChange && saleStatusDestinations(statusView).length > 0) ? (
             <section ref={statusSectionRef} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('update_status') || 'Update status'}
               </div>
               <SaleStatusWorkflow
-                currentStatus={saleNotPaid ? 'awaiting_payment' : currentStatus}
+                currentStatus={statusView.status}
+                returnTag={statusView.returnTag}
                 selectedStatus={newStatus}
                 notes={statusNotes}
                 saving={statusSaving}

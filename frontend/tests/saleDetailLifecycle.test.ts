@@ -132,7 +132,7 @@ let closed = 0
 const statusRequest = deferred()
 const submitEnv: any = {
   pendingLineMutation: null, lineMutationActor: 'actor1', lineRecoveryError: '',
-  newStatus: 'completed', currentStatus: 'awaiting_payment', authReady: true, settlementFrozenRef: { current: false },
+  newStatus: 'completed', currentStatus: 'awaiting_payment', statusView: { status: 'awaiting_payment' }, authReady: true, settlementFrozenRef: { current: false },
   needsPaymentEntry: true, paymentConfigReady: false, detailScope: 'actor1:sale1',
   detailScopeRef: { current: 'actor1:sale1' }, detailAliveRef: { current: true },
   sale: { id: 1 }, statusNotes: '', onStatusChange: () => { statusWrites++; return statusRequest.promise },

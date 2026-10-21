@@ -7723,5 +7723,6 @@
   "decrease_quantity": "Decrease quantity",
   "remove_divider": "Remove divider",
   "payment_method_new_name": "New name",
-  "receipt_aba_payment_qr_alt": "ABA payment QR"
+  "receipt_aba_payment_qr_alt": "ABA payment QR",
+  "sale_mark_delivered": "Mark delivered"
 }

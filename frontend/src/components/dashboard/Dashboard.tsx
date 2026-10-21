@@ -30,7 +30,7 @@ import { FOREGROUND_RESUME_GAP_REASON } from '../../utils/permissionRefreshAccum
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
-import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
+import { getDashboardSaleLabel, getDashboardSaleTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
 import { showsBranchComparison } from '../../utils/branchScope.ts'
@@ -607,7 +607,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
   fmtKHR: FormatMoneyFn
-  formatStatus: (status: unknown) => string
+  formatStatus: (sale: DashboardSale) => string
   onOpenSale: (sale: DashboardSale) => void
   onViewMore: () => void
 }) {
@@ -619,7 +619,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="detail-scroll-text text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleTone(sale)}`}>{formatStatus(sale)}</div></div>
           </button>
         ))}
       </div>
@@ -1546,8 +1546,8 @@ export default function Dashboard() {
   const grossShortLabel = translateOr('gross_short', 'Gross')
   const saleShortLabel = translateOr('sale_short', 'sale')
   const marginShortLabel = translateOr('profit_margin_short', 'margin')
-  const formatSaleStatus = useCallback((status: unknown) => {
-    return getDashboardSaleStatusLabel(status, t)
+  const formatSaleStatus = useCallback((sale: DashboardSale) => {
+    return getDashboardSaleLabel(sale, t)
   }, [t])
 
   // Still serves the Best Hour drill below (openHourDetail). The period
@@ -2580,8 +2580,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               </div>
               <div className="shrink-0 text-right">
                 <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
-                  {formatSaleStatus(sale.sale_status)}
+                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleTone(sale)}`}>
+                  {formatSaleStatus(sale)}
                 </div>
               </div>
             </button>
@@ -2744,7 +2744,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <div className="modal-scroll grid grid-cols-2 gap-2 p-4">
               {([
                 { label: t('date') || 'Date', value: fmtTime(recentSaleDetail.created_at) },
-                { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail.sale_status) },
+                { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail) },
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
                 { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },
