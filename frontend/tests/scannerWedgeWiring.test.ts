@@ -49,14 +49,14 @@ runTest('POS: the camera and the gun fill the search through the typing handler'
   assert.match(pos, /<ScanSearchButton onDetected=\{applyScan\} t=\{t\} \/>/)
   assert.match(pos, /const changeSearch = useCallback\(\(next: string\) => \{\s*writePosStorage\('session', 'pos_search', next\)\s*setSearch\(next\)\s*\}, \[\]\)/)
   assert.match(pos, /onChange=\{e => \{ pendingScanRef\.current = null; changeSearch\(e\.target\.value\) \}\}/, 'typing uses changeSearch too')
-  const applyScan = slice(pos, /const applyScan = useCallback/, /\n {2}\}, \[changeSearch\]\)/)
+  const applyScan = slice(pos, /const applyScan = useCallback/, /\n {2}\}, \[changeSearch, markScanned\]\)/)
   assert.match(applyScan, /changeSearch\(code\)/)
   assert.match(pos, /useScannerWedge\(\{\s*enabled: isActive && !posOverlayOpen,\s*searchRef,/)
   assert.match(pos, /applyScan\(code\)\s*if \(origin === 'field'\) notify\(t\('scan_moved_to_search'\), 'info'\)/)
 })
 
 runTest('POS: a scan never adds, opens or picks a product', () => {
-  assert.doesNotMatch(slice(pos, /const applyScan = useCallback/, /\n {2}\}, \[changeSearch\]\)/), PICKS_OR_ADDS)
+  assert.doesNotMatch(slice(pos, /const applyScan = useCallback/, /\n {2}\}, \[changeSearch, markScanned\]\)/), PICKS_OR_ADDS)
   const onScan = slice(pos, /useScannerWedge\(\{/, /\n {2}\}\)\n/)
   assert.doesNotMatch(onScan, PICKS_OR_ADDS)
   const reveal = slice(pos, /const code = pendingScanRef\.current/, /\}, \[debouncedProductSearch, isDesktopViewport, scanHitId\]\)/)
@@ -87,7 +87,7 @@ runTest('POS: the search box takes codes verbatim', () => {
 runTest('Products: the camera and the gun go through handleSearchInputChange like typing', () => {
   assert.doesNotMatch(products, /onDetected=\{setSearch\}/, 'a scan used to skip the handler that releases pinned just-edited rows')
   assert.match(products, /<ScanSearchButton onDetected=\{applyScan\} t=\{t\} \/>/)
-  const applyScan = slice(products, /const applyScan = useCallback/, /\n {2}\}, \[handleSearchInputChange\]\)/)
+  const applyScan = slice(products, /const applyScan = useCallback/, /\n {2}\}, \[handleSearchInputChange, markScanned\]\)/)
   assert.match(applyScan, /handleSearchInputChange\(code\)/)
   assert.doesNotMatch(applyScan, PICKS_OR_ADDS)
   assert.match(products, /const handleTypedSearch = useCallback\(\(value: string\) => \{\s*pendingScanRef\.current = null\s*handleSearchInputChange\(value\)/)

@@ -19,8 +19,14 @@
 // -- AND a broken/empty/word barcode on either side is a wildcard, never a
 // second identity on its own) exactly as every other comparison site does.
 // The stored barcode is never rewritten -- only the comparison folds.
+//
+// The TYPED barcode first goes through foldNativeDigits (Khmer digits ០-៩ to 0-9, nothing else: no trim, no
+// case change, no leading-zero strip), because the server folds exactly that on every typed barcode save. A
+// barcode typed on the Khmer keyboard layout is therefore previewed as the product it will really match.
+// Names are never folded: a Khmer-numbered name is a different name from its ASCII twin.
 
 import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, rankBarcodeIdentityWinner } from '../../../utils/productDetailRule.ts'
+import { foldNativeDigits } from '../../../utils/searchMatch.ts'
 
 export interface CreateMatchCandidate {
   id: number | string
@@ -64,9 +70,11 @@ export function classifyCreateMatches(
   candidates: readonly CreateMatchCandidate[],
 ): CreateMatchVerdict {
   const typedName = norm(typed.name)
-  const typedBarcode = normBarcode(typed.barcode)
+  // what the server will see once it has folded the typed digits
+  const typedBarcodeValue = foldNativeDigits(typed.barcode)
+  const typedBarcode = normBarcode(typedBarcodeValue)
   // the identity key -- what every comparison site, client and server, uses
-  const typedBarcodeKey = identityBarcodeKey(typed.barcode)
+  const typedBarcodeKey = identityBarcodeKey(typedBarcodeValue)
   const typedPrice = Number(typed.selling_price_usd) || 0
 
   const none: CreateMatchVerdict = {
@@ -85,7 +93,7 @@ export function classifyCreateMatches(
   // barcode on both sides -- a broken/empty typed value is a wildcard
   // WITHIN a name group, never a signal that an unrelated-name row is the
   // same product.
-  const barcodeRows = typedBarcode && isRealBarcode(typed.barcode)
+  const barcodeRows = typedBarcode && isRealBarcode(typedBarcodeValue)
     ? candidates.filter((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey)
     : []
   // When the typed barcode is broken/empty AND the name group already holds
@@ -97,8 +105,8 @@ export function classifyCreateMatches(
   // with the most stock, then lowest id (falls back to id alone here -- this
   // candidate shape carries no stock).
   const realNameRows = nameRows.filter((row) => isRealBarcode(row.barcode))
-  const twin = isRealBarcode(typed.barcode)
-    ? nameRows.find((row) => barcodeIdentityMatches(row.barcode, typed.barcode)) || null
+  const twin = isRealBarcode(typedBarcodeValue)
+    ? nameRows.find((row) => barcodeIdentityMatches(row.barcode, typedBarcodeValue)) || null
     : (nameRows.length ? rankBarcodeIdentityWinner(realNameRows.length ? realNameRows : nameRows) : null)
 
   if (twin) {

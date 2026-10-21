@@ -7,6 +7,7 @@ import {
   type SuggestionOption,
 } from '../../utils/suggestionMatching.ts'
 import { isImeComposingKey } from '../../utils/imeComposition.ts'
+import { SCAN_GUARD_PROPS } from '../../utils/scannerWedge.ts'
 
 // THE "type or select" field. One implementation, shared by every catalog
 // text field that has existing values worth offering: ProductForm's Category,
@@ -75,6 +76,8 @@ export type SuggestionTextInputProps = {
   autoFocus?: boolean
   onBlurCapture?: () => void
   inputRef?: React.Ref<HTMLInputElement>
+  /** A scanner-gun burst typed here is put back and moved to the surface's search (SCAN_GUARD_PROPS). */
+  guardScans?: boolean
 }
 
 export default function SuggestionTextInput({
@@ -97,6 +100,7 @@ export default function SuggestionTextInput({
   autoFocus,
   onBlurCapture,
   inputRef,
+  guardScans = false,
 }: SuggestionTextInputProps) {
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(-1)
@@ -145,6 +149,7 @@ export default function SuggestionTextInput({
         value={value}
         disabled={disabled}
         autoFocus={autoFocus}
+        {...(guardScans ? SCAN_GUARD_PROPS : {})}
         role="combobox"
         aria-expanded={listOpen}
         aria-controls={listId}

@@ -26,12 +26,15 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import ProductsImageOnlyControls, { type ImageOnlyScope } from './ProductsImageOnlyControls'
+import ScanMissNotice from '../shared/ScanMissNotice'
+import { useScannedQuery } from '../shared/useScannedQuery.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
 import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
 import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { classifyScanMiss } from '../../utils/scanMiss.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
@@ -204,6 +207,13 @@ export default function ProductsImageOnlyView() {
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // The search text the rows on screen answer, so a scan's "no such barcode" waits for its own page.
+  const [answeredSearch, setAnsweredSearch] = useState<string | null>(null)
+  const { scannedCode, markScanned } = useScannedQuery(search)
+  const applyScan = useCallback((code: string) => {
+    markScanned(code)
+    setSearch(code)
+  }, [markScanned])
   // Which row's image save is in flight, if any -- used to disable that
   // row's upload actions so a second tap can't fire a second upload+save
   // before the first one lands (same class of bug as the full editor's
@@ -301,6 +311,7 @@ export default function ProductsImageOnlyView() {
       setItems(rows)
       setTotal(rowTotal)
       setFacets(rowFacets)
+      setAnsweredSearch(debouncedSearch)
     } catch (error) {
       if (requestIdRef.current !== requestId) return
       setLoadError(getErrorMessage(error, t('load_failed') || 'Failed to load products'))
@@ -310,6 +321,18 @@ export default function ProductsImageOnlyView() {
   }, [debouncedSearch, page, pageSize, range.startDate, range.endDate, scope, showBatches, showStock, showCategory, showBrand, t])
 
   useEffect(() => { load() }, [load])
+
+  // This role has no search index, so a filter that may hide the barcode leaves the empty list unexplained (plain
+  // empty state); with none on, an empty answer to a scan means no product has it. It cannot create products.
+  const filtersActive = Boolean((showBatches && (range.startDate || range.endDate))
+    || (showStock && scope.stockState) || (showCategory && scope.category) || (showBrand && scope.brand))
+  const scanMiss = classifyScanMiss({
+    scannedCode,
+    answered: !loading && answeredSearch === scannedCode && debouncedSearch === scannedCode,
+    listEmpty: items.length === 0,
+    filtersActive,
+    inCatalog: null,
+  })
 
   // Shared by all three upload paths (choose file / take photo / pick from
   // library) -- each just needs to arrive at a public path, then this does
@@ -436,6 +459,7 @@ export default function ProductsImageOnlyView() {
         onRangeChange={setRange}
         search={search}
         onSearchChange={setSearch}
+        onScan={applyScan}
         scope={scope}
         onScopeChange={(patch) => setScope((current) => ({ ...current, ...patch }))}
         categories={facets.categories}
@@ -463,7 +487,9 @@ export default function ProductsImageOnlyView() {
               </div>
             ))
           ) : items.length === 0 ? (
-            <div className="py-10 text-center text-gray-400">{t('no_data') || 'No products found'}</div>
+            <div className="py-10 text-center text-gray-400">
+              {scanMiss ? <ScanMissNotice miss={scanMiss} t={t} /> : (t('no_data') || 'No products found')}
+            </div>
           ) : items.map((product) => {
             const photo = rowPhotos[product.id]
             // A photo waiting its turn behind another row's save is just as busy as the row being saved.

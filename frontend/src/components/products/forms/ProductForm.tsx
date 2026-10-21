@@ -28,6 +28,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import { foldNativeDigits } from '../../../utils/searchMatch.ts'
 import {
   PRODUCT_MATCH_DEBOUNCE_MS,
   buildProductNameSuggestions,
@@ -959,7 +960,8 @@ function ProductFormContent({
     if (!isCreateMode) return
     const seq = ++createMatchSeqRef.current
     const name = String(form.name || '').trim()
-    const barcode = String(form.barcode || '').trim()
+    // The lookup asks for the barcode the server will store (Khmer digits folded), like the verdict that reads its answer.
+    const barcode = foldNativeDigits(form.barcode).trim()
     // The min-length and debounce live in helpers/productNameSuggestions.ts
     // because the Name field's suggestion list is fed by THIS lookup: one
     // gate, so the dropdown and the identity hint can never disagree about

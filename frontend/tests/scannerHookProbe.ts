@@ -8,7 +8,6 @@ export const MESSAGES = {
   scanUnsupported: 'unsupported',
   cameraDocumentBlocked: 'document-blocked',
   cameraPermissionBlocked: 'blocked',
-  scanPermissionDenied: 'denied',
   scanFailed: 'failed',
   scanPromptDismissed: 'dismissed',
 }

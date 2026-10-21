@@ -60,7 +60,6 @@ export interface CameraMessages {
   scanUnsupported: string
   cameraDocumentBlocked: string
   cameraPermissionBlocked: string
-  scanPermissionDenied: string
   scanFailed: string
   scanPromptDismissed: string
 }
@@ -437,6 +436,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       cleanup()
       setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
       setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
+      // `denied` is either blocked or dismissed, so a failure that reaches the last branch was never a permission one.
       setError(
         documentBlocked
           ? messages.cameraDocumentBlocked
@@ -444,7 +444,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
             ? messages.cameraPermissionBlocked
           : dismissed
             ? messages.scanPromptDismissed
-            : (denied ? messages.scanPermissionDenied : messages.scanFailed),
+            : messages.scanFailed,
       )
     }
   }, [
@@ -453,7 +453,6 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     messages.cameraDocumentBlocked,
     messages.cameraPermissionBlocked,
     messages.scanFailed,
-    messages.scanPermissionDenied,
     messages.scanPromptDismissed,
     messages.scanUnsupported,
     waitForVideoElement,

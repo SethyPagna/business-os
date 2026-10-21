@@ -492,13 +492,17 @@ try {
   // ---- copy and packs ---------------------------------------------------------------
 
   const OWNED_KEYS = [
-    'scan_ready', 'scan_unsupported', 'scan_permission_denied', 'scan_prompt_dismissed', 'camera_permission_blocked',
+    'scan_ready', 'scan_unsupported', 'scan_prompt_dismissed', 'camera_permission_blocked',
     'camera_document_blocked', 'scan_photo_failed', 'scan_photo_unreadable', 'scanner_read_ok', 'scanner_switch_camera',
     'camera_permission_reset_hint_ios', 'camera_permission_reset_hint_android',
   ]
 
+  // Kept in the packs for the owner's unused-key list: the camera hook's last error branch could never choose it
+  // (a denied start is always 'blocked' or 'dismissed' first), so the sheet no longer reads it.
+  const UNREACHABLE_KEYS = ['scan_permission_denied']
+
   await runTest('Khmer: every string this lane owns is Khmer, with no English left over and barcode spelled បាកូដ', () => {
-    for (const key of [...OWNED_KEYS, 'camera_permission_reset_hint', 'scan_no_match', 'scan_create_with_barcode', 'scan_hidden_by_filters']) {
+    for (const key of [...OWNED_KEYS, ...UNREACHABLE_KEYS, 'camera_permission_reset_hint', 'scan_no_match', 'scan_create_with_barcode', 'scan_hidden_by_filters']) {
       assert.ok(en[key], `en has ${key}`)
       assert.match(km[key] ?? '', /[ក-៿]/, `km ${key} is Khmer`)
       assert.notEqual(km[key], en[key], `km ${key} is not the English text`)

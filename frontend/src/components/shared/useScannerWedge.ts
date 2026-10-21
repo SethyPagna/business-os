@@ -30,7 +30,9 @@
  *   nothing editable focused  -> onScan, so a scan is no longer lost;
  *   the surface's own search  -> onScan replaces its text with the code;
  *   a number / date / select  -> the field gets its pre-burst value back, then onScan;
- *   any other text field      -> left alone, the person is typing there.
+ *   any other text field      -> left alone, the person is typing there, unless the
+ *                                field spreads SCAN_GUARD_PROPS (utils/scannerWedge.ts): then it
+ *                                is put back and the code goes to search, as for a quantity.
  *
  * The terminating Enter / Tab is cancelled and stopped before any other handler
  * sees it, so a focused button is not clicked and an `onEnter={add}` field does

@@ -69,7 +69,7 @@ import { createRoot } from 'react-dom/client'
 import { useBarcodeCamera } from '/src/components/products/scanning/useBarcodeCamera.ts'
 import { markScanner } from '/src/components/products/scanning/scannerWarmup.ts'
 
-const messages = { scanUnsupported: 'unsupported', cameraDocumentBlocked: 'document-blocked', cameraPermissionBlocked: 'blocked', scanPermissionDenied: 'denied', scanFailed: 'failed', scanPromptDismissed: 'dismissed' }
+const messages = { scanUnsupported: 'unsupported', cameraDocumentBlocked: 'document-blocked', cameraPermissionBlocked: 'blocked', scanFailed: 'failed', scanPromptDismissed: 'dismissed' }
 const state = window.__scan = { detected: [], closed: 0, status: 'starting', camera: null }
 
 function Page() {

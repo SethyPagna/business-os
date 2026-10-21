@@ -17,6 +17,7 @@ import { apiFetch } from './http.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
 import {
   SEARCH_CORE_VERSION,
+  SEARCH_TIER_EXACT_CODE,
   createSearchIndexBuilder,
   searchTermIndex,
   type SearchOptions,
@@ -232,6 +233,17 @@ export function searchProductIndex(query: string, options: SearchOptions = {}): 
   }
   if (Date.now() - state.checkedAt > REVALIDATE_MS) void ensureProductSearchIndex()
   return searchTermIndex(state.index, query, options)
+}
+
+/**
+ * Whether some catalog product carries this scanned code as its barcode, by the index's own exact-code rule (leading
+ * zeros fold, UPC-E pairs with UPC-A, Khmer digits fold; never a name or a substring). The list a page shows is
+ * narrowed by its filters, the index is not, so this is how a page tells "hidden by the filters" from "no such
+ * product" without another request. Null while the index cannot say (not loaded, or this account has none).
+ */
+export function catalogHasBarcode(code: string): boolean | null {
+  const result = searchProductIndex(code)
+  return result ? result.hits.some((hit) => hit.tier === SEARCH_TIER_EXACT_CODE) : null
 }
 
 /** Query params that hand a ranked result to the product endpoints. */

@@ -28,7 +28,9 @@ import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
+import { useScannedQuery } from '../shared/useScannedQuery.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
+import { classifyScanMiss } from '../../utils/scanMiss.ts'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { PINNED_BG, PINNED_BG_SELECTED, PINNED_CELL, ROW_TEXT_GUTTER, pinnedLeft } from './surfaces/ProductsListSurface'
@@ -180,7 +182,7 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
-import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
+import { catalogHasBarcode, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
 import '../navigation/nav-chrome.css'
@@ -1531,6 +1533,9 @@ function ProductsFullEditor() {
   // index (G37): the server returned exactly the match set, typos included,
   // so the page re-filter must not re-match it with the older rules.
   const [productsRanked, setProductsRanked] = useState(false)
+  // The search-params key (productSearchParamsKey) the loaded page was answered for: a scan's "no such barcode"
+  // waits for the page that answers that scan, not the query before it.
+  const [answeredSearchKey, setAnsweredSearchKey] = useState('')
   const [categories,   setCategories]   = useState<LookupRecord[]>([])
   const [units,        setUnits]        = useState<LookupRecord[]>([])
   const [branches,     setBranches]     = useState<BranchRecord[]>([])
@@ -1693,6 +1698,12 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
+  // The barcode a scan-miss Create opens the product form with; null for every other way the form opens.
+  const [scanCreateBarcode, setScanCreateBarcode] = useState<string | null>(null)
+  const scanCreateDefaults = useMemo(() => (scanCreateBarcode ? { barcode: scanCreateBarcode } : undefined), [scanCreateBarcode])
+  useEffect(() => {
+    if (modal !== 'form') setScanCreateBarcode(null)
+  }, [modal])
   // Minimized create flows restore here. Each modal's scoped draft repopulates
   // its own state, while this host rechecks the current action grant before it
   // reopens a write surface.
@@ -2088,6 +2099,7 @@ function ProductsFullEditor() {
           throw versionMismatchError
         }
         setProductsRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
+        setAnsweredSearchKey(productSearchParamsKey)
         // Set in the same batch as the rows so a page never renders without its held stock. Absent when the
         // account lacks Inventory view: the tagged effect then falls back to the separate read and its refusal.
         setFoldedTagged(Array.isArray(productPayloadObject?.tagged_lots)
@@ -4098,10 +4110,12 @@ function ProductsFullEditor() {
   }, [handleSearchInputChange])
   // The camera and the scanner gun fill the search exactly like typing does
   // (pinned rows released too). A scan never opens or picks a row.
+  const { scannedCode, markScanned } = useScannedQuery(search)
   const applyScan = useCallback((code: string) => {
     handleSearchInputChange(code)
     pendingScanRef.current = code
-  }, [handleSearchInputChange])
+    markScanned(code)
+  }, [handleSearchInputChange, markScanned])
   useScannerWedge({
     enabled: isActive,
     searchRef: searchInputRef,
@@ -4145,6 +4159,21 @@ function ProductsFullEditor() {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-scan-hit="true"]'))
     scrollNodeWithOffset(nodes.find((node) => node.getClientRects().length > 0) ?? null)
   }, [scanRevealCount])
+
+  // The filters clearAllFilters resets. An empty list after a scan is "hidden by the filters" only while one of them is on.
+  const hasHidingFilters = catFilter.size > 0 || brandFilter.size > 0 || supplierFilter.size > 0 || unitFilter !== ''
+    || branchFilter !== 'all' || stockFilter !== 'all' || groupFilter !== 'all' || issueFilter !== 'all'
+    || promoFilter !== 'all' || mergedFilter !== 'all' || hideZeroStockRows
+  // An empty list after a scan says why: no product has the barcode, or the filters hide it. The index (not the
+  // filtered page) tells those apart; typed text never gets this (scannedCode is null for it). The index
+  // generation is a dependency only: catalogHasBarcode reads module state that changes with it.
+  const scanMiss = useMemo(() => classifyScanMiss({
+    scannedCode,
+    answered: !loading && !refreshingProducts && answeredSearchKey === productSearchParamsKey && debouncedSearch === scannedCode,
+    listEmpty: visibleProducts.length === 0,
+    filtersActive: hasHidingFilters,
+    inCatalog: scannedCode && hasHidingFilters ? catalogHasBarcode(scannedCode) : null,
+  }), [answeredSearchKey, debouncedSearch, hasHidingFilters, loading, productSearchParamsKey, refreshingProducts, scannedCode, searchIndexGeneration, visibleProducts.length])
 
   const handleLookupReviewSelection = useCallback((selection: { type?: unknown; value?: unknown }) => {
     const type = String(selection?.type || '').toLowerCase()
@@ -4376,6 +4405,15 @@ function ProductsFullEditor() {
     }
     await load(true)
   }, [fetchProductsByIds, load, pushCreatedProductHistory])
+
+  // The scan-miss Create: a new product whose barcode is the scanned one. The form keeps its own draft per code and
+  // has no minimize here: the minimized-work chip reopens only the standalone Add form, so it could not return this one.
+  const openCreateFromScan = useCallback((code: string) => {
+    setSelected(null)
+    setFormInitialTab('basic')
+    setScanCreateBarcode(code)
+    setModal('form')
+  }, [setModal])
 
   const openProductFormTab = useCallback((product: ProductRecord, tab: ProductFormTab = 'basic') => {
     setSelected(product)
@@ -5645,6 +5683,9 @@ function ProductsFullEditor() {
           productTotal={productTotal}
           productTotalLabel={productSummaryLabel}
           refreshingProducts={refreshingProducts}
+          scanMiss={scanMiss}
+          onCreateFromScan={canAddProduct ? openCreateFromScan : undefined}
+          onClearFilters={clearAllFilters}
           renderDesktopProductRow={renderDesktopProductRow}
           bindGroupHold={bindGroupHold}
           renderGroupActions={renderGroupActions}
@@ -5880,7 +5921,8 @@ function ProductsFullEditor() {
         <Suspense fallback={null}>
           <ProductForm
             product={modalProduct}
-            draftScope="standalone-create"
+            draftScope={scanCreateBarcode ? `scan-miss-${scanCreateBarcode}` : 'standalone-create'}
+            createDefaults={scanCreateDefaults}
             categories={categoryOptions}
             units={unitOptions}
             branches={branchOptions}
@@ -5894,7 +5936,7 @@ function ProductsFullEditor() {
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             // S4-20: minimizing is silent otherwise -- the form just
             // vanishes, which reads as lost work. Say where it went.
-            onMinimize={(label: string, detail?: { draftKey: string; productId: EntityId | null }) => {
+            onMinimize={scanCreateBarcode ? undefined : (label: string, detail?: { draftKey: string; productId: EntityId | null }) => {
               if (modalProduct) {
                 const productId = Number(detail?.productId || modalProduct.id || 0)
                 const draftKey = String(detail?.draftKey || '')

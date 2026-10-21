@@ -37,10 +37,18 @@ assert.match(
   /totalItems=\{productTotal\}/,
   'POS pagination should be driven by the total product result count',
 )
+// The empty-state text is ONE value (`emptyMessage`) shared by the desktop table row and the phone card list. Its
+// first branch is the refreshing line, so an in-flight load always wins over the scan's "no such barcode" answer
+// and over the plain no-data text (lane 6.0.940 moved the ternary up from two inline copies; the rule is unchanged).
 assert.match(
   productsSurface,
-  /visibleProducts\.length === 0[\s\S]*refreshingProducts[\s\S]*Refreshing products/,
+  /const emptyMessage = refreshingProducts\s*\?\s*tr\('products_refreshing', 'Refreshing products\.\.\.'[\s\S]*?: t\('no_data'\)/,
   'Products page should show refreshing state instead of a false no-data search result while data is in flight',
+)
+assert.equal(
+  (productsSurface.match(/visibleProducts\.length === 0[\s\S]{0,400}?\{emptyMessage\}/g) || []).length,
+  2,
+  'both the desktop table and the phone list render the shared empty message',
 )
 assert.match(
   productsSurface,

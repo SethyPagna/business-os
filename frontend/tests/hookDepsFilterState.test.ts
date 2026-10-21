@@ -49,10 +49,13 @@ type Finding = { file: string; line: number; hook: string; name: string }
 // decays into a list of things nobody dares delete.
 export const ALLOWLIST: AllowEntry[] = [
   {
-    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 214,
+    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 260,
     reason: 'The load effect is keyed by requestKey, whose serialized params spread every filter. '
       + 'The same snapshot carries sole-branch bootstrap intent. inventoryChecksPage.test.ts '
-      + 'checks each filter dispatch and delayed discovery; adding object identity would reload equal queries.',
+      + 'checks each filter dispatch and delayed discovery; adding object identity would reload equal queries. '
+      + 'RE-VERIFIED 2026-10-22 after 6.0.933 (the count page: scan, debounce and gun state above it) moved it '
+      + 'from :214 to :260, past the pin\'s tolerance; the effect is still [requestKey], and requestKey is still '
+      + 'JSON.stringify([params, section, refresh]) with params spreading ...filters. Body and dependencies unchanged.',
   },
   {
     file: 'components/pos/POS.tsx',
@@ -65,7 +68,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 2367,
+    line: 2409,
     reason:
       'Deferred filter-metadata fallback. filterMetaScope includes all six filters; '
       + 'its own effect just above invalidates the outstanding fallback and clears readiness, '
@@ -83,12 +86,14 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'the request and readiness, and main load retains effective filter dependencies; '
       + 'the fallback body and dependencies are byte-identical to the prior release. '
       + 'RE-VERIFIED 2026-10-20 after 6.0.873 (Excel-style row cells above ProductsFullEditor) moved it '
-      + 'to :2367; body and dependencies unchanged.',
+      + 'to :2367; body and dependencies unchanged. RE-VERIFIED 2026-10-22 after 6.0.940 (scan-miss state, '
+      + 'the Create-from-scan state and the answered-search marker above it) moved it to :2409; body and '
+      + 'dependencies are byte-identical.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 3733,
+    line: 3744,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
@@ -102,7 +107,9 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'effectiveStockState dependency are unchanged. RE-VERIFIED 2026-10-13 after the '
       + 'waiting-for-review tag (6.0.169: tag imports, the row tag and its comments above '
       + 'this site) moved it to :3649; the object key and the effectiveStockState '
-      + 'dependency are unchanged. RE-VERIFIED 2026-10-20 after 6.0.873 moved it to :3733; unchanged.',
+      + 'dependency are unchanged. RE-VERIFIED 2026-10-20 after 6.0.873 moved it to :3733; unchanged. '
+      + 'RE-VERIFIED 2026-10-22 after 6.0.940 (scan-miss state above it) moved it to :3744; the object key and the '
+      + 'effectiveStockState dependency are unchanged.',
   },
 ]
 
