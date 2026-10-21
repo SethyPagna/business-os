@@ -77,10 +77,14 @@ export interface PermissionDefinition {
   short?: string
   hintTKey?: string
   hint?: string
-  // The Worker's hasPermission() answers true for this key whenever the named key is Full
-  // (cloudflare/src/lib/permissions.ts, mirrored by hasPermission in utils/permissions.ts), so the editor shows it
-  // as included in that module's Full and locked on rather than as a separate switch it cannot truly turn off.
-  // Delete the flag when the Worker stops falling back; the catalog parity test fails until you do.
+  // The Worker already grants this key's access whenever the named key is Full -- through a fallback in
+  // hasPermission() (cloudflare/src/lib/permissions.ts) or through a route that accepts "this key or Settings"
+  // (settings.ts buckets, files.ts, portal.ts, promotions.ts, compat.ts). The editor therefore shows it as included
+  // in that module's Full and locked on, rather than as a separate switch it cannot truly turn off, and a row whose
+  // every grant is covered is locked at Full. Today only `settings` covers anything.
+  // cloudflare/scripts/test-permission-catalog-parity-pure.cjs reads every Worker site that tests the Settings
+  // grant and fails when a key is covered there but not marked here, or marked here but covered nowhere. Delete the
+  // flag when the Worker stops falling back (the PERM-CONSISTENCY lane); that test fails until you do.
   coveredBy?: string
 }
 
@@ -111,8 +115,12 @@ export interface PermissionSection {
 //   - `business_identity`/`sales_policy`/`security_settings`/
 //     `drive_credentials` have no frontend call site of their own;
 //     cloudflare/src/lib/permissions.ts falls each of them back to the plain
-//     `settings` grant, so they stay grouped under Settings, the page whose
-//     sub-areas they name.
+//     `settings` grant (security_settings excepted: no Worker route reads
+//     it), so they stay grouped under Settings, the page whose sub-areas
+//     they name.
+//   - Settings Full also carries Receipts, the four Website Editor areas and
+//     the Library through the routes' own "this key or Settings" checks.
+//     Those keep their own sections, marked `coveredBy: 'settings'`.
 export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'full_access',
@@ -150,13 +158,16 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // PORTAL_*_KEYS buckets. Each is plain Full/None (no tier): the editor
       // section + its save self-gate on the matching key, and the backend
       // POST /settings rejects any customer_portal_* key the caller lacks.
-      { key: 'portal_posts', tKey: 'perm_portal_posts', label: 'Manage posts & promos', sensitivity: 'normal', shortTKey: 'perm_short_posts', short: 'Posts' },
-      { key: 'portal_faq', tKey: 'perm_portal_faq', label: 'Manage FAQ', sensitivity: 'normal', shortTKey: 'faq', short: 'FAQ' },
-      { key: 'portal_about', tKey: 'perm_portal_about', label: 'Manage About section', sensitivity: 'normal', shortTKey: 'about', short: 'About' },
+      // All four are `coveredBy: 'settings'`: the same route accepts a bucket
+      // key OR full Settings, so Settings Full edits every area (and
+      // routes/promotions.ts and routes/portal.ts accept it the same way).
+      { key: 'portal_posts', tKey: 'perm_portal_posts', label: 'Manage posts & promos', sensitivity: 'normal', shortTKey: 'perm_short_posts', short: 'Posts', coveredBy: 'settings' },
+      { key: 'portal_faq', tKey: 'perm_portal_faq', label: 'Manage FAQ', sensitivity: 'normal', shortTKey: 'faq', short: 'FAQ', coveredBy: 'settings' },
+      { key: 'portal_about', tKey: 'perm_portal_about', label: 'Manage About section', sensitivity: 'normal', shortTKey: 'about', short: 'About', coveredBy: 'settings' },
       // The catch-all "portal config": branding, media, theme, catalog display,
       // social links, AI assistant, maps, translations, publishing, loyalty,
       // and submission moderation.
-      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Manage portal config', sensitivity: 'normal', shortTKey: 'perm_short_site_setup', short: 'Site setup' },
+      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Manage portal config', sensitivity: 'normal', shortTKey: 'perm_short_site_setup', short: 'Site setup', coveredBy: 'settings' },
     ],
   },
   {
@@ -533,7 +544,12 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'settings',
     tKey: 'perm_section_settings',
     label: 'Settings',
-    description: 'View: read. Full: change settings. Identity, policies, Receipts, Security and Drive are separate switches.',
+    // Full changes every setting and, on the Worker today, also holds the extras marked `coveredBy: 'settings'`
+    // (Identity, Policies, Receipts, Google Drive here; the Website Editor areas and the Library say so on their own
+    // rows) plus two things with no row at all: AI provider keys (routes/ai.ts) and the system checks (runtime.ts,
+    // system.ts). The text names those two, because nothing else on screen can; Security is the one extra that
+    // really is separate (no Worker route reads it). One plain line, 120 characters at most, in both packs.
+    description: 'View: read. Full: change settings, AI provider keys, system checks and extras marked Included. Security is separate.',
     permissions: [
       // View-tier section (Part 557): reading settings is open to any signed-in
       // user already (routes/settings.ts GET / strips secrets and serves the
@@ -560,8 +576,9 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // turn it off per role here. Enforced server-side by
       // routes/settings.ts's settingsBucketPermissionFor() on
       // receipt_template/receipt_footer/receipt_print_settings, and gates
-      // the page itself via AppContext.tsx's PAGE_PERMISSIONS.
-      { key: 'receipt_settings', tKey: 'perm_receipt_settings', label: 'Receipt / print settings', sensitivity: 'normal', shortTKey: 'receipts', short: 'Receipts' },
+      // the page itself via AppContext.tsx's PAGE_PERMISSIONS. The same
+      // bucket check also accepts full `settings`, hence `coveredBy`.
+      { key: 'receipt_settings', tKey: 'perm_receipt_settings', label: 'Receipt / print settings', sensitivity: 'normal', shortTKey: 'receipts', short: 'Receipts', coveredBy: 'settings' },
       { key: 'security_settings', tKey: 'perm_security_settings', label: 'Security and sign-in settings', sensitivity: 'critical', shortTKey: 'security', short: 'Security' },
       { key: 'drive_credentials', tKey: 'perm_drive_credentials', label: 'Google Drive credentials', sensitivity: 'critical', shortTKey: 'google_drive', short: 'Google Drive', coveredBy: 'settings' },
     ],
@@ -581,12 +598,15 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // both cloudflare/src/lib/permissions.ts's and
       // frontend/src/utils/permissions.ts's REVIEW_TIER_KEYS in the same
       // session; see those files' comments for the full reasoning.
+      // `coveredBy`: routes/files.ts hasFullLibraryAccess() is "Library Full OR
+      // Settings Full", so Settings Full manages the Library whatever this key says.
       {
         key: 'library',
         tKey: 'perm_library',
         label: 'Library',
         sensitivity: 'normal',
         lead: true,
+        coveredBy: 'settings',
       },
     ],
   },

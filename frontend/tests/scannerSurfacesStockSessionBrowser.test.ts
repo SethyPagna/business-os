@@ -245,6 +245,81 @@ try {
     assert.equal(await page.locator(SEARCH).count(), 1, 'the entry row is ready for the next product')
   })
 
+  // Lane 6.0.945 (release review P3-2): a scan clears a picked item, so an item with typed values is kept instead.
+  const FINISH_NOTICE = [['Add or clear this item first', 'warning']]
+  for (const [mode, label] of [['add', 'Qty'], ['remove', 'Qty'], ['set', 'Set to']] as const) {
+    await test(`${mode}: a scan with nothing focused keeps an item whose ${label} was typed, says why, and does not touch the search`, async () => {
+      await openSession({ picked: true, mode })
+      await page.fill(`input[aria-label="${label}"]`, '3')
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+      await typeKeys(gun(CODE), 4)
+      await page.waitForTimeout(400)
+      assert.equal(await page.locator(SEARCH).count(), 0, 'the picked item stays and the search stays hidden')
+      assert.equal(await page.inputValue(`input[aria-label="${label}"]`), '3', 'what was typed is still there')
+      assert.ok((await bodyText()).includes('Gun fixture'), 'the picked product is still shown')
+      assert.equal(await lineAdded(), false)
+      assert.deepEqual(await notices(), FINISH_NOTICE)
+    })
+  }
+
+  await test('add: a burst typed into the typed Qty box is put back, the item is kept, and only the finish-first notice shows', async () => {
+    await openSession({ picked: true })
+    await page.fill('input[aria-label="Qty"]', '12')
+    await page.focus('input[aria-label="Qty"]')
+    await typeKeys(gun(CODE), 4)
+    await page.waitForTimeout(400)
+    assert.equal(await page.locator(SEARCH).count(), 0)
+    assert.equal(await page.inputValue('input[aria-label="Qty"]'), '12', 'the barcode did not become the quantity')
+    assert.equal(await lineAdded(), false)
+    assert.deepEqual(await notices(), FINISH_NOTICE, 'no "moved to search": it did not move')
+  })
+
+  for (const label of ['Cost', 'Price']) {
+    await test(`add: a changed ${label} keeps the item on a scan`, async () => {
+      await openSession({ picked: true })
+      await page.fill(`input[aria-label="${label}"]`, '7.25')
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+      await typeKeys(gun(CODE), 4)
+      await page.waitForTimeout(400)
+      assert.equal(await page.locator(SEARCH).count(), 0)
+      assert.equal(await page.inputValue(`input[aria-label="${label}"]`), '7.25')
+      assert.deepEqual(await notices(), FINISH_NOTICE)
+    })
+  }
+
+  await test('add: typing the cost the product already has is not typing, so the scan still clears the item', async () => {
+    await openSession({ picked: true })
+    await page.fill('input[aria-label="Cost"]', '4.00')
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await typeKeys(gun(CODE), 4)
+    await page.waitForSelector(SEARCH, { timeout: 5000 })
+    assert.equal(await searchValue(), CODE)
+    assert.deepEqual(await notices(), [])
+  })
+
+  await test('add: after the X clears a typed item, the next scan fills the search', async () => {
+    await openSession({ picked: true })
+    await page.fill('input[aria-label="Qty"]', '12')
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await typeKeys(gun(CODE), 4)
+    await page.waitForTimeout(300)
+    assert.deepEqual(await notices(), FINISH_NOTICE)
+    await page.getByRole('button', { name: 'Clear', exact: true }).click()
+    await page.waitForSelector(SEARCH, { timeout: 5000 })
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await typeKeys(gun(CODE), 4)
+    await page.waitForFunction((value) => (document.querySelector('input[aria-label="Product or barcode"]') as HTMLInputElement | null)?.value === value, CODE, { timeout: 5000 })
+  })
+
+  await test('add: a clean item that the gun hits in a field still moves to the search, with the moved notice (the put-back is seen before the check)', async () => {
+    await openSession({ picked: true })
+    await page.focus('input[aria-label="Qty"]')
+    await typeKeys(gun(CODE), 4)
+    await page.waitForSelector(SEARCH, { timeout: 5000 })
+    assert.equal(await searchValue(), CODE)
+    assert.deepEqual(await notices(), [['Barcode moved to search', 'info']])
+  })
+
   await test('the float renders and runs without a page error', async () => {
     assert.deepEqual(problems, [])
   })

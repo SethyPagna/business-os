@@ -37,7 +37,7 @@ import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
-import { useScannerWedge } from '../shared/useScannerWedge.ts'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
@@ -169,7 +169,7 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
 }
 
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
-  const { t, user, canWriteToServer, navigateTo } = useApp() as AppContextCoreValue
+  const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -185,7 +185,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const scanSeq = useRef(0)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [searchFocus, setSearchFocus] = useState(0)
-  const [gunScan, setGunScan] = useState<{ code: string; token: number } | null>(null)
+  const [gunScan, setGunScan] = useState<{ code: string; token: number; origin: ScanOrigin } | null>(null)
   const [showCustomerRanking, setShowCustomerRanking] = useState(bootstrapIntent?.showCustomerRanking ?? false)
   const [filters, setFilters] = useState<InventoryCheckFilters>({ ...(bootstrapIntent?.filters ?? initialFilters), branchId })
   const [pagination, setPagination] = useState<{ section: Section; page: number }>(bootstrapIntent?.pagination ?? { section, page: 1 })
@@ -319,13 +319,16 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
 
   // A scanner gun: the hook has already cancelled the Enter and put a quantity box back as it was. The scan then does what typing the
   // code and pressing Enter does -- but only once the row's own restore has rendered, so a row left unchanged does not count as unsaved work.
-  useScannerWedge({ enabled: section !== 'sessions', searchRef, onScan: code => setGunScan({ code, token: ++scanSeq.current }) })
+  // A burst typed into a count box (origin 'field') says where the code went, as every other surface does -- once the scan is accepted:
+  // a blocked scan moved nothing, and the blocked message already says so.
+  useScannerWedge({ enabled: section !== 'sessions', searchRef, onScan: (code, origin) => setGunScan({ code, token: ++scanSeq.current, origin }) })
   useEffect(() => {
     if (!gunScan) return
     setGunScan(null)
     if (busy || createAttempt.current || getDirtyWork().some(work => work.pageId === 'inventory')) { setWriteError(tr('inventory_check_count_blocked_busy', 'Finish or cancel the open check first.')); return }
     setWriteError('')
     applyQuery(gunScan.code, true)
+    if (gunScan.origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
   }, [gunScan])
 
   function changeFilters(patch: Partial<InventoryCheckFilters>) {

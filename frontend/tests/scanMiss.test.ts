@@ -211,6 +211,19 @@ await runTest('both packs carry the words, and no source file spells barcode ប
   assert.deepEqual(offenders, [], 'VariantFormModal used to carry the other spelling in its fallback')
 })
 
+await runTest('the scan-miss notice spells "filter" one way in Khmer, the way most of the pack does (6.0.945)', () => {
+  const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
+  const noun = 'តម្រង'
+  // ត្រង is the verb root (and part of ការត្រង, ដែលបានត្រង); the lookbehind keeps it apart from តម្រង, the lookahead from ត្រង់ ("honest").
+  const verbRoot = /(?<!ម)ត្រង(?!់)/
+  for (const key of ['clear_filters', 'scan_hidden_by_filters', 'filter', 'filters']) assert.ok(km[key].includes(noun), `${key} is spelled ${noun}`)
+  for (const key of ['clear_filters', 'scan_hidden_by_filters']) assert.doesNotMatch(km[key], verbRoot, `${key} does not mix in the verb root`)
+  const values = Object.values(km).filter((value): value is string => typeof value === 'string')
+  const nounValues = values.filter((value) => value.includes(noun)).length
+  const verbValues = values.filter((value) => verbRoot.test(value)).length
+  assert.ok(nounValues > 3 * verbValues, `${noun} is the dominant spelling (${nounValues} values against ${verbValues})`)
+})
+
 await runTest('the camera hook has no permission-denied message: a denied start is blocked or dismissed first', () => {
   const hook = read('src/components/products/scanning/useBarcodeCamera.ts')
   assert.doesNotMatch(hook, /scanPermissionDenied/)

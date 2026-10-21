@@ -48,6 +48,7 @@ import {
   commitSessionBlock,
   defaultLotChoice,
   emptyStockSessionDraft,
+  lineEntryHasTypedValues,
   lineEntryRefusal,
   lineNeedsCreate,
   modeSwitchBlocked,
@@ -599,6 +600,16 @@ export default function FastStockInModal({
     : ''
   // Ring a control for the receipt gate (it names the control to fix) or after a refused Add.
   const invalidField = refusal && (addAttempted || (picked && refusal.gate)) ? refusal.field : null
+
+  // What clearing the row would throw away: typed values, as opposed to what picking the product (or loading the line
+  // being edited) filled in. A scan asks this before it clears a picked item.
+  const editedLine = editingKey ? received.find((line) => line.key === editingKey) : undefined
+  const entryHasTypedValues = Boolean(picked) && lineEntryHasTypedValues(
+    { quantity, unitCost, sellingPrice, expiryDate, holdsNewProduct: !editedLine && Boolean(createPayload) },
+    editedLine
+      ? { quantity: String(editedLine.quantity), unitCost: canViewCosts ? editedLine.unitCost : '', sellingPrice: editedLine.sellingPrice, expiryDate: editedLine.expiryDate }
+      : picked ? entryFor(picked, mode) : {},
+  )
 
   const resetLine = () => {
     setPicked(null)
@@ -1398,6 +1409,8 @@ export default function FastStockInModal({
                   setCreatePayload(null)
                 }}
                 onScanMoved={() => notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')}
+                hasTypedValues={entryHasTypedValues}
+                onScanKept={() => notify(tr('stock_session_scan_finish_item', 'Add or clear this item first'), 'warning')}
                 picked={picked}
                 pickedStock={branchQuantity}
                 pickedIsNew={Boolean(createPayload) || (picked ? createdProductIds.includes(String(picked.id)) : false)}

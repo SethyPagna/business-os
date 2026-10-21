@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs'
 import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitions.ts'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
 import {
-  MODULE_ROWS, applyModuleLevel, chipStates, followInventory, isCoveredByFull, levelsOf, moduleCanDo, moduleChanged, moduleIsOn, moduleState,
-  roleTierCounts, searchRow, toggleGrant, type Level, type ModuleRow, type PermissionState,
+  MODULE_ROWS, applyModuleLevel, chipStates, coverNote, followInventory, isCoveredByFull, levelsOf, moduleCanDo, moduleChanged, moduleIsOn, moduleState,
+  roleTierCounts, rowCoveredBy, searchRow, toggleGrant, type Level, type ModuleRow, type PermissionState,
 } from '../src/components/users/permissionSummary.ts'
 import { effectivePermissions, normalizePermissionState } from '../src/utils/permissions.ts'
 
@@ -98,21 +98,69 @@ test('the sensitive extras are never written by any level tap', () => {
   }
 })
 
-test('Full leaves a module\'s sensitive extras to the Worker\'s own reading: only the declared included ones are held', () => {
-  // Effective grants after a Full tap, asked of the real authority: an extra is held only when the catalog says Full includes it.
+test('Full leaves a module\'s sensitive extras alone: after a Full tap an extra is held only when the catalog says that module\'s Full includes it', () => {
   const included = new Set<string>()
   for (const entry of MODULE_ROWS) {
     const perms = applyModuleLevel(entry, 'full', {})
     const authority = effectivePermissions({ permissions: perms })
     for (const def of [...entry.extras, ...(entry.imageOnly ? [entry.imageOnly.toggle] : [])]) {
       if (entry.group.includes(def)) continue
-      const held = authority.hasPermission(def.key)
-      assert.equal(held, !!def.coveredBy, `${entry.id} Full: ${def.key} ${held ? 'is' : 'is not'} held but the catalog says ${def.coveredBy ? 'included' : 'separate'}`)
-      assert.equal(isCoveredByFull(def, perms), held, `${def.key}: the editor's reading matches the authority`)
-      if (held) included.add(def.key)
+      const covered = isCoveredByFull(def, perms)
+      assert.equal(covered, !!def.coveredBy && def.coveredBy === entry.lead?.key, `${entry.id} Full: ${def.key} ${covered ? 'is' : 'is not'} held but the catalog says ${def.coveredBy ? 'included in ' + def.coveredBy : 'separate'}`)
+      // The browser's own hasPermission must never hold what the grid shows as off (it may hold less: it mirrors three keys).
+      if (authority.hasPermission(def.key)) assert.equal(covered, true, `${def.key}: the browser holds it but the grid shows it off`)
+      if (covered) included.add(def.key)
     }
   }
-  assert.deepEqual([...included].sort(), ['business_identity', 'drive_credentials', 'sales_policy'], 'Settings Full still covers these three on the Worker today')
+  assert.deepEqual([...included].sort(), ['business_identity', 'drive_credentials', 'receipt_settings', 'sales_policy'], 'Settings Full holds these four extras on its own row; the Worker grants them through the settings.ts buckets and lib/permissions.ts')
+})
+
+test('Settings Full holds the Website Editor and the Library whole: both rows read Full, are locked there, and a tap changes nothing', () => {
+  const full = state({ settings: true })
+  for (const id of ['customer_portal', 'library']) {
+    const entry = row(id)
+    const held = moduleState(entry, full)
+    assert.deepEqual([held.level, held.coveredBy, held.partial], ['full', 'settings', null], id)
+    assert.equal(rowCoveredBy(entry, full), 'settings')
+    assert.equal(moduleIsOn(entry, full), true, `${id} counts for the On filter`)
+    for (const level of ['none', 'full'] as const) assert.equal(applyModuleLevel(entry, level, full), full, `a tap on ${id} ${level} changes nothing`)
+    for (const settings of ['view', false] as const) {
+      const lower = state({ settings })
+      assert.deepEqual([moduleState(entry, lower).level, moduleState(entry, lower).coveredBy], ['none', null], `${id} is a normal row under Settings ${settings}`)
+      assert.equal(applyModuleLevel(entry, 'full', lower)[entry.group[0]?.key ?? entry.lead!.key], true, `${id} still takes a tap under Settings ${settings}`)
+    }
+  }
+  const stored = state({ settings: true, portal_posts: true, library: true })
+  assert.equal(applyModuleLevel(row('customer_portal'), 'none', stored), stored, 'stored grants underneath are left exactly as they were')
+  assert.equal(applyModuleLevel(row('library'), 'none', stored), stored)
+  assert.deepEqual(moduleCanDo(row('customer_portal'), full, tr), ['Posts', 'FAQ', 'About', 'Site setup'], 'the role summary lists the four areas')
+  assert.equal(moduleState(row('settings'), state({ settings: true, all: true })).coveredBy, null, 'Administrator is not coverage')
+  assert.equal(rowCoveredBy(row('inventory_checks'), full), null, 'a row with no coveredBy is never locked')
+  assert.equal(rowCoveredBy(row('settings'), full), null, 'the Settings row keeps its extras as chips and its own level')
+})
+
+test('the Roles list strip counts what Settings Full really holds: Settings, the Website Editor and the Library are all Full', () => {
+  const total = MODULE_ROWS.filter((entry) => !entry.sub).length
+  assert.deepEqual(roleTierCounts(state({ settings: true })), { none: total - 3, view: 0, review: 0, full: 3, off: 0 })
+  assert.deepEqual(roleTierCounts(state({ settings: 'view' })), { none: total - 1, view: 1, review: 0, full: 0, off: 0 }, 'View includes nothing')
+  const manager = state(ROLE_PRESETS.find((preset) => preset.key === 'manager')!.permissions)
+  assert.equal(manager.settings, true)
+  assert.ok(moduleState(row('library'), manager).level === 'full' && moduleState(row('customer_portal'), manager).level === 'full', 'the Manager preset, which stores settings: true, reads Full in both')
+})
+
+test('moduleChanged: a row held through Settings Full changes when Settings Full does, though none of its keys moved', () => {
+  const before = { settings: 'view' }
+  const after = state({ settings: true })
+  assert.deepEqual(MODULE_ROWS.filter((entry) => moduleChanged(entry, after, before)).map((entry) => entry.id), ['customer_portal', 'settings', 'library'])
+  assert.equal(moduleChanged(row('library'), after, { settings: true }), false)
+  assert.equal(moduleChanged(row('library'), state({ settings: true, library: true }), { settings: true }), true, 'a stored key still counts')
+})
+
+test('coverNote: Included in Full beside the module that holds it, the module named on any other row, nothing for a grant nothing covers', () => {
+  const def = (key: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).find((entry) => entry.key === key)!
+  for (const key of ['business_identity', 'sales_policy', 'receipt_settings', 'drive_credentials']) assert.equal(coverNote(def(key), tr), en.perm_covered_by_full, key)
+  for (const key of ['portal_posts', 'portal_faq', 'portal_about', 'customer_portal', 'library']) assert.equal(coverNote(def(key), tr), 'Included in Settings Full', key)
+  for (const key of ['security_settings', 'backup_restore', 'product_cost_view', 'settings']) assert.equal(coverNote(def(key), tr), '', key)
 })
 
 test('a level tap on the level already selected, on a level the row lacks, or under Administrator changes nothing', () => {
@@ -322,18 +370,17 @@ test('the highest sensitivity the role holds in a row drives the shield', () => 
   assert.equal(moduleState(row('settings'), state({ settings: true })).sensitivity, 'critical', 'Settings Full includes Google Drive, which is critical')
 })
 
-test('Settings Full shows its included extras as held and locked; View and None do not', () => {
+test('Settings Full shows its included extras as held and locked; View and None do not; Security stays separate', () => {
   const settings = row('settings')
-  for (const key of ['business_identity', 'sales_policy', 'drive_credentials']) {
+  for (const key of ['business_identity', 'sales_policy', 'receipt_settings', 'drive_credentials']) {
     const def = settings.extras.find((entry) => entry.key === key)!
     assert.equal(isCoveredByFull(def, state({ settings: true })), true, key)
     assert.equal(isCoveredByFull(def, state({ settings: 'view' })), false, key)
     assert.deepEqual(toggleGrant(state({ settings: true }), key), state({ settings: true }), `${key} cannot be switched off under Full`)
     assert.equal(toggleGrant(state({ settings: 'view' }), key)[key], true, `${key} is a normal switch under View`)
   }
-  for (const key of ['receipt_settings', 'security_settings']) {
-    assert.equal(isCoveredByFull(settings.extras.find((entry) => entry.key === key)!, state({ settings: true })), false, `${key} stays separate`)
-  }
+  assert.equal(isCoveredByFull(settings.extras.find((entry) => entry.key === 'security_settings')!, state({ settings: true })), false, 'security_settings stays separate')
+  assert.deepEqual(toggleGrant(state({ settings: true, portal_faq: true }), 'portal_about'), state({ settings: true, portal_faq: true }), 'a Website Editor area cannot be switched on or off while Settings is Full')
 })
 
 test('changed: only the rows that differ from the saved role, by stored key, with absent equal to off', () => {

@@ -184,7 +184,7 @@ const SURFACES: Surface[] = [
     name: 'Stock Session line entry (Add / Remove / Set)',
     file: '../src/components/stock-session/StockSessionLineEntry.tsx',
     hooks: 1,
-    scans: [/enabled: !busy,\s*searchRef: wedgeSearchRef,\s*onScan: \(code: string, origin: ScanOrigin\) => \{\s*if \(picked\) onClearPick\(\)\s*onScan\(code\)\s*if \(origin === 'field'\) onScanMoved\?\.\(\)/],
+    scans: [/enabled: !busy,\s*searchRef: wedgeSearchRef,\s*onScan: \(code: string, origin: ScanOrigin\) => \{\s*if \(picked && typedRef\.current\) \{ onScanKept\?\.\(\); return \}\s*if \(picked\) onClearPick\(\)\s*onScan\(code\)\s*if \(origin === 'field'\) onScanMoved\?\.\(\)/],
     same: [/<ScanSearchButton onDetected=\{onScan\}/, /onChange=\{\(event\) => onQuery\(event\.target\.value\)\}/],
   },
   {
@@ -279,6 +279,21 @@ runTest('Sale edit: both searches have a scan button, and the hooks sit above th
   assert.match(fill, /if \(!saleBranchDisabled \|\| stockRedirect !== null\) \{ changeAddQuery\(value\); return \}/, 'the same gate typing has')
   assert.match(fill, /confirmStockRedirect\(\)\.then\(\(ready\) => \{ if \(ready && detailAliveRef\.current\) changeAddQuery\(value\) \}\)/, 'a disabled sale branch asks for the redirect first, as focusing the box does')
   assert.doesNotMatch(fill, PICKS_OR_ADDS)
+})
+
+runTest('Inventory count page: a burst put back from a Count box says where the code went, once the scan is accepted (6.0.945)', () => {
+  const page = read('../src/components/inventory/InventoryChecksPage.tsx')
+  const calls = hookCalls(page)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0], /onScan: \(code, origin\) => setGunScan\(\{ code, token: \+\+scanSeq\.current, origin \}\)/, 'the gun keeps the origin the hook reports')
+  assert.doesNotMatch(calls[0], PICKS_OR_ADDS)
+  assert.match(page, /useState<\{ code: string; token: number; origin: ScanOrigin \} \| null>\(null\)/)
+  const accepted = page.slice(page.search(/useEffect\(\(\) => \{\s*if \(!gunScan\) return/), page.indexOf('}, [gunScan])'))
+  assert.ok(accepted.length > 100, 'found the effect that applies a gun scan')
+  // The blocked branch returns before the notice: a refused scan moved nothing.
+  assert.ok(accepted.indexOf('inventory_check_count_blocked_busy') < accepted.indexOf('return }') && accepted.indexOf('return }') < accepted.indexOf("gunScan.origin === 'field'"), 'the notice comes after the blocked branch')
+  assert.match(accepted, /applyQuery\(gunScan\.code, true\)\s*if \(gunScan\.origin === 'field'\) notify\(tr\('scan_moved_to_search', 'Barcode moved to search'\), 'info'\)/, 'same words, same fallback and same kind as every other surface')
+  assert.match(page, /const \{ t, user, canWriteToServer, navigateTo, notify \} = useApp\(\) as AppContextCoreValue/)
 })
 
 runTest('every file that renders a scan button also registers the scanner gun (known exemptions are named)', () => {

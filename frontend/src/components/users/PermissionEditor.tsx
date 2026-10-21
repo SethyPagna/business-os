@@ -16,7 +16,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import PermissionFieldChips from './PermissionFieldChips.tsx'
 import { permissionDefinitionValue, type PermissionDefinition, type PermissionSensitivity } from './permissionDefinitions'
 import {
-  MODULE_ROWS, applyModuleLevel, chipStates, followInventory, isCoveredByFull, levelsOf, moduleCanDo, moduleChanged, moduleIsOn, moduleState, searchRow, toggleGrant,
+  MODULE_ROWS, applyModuleLevel, chipStates, coverNote, followInventory, isCoveredByFull, levelsOf, moduleCanDo, moduleChanged, moduleIsOn, moduleState, searchRow, toggleGrant,
   type ChipMark, type ChipState, type ControlState, type Level, type ModuleRow, type ModuleState, type PermissionState,
 } from './permissionSummary.ts'
 import { effectivePermissions, normalizePermissionState } from '../../utils/permissions.ts'
@@ -285,7 +285,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
     const on = covered || !!perms[def.key]
     const label = labelFor(def)
     const hint = def.hintTKey ? translate(def.hintTKey, def.hint ?? '') : ''
-    const title = [label, def.sensitivity === 'normal' ? '' : sensitivityLabel(def.sensitivity), hint, covered ? translate('perm_covered_by_full', 'Included in Full') : ''].filter(Boolean).join(' · ')
+    const title = [label, def.sensitivity === 'normal' ? '' : sensitivityLabel(def.sensitivity), hint, covered ? coverNote(def, translate) : ''].filter(Boolean).join(' · ')
     return (
       <button
         key={def.key}
@@ -380,6 +380,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
             {chips.length ? <div className="flex flex-wrap items-center gap-1.5">{chips.map((chip) => renderActionChip(row, chip, ringed))}</div> : null}
             {chips.some((chip) => chip.viewLocked) ? <p className="text-xs text-gray-600 dark:text-gray-300">{translate('perm_view_implied', 'On while Add or Edit is on.')}</p> : null}
             {row.extras.length ? <div className="flex flex-wrap items-center gap-1.5">{row.extras.map((def) => renderSwitch(def, ringed))}</div> : null}
+            {rowCoverNote(row, state) ? <p className="text-xs text-gray-600 dark:text-gray-300">{rowCoverNote(row, state)}</p> : null}
             {imageOnly ? (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-1.5">{renderSwitch(imageOnly.toggle, ringed)}</div>
@@ -399,6 +400,9 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
     )
   }
 
+  // The words for a row another module's Full already grants whole (Library, Website Editor under Settings Full); empty otherwise.
+  const rowCoverNote = (row: ModuleRow, state: ModuleState): string => (state.coveredBy ? coverNote((row.group[0] ?? row.lead) as PermissionDefinition, translate) : '')
+
   const renderLevelCell = (row: ModuleRow, state: ModuleState, level: Level, name: string) => {
     // Neither dot is pressed while counting only follows Inventory (the Full dot wears a ring instead) or while a
     // group of grants is partly on (the Full dot is half filled).
@@ -407,9 +411,11 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
     const half = !state.admin && level === 'full' && !!state.partial
     const hasExtras = !row.group.length && row.extras.length > 0
     const someIncluded = row.extras.some((def) => !!def.coveredBy)
+    const included = rowCoverNote(row, state)
     const aria = [`${name}: ${levelWord(level)}`]
     if (half && state.partial) aria.push(translate('perm_n_of_total', '{n} of {total}').replace('{n}', String(state.partial.on)).replace('{total}', String(state.partial.total)))
     if (ring) aria.push(translate('perm_follows_inventory', 'Follows Inventory'))
+    if (included) aria.push(included)
     const title = state.admin
       ? translate('perm_admin_locked', 'Administrator has every permission. Turn it off to set each module.')
       : level === 'full' && hasExtras
@@ -424,7 +430,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
         aria-pressed={pressed}
         aria-label={aria.join(', ')}
         title={title}
-        disabled={state.admin}
+        disabled={state.admin || !!included}
         data-perm-level={level}
         onClick={() => setLevel(row, level)}
         className={`mx-auto flex h-7 w-7 items-center justify-center rounded-full disabled:cursor-not-allowed ${TOUCH_SQUARE}`}
@@ -449,7 +455,8 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
     const offered = levelsOf(row)
     const doing = moduleCanDo(row, perms, translate)
     const shown = doing.slice(0, 3)
-    const summary = state.follows && !doing.length ? translate('perm_follows_inventory', 'Follows Inventory') : `${shown.join(' · ')}${doing.length > shown.length ? ` +${doing.length - shown.length}` : ''}`
+    const covered = rowCoverNote(row, state)
+    const summary = state.follows && !doing.length ? translate('perm_follows_inventory', 'Follows Inventory') : covered && !doing.length ? covered : `${shown.join(' · ')}${doing.length > shown.length ? ` +${doing.length - shown.length}` : ''}`
     return (
       <div key={row.id} data-perm-module={row.id} data-perm-changed={changed ? 'true' : undefined} className="border-b border-gray-100 last:border-b-0 dark:border-zinc-700/60">
         <div className={GRID}>
@@ -479,7 +486,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
             </span>
             {summary ? (
               <span className="flex w-full min-w-0 items-center gap-1 text-xs font-normal text-gray-500 dark:text-gray-400">
-                {doing.length ? <Check className="h-3 w-3 flex-shrink-0" aria-hidden="true" /> : null}
+                {doing.length ? <Check className="h-3 w-3 flex-shrink-0" aria-hidden="true" /> : covered ? <Link2 className="h-3 w-3 flex-shrink-0" aria-hidden="true" /> : null}
                 <span className="truncate">{summary}</span>
               </span>
             ) : null}

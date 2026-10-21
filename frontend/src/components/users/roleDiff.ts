@@ -1,6 +1,6 @@
 import { PERMISSION_DEFS, permissionDefinitionValue, type PermissionDefinition, type PermissionSensitivity } from './permissionDefinitions.ts'
 import { levelWord, rolePermissionLabel } from './rolePermissionLabel.ts'
-import { MODULE_ROWS, isCoveredByFull, moduleState, type ModuleRow, type PermissionState } from './permissionSummary.ts'
+import { MODULE_ROWS, coverNote, isCoveredByFull, moduleState, type ModuleRow, type PermissionState } from './permissionSummary.ts'
 import { actionsForKey } from '../../utils/permissionActions.ts'
 import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 
@@ -93,7 +93,7 @@ function snapshotOf(row: ModuleRow, perms: PermissionState) {
   if (row.actionKey && !admin) {
     for (const action of actionsForKey(row.actionKey)) if (perms[`${row.actionKey}:${action.key}`] === false) off.add(action.key)
   }
-  return { level: state.level, follows: state.follows, grants, off, extras, fields }
+  return { level: state.level, coveredBy: state.coveredBy, follows: state.follows, grants, off, extras, fields }
 }
 
 function moduleChange(row: ModuleRow, a: PermissionState, b: PermissionState, tr: Translate): RoleChangeRow | null {
@@ -107,6 +107,9 @@ function moduleChange(row: ModuleRow, a: PermissionState, b: PermissionState, tr
   // A group of grants with no main key (Website Editor) has no level of its own: each grant is its own line below.
   const moved = !row.group.length && (was.level !== now.level || was.follows !== now.follows)
   if (moved) raise(row.lead?.sensitivity ?? 'normal')
+
+  // A row held through another module's Full (Library, Website Editor): say why it moved, or it reads as a change nobody made.
+  if (now.coveredBy && !was.coveredBy) lines.push({ kind: 'extra', text: coverNote((row.group[0] ?? row.lead) as PermissionDefinition, tr) })
 
   const actions = row.actionKey ? actionsForKey(row.actionKey) : []
   const word = (action: (typeof actions)[number]): string => tr(action.shortTKey, action.short)
