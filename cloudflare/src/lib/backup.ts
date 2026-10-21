@@ -233,6 +233,15 @@ export const BACKUP_TABLES = [
   'stock_session_revisions',
   'stock_session_operations',
   'stock_session_members',
+  // No foreign keys, so position is free. Per-line stock idempotency (0192): a
+  // restore without these receipts lets a replayed stock request apply twice.
+  'stock_mutation_receipts',
+  // Import stock-skip ledger and its guard (0235) change stock math for imported
+  // sales; sale_status_normalization_ledger (0263) is the correction evidence
+  // for the held 0264 repair.
+  'imported_sale_stock_skip_0235',
+  'imported_sale_stock_skip_guard_0235',
+  'sale_status_normalization_ledger',
   'audit_logs',
   'custom_tables',
   'custom_fields',

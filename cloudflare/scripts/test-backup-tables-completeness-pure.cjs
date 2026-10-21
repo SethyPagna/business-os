@@ -30,6 +30,7 @@ const EXCLUDED = {
   portal_sessions: 'storefront auth ephemera',
   portal_auth_lockouts: 'storefront auth ephemera',
   portal_password_resets: 'storefront auth ephemera (reset tokens)',
+  password_reset_requests: '0203 transient admin password-reset requests; a restore must not resurrect stale ones',
   // Runtime state owned by the running Worker, not by the business.
   cache_versions: 'runtime cache state',
   quota_usage: 'runtime quota counters',
@@ -91,22 +92,16 @@ const UNRULED = {
   sale_not_paid_repair_0173: '0173 repair before-values',
 }
 
-// Created after the list above was ruled and found NOT in BACKUP_TABLES on the
-// integration-c base (18c5c5c45). Parked here only so this ratchet is green
-// and the gap stays visible; each needs a backup-or-exclude ruling and a
-// lib/backup.ts change, which is outside the retention lane.
-// stock_mutation_receipts is the urgent one: a restore drops the per-line
-// stock idempotency receipts, so a retried stock line re-applies its delta.
+// Backup decided (BACKUP_TABLES) but a restore cannot yet replay them: their
+// no_delete / immutable-insert triggers (0259, 0224, 0225) have no restore
+// maintenance carve-out like shift_close_figures_no_delete (0237), so
+// DELETE FROM aborts the restore. Needs a migration; adding them to
+// BACKUP_TABLES first would make every restore fail. Do not add new tables here.
 const UNRULED_SINCE_BASE = {
-  stock_mutation_receipts: '0192 per-line stock idempotency receipts, kept forever',
-  inventory_check_sessions: '0259 inventory check sessions',
-  inventory_check_items: '0259 inventory check items',
-  inventory_check_events: '0259 inventory check events',
-  branch_cutovers: 'branch cutover ledger',
-  imported_sale_stock_skip_0235: '0235 import stock-skip ledger',
-  imported_sale_stock_skip_guard_0235: '0235 import stock-skip guard',
-  password_reset_requests: 'password reset requests (likely auth ephemera)',
-  sale_status_normalization_ledger: 'sale status normalization ledger',
+  inventory_check_sessions: 'backup decided; blocked on restore carve-out in 0259 triggers',
+  inventory_check_items: 'backup decided; blocked on restore carve-out in 0259 triggers',
+  inventory_check_events: 'backup decided; blocked on restore carve-out in 0259 triggers',
+  branch_cutovers: 'backup decided; blocked on restore carve-out in 0224/0225 triggers',
 }
 Object.assign(UNRULED, UNRULED_SINCE_BASE)
 
@@ -147,7 +142,7 @@ check('every BACKUP_TABLES entry exists in the migrated schema', () => {
   assert.deepEqual(ghosts, [], `backed up but never created: ${ghosts.join(', ')}`)
 })
 
-check('the unruled list only shrinks (base-era 19, plus the nine tables found unruled)', () => {
+check('the unruled list only shrinks (base-era 19, plus the four blocked on trigger carve-outs)', () => {
   assert.ok(Object.keys(UNRULED).length <= 19 + Object.keys(UNRULED_SINCE_BASE).length, 'do not park new tables in UNRULED -- decide')
 })
 

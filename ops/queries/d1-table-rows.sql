@@ -157,6 +157,7 @@ SELECT
   ) AS rows_8,
   json_object(
     'branch_cutovers', (SELECT COUNT(*) FROM branch_cutovers),
+    'sale_status_normalization_ledger', (SELECT COUNT(*) FROM sale_status_normalization_ledger),
     'shift_close_figures', (SELECT COUNT(*) FROM shift_close_figures),
     'suppliers', (SELECT COUNT(*) FROM suppliers),
     'system_flags', (SELECT COUNT(*) FROM system_flags),
