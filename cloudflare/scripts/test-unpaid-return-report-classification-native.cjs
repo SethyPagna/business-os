@@ -88,7 +88,10 @@ async function assertUnpaidConsumers(f, rawStatus, label) {
   assert.equal(totals.pending_tx_count, 1, `${label}: pending count`)
   const row = analytics.businessSummarySalesRowsFromSnapshot(snapshot)[0]
   assert.equal(row.collected_total_usd, 0, `${label}: export row collected`)
-  assert.equal(row.status, rawStatus, `${label}: raw export status is retained`)
+  // 6.0.905 (owner, 20 Oct 2026): a return is a tag beside Not Paid; the word the previous Worker wrote is now the tag.
+  assert.equal(row.status, 'awaiting_payment', `${label}: raw export status is the payment state`)
+  assert.deepEqual(f.raw.prepare('SELECT return_state FROM sales').all([]).map(sale => sale.return_state),
+    [{ returned: 'full', partial_return: 'partial' }[rawStatus] ?? null], `${label}: return tag`)
   const remaining = rawStatus === 'returned' ? 0 : rawStatus === 'partial_return' ? 1 : 2
   assert.equal(totals.pending_revenue_usd, remaining * 9.5, `${label}: pending revenue reverses the same merchandise recognition as revenue`)
   assert.equal(row.pending_revenue_usd, totals.pending_revenue_usd, `${label}: aggregate pending and export row agree`)
@@ -138,9 +141,10 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     const rawCustomerBeforeReturn = await analytics.getCustomerSalesTotals({ DB: f.route }, { ...filters, customerId: 7 })
     const firstReturn = await createReturn(f, sale, 'unpaid-report-partial')
     f.raw.prepare("UPDATE returns SET created_at='2026-10-01 01:00:00' WHERE id=?").run([firstReturn.id])
-    const saved = f.raw.prepare('SELECT sale_status,status_before_return FROM sales WHERE id=?').get([sale.id])
-    assert.equal(saved.sale_status, 'partial_return')
-    assert.equal(saved.status_before_return, 'awaiting_payment')
+    const saved = f.raw.prepare('SELECT sale_status,status_before_return,return_state FROM sales WHERE id=?').get([sale.id])
+    assert.equal(saved.sale_status, 'awaiting_payment')
+    assert.equal(saved.return_state, 'partial')
+    assert.equal(saved.status_before_return, null, '6.0.905: status_before_return is no longer written')
     const totals = await analytics.getSalesTotals({ DB: f.route }, filters)
     assert.equal(totals.collected_total_usd, 0, 'a partial return must not turn an unpaid sale into collected money')
     assert.equal(totals.pending_tx_count, 1, 'the retained unpaid lifecycle must remain pending')
@@ -150,7 +154,7 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     const partial = await assertUnpaidConsumers(f, 'partial_return', 'partial')
     assert.equal(partial.totals.revenue_usd, 9.5, 'recognized revenue/refund basis is unchanged')
     const secondReturn = await createReturn(f, sale, 'unpaid-report-full')
-    assert.equal(f.raw.prepare('SELECT status_before_return FROM sales WHERE id=?').get([sale.id]).status_before_return, 'awaiting_payment')
+    assert.equal(f.raw.prepare('SELECT sale_status FROM sales WHERE id=?').get([sale.id]).sale_status, 'awaiting_payment')
     const full = await assertUnpaidConsumers(f, 'returned', 'full')
     assert.equal(full.totals.revenue_usd, 0)
     const cancelled = await status(f, secondReturn.id, 'cancelled', 'cancel-second')
@@ -169,12 +173,17 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     assert.equal(f.raw.prepare('SELECT amount_paid_usd FROM sales WHERE id=?').get([sale.id]).amount_paid_usd, 0,
       'reporting must not manufacture a payment')
     const rawFilter = await analytics.getSalesTotals({ DB: f.route }, { ...filters, status: 'awaiting_payment' })
-    assert.equal(rawFilter.tx_count, 0, 'raw status filter semantics remain unchanged')
+    // 6.0.905: the raw column is the payment state, so the raw Not Paid filter now finds a Not Paid sale with returns
+    // (it missed it while a return relabelled the column -- plan S2a/S3 parity gap).
+    assert.equal(rawFilter.tx_count, 1, 'the raw Not Paid filter finds the Not Paid sale with returns')
     console.log('PASS partial/full/successive returns, cancel-final, restore and server Undo/Redo; JS/SQL, export, day, payment, cashier, customer, Telegram and shift classification')
 
+    // A row the previous Worker relabelled (retired word + status_before_return) until the held normalization rewrites it.
+    f.raw.prepare("UPDATE sales SET sale_status='returned',status_before_return='awaiting_payment',return_state=NULL WHERE id=?").run([sale.id])
+    const legacy = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
     f.raw.prepare("UPDATE sales SET status_before_return='completed' WHERE id=?").run([sale.id])
     const changed = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
-    assert.notEqual(changed.export_token, full.exported.export_token, 'retained classification belongs to export identity')
+    assert.notEqual(changed.export_token, legacy.export_token, 'retained classification belongs to export identity')
     f.raw.prepare("UPDATE sales SET status_before_return='awaiting_payment' WHERE id=?").run([sale.id])
     const originalPrepare = f.route.prepare.bind(f.route)
     let passes = 0

@@ -80,11 +80,12 @@ check('integers are unchanged', () => {
   assert.equal(refusal([line(3)], [{ sale_item_id: 1, quantity: 2 }], [{ sale_item_id: 1, quantity: 1 }]), null)
   assert.equal(refusal([line(3)], [{ sale_item_id: 1, quantity: 2 }], [{ sale_item_id: 1, quantity: 2 }]).message, 'Cannot return 4 of A — only 3 sold')
 })
-check('v0 status projection: 0.7 + 0.1 on a 0.8 line is returned, 0.7 alone is partial_return', () => {
-  assert.equal(subject.projectedSaleStatusForReturnCreate([line(0.8)], [{ sale_item_id: 1, quantity: 0.7 }], [{ sale_item_id: 1, quantity: 0.1 }], 'completed'), 'returned')
-  assert.equal(subject.projectedSaleStatusForReturnCreate([line(0.8)], [], [{ sale_item_id: 1, quantity: 0.7 }], 'completed'), 'partial_return')
-  assert.equal(subject.projectedSaleStatusForReturnCreate([line(0.8)], [], [{ product_id: 5, quantity: 0.7 }, { product_id: 5, quantity: 0.1 }], 'completed'), 'returned')
-  assert.equal(subject.projectedSaleStatusForReturnCreate([line(0.8)], [], [], 'awaiting_delivery'), 'awaiting_delivery')
+// 6.0.905: the projection is the return tag (full / partial / none), never a status word.
+check('v0 tag projection: 0.7 + 0.1 on a 0.8 line is full, 0.7 alone is partial', () => {
+  assert.equal(subject.projectedReturnStateForReturnCreate([line(0.8)], [{ sale_item_id: 1, quantity: 0.7 }], [{ sale_item_id: 1, quantity: 0.1 }]), 'full')
+  assert.equal(subject.projectedReturnStateForReturnCreate([line(0.8)], [], [{ sale_item_id: 1, quantity: 0.7 }]), 'partial')
+  assert.equal(subject.projectedReturnStateForReturnCreate([line(0.8)], [], [{ product_id: 5, quantity: 0.7 }, { product_id: 5, quantity: 0.1 }]), 'full')
+  assert.equal(subject.projectedReturnStateForReturnCreate([line(0.8)], [], []), null)
 })
 check('legacy remaining helper: 0.3 sold, 0.2 returned leaves exactly 0.1; a 0.1 request fits, 0.1000000001 does not', () => {
   assert.equal(subject.returnQuantityRemaining(0.3, [0.2]), 0.1)

@@ -18,7 +18,7 @@ import {
 // call the same function -- see the header note there for what changed and why.
 import {
   composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
-  SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
+  refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
@@ -3169,35 +3169,52 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
 // route just wrote, incl. the lot each line landed in and its branch) and the
 // resulting on-hand per product, so the route hands over only the header.
 type ReturnItemRow = { product_name: string | null; quantity: number; total_usd: number | null; stock_action: string | null; lot_code: string | null; received_at: string | null; branch_on_hand: number | null; total_on_hand: number | null }
-export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>): Promise<boolean> {
-  const db = getDb(env)
-  const [items, replacements] = await Promise.all([
-    db.prepare(`SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code, pb.received_at,
-        (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
-        (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
-      FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
-      WHERE ri.return_id = @returnId ORDER BY ri.id`).all<ReturnItemRow>({ returnId }),
-    db.prepare('SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id').all<{ product_name: string | null; quantity: number }>({ returnId }).catch(() => []),
-  ])
-  return sendTelegramEvent(env, {
-    // A customer return is the `returns` family (its own switch and topic);
-    // it is NOT also sent as a sale. A supplier return stays a stock-out.
-    type: base.kind === 'supplier' ? 'stock_out' : 'returns',
-    heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
-    lines: formatReturnTelegramLines({
-      ...base,
-      items: items.map((row) => ({
-        product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
-        refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
-        stockAction: base.kind === 'supplier' ? null : row.stock_action,
-        receivedDate: row.received_at,
-        lot: row.lot_code,
-        branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
-        totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
-      })),
-      replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
-    }),
-  })
+/**
+ * One settings read, then -- only when the return alert is on -- ONE read of
+ * the recorded lines and replacements. `after` (the replacement sale's own
+ * alert) goes out on the same settings read: an exchange is the costliest
+ * return request in D1 statements, so its notifications share what they can.
+ */
+export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>, after: TelegramEvent[] = []): Promise<boolean> {
+  const config = await getTelegramConfig(env)
+  // A customer return is the `returns` family (its own switch and topic);
+  // it is NOT also sent as a sale. A supplier return stays a stock-out.
+  const type: TelegramEventType = base.kind === 'supplier' ? 'stock_out' : 'returns'
+  let sent = false
+  if (telegramEventIsOn(config, type)) {
+    const recorded = await getDb(env).prepare(`SELECT
+        (SELECT json_group_array(json_object('product_name',product_name,'quantity',quantity,'total_usd',total_usd,'stock_action',stock_action,
+          'lot_code',lot_code,'received_at',received_at,'branch_on_hand',branch_on_hand,'total_on_hand',total_on_hand)) FROM (
+          SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code, pb.received_at,
+            (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
+            (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
+          FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
+          WHERE ri.return_id = @returnId ORDER BY ri.id)) AS items,
+        (SELECT json_group_array(json_object('product_name',product_name,'quantity',quantity)) FROM (
+          SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id)) AS replacements`)
+      .get<{ items: string | null; replacements: string | null }>({ returnId })
+    const items = JSON.parse(recorded?.items || '[]') as ReturnItemRow[]
+    const replacements = JSON.parse(recorded?.replacements || '[]') as Array<{ product_name: string | null; quantity: number }>
+    sent = await deliverTelegramEvent(config, {
+      type,
+      heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
+      lines: formatReturnTelegramLines({
+        ...base,
+        items: items.map((row) => ({
+          product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
+          refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
+          stockAction: base.kind === 'supplier' ? null : row.stock_action,
+          receivedDate: row.received_at,
+          lot: row.lot_code,
+          branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
+          totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
+        })),
+        replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
+      }),
+    }, {})
+  }
+  for (const event of after) await deliverTelegramEvent(config, event, {})
+  return sent
 }
 
 // ---- Return cancelled / restored (owner, 27 Sep 2026) ----------------------
@@ -3208,9 +3225,11 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
 // status NOW, so an undo of a cancel reports a restore without the caller
 // having to work out the direction.
 
+// refund*: the cash part only (what left, or comes back to, a drawer -- the shift drawer SQL); debtLoweredUsd: the
+// part that lowered a Not Paid sale's debt instead (returns.owed_reduction_usd).
 export type TelegramReturnStatusRow = {
   returnNumber: string; receiptNumber?: string | null; party?: string | null; branch?: string | null
-  refundUsd?: number | null; refundKhr?: number | null
+  refundUsd?: number | null; refundKhr?: number | null; debtLoweredUsd?: number | null
 }
 
 /**
@@ -3244,6 +3263,8 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
       ].filter(Boolean)))
     }
   }
+  const debtLowered = input.kind === 'customer' ? input.returns.reduce((sum, ret) => sum + (Number(ret.debtLoweredUsd) || 0), 0) : 0
+  if (debtLowered > 0) lines.push(`Debt lowered: ${usd(debtLowered)}`)
   if (input.by) lines.push(`By: ${input.by}`)
   return lines.filter(Boolean)
 }
@@ -3257,6 +3278,7 @@ type ReturnStatusDbRow = {
   id: number; return_number: string | null; status: string | null; return_scope: string | null
   receipt_number: string | null; customer_name: string | null; supplier_name: string | null
   branch_name: string | null; total_refund_usd: number | null; total_refund_khr: number | null
+  owed_reduction_usd: number | null; cash_usd: number | null; cash_khr: number | null
 }
 
 /**
@@ -3270,7 +3292,8 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
   if (!ids.length) return
   const rows = await getDb(env).prepare(`
     SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
-      ${branchHistoryNameSql('r.branch_name', 'b.name')} AS branch_name, r.total_refund_usd, r.total_refund_khr
+      ${branchHistoryNameSql('r.branch_name', 'b.name')} AS branch_name, r.total_refund_usd, r.total_refund_khr,
+      r.owed_reduction_usd, ${refundDrawerUsdSql('r')} AS cash_usd, ${refundDrawerKhrSql('r')} AS cash_khr
     FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
     WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
   `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })
@@ -3285,7 +3308,8 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
       receiptNumber: row.receipt_number,
       party: kind === 'supplier' ? row.supplier_name : row.customer_name,
       branch: row.branch_name,
-      refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr,
+      ...(kind === 'customer' ? { refundUsd: Number(row.cash_usd) || 0, refundKhr: Number(row.cash_khr) || 0, debtLoweredUsd: Number(row.owed_reduction_usd) || 0 }
+        : { refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr }),
     })
     groups.set(key, group)
   }

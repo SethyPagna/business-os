@@ -62,7 +62,9 @@ async function main() {
       const durable = f.raw.prepare('SELECT response_json FROM return_create_receipts').get()
       assert.deepEqual(result.body, JSON.parse(durable.response_json))
     }
-    if (scenario === 'cold-retries') assert.equal(observed.used(), 50, 'stock admission consumes the historical one-statement reserve within the Free limit')
+    // 6.0.905: the return alert reads its lines in one statement after the settings read (was two reads before it):
+    // four fewer attempts with transient retries, so the same worst case now lands at 46 of the Free 50.
+    if (scenario === 'cold-retries') assert.equal(observed.used(), 46, 'stock admission consumes the historical one-statement reserve within the Free limit')
     if (!rolledBack) {
       const retry = meter(f.raw, 50, 10)
       const replay = await request(retry.db, '/', f.body, f.env)

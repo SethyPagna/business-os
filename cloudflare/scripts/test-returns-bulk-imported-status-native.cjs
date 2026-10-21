@@ -37,7 +37,13 @@ async function main() {
       assert.equal(res.status, 200, `fixture return refused: ${JSON.stringify(res.body).slice(0, 200)}`)
       return Number(res.body.id)
     }
-    const status = async (fixture) => (await h.one('SELECT sale_status FROM sales WHERE id=?', fixture.sale.id)).sale_status
+    // 6.0.905 (owner, 20 Oct 2026): a return is the tag beside the payment state; the word it used to write is read off
+    // the tag, and sale_status never holds a return word.
+    const status = async (fixture) => {
+      const row = await h.one('SELECT sale_status,return_state FROM sales WHERE id=?', fixture.sale.id)
+      assert.ok(!['partial_return', 'returned'].includes(row.sale_status), `sale ${fixture.sale.id} carries a retired word: ${row.sale_status}`)
+      return row.return_state === 'full' ? 'returned' : row.return_state === 'partial' ? 'partial_return' : row.sale_status
+    }
     // The status the bulk action RECORDED for the sale (its Undo snapshot and record events are built from this value).
     const recorded = async (fixture) => {
       const rows = await h.all("SELECT payload_json FROM undo_snapshots WHERE kind='return.fields.bulk' ORDER BY id DESC")
