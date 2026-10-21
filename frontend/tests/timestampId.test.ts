@@ -59,7 +59,11 @@ await runTest('client and server generators stay hand-synced and wired in', asyn
   assert.doesNotMatch(saleWrite, /`RCP-\$\{/)
   assert.doesNotMatch(saleWrite, /`OFFLINE-\$\{/)
   const salesRoute = readRepo('cloudflare/src/routes/sales.ts')
-  assert.match(salesRoute, /normalizeClientReceiptNumber\(body\.receipt_number\) \|\| await uniqueBusinessDateTimeNumber\(/)
+  // Since 6.0.913 the server mint is started in parallel and used only when the
+  // client sent no valid number (full shape: test-receipt-number-format-pure.cjs).
+  assert.match(salesRoute, /const clientReceiptNumber = normalizeClientReceiptNumber\(body\.receipt_number\)/)
+  assert.match(salesRoute, /clientReceiptNumber \? null : readStarted\(uniqueBusinessDateTimeNumber\('', receiptNumberTaken\)\)/)
+  assert.match(salesRoute, /let receiptNumber = clientReceiptNumber \|\| await mintedReceiptNumberRead!/)
   // ...and returns mint RET-/SRET-<datetime> instead of Date.now() ids.
   const returnsTransport = readFrontend('src/api/returnsTransport.ts')
   assert.match(returnsTransport, /\$\{prefix\}-\$\{businessDateTimeId\(\)\}/)

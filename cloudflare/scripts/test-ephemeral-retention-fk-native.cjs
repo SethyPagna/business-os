@@ -54,8 +54,8 @@ async function main() {
         return Response.json({ result, errors });
       } finally { console.error = original }
     }}
-  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022' })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01',
+  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'] })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], r2Buckets: ['ASSETS'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')

@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict')
-const { execFileSync } = require('node:child_process')
+const crypto = require('node:crypto')
+const fs = require('node:fs')
+const path = require('node:path')
 const { Hono } = require('hono')
 const f = require('./test-stock-bridge-core-native.cjs')
 f.actor.permissions = JSON.stringify({ all: true })
@@ -9,9 +11,25 @@ const app = new Hono()
 app.route('/inventory', load('routes/inventory.ts').default)
 app.route('/returns', load('routes/returns.ts').default)
 app.onError((error, c) => c.json(executor.stockTransactionRefusal(error) || { error: error.message }, 503))
+// The pre-bridge Worker's routes, frozen in-tree: 9dec3a3ab is not an ancestor
+// of the release line, so a clean clone cannot `git show` it (gate 39570558134).
+// The fixtures are byte-for-byte those blobs; the git blob id pins provenance
+// without needing repository history (CRLF from a Windows checkout is undone).
+const FROZEN = {
+  'routes/inventory.ts': ['inventory.ts.txt', '9de315de59df423376ad85f3d7e48ceced760de5'],
+  'routes/returns.ts': ['returns.ts.txt', 'f1be6bb660c66ee1fafd61cb6e07db2eed7fb468'],
+}
+function frozenSource(file) {
+  const [name, blob] = FROZEN[file]
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'stock-bridge-9dec3a3ab', name), 'utf8').replace(/\r\n/g, '\n')
+  const bytes = Buffer.from(text, 'utf8')
+  const id = crypto.createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')
+  assert.equal(id, blob, `${name} must stay the 9dec3a3ab blob of cloudflare/src/${file}`)
+  return text
+}
 const frozen = new Hono()
-frozen.route('/inventory', load('routes/inventory.ts', execFileSync('git', ['show', '9dec3a3ab906ee2183db81f4205cb56f38a417ff:cloudflare/src/routes/inventory.ts'], { encoding: 'utf8' })).default)
-frozen.route('/returns', load('routes/returns.ts', execFileSync('git', ['show', '9dec3a3ab906ee2183db81f4205cb56f38a417ff:cloudflare/src/routes/returns.ts'], { encoding: 'utf8' })).default)
+frozen.route('/inventory', load('routes/inventory.ts', frozenSource('routes/inventory.ts')).default)
+frozen.route('/returns', load('routes/returns.ts', frozenSource('routes/returns.ts')).default)
 const physical = () => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','inventory_movements','action_history'].map(table => sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
 const total = () => Number(sql.prepare('SELECT quantity q FROM branch_stock WHERE product_id=1001 AND branch_id=1').get().q)
 const tagged = () => Number(sql.prepare('SELECT COALESCE(SUM(quantity_remaining),0) q FROM damaged_stock_lots WHERE product_id=1001').get().q)
