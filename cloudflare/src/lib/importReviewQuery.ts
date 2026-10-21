@@ -21,6 +21,21 @@ function escapeLike(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
+const KHMER_ZERO_CODE = 0x17e0
+
+// A scanner on the Windows Khmer layout types ០-៩ for 0-9. This is the ASCII
+// form of a lone code-shaped search that carries Khmer digits, or '' when no
+// fold applies (no Khmer digit, several words, or Khmer letters left after the
+// fold, so a Khmer name search stays a name search). Matched against the
+// identifier (sku/barcode) and barcode text only, besides the literal search.
+// Same fold as stockInSessionsQuery.ts's asciiCodeSearch; neither module can
+// import the other because their test loaders compile them alone.
+function asciiCodeSearch(search: string): string {
+  if (/\s/.test(search)) return ''
+  const folded = search.replace(/[\u17E0-\u17E9]/g, (digit) => String(digit.charCodeAt(0) - KHMER_ZERO_CODE))
+  return folded !== search && /^[!-~]+$/.test(folded) ? folded : ''
+}
+
 /** Builds only parameterized SQL; user search/warning text never enters SQL. */
 export function buildImportReviewWhere(filter: ImportReviewFilter): ImportReviewWhere {
   const clauses = [`job_id = @id`, `phase = 'analyze'`]
@@ -31,15 +46,22 @@ export function buildImportReviewWhere(filter: ImportReviewFilter): ImportReview
   }
   const query = String(filter.query || '').trim().toLowerCase().slice(0, 160)
   if (query) {
+    const codeQuery = asciiCodeSearch(query)
+    const codeMatches = codeQuery
+      ? `
+      OR LOWER(COALESCE(identifier, '')) LIKE @codeQuery ESCAPE '\\'
+      OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @codeQuery ESCAPE '\\'`
+      : ''
     clauses.push(`(
       LOWER(COALESCE(identifier, '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.name'), '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.phone'), '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.email'), '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.membership_number'), '')) LIKE @query ESCAPE '\\'
-      OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @query ESCAPE '\\'
+      OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @query ESCAPE '\\'${codeMatches}
     )`)
     params.query = `%${escapeLike(query)}%`
+    if (codeQuery) params.codeQuery = `%${escapeLike(codeQuery)}%`
   }
   const warningKinds = [...new Set(filter.warningKinds || [])].slice(0, 8)
   if (warningKinds.length) {

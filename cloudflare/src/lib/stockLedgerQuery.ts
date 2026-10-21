@@ -30,7 +30,7 @@ import { movementActorNameSql } from './movementActorName'
 // row's reference_id names -- see lib/movementReference.ts for the type
 // mapping and why the ambiguous types resolve by product membership.
 import { movementReferenceSelectSql } from './movementReference'
-import { STOCK_RECEIPT_MOVEMENT_TYPES, revertChainOpenSql } from './stockInSessionsQuery'
+import { STOCK_RECEIPT_MOVEMENT_TYPES, asciiCodeSearch, revertChainOpenSql } from './stockInSessionsQuery'
 
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -401,8 +401,17 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
     // literally, % and _ included.
-    base.push(`(m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\')`)
-    params.search = `%${search.replace(/([\\%_])/g, '\\$1')}%`
+    const likeParam = (text: string): string => `%${text.replace(/([\\%_])/g, '\\$1')}%`
+    const matches = [`m.product_name LIKE @search ESCAPE '\\'`, `p.barcode LIKE @search ESCAPE '\\'`]
+    params.search = likeParam(search)
+    // A Khmer-layout scan (០-៩) also finds the ASCII barcode; the name side
+    // keeps the search exactly as typed.
+    const codeSearch = asciiCodeSearch(search)
+    if (codeSearch) {
+      matches.push(`p.barcode LIKE @codeSearch ESCAPE '\\'`)
+      params.codeSearch = likeParam(codeSearch)
+    }
+    base.push(`(${matches.join(' OR ')})`)
   }
   const supplierId = Number(filters.supplierId) || 0
   if (supplierId > 0) {
