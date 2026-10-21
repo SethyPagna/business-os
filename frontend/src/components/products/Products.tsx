@@ -27,6 +27,8 @@ import AppSelect from '../shared/AppSelect'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
+import { findScanHit } from '../../utils/scanExactHit.ts'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { PINNED_BG, PINNED_BG_SELECTED, PINNED_CELL, ROW_TEXT_GUTTER, pinnedLeft } from './surfaces/ProductsListSurface'
@@ -791,7 +793,16 @@ type ProductRowCtx = {
   canEditPrices: boolean
   canEditSupplier: boolean
   soleBranchName: string
+  // The one row whose barcode is exactly what was scanned or typed (null when
+  // none, or when two rows share it): marked and scrolled to, never opened.
+  scanHitId: EntityId | null
 }
+
+// Classes for that row. A <tr> takes no ring, so the brass edge is an inset
+// shadow on every cell over a brass tint; the mobile card uses an inset
+// outline (the dark theme forces its own box-shadow on .card).
+const SCAN_HIT_ROW_CLASS = 'bg-primary-50 dark:bg-primary-900/20 [&>td]:[box-shadow:inset_0_2px_0_0_var(--ui-accent,#9c7a3c),inset_0_-2px_0_0_var(--ui-accent,#9c7a3c)]'
+const SCAN_HIT_CARD_CLASS = 'outline outline-2 -outline-offset-2 outline-primary-500'
 
 function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
   const {
@@ -801,9 +812,10 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct, openCostFloat, columns, canEditPrices, canEditSupplier, soleBranchName,
+    setDetailProduct, openCostFloat, columns, canEditPrices, canEditSupplier, soleBranchName, scanHitId,
   } = ctx
     const productId = p.id ?? 0
+    const scanHit = scanHitId !== null && p.id === scanHitId
     const productName = String(p.name || '')
     const sellingUsd = Number(p.selling_price_usd || 0)
     const sellingKhr = Number(p.selling_price_khr || 0)
@@ -889,7 +901,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     // hidden its value moves back to the name cell's tag line so nothing
     // disappears from the row.
     const shownColumns = new Set<string>(columns.map((column) => column.key))
-    const pinClass = `${PINNED_CELL} ${rowSelected ? PINNED_BG_SELECTED : PINNED_BG}`
+    const pinClass = `${PINNED_CELL} ${rowSelected || scanHit ? PINNED_BG_SELECTED : PINNED_BG}`
     // Barcode and brand are two of the four copyable product fields.
     // renderMetaPill stringifies its label, so the affordance cannot go inside
     // the pill -- this is the same wrapper ProductRowParts uses for the
@@ -1001,7 +1013,8 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
         // only: the CSS keyed on this attribute is scoped to
         // `.dense-data-table`, which this table is not.
         data-clickable="true"
-        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
+        data-scan-hit={scanHit ? 'true' : undefined}
+        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}${scanHit ? ` ${SCAN_HIT_ROW_CLASS}` : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
@@ -1141,9 +1154,10 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct, openCostFloat,
+    setDetailProduct, openCostFloat, scanHitId,
   } = ctx
     const productId = p.id ?? 0
+    const scanHit = scanHitId !== null && p.id === scanHitId
     const productName = String(p.name || '')
     const brandName = String(p.brand || '')
     const barcode = String(p.barcode || '')
@@ -1225,7 +1239,8 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
         data-product-jump-id={productId}
         // Same declaration as renderDesktopProductRow -- see its comment.
         data-clickable="true"
-        className={rowClassName}
+        data-scan-hit={scanHit ? 'true' : undefined}
+        className={scanHit ? `${rowClassName} ${SCAN_HIT_CARD_CLASS}` : rowClassName}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
@@ -1919,6 +1934,10 @@ function ProductsFullEditor() {
   // matching "stays until I search again" rather than "stays forever" or
   // "disappears on the very next silent refresh."
   const pinnedEditedProductsRef = useRef<Map<number, ProductRecord>>(new Map())
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  // The code of a scan whose exact match has not been revealed yet; typing clears it.
+  const pendingScanRef = useRef<string | null>(null)
+  const [scanRevealCount, setScanRevealCount] = useState(0)
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
@@ -4073,6 +4092,59 @@ function ProductsFullEditor() {
     pinnedEditedProductsRef.current.clear()
     setSearch(value)
   }, [])
+  const handleTypedSearch = useCallback((value: string) => {
+    pendingScanRef.current = null
+    handleSearchInputChange(value)
+  }, [handleSearchInputChange])
+  // The camera and the scanner gun fill the search exactly like typing does
+  // (pinned rows released too). A scan never opens or picks a row.
+  const applyScan = useCallback((code: string) => {
+    handleSearchInputChange(code)
+    pendingScanRef.current = code
+  }, [handleSearchInputChange])
+  useScannerWedge({
+    enabled: isActive,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      applyScan(code)
+      if (origin === 'field') notify(t('scan_moved_to_search'), 'info')
+    },
+  })
+
+  // The row whose barcode is exactly the searched one, across every category
+  // and name group (two rows sharing it single out nothing).
+  const scanHit = useMemo(
+    () => findScanHit(
+      productSections.flatMap((section) => section.groups.map((group) => ({ section, group }))),
+      ({ group }) => group.rows,
+      cleanedSearchQuery,
+    ),
+    [cleanedSearchQuery, productSections],
+  )
+  const scanHitId = scanHit?.row.id ?? null
+  // Name groups open collapsed and a category band can be collapsed, so a scan's
+  // row is opened first, then (next effect, once it exists) scrolled into view.
+  useEffect(() => {
+    const code = pendingScanRef.current
+    if (!code || !scanHit || debouncedSearch !== code) return
+    pendingScanRef.current = null
+    const { section, group } = scanHit.group
+    const without = (current: Set<string>, key: string) => {
+      if (!current.has(key)) return current
+      const next = new Set(current)
+      next.delete(key)
+      return next
+    }
+    setCollapsedProductSections((current) => without(current, section.id))
+    setCollapsedProductGroups((current) => without(current, group.key))
+    setScanRevealCount((count) => count + 1)
+  }, [debouncedSearch, scanHit])
+  useEffect(() => {
+    if (scanRevealCount === 0) return
+    // The table and the card list both render the row; only one is displayed.
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-scan-hit="true"]'))
+    scrollNodeWithOffset(nodes.find((node) => node.getClientRects().length > 0) ?? null)
+  }, [scanRevealCount])
 
   const handleLookupReviewSelection = useCallback((selection: { type?: unknown; value?: unknown }) => {
     const type = String(selection?.type || '').toLowerCase()
@@ -4809,8 +4881,8 @@ function ProductsFullEditor() {
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
     setDetailProduct,
     openCostFloat: setCostFloatProduct,
-    columns: productColumns, canEditPrices, canEditSupplier, soleBranchName,
-  }), [productColumns, canEditPrices, canEditSupplier, soleBranchName, branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
+    columns: productColumns, canEditPrices, canEditSupplier, soleBranchName, scanHitId,
+  }), [scanHitId, productColumns, canEditPrices, canEditSupplier, soleBranchName, branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
     <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />
@@ -5144,12 +5216,13 @@ function ProductsFullEditor() {
               id="products-search"
               name="products_search"
               value={search}
-              onChange={handleSearchInputChange}
+              onChange={handleTypedSearch}
+              inputRef={searchInputRef}
               placeholder={t('search_products_placeholder') || `${t('search') || 'Search'} products`}
               title={t('search_comma_tip') || 'Comma separates OR-groups \u00b7 space = AND within a group'}
               inputClassName="text-sm"
             />
-            <ScanSearchButton onDetected={setSearch} t={t} />
+            <ScanSearchButton onDetected={applyScan} t={t} />
             {/* AND/OR toggle removed (Aug 19 2026 UI request): matching
                 ALL terms is now the only mode -- search always behaves as
                 if this were locked to 'AND'. searchMode state/plumbing

@@ -5,9 +5,11 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
+import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { isExactBarcodeHit } from '../../utils/scanExactHit.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
 import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFreshness.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
@@ -199,6 +201,10 @@ interface ProductDetailSheetProps {
   /** POS shows selling prices in USD and never exposes product costs. */
   posPresentation?: boolean
   product: ProductRecord
+  // What the search box holds. When it is a lone barcode, the option whose
+  // barcode is exactly that is marked (and its page opened). Marked, never
+  // chosen: a scan does not pick a row.
+  scanQuery?: string
   exchangeRate: number
   t: Translate
   fmtUSD: CurrencyFormatter
@@ -267,6 +273,7 @@ interface ProductDetailSheetProps {
 export default function ProductDetailSheet({
   posPresentation = false,
   product,
+  scanQuery = '',
   exchangeRate,
   t,
   fmtUSD,
@@ -476,6 +483,12 @@ export default function ProductDetailSheet({
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE,
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE + VARIANT_CHOICES_PAGE_SIZE,
   )
+  // Open on the page that holds the searched barcode so its mark is on screen.
+  // Declared after the reset effect above, so it wins when the product changes.
+  const scanHitIndex = scanQuery ? candidatePool.findIndex((variant) => isExactBarcodeHit(variant, scanQuery)) : -1
+  useEffect(() => {
+    if (scanHitIndex >= 0) setBarcodePage(Math.floor(scanHitIndex / VARIANT_CHOICES_PAGE_SIZE))
+  }, [product?.id, scanHitIndex])
   const effectiveVariantInStock = effectiveVariant ? effectiveVariantStock > asNumber(effectiveVariant.out_of_stock_threshold) : false
   const effectiveVariantPromoBadge = promotionBadgeForProduct(effectiveVariant || undefined, promotionRules)
   const effectiveVariantPromoEvaluation = evaluatePromotionPricing(effectiveVariant || undefined, 1, promotionRules, exchangeRate)
@@ -934,13 +947,17 @@ export default function ProductDetailSheet({
                     const variantStock = getVariantStockForBranch(variant, effectiveBranchId)
                     const variantOut = variantStock <= asNumber(variant.out_of_stock_threshold)
                     const optionLabel = variantOptionLabels.byId.get(String(variant.id))
+                    const scanned = scanHitIndex >= 0 && isExactBarcodeHit(variant, scanQuery)
                     return (
                       <button
                         key={variant.id}
                         type="button"
-                        className={pillClass(String(variant.id) === String(effectiveVariant?.id), variantOut)}
+                        className={`${pillClass(String(variant.id) === String(effectiveVariant?.id), variantOut)}${scanned ? ' outline outline-2 outline-offset-1 outline-primary-500' : ''}`}
+                        aria-current={scanned ? 'true' : undefined}
+                        data-scan-hit={scanned ? 'true' : undefined}
                         onClick={() => setSelectedVariantId(String(variant.id))}
                       >
+                        {scanned ? <ScanLine className="mr-1 inline h-3 w-3 align-[-2px]" aria-hidden="true" /> : null}
                         {variant.__variantLabel ? <span className="mr-1 opacity-75">{variant.__variantLabel}</span> : null}
                         <span className="font-mono">{optionLabel?.label || posCopy('No barcode', 'គ្មានបាកូដ')}</span>
                         {optionLabel?.hint ? <span className="ml-1 text-[10px] font-normal opacity-75">{optionLabel.hint}</span> : null}

@@ -7733,5 +7733,6 @@
   "remove_divider": "Remove divider",
   "payment_method_new_name": "New name",
   "receipt_aba_payment_qr_alt": "ABA payment QR",
+  "scan_moved_to_search": "Barcode moved to search",
   "sale_mark_delivered": "Mark delivered"
 }
