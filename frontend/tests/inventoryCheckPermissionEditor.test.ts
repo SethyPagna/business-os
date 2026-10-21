@@ -29,7 +29,7 @@ try {
   assert.equal(changed.inventory_check_show_stock, true)
   await surface.render({ ...props, permissions: { inventory: 'review' } })
   await surface.click(surface.button(/Show recorded stock/, section()))
-  assert.equal(changed.inventory, 'review', 'a field toggle preserves Partial Access')
+  assert.equal(changed.inventory, 'review', 'a field toggle preserves Review')
   assert.equal(changed.inventory_check_show_stock, true)
   const access = getInventoryCheckAccess({ permissions: JSON.stringify(changed) })
   assert.equal(access.fields.stock, true)
@@ -38,5 +38,5 @@ try {
   await surface.click(surface.button('None', section()))
   assert.equal(getInventoryCheckAccess({ permissions: JSON.stringify(changed) }).canView, false)
   await surface.unmount()
-  console.log('PASS Inventory permission editor preserves inherited defaults, explicit hidden fields and Partial Access')
+  console.log('PASS Inventory permission editor preserves inherited defaults, explicit hidden fields and Review')
 } finally { await harness.close() }

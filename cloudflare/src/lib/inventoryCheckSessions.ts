@@ -2,15 +2,17 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { buildInventoryCheckStockQuery, readInventoryCheckStock, type InventoryCheckStockRow } from './inventoryCheckStock'
+import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
 import { stockVisibleProductSql } from './productStockGuard'
 import { actorSnapshot } from './actorSnapshot'
+import { localDateExpr } from './businessDateWindow'
 
 export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
+export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null }
 export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
 type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
 type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
@@ -45,12 +47,17 @@ export async function currentInventoryCheckActor(db: D1Compat, principal: Invent
   if (!access.canView || write && !access.canCheck) fail(403, 'inventory_check_permission_required')
   return { ...actor, tokenHash: principal.tokenHash }
 }
+// Positive-only per-isolate memos: a miss re-probes, so a migration that lands later is seen on the next request.
+let checkSchemaReady = false
+let physicalSignature: string | undefined
 async function schemaReady(db: D1Compat): Promise<void> {
+  if (checkSchemaReady) return
   const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (
     'inventory_check_sessions','inventory_check_items','inventory_check_events','inventory_check_events_no_update',
     'inventory_check_events_no_delete','inventory_check_sessions_identity','inventory_check_sessions_no_delete',
     'inventory_check_items_baseline','inventory_check_items_no_delete')`).get<{ n: number }>()
   if (ready?.n !== 9) fail(503, 'inventory_check_schema_unavailable')
+  checkSchemaReady = true
 }
 const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
 function authorityGuard(actor: Actor): Statement {
@@ -82,6 +89,8 @@ async function progress(db: D1Compat, id: string) {
   const row = await db.prepare(`SELECT COUNT(*) AS total,SUM(state='unstarted') AS unstarted,SUM(state='done') AS done,SUM(state='issue') AS issue FROM inventory_check_items WHERE session_id=@id`).get<Record<string, number>>({ id })
   return { total: Number(row?.total || 0), unstarted: Number(row?.unstarted || 0), done: Number(row?.done || 0), issue: Number(row?.issue || 0) }
 }
+// One rule for who may see a staff member's name on any Inventory check surface (history actor_name, session creator_name).
+const canSeeStaffIdentity = (actor: Actor, accountId: number): boolean => isAdminControlUser(actor) || hasPermission(actor,'audit_log') || accountId === actor.id
 async function projectSession(db: D1Compat, actor: Actor, row: SessionRow, counts?: InventoryCheckSession['progress']): Promise<InventoryCheckSession> {
   const scope = parse(row.scope_json), access = getInventoryCheckAccess(actor)
   if (!access.fields.brand) delete scope.brand
@@ -123,23 +132,42 @@ export async function getInventoryCheckSession(db: D1Compat, principal: Inventor
   const byId = new Map(current.map(row => [row.product_id, row]))
   return { item: await projectSession(db, actor, session), items: items.map(item => projectObservation(actor, item, session.created_by === actor.id, byId.get(item.product_id))) }
 }
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+function businessDay(value: unknown): string | null {
+  if (value == null || value === '') return null
+  if (typeof value !== 'string' || !ISO_DAY.test(value)) return fail(400, 'inventory_check_invalid_filter')
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10) !== value ? fail(400, 'inventory_check_invalid_filter') : value
+}
+function sessionListFilters(query: Record<string, string>) {
+  const status = query.status == null || query.status === '' ? null : query.status === 'open' || query.status === 'closed' ? query.status : fail(400, 'inventory_check_invalid_filter')
+  const mine = query.mine == null || query.mine === '' || query.mine === '0' ? 0 : query.mine === '1' ? 1 : fail(400, 'inventory_check_invalid_filter')
+  const startDate = businessDay(query.startDate), endDate = businessDay(query.endDate)
+  if (startDate && endDate && startDate > endDate) fail(400, 'inventory_check_invalid_filter')
+  return { status, mine, startDate, endDate }
+}
 export async function listInventoryCheckSessions(db: D1Compat, principal: InventoryCheckPrincipal, query: Record<string, string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const page = pageNumber(query.page, 1, 100000), pageSize = pageNumber(query.pageSize, 20, 100)
   const branchId = query.branchId ? positive(Number(query.branchId)) : null
+  const filters = sessionListFilters(query)
   const organization = actor.organization_id
-  const params = { organization, branchId, limit: pageSize, offset: (page-1)*pageSize }
-  const where = 'organization_id IS @organization AND (@branchId IS NULL OR branch_id=@branchId)'
+  // Filters run before LIMIT so the page total counts every matching session. started_at is a UTC instant; the day filter is the Cambodia business day.
+  const params = { organization, branchId, ...filters, actorId: actor.id, limit: pageSize, offset: (page-1)*pageSize }
+  const where = `organization_id IS @organization AND (@branchId IS NULL OR branch_id=@branchId) AND (@status IS NULL OR status=@status)
+    AND (@mine=0 OR created_by=@actorId) AND (@startDate IS NULL OR ${localDateExpr('started_at')}>=@startDate) AND (@endDate IS NULL OR ${localDateExpr('started_at')}<=@endDate)`
   const [count, rows] = await db.batch([{ sql: `SELECT COUNT(*) AS total FROM inventory_check_sessions WHERE ${where}`, params },
     { sql: `WITH page AS (SELECT * FROM inventory_check_sessions WHERE ${where} ORDER BY updated_at DESC,id DESC LIMIT @limit OFFSET @offset)
-      SELECT page.*,COUNT(i.product_id) AS item_total,SUM(i.state='unstarted') AS item_unstarted,SUM(i.state='done') AS item_done,SUM(i.state='issue') AS item_issue
-      FROM page LEFT JOIN inventory_check_items i ON i.session_id=page.id GROUP BY page.id ORDER BY page.updated_at DESC,page.id DESC`, params }])
+      SELECT page.*,b.name AS branch_name,u.username AS creator_username,COUNT(i.product_id) AS item_total,SUM(i.state='unstarted') AS item_unstarted,SUM(i.state='done') AS item_done,SUM(i.state='issue') AS item_issue
+      FROM page LEFT JOIN inventory_check_items i ON i.session_id=page.id LEFT JOIN branches b ON b.id=page.branch_id LEFT JOIN users u ON u.id=page.created_by
+      GROUP BY page.id ORDER BY page.updated_at DESC,page.id DESC`, params }])
   actor = await currentInventoryCheckActor(db, principal)
   if (actor.organization_id !== organization) fail(403, 'inventory_check_authority_changed')
-  const items = []
+  const items: InventoryCheckSessionListItem[] = []
   for (const raw of rows.results || []) {
-    const row = raw as SessionRow & { item_total: number; item_unstarted: number; item_done: number; item_issue: number }
-    items.push(await projectSession(db, actor, row, { total: Number(row.item_total), unstarted: Number(row.item_unstarted), done: Number(row.item_done), issue: Number(row.item_issue) }))
+    const row = raw as SessionRow & { branch_name: string | null; creator_username: string | null; item_total: number; item_unstarted: number; item_done: number; item_issue: number }
+    const session = await projectSession(db, actor, row, { total: Number(row.item_total), unstarted: Number(row.item_unstarted), done: Number(row.item_done), issue: Number(row.item_issue) })
+    items.push({ ...session, branch_name: row.branch_name ?? null, ...(canSeeStaffIdentity(actor, row.created_by) ? { creator_name: row.creator_username ?? null } : {}) })
   }
   return { items, page, pageSize, total: Number((count.results?.[0] as { total: number })?.total || 0) }
 }
@@ -170,7 +198,10 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
   catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
-    if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
+    if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
+      physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
+      fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
+    }
     try {
       const fresh = await currentInventoryCheckActor(db, principal, true)
       const recovered = await receipt(db, fresh, key, hash)
@@ -222,18 +253,25 @@ async function committedSessionProjection(db: D1Compat, principal: InventoryChec
     return {item:summary,observation:projectObservation(actor,item,session.created_by===actor.id,current)}
   } catch { return fail(503,'inventory_check_outcome_unknown') }
 }
+// One sqlite_master pass for the stock tables and the epoch guards; the write guards compare it inside the transaction.
 const PHYSICAL_SCHEMA_SQL = `SELECT json_object('epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'),
   'epoch_present',(SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch'),
-  'tables',(SELECT json_group_array(sql) FROM (SELECT sql FROM sqlite_master WHERE type='table' AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') ORDER BY name)),
-  'guards',(SELECT json_group_array(json_object('name',name,'sql',sql)) FROM (SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'stock_epoch_%_0243' ORDER BY name))) AS signature`
+  'objects',(SELECT json_group_array(json_array(type,name,sql)) FROM (SELECT type,name,sql FROM sqlite_master
+    WHERE type='table' AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') OR type='trigger' AND name LIKE 'stock_epoch_%_0243'
+    ORDER BY type,name))) AS signature`
+// The remembered signature was read with a full structure validation; a fresh one is read with a fresh validation too.
 async function validatedStockSnapshot(db: D1Compat, branchId: number, productIds: number[]) {
-  let signature: string | undefined
+  const known = physicalSignature
+  if (!known) resetInventoryCheckStockSchemaMemo()
+  let signature = known
   const rows = await readInventoryCheckStock({batch:async statements=>{
-    const results=await db.batch([...statements,{sql:PHYSICAL_SCHEMA_SQL}])
-    signature=(results[statements.length]?.results?.[0] as {signature?:string})?.signature
+    const results=await db.batch(known ? statements : [...statements,{sql:PHYSICAL_SCHEMA_SQL}])
+    if (!known) signature=(results[statements.length]?.results?.[0] as {signature?:string})?.signature
     return results.slice(0,statements.length)
   }},{branchId,productIds})
-  return {rows,signature:signature ?? fail(503,'inventory_check_stock_schema_unavailable')}
+  if (!signature) return fail(503,'inventory_check_stock_schema_unavailable')
+  physicalSignature = signature
+  return {rows,signature}
 }
 const LOW_STOCK_ROWS_SQL = `SELECT key,value FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_threshold_default') ORDER BY key`
 const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'value',value)) FROM (${LOW_STOCK_ROWS_SQL})`
@@ -365,19 +403,23 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
   const page = pageNumber(query.page,1,100000), pageSize = pageNumber(query.pageSize,20,100)
-  const rows = await db.prepare('SELECT * FROM inventory_check_events WHERE session_id=@id ORDER BY id DESC LIMIT @limit OFFSET @offset').all<EventRow>({ id, limit: pageSize, offset: (page-1)*pageSize })
+  // product_name is the session's frozen starting name (never a live products lookup), so renames, merges and deletes cannot change or leak it.
+  const rows = await db.prepare(`SELECT e.*,json_extract(i.product_snapshot_json,'$.name') AS product_name FROM inventory_check_events e
+    LEFT JOIN inventory_check_items i ON i.session_id=e.session_id AND i.product_id=e.product_id AND i.branch_id=@branchId
+    WHERE e.session_id=@id ORDER BY e.id DESC LIMIT @limit OFFSET @offset`).all<EventRow & { product_name: string | null }>({ id, branchId: session.branch_id, limit: pageSize, offset: (page-1)*pageSize })
   const count = await db.prepare('SELECT COUNT(*) AS total FROM inventory_check_events WHERE session_id=@id').get<{ total: number }>({ id })
   actor = await currentInventoryCheckActor(db, principal)
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
-  const showCount = getInventoryCheckAccess(actor).fields.stock || session.created_by === actor.id
+  const access = getInventoryCheckAccess(actor), showCount = access.fields.stock || session.created_by === actor.id
   return { items: rows.map(row => {
     const project = (json: string) => {
       const parsed = JSON.parse(json) as Record<string, unknown> | null
       if (!parsed) return null
       return Object.fromEntries(['state','reason','revision','status','members', ...(showCount ? ['counted_quantity'] : [])].filter(key => Object.hasOwn(parsed,key)).map(key => [key, parsed[key]]))
     }
-    return { id: row.id, session_id: row.session_id, product_id: row.product_id, actor_id: row.actor_id,
-      ...(isAdminControlUser(actor) || hasPermission(actor,'audit_log') || row.actor_id === actor.id ? { actor_name: row.actor_name } : {}),
+    const productName = projectInventoryCheckProduct({ name: row.product_name }, access).name
+    return { id: row.id, session_id: row.session_id, product_id: row.product_id, product_name: typeof productName === 'string' ? productName : null, actor_id: row.actor_id,
+      ...(canSeeStaffIdentity(actor, row.actor_id) ? { actor_name: row.actor_name } : {}),
       action: row.action, created_at: row.created_at, before: project(row.before_json), after: project(row.after_json) }
   }), total: Number(count?.total || 0), page, pageSize }
 }

@@ -3,6 +3,8 @@ import type { ChangeEvent, ReactNode } from 'react'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import Flashlight from 'lucide-react/dist/esm/icons/flashlight.js'
+import FlashlightOff from 'lucide-react/dist/esm/icons/flashlight-off.js'
 import Keyboard from 'lucide-react/dist/esm/icons/keyboard.js'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
@@ -11,22 +13,23 @@ import { deriveScannerPresentation } from './barcodeScannerState.ts'
 import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
 import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
 import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
+import {
+  RETAIL_BARCODE_FORMATS,
+  createFrameGrabber,
+  createReadConfirmer,
+  loadLumaDecoder,
+  runDecodeLadder,
+  type LumaDecoder,
+} from './barcodeFrameDecoder.ts'
 
-const KNOWN_FORMATS = [
-  'aztec',
-  'codabar',
-  'code_128',
-  'code_39',
-  'code_93',
-  'data_matrix',
-  'ean_13',
-  'ean_8',
-  'itf',
-  'pdf417',
-  'qr_code',
-  'upc_a',
-  'upc_e',
-]
+// Per-tick CPU for the ZXing ladder. The first step always runs; later steps
+// only while under budget, and the next tick waits at least as long as this
+// one took, so decoding never holds more than about half the main thread.
+const ZXING_TICK_BUDGET_MS = 40
+const NATIVE_TICK_INTERVAL_MS = 250
+// Some Android BarcodeDetector builds never see a low-contrast foil code;
+// after this many empty native frames the ZXing ladder joins in.
+const NATIVE_MISSES_BEFORE_ZXING = 6
 
 // One constraints object for both decoders. The native BarcodeDetector loop and
 // the ZXing fallback open the SAME camera from the SAME single getUserMedia
@@ -35,8 +38,10 @@ const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
   video: {
     facingMode: { ideal: 'environment' },
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
+    // Thin bars on a small box need pixels; `ideal` lets a camera that cannot
+    // do 1080p fall back to its best mode instead of failing.
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
   },
 }
 
@@ -60,6 +65,7 @@ interface BarcodeScannerModalProps {
 
 interface BarcodeDetectionResult {
   rawValue?: unknown
+  format?: unknown
 }
 
 interface NativeBarcodeDetector {
@@ -71,25 +77,9 @@ interface NativeBarcodeDetectorConstructor {
   getSupportedFormats?: () => Promise<unknown[]>
 }
 
-interface ZxingControls {
-  stop?: () => void
-}
-
-interface ZxingReader {
-  reset?: () => void
-  /** Decode from a stream this component already owns. `decodeFromConstraints`
-   * is deliberately NOT used: it calls getUserMedia itself, which would put the
-   * permission prompt behind the decoder's own chunk download. */
-  decodeFromStream: (
-    stream: MediaStream,
-    element: HTMLVideoElement,
-    callback: (result: { getText?: () => unknown } | null) => void,
-  ) => Promise<ZxingControls>
-}
-
-interface ZxingModule {
-  BrowserMultiFormatReader: new () => ZxingReader
-}
+// Torch and focus are not in the DOM lib's track types yet.
+type CameraTrackCapabilities = MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] }
+type CameraConstraintSet = MediaTrackConstraintSet & { torch?: boolean; focusMode?: string }
 
 interface ScannerLabels {
   scanReady: string
@@ -113,6 +103,9 @@ interface ScannerLabels {
   useValue: string
   scanning: string
   cameraDocumentBlocked: string
+  torchOn: string
+  torchOff: string
+  torchFailed: string
 }
 
 interface ScannerStateBadge {
@@ -157,14 +150,19 @@ export default function BarcodeScannerModal({
   const streamRef = useRef<MediaStream | null>(null)
   const frameRef = useRef<number | null>(null)
   const detectorRef = useRef<NativeBarcodeDetector | null>(null)
-  const zxingReaderRef = useRef<ZxingReader | null>(null)
-  const zxingControlsRef = useRef<ZxingControls | null>(null)
+  const lumaDecoderRef = useRef<LumaDecoder | null>(null)
+  const lumaDecoderLoadingRef = useRef(false)
+  const ladderStepRef = useRef(0)
+  const nativeMissesRef = useRef(0)
+  const confirmReadRef = useRef(createReadConfirmer())
+  const [grabFrame] = useState(() => createFrameGrabber())
+  const trackRef = useRef<MediaStreamTrack | null>(null)
   const permissionCleanupRef = useRef<() => void>(() => {})
   const photoInputRef = useRef<HTMLInputElement | null>(null)
   const startTokenRef = useRef(0)
   const startSequenceRef = useRef(0)
   const detectionHandledRef = useRef(false)
-  const lastScanAtRef = useRef(0)
+  const nextScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
   // Seeded from `open` rather than 'idle': the modal is only ever mounted by
   // the tap on a scanner button, and that tap already starts the camera (see
@@ -176,6 +174,9 @@ export default function BarcodeScannerModal({
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
   const [photoBusy, setPhotoBusy] = useState(false)
+  const [torchAvailable, setTorchAvailable] = useState(false)
+  const [torchOn, setTorchOn] = useState(false)
+  const [torchFailed, setTorchFailed] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -210,6 +211,9 @@ export default function BarcodeScannerModal({
     detectedValue: tr('detected_value', 'Detected value', 'តម្លៃដែលបានរកឃើញ'),
     useValue: tr('use_value', 'Use value', 'ប្រើតម្លៃនេះ'),
     scanning: tr('scanning', 'Scanning...', 'កំពុងស្កេន...'),
+    torchOn: tr('scanner_torch_on', 'Turn on flashlight', 'បើកភ្លើងពិល'),
+    torchOff: tr('scanner_torch_off', 'Turn off flashlight', 'បិទភ្លើងពិល'),
+    torchFailed: tr('scanner_torch_failed', 'The flashlight could not be switched.', 'មិនអាចប្ដូរភ្លើងពិលបានទេ។'),
     cameraDocumentBlocked: hideManualEntry
       ? tr('camera_document_blocked_no_manual', 'This view does not allow camera access. Open this page in your regular browser to scan.', 'ទិដ្ឋភាពនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតា ដើម្បីស្កេន។')
       : tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular phone browser to scan, or use manual entry below.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតានៅលើទូរស័ព្ទរបស់អ្នក ដើម្បីស្កេន ឬបញ្ចូលដោយដៃខាងក្រោម។'),
@@ -238,13 +242,18 @@ export default function BarcodeScannerModal({
       cancelAnimationFrame(frameRef.current)
       frameRef.current = null
     }
-    try { zxingControlsRef.current?.stop?.() } catch (_) {}
-    zxingControlsRef.current = null
-    try { zxingReaderRef.current?.reset?.() } catch (_) {}
-    zxingReaderRef.current = null
     stopStream(streamRef.current)
     streamRef.current = null
+    trackRef.current = null
     detectorRef.current = null
+    lumaDecoderRef.current = null
+    lumaDecoderLoadingRef.current = false
+    ladderStepRef.current = 0
+    nativeMissesRef.current = 0
+    confirmReadRef.current = createReadConfirmer()
+    setTorchAvailable(false)
+    setTorchOn(false)
+    setTorchFailed(false)
     const video = videoRef.current
     if (video) {
       try { video.pause() } catch (_) {}
@@ -269,29 +278,80 @@ export default function BarcodeScannerModal({
     }
   }, [cleanup, onClose, onDetected])
 
+  // One loop for both decoders. Native BarcodeDetector reads are trusted on
+  // their own; ZXing reads must agree twice in a row (createReadConfirmer) and
+  // EAN/UPC must pass the check digit, so a smudged frame cannot pick the
+  // wrong product. ZXing works on frames this loop grabs from our own video
+  // element, never on a camera of its own.
   const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
     const scanToken = startTokenRef.current
-    if (!detector || !video || !scanToken || detectionHandledRef.current) return
+    if (!video || !scanToken || detectionHandledRef.current) return
 
-    try {
-      const now = Date.now()
-      if (video.readyState >= 2 && (now - lastScanAtRef.current) > 250) {
-        lastScanAtRef.current = now
-        const results = await detector.detect(video)
-        if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-        const raw = String(results?.[0]?.rawValue || '').trim()
-        if (raw) {
-          completeDetection(raw, scanToken)
-          return
+    const now = Date.now()
+    if (video.readyState >= 2 && video.videoWidth > 0 && now >= nextScanAtRef.current) {
+      nextScanAtRef.current = now + NATIVE_TICK_INTERVAL_MS
+      let accepted: string | null = null
+      if (detector) {
+        try {
+          const results = await detector.detect(video)
+          if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
+          for (const result of results || []) {
+            accepted = confirmReadRef.current({ text: String(result?.rawValue || '').trim(), format: String(result?.format || '') }, 'native')
+            if (accepted) break
+          }
+        } catch (_) {
+          // A frame the detector cannot read yet (still decoding, resized)
+          // is a miss like any other; the next tick tries again.
+        }
+        nativeMissesRef.current = accepted ? 0 : nativeMissesRef.current + 1
+        if (!accepted && nativeMissesRef.current >= NATIVE_MISSES_BEFORE_ZXING && !lumaDecoderLoadingRef.current) {
+          lumaDecoderLoadingRef.current = true
+          loadLumaDecoder().then(
+            (decode) => { if (startTokenRef.current === scanToken) lumaDecoderRef.current = decode },
+            (loadError) => console.error('[scanner] ZXing fallback failed to load; native detection continues.', loadError),
+          )
         }
       }
-    } catch (_) {}
+      const decode = lumaDecoderRef.current
+      if (!accepted && decode) {
+        const started = Date.now()
+        try {
+          const { read, nextStep } = runDecodeLadder(grabFrame(video, video.videoWidth, video.videoHeight), decode, {
+            startStep: ladderStepRef.current,
+            deadline: started + ZXING_TICK_BUDGET_MS,
+          })
+          ladderStepRef.current = nextStep
+          accepted = confirmReadRef.current(read, 'zxing')
+        } catch (decodeError) {
+          console.error('[scanner] ZXing frame decode failed.', decodeError)
+        }
+        const spent = Date.now() - started
+        nextScanAtRef.current = Date.now() + Math.max(detector ? NATIVE_TICK_INTERVAL_MS : 0, spent)
+      }
+      if (accepted) {
+        completeDetection(accepted, scanToken)
+        return
+      }
+    }
 
     if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
     frameRef.current = requestAnimationFrame(scanFrame)
-  }, [completeDetection])
+  }, [completeDetection, grabFrame])
+
+  const toggleTorch = useCallback(async (): Promise<void> => {
+    const track = trackRef.current
+    if (!track) return
+    const next = !torchOn
+    setTorchFailed(false)
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as CameraConstraintSet] })
+      if (trackRef.current === track) setTorchOn(next)
+    } catch (_) {
+      if (trackRef.current === track) setTorchFailed(true)
+    }
+  }, [torchOn])
 
   const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
     const startToken = ++startSequenceRef.current
@@ -300,7 +360,7 @@ export default function BarcodeScannerModal({
     setStatus('starting')
     setError('')
     if (!preserveManualValue) setManualValue('')
-    lastScanAtRef.current = 0
+    nextScanAtRef.current = 0
 
     if (
       typeof window === 'undefined' ||
@@ -355,6 +415,15 @@ export default function BarcodeScannerModal({
       // load can never leave the camera light on.
       streamRef.current = stream
       setPermissionState('granted')
+      const [track] = stream.getVideoTracks?.() || []
+      trackRef.current = track || null
+      const capabilities = (track?.getCapabilities?.() || {}) as CameraTrackCapabilities
+      setTorchAvailable(capabilities.torch === true)
+      if (capabilities.focusMode?.includes('continuous')) {
+        // Best effort: a camera that refuses keeps its default focus, which is
+        // how every scan worked before this hint existed.
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as CameraConstraintSet] }).catch(() => {})
+      }
       video.srcObject = stream
       await video.play()
       if (startTokenRef.current !== startToken) return
@@ -363,44 +432,30 @@ export default function BarcodeScannerModal({
       if (NativeBarcodeDetector) {
         const supported = typeof NativeBarcodeDetector.getSupportedFormats === 'function'
           ? await NativeBarcodeDetector.getSupportedFormats()
-          : KNOWN_FORMATS
+          : RETAIL_BARCODE_FORMATS
         if (startTokenRef.current !== startToken) return
         const formats = (supported || [])
           .map((item) => String(item || ''))
-          .filter((item) => KNOWN_FORMATS.includes(item))
-        detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
+          .filter((item) => RETAIL_BARCODE_FORMATS.includes(item))
+        detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : RETAIL_BARCODE_FORMATS })
         setStatus('scanning')
         frameRef.current = requestAnimationFrame(scanFrame)
         return
       }
 
       // No native detector: load the compatibility decoder now that the camera
-      // is already live, and hand it the stream instead of letting it open its
-      // own. decodeFromStream is exactly what decodeFromConstraints calls once
-      // it has a stream, so this is the same supported path minus its
-      // getUserMedia.
-      const { BrowserMultiFormatReader } = await import('@zxing/browser') as unknown as ZxingModule
+      // is already live. It reads frames the scan loop grabs from this video
+      // element, so it never opens a camera of its own (decodeFromConstraints
+      // would put the permission prompt behind this chunk download).
+      const decode = await loadLumaDecoder()
       if (startTokenRef.current !== startToken) return
-      const reader = new BrowserMultiFormatReader()
-      zxingReaderRef.current = reader
-      const controls = await reader.decodeFromStream(
-        stream,
-        video,
-        (result) => {
-          const raw = String(result?.getText?.() || '').trim()
-          if (!raw) return
-          completeDetection(raw, startToken)
-        },
-      )
-      if (startTokenRef.current !== startToken) {
-        try { controls?.stop?.() } catch (_) {}
-        return
-      }
-      zxingControlsRef.current = controls
+      lumaDecoderRef.current = decode
+      lumaDecoderLoadingRef.current = true
       // permissionState was already set to 'granted' by the single acquisition
       // above -- both decoders share it now, so it is not repeated per branch.
       setStatus('scanning')
       setError(labels.scanFallbackActive)
+      frameRef.current = requestAnimationFrame(scanFrame)
     } catch (scanError) {
       const scanErrorText = getScanErrorText(scanError)
       const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
@@ -426,8 +481,8 @@ export default function BarcodeScannerModal({
     labels.cameraPermissionBlocked,
     labels.scanFailed,
     labels.scanPermissionDenied,
+    labels.scanFallbackActive,
     labels.scanUnsupported,
-    completeDetection,
     scanFrame,
     tr,
     waitForVideoElement,
@@ -664,8 +719,21 @@ export default function BarcodeScannerModal({
                   </div>
                   <div className="absolute inset-x-5 bottom-4 rounded-2xl border border-white/10 bg-slate-950/58 px-3 py-2 text-center text-xs leading-5 text-slate-100 backdrop-blur-sm">
                     {tr('scanner_live_hint', 'Center the barcode inside the frame. We will scan it automatically.', 'ដាក់បារកូដឱ្យស្ថិតនៅកណ្ដាលស៊ុម។ ប្រព័ន្ធនឹងស្កេនដោយស្វ័យប្រវត្តិ។')}
+                    {torchFailed ? <span role="alert" className="block text-amber-200">{labels.torchFailed}</span> : null}
                   </div>
                 </div>
+                {status === 'scanning' && torchAvailable ? (
+                  <button
+                    type="button"
+                    className="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white backdrop-blur-sm hover:bg-black/65"
+                    aria-pressed={torchOn}
+                    aria-label={torchOn ? labels.torchOff : labels.torchOn}
+                    title={torchOn ? labels.torchOff : labels.torchOn}
+                    onClick={() => { void toggleTorch() }}
+                  >
+                    {torchOn ? <FlashlightOff className="h-5 w-5" /> : <Flashlight className="h-5 w-5" />}
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-6 text-center text-white">

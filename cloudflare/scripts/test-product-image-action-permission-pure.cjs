@@ -61,6 +61,7 @@ const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './stockMutationReceipt': { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } },
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
+  './businessDateWindow': loadTs('lib/businessDateWindow.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   './schemaProbe': loadTs('lib/schemaProbe.ts'),
@@ -382,10 +383,6 @@ async function main() {
     console.log('PASS variant creation cannot bypass the image action override')
   }
 
-  const syncSource = fs.readFileSync(path.join(srcRoot, 'routes', 'sync.ts'), 'utf8')
-  assert.match(syncSource, /'products\.update': \{ method: 'PUT', path: \(op\) => `\/api\/products\/\$\{encodeURIComponent/)
-  assert.match(syncSource, /const result = await replayOperation\(mainApp,[\s\S]*operation, route\)/)
-  console.log('PASS offline products.update dispatches through the same guarded real product route')
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

@@ -49,7 +49,11 @@ assert.deepEqual(hits, [], `no file may still mention the Scanbot SDK: ${hits.jo
 // and the camera policy check now lives in cameraPolicy.ts.
 const modal = fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/BarcodeScannerModal.tsx'), 'utf8')
 assert.ok(modal.includes('BarcodeDetector'), 'modal keeps the native BarcodeDetector path')
-assert.ok(modal.includes('BrowserMultiFormatReader'), 'modal keeps the ZXing fallback')
+assert.ok(modal.includes('loadLumaDecoder'), 'modal keeps the ZXing fallback')
+assert.ok(
+  fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/barcodeFrameDecoder.ts'), 'utf8').includes('new zxing.MultiFormatReader()'),
+  'the ZXing fallback decodes with MultiFormatReader',
+)
 assert.ok(modal.includes("from './cameraPolicy.ts'"), 'modal imports the camera policy check from cameraPolicy.ts')
 assert.ok(
   fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/cameraPolicy.ts'), 'utf8').includes('export function isCameraBlockedByDocumentPolicy'),

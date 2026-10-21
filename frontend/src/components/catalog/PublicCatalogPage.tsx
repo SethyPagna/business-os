@@ -10,9 +10,6 @@ import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import Send from 'lucide-react/dist/esm/icons/send.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
@@ -24,23 +21,21 @@ import Minus from 'lucide-react/dist/esm/icons/minus.js'
 import PlusIcon from 'lucide-react/dist/esm/icons/plus.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
 import Headset from 'lucide-react/dist/esm/icons/headset.js'
-import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
-import { FacebookIcon, InstagramIcon, MessengerIcon } from '../shared/BrandIcons.tsx'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './publicFirstPaint.ts'
 import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWhatsappLink, deriveInstagramLink, resolveMessengerLink } from '../../utils/socialLinks.ts'
+import { buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl } from './portalSocialLinks.ts'
+import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
-import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
+import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
@@ -55,14 +50,17 @@ import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLangua
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
-import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
+import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
+import { aiProviderState } from './legal/aiProviderDisclosure.ts'
+import type { AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
 const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'public-catalog-secondary-tabs')
+const ConsentRenewalPrompt = lazyRetry(() => import('./legal/ConsentRenewalPrompt'), 'public-catalog-consent-renewal')
 const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
 
@@ -72,7 +70,7 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
 const STOREFRONT_NAME = 'Leang Cosmetics'
-const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
+const STOREFRONT_HOME_SCREEN_NAME = 'Leang Cosmetics'
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512-v2.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
@@ -279,21 +277,6 @@ function normalizePriceDisplay(value: unknown): string {
   return ['USD', 'KHR', 'BOTH'].includes(raw) ? raw : 'USD'
 }
 
-function normalizeExternalUrl(value: unknown): string {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  const normalized = /^https?:\/\//i.test(raw)
-    ? raw
-    : (/^(www\.|[\w-]+(\.[\w-]+)+|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(raw) ? `https://${raw}` : '')
-  if (!normalized) return ''
-  try {
-    const url = new URL(normalized)
-    return /^https?:$/i.test(url.protocol) ? url.toString().replace(/\/$/, '') : ''
-  } catch (_) {
-    return ''
-  }
-}
-
 function normalizeCatalogOptions(value: unknown): CatalogOption[] {
   if (!Array.isArray(value)) return []
   return value.map((item, index) => {
@@ -480,10 +463,7 @@ export default function PublicCatalogPage() {
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantError, setAssistantError] = useState('')
   const [assistantResponse, setAssistantResponse] = useState<LooseRecord | null>(null)
-  const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
-  const [aiUsageSummary, setAiUsageSummary] = useState<LooseRecord | null>(null)
-  const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
-  const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
+  const [assistantDisclosure, setAssistantDisclosure] = useState<AiProviderState | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
   const [pageLanguage, setPageLanguage] = useState(readPublicStorefrontLanguage)
   const bucket = usePortalBucket()
@@ -612,23 +592,10 @@ export default function PublicCatalogPage() {
     return () => { document.documentElement.lang = previous }
   }, [pageLanguage])
 
-  // G5/B9: arm the same install-prompt capture and standalone external-link
-  // guard App.tsx arms at boot for the admin app. The storefront never mounts
-  // App.tsx (see PublicCatalogRoot.tsx), so neither installer ever ran here
-  // before -- an installed storefront PWA had no install offer of its own,
-  // AND (per standaloneNavigation.ts's own doc comment, written assuming
-  // this WAS already wired) a same-origin `target="_blank"` link on this
-  // exact page could still strand a shopper in a second chromeless window
-  // with no way back. Both installers are idempotent no-ops in an ordinary
-  // browser tab.
-  useEffect(() => {
-    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
-    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
-    return () => {
-      stopInstallPromptCapture()
-      stopExternalLinkGuard()
-    }
-  }, [])
+  // B9: the storefront never mounts App.tsx (see PublicCatalogRoot.tsx), so it arms the
+  // standalone external-link guard itself; a no-op in an ordinary browser tab. The install
+  // capture is armed earlier, in index.tsx.
+  useEffect(() => installStandaloneExternalLinkGuard(), [])
 
   const changePageLanguage = (next: string) => {
     const language = normalizePortalLanguage(next)
@@ -737,9 +704,12 @@ export default function PublicCatalogPage() {
     setBrowseSort(sort)
   }
 
+  // A boolean, not loading + products.length: the response itself changes the
+  // grid's length, and that re-ran this effect into a second identical request.
+  const productSearchReady = !(loading && products.length === 0)
   useEffect(() => {
     if (!config.showCatalog || loadFailed) return undefined
-    if (loading && products.length === 0) return undefined
+    if (!productSearchReady) return undefined
     if (skipNextProductSearchRef.current) {
       skipNextProductSearchRef.current = false
       return undefined
@@ -813,7 +783,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, productInitial, productPage, productPageSize, productSearchReady, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
@@ -857,75 +827,20 @@ export default function PublicCatalogPage() {
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
-  const socialLinks = [
-    { key: 'website', enabled: displayConfig.showWebsite, label: String(displayConfig.linkLabels?.website || copy('website', 'Website')).trim() || copy('website', 'Website'), value: displayConfig.links?.website },
-    { key: 'facebook', enabled: displayConfig.showFacebook, label: String(displayConfig.linkLabels?.facebook || copy('facebook', 'Facebook')).trim() || copy('facebook', 'Facebook'), value: displayConfig.links?.facebook },
-    { key: 'instagram', enabled: displayConfig.showInstagram, label: String(displayConfig.linkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'), value: displayConfig.links?.instagram },
-    { key: 'telegram', enabled: displayConfig.showTelegram, label: String(displayConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'), value: displayConfig.links?.telegram },
-  ].filter((item) => item.enabled && (item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value))).map((item) => ({ key: item.key, label: item.label, value: item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value) }))
-  // "Contact us" is a distinct, direct-message channel list, separate from
-  // the official/social page links above -- a Facebook page link opens a
-  // feed, not a chat, so staff configure these explicitly (with sensible
-  // fallbacks below for stores that only ever set up the social links).
-  const fallbackMessengerLink = displayConfig.showFacebook ? deriveMessengerLink(normalizeExternalUrl(displayConfig.links?.facebook)) : ''
-  // Real bug, found+fixed part 234: this used to run the raw configured
-  // value through `normalizeExternalUrl`, which only accepts values that
-  // already look like a URL/domain (www., a dotted domain, a whitelisted
-  // host) -- a bare handle like "mystore" or "@mystore" (exactly what
-  // deriveTelegramLink's own doc comment says it's meant to accept, and
-  // the most natural thing a merchant would type) silently normalized to
-  // '', so the Telegram contact button just never appeared even though
-  // the field was filled in correctly. `deriveTelegramLink` is the
-  // purpose-built canonicalizer for this exact value shape (bare handle,
-  // @handle, or full t.me/telegram.me URL) -- it already existed and was
-  // already tested, just never actually called from either contact-link
-  // site until now.
-  const fallbackTelegramContactLink = displayConfig.showTelegram ? deriveTelegramLink(displayConfig.links?.telegram || '') : ''
-  // Same fallback pattern as Messenger/Telegram above: if staff never set up
-  // a dedicated "Contact us" Instagram value, fall back to deriving the DM
-  // link from the profile link already configured in the social-links row.
-  const fallbackInstagramContactLink = displayConfig.showInstagram ? deriveInstagramLink(displayConfig.links?.instagram || '') : ''
-  const contactChannels = [
-    { key: 'messenger', enabled: displayConfig.showContactMessenger, label: String(displayConfig.contactLinkLabels?.messenger || copy('messenger', 'Messenger')).trim() || copy('messenger', 'Messenger'), value: resolveMessengerLink(displayConfig.contactLinks?.messenger || '') || fallbackMessengerLink },
-    { key: 'telegram', enabled: displayConfig.showContactTelegram, label: String(displayConfig.contactLinkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'), value: deriveTelegramLink(displayConfig.contactLinks?.telegram || '') || fallbackTelegramContactLink },
-    { key: 'whatsapp', enabled: displayConfig.showContactWhatsapp, label: String(displayConfig.contactLinkLabels?.whatsapp || copy('whatsapp', 'WhatsApp')).trim() || copy('whatsapp', 'WhatsApp'), value: deriveWhatsappLink(displayConfig.contactLinks?.whatsapp || '') },
-    { key: 'phone', enabled: displayConfig.showContactPhone, label: String(displayConfig.contactLinkLabels?.phone || copy('call', 'Call')).trim() || copy('call', 'Call'), value: derivePhoneCallLink(displayConfig.contactLinks?.phone || '') },
-    { key: 'instagram', enabled: displayConfig.showContactInstagram, label: String(displayConfig.contactLinkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'), value: deriveInstagramLink(displayConfig.contactLinks?.instagram || '') || fallbackInstagramContactLink },
-  ].filter((item) => item.enabled && item.value).map((item) => ({ key: item.key, label: item.label, value: item.value }))
+  // One builder for the header row, the contact sheets, About and the footer: the
+  // visible text is the owner's label, else the real account handle (never the
+  // platform name). Contact channels are direct-message links, separate from the
+  // page links, with the same fallbacks the shop has always applied.
+  const socialBuilt = buildPortalSocialFromConfig(displayConfig, pageLanguage)
+  const socialGroups = socialBuilt.social
+  const socialLinks = flattenPortalSocialGroups(socialGroups)
+  const contactChannels = flattenPortalSocialGroups(socialBuilt.contact)
   const businessFacts = [
     { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '', icon: Phone },
     { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: displayConfig.businessEmail ? `mailto:${displayConfig.businessEmail}` : '', icon: Mail },
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address') || null
-  const socialIconByKey: Record<string, LucideIcon> = {
-    facebook: FacebookIcon,
-    instagram: InstagramIcon,
-    telegram: Send,
-    website: Globe,
-  }
-  const contactIconByKey: Record<string, LucideIcon> = {
-    messenger: MessengerIcon,
-    telegram: Send,
-    whatsapp: PhoneCall,
-    phone: PhoneCall,
-    instagram: InstagramIcon,
-  }
-  const socialAccentByKey: Record<string, string> = {
-    facebook: 'hover:text-amber-600 hover:border-amber-600/40 dark:hover:text-amber-400 dark:hover:border-amber-400/40',
-    messenger: 'hover:text-amber-600 hover:border-amber-600/40 dark:hover:text-amber-400 dark:hover:border-amber-400/40',
-    instagram: 'hover:text-amber-600 hover:border-amber-600/40 dark:hover:text-amber-400 dark:hover:border-amber-400/40',
-    telegram: 'hover:text-amber-600 hover:border-amber-600/40 dark:hover:text-amber-400 dark:hover:border-amber-400/40',
-    website: 'hover:text-slate-900 dark:hover:text-white',
-  }
-  const headerLinks = [
-    ...socialLinks.map((item) => ({
-      ...item,
-      icon: socialIconByKey[item.key] || ExternalLink,
-      accentClassName: socialAccentByKey[item.key] || '',
-    })),
-    addressFact?.href ? { key: 'map', label: copy('map', 'Map'), value: addressFact.href, icon: MapPin, accentClassName: '' } : null,
-  ].filter(Boolean) as Array<{ key: string; label: string; value: string; icon: LucideIcon; accentClassName: string }>
   const assistantCategoryOptions = useMemo(() => Array.from(new Set(products.map((item) => String(item.category || '').trim()).filter(Boolean))).slice(0, 40), [products])
 
   const toggleFilterValue = (values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) => {
@@ -960,7 +875,6 @@ export default function PublicCatalogPage() {
   const clearAssistantState = () => {
     setAssistantError('')
     setAssistantResponse(null)
-    setAssistantExpandedProductId(null)
   }
   const askAssistant = () => {
     const question = assistantQuestion.trim()
@@ -987,10 +901,7 @@ export default function PublicCatalogPage() {
     if (activeTab !== 'ai') return
     getCatalogApi().getPortalAiStatus?.()
       ?.then((result) => {
-        const data = (result || {}) as LooseRecord
-        setAiUsageSummary((data.usage || data.usageSummary || null) as LooseRecord | null)
-        setAssistantRequestPolicy((data.policy || data.requestPolicy || null) as LooseRecord | null)
-        setAssistantDisclosure({ provider: data.provider || '', dataUseNotice: data.dataUseNotice || '' })
+        setAssistantDisclosure(aiProviderState(result))
       })
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
@@ -1073,8 +984,18 @@ export default function PublicCatalogPage() {
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice, portalPromotionRules)
       : null
-    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
+    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices, showStockStatus: shouldShowStockStatus(displayConfig) })
   }
+  // The product cards and the detail sheet add and save through these same two
+  // functions, so a product behaves the same wherever it is tapped.
+  const addToBucket = (product: CatalogProduct, priceText?: string) => bucket.add(
+    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+    priceText,
+  )
+  const toggleWishlist = (product: CatalogProduct, priceText?: string) => wishlist.toggle(
+    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+    priceText,
+  )
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // The announcement strip and the promotion cards link to a product by id.
   // It is usually not on the loaded page, and there is no public by-id
@@ -1101,6 +1022,12 @@ export default function PublicCatalogPage() {
       })
   }
 
+  // The same two steps the floating Contact button takes, so the FAQ button opens what that button opens.
+  const openContactSheet = () => {
+    setContactMinimized(false)
+    setContactOpen(true)
+  }
+
   const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
   const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
   const loadFailedPanel = (
@@ -1112,6 +1039,14 @@ export default function PublicCatalogPage() {
       </button>
     </div>
   )
+
+  // The offers banner lives inside the products section (one place, with its own
+  // loading and retry), not as a second render above it.
+  const promotionsSection = activeTab === 'products' ? (
+    <Suspense fallback={null}>
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
+    </Suspense>
+  ) : null
 
   const catalogSection = displayConfig.showCatalog ? (productsFailed && products.length === 0 ? loadFailedPanel : (
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>
@@ -1158,6 +1093,8 @@ export default function PublicCatalogPage() {
         toggleFilterValues={toggleFilterValues}
         previewConfig={displayConfig}
         portalError={productsFailed ? loadFailedText : ''}
+        onRetry={retryLoad}
+        promotionsBanner={promotionsSection}
         productGridClass={productGridClass}
         compactTwoColumnMobile={compactTwoColumnMobile}
         compactCatalogCards
@@ -1172,26 +1109,14 @@ export default function PublicCatalogPage() {
         openPortalImage={openPortalImage}
         formatPortalPrice={formatPortalPrice}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
-        onAddToBucket={(product, priceText) => bucket.add(
-          { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-          priceText,
-        )}
+        onAddToBucket={addToBucket}
         isInBucket={bucket.hasItem}
         getBucketQty={bucket.getQty}
         isInWishlist={wishlist.has}
-        onToggleWishlist={(product, priceText) => wishlist.toggle(
-          { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-          priceText,
-        )}
+        onToggleWishlist={toggleWishlist}
       />
     </Suspense>
   )) : null
-
-  const promotionsSection = activeTab === 'products' ? (
-    <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
-    </Suspense>
-  ) : null
 
   const secondaryTabSection = activeTab !== 'products' ? (realConfigInHand ? (
     <Suspense fallback={storefrontSkeleton}>
@@ -1210,6 +1135,9 @@ export default function PublicCatalogPage() {
         publicFaqItems={publicFaqItems}
         expandedFaqId={expandedFaqId}
         setExpandedFaqId={setExpandedFaqId}
+        onOpenContact={contactChannels.length > 0 ? openContactSheet : undefined}
+        faqLoading={!realConfigInHand}
+        openProductById={openProductById}
         brands={brands}
         assistantProfile={assistantProfile}
         setAssistantProfile={setAssistantProfile}
@@ -1220,13 +1148,9 @@ export default function PublicCatalogPage() {
         askAssistant={askAssistant}
         assistantLoading={assistantLoading}
         clearAssistantState={clearAssistantState}
-        aiUsageSummary={aiUsageSummary}
-        assistantRequestPolicy={assistantRequestPolicy}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
         assistantError={assistantError}
         assistantResponse={assistantResponse}
-        assistantExpandedProductId={assistantExpandedProductId}
-        setAssistantExpandedProductId={setAssistantExpandedProductId}
         assistantDisclosure={assistantDisclosure}
         assistantDataUseConsent={assistantDataUseConsent}
         setAssistantDataUseConsent={setAssistantDataUseConsent}
@@ -1324,10 +1248,11 @@ export default function PublicCatalogPage() {
             </div>
             <div className="space-y-1">
               {contactChannels.map((item) => {
-                const Icon = contactIconByKey[item.key] || MessageSquare
+                const Icon = PORTAL_SOCIAL_ICONS[item.platform]
                 return (
                   <a
                     key={item.key}
+                    aria-label={item.accessibleName}
                     href={item.value}
                     target={item.value.startsWith('tel:') ? undefined : '_blank'}
                     rel={item.value.startsWith('tel:') ? undefined : 'noreferrer'}
@@ -1336,7 +1261,7 @@ export default function PublicCatalogPage() {
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm transition group-hover:text-amber-600 dark:bg-neutral-800 dark:text-neutral-300 dark:group-hover:text-amber-300">
                       <Icon className="h-4 w-4 shrink-0" />
                     </span>
-                    {item.label}
+                    <PortalSocialText text={item.label} latin={item.latin} />
                   </a>
                 )
               })}
@@ -1719,10 +1644,11 @@ export default function PublicCatalogPage() {
         </div>
         <div className="space-y-1">
           {contactChannels.map((item) => {
-            const Icon = contactIconByKey[item.key] || MessageSquare
+            const Icon = PORTAL_SOCIAL_ICONS[item.platform]
             return (
               <a
                 key={item.key}
+                aria-label={item.accessibleName}
                 href={item.value}
                 target={item.value.startsWith('tel:') ? undefined : '_blank'}
                 rel={item.value.startsWith('tel:') ? undefined : 'noreferrer'}
@@ -1731,7 +1657,7 @@ export default function PublicCatalogPage() {
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 shadow-sm transition group-hover:text-amber-600 dark:bg-neutral-800 dark:text-neutral-300 dark:group-hover:text-amber-300">
                   <Icon className="h-4 w-4 shrink-0" />
                 </span>
-                {item.label}
+                <PortalSocialText text={item.label} latin={item.latin} />
               </a>
             )
           })}
@@ -1761,6 +1687,19 @@ export default function PublicCatalogPage() {
     {contactPopover}
     {bucketDrawer}
     {accountDrawer}
+    {portalAccount.consentRenewal ? (
+      <Suspense fallback={null}>
+        <ConsentRenewalPrompt
+          copy={copy}
+          busy={portalAccount.busy}
+          error={portalAccount.error}
+          consentLocale={String(displayConfig.language || 'en')}
+          onAgree={portalAccount.renewConsent}
+          onSignOut={portalAccount.signOut}
+          onClose={portalAccount.dismissConsentRenewal}
+        />
+      </Suspense>
+    ) : null}
     {wishlistDrawer}
     <PullToRefreshIndicator pullDistance={publicPullDistance} refreshing={publicPullRefreshing} />
     <CatalogPreviewSurface
@@ -1786,13 +1725,17 @@ export default function PublicCatalogPage() {
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
       publicPortalNavPinned={false}
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
-      headerLinks={headerLinks}
+      socialGroups={socialGroups}
+      mapLink={addressFact?.href || ''}
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
-      promotionsSection={loadFailed ? null : promotionsSection}
       footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
+      onAddToBucket={addToBucket}
+      getBucketQty={bucket.getQty}
+      isInWishlist={wishlist.has}
+      onToggleWishlist={toggleWishlist}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
       productDetailCautionDefault={displayConfig.productCautionDefault || ''}
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}

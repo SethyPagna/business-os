@@ -4,11 +4,11 @@ import { apiFetch } from './http.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from './actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, sameQueuedSaleRevision, OFFLINE_OWNER_REVIEW_MESSAGE, type OfflineSaleOwner } from './offlineQueueOwnership.ts'
 import { serializePendingSyncPreview, type PendingSyncPreviewInput } from './syncPreview.ts'
-import {
-  DISCARD_SYNC_UPDATE_CHANNELS,
-  dispatchSyncUpdates,
-  emitSyncQueueChanged,
-} from './syncRuntime.ts'
+
+// The one-time recovery of sales a device queued before offline selling ended
+// (26 Sep 2026). Only components/server/LegacyQueueNotice.tsx calls it, and
+// only after api/legacyQueueProbe.ts counted rows, so Dexie stays unloaded on
+// every other device.
 
 export interface PendingSyncState {
   total: number
@@ -25,9 +25,9 @@ export interface PendingSyncState {
 }
 
 type QueueRow = PendingSyncPreviewInput & Record<string, unknown> & { _seq?: number; payload?: Record<string, unknown> }
-type QueueReview = { owner: OfflineSaleOwner; scope: ReturnType<typeof captureActorReadScope>; rows: QueueRow[] }
+type QueueReview = { owner: OfflineSaleOwner; scope: ReturnType<typeof captureActorReadScope>; rows: QueueRow[]; exported?: Set<number> }
 // Tokens bind an explicit action to the exact snapshot the person reviewed.
-// Neither polling nor an account switch may retarget an older action.
+// Neither a re-read nor an account switch may retarget an older action.
 const queueReviews = new Map<string, QueueReview>()
 
 async function validatedReview(token: string | undefined): Promise<QueueReview> {
@@ -39,12 +39,30 @@ async function validatedReview(token: string | undefined): Promise<QueueReview> 
   return review
 }
 
+/** The reviewed rows, whole and unchanged since the review, for a file the person keeps. Only these can be cleared. */
+export async function exportPendingSyncReview(reviewToken?: string): Promise<{ exported_at: string; owner: OfflineSaleOwner; rows: QueueRow[] }> {
+  const review = await validatedReview(reviewToken)
+  const db = await getLocalDb()
+  const queue = db.table('sync_queue')
+  const rows: QueueRow[] = []
+  for (const row of review.rows) {
+    if (row._seq == null) continue
+    const current = await queue.get(row._seq) as QueueRow | undefined
+    if (current && sameQueuedSaleRevision(current, row) && offlineSaleOwnersMatch(current.payload?.offline_owner, review.owner)) rows.push(current)
+  }
+  if (!isActorReadScopeCurrent(review.scope, false)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
+  review.exported = new Set(rows.map((row) => row._seq!))
+  return { exported_at: new Date().toISOString(), owner: review.owner, rows }
+}
+
+/** Removes reviewed rows that were exported in the same review and have not changed since. */
 export async function discardPendingSyncQueue(reason = 'Reviewed pending sales were cleared.', reviewToken?: string): Promise<{
   success: true
   discarded: number
   reason: string
 }> {
   const review = await validatedReview(reviewToken)
+  const exported = review.exported ?? new Set<number>()
   const db = await getLocalDb()
   const queue = db.table('sync_queue')
   const sales = db.table('sales')
@@ -52,7 +70,7 @@ export async function discardPendingSyncQueue(reason = 'Reviewed pending sales w
     if (!isActorReadScopeCurrent(review.scope, false)) return 0
     let count = 0
     for (const row of review.rows) {
-      if (row._seq == null || row.status === 'syncing') continue
+      if (row._seq == null || row.status === 'syncing' || !exported.has(row._seq)) continue
       const current = await queue.get(row._seq)
       if (!isActorReadScopeCurrent(review.scope, false) || !sameQueuedSaleRevision(current, row)
         || !offlineSaleOwnersMatch(current?.payload?.offline_owner, review.owner)) continue
@@ -65,8 +83,6 @@ export async function discardPendingSyncQueue(reason = 'Reviewed pending sales w
     return count
   })
   if (reviewToken) queueReviews.delete(reviewToken)
-  emitSyncQueueChanged({ reason, discarded })
-  dispatchSyncUpdates(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue')
   return {
     success: true,
     discarded,

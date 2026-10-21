@@ -5,6 +5,7 @@ import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostIn
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
+import { PRODUCT_SUPPLIER_REFUSAL, lotSupplierChanged } from '../lib/productSupplierGate'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -12,6 +13,7 @@ import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, 
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
+import { businessToday } from '../lib/businessDateWindow'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { effectiveUnitCost } from '../lib/stockSessionMath'
@@ -72,7 +74,7 @@ app.get('/picker-lots', async (c) => {
   const rows = await listBatchesForProduct(db, productId, branchId)
   const knownPositive = await db.prepare(`
     SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
-    FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id
+    FROM product_batches pb CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = ? AND bbs.branch_id = ? AND bbs.quantity > 0
   `).get<{ quantity: number }>([productId, branchId])
   c.header('Cache-Control', 'private, no-store')
@@ -157,8 +159,8 @@ app.get('/', async (c) => {
   // sales.ts rechecks the same remainder inside its stock write transaction.
   const knownPositive = await db.prepare(`
     SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
-    FROM branch_batch_stock bbs
-    JOIN product_batches pb ON pb.id = bbs.batch_id
+    FROM product_batches pb
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = ?
       AND bbs.branch_id = ?
       AND bbs.quantity > 0
@@ -467,8 +469,15 @@ app.patch('/:id', async (c) => {
   if (!canEditAcquisitionCosts(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
     return c.json({ error: 'Cost-entry permission is required to change stored receipt costs.', code: 'product_cost_edit_required' }, 403)
   }
-  const existing = await db.prepare('SELECT id, variant_product_id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id, updated_at, supplier_id, supplier_name FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null; supplier_id: number | null; supplier_name: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
+  // Owner, 19 Oct 2026: re-attributing a received lot to another supplier is a supplier change (as the backfill route is).
+  // The editor posts the stored supplier back on every save; only a different one is refused.
+  if (getActionTier(user, 'products', 'supplier') === 'none') {
+    if (lotSupplierChanged(existing, body as Record<string, unknown>)) return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
+    delete (body as Record<string, unknown>).supplier_name
+    delete (body as Record<string, unknown>).supplier_id
+  }
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
   // No-op when the editor sends no token; a stale token means someone else
@@ -498,9 +507,9 @@ app.patch('/:id', async (c) => {
     // This value comes from the operator-facing editor, whose display/input
     // convention is day-first. Ambiguous 03/09/2026 must therefore remain
     // September 3, matching the frontend lineage date shown to the user.
-    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
+    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : businessToday())
     if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
-    const resolvedIso = iso || new Date().toISOString().slice(0, 10)
+    const resolvedIso = iso || businessToday()
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'lot_code = @lot_code')
     params.received_at = resolvedIso

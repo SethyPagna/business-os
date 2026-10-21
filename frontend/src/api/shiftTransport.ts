@@ -296,9 +296,10 @@ export type Shift = {
  *     from them, which is why the same window prices identically whatever
  *     was counted (owner ruling, Sep 6 2026).
  *   * everything else is the business, from the sales kernel and the `fees`
- *     table. `credit_usd` is an amount OWED and is printed as a positive
- *     note; it is already inside sales and profit and is subtracted from
- *     nothing.
+ *     table. `credit_usd` is what Not Paid sales still OWE (owner, 21 Oct
+ *     2026), printed as a positive note and subtracted from nothing.
+ *     `sales_without_not_paid_usd` / `profit_without_not_paid_usd` are the
+ *     same figures without Not Paid sales (owner, 20 Oct 2026).
  *
  * `delivery_cost` counts both ways a courier gets paid (a fee row typed
  * delivery, and a payout recorded on the sale) and `other_expenses` is every
@@ -311,6 +312,8 @@ export type ShiftFigures = {
   sales_usd: number
   cogs_usd: number
   profit_usd: number
+  sales_without_not_paid_usd?: number
+  profit_without_not_paid_usd?: number
   delivery_fee_usd: number
   credit_usd: number
   refunds_usd: number

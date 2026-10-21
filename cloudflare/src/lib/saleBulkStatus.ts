@@ -5,7 +5,7 @@ import type { Env } from '../index';
 import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
-import { VALID_SALE_STATUSES } from './salesStatus';
+import { RETURN_STATUSES, SALE_STATE_SET_SQL, VALID_SALE_STATUSES, requestedSaleState, sameSaleState, saleStateParams, saleStatusWord } from './salesStatus';
 import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
@@ -15,7 +15,8 @@ import { BranchEffectResolver, branchEffectGuardPredicate, branchEffectRefusal, 
 import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
-import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { returnSaleAwaitsPayment, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type SaleStoredState } from './saleStatusResolution';
+import { returnDebtLoweredSql } from './returnRefundSplit';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -112,7 +113,28 @@ export class SaleBulkError extends Error {
 function refuseUnpaid(unpaid: Row[], statusCode: 400 | 409 = 400): never {
     throw new SaleBulkError(`Not fully paid: ${unpaid.map(s => String(s.receipt_number || s.id)).join(', ')}. Record the payment before marking a sale Completed or Awaiting Delivery. Nothing in the group was changed.`, statusCode, { code: 'insufficient_payment_for_status', sale_ids: unpaid.map(s => Number(s.id)) });
 }
-const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
+// Snapshot columns. Older snapshots lack status_before_return and the two tags;
+// memberStatements writes every snapshot in the two-status model.
+const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id', 'status_before_return', 'return_state', 'delivery_pending'] as const;
+const STATE_FIELDS: readonly string[] = ['sale_status', 'status_before_return', 'return_state', 'delivery_pending', 'status_before_cancel'];
+// A row (or saved snapshot) in the two-status model (owner, 20 Oct 2026). A
+// cancelled row whose status_before_cancel is a retired word keeps that word's
+// tags, and status_before_cancel holds the payment state only.
+function writableState(row: Row): { state: SaleStoredState; statusBeforeCancel: string | null } {
+    const state = saleStoredState(row);
+    const beforeCancel = row.status_before_cancel ? saleStoredState({ ...row, sale_status: row.status_before_cancel }) : null;
+    if (state.saleStatus !== 'cancelled' || !beforeCancel)
+        return { state, statusBeforeCancel: beforeCancel ? beforeCancel.saleStatus : null };
+    return { state: { saleStatus: 'cancelled', returnState: state.returnState ?? beforeCancel.returnState, deliveryPending: state.deliveryPending || beforeCancel.deliveryPending }, statusBeforeCancel: beforeCancel.saleStatus };
+}
+function statusWordOf(row: Row): string { return saleStatusWord(writableState(row).state); }
+// What a Not Paid sale with returns owes is its total less the debt its active returns lowered (owner, 29 Sep 2026).
+async function withDebtLowered(db: D1Compat, sales: Row[]): Promise<(sale: Row) => Row> {
+    const refundRows = await rowsIn<{ sale_id: number; debt_lowered_usd: number | string | null }>(db, sales.filter(s => returnSaleAwaitsPayment(s)).map(s => Number(s.id)), m => `SELECT sale_id,${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id IN (${m}) AND COALESCE(status,'completed')<>'cancelled' AND COALESCE(return_scope,'customer')='customer' ORDER BY id LIMIT 301`);
+    if (refundRows.length > 300)
+        throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
+    return (sale: Row): Row => returnSaleAwaitsPayment(sale) ? { ...sale, refund_usd: sumRefundsUsd(refundRows.filter(r => r.sale_id === sale.id).map(r => r.debt_lowered_usd ?? 0)) } : sale;
+}
 // reference_id is polymorphic: use a conservative read guard, never revision
 // triggers that would write to an unrelated sale with the same numeric id.
 export function saleMovementFingerprint(idSql: string) {
@@ -218,18 +240,23 @@ function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes =
 function recordState(value: unknown): SaleRecordValueState {
     return value === null || value === undefined ? { state: 'known_none' } : { state: 'known_value', value };
 }
+// Records and receipts show the payment state (and delivery) that moved; a return tag is not a status.
 function statusChanges(before: Row, after: Row, cancelled: boolean): SaleRecordChange[] {
     const keys = cancelled ? ['sale_status', 'cancel_reason', 'cancel_note'] as const : ['sale_status'] as const;
     return keys.flatMap(field => {
-        const left = recordState(before[field]), right = recordState(after[field]);
+        const left = recordState(field === 'sale_status' ? statusWordOf(before) : before[field]), right = recordState(field === 'sale_status' ? statusWordOf(after) : after[field]);
         return JSON.stringify(left) === JSON.stringify(right) ? [] : [{ field, before: left, after: right }];
     });
+}
+function receiptStatuses(m: Member): Row {
+    const returnState = writableState(m.before).state.returnState;
+    return { before: statusWordOf(m.before), after: statusWordOf(m.after), ...(returnState ? { return_state: returnState } : {}) };
 }
 function statusRecordEvents(members: Member[], operationId: string, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
     return buildSaleRecordEventsInsert(members.filter(member => member.changed).map(member => {
         const before = via === 'undo' ? member.after : member.before;
         const after = via === 'undo' ? member.before : member.after;
-        const cancelled = before.sale_status === 'cancelled' || after.sale_status === 'cancelled';
+        const cancelled = statusWordOf(before) === 'cancelled' || statusWordOf(after) === 'cancelled';
         return {
             saleId: member.id, sourceKind: 'sale_bulk_status' as const, sourceId: operationId, generation,
             kind: cancelled ? 'cancelled' as const : 'status_changed' as const, via,
@@ -308,7 +335,10 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
             out.push({ sql: `INSERT INTO fees(${keys.join(',')}) VALUES(${keys.map(k => `@${k}`).join(',')})`, params: member.fee });
         }
     }
-    out.push({ sql: `UPDATE sales SET ${fields.map(k => `${k}=@${k}`).join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, id: member.id, stamp, actor: actorSnapshot(user) } });
+    // A retired status in a saved snapshot is written in the two-status model; status_before_return is never written.
+    const { state, statusBeforeCancel } = writableState(target);
+    const columns = fields.filter(k => !STATE_FIELDS.includes(k) && Object.prototype.hasOwnProperty.call(target, k)).map(k => `${k}=@${k}`);
+    out.push({ sql: `UPDATE sales SET ${[SALE_STATE_SET_SQL, 'status_before_cancel=@status_before_cancel', ...columns].join(',')}, updated_at=@stamp${member.skipped ? ', stock_skipped=1, stock_skipped_at=COALESCE(stock_skipped_at,@stamp), stock_skipped_by_name=COALESCE(stock_skipped_by_name,@actor)' : ''} WHERE id=@id`, params: { ...target, ...saleStateParams(state), status_before_cancel: statusBeforeCancel, id: member.id, stamp, actor: actorSnapshot(user) } });
     return out;
 }
 function auditStatement(user: SessionUser, operationId: string, direction: string, count: number): StockStatement {
@@ -333,21 +363,25 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before
     // it commits.
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.status_before_return,s.return_state,s.delivery_pending,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const withRefunds = await withDebtLowered(db, sales);
+    // A source or target word reads the two-status model: Completed includes a
+    // returned or delivery-pending paid sale.
+    const sourceMatches = (sale: Row) => request.source_status === undefined || String(sale.sale_status || 'completed') === request.source_status
+        || statusWordOf(sale) === request.source_status || saleStoredState(sale).saleStatus === request.source_status;
     const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
         if (!sale)
             fail(`Sale ${expected.id} was not found.`);
-        const sourceMatched = request.source_status === undefined || String(sale.sale_status || 'completed') === request.source_status;
-        if (!sourceMatched)
+        if (!sourceMatches(sale))
             continue;
         if ((sale.sale_status || 'completed') !== expected.expected_status || (sale.updated_at ?? null) !== expected.expected_updated_at)
             fail(`Sale ${expected.id} changed. Refresh before retrying.`);
         if (sale.movement_fingerprint === null)
             throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
         sourceMatchedIds.push(expected.id);
-        if (statusChangeNeedsPayment(sale.sale_status || 'completed', request.target_status, sale))
+        if (statusChangeNeedsPayment(saleStoredState(sale).saleStatus, request.target_status, withRefunds(sale)))
             unpaid.push(sale);
     }
     if (unpaid.length)
@@ -386,16 +420,21 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         if (!sale)
             fail(`Sale ${expected.id} was not found.`);
         const old = String(sale.sale_status || 'completed');
-        const sourceMatched = request.source_status === undefined || old === request.source_status;
-        const changed = sourceMatched && old !== request.target_status;
+        const sourceMatched = sourceMatches(sale);
+        // Same reading as PATCH /:id/status: payment moves keep the tags, and un-cancel goes back to where the sale was.
+        const { state: current, statusBeforeCancel } = writableState(sale);
+        const beforeCancel: SaleStoredState | null = current.saleStatus === 'cancelled' ? { ...current, saleStatus: statusBeforeCancel || 'completed' } : null;
+        const targetState = beforeCancel && request.target_status !== 'cancelled' ? beforeCancel : requestedSaleState(current, request.target_status);
+        const requestedPayment = beforeCancel && request.target_status === String(sale.status_before_cancel || 'completed') ? beforeCancel.saleStatus : requestedSaleState(beforeCancel ?? current, request.target_status).saleStatus;
+        const changed = sourceMatched && !sameSaleState(current, targetState) && !(RETURN_STATUSES.has(request.target_status) && old === request.target_status);
         if (sourceMatched) {
             guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
             guards.push(bulkAssertion(`${saleMovementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
         }
-        const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null);
+        const guard = guardSaleStatusTransition(current.saleStatus, RETURN_STATUSES.has(request.target_status) && !beforeCancel ? request.target_status : requestedPayment, beforeCancel?.saleStatus ?? null, current.returnState !== null);
         if (changed && !guard.ok)
             throw new SaleBulkError(guard.error || 'Invalid transition.', 400);
-        const before = scalar(sale), after: Row = changed ? { ...before, sale_status: request.target_status } : { ...before };
+        const before = scalar(sale), after: Row = !changed ? { ...before } : { ...before, sale_status: targetState.saleStatus, return_state: targetState.returnState, delivery_pending: targetState.deliveryPending ? 1 : 0 };
         if (changed && request.notes !== undefined)
             after.notes = request.notes;
         const itemCancel = expected.cancel;
@@ -432,7 +471,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         if (request.target_status === 'cancelled' && changed) {
             if (!normalizeCancelReason(cancelReason) || (cancelReason === 'other' && !String(cancelNote || '').trim()))
                 throw new SaleBulkError(`Sale ${expected.id} needs its cancellation answers.`, 400);
-            Object.assign(after, { cancel_reason: cancelReason, cancel_note: String(cancelNote || '').trim() || null, cancelled_at: stamp, cancelled_by_name: actorSnapshot(user), status_before_cancel: old });
+            Object.assign(after, { cancel_reason: cancelReason, cancel_note: String(cancelNote || '').trim() || null, cancelled_at: stamp, cancelled_by_name: actorSnapshot(user), status_before_cancel: current.saleStatus });
         }
         else if (old === 'cancelled' && changed)
             Object.assign(after, { cancel_reason: null, cancel_note: null, cancelled_at: null, cancelled_by_name: null, status_before_cancel: null, cancel_fee_id: null });
@@ -538,7 +577,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     }
     const snapshot: Snapshot = { version: 1, operationId, members };
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
-    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
+    const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, ...receiptStatuses(m), changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
     const effectGuards = resolver.guards();
     if (effectGuards.length)
         guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }));
@@ -593,11 +632,12 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     // history route passes on). The member assertions below pin the money read
     // here: any write to a sale since bumps its revision.
     const moved = snapshot.members.filter(m => m.changed);
-    const money = await rowsIn<Row>(db, moved.map(m => m.id), marks => `SELECT id,receipt_number,total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,calculated_total_usd FROM sales WHERE id IN (${marks})`);
+    const money = await rowsIn<Row>(db, moved.map(m => m.id), marks => `SELECT id,receipt_number,sale_status,status_before_return,return_state,total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,calculated_total_usd FROM sales WHERE id IN (${marks})`);
+    const withRefunds = await withDebtLowered(db, money);
     const unpaid = money.filter(sale => {
         const member = moved.find(m => m.id === Number(sale.id))!;
         const [from, to] = sign > 0 ? [member.before, member.after] : [member.after, member.before];
-        return statusChangeNeedsPayment(from.sale_status, to.sale_status, sale);
+        return statusChangeNeedsPayment(writableState(from).state.saleStatus, statusWordOf(to), withRefunds(sale));
     });
     if (unpaid.length)
         refuseUnpaid(unpaid, 409);

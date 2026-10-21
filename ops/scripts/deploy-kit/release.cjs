@@ -522,11 +522,24 @@ async function stepMigrations(ctx) {
   if (!approval.ok) { log.say('Stopped.'); return false }
   const pending = {}
   const touched = new Set()
-  for (const db of lib.DATABASES) {
+  for (const db of lib.DATABASES.filter(db => db.name !== 'business-os')) {
+    const result = await readProduction(ctx, lib.commandCatalog.importMigrationLedger(), approval)
+    if (result.dry) { pending[db.name] = null; continue }
+    try {
+      if (!result.ok) throw Error('Could not read import migration ledger')
+      const candidate = fs.readdirSync(path.join(ctx.releaseDir, 'cloudflare', db.migrationsDir)).filter(name => name.endsWith('.sql')).sort()
+      const applied = lib.validateImportMigrationLedger(result.json, candidate)
+      writeRecord(ctx, 'import-migration-ledger.json', { database: db.name, applied, candidate })
+      pending[db.name] = []
+    } catch (error) { log.say(`STOP: ${error.message}`); return false }
+  }
+  for (const db of lib.DATABASES.filter(db => db.name === 'business-os')) {
     const r = await ex.runSpec(lib.commandCatalog.migrationsList(db.name), ctx, approval, { capture: true })
     if (r.dry) { pending[db.name] = null; continue }
     if (r.code !== 0) { log.say(`STOP: could not list the updates for ${db.name}.`); if (!ctx.ci) log.say(r.out); return false }
-    pending[db.name] = lib.parseMigrationNames(r.out)
+    try {
+      pending[db.name] = lib.parseMigrationNames(r.out)
+    } catch (error) { log.say(`STOP: could not verify the updates for ${db.name}: ${error.message}`); return false }
     log.say(`${db.name}: ${pending[db.name].length ? `${pending[db.name].length} update(s) waiting` : 'nothing waiting'}`)
     for (const name of pending[db.name]) {
       const file = path.join(ctx.releaseDir, 'cloudflare', db.migrationsDir, name)

@@ -233,6 +233,22 @@ export const BACKUP_TABLES = [
   'stock_session_revisions',
   'stock_session_operations',
   'stock_session_members',
+  // No foreign keys, so position is free. Per-line stock idempotency (0192): a
+  // restore without these receipts lets a replayed stock request apply twice.
+  'stock_mutation_receipts',
+  // Import stock-skip ledger and its guard (0235) change stock math for imported
+  // sales; sale_status_normalization_ledger (0263) is the correction evidence
+  // for the held 0264 repair.
+  'imported_sale_stock_skip_0235',
+  'imported_sale_stock_skip_guard_0235',
+  'sale_status_normalization_ledger',
+  // Inventory-check history (0259) and the branch-cutover journal (0224): immutable by trigger
+  // except while the restore maintenance flag is set (0268). Sessions first: items and events
+  // reference them. branch_cutovers has no foreign keys.
+  'inventory_check_sessions',
+  'inventory_check_items',
+  'inventory_check_events',
+  'branch_cutovers',
   'audit_logs',
   'custom_tables',
   'custom_fields',

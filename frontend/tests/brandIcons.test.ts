@@ -118,6 +118,7 @@ const portalManifest = JSON.parse(read('../public/portal-manifest.json')) as {
   icons: Array<{ src: string; sizes: string; purpose: string }>
 }
 assert.equal(portalManifest.name, 'Leang Cosmetics', 'the static portal manifest is the storefront brand, not the staff app')
+assert.equal((portalManifest as { short_name?: string }).short_name, 'Leang Cosmetics', 'the Android launcher label is the full shop name (owner, 19 Oct 2026)')
 assert.deepEqual(
   portalManifest.icons.map((icon) => `${icon.src} ${icon.sizes} ${icon.purpose}`).sort(),
   [
@@ -176,7 +177,7 @@ for (const swapped of ['link[rel="icon"]', 'link[rel="manifest"]', 'link[rel="ap
   assert.ok(brandEffect.indexOf(swapped) > adminHostGuard, `${swapped} is swapped before the admin-host guard`)
 }
 assert.match(publicCatalog, /import \{ isAdminHostname(?:, \w+)* \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
-assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang'/, 'the iPhone home-screen label is the owner\'s short name')
+assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang Cosmetics'/, 'the iPhone home-screen label is the full shop name (owner, 19 Oct 2026)')
 assert.match(brandEffect, /appleTitle\.setAttribute\('content', STOREFRONT_HOME_SCREEN_NAME\)/)
 assert.match(publicCatalog, /const STOREFRONT_NAME = 'Leang Cosmetics'/)
 assert.match(brandEffect, /displayConfig\.title \|\| STOREFRONT_NAME\)/, 'the tab title falls back to the storefront name')
@@ -246,7 +247,7 @@ function runBootstrap(hostname: string, pathname: string) {
 
 const SHOP_IDENTITY = {
   title: 'Leang Cosmetics',
-  appTitle: 'Leang',
+  appTitle: 'Leang Cosmetics',
   manifest: '/portal-manifest.json',
   themeColor: '#ffffff',
   appleIcon: SHOP_APPLE_TOUCH_ICON,

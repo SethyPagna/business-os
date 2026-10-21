@@ -35,6 +35,7 @@ import AuditRetentionSetting from './AuditRetentionSetting.tsx'
 import TelegramSummarySections from './TelegramSummarySections.tsx'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -542,6 +543,7 @@ export default function Settings() {
   const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
+  const [renameDraft, setRenameDraft] = useState<{ from: string; to: string } | null>(null)
   // Methods the shop has taken money through that are not in the list above.
   // Held as state rather than derived, because only the server can know it --
   // it is a DISTINCT over the sales table, not anything the browser has.
@@ -884,9 +886,13 @@ export default function Settings() {
     }
   }
 
-  const renamePaymentMethod = async (from: string) => {
-    const to = window.prompt(t('rename_payment_method') || 'Rename payment method', from)?.trim()
-    if (!to || to === from) return
+  // The new name is typed in the shared dialog (before/after shown), not a native prompt.
+  const renamedTo = renameDraft?.to.trim() || ''
+  const submitPaymentMethodRename = async () => {
+    if (!renameDraft || !renamedTo || renamedTo === renameDraft.from) return
+    const from = renameDraft.from
+    const to = renamedTo
+    setRenameDraft(null)
     try {
       const impact = await getPaymentMethodImpact(from, to)
       const linked = Number(impact.linked_records || 0)
@@ -1178,7 +1184,7 @@ export default function Settings() {
           // View-only grant: no Save button, a plain read-only badge instead
           // (Part 557). The backend refuses the POST regardless.
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 dark:bg-teal-950/30 dark:text-teal-200">
-            {t('view_only') || 'View only'}
+            {t('view_only') || 'View'}
           </span>
         )}
       </div>
@@ -1331,6 +1337,21 @@ export default function Settings() {
               onChange={(event) => setValue('tax_enabled', event.target.checked ? 'true' : 'false')}
             />
           </label>
+          {/* Same setting as the Loyalty points page switch; the Worker accepts a change from an administrator only. */}
+          {isAdmin ? (
+            <label className="mt-2 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+              <div className="pr-3">
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('loyalty_points_enabled')}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{t('loyalty_points_enabled_desc')}</div>
+              </div>
+              <input
+                type="checkbox"
+                name="loyalty_points_enabled"
+                checked={['1', 'true', 'yes', 'on'].includes(String(form.loyalty_points_enabled ?? 'false').trim().toLowerCase())}
+                onChange={(event) => setValue('loyalty_points_enabled', event.target.checked ? 'true' : 'false')}
+              />
+            </label>
+          ) : null}
         </SettingsSection>
         ) : null}
 
@@ -2023,9 +2044,10 @@ export default function Settings() {
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{paymentMethod}</span>
                 <button
                   type="button"
-                  onClick={() => void renamePaymentMethod(paymentMethod)}
+                  onClick={() => setRenameDraft({ from: paymentMethod, to: paymentMethod })}
                   className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                  title="Preview and rename"
+                  title={t('rename_payment_method') || 'Rename payment method'}
+                  aria-label={t('rename_payment_method') || 'Rename payment method'}
                 >
                   {t('rename') || 'Rename'}
                 </button>
@@ -2392,6 +2414,34 @@ export default function Settings() {
         </p>
       </div>
       {confirmDialog}
+      {renameDraft ? (
+        <ConfirmDialog
+          t={t}
+          title={t('rename_payment_method') || 'Rename payment method'}
+          items={[
+            { label: t('before') || 'Before', value: renameDraft.from },
+            { label: t('after') || 'After', value: renamedTo || '—' },
+          ]}
+          confirmLabel={t('rename') || 'Rename'}
+          confirmDisabled={!renamedTo || renamedTo === renameDraft.from}
+          onConfirm={() => { void submitPaymentMethodRename() }}
+          onClose={() => setRenameDraft(null)}
+        >
+          <div>
+            <label htmlFor="settings-rename-payment-method" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{t('payment_method_new_name') || 'New name'}</label>
+            <input
+              id="settings-rename-payment-method"
+              name="rename_payment_method"
+              autoComplete="off"
+              autoFocus
+              className="input text-sm"
+              value={renameDraft.to}
+              onChange={(event) => setRenameDraft((current) => (current ? { ...current, to: event.target.value } : current))}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitPaymentMethodRename() } }}
+            />
+          </div>
+        </ConfirmDialog>
+      ) : null}
     </div>
   )
 }

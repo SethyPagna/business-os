@@ -98,7 +98,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
 const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
@@ -261,6 +261,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/productSupplierGate': loadReal('lib/productSupplierGate.ts'),
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
@@ -277,6 +278,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': businessDateWindow,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
   '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),

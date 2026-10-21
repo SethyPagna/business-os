@@ -4,15 +4,18 @@ import { STOCK_SCHEMA_EPOCH } from './stockTransaction'
 const LEGACY_PHYSICAL_SCHEMA_HASH = '4f73a1a2235440be1a9054167a788b310a3d9e799aef8b5ea13bd0ffbc3ba89b'
 const MAX_PRODUCT_IDS = 500
 const QUANTITY_EPSILON = 0.000000001
-const SCHEMA_SQL = `SELECT
-  (SELECT value FROM system_flags WHERE key='stock_schema_epoch') AS epoch,
-  (SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch') AS epoch_present,
-  (SELECT COUNT(*) FROM system_flags WHERE key='maintenance') AS maintenance_present,
-  (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'stock_epoch_%_0243') AS epoch_guards,
-  (SELECT json_group_array(json_object('name',name,'sql',sql)) FROM (
-    SELECT name,sql FROM sqlite_master WHERE type='table'
-    AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') ORDER BY name
-  )) AS physical_schema`
+// The flags are read on every call. The sqlite_master scan (one pass for tables and epoch guards) is skipped
+// only when this isolate already verified the structure under the same installed epoch.
+const SCHEMA_SQL = `SELECT flags.*,CASE WHEN @structureVerified=1 AND flags.epoch_present=1 AND flags.epoch IS @expectedEpoch
+    AND flags.maintenance_present=0 THEN NULL ELSE (SELECT json_group_array(json_object('type',type,'name',name,'sql',sql)) FROM (
+      SELECT type,name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'stock_epoch_%_0243'
+        OR type='table' AND name IN ('branch_stock','branch_batch_stock','damaged_stock_lots') ORDER BY name)) END AS structure
+  FROM (SELECT (SELECT value FROM system_flags WHERE key='stock_schema_epoch') AS epoch,
+    (SELECT COUNT(*) FROM system_flags WHERE key='stock_schema_epoch') AS epoch_present,
+    (SELECT COUNT(*) FROM system_flags WHERE key='maintenance') AS maintenance_present) flags`
+let structureVerified = false
+/** The next read validates the structure again. */
+export function resetInventoryCheckStockSchemaMemo(): void { structureVerified = false }
 
 export class InventoryCheckStockSchemaError extends Error {
   readonly code = 'inventory_check_stock_schema_unavailable'
@@ -42,17 +45,21 @@ export type InventoryCheckStockRow = {
 
 const invalidQuantitySql = (column: string) => `(typeof(${column}) NOT IN ('integer','real') OR ABS(${column})>1.7976931348623157e308)`
 
-export function buildInventoryCheckStockQuery(scope: InventoryCheckStockScope = {}) {
+/** `idsFromSql` (internal) reads only the ids that a CTE of the enclosing statement selects. */
+export function buildInventoryCheckStockQuery(scope: InventoryCheckStockScope = {}, idsFromSql?: string) {
   if (scope.branchId !== undefined && (!Number.isSafeInteger(scope.branchId) || scope.branchId <= 0)
-    || scope.productIds !== undefined && (!Array.isArray(scope.productIds) || scope.productIds.length > MAX_PRODUCT_IDS
+    || scope.productIds !== undefined && (idsFromSql !== undefined || !Array.isArray(scope.productIds) || scope.productIds.length > MAX_PRODUCT_IDS
       || scope.productIds.some(id => !Number.isSafeInteger(id) || id <= 0))) throw new Error('Invalid Inventory stock scope')
   const params = {
     inventoryBranchId: scope.branchId ?? null,
-    inventoryProductIds: scope.productIds === undefined ? null : JSON.stringify([...new Set(scope.productIds)]),
+    ...scope.productIds === undefined ? {} : { inventoryProductIds: JSON.stringify([...new Set(scope.productIds)]) },
   }
+  // Separate texts: `@ids IS NULL OR id IN (...)` cannot use the primary key, so a one-product read scanned the catalog.
+  const wantedSql = idsFromSql !== undefined ? `SELECT id,stock_quantity FROM products WHERE id IN (${idsFromSql})`
+    : scope.productIds === undefined ? 'SELECT id,stock_quantity FROM products'
+    : 'SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(@inventoryProductIds))'
   const rowsSql = `WITH
-    wanted AS (SELECT id,stock_quantity FROM products WHERE @inventoryProductIds IS NULL
-      OR id IN (SELECT value FROM json_each(@inventoryProductIds))),
+    wanted AS (${wantedSql}),
     ordinary AS (
       SELECT s.product_id,s.branch_id,SUM(s.quantity) AS quantity,COUNT(*) AS rows,
         SUM(CASE WHEN ${invalidQuantitySql('s.quantity')} THEN 1 ELSE 0 END) AS invalid,
@@ -146,27 +153,34 @@ export function buildInventoryCheckStockQuery(scope: InventoryCheckStockScope = 
   return { rowsSql, params }
 }
 
-type SchemaRow = { epoch: string | null; epoch_present: number; epoch_guards: number; maintenance_present: number; physical_schema: string }
-async function validateSchema(row: SchemaRow | undefined): Promise<void> {
-  if (!row || row.maintenance_present || row.epoch_present && row.epoch !== STOCK_SCHEMA_EPOCH
-    || !row.epoch_present && row.epoch_guards) throw new InventoryCheckStockSchemaError()
-  let physical: Array<{ name: string; sql: string }>
-  try { physical = JSON.parse(row.physical_schema) } catch { throw new InventoryCheckStockSchemaError() }
-  if (!Array.isArray(physical) || physical.length !== 3 || physical.some(item => typeof item?.name !== 'string' || typeof item?.sql !== 'string')) throw new InventoryCheckStockSchemaError()
+type SchemaRow = { epoch: string | null; epoch_present: number; maintenance_present: number; structure: string | null }
+async function validateSchema(row: SchemaRow | undefined, memoUsed: boolean): Promise<void> {
+  if (!row || row.maintenance_present || row.epoch_present && row.epoch !== STOCK_SCHEMA_EPOCH) throw new InventoryCheckStockSchemaError()
+  if (row.structure === null) {
+    if (memoUsed && row.epoch_present) return
+    throw new InventoryCheckStockSchemaError()
+  }
+  let objects: Array<{ type: string; name: string; sql: string }>
+  try { objects = JSON.parse(row.structure) } catch { throw new InventoryCheckStockSchemaError() }
+  if (!Array.isArray(objects) || objects.some(item => typeof item?.type !== 'string' || typeof item?.name !== 'string' || typeof item?.sql !== 'string')) throw new InventoryCheckStockSchemaError()
+  const physical = objects.filter(item => item.type === 'table')
+  if (!row.epoch_present && physical.length !== objects.length || physical.length !== 3) throw new InventoryCheckStockSchemaError()
   // Without an epoch, only the frozen 0058/0074/0162 physical schema establishes the legacy separate pool.
   const canonical = physical.map(item => `${item.name}\n${item.sql.replace(/\s+/g, ' ').trim().toLowerCase()}`).join('\n')
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
   const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
   if (hash !== LEGACY_PHYSICAL_SCHEMA_HASH) throw new InventoryCheckStockSchemaError()
+  if (row.epoch_present) structureVerified = true
 }
 
 export async function readInventoryCheckStock(db: Pick<D1Compat, 'batch'>, scope: InventoryCheckStockScope = {}): Promise<InventoryCheckStockRow[]> {
   const query = buildInventoryCheckStockQuery(scope)
+  const memoUsed = structureVerified
   let result: D1Result[]
-  try { result = await db.batch([{ sql: SCHEMA_SQL }, { sql: query.rowsSql, params: query.params }]) }
+  try { result = await db.batch([{ sql: SCHEMA_SQL, params: { structureVerified: Number(memoUsed), expectedEpoch: STOCK_SCHEMA_EPOCH } }, { sql: query.rowsSql, params: query.params }]) }
   catch { throw new InventoryCheckStockSchemaError() }
   if (result.length !== 2 || result.some(item => item.success !== true)) throw new InventoryCheckStockSchemaError()
-  await validateSchema(result[0].results?.[0] as SchemaRow | undefined)
+  await validateSchema(result[0].results?.[0] as SchemaRow | undefined, memoUsed)
   return (result[1].results || []).map(value => {
     const raw = value as Record<string, unknown>
     const flags = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged', 'missing_branch_allocation'].filter(key => Number(raw[key]) > 0)

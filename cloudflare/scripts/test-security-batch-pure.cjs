@@ -47,23 +47,14 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
   console.log('PASS H1 routes/products.ts /rename-brand requires Full manage_lookups, no review-tier bypass')
 }
 
-// ---- H2: offline chunked upload must enforce the same library gate ----
+// ---- H2: the offline chunked-upload routes are gone; files.ts keeps the library predicates ----
 {
   const sync = read('src', 'routes', 'sync.ts')
   const files = read('src', 'routes', 'files.ts')
-  // files.ts must EXPORT the two predicates so sync.ts shares the exact rule
-  // (single owner of the library-access logic).
   assert.match(files, /export function hasFullLibraryAccess\(user: SessionUser\): boolean/, 'H2: files.ts must export hasFullLibraryAccess')
   assert.match(files, /export function canWireProductImages\(user: SessionUser\): boolean/, 'H2: files.ts must export canWireProductImages')
-  // sync.ts imports them and defines the shared guard.
-  assert.match(sync, /import \{ hasFullLibraryAccess, canWireProductImages \} from '\.\/files'/, 'H2: sync.ts must import the library predicates from files.ts')
-  assert.match(sync, /function ensureLibraryUploadAccess\(user: SessionUser\): boolean \{\s*\n\s*return hasFullLibraryAccess\(user\) \|\| canWireProductImages\(user\)/, 'H2: ensureLibraryUploadAccess must be hasFullLibraryAccess || canWireProductImages')
-  // Every chunk-upload entry point must reject a caller lacking access, before
-  // proxying to the DO (which cannot check).
-  assert.match(sync, /app\.post\('\/files\/chunks\/init'[\s\S]{0,200}?ensureLibraryUploadAccess/, 'H2: /files/chunks/init must gate on ensureLibraryUploadAccess')
-  assert.match(sync, /app\.post\('\/files\/chunks\/:uploadId\/chunk'[\s\S]{0,200}?ensureLibraryUploadAccess/, 'H2: /files/chunks/:uploadId/chunk must gate')
-  assert.match(sync, /app\.post\('\/files\/chunks\/:uploadId\/complete'[\s\S]{0,200}?ensureLibraryUploadAccess/, 'H2: /files/chunks/:uploadId/complete must gate')
-  console.log('PASS H2 routes/sync.ts chunk upload enforces the same library gate as files.ts /upload')
+  assert.doesNotMatch(sync, /files\/chunks|SYNC_UPLOADS/, 'H2: sync.ts must not expose a chunked upload that bypasses the library gate')
+  console.log('PASS H2 routes/sync.ts exposes no chunk-upload entry point')
 }
 
 // ---- M1: /ws must be session-gated, closing 4001 on unauth ----

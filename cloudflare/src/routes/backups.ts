@@ -17,6 +17,7 @@ import {
   validateCloudflareBackup,
 } from '../lib/backup'
 import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, MaintenanceAdmissionConflictError } from '../lib/maintenance'
+import { invalidateCachesAfterMaintenance } from '../lib/cache'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -99,6 +100,7 @@ app.post('/maintenance/clear', async (c) => {
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
+  await invalidateCachesAfterMaintenance(c.env, 'backups')
   await audit(c.env, user.id, user.username || null, 'update', 'backup', 'maintenance-clear', {
     cleared_state: maintenanceStatus(maintenance),
   })
@@ -257,6 +259,7 @@ app.post('/', async (c) => {
         return c.json({ job_id: job.id, item: job, error: message, code: 'restore_audit_not_recorded', data_restored: true }, 503)
       }
       const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
+      if (maintenanceReleased) await invalidateCachesAfterMaintenance(c.env, 'backups')
       if (!maintenanceReleased) {
         await audit(c.env, user.id, user.username || null, 'maintenance_release_failed', 'backup', sourceDir, {
           restored_key: restore.key,

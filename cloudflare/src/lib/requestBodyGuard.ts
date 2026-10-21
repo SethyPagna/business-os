@@ -5,7 +5,7 @@ export const SMALL_BODY_BYTES = 64 * 1024
 export const MIGRATION_FINALIZE_BODY_BYTES = 768 * 1024
 export const PORTAL_SCREENSHOT_BODY_BYTES = 20 * 1024 * 1024
 
-// Exact POST endpoints only. Imports, sync/outbox, settings, bulk operations,
+// Exact POST endpoints only. Imports, settings, bulk operations,
 // binary uploads and all GET/HEAD requests need their own streaming budgets.
 const PUBLIC_SMALL_POSTS = new Set([
   '/api/auth/login', '/api/auth/logout', '/api/auth/password-reset/email',

@@ -5,15 +5,11 @@ import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
-import { deriveTelegramLink } from '../../utils/socialLinks.ts'
+import { buildPortalSocialFromConfig, flattenPortalSocialGroups } from './portalSocialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import type { LucideIcon } from 'lucide-react'
@@ -31,7 +27,6 @@ import { pickFiles } from '../../utils/filePicker.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
-import { FacebookIcon, InstagramIcon } from '../shared/BrandIcons.tsx'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import {
@@ -53,6 +48,7 @@ import {
   productMatchesPortalBranches,
   buildPortalPricePresentation,
   resolvePortalStockStatus,
+  shouldShowStockStatus,
   type ColumnRange,
 } from './portalCatalogDisplay.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -1298,8 +1294,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantResponse, setAssistantResponse] = useState<LegacyCatalogRecord | null>(null)
   const [assistantError, setAssistantError] = useState('')
-  const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
-  const [assistantUsage, setAssistantUsage] = useState<LegacyCatalogRecord | null>(null)
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LegacyCatalogRecord | null>(null)
   const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null)
   const [recommendedProductSearchInput, setRecommendedProductSearchInput] = useState('')
@@ -1516,7 +1510,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       assistantStatusKeyRef.current = ''
       assistantInFlightRef.current = false
       setAssistantLoading(false)
-      setAssistantUsage(null)
       setAssistantRequestPolicy(null)
       return
     }
@@ -1534,7 +1527,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
-        setAssistantUsage(result?.usage || null)
         setAssistantRequestPolicy(result?.requestPolicy || null)
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
@@ -2428,7 +2420,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     })
     setAssistantResponse(null)
     setAssistantError('')
-    setAssistantExpandedProductId(null)
     setAssistantRequestPolicy(null)
   }
 
@@ -2789,7 +2780,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     assistantInFlightRef.current = true
     setAssistantLoading(true)
     setAssistantError('')
-    setAssistantExpandedProductId(null)
     try {
       const result = await withLoaderTimeout(
         () => getCatalogApi().askPortalAi({
@@ -2801,7 +2791,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       )
       if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
       setAssistantResponse(result || null)
-      setAssistantUsage(result?.usage || null)
       setAssistantRequestPolicy(result?.requestPolicy || null)
     } catch (error) {
       if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
@@ -2948,41 +2937,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const mapEmbedUrl = shouldLoadMapEmbed
     ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '')
     : ''
-  const socialLinks = [
-    {
-      key: 'website',
-      enabled: displayConfig.showWebsite,
-      label: String(displayConfig.linkLabels?.website || copy('website', 'Website')).trim() || copy('website', 'Website'),
-      value: displayConfig.links?.website,
-    },
-    {
-      key: 'facebook',
-      enabled: displayConfig.showFacebook,
-      label: String(displayConfig.linkLabels?.facebook || copy('facebook', 'Facebook')).trim() || copy('facebook', 'Facebook'),
-      value: displayConfig.links?.facebook,
-    },
-    {
-      key: 'instagram',
-      enabled: displayConfig.showInstagram,
-      label: String(displayConfig.linkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'),
-      value: displayConfig.links?.instagram,
-    },
-    {
-      key: 'telegram',
-      enabled: displayConfig.showTelegram,
-      label: String(displayConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'),
-      value: displayConfig.links?.telegram,
-    },
-  // Real bug, found+fixed part 234: Telegram's value was run through the
-  // generic `normalizeExternalUrl` here too (same gap PublicCatalogPage.tsx
-  // had) -- a bare handle like "mystore" doesn't look like a URL/domain to
-  // that function, so it silently dropped to '' and the link never
-  // rendered in the editor's own preview even when correctly configured.
-  // `deriveTelegramLink` is the purpose-built canonicalizer for this field
-  // (bare handle, @handle, or full t.me/telegram.me URL, including group/
-  // channel invite links) -- used here for parity with the live public
-  // page's fix.
-  ].filter((item) => item.enabled && (item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value))).map((item) => ({ ...item, value: item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value) }))
+  // Same builder as the live page, so the editor preview shows the same handles.
+  const socialGroups = buildPortalSocialFromConfig(displayConfig, activeCopyLanguage).social
+  const socialLinks = flattenPortalSocialGroups(socialGroups)
 
   const businessFacts = [
     { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '' },
@@ -2990,38 +2947,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
-
-  // Previously only computed on the live public site (PublicCatalogPage.tsx)
-  // and never passed into CatalogPreviewSurface here -- so the editor's own
-  // preview showed just the language/theme buttons in the header, with no
-  // social/map icons next to them, and no promotions row below the section
-  // tabs at all (promotionsSection was never passed either, further down).
-  const socialIconByKey: Record<string, LucideIcon> = {
-    facebook: FacebookIcon,
-    instagram: InstagramIcon,
-    telegram: Send,
-    website: Globe,
-  }
-  const socialAccentByKey: Record<string, string> = {
-    facebook: 'hover:text-[#1877F2] hover:border-[#1877F2]/40',
-    instagram: 'hover:text-[#E1306C] hover:border-[#E1306C]/40',
-    telegram: 'hover:text-[#26A5E4] hover:border-[#26A5E4]/40',
-    website: 'hover:text-slate-900 dark:hover:text-white',
-  }
-  const headerLinks = [
-    ...socialLinks.map((item) => ({
-      ...item,
-      icon: socialIconByKey[item.key] || ExternalLink,
-      accentClassName: socialAccentByKey[item.key] || '',
-    })),
-    addressFact?.href ? { key: 'map', label: copy('map', 'Map'), value: addressFact.href, icon: MapPin, accentClassName: '' } : null,
-  ].filter(Boolean) as Array<{ key: string; label: string; value: string; icon: LucideIcon; accentClassName: string }>
-
-  const promotionsSection = activeTab === 'products' ? (
-    <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
-    </Suspense>
-  ) : null
 
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
@@ -3096,7 +3021,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice)
       : null
-    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
+    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices, showStockStatus: shouldShowStockStatus({ showStockStatus: displayConfig.showStockStatus }) })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // Preview twin of PublicCatalogPage.tsx's openProductById, and the SAME
@@ -3175,6 +3100,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     toggleFilterValues,
     previewConfig: displayConfig,
     portalError,
+    onRetry: () => { void refreshPortalView() },
     productGridClass,
     compactTwoColumnMobile,
     compactCatalogCards,
@@ -3191,6 +3117,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     replaceVars,
   }
 
+  // The offers banner lives inside the products section (one place), not as a second render above it.
+  const promotionsSection = activeTab === 'products' ? (
+    <Suspense fallback={null}>
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
+    </Suspense>
+  ) : null
+
   function renderCatalogSection() {
     if (!displayConfig.showCatalog) return null
     const visible = activeTab === 'products'
@@ -3203,7 +3136,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
             <div className="text-sm text-slate-500">{copy('loading', 'Loading...')}</div>
           </SectionShell>
         )}>
-          <CatalogProductsSection {...catalogTabProps} />
+          <CatalogProductsSection {...catalogTabProps} promotionsBanner={promotionsSection} />
         </Suspense>
       </div>
     )
@@ -3212,7 +3145,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const publicFaqItems = Array.isArray(displayConfig.faqItems)
     ? localizeConfiguredFaqItems(displayConfig.faqItems, t).filter((item) => item?.question && item?.answer)
     : []
-  const aiUsageSummary = assistantUsage || null
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
   const handleUploadSubmissionImages = async () => {
     try {
@@ -3253,6 +3185,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     publicFaqItems,
     expandedFaqId,
     setExpandedFaqId,
+    openProductById,
     brands,
     assistantProfile,
     setAssistantProfile,
@@ -3263,13 +3196,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     askAssistant,
     assistantLoading,
     clearAssistantState,
-    aiUsageSummary,
-    assistantRequestPolicy,
     replaceVars,
     assistantError,
     assistantResponse,
-    assistantExpandedProductId,
-    setAssistantExpandedProductId,
   }
 
   const handlePortalTabChange = (key: string) => {
@@ -3512,10 +3441,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}
-        headerLinks={headerLinks}
+        socialGroups={socialGroups}
+        mapLink={addressFact?.href || ''}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
-        promotionsSection={promotionsSection}
         footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
         productDetailView={productDetailView}
         closeProductDetailView={closeProductDetailView}

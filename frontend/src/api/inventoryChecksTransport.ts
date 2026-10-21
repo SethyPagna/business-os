@@ -15,8 +15,37 @@ export type InventoryCheckSession = {
   revision: number
   started_at: string
   updated_at: string
+  closed_at?: string | null
+  can_edit?: boolean
   scope: QueryParams
   progress?: { total: number; done: number; issue: number; unstarted: number }
+  /** Sessions list only. Branch name is always sent; creator_name only when the viewer may see staff identity. */
+  branch_name?: string | null
+  creator_name?: string | null
+}
+export type InventoryCheckSessionsParams = QueryParams & {
+  branchId?: string | number
+  status?: 'open' | 'closed'
+  mine?: 1 | '1'
+  /** Business days (YYYY-MM-DD, Cambodia UTC+7) on started_at. */
+  startDate?: string
+  endDate?: string
+  page?: number
+  pageSize?: number
+}
+export type InventoryCheckHistoryEvent = {
+  id: number
+  session_id: string
+  product_id: number | null
+  /** The session's frozen starting name for the product; null for session-level events. */
+  product_name: string | null
+  actor_id: number
+  /** Present only when the viewer may see staff identity. */
+  actor_name?: string | null
+  action: string
+  created_at: string
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
 }
 export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'> & {
   state: 'unstarted' | 'done' | 'issue'
@@ -78,7 +107,7 @@ export function readInventoryCheckProducts<T>(params: QueryParams, signal?: Abor
   return apiFetch('GET', appendQuery(`${base}/products`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
-export function readInventoryCheckSessions(params: QueryParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number }> {
+export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number }> {
   return apiFetch('GET', appendQuery(`${base}/sessions`, buildQueryString(params)), undefined, undefined, { signal })
 }
 

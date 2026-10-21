@@ -80,8 +80,8 @@ test('Import for products, inventory and sales is unavailable without both cost 
     assert.equal(can({ ...base, ...COSTS, [`${section}:import`]: false }, section, 'import'), false, `${section}: switched off wins`)
     assert.equal(can({}, section, 'import', 'admin'), true, `${section}: an administrator holds every grant`)
   }
-  assert.equal(can({ products: 'review', ...COSTS }, 'products', 'import'), false, 'Partial Access never imports')
-  assert.equal(can({ sales: 'view', ...COSTS }, 'sales', 'import'), false, 'View only never imports')
+  assert.equal(can({ products: 'review', ...COSTS }, 'products', 'import'), false, 'Review never imports')
+  assert.equal(can({ sales: 'view', ...COSTS }, 'sales', 'import'), false, 'View never imports')
   assert.equal(can({ contacts: true }, 'contacts', 'import'), true, 'contacts imports carry no costs')
 })
 
@@ -104,7 +104,7 @@ test('relinking sales needs Sales customer and Reassign customer at Full Access,
   const sales = { contacts: true, sales: true }
   assert.equal(can(sales, 'contacts', 'relink_sales'), true)
   for (const [name, mutate] of Object.entries({
-    'Sales View only': { sales: 'view' },
+    'Sales View': { sales: 'view' },
     'Change linked customer off': { 'sales:customer': false },
     'Reassign customer off': { 'sales:customer_reassign': false },
     'Resolve conflicts off': { 'contacts:resolve_conflicts': false },
@@ -116,7 +116,7 @@ test('relinking sales needs Sales customer and Reassign customer at Full Access,
 
 test('renaming a saved inventory reason needs Full Access and follows the edit-reasons switch', () => {
   assert.equal(can({ inventory: true }, 'inventory', 'rename_reasons'), true)
-  assert.equal(can({ inventory: 'review' }, 'inventory', 'edit_reasons'), true, 'Partial Access still edits the list, queued')
+  assert.equal(can({ inventory: 'review' }, 'inventory', 'edit_reasons'), true, 'Review still edits the list, queued')
   assert.equal(can({ inventory: 'review' }, 'inventory', 'rename_reasons'), false, 'but the rename is refused')
   assert.equal(can({ inventory: true, 'inventory:edit_reasons': false }, 'inventory', 'rename_reasons'), false)
   assert.equal(can({}, 'inventory', 'rename_reasons', 'admin'), true)
@@ -225,7 +225,7 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
     assert.ok(!/\{(list|control)\}/.test(html), 'every placeholder is replaced')
   })
 
-  test(`${name}: at Partial Access the edit-reasons row says renaming needs Full Access, and not once switched off`, () => {
+  test(`${name}: at Review the edit-reasons row says renaming needs Full Access, and not once switched off`, () => {
     const sentence = fill(pack.perm_action_control_needs_full, { control: pack.perm_control_rename_reasons })
     const row = rowButton(render(pack, { inventory: 'review' }), pack.perm_act_inventory_edit_reasons)
     assert.ok((attribute(row, 'title') ?? '').includes(sentence))

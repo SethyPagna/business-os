@@ -59,6 +59,7 @@ function loadCore(legacy = false) {
     './customTableName': load('lib/customTableName.ts'),
     './passwordHash': { hashPassword: async () => 'focused-test-hash' },
     './passwordPolicy': load('lib/passwordPolicy.ts'),
+    './roleDefaults': load('lib/roleDefaults.ts'),
   }, text + '\nexport { tryFastPath }\n')
 }
 const core = loadCore()

@@ -153,7 +153,9 @@ async function main() {
     const m = meter(prior.raw, 1000, 0)
     const result = await request(m.db, '/', body, prior.env)
     assert.equal(result.status, 200, JSON.stringify(result))
-    assert.equal(prior.raw.prepare('SELECT sale_status FROM sales WHERE id=@id').get({ id: prior.body.sale_id }).sale_status, i === 0 ? 'partial_return' : 'returned')
+    // 6.0.905: the projection is the return tag; sale_status keeps the payment state.
+    assert.deepEqual({ ...prior.raw.prepare('SELECT sale_status,return_state FROM sales WHERE id=@id').get({ id: prior.body.sale_id }) },
+      { sale_status: 'completed', return_state: i === 0 ? 'partial' : 'full' })
   }
   console.log('PASS successive v1 partial returns project completed cohort status without another read')
   const legacyOccupied = await fixture(1)
@@ -215,7 +217,9 @@ async function main() {
     assert.equal(response.status, 200, JSON.stringify(response))
     assert.equal(sends - beforeSends, replacement ? 2 : 1)
     const notificationReads = m.events.filter(event => event.kind === 'read' && /FROM return_items ri LEFT JOIN|FROM return_replacement_items|FROM settings WHERE key IN/.test(event.sql)).length
-    assert.equal(notificationReads, replacement ? 7 : 6)
+    // 6.0.905: the return alert reads its lines and replacements in ONE statement after the settings read, and the
+    // replacement sale's alert shares that settings read (was 6 / 7 attempts with transient retries).
+    assert.equal(notificationReads, 4)
     console.log(`PASS enabled actual notifications replacement${replacement}: ${notificationReads} SQL attempts, ${sends - beforeSends} fake external sends`)
     if (replacement) {
       const separate = meter(enabled.raw, 1000, 0, { settingsEach: true })

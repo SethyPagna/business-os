@@ -47,6 +47,7 @@ function world({ through } = {}) {
     './stockTransaction': load('stockTransaction'), './db': dbModule, './customTableName': load('customTableName'), './sqlBinding': load('sqlBinding'),
     './passwordHash': { hashPassword: async () => 'synthetic-test-hash' },
     './passwordPolicy': load('passwordPolicy'),
+    './roleDefaults': load('roleDefaults'),
   })
   return { raw, control, core, env: { DB: { prepare: prepared, async batch(statements) {
     raw.exec('BEGIN IMMEDIATE')

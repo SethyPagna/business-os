@@ -46,6 +46,9 @@ interface SalesExportSummary {
   total_delivery_usd?: number
   total_refunds_usd?: number
   net_revenue_usd?: number
+  /** Owner, 20-21 Oct 2026: net revenue without Not Paid sales, and what those still owe. */
+  net_revenue_without_not_paid_usd?: number
+  not_paid_owed_usd?: number
   avg_order_usd?: number
   /** A cost viewer who is not an administrator gets profit on goods alone (L4). */
   profit_excludes_delivery?: boolean
@@ -284,6 +287,10 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                   [tr('delivery_fees', 'Delivery Fees'), fmtUSD(preview.summary?.total_delivery_usd || 0)],
                   [tr('total_refunded', 'Total Refunded'), fmtUSD(preview.summary?.total_refunds_usd || 0)],
                   [tr('net_revenue', 'Net Revenue'), fmtUSD(preview.summary?.net_revenue_usd || 0)],
+                  ...(typeof preview.summary?.net_revenue_without_not_paid_usd === 'number' && preview.summary.net_revenue_without_not_paid_usd !== preview.summary.net_revenue_usd ? [
+                    [tr('revenue_paid_only', 'Revenue (paid only)'), fmtUSD(preview.summary.net_revenue_without_not_paid_usd)],
+                    [tr('not_paid_owed', 'Still owed'), fmtUSD(preview.summary.not_paid_owed_usd || 0)],
+                  ] satisfies Array<[string, string | number | undefined]> : []),
                   [tr('avg_order', 'Avg Order'), fmtUSD(preview.summary?.avg_order_usd || 0)],
                 ] satisfies Array<[string, string | number | undefined]>).map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between gap-3">

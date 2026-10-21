@@ -50,6 +50,7 @@ const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
+  if (id === './businessDateWindow') return loadModule('lib/businessDateWindow.ts', require)
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
   if (id === './receivingBranch') return loadModule('lib/receivingBranch.ts', require)
@@ -129,7 +130,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/reviewGate') return { maybeQueueForReview: asyncNoop }
   if (id === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
   if (id === '../lib/cache') return { bumpVersion: asyncNoop }
-  if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockFromBatch: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
+  if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
@@ -484,7 +485,9 @@ ${marker}`)
       reason: 'query parity', client_request_id: 'query-parity' }, app)
     assert.strictEqual(result.status, 200, JSON.stringify(result.json))
     await Promise.all(routeWaits)
-    counts.push(queryReads.length)
+    // 6.0.882 memoises the schema probe per isolate: the freshly loaded legacy module pays it once, the warmed handler does not.
+    // That is not part of the FIFO-read oracle, so it is excluded from the count.
+    counts.push(queryReads.filter(sql => !/sqlite_master/.test(sql)).length)
     assert.strictEqual(queryReads.filter(sql => /bbs\.quantity AS available/.test(sql)).length, app === legacyApp ? 2 : 1)
     assert.strictEqual(telegramInputs[0].items[0].lot, 'A')
     routeDb.close()
@@ -562,12 +565,8 @@ await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonle
   })
 })
 
-await check('offline replay still dispatches Inventory transfer to the same guarded route and forwards its request id', () => {
-  const sync = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8')
+await check('Inventory transfer transport sends its request id to the guarded route', () => {
   const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'inventoryWriteTransport.ts'), 'utf8')
-  assert.match(sync, /'inventory\.transfer': \{ method: 'POST', path: '\/api\/inventory\/transfer' \}/)
-  assert.match(sync, /'x-client-request-id': operation\.client_request_id/)
-  assert.match(sync, /client_request_id: operation\.client_request_id/)
   assert.match(transport, /'inventory:transfer'[\s\S]*'POST'[\s\S]*'\/api\/inventory\/transfer'/)
   assert.match(transport, /ensureClientRequestId\([\s\S]*'transfer'\)/)
 })

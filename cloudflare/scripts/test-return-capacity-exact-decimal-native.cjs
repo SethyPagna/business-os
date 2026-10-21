@@ -12,7 +12,7 @@
 // the exact entitlement).
 //
 //   path                          sequence on a 0.3 line      expected
-//   create by sale line           0.2, then 0.1                both 200, sale 'returned'
+//   create by sale line           0.2, then 0.1                both 200, sale Completed + 'full' tag (6.0.905)
 //   control                       ... then 0.1 more            refused, nothing written
 //   create by product             0.2 by line, 0.1 by product  both 200
 //   edit                          0.2 + 0.05, edit 0.05->0.1   200 (exactly full)
@@ -35,11 +35,11 @@ async function main() {
     const a = await sale(31, 901, 'Exact Serum')
     const a1 = await legacyReturn(a, 'exact-a-1', { sale_item_id: a.items[0].id, product_id: 901, quantity: 0.2 })
     const a2 = await legacyReturn(a, 'exact-a-2', { sale_item_id: a.items[0].id, product_id: 901, quantity: 0.1 })
-    const aStatus = (await h.one('SELECT sale_status FROM sales WHERE id=?', a.sale.id)).sale_status
+    const aStatus = (await h.one("SELECT sale_status || '/' || COALESCE(return_state,'-') AS state FROM sales WHERE id=?", a.sale.id)).state
     r.check(`by sale line: 0.2 then 0.1 of a 0.3 line are both recorded (got ${a1.status}, ${a2.status} ${a2.body.error || ''}; sale ${aStatus})`, () => {
       assert.equal(a1.status, 200, JSON.stringify(a1.body))
       assert.equal(a2.status, 200, JSON.stringify(a2.body))
-      assert.equal(aStatus, 'returned')
+      assert.equal(aStatus, 'completed/full')
     })
     const a3 = await legacyReturn(a, 'exact-a-3', { sale_item_id: a.items[0].id, product_id: 901, quantity: 0.1 })
     const aRows = await recorded(a.sale.id)
@@ -68,11 +68,11 @@ async function main() {
         items: [{ sale_item_id: c.items[0].id, product_id: 903, quantity, applied_price_usd: 10, stock_action: 'restock', branch_id: 1 }] }, key)
     }
     const e1 = await edit('exact-c-edit-1', 0.1)
-    const cStatus = (await h.one('SELECT sale_status FROM sales WHERE id=?', c.sale.id)).sale_status
+    const cStatus = (await h.one("SELECT sale_status || '/' || COALESCE(return_state,'-') AS state FROM sales WHERE id=?", c.sale.id)).state
     r.check(`edit: raising 0.05 to 0.1 beside 0.2 on a 0.3 line is accepted (fixture ${c1.status}/${c2.status}; edit ${e1.status} ${e1.body.error || ''}; sale ${cStatus})`, () => {
       assert.equal(c1.status, 200); assert.equal(c2.status, 200)
       assert.equal(e1.status, 200, JSON.stringify(e1.body))
-      assert.equal(cStatus, 'returned', 'the edit projection is exact too')
+      assert.equal(cStatus, 'completed/full', 'the edit projection is exact too')
     })
     const e2 = await edit('exact-c-edit-2', 0.1000001)
     const cRows = await recorded(c.sale.id)

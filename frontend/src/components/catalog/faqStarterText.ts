@@ -14,7 +14,7 @@
 // there is only one copy of this text in the repository.
 export const FAQ_STARTER_TEXT = [
   ['1', 'How do I compare products for my skin type?', 'Use the catalogue description and manufacturer label to compare products. For allergies, reactions, skin conditions, medicines, or pregnancy, ask a qualified health professional.'],
-  ['2', 'Are the products shown here available in store?', 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.'],
+  ['2', 'Are the products shown here available in store?', 'The products shown come from our current catalogue. Stock can change during busy periods, so contact the store for a final confirmation before visiting.'],
   // G38 P0: the owner's rule (30 Sep) is membership stays, the points value
   // reads "coming soon" -- never a promise of points, history or rewards.
   ['3', 'Where can I see my membership?', 'Sign in and open your account. Your membership ID is shown there. Points are coming soon.'],
@@ -24,7 +24,7 @@ export const FAQ_STARTER_TEXT = [
   ['7', 'Can I ask about a product or brand line?', 'Contact the store about the specific item and ask what packaging, batch, supplier, or sourcing information can be verified before buying.'],
   ['8', 'What types of products are available?', 'Use the category and brand filters to see what is currently listed. Contact the store if a product or category is not shown.'],
   ['9', 'Can I ask about a routine?', 'You can contact the store with your budget and preferences. For skin conditions, allergies, reactions, medicines, or pregnancy, ask a qualified health professional.'],
-  ['10', 'What should I do if an item is out of stock?', 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.'],
+  ['10', 'What should I do if an item is out of stock?', 'If an item is unavailable, message the store through the contact links on this page so the team can suggest alternatives or confirm when stock changes.'],
   ['11', 'Can I look for products within a specific budget?', 'Use the prices shown in the current catalogue and contact the store to confirm a final price before purchase.'],
   ['12', 'Are gifts or bundles available?', 'Check the current catalogue and promotions, then contact the store to confirm what is available.'],
   ['13', 'Can I compare alternatives if a brand is unavailable?', 'Compare current products by category, description, price and stock status. The store can confirm current availability.'],
@@ -32,7 +32,9 @@ export const FAQ_STARTER_TEXT = [
   ['15', 'Where can I see the product categories?', 'Use the current category filters. They reflect the products listed in the catalogue.'],
   ['21', 'Do you offer delivery, or is it pickup only?', 'Contact the store with your location to confirm available delivery or collection options, timing, and fees before ordering.'],
   ['22', 'What payment methods do you accept?', 'Payment is not collected on this site. Contact the store to confirm the available payment method before ordering.'],
-  ['23', 'What are your store hours?', 'Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.'],
+  // Owner, 20 Oct 2026: 7 days, unopened, with the receipt. Mirrors the Terms returns section.
+  ['26', 'What is your returns policy?', 'Returns are accepted within 7 days for unopened items with the receipt.'],
+  ['23', 'What are your store hours?', 'Opening hours are listed in the branch details on this page. Contact the store to confirm the hours for today.'],
   ['24', 'How can I ask about a product\'s source or authenticity?', 'Contact the store about the specific item and ask what sourcing, batch, packaging, or supplier information can be verified. This catalogue does not make a blanket authenticity guarantee.'],
   ['25', 'Where can I see current promotions and discounts?', 'Check the Promotions section for offers currently published by the store, then confirm the final price and terms before purchase.'],
 ]

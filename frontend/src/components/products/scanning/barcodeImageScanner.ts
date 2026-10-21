@@ -1,4 +1,16 @@
+import {
+  RETAIL_BARCODE_FORMATS,
+  createFrameGrabber,
+  isAcceptableBarcodeRead,
+  loadLumaDecoder,
+  runDecodeLadder,
+  type FrameRegions,
+  type LumaDecoder,
+} from './barcodeFrameDecoder.ts'
+
 interface BarcodeImageElement {
+  naturalWidth?: number
+  naturalHeight?: number
   onload: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
   onerror: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
   src: string
@@ -6,6 +18,7 @@ interface BarcodeImageElement {
 
 interface BarcodeDetectorResult {
   rawValue?: unknown
+  format?: unknown
 }
 
 interface NativeBarcodeDetector {
@@ -17,19 +30,10 @@ interface NativeBarcodeDetectorConstructor {
   getSupportedFormats?: () => Promise<unknown[]>
 }
 
-interface ZxingReader {
-  decodeFromImageElement(image: BarcodeImageElement): Promise<{
-    getText?: () => unknown
-  } | null>
-}
-
-interface ZxingModule {
-  BrowserMultiFormatReader: new() => ZxingReader
-}
-
 interface ScanBarcodeOptions {
   readDataUrl?: (file: unknown) => Promise<string> | string
-  loadZxingModule?: () => Promise<ZxingModule>
+  loadDecoder?: () => Promise<LumaDecoder>
+  grabRegions?: (image: BarcodeImageElement, width: number, height: number) => FrameRegions
   createImage?: () => BarcodeImageElement
   getNativeBarcodeDetector?: () => unknown
 }
@@ -42,22 +46,6 @@ function readFileAsDataUrl(file: Blob): Promise<string> {
     reader.readAsDataURL(file)
   })
 }
-
-const KNOWN_FORMATS = [
-  'aztec',
-  'codabar',
-  'code_128',
-  'code_39',
-  'code_93',
-  'data_matrix',
-  'ean_13',
-  'ean_8',
-  'itf',
-  'pdf417',
-  'qr_code',
-  'upc_a',
-  'upc_e',
-]
 
 function createImageElement(): BarcodeImageElement {
   return new Image()
@@ -85,15 +73,19 @@ async function detectWithNativeBarcodeDetector(
     const NativeDetector = BarcodeDetectorCtor as NativeBarcodeDetectorConstructor
     const supportedFormats = typeof NativeDetector.getSupportedFormats === 'function'
       ? await NativeDetector.getSupportedFormats()
-      : KNOWN_FORMATS
+      : RETAIL_BARCODE_FORMATS
     const formats = (supportedFormats || [])
       .map((format) => String(format || ''))
-      .filter((format) => KNOWN_FORMATS.includes(format))
-    const detector = new NativeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
+      .filter((format) => RETAIL_BARCODE_FORMATS.includes(format))
+    const detector = new NativeDetector({ formats: formats.length ? formats : RETAIL_BARCODE_FORMATS })
     const results = await detector.detect(image)
-    const value = String(results?.[0]?.rawValue || '').trim()
-    return value
+    const read = (results || [])
+      .map((result) => ({ text: String(result?.rawValue || '').trim(), format: String(result?.format || '') }))
+      .find((candidate) => isAcceptableBarcodeRead(candidate))
+    return read?.text || ''
   } catch (_) {
+    // A native detector that throws is treated like one that saw nothing:
+    // the ZXing ladder below still reads the photo.
     return ''
   }
 }
@@ -102,8 +94,11 @@ export async function scanBarcodeFromImageFile(file: unknown, options: ScanBarco
   if (!file) throw new Error('Choose a photo before scanning.')
 
   const readDataUrl = options.readDataUrl || ((input: unknown) => readFileAsDataUrl(input as Blob))
-  const loadZxingModule: () => Promise<ZxingModule> = options.loadZxingModule
-    || (async () => (await import('@zxing/browser')) as unknown as ZxingModule)
+  const loadDecoder = options.loadDecoder || (() => loadLumaDecoder())
+  const grabRegions = options.grabRegions
+    || ((image: BarcodeImageElement, width: number, height: number) => (
+      createFrameGrabber()(image as unknown as CanvasImageSource, width, height)
+    ))
   const createImage = options.createImage || createImageElement
 
   const dataUrl = await readDataUrl(file)
@@ -115,10 +110,11 @@ export async function scanBarcodeFromImageFile(file: unknown, options: ScanBarco
   const nativeValue = await detectWithNativeBarcodeDetector(image, options)
   if (nativeValue) return nativeValue
 
-  const { BrowserMultiFormatReader } = await loadZxingModule()
-  const reader = new BrowserMultiFormatReader()
-  const result = await reader.decodeFromImageElement(image)
-  const value = String(result?.getText?.() || '').trim()
-  if (!value) throw new Error('We could not find a barcode in that photo.')
-  return value
+  // A still photo can afford the whole ladder, TRY_HARDER included: the
+  // person is already waiting on "Reading photo...".
+  const decode = await loadDecoder()
+  const regions = grabRegions(image, Number(image.naturalWidth || 0), Number(image.naturalHeight || 0))
+  const { read } = runDecodeLadder(regions, decode, { tryHarder: true })
+  if (!read) throw new Error('We could not find a barcode in that photo.')
+  return read.text.trim()
 }

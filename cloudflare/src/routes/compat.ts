@@ -14,7 +14,6 @@ import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
-import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { BUCKET_MONEY_PLACES, DASHBOARD_TOP_ROWS, applyLiveProductNames, dashboardRankingRows, getSalesTotalsAndPeriodSeries, getSalesTotalsWithoutLosses, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere, type DashboardProductRow } from '../lib/salesAnalytics'
 import { DASHBOARD_RANKING_ROWS, openDashboardRankingsCache, type DashboardRankingsCacheContext } from '../lib/dashboardRankingsCache'
@@ -266,7 +265,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
     `).get(params),
     loadDashboardStockOverview(env, overviewCtx),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+      SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause('sales')}
@@ -414,7 +413,7 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     const params = dashboardRangeParams(range, branchId)
     const saleBranchClause = branchId ? ' AND sales.branch_id = @branchId' : ''
     const rows = await db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+      SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause}
@@ -594,8 +593,8 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
     // A db error is a 500, never an empty 200 that reads as "no logs": the
     // client falls back to its local mirror (and says so) instead of
     // presenting an error as an empty trail.
-    const message = error instanceof Error ? error.message : 'Failed to load audit logs'
-    return c.json({ error: message }, 500)
+    console.error('[audit-logs] load failed', error)
+    return c.json({ error: 'Failed to load audit logs', code: 'audit_logs_failed' }, 500)
   }
 })
 app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
@@ -741,12 +740,16 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   } catch (error) {
     // Same fail-loud rule as /system/audit-logs above: a db error must not
     // render as an empty ledger.
-    const message = error instanceof Error ? error.message : 'Failed to load the deleted-sale ledger'
-    return c.json({ error: message }, 500)
+    console.error('[deleted-sale-ledger] load failed', error)
+    return c.json({ error: 'Failed to load the deleted-sale ledger', code: 'deleted_sale_ledger_failed' }, 500)
   }
 })
 
-app.get('/system/integration-doctor', requireAuth, async (c) => {
+// GET is read-only; the R2 write/delete probe is POST (a GET must not write).
+app.get('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c, false))
+app.post('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c, true))
+
+async function runIntegrationDoctor(c: any, deep: boolean) {
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
   let ok = true
@@ -758,11 +761,12 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     ok = false
     database.ok = false
     database.status = 'needs_attention'
-    database.message = error instanceof Error ? error.message : 'D1 query failed'
+    console.error('[integration-doctor] D1 query failed', error)
+    database.message = 'D1 query failed'
   }
 
   const objectStorage: Record<string, unknown> = { driver: 'r2', ok: true, status: 'ok', message: 'R2 (ASSETS) bucket is bound.' }
-  if (c.req.query('deep')) {
+  if (deep) {
     try {
       const key = `system/doctor-${crypto.randomUUID()}.txt`
       await c.env.ASSETS.put(key, 'ok')
@@ -772,7 +776,8 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
       ok = false
       objectStorage.ok = false
       objectStorage.status = 'needs_attention'
-      objectStorage.message = error instanceof Error ? error.message : 'R2 write/delete failed'
+      console.error('[integration-doctor] R2 write/delete failed', error)
+      objectStorage.message = 'R2 write/delete failed'
       objectStorage.writeReadDelete = { ok: false }
     }
   }
@@ -783,7 +788,8 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     backupCheck = { ok: true, status: 'ok', message: `${backups.length} backup(s) stored in R2.`, count: backups.length, keep: 2, intervalHours: 6 }
   } catch (error) {
     ok = false
-    backupCheck = { ok: false, status: 'needs_attention', message: error instanceof Error ? error.message : 'R2 backup listing failed' }
+    console.error('[integration-doctor] R2 backup listing failed', error)
+    backupCheck = { ok: false, status: 'needs_attention', message: 'R2 backup listing failed' }
   }
 
   // This was hard-coded `ok: true, 'configured'` -- it reported a healthy
@@ -852,68 +858,7 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   // expect, and "which plan is this deployment on" is the first question.
   const runtime = { objectStorageDriver: 'r2', tier: resolvePlanTier(c.env), quotas: await readAllQuotas(c.env) }
   return c.json({ item: { checks, runtime }, checks, ok })
-})
-
-// Ported from backend's testObjectStore(): write, read-back, delete a probe
-// key against the same bucket production uploads go to (R2's ASSETS
-// binding), confirming credentials/bucket config actually work end-to-end
-// rather than just "the binding exists". Both legacy routes hit the same
-// underlying check; kept as two routes to match existing frontend call
-// sites (`GET .../doctor` for passive display, `POST .../test-write` for
-// an explicit user-triggered "Test connection" button).
-async function testObjectStore(env: Env) {
-  const key = `system/doctor/object-store-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
-  const probeBody = new Uint8Array(new TextEncoder().encode('business-os-object-store-test')).buffer as ArrayBuffer
-  await putObject(env.ASSETS, key, probeBody, 'text/plain; charset=utf-8')
-  const object = await getObject(env.ASSETS, key)
-  if (!object) throw new Error('Object store test read returned no body')
-  await deleteObject(env.ASSETS, key)
-  return { ok: true, driver: 'cloudflare-r2', bucket: 'ASSETS' }
 }
-app.get('/system/object-storage/doctor', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage doctor failed' }, 503)
-  }
-})
-app.post('/system/object-storage/test-write', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage test failed' }, 503)
-  }
-})
-
-// Ported from backend's `/backups/versions`(+`/list` alias)/`/backups/:id` --
-// these were missing entirely on Cloudflare even though `routes/backups.ts`
-// (mounted at /api/backups) covers create/list/restore; this compat.ts
-// `/system/backups/*` path is the one the Settings > Backups panel's
-// version-history view and per-job status poll actually call.
-async function sendBackupVersions(c: any) {
-  const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query('limit') || '50', 10) || 50))
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  try {
-    const items = (await listCloudflareBackups(c.env)).slice(0, limit)
-    return c.json({ items })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Failed to list backup versions' }, 500)
-  }
-}
-app.get('/system/backups/versions', requireAuth, sendBackupVersions)
-app.get('/system/backups/versions/list', requireAuth, sendBackupVersions)
-app.get('/system/backups/:id', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  const item = await getSystemJob(c.env, c.req.param('id') || '')
-  if (!item) return c.json({ error: 'Backup job not found' }, 404)
-  return c.json({ item })
-})
 
 // -----------------------------------------------------------------------
 // Filesystem / Postgres-only diagnostics from the Docker-era backend.
@@ -929,7 +874,6 @@ app.get('/system/backups/:id', requireAuth, async (c) => {
 const NOT_APPLICABLE_CLOUD = { error: 'Not applicable when running fully on Cloudflare -- there is no local filesystem or Postgres instance to manage.', code: 'not_applicable_cloud_mode' }
 app.post('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.delete('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.get('/system/storage-mode', requireAuth, (c) => c.json({ mode: 'cloudflare', driver: 'd1+r2', migratable: false }))
 app.post('/system/scale-migration/prepare', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.post('/system/scale-migration/run', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
 app.post('/system/browse-dir', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))

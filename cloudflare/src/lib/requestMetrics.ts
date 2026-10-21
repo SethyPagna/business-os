@@ -35,9 +35,7 @@
 // going through D1Compat (lib/maintenance.ts, lib/productWrites.ts,
 // lib/backup.ts and a handful of route sites). Those statements are invisible
 // here until they move onto D1Compat. The queue() consumers in index.ts run
-// outside any scope and are not counted either. A /api/sync replay
-// re-dispatches each op through app.request(), so every op is its own
-// request and the outer sync request shows almost no D1 work.
+// outside any scope and are not counted either.
 // The separate invocation budget includes getMaintenance's raw dispatch and
 // attached background/late attempts. It is shared only by work belonging to
 // this invocation; it does not make other uninstrumented raw routes complete.

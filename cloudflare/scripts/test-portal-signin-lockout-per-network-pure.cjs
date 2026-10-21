@@ -43,7 +43,7 @@ async function check(name, fn) {
 
 async function harnessWithAccount(source = portalSource) {
   const h = createPortalHarness({ sources: { [PORTAL_REL]: source }, settings: SIGNUP_OPEN })
-  const signup = await h.request('/auth/signup', 'POST', { name: 'Dara', phone: PHONE, password: PASSWORD, consent: true, consentLocale: 'en' }, { ip: '192.0.2.1' })
+  const signup = await h.request('/auth/signup', 'POST', { name: 'Dara', phone: PHONE, password: PASSWORD, consent: true, ageConfirmed: true, consentLocale: 'en' }, { ip: '192.0.2.1' })
   assert.equal(signup.status, 200, `fixture sign-up failed: ${JSON.stringify(signup.body)}`)
   return h
 }

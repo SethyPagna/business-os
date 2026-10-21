@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { getDb } from './db'
-import { PORTAL_CONSENT_VERSION, portalConsentVersionAccepted } from './portalAccounts'
+import { PORTAL_CONSENT_VERSION, portalConsentCurrent } from './portalAccounts'
 import type { Env } from '../index'
 import { customerIsProfileSql } from './anonymousCustomer'
 
@@ -61,7 +61,8 @@ export type PortalAccount = {
 
 export type PortalAccountState =
   | { status: 'authenticated'; account: PortalAccount }
-  | { status: 'reconsent_required'; account: null }
+  // accountId lets the renew endpoint (and nothing else) act for the session.
+  | { status: 'reconsent_required'; account: null; accountId: number; membershipId: string }
   | { status: 'unauthenticated'; account: null }
 
 export async function createPortalSession(
@@ -108,7 +109,7 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
   const db = getDb(c.env)
   const row = await db.prepare(`
     SELECT a.id, a.membership_id, a.name, a.phone, a.email, a.contact_id,
-           a.consent_version, a.consent_at
+           a.consent_version, a.consent_at, a.age_confirmed_at
     FROM portal_sessions s
     JOIN portal_accounts a ON a.id = s.account_id
     LEFT JOIN customers c ON c.id = a.contact_id
@@ -117,10 +118,10 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
       AND s.expires_at > @now
       AND (a.contact_id IS NULL OR (c.id IS NOT NULL AND ${customerIsProfileSql('c')}))
     LIMIT 1
-  `).get<PortalAccount & { consent_version: string | null; consent_at: string | null }>({ token_hash: tokenHash, now: nowIso })
+  `).get<PortalAccount & { consent_version: string | null; consent_at: string | null; age_confirmed_at: string | null }>({ token_hash: tokenHash, now: nowIso })
   if (!row) return { status: 'unauthenticated', account: null }
-  if (!portalConsentVersionAccepted(row.consent_version) || !row.consent_at) {
-    return { status: 'reconsent_required', account: null }
+  if (!portalConsentCurrent(row)) {
+    return { status: 'reconsent_required', account: null, accountId: row.id, membershipId: row.membership_id }
   }
 
   c.executionCtx.waitUntil(

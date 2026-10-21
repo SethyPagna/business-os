@@ -238,7 +238,7 @@ assert.deepEqual(lines, [
   '· Delivery fee/ថ្លៃដឹក: $12.00',
   // POSITIVE, and the owner's own word. Never $-38.00, and never taken off
   // the Revenue or Profit lines above it.
-  '· Not Paid/ប្រាក់ជំពាក់: $38.00',
+  '· Still owed/ប្រាក់នៅជំពាក់: $38.00',
   '· Refunds/ការសងប្រាក់: $15.00',
   // The gap the owner named: registered opening and closing cash, both
   // currencies, then the expected drawer and ONE difference line. Four marks
@@ -302,7 +302,7 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Gross sales: $503.65',
   '· Profit: $142.60',
   '· Delivery fee: $12.00',
-  '· Not Paid: $38.00',
+  '· Still owed: $38.00',
   '· Refunds: $15.00',
   '=====Cash count=====',
   '· Opening cash: $50.00 · 100,000៛',
@@ -346,7 +346,7 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· ការលក់សរុប: $503.65',
   '· ចំណេញ: $142.60',
   '· ថ្លៃដឹក: $12.00',
-  '· ប្រាក់ជំពាក់: $38.00',
+  '· ប្រាក់នៅជំពាក់: $38.00',
   '· ការសងប្រាក់: $15.00',
   '=====ការរាប់សាច់ប្រាក់=====',
   '· សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
@@ -585,7 +585,7 @@ assert.deepEqual(quiet.split('\n'), [
   '· N/A',
 ], quiet)
 check(`a shift that took nothing keeps all six sections and marks the empty ones (${quiet.split('\n').length} lines)`,
-  !quiet.includes('Not Paid') && !quiet.includes('Delivery fee') && !quiet.includes('Refunds')
+  !quiet.includes('Still owed') && !quiet.includes('Delivery fee') && !quiet.includes('Refunds')
   && !quiet.includes('Cancelled') && !quiet.includes('Edited'), quiet)
 check('the retired em-dash empty marker is gone from every section',
   !quiet.split('\n').includes('—') && quiet.split('\n').filter((line) => line === '· N/A').length === 3, quiet)
@@ -618,7 +618,7 @@ check('...and the SAME suffix survives in the Khmer rendering of the same line',
 // unpaid in reports as well".
 const lossBoth = render('both', () => telegram.formatShiftReport('Sunrise Mart', shift, lossFigures, NOW)).split('\n')
 check('and Loss sits directly below Not Paid',
-  lossBoth.findIndex((line) => line.startsWith('· Loss')) === lossBoth.findIndex((line) => line.startsWith('· Not Paid')) + 1, lossBoth.join('\n'))
+  lossBoth.findIndex((line) => line.startsWith('· Loss')) === lossBoth.findIndex((line) => line.startsWith('· Still owed')) + 1, lossBoth.join('\n'))
 
 // The 8-row cap with an "Other" fold is applied in shiftFigures (it needs the
 // kernel rows), so the formatter is pinned on the rows it is handed.
@@ -663,7 +663,7 @@ assert.deepEqual(daySections, [
   '· Revenue/ចំណូល: $486.25',
   '· Profit/ចំណេញ: $142.60',
   '· Delivery fee/ថ្លៃដឹក: $12.00',
-  '· Not Paid/ប្រាក់ជំពាក់: $38.00',
+  '· Still owed/ប្រាក់នៅជំពាក់: $38.00',
   '· Refunds/ការសងប្រាក់: $15.00',
   '=====Invoices/វិក្កយបត្រ=====',
   '· Total/សរុប: 24 · Cancelled/បានបោះបង់: 1',
@@ -758,7 +758,7 @@ check('the recorded delivery COST stays, under Sales, when Expenses is gone',
     '· Profit/ចំណេញ: $142.60',
     '· Delivery fee/ថ្លៃដឹក: $12.00',
     '· Actual delivery cost/ថ្លៃដឹកដើម: $7.50',
-    '· Not Paid/ប្រាក់ជំពាក់: $38.00',
+    '· Still owed/ប្រាក់នៅជំពាក់: $38.00',
     '· Refunds/ការសងប្រាក់: $15.00',
   ].join('\n'), sectionBlock(feesOff, 'Sales/ការលក់').join('\n'))
 check('and the fees table\'s own money is gone with the section',

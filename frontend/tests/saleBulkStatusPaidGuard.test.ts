@@ -40,6 +40,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { transformSync } from 'esbuild'
 
 import * as uiRule from '../src/utils/saleStatusResolution.ts'
+import { returnOwedReductionUsd } from '../src/utils/receiptTotals.ts'
 import { bulkDialogDependency, NOT_BULK_DIALOG_DEPENDENCY } from './bulkFieldChangeDialogShim.ts'
 
 const nodeRequire = createRequire(import.meta.url)
@@ -86,11 +87,15 @@ async function loadWorkerRule(): Promise<Rule> {
 
 // --- 1. the rule, as the page applies it ------------------------------------
 
-const blockedExpression = salesPage.match(/blockedTargetKeys: (PAID_SALE_STATUSES\.filter\(\(status\) => statusChangeNeedsPayment\(sale\.sale_status, status, sale\)\)\.map\(\(status\) => `value:\$\{status\}`\))/)
+// The sale's money as the Worker reads it: the debt half of its returns (withDebtLowered), not the whole refund.
+const blockedExpression = salesPage.match(/blockedTargetKeys: (PAID_SALE_STATUSES\.filter\(\(status\) => statusChangeNeedsPayment\(salePaymentStatus\(sale\), status, \{ \.\.\.sale, refund_usd: returnOwedReductionUsd\(sale\) \}\)\)\.map\(\(status\) => `value:\$\{status\}`\))/)
 // The page's own expression, compiled once and fed either copy of the rule.
 const blockedTargets = blockedExpression
-  ? new Function('PAID_SALE_STATUSES', 'statusChangeNeedsPayment', 'sale', `return ${blockedExpression[1]}`) as
-    (paid: readonly string[], rule: Rule['statusChangeNeedsPayment'], sale: Row) => string[]
+  ? ((compiled: (paid: readonly string[], rule: Rule['statusChangeNeedsPayment'], paymentStatus: Rule['salePaymentStatus'], owedReduction: typeof returnOwedReductionUsd, sale: Row) => string[]) =>
+      (paid: readonly string[], rule: Rule['statusChangeNeedsPayment'], sale: Row, paymentStatus: Rule['salePaymentStatus'] = uiRule.salePaymentStatus): string[] =>
+        compiled(paid, rule, paymentStatus, returnOwedReductionUsd, sale))(
+      new Function('PAID_SALE_STATUSES', 'statusChangeNeedsPayment', 'salePaymentStatus', 'returnOwedReductionUsd', 'sale', `return ${blockedExpression[1]}`) as
+        (paid: readonly string[], rule: Rule['statusChangeNeedsPayment'], paymentStatus: Rule['salePaymentStatus'], owedReduction: typeof returnOwedReductionUsd, sale: Row) => string[])
   : null
 
 // Rows as GET /api/sales returns them: the sale's own columns, V1 money.
@@ -109,11 +114,15 @@ const SALES: Array<{ row: Row; blocked: string[]; why: string }> = [
   // a tender the POS records Completed, so it is paid now -- pinned below.)
   { row: listRow(4, 'awaiting_payment', { amount_paid_usd: 9.99, amount_paid_khr: 20 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'just over half a cent short on a mixed tender' },
   { row: listRow(5, null, {}), blocked: [], why: 'a NULL status is a legacy Completed' },
+  // A return keeps the payment state in status_before_return and lowers what is owed (owner, 29 Sep / 6 Oct 2026).
+  { row: listRow(7, 'partial_return', { status_before_return: 'awaiting_payment', refund_usd: 4 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'a returned Not Paid sale that still owes $6' },
+  { row: listRow(8, 'partial_return', { status_before_return: 'awaiting_payment', refund_usd: 4, amount_paid_usd: 6 }), blocked: [], why: 'a returned Not Paid sale whose $6 tender covers the $10 less the $4 returned' },
 ]
 
 await runTest('the page asks the shared rule which targets each sale may not take', () => {
   assert.ok(blockedTargets, 'Sales.tsx should build blockedTargetKeys from PAID_SALE_STATUSES and statusChangeNeedsPayment')
-  assert.match(salesPage, /import \{ PAID_SALE_STATUSES, statusChangeNeedsPayment \} from '\.\.\/\.\.\/utils\/saleStatusResolution\.ts'/)
+  assert.match(salesPage, /import \{ PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment \} from '\.\.\/\.\.\/utils\/saleStatusResolution\.ts'/)
+  assert.match(salesPage, /import \{ returnOwedReductionUsd \} from '\.\.\/\.\.\/utils\/receiptTotals\.ts'/)
   // Only the Status review is gated; payment method, driver and customer changes are not status moves.
   assert.match(salesPage, /\.\.\.\(field === 'status' \? \{ blockedTargetKeys: /)
   // The blocked keys must be spelled like the Status targets the review offers.
@@ -132,21 +141,31 @@ await runTest('the page asks the shared rule which targets each sale may not tak
   }
 })
 
+// Release review a77883c78, Finding 3: GET /api/sales sends refund_usd (the whole return) and
+// return_owed_reduction_usd (the part that lowered the debt); the Worker's group route reads the second.
+await runTest('only the debt half of a return lowers what a Not Paid sale owes', () => {
+  assert.ok(blockedTargets)
+  const probe = listRow(9, 'awaiting_payment', { return_state: 'partial', refund_usd: 2, return_owed_reduction_usd: 1, amount_paid_usd: 8 })
+  assert.deepEqual(blockedTargets!(uiRule.PAID_SALE_STATUSES, uiRule.statusChangeNeedsPayment, probe), ['value:completed', 'value:awaiting_delivery'],
+    '$1 lowered the debt and $1 went back in cash: $8 paid of $9 still owes $1 (base read the whole $2 refund and called it paid)')
+  assert.deepEqual(blockedTargets!(uiRule.PAID_SALE_STATUSES, uiRule.statusChangeNeedsPayment, { ...probe, amount_paid_usd: 9 }), [], 'control: $9 covers it')
+})
+
 await runTest('the UI copy and the Worker copy block exactly the same sales', async () => {
   assert.ok(blockedTargets)
   const worker = await loadWorkerRule()
   for (const { row } of SALES) {
     assert.deepEqual(
-      blockedTargets!(worker.PAID_SALE_STATUSES, worker.statusChangeNeedsPayment, row),
+      blockedTargets!(worker.PAID_SALE_STATUSES, worker.statusChangeNeedsPayment, row, worker.salePaymentStatus),
       blockedTargets!(uiRule.PAID_SALE_STATUSES, uiRule.statusChangeNeedsPayment, row),
       `R${row.id}`,
     )
   }
   // ...and the Worker routes refuse by calling that rule, not by comparing money themselves.
-  assert.match(workerBulk, /import \{ statusChangeNeedsPayment \} from '\.\/saleStatusResolution'/)
+  assert.match(workerBulk, /import \{[^}]*\bstatusChangeNeedsPayment\b[^}]*\} from '\.\/saleStatusResolution'/)
   assert.ok((workerBulk.match(/statusChangeNeedsPayment\(/g) || []).length >= 2, 'the group apply and its undo/redo replay both ask the rule')
   assert.match(workerRoutes, /import \{[^}]*\bstatusChangeNeedsPayment\b[^}]*\} from '\.\.\/lib\/saleStatusResolution'/)
-  assert.match(workerRoutes, /!paymentFieldsSent && statusChangeNeedsPayment\(oldStatus, saleStatus, sale\)/)
+  assert.match(workerRoutes, /!paymentFieldsSent && statusChangeNeedsPayment\(paymentFromStatus, saleStatus, saleMoney\)/)
 })
 
 // --- 2. the review, rendered ------------------------------------------------

@@ -766,6 +766,43 @@ async function main() {
     assert.deepEqual(till(w, pid), { active: false, unit_price_usd: 5 })
   })
 
+  // ============================================================== audit P2-b: opening stock is a stock-in
+  const addMovements = (w, name) => w.raw.prepare(`SELECT m.* FROM inventory_movements m JOIN products p ON p.id=m.product_id WHERE p.name=? AND m.movement_type='add'`).all(name)
+  const productCount = (w, name) => w.raw.prepare('SELECT COUNT(*) n FROM products WHERE name=?').get(name).n
+  await group('P2-b direct create: starting stock needs inventory:adjust; stock 0 does not; adjust leaves movement and audit', async w => {
+    w.raw.exec(`INSERT INTO users(id,username,name,password,permissions) VALUES
+      (5,'noadjust','No adjust','fixture','{"products":true}'),(6,'adjuster','Adjuster','fixture','{"products":true,"inventory":true}')`)
+    const t = cases()
+    for (const [path, label] of [['/', 'POST /'], ['/variant', 'POST /variant']]) {
+      const name = `NoAdjust ${path}`
+      const refused = await request(w, 'products', 'POST', path, { name, selling_price_usd: 3, stock_quantity: 5 }, 5)
+      t.check(`${label} stock 5 refused`, refused.status === 403 && refused.body?.code === 'permission_denied' && productCount(w, name) === 0, refused)
+      const zero = await request(w, 'products', 'POST', path, { name: `${name} zero`, selling_price_usd: 3, stock_quantity: 0 }, 5)
+      t.check(`${label} stock 0 allowed`, zero.status === 200 && addMovements(w, `${name} zero`).length === 0, zero)
+      const ok = await request(w, 'products', 'POST', path, { name: `Adjust ${path}`, selling_price_usd: 3, stock_quantity: 5 }, 6)
+      t.check(`${label} with adjust created`, ok.status === 200, ok)
+      const moves = addMovements(w, `Adjust ${path}`)
+      t.check(`${label} one add movement`, moves.length === 1 && moves[0].quantity === 5 && moves[0].user_id === 6 && moves[0].batch_id != null && moves[0].branch_id === 1 && /^Stock received/.test(moves[0].reason), moves)
+      const audit = moves[0] && w.raw.prepare("SELECT * FROM audit_logs WHERE action='batch_receive' AND entity='product_batch' AND CAST(entity_id AS INTEGER)=?").all(moves[0].batch_id)
+      t.check(`${label} batch_receive audit row`, audit?.length === 1 && audit[0].user_id === 6, audit)
+    }
+    t.done(10)
+  })
+  await group('P2-b review approval: a create that does not fold needs the reviewer to hold inventory:adjust', async w => {
+    grants(w, { ...FULL, inventory: false })
+    const pending = queue(w, 'products', 'create', 'product', { name: 'Queued stock', selling_price_usd: 3, stock_quantity: 5 }, null)
+    await denied(w, pending, 'inventory:adjust')
+    assert.equal(productCount(w, 'Queued stock'), 0)
+    const zero = queue(w, 'products', 'create', 'product', { name: 'Queued zero', selling_price_usd: 3, stock_quantity: 0 }, null)
+    assert.equal((await approve(w, zero)).status, 200, 'a create without a starting quantity needs no inventory grant')
+    grants(w, FULL)
+    assert.equal((await approve(w, pending)).status, 200)
+    const moves = addMovements(w, 'Queued stock')
+    assert.equal(moves.length, 1)
+    assert.equal(moves[0].user_id, 2, 'the reviewer is the actor of record')
+    assert.equal(moves[0].quantity, 5)
+  })
+
   // ========================================================================= D1 query budget (Free 50 / Paid 1000)
   await group('Query budget: approval admission adds bounded reads (Free 50 / Paid 1000)', async w => {
     const pid = await makeProduct(w, 'Budget', { image_path: 'https://example.invalid/a.png' })

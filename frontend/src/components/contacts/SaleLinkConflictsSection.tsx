@@ -255,6 +255,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
                       onClick={() => void handleDismiss('mismatch', key)}
                       disabled={busy}
                       title={tr('keep_current_link', 'Keep current link')}
+                      aria-label={tr('keep_current_link', 'Keep current link')}
                       className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
                     >
                       <EyeOff className="h-3.5 w-3.5" />
@@ -330,6 +331,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
                       onClick={() => void handleDismiss('missing', key)}
                       disabled={busy}
                       title={tr('ignore_group', 'Ignore')}
+                      aria-label={tr('ignore_group', 'Ignore')}
                       className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
                     >
                       <EyeOff className="h-3.5 w-3.5" />

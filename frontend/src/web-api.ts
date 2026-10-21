@@ -18,7 +18,6 @@ import { setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCall
 import { disconnectWS, isWSConnected, resumeWS, scheduleConnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
-  emitSyncQueueChanged,
   FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,
   hasStoredUserSession,
 } from './api/syncRuntime.ts'
@@ -31,7 +30,6 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier'
 
-type AnyRecord = Record<string, any>
 type LazyApiMethod = (...args: any[]) => Promise<any>
 type MethodsModule = Record<string, (...args: any[]) => any>
 type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
@@ -48,17 +46,10 @@ type UserReadTransportModule = typeof import('./api/userReadTransport.ts')
 type ActionHistoryTransportModule = typeof import('./api/actionHistoryTransport.ts')
 type NotesTransportModule = typeof import('./api/notesTransport.ts')
 type ProductQueryParams = Parameters<ProductReadTransportModule['searchProducts']>[0]
-type OfflineVaultKey = CryptoKey | null
 const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
 const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
-const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
-const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000
-const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const FOREGROUND_REFRESH_AFTER_MS = 45_000
 const FOREGROUND_RECOVERY_THROTTLE_MS = 1500
-let offlineVaultKey: OfflineVaultKey = null
-let offlineVaultUnlockedAt = 0
-let offlineVaultIdleTimer: number | null = null
 let sessionRecoveryListenersRegistered = false
 let backgroundedAt = 0
 // Last time the sync socket was seen closing. A resume compares it with
@@ -80,25 +71,7 @@ let branchTransportModulePromise: Promise<BranchTransportModule> | null = null
 let notesTransportModulePromise: Promise<NotesTransportModule> | null = null
 let userReadTransportModulePromise: Promise<UserReadTransportModule> | null = null
 let actionHistoryTransportModulePromise: Promise<ActionHistoryTransportModule> | null = null
-let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
-
-function isPublicRuntimePath(): boolean {
-  if (typeof location === 'undefined') return false
-  const pathname = String(location.pathname || '').toLowerCase()
-  const hostname = String(location.hostname || '').toLowerCase()
-  const publicRoot = hostname
-    && hostname !== 'localhost'
-    && hostname !== '127.0.0.1'
-    && hostname !== '::1'
-    && !hostname.startsWith('admin.')
-  return (publicRoot && pathname === '/') || pathname === '/public' || pathname.startsWith('/public/')
-}
-
-function getOfflineDb(): Promise<any> {
-  if (!localDbPromise) localDbPromise = import('./api/localDb.ts').then((module) => module.dexieDb as any)
-  return localDbPromise
-}
 
 function loadMethodsModule(): Promise<MethodsModule> {
   if (!methodsModulePromise) methodsModulePromise = import('./api/methods.ts')
@@ -217,41 +190,11 @@ function getLazyApiMethod(name: string): LazyApiMethod {
   return lazyApiMethodCache.get(name) as LazyApiMethod
 }
 
-async function requestOfflinePersistentStorage(): Promise<{ supported: boolean; persistent: boolean; estimate?: StorageEstimate | null }> {
-  if (typeof navigator === 'undefined' || !navigator.storage?.persist) return { supported: false, persistent: false }
-  const persistent = await navigator.storage.persist().catch(() => false)
-  const estimate = await navigator.storage.estimate?.().catch(() => null)
-  return { supported: true, persistent: !!persistent, estimate }
-}
-
-function dispatchVaultLocked(reason = 'idle'): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('offline:vault-locked', { detail: { reason, ts: Date.now() } }))
-}
-
-function lockOfflineVault(reason = 'manual'): void {
-  offlineVaultKey = null
-  offlineVaultUnlockedAt = 0
-  if (typeof window !== 'undefined' && offlineVaultIdleTimer != null) window.clearTimeout(offlineVaultIdleTimer)
-  offlineVaultIdleTimer = null
-  dispatchVaultLocked(reason)
-}
-
-// F1 (27 Sep 2026): there is no background "offline maintenance" loop any more.
-// Offline selling is cancelled (owner, 26 Sep): the loop's snapshot refresh
-// made eleven serial GETs every five minutes and again on every online/focus/
-// visibility/pageshow/reconnect, and localMirrors.ts discards every one of
-// them on an http(s) origin, so it was pure Worker and D1 load. Its second job,
-// the service-worker update check, is index.tsx's watchForNewAppShell alone
-// (interval, visibility, focus, back/forward-cache pageshow, online and
-// sync:reconnected) -- one checker, so a long-lived till tab still sees the
-// "Restart now" bar. The loop never drained queued sales either. The one-time
-// drain is the MANUAL review path:
-// retryPendingSyncNow -> syncPendingSalesQueue({ manualRecovery: true }) in
-// pendingSyncTransport.ts / saleWriteTransport.ts, started from the App banner
-// and the Server page. Keep it until every device has upgraded. The service
-// worker does not drain: its sync / BUSINESS_OS_SYNC_NOW handlers run
-// syncOutboxOnce, which answers manual_recovery_required and replays nothing.
+// Foreground recovery only: there is no background offline loop (F1, 27 Sep
+// 2026). The app-shell update check is index.tsx's watchForNewAppShell alone,
+// so a long-lived till tab still sees the "Restart now" bar. Sales a device
+// queued before offline selling ended are recovered only by hand, from
+// components/server/LegacyQueueNotice.tsx.
 function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
@@ -347,70 +290,6 @@ function scheduleBootstrapStorageMaintenance(task: () => void): void {
   window.addEventListener('load', run, { once: true })
 }
 
-function scheduleBootstrapOfflineDbWrite(task: (db: any) => void | Promise<void>): void {
-  if (typeof window === 'undefined') {
-    getOfflineDb().then(task).catch(() => {})
-    return
-  }
-
-  const run = () => {
-    window.setTimeout(() => {
-      const write = () => {
-        if (document.visibilityState === 'hidden') return
-        getOfflineDb().then(task).catch(() => {})
-      }
-      if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(write, { timeout: BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS })
-        return
-      }
-      write()
-    }, BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS)
-  }
-
-  if (document.readyState === 'complete') {
-    run()
-    return
-  }
-  window.addEventListener('load', run, { once: true })
-}
-
-function forwardServiceWorkerOutboxEvent(event: MessageEvent): void {
-  if (typeof window === 'undefined') return
-  const type = event?.data?.type
-  const detail = event?.data?.detail || {}
-  if (!type || !String(type).startsWith('BUSINESS_OS_OUTBOX_')) return
-
-  if (type === 'BUSINESS_OS_OUTBOX_SYNCED') {
-    window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
-      detail: {
-        channel: detail.channel || 'sales:create',
-        receiptNumber: detail.entity_name || null,
-        ts: detail.ts || Date.now(),
-      },
-    }))
-    dispatchSyncUpdates(['sales', 'products', 'inventory', 'dashboard'], 'offline-background-sale-synced')
-    return
-  }
-
-  if (type === 'BUSINESS_OS_OUTBOX_CONFLICT') {
-    window.dispatchEvent(new CustomEvent('sync:write-conflict', {
-      detail: {
-        channel: detail.channel || 'sales:create',
-        entity_name: detail.entity_name || null,
-        refreshChannels: ['sales', 'products', 'inventory', 'dashboard'],
-        ts: detail.ts || Date.now(),
-      },
-    }))
-    return
-  }
-
-  emitSyncQueueChanged({
-    reason: detail.reason || 'background-sync-waiting',
-    error: detail.error || '',
-    ts: detail.ts || Date.now(),
-  })
-}
-
 // ?€?€ Silence Capacitor/vendor bridge noise that fires in plain web context ?€?€?€?€?€?€
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
 // rejection when Capacitor's tab-messaging bridge can't find a native listener.
@@ -488,7 +367,6 @@ function forwardServiceWorkerAppEvent(event: MessageEvent): void {
 const staticApi = {
   login: getAuthTransportMethod('login'),
   logout: getAuthTransportMethod('logout'),
-  resetPasswordWithOtp: getAuthTransportMethod('resetPasswordWithOtp'),
   requestPasswordResetEmail: getAuthTransportMethod('requestPasswordResetEmail'),
   completePasswordReset: getAuthTransportMethod('completePasswordReset'),
   updateSessionDuration: getAuthTransportMethod('updateSessionDuration'),
@@ -528,7 +406,6 @@ const staticApi = {
     setSyncServerUrl(clean)
     if (clean) {
       if (syncServerChanged) {
-        scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: clean }))
         cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       }
       if (hasStoredUserSession()) {
@@ -538,7 +415,6 @@ const staticApi = {
       }
     } else {
       if (syncServerChanged) {
-        scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_server_url'))
         disconnectWS()
       }
     }
@@ -590,6 +466,11 @@ const staticApi = {
   async discardPendingSyncQueue(reason?: string, reviewToken?: string) {
     const module = await import('./api/pendingSyncTransport.ts')
     return module.discardPendingSyncQueue(reason, reviewToken)
+  },
+
+  async exportPendingSyncReview(reviewToken?: string) {
+    const module = await import('./api/pendingSyncTransport.ts')
+    return module.exportPendingSyncReview(reviewToken)
   },
 
   async getSettings(options: unknown = {}) {
@@ -738,7 +619,6 @@ const staticApi = {
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
     } catch (_) {}
-    getOfflineDb().then((db) => db.settings.delete('sync_token')).catch(() => {})
     if (clean) {
       console.warn('[web-api] Sync token support has been retired in favor of user sign-in sessions.')
     }
@@ -750,15 +630,6 @@ const staticApi = {
 
   ensureSessionRecoveryListeners,
 
-  lockOfflineVault,
-  getOfflineVaultState() {
-    return {
-      unlocked: !!offlineVaultKey,
-      unlockedAt: offlineVaultUnlockedAt,
-      idleLockMs: OFFLINE_VAULT_IDLE_LOCK_MS,
-    }
-  },
-  requestOfflinePersistentStorage,
   getCallLog,
   clearCallLog,
 }
@@ -772,9 +643,7 @@ window.api = new Proxy(staticApi, {
 })
 
 if (typeof window !== 'undefined') {
-  navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerOutboxEvent)
   navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerAppEvent)
-  window.addEventListener('beforeunload', () => lockOfflineVault('tab_close'))
 }
 
 // ---- Bootstrap: read stored token, auto-detect server URL from page origin ----
@@ -790,7 +659,6 @@ if (typeof window !== 'undefined') {
   try {
     const isViteDev = location.hostname === 'localhost' &&
       (location.port === '5173' || location.port === '5174')
-    const skipOfflineBootstrapDb = isPublicRuntimePath()
 
     scheduleBootstrapStorageMaintenance(() => {
       try {
@@ -800,9 +668,6 @@ if (typeof window !== 'undefined') {
         sessionStorage.removeItem('businessos_sync_token_session')
       } catch (_) {}
     })
-    if (!skipOfflineBootstrapDb) {
-      scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_token'))
-    }
 
     // Determine the correct sync server URL
     let url = ''
@@ -812,9 +677,6 @@ if (typeof window !== 'undefined') {
       scheduleBootstrapStorageMaintenance(() => {
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
       })
-      if (!skipOfflineBootstrapDb) {
-        scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
-      }
     } else {
       // Vite dev -- use stored value (localhost:8787 for wrangler local
       // dev), falling back to the PRODUCTION admin origin (user, Part 388:
@@ -822,13 +684,6 @@ if (typeof window !== 'undefined') {
       // checkout talks to the real server until someone points it
       // elsewhere on the Server page.
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
-      if (!skipOfflineBootstrapDb) {
-        try {
-          const db = await getOfflineDb()
-          const stored = await db.settings.bulkGet(['sync_server_url'])
-          if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
-        } catch (_) {}
-      }
       if (!url) url = sanitizeSyncServerUrl('https://admin.leangbeauty.com')
     }
 

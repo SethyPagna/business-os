@@ -229,6 +229,26 @@ export function tokenizeSearchTermGroups(raw: unknown, maxGroups = 6, maxWordsPe
   return groups.slice(0, maxGroups)
 }
 
+// Word and group allowance of one search, shared by the admin pickers and the storefront (see
+// SEARCH_PARAM_BUDGET in lib/productSearchQuery.ts for why it is bounded).
+export const SEARCH_MAX_GROUPS = 3
+export const SEARCH_MAX_WORDS = 12
+
+// Keeps at most maxGroups groups and maxWords words in total, earliest first. One definition for
+// every search entry point, so a cap cannot differ between the admin pickers and the storefront.
+export function limitSearchTermGroups(groups: string[][], maxGroups: number, maxWords: number): string[][] {
+  let budget = maxWords
+  const kept: string[][] = []
+  for (const group of groups) {
+    const words = group.slice(0, budget)
+    if (!words.length) continue
+    kept.push(words)
+    budget -= words.length
+    if (!budget || kept.length === maxGroups) break
+  }
+  return kept
+}
+
 // Every alias form (including the word itself) for a single normalized
 // search word -- exported so callers can generate one LIKE per alias.
 export function expandAliasCandidates(compactWord: string): string[] {

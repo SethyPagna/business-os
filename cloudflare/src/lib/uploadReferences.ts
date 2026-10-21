@@ -231,7 +231,3 @@ export async function findUploadReferences(db: D1Compat, asset: UploadReferenceA
     + usage.descriptions + usage.submissions + usage.imports + usage.pending
   return usage
 }
-
-export async function isUploadReferenced(db: D1Compat, asset: UploadReferenceAsset): Promise<boolean> {
-  return (await findUploadReferences(db, asset)).total > 0
-}

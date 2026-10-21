@@ -112,8 +112,8 @@ export const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
 
 /**
  * Hard ceiling on how many methods the setting may hold. A method name comes
- * from a free-text field, so a till with a typo-happy cashier (or a replayed
- * offline queue) could otherwise grow this list without bound -- and it is
+ * from a free-text field, so a till with a typo-happy cashier could
+ * otherwise grow this list without bound -- and it is
  * read on every POS boot. 60 is far above any real shop's count and far below
  * anything that would matter to parse.
  */

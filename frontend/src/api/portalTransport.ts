@@ -6,6 +6,7 @@ import {
 } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
+import { boundPortalSearchParams } from './portalPublicTransport.ts'
 
 type PortalPayload = Record<string, unknown>
 
@@ -50,7 +51,8 @@ export async function searchPortalCatalogProducts(params: QueryParams = {}): Pro
   if (mismatchError) throw mismatchError
 
   const base = getPortalBaseUrl()
-  const query = buildQueryString(params)
+  // The editor preview sends the same bounded text the storefront does; the Worker refuses longer.
+  const query = buildQueryString(boundPortalSearchParams(params))
   const res = await fetchJsonWithTimeout(`${base}${appendQuery(path, query)}`, {
     headers: PORTAL_HEADERS,
   })

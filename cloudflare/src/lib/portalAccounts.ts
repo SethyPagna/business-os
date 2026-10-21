@@ -40,16 +40,18 @@ import type { Env } from '../index'
 // frontend/src/components/catalog/legal/legalContent.ts, which is the version
 // of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
 // the two together so they cannot drift apart.
-export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-30'
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-10-20'
 
-// Owner, 30 Sep 2026: the rewrite removed promises and changed no data use, so
-// agreement to the earlier text stays valid and nobody is signed out or asked
-// again. scripts/test-portal-consent-version-accepted-pure.cjs pins this.
-const EARLIER_ACCEPTED_CONSENT_VERSIONS: readonly string[] = ['portal-legal-2026-09-07']
-
+// Owner, 20 Oct 2026: every account agrees again to the age-16 wording, so no
+// earlier version is accepted (the 30 Sep rewrite had accepted 2026-09-07).
+// An account is current only with this exact version AND a stored age
+// confirmation; scripts/test-portal-consent-version-accepted-pure.cjs pins it.
 export function portalConsentVersionAccepted(version: unknown): boolean {
-  if (typeof version !== 'string') return false
-  return version === PORTAL_CONSENT_VERSION || EARLIER_ACCEPTED_CONSENT_VERSIONS.includes(version)
+  return version === PORTAL_CONSENT_VERSION
+}
+
+export function portalConsentCurrent(row: { consent_version?: unknown; consent_at?: unknown; age_confirmed_at?: unknown }): boolean {
+  return portalConsentVersionAccepted(row.consent_version) && !!row.consent_at && !!row.age_confirmed_at
 }
 
 // A ticked checkbox arrives as `true` over JSON and as 'true'/'on'/'1' from
@@ -62,7 +64,8 @@ export function consentGiven(value: unknown): boolean {
   return text === 'true' || text === 'on' || text === '1' || text === 'yes'
 }
 
-// consent_version / consent_at / consent_locale arrive with migration 0130.
+// consent_version / consent_at / consent_locale arrive with migration 0130,
+// age_confirmed_at with 0262.
 // Account creation and sign-in fail closed until all three exist: returning
 // success without the durable consent record would contradict the form and
 // make later policy-version checks impossible.
@@ -76,7 +79,7 @@ async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): P
   try {
     const rows = await db.prepare('PRAGMA table_info("portal_accounts")').all<{ name?: string }>()
     const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
-    const present = names.has('consent_version') && names.has('consent_at') && names.has('consent_locale')
+    const present = names.has('consent_version') && names.has('consent_at') && names.has('consent_locale') && names.has('age_confirmed_at')
     consentColumnState = { present, checkedAt: now }
     return present
   } catch {
@@ -85,8 +88,8 @@ async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): P
   }
 }
 
-export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
-export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
+export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown; ageConfirmed?: unknown }
+export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown; ageConfirmed?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
 // (probing phones/membership ids) vs. a benign form error (missing field,
@@ -165,6 +168,19 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
       abuse: false,
     }
   }
+  // Owner rule: minimum account age is 16. Strict boolean, unlike consent: the
+  // storefront sends JSON true from the combined tick, and a form-style
+  // 'true'/'on' is not a confirmation. claimAccount stores it as
+  // age_confirmed_at in the same write as the consent record.
+  if (input.ageConfirmed !== true) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Please confirm you are 16 or older to create an account.',
+      code: 'age_confirmation_required',
+      abuse: false,
+    }
+  }
   const db = getDb(env)
   if (!(await portalAccountsHaveConsentColumns(db))) {
     return {
@@ -232,8 +248,8 @@ async function claimAccount(
   let accountId: number | null = null
   let lastError: unknown = null
   const maxAttempts = args.createContact ? 5 : 1
-  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id', 'consent_version', 'consent_at', 'consent_locale']
-  const values = ['@membership_id', '@name', '@phone', '@password_hash', '@contact_id', '@consent_version', 'CURRENT_TIMESTAMP', '@consent_locale']
+  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id', 'consent_version', 'consent_at', 'consent_locale', 'age_confirmed_at']
+  const values = ['@membership_id', '@name', '@phone', '@password_hash', '@contact_id', '@consent_version', 'CURRENT_TIMESTAMP', '@consent_locale', 'CURRENT_TIMESTAMP']
   const sql = `INSERT INTO portal_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -269,7 +285,7 @@ async function claimAccount(
           {
             sql: `INSERT INTO portal_accounts (
               membership_id, name, phone, password_hash, contact_id,
-              consent_version, consent_at, consent_locale
+              consent_version, consent_at, consent_locale, age_confirmed_at
             ) VALUES (
               @membership_id, @name, @phone, @password_hash,
               COALESCE((
@@ -278,7 +294,7 @@ async function claimAccount(
                   AND phone_normalized = @phone
                 LIMIT 1
               ), json_extract('portal_contact_missing', '$')),
-              @consent_version, CURRENT_TIMESTAMP, @consent_locale
+              @consent_version, CURRENT_TIMESTAMP, @consent_locale, CURRENT_TIMESTAMP
             )`,
             params,
           },
@@ -383,7 +399,9 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
 
   const consentUpdate = await db.prepare(`
     UPDATE portal_accounts
-    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale, updated_at = CURRENT_TIMESTAMP
+    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale,
+        age_confirmed_at = CASE WHEN @age = 1 THEN CURRENT_TIMESTAMP ELSE age_confirmed_at END,
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
       AND (contact_id IS NULL OR EXISTS (
         SELECT 1 FROM customers WHERE id = portal_accounts.contact_id AND ${customerIsProfileSql()}
@@ -391,6 +409,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   `).run({
     version: PORTAL_CONSENT_VERSION,
     locale: String(input.consentLocale || 'und').slice(0, 16),
+    age: input.ageConfirmed === true ? 1 : 0,
     id: account.id,
   })
   if (Number(consentUpdate.changes || 0) !== 1) return genericFail
@@ -403,4 +422,40 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   }
 
   return { ok: true, accountId: account.id }
+}
+
+export type RenewConsentResult =
+  | { ok: true; renewed: boolean }
+  | { ok: false; status: 400 | 404 | 503; error: string; code: string }
+
+// An already-signed-in account agrees again to the current wording (owner,
+// 20 Oct 2026). Same tick and rules as sign-up: a missing tick is a form
+// error and ageConfirmed must be JSON true. Idempotent: an account that is
+// already current keeps its original consent_at and reports renewed=false.
+export async function renewPortalConsent(
+  env: Env,
+  accountId: number,
+  input: { consent?: unknown; ageConfirmed?: unknown; consentLocale?: unknown },
+): Promise<RenewConsentResult> {
+  if (!consentGiven(input.consent)) {
+    return { ok: false, status: 400, error: 'Please agree to the Terms & Conditions and the Privacy Policy to continue.', code: 'consent_required' }
+  }
+  if (input.ageConfirmed !== true) {
+    return { ok: false, status: 400, error: 'Please confirm you are 16 or older to continue.', code: 'age_confirmation_required' }
+  }
+  const db = getDb(env)
+  if (!(await portalAccountsHaveConsentColumns(db))) {
+    return { ok: false, status: 503, error: 'Account consent storage is not ready. Please try again later.', code: 'consent_storage_unavailable' }
+  }
+  const result = await db.prepare(`
+    UPDATE portal_accounts
+    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale,
+        age_confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+      AND NOT (consent_version = @version AND consent_at IS NOT NULL AND age_confirmed_at IS NOT NULL)
+  `).run({ version: PORTAL_CONSENT_VERSION, locale: String(input.consentLocale || 'und').slice(0, 16), id: accountId })
+  if (Number(result.changes || 0) === 1) return { ok: true, renewed: true }
+  const current = await db.prepare('SELECT id FROM portal_accounts WHERE id = @id LIMIT 1').get<{ id: number }>({ id: accountId })
+  if (!current) return { ok: false, status: 404, error: 'Account not found.', code: 'portal_unauthenticated' }
+  return { ok: true, renewed: false }
 }

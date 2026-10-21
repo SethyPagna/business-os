@@ -19,6 +19,14 @@ const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 
 const fs = require('fs')
 const path = require('path')
+// Bundled (esbuild) so a kernel's own imports resolve without a hand-written map.
+function bundledKernel(rel) {
+  const out = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '..', 'src', rel)], bundle: true, write: false,
+    format: 'cjs', platform: 'node', target: 'es2022', external: ['cloudflare:*'], logLevel: 'silent' })
+  const m = { exports: {} }
+  new Function('module', 'exports', 'require', out.outputFiles[0].text)(m, m.exports, require)
+  return m.exports
+}
 const ts = require('typescript')
 const assert = require('assert')
 const Module = require('module')
@@ -94,7 +102,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const productMergeLineage = loadReal('lib/productMergeLineage.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
@@ -126,6 +134,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
+  // Migration 0260: the route splits a refund into the debt it lowers and the cash it pays,
+  // and its report sums drawer cash with the shift kernel's own SQL.
+  '../lib/returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  '../lib/shiftReconciliation': bundledKernel('lib/shiftReconciliation.ts'),
   // N21: the display-address kernel routes/returns.ts snapshots through, REAL
   // (it has no imports of its own; a stub would leave it undefined).
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),

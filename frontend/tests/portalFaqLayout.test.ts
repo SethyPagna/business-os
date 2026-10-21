@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { faqItemKey, nextOpenFaqKey, splitFaqColumns } from '../src/components/catalog/portalFaqLayout.ts'
+import { faqEntries, faqItemKey, nextOpenFaqKey } from '../src/components/catalog/portalFaqLayout.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.join(here, '..', relative), 'utf8').replace(/\r\n/g, '\n')
@@ -22,8 +22,7 @@ const items = [
 
 // 1. Independent expansion: clicking one opens exactly that one, whatever
 //    the ids look like.
-const [left, right] = splitFaqColumns(items)
-const all = [...left, ...right]
+const all = faqEntries(items)
 const keys = all.map((entry) => entry.key)
 assert.equal(new Set(keys).size, items.length, 'every FAQ item has its own open key, even with duplicate or empty ids')
 let open: string | null = null
@@ -38,20 +37,17 @@ assert.equal(open, null, 'clicking the open item again closes it')
 assert.equal(items.filter((item) => item.id === items[1].id).length, 2, 'fixture must contain a shared id')
 assert.equal(faqItemKey(items[1], 1) === faqItemKey(items[2], 2), false)
 
-// 2. Neighbours do not move: two column stacks, first half / second half, so
-//    DOM order stays 1..n whether the stacks sit side by side or stack.
-assert.deepEqual(left.map((entry) => entry.index), [0, 1, 2])
-assert.deepEqual(right.map((entry) => entry.index), [3, 4])
-assert.deepEqual(splitFaqColumns([]), [[], []])
-assert.deepEqual(splitFaqColumns([{ id: 'a' }]).map((column) => column.length), [1, 0])
+// 2. Entries keep list order 1..n (owner, 20 Oct 2026: one column, so no column split).
+assert.deepEqual(all.map((entry) => entry.index), [0, 1, 2, 3, 4])
+assert.deepEqual(faqEntries([]), [])
 
-// 3. The section uses both, with no shared row grid left.
+// 3. The list uses the position-keyed identity, with no shared row grid or id-keyed state.
 const tabs = read('src/components/catalog/CatalogSecondaryTabs.tsx')
-const section = tabs.slice(tabs.indexOf('function CatalogFaqSection'), tabs.indexOf('function CatalogAiSection'))
-assert.match(section, /const faqColumns = splitFaqColumns\(publicFaqItems\)/)
+const section = tabs.slice(tabs.indexOf('export function FaqList'), tabs.indexOf('function CatalogFaqSection'))
+assert.match(section, /const entries = faqEntries\(items\)/)
 assert.match(section, /const open = expandedFaqId === key/)
 assert.match(section, /setExpandedFaqId\(\(current\) => nextOpenFaqKey\(current, key\)\)/)
 assert.match(section, /aria-expanded=\{open\}/, 'the toggle announces its state')
 assert.doesNotMatch(section, /grid items-start gap-4 sm:grid-cols-2|expandedFaqId === item\.id/, 'the shared-row grid / id-keyed state is back')
 
-console.log('PASS FAQ items expand independently and never move the other column')
+console.log('PASS FAQ items expand independently')

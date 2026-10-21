@@ -85,7 +85,7 @@ const transferOperationReceipt = loadReal('lib/transferOperationReceipt.ts', { '
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = loadReal('lib/productBatches.ts', {
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
-  './db': {}, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding,
+  './db': {}, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding,
 })
 const transferOperation = loadReal('lib/transferOperation.ts', {
   './db': dbModule,

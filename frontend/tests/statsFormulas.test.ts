@@ -339,14 +339,16 @@ test('the actual Sales surface prints unavailable Credit as a dash in EN/KM with
     for (const creditUsd of [null, 0, 5.5]) {
       const formatted: number[] = []
       const tree = mod.exports.default({ collapsedSalesSections: new Set(), filtered: [], filteredIds: [],
-        loading: false, revenue: 19, revenueCount: 1, creditUsd, salesSections: [], selectedIds: new Set(),
+        loading: false, revenue: 19, revenueCount: 1, creditUsd, paidOnlyUsd: creditUsd === null ? null : 19 - creditUsd, salesSections: [], selectedIds: new Set(),
         selectionModeActive: false, t: (key: string) => strings[key] || key,
         fmtUSD: (value: number) => { assert.equal(typeof value, 'number'); formatted.push(value); return `$${value.toFixed(2)}` } })
       const rendered = text(tree)
       if (creditUsd === null) assert.ok(rendered.includes(`${strings.rpt_pending_credit} —`), pack)
       else if (creditUsd === 0) assert.equal(rendered.includes(strings.rpt_pending_credit), false, pack)
       else assert.ok(rendered.includes(`${strings.rpt_pending_credit} $5.50`), pack)
-      assert.deepEqual(formatted, creditUsd ? [19, creditUsd] : [19], 'unavailable and zero credit never reach the money formatter')
+      // Owner, 20 Oct 2026: revenue without Not Paid prints beside it, before the Not Paid figure.
+      if (creditUsd) assert.ok(rendered.includes(`${strings.revenue_paid_only} $13.50`), pack)
+      assert.deepEqual(formatted, creditUsd ? [19, 19 - creditUsd, creditUsd] : [19], 'unavailable and zero credit never reach the money formatter')
     }
   }
 })

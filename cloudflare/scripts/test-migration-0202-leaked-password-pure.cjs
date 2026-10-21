@@ -121,6 +121,7 @@ const auditSpy = async (_env, ...args) => { audits.push(JSON.stringify(args)) }
 let resetLinkConsumed = 0
 
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
@@ -337,9 +338,6 @@ async function check(name, fn) {
     assert.equal(link.status, 400, link.text)
     assert.equal(link.body.code, 'password_known_leaked')
     assert.equal(resetLinkConsumed, 0, 'the refusal does not spend the recovery link')
-    const otp = await send(authRoute, 'POST', '/password-reset/otp', null, { identifier: 'owner', otp: '123456', newPassword: LEAKED })
-    assert.equal(otp.status, 400, otp.text)
-    assert.equal(otp.body.code, 'password_known_leaked')
     const adminFixes = await send(usersRoute, 'POST', '/users/3/reset-password', admin, { newPassword: 'a-good-new-pass-5' })
     assert.equal(adminFixes.status, 200, `control: a fresh password is accepted: ${adminFixes.text}`)
   })
@@ -378,7 +376,7 @@ async function check(name, fn) {
 
   await check('owner: Sign out on the change screen finishes -- the sign-out probe answers, logout revokes, the probe then reads 401', async () => {
     assert.equal(SIGNOUT_PROBE_PATH, '/api/sync/owner', 'the path the app probes (frontend/src/api/http.ts)')
-    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8'), /app\.route\('\/api\/sync', createSyncRoute\(app\)\)/)
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8'), /app\.route\('\/api\/sync', createSyncRoute\(\)\)/)
     assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8'), /app\.use\('\*', requireAuth\)\s+app\.get\('\/owner'/)
     reset()
     const token = (await login('owner', LEAKED)).minted

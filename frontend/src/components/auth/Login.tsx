@@ -163,12 +163,6 @@ interface AuthApi {
     deviceTz?: string | null
     deviceName?: string | null
   }) => Promise<LoginResult>
-  resetPasswordWithOtp: (payload: {
-    identifier: string
-    organization: string
-    otp: string
-    newPassword: string
-  }) => Promise<PasswordResetResult>
   requestPasswordResetEmail: (payload: {
     identifier: string
     organization: string
@@ -290,15 +284,13 @@ export default function Login() {
   // saved to the browser only once the code is accepted too.
   const passwordForSecondFactorRef = useRef('')
 
-  const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
-  // S-auth4c: "Forgot password?" first asks HOW (authenticator code, email
-  // link, or an administrator), then shows that one form.
+  // S-auth4c: "Forgot password?" first asks HOW (email link, or an
+  // administrator), then shows that one form.
   const [showResetChooser, setShowResetChooser] = useState(false)
   const [showAdminReset, setShowAdminReset] = useState(false)
   const [recoveryAccessToken, setRecoveryAccessToken] = useState('')
   const [resetIdentifier, setResetIdentifier] = useState('')
-  const [resetOtp, setResetOtp] = useState('')
   const [resetNewPassword, setResetNewPassword] = useState('')
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [resetInfo, setResetInfo] = useState('')
@@ -414,7 +406,7 @@ export default function Login() {
       else usernameRef.current?.focus()
     }, 150)
     return () => clearTimeout(timer)
-  }, [otpRequired, showOtpReset, showEmailReset, recoveryAccessToken])
+  }, [otpRequired, showEmailReset, recoveryAccessToken])
 
   // Session duration is not user-selectable on this page (the removed
   // "keep me logged in" control). It's derived from the account's saved
@@ -561,7 +553,6 @@ export default function Login() {
         if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
         setRecoveryAccessToken(accessToken)
         setShowEmailReset(false)
-        setShowOtpReset(false)
         setError('')
         setResetInfo(tr('set_new_password_from_email', 'Set your new password below to finish email recovery.'))
         return
@@ -772,39 +763,6 @@ export default function Login() {
     setOtp(clean)
   }
 
-  const handleResetWithOtp = async () => {
-    if (passwordResetActionRef.current) return
-    const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
-    if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
-    if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
-    if (!resetOtp.trim()) return setError(tr('enter_otp_first', 'Enter the OTP code from your authenticator app.'))
-    const problem = newPasswordProblem(resetNewPassword)
-    if (problem) return setError(passwordProblemMessage(problem, tr))
-    if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
-
-    setError('')
-    passwordResetActionRef.current = true
-    setLoading(true)
-    try {
-      const result = await withLoaderTimeout(() => authApi.resetPasswordWithOtp({
-        identifier: resetIdentifier.trim(),
-        organization: resolvedOrganization,
-        otp: resetOtp.trim(),
-        newPassword: resetNewPassword,
-      }), 'OTP password reset')
-      if (result?.success === false) {
-        setError(resetFailureMessage(result, tr, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
-        return
-      }
-      showSignInWithNewPassword(String(result?.username || resetIdentifier).trim(), resetNewPassword)
-    } catch (resetError) {
-      setError(resetFailureMessage(resetError, tr, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
-    } finally {
-      passwordResetActionRef.current = false
-      setLoading(false)
-    }
-  }
-
   const handleResetWithEmail = async () => {
     if (passwordResetActionRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
@@ -914,14 +872,12 @@ export default function Login() {
   }
 
   const closeAuxMode = () => {
-    setShowOtpReset(false)
     setShowEmailReset(false)
     setShowResetChooser(false)
     setShowAdminReset(false)
     setRecoveryAccessToken('')
     setError('')
     setResetInfo('')
-    setResetOtp('')
     setResetNewPassword('')
     setResetConfirmPassword('')
   }
@@ -940,14 +896,12 @@ export default function Login() {
   }
 
   // S-auth4c: the methods offered are the same for every account -- email
-  // only when the server can send it, the authenticator code and asking an
-  // administrator always. Offering per-account methods (has an authenticator?
+  // only when the server can send it, and asking an administrator always. Offering per-account methods (has an authenticator?
   // has an email?) would tell a stranger which accounts exist and how they
   // are protected, so the form that follows answers the same either way.
-  const openResetMethod = (method: 'chooser' | 'email' | 'otp' | 'admin') => {
+  const openResetMethod = (method: 'chooser' | 'email' | 'admin') => {
     setShowResetChooser(method === 'chooser')
     setShowEmailReset(method === 'email')
-    setShowOtpReset(method === 'otp')
     setShowAdminReset(method === 'admin')
     setRecoveryAccessToken('')
     setError('')
@@ -1048,7 +1002,7 @@ export default function Login() {
           ) : null}
         </div>
 
-        {!otpRequired && !deviceApprovalPending && !showOtpReset && !showEmailReset && !showResetChooser && !showAdminReset && !recoveryAccessToken ? (
+        {!otpRequired && !deviceApprovalPending && !showEmailReset && !showResetChooser && !showAdminReset && !recoveryAccessToken ? (
           <form onSubmit={handleLogin} className="min-w-0 max-w-full space-y-4">
             {/* Organization picker -- hidden once we've confirmed (via the
                 bootstrap fetch above) that this deployment is locked to a
@@ -1319,17 +1273,13 @@ export default function Login() {
 
         {/* S-auth4c: one recovery entry point, then a choice of method. The
             list is the same for every account (see openResetMethod): email
-            only when this server can send it, the authenticator code and
-            asking an administrator always. */}
+            only when this server can send it, and asking an administrator
+            always. */}
         {!otpRequired && !deviceApprovalPending && showResetChooser && !recoveryAccessToken ? (
           <div className="space-y-3">
             <div className="text-center text-sm font-semibold text-primary-800 dark:text-primary-300">
               {tr('reset_choose_method', 'How do you want to reset your password?')}
             </div>
-            <button type="button" className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5" onClick={() => openResetMethod('otp')}>
-              <ShieldCheck className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 truncate">{tr('reset_method_authenticator', 'Code from my authenticator app')}</span>
-            </button>
             {verificationCaps.email ? (
               <button type="button" className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5" onClick={() => openResetMethod('email')}>
                 <Mail className="h-4 w-4 shrink-0" />
@@ -1363,60 +1313,6 @@ export default function Login() {
             <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
               {loading ? tr('reset_admin_request_sending', 'Sending request...') : tr('reset_admin_request_send', 'Send request')}
             </button>
-            <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
-              {tr('reset_choose_another_way', 'Choose another way')}
-            </button>
-            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
-          </form>
-        ) : null}
-
-        {!otpRequired && !deviceApprovalPending && showOtpReset ? (
-          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleResetWithOtp() }}>
-            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
-              <span>{tr('otp_recovery', 'OTP recovery')}</span>
-              <InfoHint label={tr('otp_recovery', 'OTP recovery')} text={tr('otp_reset_notice', 'Enter the code from your authenticator app to set a new password.')} />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor="reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('username_name_email_phone', 'Username, name, email, or phone')}
-                </label>
-                <input id="reset-identifier" name="username" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="reset-otp" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('otp_code', 'OTP code')}
-                </label>
-                <input
-                  id="reset-otp"
-                  name="reset_otp"
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
-                  className="input h-10"
-                  value={resetOtp}
-                  onChange={(event) => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000"
-                />
-              </div>
-            </div>
-            <NewPasswordFields
-              tr={tr}
-              idPrefix="reset-password"
-              password={resetNewPassword}
-              confirm={resetConfirmPassword}
-              onPasswordChange={setResetNewPassword}
-              onConfirmChange={setResetConfirmPassword}
-              identity={{ username: resetIdentifier }}
-              disabled={loading}
-            />
-
-            {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
-            {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
-
-            <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
-              {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
-            </button>
-
             <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
               {tr('reset_choose_another_way', 'Choose another way')}
             </button>

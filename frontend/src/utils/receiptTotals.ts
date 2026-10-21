@@ -80,6 +80,8 @@ export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
   change_khr?: number | string | null
   refund_usd?: number | string | null
   refund_khr?: number | string | null
+  /** The part of the refunds that lowered the debt (GET /api/sales); see returnOwedReductionUsd. */
+  return_owed_reduction_usd?: number | string | null
   sale_status?: string | null
 }
 
@@ -119,6 +121,8 @@ export interface ReceiptTotalsFigures {
   totalKhr: number
   refundUsd: number
   refundKhr: number
+  /** What the returns took off the debt (returnOwedReductionUsd): still owed subtracts this, not refundUsd. */
+  owedReductionUsd: number
   /** total - refund. Equal to totalUsd when nothing came back. */
   netTotalUsd: number
   netTotalKhr: number
@@ -139,6 +143,18 @@ const num = (value: unknown): number => {
 }
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
+
+/**
+ * What a sale's active returns took off what the customer owes. A return
+ * first lowers the debt and only the rest is refunded from the drawer (owner,
+ * 29 Sep and 5-6 Oct 2026; the Worker's lib/returnRefundSplit.ts), so still
+ * owed and the settlement total subtract this, never the whole refund. A row
+ * from a Worker before that split carries only refund_usd, which is what its
+ * returns lowered then.
+ */
+export function returnOwedReductionUsd(sale: Pick<ReceiptTotalsSale, 'refund_usd' | 'return_owed_reduction_usd'>): number {
+  return num(sale.return_owed_reduction_usd ?? sale.refund_usd)
+}
 
 function parseItems(raw: ReceiptTotalsSale['items']): ReceiptLineInput[] {
   if (Array.isArray(raw)) return raw
@@ -183,6 +199,7 @@ export function receiptTotalsFigures(
   const totalKhr = num(sale.total_khr) || totalUsd * exchangeRate
   const refundUsd = num(sale.refund_usd)
   const refundKhr = num(sale.refund_khr) || refundUsd * exchangeRate
+  const owedReductionUsd = returnOwedReductionUsd(sale)
 
   const paidUsd = num(sale.amount_paid_usd ?? sale.amount_paid)
   const paidKhr = num(sale.amount_paid_khr)
@@ -202,6 +219,8 @@ export function receiptTotalsFigures(
   try {
     owedUsd = recordedSaleOutstandingUsd({
       total_usd: totalUsd,
+      // A return lowers what is owed by its debt part only (returnOwedReductionUsd).
+      refund_usd: owedReductionUsd,
       amount_paid_usd: paidUsd,
       amount_paid_khr: paidKhr,
       exchange_rate: exchangeRate,
@@ -236,6 +255,7 @@ export function receiptTotalsFigures(
     totalKhr,
     refundUsd,
     refundKhr,
+    owedReductionUsd,
     netTotalUsd: version1 ? subtractMoney4(totalUsd, refundUsd) : round2(totalUsd - refundUsd),
     netTotalKhr: Math.round(totalKhr - refundKhr),
     paidUsd,

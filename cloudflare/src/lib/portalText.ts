@@ -69,6 +69,41 @@ export function withoutOtherLanguageTranslations(stored: string): string {
   return storefrontBlocks.length === blocks.length ? stored : JSON.stringify(Object.fromEntries(storefrontBlocks))
 }
 
+// Field names that may never appear in anything the storefront publishes: raw stock counts and thresholds,
+// cost/wholesale/supplier data and the assistant's private settings. routes/portal.ts scans every public body
+// with this before caching it; the settings save refuses a translation key that would trip that scan.
+const PRIVATE_STOREFRONT_FIELD_NAMES: ReadonlySet<string> = new Set([
+  'stock_quantity', 'low_stock_threshold', 'out_of_stock_threshold', 'branch_stock', 'quantity',
+  'aiPrompt', 'aiProviderId', 'password_hash', 'token_hash',
+])
+const PRIVATE_STOREFRONT_FIELD_PATTERN = /cost|wholesale|supplier|margin|vip_price/i
+
+export function isPrivateStorefrontFieldName(name: string): boolean {
+  return PRIVATE_STOREFRONT_FIELD_NAMES.has(name) || PRIVATE_STOREFRONT_FIELD_PATTERN.test(name)
+}
+
+// Translated collections an editor may key by its own names (an id per entry) -- the only staff-named keys the
+// storefront publishes. routes/portal.ts publishes exactly these.
+export const PORTAL_TRANSLATED_COLLECTION_NAMES = ['aboutBlocks', 'promoItems', 'faqItems', 'products', 'catalogProducts', 'catalog'] as const
+export type PortalTranslatedCollectionName = typeof PORTAL_TRANSLATED_COLLECTION_NAMES[number]
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+// The first staff-named entry key in stored translations that names a private field, or null. Fixed field
+// names are not checked: publishing keeps only its own allowlist of those, whatever was stored.
+export function privateTranslationKey(stored: string): string | null {
+  for (const block of Object.values(parsedTranslations(stored) ?? {})) {
+    if (!isRecord(block)) continue
+    for (const name of PORTAL_TRANSLATED_COLLECTION_NAMES) {
+      const collection = block[name]
+      if (!isRecord(collection)) continue
+      const found = Object.keys(collection).find(isPrivateStorefrontFieldName)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 export const MAX_PORTAL_IMAGE_ALT_LENGTH = 200
 const CONTROL_CHARACTERS = /\p{Cc}/gu
 

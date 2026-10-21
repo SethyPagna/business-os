@@ -261,16 +261,18 @@ runTest('the refund is the ORIGINAL sale line price, resolved on the server', ()
 
 runTest('a replacement is recorded as an ordinary sale, not a settlement', () => {
   const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
-  // the atomic planner tenders the whole sale through the ordinary totals kernel...
-  assert.match(routeSource, /rawAmountPaidUsd: subtotalUsd, rawAmountPaidKhr: 0,/)
-  assert.match(routeSource, /const paymentDetails = subtotalUsd > 0 \? \[\{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 \}\] : \[\]/)
+  // the atomic planner tenders the whole sale through the ordinary totals kernel... -- except on a sale that reads
+  // Not Paid, where the replacement is itself Not Paid with no tender (owner, 20 Oct 2026; lane 6.0.905)
+  assert.match(routeSource, /rawAmountPaidUsd: replacementUnpaid \? 0 : subtotalUsd, rawAmountPaidKhr: 0,/)
+  assert.match(routeSource, /const paymentDetails = replacementPaymentMethod && subtotalUsd > 0 \? \[\{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 \}\] : \[\]/)
+  assert.match(routeSource, /const replacementStatus = replacementUnpaid \? 'awaiting_payment' : 'completed'/)
   assert.match(routeSource, /amount_paid_usd: replacementTotals\.amountPaidUsd, amount_paid_khr: replacementTotals\.amountPaidKhr,/)
   // ...on a real payment method, defaulting to a real one
   assert.match(routeSource, /const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'/)
   assert.doesNotMatch(routeSource, /'Return Exchange'/)
   // ...and it earns loyalty exactly as any other sale does
   assert.match(routeSource, /loyalty_accrual,sale_status,notes,items,search_normalized/)
-  assert.ok(routeSource.includes(`0,0,0,0,0,0,\${loyaltyAccrualSql()},'completed',@notes,@items,@search_normalized,`))
+  assert.ok(routeSource.includes(`0,0,0,0,0,0,\${loyaltyAccrualSql()},@sale_status,@notes,@items,@search_normalized,`))
   assert.match(loyaltyAccrualSql(), /^CASE WHEN .*loyalty_points_enabled.*AND \(1\) = 1 THEN 1 ELSE 0 END$/)
   // the modal offers the shop's own methods
   assert.match(newReturnSource, /PAYMENT_METHODS\.map\(\(method\) => \(\{ value: method, label: method \}\)\)/)

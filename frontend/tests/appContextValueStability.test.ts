@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -63,6 +63,24 @@ runTest('syncValue is memoized with useMemo keyed on its three fields', () => {
     /const syncValue: SyncContextValue = \{\s*\n\s*syncConnected,/,
     'the pre-fix unmemoized syncValue literal must not still be present',
   )
+})
+
+runTest('realtime sync state lives only in SyncContext: appValue carries none of it, and no useApp() reader asks for it', () => {
+  const memoStart = appContext.indexOf('const appValue: AppContextValue = useMemo(')
+  const memoEnd = appContext.indexOf('const syncValue: SyncContextValue')
+  assert.ok(memoStart >= 0 && memoEnd > memoStart, 'appValue block not found')
+  const appValueBlock = appContext.slice(memoStart, memoEnd)
+  for (const field of ['syncChannel', 'syncConnected', 'syncServerUnreachable']) {
+    assert.doesNotMatch(appValueBlock, new RegExp(`(^|[^A-Za-z])${field}([^A-Za-z]|$)`), `${field} must not be in appValue: every realtime event would re-render every useApp() consumer`)
+  }
+  assert.match(appValueBlock, /canWriteToServer,/, 'the derived write gate stays in appValue (it flips rarely)')
+  const walk = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = resolve(directory, entry.name)
+    return entry.isDirectory() ? walk(full) : /\.(ts|tsx)$/.test(entry.name) ? [full] : []
+  })
+  const readers = walk(resolve(frontendRoot, 'src')).filter((file) =>
+    /[{][^{}]*(syncChannel|syncConnected|syncServerUnreachable)[^{}]*[}] = useApp[(]/.test(readFileSync(file, 'utf8')))
+  assert.deepEqual(readers, [], 'these files still read sync state through useApp(); use useSync()')
 })
 
 runTest('appValue useMemo dependency array carries the real fields (not empty, not omitted)', () => {

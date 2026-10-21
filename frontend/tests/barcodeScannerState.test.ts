@@ -103,7 +103,7 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   const modalSource = fs.readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
   const searchButtonSource = fs.readFileSync(new URL('../src/components/shared/ScanSearchButton.tsx', import.meta.url), 'utf8')
   assert.match(source, /const video = await waitForVideoElement\(startToken\)/, 'camera startup must wait for React to commit the video element')
-  assert.match(source, /decodeFromStream\(\s*stream,\s*video,[\s\S]*?\(result\)/, 'the iOS compatibility decoder must receive the stream we already hold and the mounted video element')
+  assert.match(source, /runDecodeLadder\(grabFrame\(video, video\.videoWidth, video\.videoHeight\)/, 'the iOS compatibility decoder must read frames from the mounted video element we already own, never a camera of its own')
 
   // WebKit has no BarcodeDetector, so iOS always takes the ZXing branch. If the
   // camera were acquired inside that branch's decodeFromConstraints, the prompt
@@ -114,7 +114,7 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   assert.equal(acquisitions.length, 1, 'both decoders must share ONE getUserMedia call')
   const acquireAt = startBlock.indexOf('navigator.mediaDevices.getUserMedia(')
   const chooseDecoderAt = startBlock.indexOf('const NativeBarcodeDetector = getNativeBarcodeDetector()')
-  const zxingImportAt = startBlock.indexOf("import('@zxing/browser')")
+  const zxingImportAt = startBlock.indexOf('loadLumaDecoder()')
   assert.ok(acquireAt > 0 && chooseDecoderAt > acquireAt, 'the camera must be acquired BEFORE the native/fallback decision, not inside one branch')
   assert.ok(zxingImportAt > acquireAt, 'the fallback decoder chunk must load after the camera is already open')
   assert.doesNotMatch(source, /decodeFromConstraints\(/, 'decodeFromConstraints hides getUserMedia behind the decoder import; it must not be called again')
@@ -183,6 +183,10 @@ await runTest('both scanner entry points warm the modal chunk before the click t
 
 // --- the discriminating one: mount it and watch getUserMedia ---------------
 
+// Off by default so the permission tests keep their idle loop; the ZXing
+// read test turns it on to give the scan loop a playing video.
+let liveVideoFrames = false
+
 class MemoryNode {
   nodeType: number
   nodeName: string
@@ -195,6 +199,10 @@ class MemoryNode {
   nodeValue = ''
   // <video> surface the modal touches: it plays the stream and polls readiness.
   readyState = 0
+  videoWidth = 0
+  videoHeight = 0
+  width = 0
+  height = 0
   srcObject: unknown = null
   muted = false
   private ownText = ''
@@ -206,6 +214,20 @@ class MemoryNode {
     this.tagName = nodeName
     this.ownerDocument = ownerDocument
     this.namespaceURI = namespaceURI
+    if (nodeName === 'VIDEO' && liveVideoFrames) {
+      this.readyState = 4
+      this.videoWidth = 64
+      this.videoHeight = 48
+    }
+  }
+
+  // The scan loop grabs frames through a canvas; record each grab.
+  getContext(): unknown {
+    if (this.nodeName !== 'CANVAS') return null
+    return {
+      drawImage: (source: MemoryNode) => { scannerEvents.push(`frame-from-${source.nodeName.toLowerCase()}`) },
+      getImageData: (_x: number, _y: number, width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4).fill(128) }),
+    }
   }
 
   appendChild(child: MemoryNode): MemoryNode { child.parentNode = this; this.ownText = ''; this.childNodes.push(child); return child }
@@ -339,19 +361,30 @@ interface FakeTrack {
   readyState: string
   stopCount: number
   stop: () => void
+  getCapabilities?: () => Record<string, unknown>
+  applyConstraints?: (constraints: unknown) => Promise<void>
 }
 
 interface CameraProbe {
   getUserMediaCalls: number
   tracks: FakeTrack[]
+  requested: unknown[]
+  applied: unknown[]
+}
+
+interface CameraOptions {
+  native?: boolean
+  capabilities?: Record<string, unknown>
+  rejectTorch?: boolean
 }
 
 function installCamera(
   permissionState: 'granted' | 'prompt' | 'denied',
-  { native = true }: { native?: boolean } = {},
+  { native = true, capabilities, rejectTorch = false }: CameraOptions = {},
 ): CameraProbe {
-  const probe: CameraProbe = { getUserMediaCalls: 0, tracks: [] }
+  const probe: CameraProbe = { getUserMediaCalls: 0, tracks: [], requested: [], applied: [] }
   scannerEvents.length = 0
+  framesLeft = 120
   if (native) memoryWindow.BarcodeDetector = FakeBarcodeDetector
   else delete memoryWindow.BarcodeDetector
   Object.defineProperty(globalThis, 'navigator', {
@@ -361,13 +394,21 @@ function installCamera(
         query: async () => ({ state: permissionState, addEventListener() {}, removeEventListener() {} }),
       },
       mediaDevices: {
-        getUserMedia: async () => {
+        getUserMedia: async (constraints: unknown) => {
           probe.getUserMediaCalls += 1
+          probe.requested.push(constraints)
           scannerEvents.push('getUserMedia')
           const track: FakeTrack = {
             readyState: 'live',
             stopCount: 0,
             stop() { this.stopCount += 1; this.readyState = 'ended' },
+          }
+          if (capabilities) {
+            track.getCapabilities = () => capabilities
+            track.applyConstraints = async (next: unknown) => {
+              probe.applied.push(next)
+              if (rejectTorch && JSON.stringify(next).includes('torch')) throw new Error('OverconstrainedError')
+            }
           }
           probe.tracks.push(track)
           return { getTracks: () => [track], getVideoTracks: () => [track] }
@@ -392,7 +433,7 @@ const vite = await createServer({
   // Without this the decoder is externalised to Node's own resolver and the
   // stub below is never consulted -- the import would load (and fail on) the
   // real browser package instead of recording its evaluation order.
-  ssr: { noExternal: ['@zxing/browser'] },
+  ssr: { noExternal: ['@zxing/library'] },
   plugins: [
     {
       name: 'barcode-scanner-mocks',
@@ -400,7 +441,7 @@ const vite = await createServer({
       resolveId(id) {
         if (id.includes('lucide-react')) return '\0scanner-icon'
         if (/shared\/Modal$/.test(id)) return '\0scanner-modal'
-        if (id === '@zxing/browser') return '\0scanner-zxing'
+        if (id === '@zxing/library') return '\0scanner-zxing'
         return null
       },
       load(id) {
@@ -410,23 +451,26 @@ const vite = await createServer({
             export default function Modal({ children }) { return React.createElement('div', { role: 'dialog' }, children) }`
         }
         // Records the moment the decoder module is EVALUATED, which is what the
-        // real 446 KB chunk costs on iOS. controls.stop() disposes the stream it
-        // was handed, mirroring BrowserCodeReader's finalize callback -- that is
-        // the second stop cleanup() has to avoid duplicating.
+        // real ZXing chunk costs on iOS. Each decode hands out the next queued
+        // read (an EAN-13 value) or reports nothing found.
         if (id === '\0scanner-zxing') {
           return `globalThis.__scannerEvents.push('zxing-module-evaluated')
-            export class BrowserMultiFormatReader {
-              async decodeFromStream(stream, video, callback) {
-                globalThis.__scannerEvents.push('decodeFromStream')
-                if (!stream || typeof stream.getVideoTracks !== 'function') throw new Error('decodeFromStream needs the caller stream')
-                return {
-                  stop() {
-                    globalThis.__scannerEvents.push('zxing-controls-stop')
-                    stream.getVideoTracks().forEach((track) => track.stop())
-                  },
-                }
+            export const BarcodeFormat = { EAN_13: 7, EAN_8: 6, UPC_A: 14, UPC_E: 15, CODE_128: 4, CODE_39: 2, ITF: 8 }
+            export const DecodeHintType = { POSSIBLE_FORMATS: 2, TRY_HARDER: 3 }
+            export class NotFoundException extends Error {}
+            export class ChecksumException extends Error {}
+            export class FormatException extends Error {}
+            export class RGBLuminanceSource {}
+            export class HybridBinarizer {}
+            export class BinaryBitmap {}
+            export class MultiFormatReader {
+              constructor() { globalThis.__scannerEvents.push('zxing-reader-created') }
+              setHints() {}
+              decodeWithState() {
+                const text = (globalThis.__zxingReads || []).shift()
+                if (!text) throw new NotFoundException()
+                return { getText: () => text, getBarcodeFormat: () => 7 }
               }
-              reset() {}
             }`
         }
         return null
@@ -438,8 +482,9 @@ const vite = await createServer({
 
 async function mountScanner(
   probePermission: 'granted' | 'prompt' | 'denied',
-  options: { native?: boolean } = {},
-): Promise<{ probe: CameraProbe; text: string; events: string[]; unmount: () => Promise<void> }> {
+  options: CameraOptions = {},
+  onDetected: (value: string) => void = () => {},
+): Promise<{ probe: CameraProbe; text: string; events: string[]; container: MemoryNode; root: ReturnType<typeof createRoot>; unmount: () => Promise<void> }> {
   const probe = installCamera(probePermission, options)
   const module = await vite.ssrLoadModule(modulePath) as { default: React.ComponentType<Record<string, unknown>> }
   const container = memoryDocument.createElement('div')
@@ -450,7 +495,7 @@ async function mountScanner(
       open: true,
       title: 'Scan barcode',
       onClose() {},
-      onDetected() {},
+      onDetected,
       t: (key: string) => key,
     }))
     await Promise.resolve()
@@ -464,6 +509,8 @@ async function mountScanner(
     probe,
     text,
     events: scannerEvents,
+    container,
+    root,
     unmount: async () => {
       if (unmounted) return
       unmounted = true
@@ -505,12 +552,10 @@ try {
       const decoderAt = mounted.events.indexOf('zxing-module-evaluated')
       assert.ok(acquiredAt >= 0, `the camera must be requested on the fallback path, got: ${trace}`)
       assert.ok(decoderAt > acquiredAt, `the decoder chunk must be evaluated only after the camera is open, got: ${trace}`)
-      assert.ok(mounted.events.includes('decodeFromStream'), `the decoder must be handed the stream we already own, got: ${trace}`)
+      assert.ok(mounted.events.indexOf('zxing-reader-created') > acquiredAt, `the decoder must be built only once the camera is open, got: ${trace}`)
 
       await mounted.unmount()
-      // ZXing's controls.stop() disposes the stream, then cleanup() calls
-      // stopStream on the same one: the track must still end up stopped once.
-      assert.ok(mounted.events.includes('zxing-controls-stop'), `closing must stop the decoder, got: ${mounted.events.join(' -> ')}`)
+      // Closing stops the one stream exactly once; the decoder owns no camera.
       assert.deepEqual(
         mounted.probe.tracks.map((track) => track.stopCount),
         [1],
@@ -528,6 +573,84 @@ try {
       assert.match(mounted.text, /Camera access is blocked/, 'a blocked camera must explain itself instead of showing a blank video')
       assert.match(mounted.text, /Try camera again/, 'the explicit retry button survives exactly for this state')
     } finally {
+      await mounted.unmount()
+    }
+  })
+
+  function findByLabel(node: MemoryNode, label: string): MemoryNode | null {
+    if (node.getAttribute?.('aria-label') === label) return node
+    for (const child of node.childNodes) {
+      const found = findByLabel(child, label)
+      if (found) return found
+    }
+    return null
+  }
+
+  async function press(node: MemoryNode): Promise<void> {
+    const propsKey = Object.keys(node).find((key) => key.startsWith('__reactProps$')) as keyof MemoryNode
+    const props = node[propsKey] as unknown as { onClick: () => void }
+    await act(async () => {
+      props.onClick()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+  }
+
+  await runTest('the camera asks for 1080p and turns on continuous focus when the track offers it', async () => {
+    const mounted = await mountScanner('granted', { capabilities: { focusMode: ['manual', 'continuous'] } })
+    try {
+      const video = (mounted.probe.requested[0] as { video: { width: { ideal: number }; height: { ideal: number } } }).video
+      assert.equal(video.width.ideal, 1920, 'thin bars need a 1080p frame where the camera has one')
+      assert.equal(video.height.ideal, 1080)
+      assert.deepEqual(mounted.probe.applied, [{ advanced: [{ focusMode: 'continuous' }] }])
+      assert.equal(findByLabel(mounted.container, 'Turn on flashlight'), null, 'no torch button for a track without a torch')
+    } finally {
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('the flashlight toggle appears only for a torch track and reflects what the camera accepted', async () => {
+    const mounted = await mountScanner('granted', { capabilities: { torch: true } })
+    try {
+      const button = findByLabel(mounted.container, 'Turn on flashlight')
+      assert.ok(button, 'a torch-capable track gets the icon toggle')
+      assert.equal(button.getAttribute('title'), 'Turn on flashlight', 'icon-only buttons carry a tooltip')
+      assert.equal(button.getAttribute('aria-pressed'), 'false')
+      await press(button)
+      assert.deepEqual(mounted.probe.applied, [{ advanced: [{ torch: true }] }])
+      const lit = findByLabel(mounted.container, 'Turn off flashlight')
+      assert.ok(lit, 'once the camera accepts, the toggle offers to turn it off')
+      assert.equal(lit.getAttribute('aria-pressed'), 'true')
+    } finally {
+      await mounted.unmount()
+    }
+
+    const refused = await mountScanner('granted', { capabilities: { torch: true }, rejectTorch: true })
+    try {
+      const button = findByLabel(refused.container, 'Turn on flashlight')
+      assert.ok(button)
+      await press(button)
+      assert.equal(button.getAttribute('aria-pressed'), 'false', 'a refused torch must not show as on')
+      assert.match(refused.container.textContent, /The flashlight could not be switched\./, 'a refused torch says so')
+    } finally {
+      await refused.unmount()
+    }
+  })
+
+  await runTest('ZXing reads frames from our video and needs two agreeing, checksum-valid reads', async () => {
+    liveVideoFrames = true
+    ;(globalThis as { __zxingReads?: string[] }).__zxingReads = ['3348901729223', '4006381333931', '3348901729222', '3348901729222']
+    const detected: string[] = []
+    const mounted = await mountScanner('granted', { native: false }, (value) => detected.push(value))
+    try {
+      for (let wait = 0; wait < 40 && !detected.length; wait += 1) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
+      }
+      const trace = mounted.events.join(' -> ')
+      assert.deepEqual(detected, ['3348901729222'], `a bad check digit and a lone read must both lose to two agreeing reads, got ${JSON.stringify(detected)}: ${trace}`)
+      assert.ok(mounted.events.includes('frame-from-video'), `frames must come from the scanner's own video element, got: ${trace}`)
+      assert.equal(mounted.probe.getUserMediaCalls, 1)
+    } finally {
+      liveVideoFrames = false
       await mounted.unmount()
     }
   })

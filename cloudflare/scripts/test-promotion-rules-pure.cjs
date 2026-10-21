@@ -269,7 +269,8 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
   // TTL died (reproduced live in Part 400's sweep).
   const settingsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
   assert.match(settingsSrc, /bumpVersion\(c\.env, 'settings'\)/, 'settings POST must bump the settings cache version')
-  assert.match(portalSrc, /getVersionWithFallback\(c\.env, 'settings'\)/, 'portal cache key must include the settings version')
+  // 6.0.896: the versions are read in one batched call (lib/cache.ts getVersionsWithFallback).
+  assert.match(portalSrc, /const namespaces = \['products', 'settings'[\s\S]{0,200}getVersionsWithFallback\(c\.env, namespaces/, 'portal cache key must include the settings version')
   pass('6.3: settings saves invalidate the portal cache immediately (no TTL hiding)')
 }
 

@@ -35,7 +35,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
 import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
-import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, portalLanguageSetting, withoutOtherLanguageTranslations } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, portalLanguageSetting, privateTranslationKey, withoutOtherLanguageTranslations } from '../lib/portalText'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1141,7 +1141,12 @@ app.post('/', async (c) => {
   }
   if (attemptedKeys.includes(PORTAL_TRANSLATIONS_KEY)) {
     const sent = body[PORTAL_TRANSLATIONS_KEY]
-    body[PORTAL_TRANSLATIONS_KEY] = withoutOtherLanguageTranslations(typeof sent === 'string' ? sent : JSON.stringify(sent))
+    const translations = withoutOtherLanguageTranslations(typeof sent === 'string' ? sent : JSON.stringify(sent))
+    const privateKey = privateTranslationKey(translations)
+    if (privateKey) {
+      return c.json({ error: `A translation entry cannot be named "${privateKey}". Rename it and save again.`, code: 'portal_translation_private_key', key: privateKey }, 400)
+    }
+    body[PORTAL_TRANSLATIONS_KEY] = translations
   }
 
   // The low-stock alert switch and its threshold decide what the WHOLE

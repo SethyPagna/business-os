@@ -17,7 +17,7 @@ function resetApiState() {
 // The reported defect was specifically a spelling-only correction: the old
 // case-folded early return made Fcb -> FCB impossible before the server ever
 // saw it. Exact equality remains a no-op, but identity equality does not.
-assert.match(settingsSource, /if \(!to \|\| to === from\) return/)
+assert.match(settingsSource, /if \(!renameDraft \|\| !renamedTo \|\| renamedTo === renameDraft\.from\) return/)
 assert.doesNotMatch(settingsSource, /if \(!to \|\| to\.toLocaleLowerCase\(\) === from\.toLocaleLowerCase\(\)\) return/)
 assert.match(settingsSource, /const isCaseOnlyRename = to\.toLocaleLowerCase\(\) === from\.toLocaleLowerCase\(\)/)
 assert.match(settingsSource, /const scope: PaymentMethodRenameScope = isCaseOnlyRename \|\| linked > 0 \? 'linked' : 'settings_only'/)

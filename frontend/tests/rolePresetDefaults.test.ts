@@ -18,11 +18,12 @@ assert.equal(employee.permissions.returns, true, 'Employee must receive individu
 for (const action of ['bulk', 'export']) {
   assert.equal(employee.permissions[`returns:${action}`], false, `Employee must not receive returns action ${action}`)
 }
-assert.equal(employee.permissions.contacts, 'review', 'Employee contact changes remain Partial Access')
+assert.equal(employee.permissions.contacts, true, 'Employee Contacts is Full (owner, 20 Oct 2026)')
 assert.equal(employee.permissions['contacts:bulk'], false)
 assert.equal(employee.permissions['contacts:financial_history'], false)
 assert.equal(employee.permissions.contacts_suppliers, false)
 // Owner, 5 Oct 2026: Employee on Products = view, product information edits and image upload, never costs.
+// (products:supplier, 19 Oct 2026, is off too.)
 const ALLOWED_PRODUCT_ACTIONS = ['view', 'edit', 'image']
 assert.equal(employee.permissions.products, true, 'Employee products is Full tier so image upload is not blocked; every other action is switched off below')
 assert.equal(employee.permissions.product_cost_view, false, 'cost price is never visible by default')
@@ -42,55 +43,22 @@ assert.equal(employee.permissions.all, undefined)
 assert.equal(employee.permissions.settings, undefined)
 assert.equal(employee.permissions.backup_restore, undefined)
 
-// Fresh databases must seed the same safe Employee baseline. Existing role
-// rows remain editable because core invariants only force-rewrite Admin.
+// The one-click Employee preset EQUALS the server seed (cloudflare/src/lib/roleDefaults.ts): the same map, key for key. It is
+// read from the source, not copied, so a change to either side that is not made to the other fails here. Fresh databases seed
+// that map; existing role rows remain editable because core invariants only force-rewrite Admin.
+const roleDefaults = fs.readFileSync(new URL('../../cloudflare/src/lib/roleDefaults.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const seedOpen = roleDefaults.indexOf('= {', roleDefaults.indexOf('const DEFAULT_ROLE_PERMISSIONS')) + 2
+const seedMap = new Function('return ' + roleDefaults.slice(seedOpen, roleDefaults.indexOf('\n}\n', seedOpen) + 2))() as Record<string, Record<string, unknown>>
+assert.ok(seedMap.employee && seedMap.admin, 'the Employee seed was read from roleDefaults.ts')
+assert.deepEqual(employee.permissions, seedMap.employee, 'the Employee preset equals the Employee seed')
+// The owner decisions that map encodes (5 Oct, 16 Sep, 19-20 Oct 2026).
+assert.equal(Object.hasOwn(employee.permissions, 'dashboard'), false, 'Dashboard is off by default')
+assert.equal(Object.hasOwn(employee.permissions, 'inventory'), false, 'an Employee never writes physical stock')
+assert.equal(employee.permissions['products:supplier'], false)
+assert.equal(employee.permissions['products:price'], false)
+assert.equal(employee.permissions.receipt_settings, true)
 const invariants = fs.readFileSync(new URL('../../cloudflare/src/lib/coreDataInvariants.ts', import.meta.url), 'utf8')
-const employeeStart = invariants.indexOf('employee: {')
-const employeeEnd = invariants.indexOf('\n  },', employeeStart)
-assert.ok(employeeStart >= 0 && employeeEnd > employeeStart)
-const seededEmployee = invariants.slice(employeeStart, employeeEnd)
-for (const fragment of [
-  'sales: true',
-  "'sales:status': true",
-  "'sales:customer': true",
-  "'sales:add_items': true",
-  "'sales:amend': true",
-  "'sales:bulk': false",
-  "'sales:import': false",
-  "'sales:export': false",
-  'returns: true',
-  "'returns:bulk': false",
-  "'returns:export': false",
-  "contacts: 'review'",
-  "'contacts:bulk': false",
-  "'contacts:financial_history': false",
-  'contacts_suppliers: false',
-]) assert.match(seededEmployee, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-for (const fragment of [
-  'products: true',
-  "'products:add': false",
-  "'products:delete': false",
-  "'products:bulk_delete': false",
-  "'products:variant': false",
-  "'products:import': false",
-  "'products:import_replace_all': false",
-  "'products:export': false",
-  "'products:merge_duplicates': false",
-  "'products:zero_qty_cleanup': false",
-  "'products:manage_lookups': false",
-  'product_cost_view: false',
-  'product_cost_edit: false',
-]) assert.match(seededEmployee, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the fresh Employee seed carries ' + fragment)
-// The seed and the one-click preset must say the same thing about Products and costs.
-for (const key of Object.keys(employee.permissions).filter((name) => name === 'products' || name.startsWith('products:') || name.startsWith('product_cost_'))) {
-  const expected: string = JSON.stringify(employee.permissions[key])
-  const seeded: RegExpMatchArray | null = seededEmployee.match(new RegExp("(?:'" + key + "'|" + key + "): ([^,\\n]+),"))
-  assert.ok(seeded, 'seed carries ' + key)
-  assert.equal(seeded[1].replace(/'/g, '"'), expected, 'seed and preset agree on ' + key)
-}
-for (const unrelated of ['dashboard:', 'customer_portal:', 'inventory:']) {
-  assert.doesNotMatch(seededEmployee, new RegExp(unrelated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `fresh runtime Employee seed must not add unrelated ${unrelated}`)
-}
+assert.match(invariants, /from '\.\/roleDefaults'/, 'the Worker seeds from roleDefaults.ts')
 // Release review P2-1 (6 Oct 2026): the live Employee row has no Website Editor grant, so a preset-created Employee must
 // not have one either -- the storefront announcement strip and posts are public content (routes/promotions.ts requireWebsiteEditor).
 for (const grant of ['customer_portal', 'portal_posts', 'portal_faq', 'portal_about', 'settings']) {

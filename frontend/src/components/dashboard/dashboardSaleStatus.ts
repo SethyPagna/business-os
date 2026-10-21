@@ -1,3 +1,5 @@
+import { saleStatusChipWords, saleStatusDisplay } from '../../utils/saleStatusDisplay.ts'
+
 export type DashboardSaleStatus =
   | 'completed'
   | 'awaiting_payment'
@@ -45,4 +47,16 @@ export function getDashboardSaleStatusLabel(status: unknown, t?: TranslateFn): s
 
 export function getDashboardSaleStatusTone(status: unknown): string {
   return STATUS_TONES[normalizeDashboardSaleStatus(status)]
+}
+
+type DashboardSaleRow = Parameters<typeof saleStatusDisplay>[0]
+
+/** A recent sale in the two-status model (utils/saleStatusDisplay.ts): the shown status, its tags beside it. */
+export function getDashboardSaleLabel(sale: DashboardSaleRow, t?: TranslateFn): string {
+  return saleStatusChipWords(sale).map((status) => getDashboardSaleStatusLabel(status, t)).join(' · ')
+}
+
+/** The shown status's tone; the raw column reads Completed for a delivery order. */
+export function getDashboardSaleTone(sale: DashboardSaleRow): string {
+  return getDashboardSaleStatusTone(saleStatusDisplay(sale).status)
 }

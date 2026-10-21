@@ -23,6 +23,9 @@ export function isImportMaintenanceFenceError(error: unknown): error is ImportMa
   return error instanceof ImportMaintenanceFenceError
 }
 
+// Positive answer only: a missing table is re-probed, a present one stays.
+let flagTableAvailable = false
+
 /**
  * Fence only this import/bulk workflow's main-D1 writes. A missing flag table
  * means the legacy database cannot start a restore; other lookup errors fail
@@ -31,9 +34,12 @@ export function isImportMaintenanceFenceError(error: unknown): error is ImportMa
  */
 export async function getImportFencedDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): Promise<D1Compat> {
   const db = getDb(env)
-  const capability = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'")
-  const table = await (capability.getOnce ?? capability.get).call(capability) as { name: string } | undefined
-  if (!table) {
+  if (!flagTableAvailable) {
+    const capability = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'")
+    const table = await (capability.getOnce ?? capability.get).call(capability) as { name: string } | undefined
+    flagTableAvailable = Boolean(table)
+  }
+  if (!flagTableAvailable) {
     Object.defineProperty(db, 'importWriteFenceStatements', { value: 0, configurable: true })
     return db
   }

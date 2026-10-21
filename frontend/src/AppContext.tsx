@@ -17,6 +17,7 @@ import {
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
 import { requestPersistentAppStorage } from './api/syncRuntime.ts'
+import { createSyncChannelScheduler, isRemoteSyncUpdate } from './api/syncRuntime.ts'
 import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
@@ -55,6 +56,7 @@ import {
   useSync,
   useT,
   type AppContextCoreValue,
+  type SyncContextCoreValue,
 } from './app/AppContextCore.tsx'
 
 export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
@@ -239,9 +241,6 @@ type AppContextValue = {
   /** C5: navigator.storage.persist()'s answer for this device, null until asked.
    *  false means the browser may evict IndexedDB -- including unsynced sales. */
   storagePersisted: boolean | null
-  syncChannel: SyncChannelUpdate | null
-  syncConnected: boolean
-  syncServerUnreachable: boolean
   syncUrl: string
   t: (key: string) => string
   theme: string
@@ -253,7 +252,7 @@ type AppContextValue = {
   user: AppUser | null
   writeConflict: WriteConflictDetail | null
 }
-type SyncContextValue = Pick<AppContextValue, 'syncChannel' | 'syncConnected' | 'syncServerUnreachable'>
+type SyncContextValue = SyncContextCoreValue
 
 function getAppApi(): AppRuntimeApi {
   if (typeof window === 'undefined') return {}
@@ -1186,7 +1185,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [applyBootstrapPayload, publicMode, resetLocalBusinessState, user])
 
   // Sync event listeners (loadSettings is defined above).
-  const debounceRef = useRef<Record<string, number>>({})
   const permissionRefreshRef = useRef(createPermissionRefreshAccumulator())
   const permissionRefreshTimerRef = useRef<number | null>(null)
   const schedulePermissionRefreshRef = useRef<() => void>(() => {})
@@ -1205,6 +1203,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     ensureSyncUpdateCacheListener()
 
     let disposed = false
+    const syncScheduler = createSyncChannelScheduler({
+      setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      clearTimeout: (timer) => window.clearTimeout(timer),
+    })
     const refreshPermissions = async () => {
       permissionRefreshTimerRef.current = null
       const accumulator = permissionRefreshRef.current
@@ -1271,9 +1273,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
         schedulePermissionRefresh()
       }
-      if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
-      debounceRef.current[channel] = window.setTimeout(async () => {
-        delete debounceRef.current[channel]
+      syncScheduler.schedule(channel, isRemoteSyncUpdate(detail), detail.source || null, (source) => {
         // Settings changes from other devices apply immediately; no reload needed.
         // A resume with the socket open throughout missed no settings push.
         // A save made in this tab is not re-read: its answer already carried the
@@ -1283,10 +1283,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           channel,
           ts: Date.now(),
           reason: detail.reason || null,
-          source: detail.source || null,
+          source,
           ...(detail.ownSettingsWrite ? { ownSettingsWrite: true } : {}),
         })
-      }, SYNC.EVENT_DEBOUNCE_MS)
+      })
     }
     const onStatus = (e: Event) => {
       const detail = eventDetail<{ connected?: boolean }>(e)
@@ -1526,7 +1526,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       window.removeEventListener('runtime:version-mismatch', onRuntimeMismatch)
       window.removeEventListener('sync:conflict', onConflict)
       window.removeEventListener('auth:unauthorized', onUnauthorized)
-      Object.values(debounceRef.current).forEach((timer) => window.clearTimeout(timer))
+      syncScheduler.dispose()
     }
   }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, publicMode, readAppBootstrap, t, user])
 
@@ -2812,10 +2812,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     usdToKhr, khrToUsd,
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
-    // Expose sync status so components that use useApp() (legacy) can read it.
-    syncConnected,
-    syncChannel,
-    syncServerUnreachable,
     canWriteToServer,
     recheckConnection,
     storagePersisted,
@@ -2836,9 +2832,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     usdToKhr, khrToUsd,
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
-    syncConnected,
-    syncChannel,
-    syncServerUnreachable,
     canWriteToServer,
     recheckConnection,
     storagePersisted,

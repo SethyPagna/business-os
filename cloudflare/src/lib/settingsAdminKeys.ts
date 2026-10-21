@@ -4,6 +4,7 @@
 // evidence lives:
 //   - telegram_chat_id            -> which chat receives every business report
 //   - audit_log_retention_days    -> how soon the audit trail deletes itself
+//   - loyalty_points_enabled      -> whether customers earn and spend points
 //   - drive_sync_*                -> the Drive connection, its tokens, and its
 //                                    recorded authoriser (lib/driveSyncAuthority)
 //   - *_refresh_token, *_token, *_secret, *_api_key, *_password
@@ -16,7 +17,7 @@
 // ('Telegram_Chat_ID ') is caught too. Suffix and prefix matched so the next
 // integration's credential row is covered the day it lands.
 
-const ADMIN_ONLY_SETTING_KEYS = new Set(['telegram_chat_id', 'audit_log_retention_days'])
+const ADMIN_ONLY_SETTING_KEYS = new Set(['telegram_chat_id', 'audit_log_retention_days', 'loyalty_points_enabled'])
 const ADMIN_ONLY_SETTING_PREFIXES = ['drive_sync_']
 const ADMIN_ONLY_SETTING_SUFFIXES = ['_refresh_token', '_token', '_secret', '_api_key', '_password']
 

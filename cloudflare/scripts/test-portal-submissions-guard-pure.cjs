@@ -219,8 +219,8 @@ async function makeSignedInAccount({ name, phone, membershipId, withCustomer = t
   const account = rawDb.prepare(
     `INSERT INTO portal_accounts (
       membership_id, name, phone, password_hash, contact_id,
-      consent_version, consent_at, consent_locale
-    ) VALUES (@m, @n, @p, @h, @c, 'portal-legal-2026-09-07', CURRENT_TIMESTAMP, 'en')`,
+      consent_version, consent_at, consent_locale, age_confirmed_at
+    ) VALUES (@m, @n, @p, @h, @c, 'portal-legal-2026-10-20', CURRENT_TIMESTAMP, 'en', CURRENT_TIMESTAMP)`,
   ).run({ m: membershipId, n: name, p: phone.replace(/\D/g, ''), h: 'x', c: customerId })
   const accountId = Number(account.meta.last_row_id)
   const token = `token-${membershipId}`
@@ -288,10 +288,10 @@ async function run() {
     assert.strictEqual(res.status, 428)
     const payload = await res.json()
     assert.strictEqual(payload.code, 'portal_consent_required')
-    assert.strictEqual(payload.consentVersion, 'portal-legal-2026-09-30')
+    assert.strictEqual(payload.consentVersion, 'portal-legal-2026-10-20')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n, before)
     assert.strictEqual(bucket.objects.size, 0)
-    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-09-07', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([alice.accountId])
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-10-20', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([alice.accountId])
   })
 
   await check('a stranger cannot write: no session is 401, and nothing is stored', async () => {

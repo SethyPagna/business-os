@@ -163,16 +163,24 @@ export function replayRefusalCode(error: unknown): string {
 // required tier is FULL: a review-tier user's forward edit is queued for
 // approval, and their undo must not be the one path that writes the section
 // directly.
-type UndoApplierDef = { permission: string; action?: string; run: UndoApplier }
+// alsoAction: a second action in the same section that must not be switched off (a narrowing switch such as
+// products:supplier), so a replay is held to every action the forward write was.
+type UndoApplierDef = { permission: string; action?: string; alsoAction?: string; run: UndoApplier }
 
 // The effective tier THIS user has over an applier's replay: the granular
 // action tier when the applier declares one, else the coarse section tier.
 // The single place the three gate sites (record, map, operate) agree on how
 // an applier's permission is evaluated, so they can never drift.
-export function applierPermissionTier(user: SessionUser, applier: { permission: string; action?: string }): PermissionTier {
+export function applierPermissionTier(user: SessionUser, applier: { permission: string; action?: string; alsoAction?: string }): PermissionTier {
+  if (applierAlsoActionDenied(user, applier)) return 'none'
   return applier.action
     ? getActionTier(user, applier.permission, applier.action)
     : getPermissionTier(user, applier.permission)
+}
+
+/** True when the applier's extra action (e.g. products:supplier) is switched off for this user. */
+export function applierAlsoActionDenied(user: SessionUser, applier: { permission: string; alsoAction?: string }): boolean {
+  return !!applier.alsoAction && getActionTier(user, applier.permission, applier.alsoAction) === 'none'
 }
 
 // ---------------------------------------------------------------------------
@@ -3987,10 +3995,12 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).
   // Gated by the products edit action (attributing a lot's supplier IS a product
   // edit), full tier, at record and operate time -- same authority model as the
-  // merge appliers above.
+  // merge appliers above, plus products:supplier (alsoAction).
   'supplier.backfill': {
     permission: 'products',
     action: 'edit',
+    // Attributing lots to a supplier is a supplier change: the forward route demands products:supplier, so a replay does too.
+    alsoAction: 'supplier',
     run: async (payload, ctx) => {
       const db = getDb(ctx.env)
       const snapshotId = Number(payload.snapshot_id || 0)
@@ -4037,11 +4047,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
 // Returns the applier a payload opts into, or null when the payload names no
 // registered applier (the fall-through-to-client-replay case).
-export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; permission: string; action?: string; run: UndoApplier } | null {
+export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; permission: string; action?: string; alsoAction?: string; run: UndoApplier } | null {
   if (!payload || typeof payload !== 'object') return null
   const name = typeof payload.applier === 'string' ? payload.applier : ''
   const def = name ? APPLIERS[name] : undefined
-  return def ? { name, permission: def.permission, action: def.action, run: def.run } : null
+  return def ? { name, permission: def.permission, action: def.action, alsoAction: def.alsoAction, run: def.run } : null
 }
 
 // Whether a stored action_history row's NEXT transition can be replayed by the

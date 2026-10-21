@@ -8,13 +8,19 @@ import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTransaction'
 
+// Positive answers only: a missing schema is re-probed on the next call, a
+// present one stays present for the isolate (migrations only add).
+let operationWritesAvailable = false
+
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (operationWritesAvailable) return true
   try {
     const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
       WHERE (type='table' AND name='fee_operation_receipts')
          OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    return row?.ready === 2
+    operationWritesAvailable = row?.ready === 2
+    return operationWritesAvailable
   } catch {
     return false
   }
@@ -1575,7 +1581,7 @@ function adjustPermissionRefusal(c: InventoryContext, body: Record<string, unkno
   // falling through to a full-access write now that the top-level
   // middleware admits review-tier users for reads.
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
-    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   return null
 }
@@ -2673,7 +2679,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
   // so it's gated the same way /apply already is, not treated as
   // read-only.
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseRawDatedCountRows(body)
@@ -2713,7 +2719,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
 app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const resolvedIn = Array.isArray(body.resolved) ? body.resolved : null
@@ -2735,7 +2741,7 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
 app.post('/dated-stock-count/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseDatedStockCountEntries(body)
@@ -2759,7 +2765,7 @@ app.post('/dated-stock-count/preview', async (c) => {
 app.post('/dated-stock-count/apply', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseDatedStockCountEntries(body)
@@ -2810,7 +2816,7 @@ app.post('/transfer', async (c) => {
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
   if (getActionTier(user, 'inventory', 'transfer') !== 'full') {
-    return c.json({ error: 'Branch transfers require Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Branch transfers require Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
@@ -2976,7 +2982,7 @@ app.post('/move-row', async (c) => {
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
   if (getActionTier(user, 'inventory', 'move_row') !== 'full') {
-    return c.json({ error: 'Moving stock between rows requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Moving stock between rows requires Full Access to Inventory -- Review support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const sourceProductId = Number.parseInt(String(body.sourceProductId ?? body.source_product_id ?? ''), 10)

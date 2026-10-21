@@ -196,6 +196,10 @@ async function main() {
   assert.deepEqual(JSON.parse(JSON.stringify(Object.fromEntries(Object.keys(before[0]).map(key => [key, after[0][key]])))), JSON.parse(JSON.stringify(before[0])))
   db.exec("INSERT INTO return_items(return_id,total_usd,refund_snapshot_json) VALUES(1,2.3456,'{\"version\":1}')")
   assert.equal(db.prepare('SELECT refund_snapshot_json FROM return_items WHERE id=2').get().refund_snapshot_json, '{"version":1}')
+  // The route's sale read carries the return money columns migration 0260 adds.
+  db.exec(fs.readFileSync(path.join(migrationDir, '0260_return_refund_tender.sql'), 'utf8'))
+  // 6.0.905: and the return tag (0263) it guards the quote authority with.
+  db.exec(fs.readFileSync(path.join(migrationDir, '0263_sale_return_tags.sql'), 'utf8'))
   const route = await loadReturnRoute()
   const routeBasket = [{ id: 11, key: 'quote-A', price: 10, quantity: 1 }, { id: 12, key: 'quote-B', price: 20, quantity: 1 }]
   const routeContext = { version: 1, lines: routeBasket.map(line => ({ line_key: line.key, amount: line.price })),

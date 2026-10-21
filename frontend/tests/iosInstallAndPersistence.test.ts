@@ -91,27 +91,22 @@ check('C5 the request happens once per session and is cleared on sign-out', () =
   assert.match(appContext, /persistentStorageAskedForRef\.current = null\s*\n\s*setStoragePersisted\(null\)/, 'sign-out must clear both the ref and the answer')
 })
 
-check('C5 the eviction band needs persisted === false AND a non-empty outbox', () => {
-  // CATCHES the two independently wrong bands: one that fires on
+check('C5 the eviction warning needs persisted === false AND retained rows', () => {
+  // CATCHES the two independently wrong warnings: one that fires on
   // `!storagePersisted` (so `null`, meaning "not asked yet", flashes a
-  // warning on every single boot), and one that ignores the outbox (so a
-  // till with nothing queued carries a permanent scare it cannot act on).
-  const at = app.indexOf('function StorageEvictionBand(')
-  assert.ok(at > 0, 'StorageEvictionBand moved or was renamed')
-  const body = app.slice(at, app.indexOf('\n}', at))
-  assert.match(
-    body,
-    /if \(storagePersisted !== false \|\| pending <= 0 \|\| dismissed\) return null/,
-    'both conditions must gate the band, and `null` must stay silent',
-  )
-  assert.match(body, /Number\(pendingSync\?\.total \|\| 0\)/, 'the outbox count must be the shared pendingSync total')
+  // warning on every single boot), and one shown on a till with nothing
+  // retained (a permanent scare it cannot act on).
+  const notice = read('src/components/server/LegacyQueueNotice.tsx')
+  assert.doesNotMatch(app, /function StorageEvictionBand\(/, 'the bottom band is gone with the queue total it read')
+  assert.match(app, /\{legacyQueue\.count > 0 && legacyQueueClosedFor !== legacyQueue\.ownerKey \? \([\s\S]*?<LegacyQueueNotice[\s\S]*?storagePersisted=\{storagePersisted\}/, 'the notice mounts only when retained rows were counted')
+  assert.match(notice, /\{storagePersisted === false \? \(/, '`null` must stay silent')
 })
 
-check('C5 the band explains the fix behind an InfoHint, not as inline prose', () => {
-  // CATCHES growing a fixed band into a paragraph the user must read past to
-  // get back to work -- the project's density rule.
-  const at = app.indexOf('function StorageEvictionBand(')
-  const body = app.slice(at, app.indexOf('\n}', at))
+check('C5 the warning explains the fix behind an InfoHint, not as inline prose', () => {
+  // CATCHES growing the warning into a paragraph -- the project's density rule.
+  const notice = read('src/components/server/LegacyQueueNotice.tsx')
+  const at = notice.indexOf('{storagePersisted === false ? (')
+  const body = notice.slice(at, notice.indexOf(') : null}', at))
   assert.match(body, /<InfoHint/, 'the how-to-fix belongs behind an InfoHint')
   assert.match(body, /storage_eviction_detail/, 'the InfoHint must carry the detail key')
 })
@@ -158,7 +153,10 @@ check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
   // CATCHES telling a Chrome-for-iOS user to tap Share -> Add to Home Screen,
   // which that browser cannot do, and catches showing it on a real Mac after
   // iPadOS 13+ started reporting itself as "Macintosh".
-  assert.match(standaloneNavigation, /CriOS\|FxiOS\|EdgiOS\|OPiOS/, 'other iOS browsers must be excluded')
+  // Owner, 19 Oct 2026: Chrome, Firefox and Edge on iOS 16.4+ can Add to Home Screen, so they are
+  // version-gated instead of excluded; Opera and in-app browsers (no Safari token) stay out.
+  assert.match(standaloneNavigation, /\/OPiOS\/\.test\(userAgent\)\) return false/, 'Opera for iOS must be excluded')
+  assert.match(standaloneNavigation, /\/CriOS\|FxiOS\|EdgiOS\//, 'Chrome, Firefox and Edge on iOS are version-gated')
   assert.match(standaloneNavigation, /Macintosh\/\.test\(userAgent\) && maxTouchPoints > 1/, 'iPadOS must be separated from a real Mac by touch points')
 })
 
@@ -197,8 +195,7 @@ check('B9 the link guard is installed exactly once, and torn down', () => {
   // component body instead of an effect, which leaks a listener per render.
   assert.match(standaloneNavigation, /if \(externalLinkGuardInstalled\) return \(\) => \{\}/, 'a second call must not attach a second listener')
   assert.match(standaloneNavigation, /document\.removeEventListener\('click', handleStandaloneAnchorClick, true\)/, 'the guard must be removable')
-  assert.match(app, /const stopExternalLinkGuard = installStandaloneExternalLinkGuard\(\)/, 'App must keep the teardown')
-  assert.match(app, /stopExternalLinkGuard\(\)/, 'App must run the teardown on unmount')
+  assert.match(app, /useEffect\(\(\) => installStandaloneExternalLinkGuard\(\), \[\]\)/, 'App hands the teardown straight to its effect cleanup')
   assert.equal(
     (app.match(/installStandaloneExternalLinkGuard\(\)/g) || []).length,
     1,
@@ -211,7 +208,9 @@ check('B9 the beforeinstallprompt capture is installed once and torn down', () =
   // render means N preventDefault handlers racing for one single-use event.
   assert.match(standaloneNavigation, /if \(typeof window === 'undefined' \|\| installCaptureInstalled\) return \(\) => \{\}/, 'idempotent capture')
   assert.match(standaloneNavigation, /window\.removeEventListener\('beforeinstallprompt', handleBeforeInstallPrompt\)/, 'the capture must be removable')
-  assert.match(app, /const stopInstallPromptCapture = installBeforeInstallPromptCapture\(\)/, 'App must keep the teardown')
+  // Since 20 Oct 2026 the capture is armed once in index.tsx, before React mounts, and no component tears it down.
+  assert.doesNotMatch(app, /installBeforeInstallPromptCapture/, 'App must not own the capture: an unmount would drop the listener')
+  assert.match(read('src/index.tsx'), /^installBeforeInstallPromptCapture\(\)\r?$/m, 'index.tsx arms it before React mounts')
 })
 
 const { isSameOriginNewTabLink } = await import('../src/utils/standaloneNavigation.ts')

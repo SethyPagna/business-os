@@ -70,20 +70,26 @@ await runTest("the page-reset grid only shows a card's description once it's sel
   assert.match(fn, /\{section === entry\.id \? \(\s*<div className="mt-0\.5 text-xs text-gray-500 dark:text-gray-400">\{entry\.desc\}<\/div>\s*\) : null\}/)
 })
 
-await runTest('the page-reset grid offers products alongside the four contact/log entities the backlog named', () => {
+await runTest('the page-reset grid offers products alongside the three contact entities, and no audit-log reset', () => {
   const fn = resetData.slice(resetData.indexOf('function SectionReset('), resetData.indexOf('function FactoryReset('))
-  for (const id of ["id: 'products'", "id: 'customers'", "id: 'suppliers'", "id: 'delivery_contacts'", "id: 'audit_log'"]) {
+  for (const id of ["id: 'products'", "id: 'customers'", "id: 'suppliers'", "id: 'delivery_contacts'"]) {
     assert.ok(fn.includes(id), `the page-reset grid is missing ${id}`)
   }
+  // 6.0.910 (97418328e, security P2): the audit log is no longer resettable --
+  // POST /reset-section answers 410 audit_log_reset_removed -- so the grid must
+  // not offer the card, and SectionMode must not name it.
+  assert.ok(!fn.includes("id: 'audit_log'"), 'the page-reset grid must not offer an Audit Log reset')
+  assert.ok(!/RESET AUDIT LOG/.test(resetData), 'no audit-log reset phrase may remain')
+  assert.match(resetData, /type SectionMode = 'customers' \| 'suppliers' \| 'delivery_contacts'\r?\n/)
 })
 
-await runTest('products routes to reset-data (it has toggles) while the other four route to reset-section (they do not)', () => {
+await runTest('products routes to reset-data (it has toggles) while the other three route to reset-section (they do not)', () => {
   const fn = resetData.slice(resetData.indexOf('function SectionReset('), resetData.indexOf('function FactoryReset('))
   // The two endpoints are deliberately NOT merged server-side -- see
   // routes/system.ts. This grid is a UI unification, so it must still
   // pick the right one, and only products may carry the toggles.
   assert.match(fn, /resetData\?\.\('products', \{ \.\.\.productToggles, \.\.\.confirmation, currentPassword \}\)/, 'products must go through reset-data with its toggles and the password')
-  assert.match(fn, /resetSection\?\.\(selected\.id as SectionMode, \{ \.\.\.confirmation, currentPassword \}\)/, 'the other four must go through reset-section with the phrase and the password')
+  assert.match(fn, /resetSection\?\.\(selected\.id as SectionMode, \{ \.\.\.confirmation, currentPassword \}\)/, 'the other three must go through reset-section with the phrase and the password')
   assert.match(fn, /\{isProducts \? \(\s*<ProductsResetOptions[^}]*[\s\S]*?\) : null\}/, 'the toggles must only render for products')
 })
 

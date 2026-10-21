@@ -5,6 +5,7 @@ import { BranchCutoverCapabilityError, type CutoverIdentity } from './branchCuto
 import { prepareInactiveStock, type ParentHooks } from './branchCutoverParent'
 import { parseApprovedFolds } from './branchCutoverInactiveStock'
 import type { Env } from '../index'
+import { invalidateCachesAfterMaintenance } from './cache'
 import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, inspectBranchCutover, isBranchCutoverRetryable } from './branchCutoverParent'
 import { executePlannedBranchCutoverChild } from './branchCutoverChild'
 import { abortEffectFreeBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
@@ -248,10 +249,21 @@ export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN
     if (action === 'inspect') return await runInspect(db, body)
     if (action === 'begin') return await runBegin(db, body, env)
     if (action === 'status') return await runStatus(db, body)
-    if (action === 'abort') return await runAbort(db, body)
     if (action === 'repair-sk2') return await runRepairSk2(db, body)
-    return await runStep(db, body, action, env)
+    const outcome = action === 'abort' ? await runAbort(db, body) : await runStep(db, body, action, env)
+    if (await releasedMaintenance(db, outcome)) await invalidateCachesAfterMaintenance(env as unknown as Env, 'branch-cutover')
+    return outcome
   } catch (error) { return failure(error) }
+}
+
+/**
+ * Complete and abort release the maintenance flag inside the journal batch. Caches filled before or during the run must not outlive it, so a
+ * terminal answer with the flag gone moves the versions. A replayed terminal answer counts too: a lost acknowledgement after the commit would
+ * otherwise leave the versions unmoved for good (bumping again is idempotent).
+ */
+async function releasedMaintenance(db: D1Compat, outcome: OperatorOutcome): Promise<boolean> {
+  if (outcome.status !== 200 || (outcome.body.phase !== 'completed' && outcome.body.phase !== 'aborted')) return false
+  return !(await db.prepare("SELECT 1 AS held FROM system_flags WHERE key='maintenance'").get<{ held: number }>())
 }
 
 export function parseOperatorBody(text: string): Record<string, unknown> | null {

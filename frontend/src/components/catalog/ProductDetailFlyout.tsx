@@ -13,7 +13,9 @@ import TriangleAlert from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Users2 from 'lucide-react/dist/esm/icons/users.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
+import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import { StatusPill } from './catalogUi'
+import { shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { parseProductDescription, resolveOfficialProductName } from './productDetailSections.ts'
 import { resolveProductDetailDefault } from './productDetailDefaultsText.ts'
 import type { ProductDetailSectionKey } from './productDetailSections.ts'
@@ -56,6 +58,10 @@ export type ProductDetailViewState = {
   status: StockStatus
   pricePresentation: { primaryText?: string; originalText?: string; promotion?: { active?: boolean } } | null
   showPrices?: boolean
+  // The owner's "show stock status" setting, captured when the sheet opens
+  // (cards read the same setting). Absent means shown, matching the setting's
+  // own default; false hides the stock label from the sheet.
+  showStockStatus?: boolean
 }
 
 type ProductDetailFlyoutProps = {
@@ -88,6 +94,10 @@ type ProductDetailFlyoutProps = {
   language?: string
   onAddToBucket?: (product: ProductDetailViewProduct, priceText?: string) => void
   bucketQty?: number
+  // Same save-for-later toggle the product cards carry; shown only when the
+  // storefront supplies it.
+  onToggleWishlist?: (product: ProductDetailViewProduct, priceText?: string) => void
+  isInWishlist?: boolean
 }
 
 const SECTION_META: Record<ProductDetailSectionKey, { icon: LucideIcon; labelKey: string; fallback: string }> = {
@@ -153,7 +163,7 @@ function DetailSectionBlock({
 // ends of this list are where a trapped Tab wraps around.
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, language, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
+export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, language, onAddToBucket, bucketQty = 0, onToggleWishlist, isInWishlist = false }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -219,6 +229,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   // Only a real official name -- never the shop's name (see
   // resolveOfficialProductName for why a copy of it counts as none).
   const officialName = resolveOfficialProductName(parsed.officialName, product.name)
+  const showStockLabel = shouldShowStockStatus({ showStockStatus: view.showStockStatus })
   const sectionItems = (...keys: ProductDetailSectionKey[]) => parsed.sections
     .filter((section) => keys.includes(section.key))
     .flatMap((section) => section.items)
@@ -259,12 +270,17 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
       >
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-neutral-800">
           <div className="min-w-0 pr-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
-              {copy('productShopName', "Shop's Product Name")}
-            </div>
             <div id={titleId} translate="no" {...getKhmerTextProps(product.name || '', 'notranslate break-words text-base font-semibold text-slate-900 dark:text-white')}>
               {product.name || copy('productDetails', 'Product details')}
             </div>
+            {/* Secondary line, only when the official name really differs from
+                the name shown above (resolveOfficialProductName drops a copy). */}
+            {officialName ? (
+              <div className="mt-0.5 text-xs leading-5 text-slate-500 dark:text-neutral-400">
+                <span>{copy('productOfficialName', 'Official name', 'ឈ្មោះផ្លូវការ')}: </span>
+                <span translate="no" {...getKhmerTextProps(officialName, 'notranslate break-words')}>{officialName}</span>
+              </div>
+            ) : null}
           </div>
           <button
             ref={closeButtonRef}
@@ -311,15 +327,17 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           )}
 
           <div className="space-y-4 p-4 pt-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill status={view.status} copy={copy} />
-              {promotion?.active ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/20 dark:text-rose-200">
-                  <BadgePercent className="h-3 w-3" />
-                  {product.discount_label || copy('discounts', 'Discount')}
-                </span>
-              ) : null}
-            </div>
+            {showStockLabel || promotion?.active ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {showStockLabel ? <StatusPill status={view.status} copy={copy} /> : null}
+                {promotion?.active ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/20 dark:text-rose-200">
+                    <BadgePercent className="h-3 w-3" />
+                    {product.discount_label || copy('discounts', 'Discount')}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
             {view.showPrices && view.pricePresentation?.primaryText ? (
               <div translate="no" className="notranslate text-xl font-semibold text-slate-900 dark:text-white">
@@ -335,14 +353,6 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             {/* Owner, 2026-09-25: a row with no value is left out rather
                 than shown with a placeholder. Caution and Need More
                 Details always have text (owner defaults). */}
-            {officialName ? (
-              <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-                <p translate="no" {...getKhmerTextProps(officialName, 'notranslate whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                  {officialName}
-                </p>
-              </DetailField>
-            ) : null}
-
             {parsed.intro ? (
               <DetailField label={copy('productIntroduction', 'Introduction')}>
                 <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
@@ -395,21 +405,35 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           </div>
         </div>
 
-        {onAddToBucket ? (
+        {onAddToBucket || onToggleWishlist ? (
           <div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">
-            <button
-              type="button"
-              onClick={() => onAddToBucket(product, view.pricePresentation?.primaryText)}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
-            >
-              <Plus className="h-4 w-4" />
-              {copy('addToBucket', 'Add')}
-              {bucketQty > 0 ? (
-                <span className="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">
-                  {bucketQty}
-                </span>
-              ) : null}
-            </button>
+            {onToggleWishlist ? (
+              <button
+                type="button"
+                onClick={() => onToggleWishlist(product, view.pricePresentation?.primaryText)}
+                aria-label={isInWishlist ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
+                aria-pressed={isInWishlist}
+                title={isInWishlist ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
+                className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 transition dark:border-neutral-700 ${isInWishlist ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300'}`}
+              >
+                <Heart className={`h-4 w-4 ${isInWishlist ? 'fill-current' : ''}`} />
+              </button>
+            ) : null}
+            {onAddToBucket ? (
+              <button
+                type="button"
+                onClick={() => onAddToBucket(product, view.pricePresentation?.primaryText)}
+                className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold leading-6 text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
+              >
+                <Plus className="h-4 w-4" />
+                {copy('addToBucket', 'Add')}
+                {bucketQty > 0 ? (
+                  <span data-product-detail-bucket-qty="true" className="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">
+                    {bucketQty}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

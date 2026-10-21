@@ -8,6 +8,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import { branchChoiceSettled } from '../../utils/branchScope.ts'
+import { isImeComposingKey } from '../../utils/imeComposition.ts'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 type IconType = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' }>
@@ -57,7 +58,7 @@ export function InsetNumberField({ label, value, onChange, disabled = false, inv
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
-        onKeyDown={onEnter ? (event) => { if (event.key === 'Enter') { event.preventDefault(); onEnter() } } : undefined}
+        onKeyDown={onEnter ? (event) => { if (event.key === 'Enter' && !isImeComposingKey(event)) { event.preventDefault(); onEnter() } } : undefined}
         className={`input h-10 w-full min-w-0 px-2 pb-0.5 pt-3 text-right text-sm tabular-nums disabled:cursor-not-allowed disabled:opacity-60 ${invalid ? INVALID_RING : ''}`}
       />
     </label>

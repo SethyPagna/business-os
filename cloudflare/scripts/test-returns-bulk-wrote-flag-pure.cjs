@@ -32,7 +32,9 @@ const root = path.join(__dirname, '..')
 const cache = new Map()
 const actual = new Set(['branchEffect', 'branchRoles', 'sqlBinding', 'saleStatusResolution', 'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
-  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction', 'saleTransitions'])
+  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction', 'saleTransitions',
+  // Migration 0260: a status change splits a restored refund against the sale's debt.
+  'returnRefundSplit', 'salesStatus', 'financialPrecision'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

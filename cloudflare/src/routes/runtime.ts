@@ -70,49 +70,7 @@ function requireSettingsPermission(user: SessionUser) {
 
 app.get('/version', (c) => c.json({ success: true, ...getRuntimeVersion(c.env) }))
 
-app.use('/queues/*', requireAuth)
 app.use('/catalog-integrity', requireAuth)
-
-app.get('/queues/status', async (c) => {
-  const user = c.get('user')
-  if (!requireSettingsPermission(user)) {
-    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'settings' }, 403)
-  }
-  try {
-    const cacheProbeKey = `__runtime_probe__:${crypto.randomUUID()}`
-    let cacheReady = false
-    let cacheProbeError: string | null = null
-    try {
-      await c.env.CACHE.put(cacheProbeKey, '1', { expirationTtl: 60 })
-      const value = await c.env.CACHE.get(cacheProbeKey)
-      cacheReady = value === '1'
-      c.executionCtx.waitUntil(c.env.CACHE.delete(cacheProbeKey))
-    } catch (error) {
-      cacheProbeError = (error as Error)?.message || String(error)
-    }
-
-    return c.json({
-      success: true,
-      queues: {
-        import: {
-          configured: !!c.env.IMPORT_QUEUE,
-          binding: 'IMPORT_QUEUE',
-        },
-        media: {
-          configured: !!c.env.MEDIA_QUEUE,
-          binding: 'MEDIA_QUEUE',
-        },
-      },
-      cache: {
-        configured: !!c.env.CACHE,
-        ready: cacheReady,
-        probeError: cacheProbeError,
-      },
-    })
-  } catch (error) {
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to check queue status' }, 500)
-  }
-})
 
 function createProductFieldCounts(): Record<string, number> {
   const counts: Record<string, number> = {}

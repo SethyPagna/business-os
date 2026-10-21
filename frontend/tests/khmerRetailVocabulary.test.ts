@@ -128,9 +128,9 @@ const GLOSSARY: GlossaryRule[] = [
     forbidden: [/(?<!ចាំ)បាច់/, /(?<!អាប់)ឡូត/, 'ឡុត', /ថ្ងៃទទួល(?!ប្រាក់)/, 'កាលបរិច្ឆេទទទួល'],
     except: ['reason_defective_batch'],
   },
-  // Part 347: the middle permission tier is Partial Access. The old
+  // Part 347: the middle permission tier is Review (renamed from Partial Access, 20 Oct). The old
   // "Review Required" Khmer and a third rendering survived in descriptions.
-  { concept: 'Partial Access tier', canonical: 'សិទ្ធិមួយផ្នែក', forbidden: ['តម្រូវការត្រួតពិនិត្យ', 'សិទ្ធិមានកម្រិត', '«ត្រូវការពិនិត្យ»', 'ឬត្រូវការពិនិត្យ)'] },
+  { concept: 'Review tier', canonical: 'កម្រិតពិនិត្យ', forbidden: ['សិទ្ធិមួយផ្នែក', 'តម្រូវការត្រួតពិនិត្យ', 'សិទ្ធិមានកម្រិត', '«ត្រូវការពិនិត្យ»', 'ឬត្រូវការពិនិត្យ)'] },
   // 4-5 Sep (S4-28): the VIP price IS the wholesale price.
   { concept: 'wholesale price (VIP retired)', canonical: 'តម្លៃបោះដុំ', forbidden: ['តម្លៃពិសេស', 'តម្លៃ VIP'] },
   // 31 Aug: the Fees section is Expenses.

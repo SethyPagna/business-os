@@ -20,9 +20,12 @@ await runTest('products table separates product identity from operational detail
   const source = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
   const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
-  assert.match(source, /ProductDetailsCell/)
-  assert.match(surface, /t\('details'\)\s*\|\|\s*'Details'/)
-  assert.match(source, /renderDesktopProductRow[\s\S]*<ProductDetailsCell/)
+  // 6.0.873: the Details chip cell became Excel-style columns -- identity (barcode,
+  // category, brand) and operational detail (supplier, discount, lots) each get their own.
+  assert.doesNotMatch(surface, /t\('details'\)/, 'the mixed Details column is gone')
+  assert.match(source, /case 'discount': return promotion\.active \? <ProductDiscountBadge/)
+  assert.match(source, /case 'supplier': return <ProductSupplierCell/)
+  assert.match(source, /case 'lots': return <ProductBatchPreview/)
   assert.match(source, /renderMobileProductCard[\s\S]*<ProductDiscountBadge[\s\S]*overlay/)
   const desktopRowStart = source.indexOf('const renderDesktopProductRow')
   const desktopRowEnd = source.indexOf('const renderMobileProductCard', desktopRowStart)

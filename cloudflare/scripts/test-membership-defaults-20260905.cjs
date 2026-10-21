@@ -36,6 +36,8 @@ const portal = load('routes/portal.ts', {
   '../lib/portalText': load('lib/portalText.ts'),
 })
 const permissionsModule = load('lib/permissions.ts')
+// Since 6.0.888 points are computed only while the programme is on; the cases below that read balances switch it on.
+let loyaltyOn = true
 const contactDependencies = {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => {
@@ -50,7 +52,7 @@ const contactDependencies = {
   '../lib/membershipNumber': membership,
   '../lib/anonymousCustomer': anonymousCustomer,
   '../lib/customerPointsReturn': load('lib/customerPointsReturn.ts'),
-  './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: 'false' }) },
+  './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: String(loyaltyOn) }) },
 }
 const contacts = load('routes/contacts.ts', contactDependencies).default
 // A second load of the SAME route file with the rest of its collaborators
@@ -89,8 +91,13 @@ async function main() {
     const response = await request('/customers/membership/legacy-id', perms)
     assert.equal(response.status, 200)
     assert.match(response.headers.get('cache-control'), /no-store/)
-    assert.deepEqual(await response.json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 250, redeemableUnits: 0 } })
+    assert.deepEqual(await response.json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 250, redeemableUnits: 2 } })
   }
+  // With the programme on, redeemable units are floor(balance / redeem_points); they were 0 only because the stub said off.
+  // New rule (6.0.888, 20 Oct): programme off hides points (balance 0) but the membership id still resolves.
+  loyaltyOn = false
+  assert.deepEqual(await (await request('/customers/membership/legacy-id', { pos: true })).json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 0, redeemableUnits: 0 } })
+  loyaltyOn = true
   const mounted = new (require('hono').Hono)().route('/api', contacts)
   assert.equal((await mounted.request('/api/customers/membership/legacy-id', { headers: { 'x-test-permissions': '{"pos":true}' } }, {})).status, 200)
   for (const route of ['/customers', '/customers/1', '/suppliers', '/delivery-contacts', '/customers/membership/legacy-id/extra']) assert.equal((await request(route, { pos: true })).status, 403, route)
@@ -104,7 +111,7 @@ async function main() {
   for (const perms of [{ pos: true }, { contacts: true }]) {
     const response = await request('/customers/membership/legacy-id', perms)
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 239, redeemableUnits: 0 } },
+    assert.deepEqual(await response.json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 239, redeemableUnits: 2 } },
       'only completed customer returns deduct points; supplier refunds and cancelled returns do not')
   }
   raw.prepare("INSERT INTO customers (name,membership_number) VALUES ('Ambiguous','LEGACY-ID')").run()

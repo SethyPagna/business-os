@@ -20,6 +20,7 @@ const catalogPageSource = fs.readFileSync(new URL('../src/components/catalog/Cat
 const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
 const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/catalog/CatalogSecondaryTabs.tsx', import.meta.url), 'utf8')
 const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
+const portalSocialRowSource = fs.readFileSync(new URL('../src/components/catalog/PortalSocialRow.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
 const catalogPaginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
@@ -144,7 +145,7 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /-mt-(?:7|9) flex flex-wrap items-end gap-(?:3|4) sm:-mt-(?:9|12)/, 'public about name/tagline should sit on a plain surface below the banner, not overlaid on it')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
-  assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
+  assert.match(catalogSecondaryTabsSource, /<PortalSocialText text=\{item\.label\} latin=\{item\.latin \?\? true\} \/>/, 'owner rule: the About chips show the account handle at every width (the link keeps an accessible name)')
   assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
@@ -156,7 +157,7 @@ runTest('public portal About tab keeps the story on the right, the map full-widt
   // session -- that entry was stale (copy-pasted forward without
   // re-checking). Locking each one in with a source assertion here so a
   // future session can't make the same stale-carry-forward mistake again.
-  assert.match(publicCatalogPageSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
+  assert.match(portalSocialRowSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
   assert.match(catalogSecondaryTabsSource, /the business story\/description on the right per the requested/, 'About tab facts\\/contact card should stay on the left and the story on the right')
   assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map should render as its own full-width section')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
@@ -276,6 +277,17 @@ runTest('productMatchesPortalBranches understands redacted branch_availability r
   assert.equal(productMatchesPortalBranches(legacy, ['4']), true)
 })
 
+runTest('stock withheld by the Worker (stock status off) is never read as out of stock', () => {
+  // 6.0.896: with the switch off the Worker publishes no stock field at all and has already
+  // applied every stock rule to the list, so nothing may hide or badge the product here.
+  const withheld = { id: 7, name: 'Glow Serum' }
+  assert.equal(resolvePortalStockStatus(withheld, 'all'), 'in_stock')
+  assert.equal(resolvePortalStockStatus(withheld, 3), 'in_stock')
+  assert.equal(productMatchesPortalBranches(withheld, ['3']), true, 'the Worker already applied the branch filter')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'out_of_stock', 'a legacy row with a quantity still counts')
+  assert.equal(productMatchesPortalBranches({ branch_stock: [] }, ['3']), false, 'a legacy row with a ledger still counts')
+})
+
 runTest('portal editor compacts compatible controls into responsive rows with mobile clearance', () => {
   assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-hidden[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
   assert.match(catalogEditorSource, /data-testid="portal-visibility-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
@@ -328,8 +340,8 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
-    'search should stay sticky and use the same blue discovery accent as filters')
+  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-amber-700/,
+    'search should stay sticky and use the same brass discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
     'the brand index still needs its labelled, translated name')
   // The brand index used to be TWO controls: a scrolling 4-column letter grid

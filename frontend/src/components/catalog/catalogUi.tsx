@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from 'react'
+import { containsKhmerScript } from '../../utils/scriptTypography.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock' | string
 type SummaryTone = 'blue' | 'dark' | 'green' | 'amber'
@@ -36,6 +37,20 @@ function statusDotClass(status: StockStatus): string {
   return 'bg-emerald-500'
 }
 
+/**
+ * Props for a small label that is upper-cased and tracked in Latin. Khmer has
+ * no case, tracking splits its clusters and 10px is unreadable, so Khmer text
+ * gets 12px, normal case and no tracking instead.
+ */
+export function microLabelProps(
+  text: unknown,
+  className = '',
+  latin = 'text-[10px] uppercase tracking-wide',
+): { lang?: 'km'; className: string } {
+  if (!containsKhmerScript(text)) return { className: [latin, className].filter(Boolean).join(' ') }
+  return { lang: 'km', className: ['text-xs normal-case tracking-normal khmer-text', className].filter(Boolean).join(' ') }
+}
+
 /** Shared shell block for portal sections. */
 export function SectionShell({ title, subtitle, action, children }: SectionShellProps) {
   return (
@@ -65,7 +80,7 @@ export function SummaryTile({ icon: Icon, label, value, tone = 'dark' }: Summary
     <div className={`rounded-[24px] bg-gradient-to-br p-4 shadow-sm ${tones[tone]}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] opacity-80">{label}</div>
+          <div {...microLabelProps(label, 'opacity-80', 'text-[11px] uppercase tracking-[0.18em]')}>{label}</div>
           <div className="mt-2 text-2xl font-semibold">{value}</div>
         </div>
         <div className="rounded-2xl bg-white/15 p-3">
@@ -87,10 +102,11 @@ export function StatusPill({ status, copy }: StatusPillProps) {
       ? ['lowStock', 'Low Stock']
       : ['inStock', 'In Stock']
 
+  const label = copy(labelKey, fallback)
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur dark:bg-neutral-900/90 ${statusClass(status)}`}>
+    <span {...microLabelProps(label, `inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 font-semibold shadow-sm backdrop-blur dark:bg-neutral-900/90 ${statusClass(status)}`)}>
       <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(status)}`} aria-hidden="true" />
-      {copy(labelKey, fallback)}
+      {label}
     </span>
   )
 }

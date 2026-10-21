@@ -32,7 +32,7 @@ function load(file) {
   return mod.exports
 }
 
-const coreSource = read('cloudflare/src/lib/coreDataInvariants.ts')
+const coreSource = read('cloudflare/src/lib/roleDefaults.ts')
 const seedStart = coreSource.indexOf('const DEFAULT_ROLE_PERMISSIONS')
 const seedOpen = coreSource.indexOf('= {', seedStart) + 2
 const SEED = new Function('return ' + coreSource.slice(seedOpen, coreSource.indexOf('\n}\n', seedOpen) + 2))()

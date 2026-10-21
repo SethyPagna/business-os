@@ -5,13 +5,19 @@ import { getDb } from '../lib/db'
 import { assertProductsActive, stockVisibleProductSql } from '../lib/productStockGuard'
 import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
 
+// Positive answers only: a missing schema is re-probed on the next call, a
+// present one stays present for the isolate (migrations only add).
+let operationWritesAvailable = false
+
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (operationWritesAvailable) return true
   try {
     const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
       WHERE (type='table' AND name='fee_operation_receipts')
          OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    return row?.ready === 2
+    operationWritesAvailable = row?.ready === 2
+    return operationWritesAvailable
   } catch {
     return false
   }
@@ -237,7 +243,7 @@ app.post('/stock-integrity/repair', async (c) => {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
   if (tier === 'review') {
-    return c.json({ success: false, error: 'Repairing stock integrity requires Full Access to Branches -- Partial Access support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
+    return c.json({ success: false, error: 'Repairing stock integrity requires Full Access to Branches -- Review support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
   }
 
   const db = getDb(c.env)
@@ -369,7 +375,7 @@ app.post('/transfer', async (c) => {
   // Same live-quantity-movement reasoning as stock-integrity/repair above
   // -- deliberately blocked, not queued, for Review Required.
   if (transferTier === 'review') {
-    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Partial Access support for this action is not built.' }, 403)
+    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
@@ -562,7 +568,7 @@ app.post('/transfer-bulk', async (c) => {
   // Same live-quantity-movement reasoning as stock-integrity/repair and
   // /transfer above -- deliberately blocked, not queued, for Review Required.
   if (bulkTransferTier === 'review') {
-    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Partial Access support for this action is not built.' }, 403)
+    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)

@@ -4,7 +4,7 @@ assert.ok(boundary>0)
 const fixtureModule=new Module(file,module);fixtureModule.filename=file;fixtureModule.paths=module.paths
 assert.ok(source.includes("fs.readFileSync(sourcePath, 'utf8')"))
 fixtureModule._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")
- .replace("fs.readFileSync(sourcePath, 'utf8')","(fs.readFileSync(sourcePath, 'utf8')+(rel==='routes/sales.ts'?'\\nexport {capturePrecisionBasket};':''))")
+ .replace("fs.readFileSync(sourcePath, 'utf8')","(fs.readFileSync(sourcePath, 'utf8')+(rel==='routes/sales.ts'?'\\nexport {capturePrecisionBasket};export const resetHistoricalEditReady=()=>{historicalEditSchemaAvailable=false};':''))")
  +'\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
 const h=fixtureModule.exports,helper=h.load('lib/historicalSalePricing.ts')
 const contract=h.load('lib/saleMoneyPrecision.ts')
@@ -165,6 +165,11 @@ assert.equal(helper.planHistoricalSaleLine({...historical,manual_discount_type:n
  }finally{await mf.dispose()}
  f.raw.exec('DROP TRIGGER sales_money_precision_update_0161')
  assert.equal((await send(frozenFallback)).status,200,'committed receipt must precede readiness and repricing')
+ // Lane 882 (1e590bab7) memoizes a positive historicalEditSchemaReady per isolate (migrations only add triggers), so a warm
+ // isolate no longer notices the trigger vanish and the no-op guard answers 400. Only a cold isolate must refuse with 409.
+ const warmIsolate=await send({...frozenFallback,client_request_id:'schema-warm'})
+ assert.equal(warmIsolate.status,400);assert.equal(warmIsolate.body.code,undefined)
+ h.load('routes/sales.ts').resetHistoricalEditReady()
  const missingSchema=await send({...frozenFallback,client_request_id:'schema-unavailable'})
  assert.equal(missingSchema.status,409);assert.equal(missingSchema.body.code,'historical_sale_schema_not_ready')
  const g=h.fixture(),deliveryCreated=await h.postSale(g.route,{...h.request('delivery-legacy-fixture'),money_precision_version:1,items:[plain('delivery-original')]})

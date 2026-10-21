@@ -4,20 +4,15 @@
 // the other 8 found two different situations, and this test pins BOTH so the
 // distinction survives future edits:
 //
-//   1. Four files carried real, unaudited mutations -- backups (create +
+//   1. Three files carried real, unaudited mutations -- backups (create +
 //      restore, the single most consequential action in the app), files
-//      (upload / rename / force-delete), notes (create / delete), sync
-//      (chunked offline upload -> file_assets via a Durable Object that has
-//      no session context, so the route audits it).
+//      (upload / rename / force-delete), notes (create / delete).
 //   2. Four files are read-only by design -- catalog, organizations, runtime,
 //      notifications. Their lack of audit calls is legitimate, but only for
 //      as long as they stay read-only; the file-level rule below turns into a
 //      real failure the moment someone adds a mutation handler without one.
 //
-// Two DELIBERATE non-audits are pinned as hard as the audits themselves:
-//   - sync's /outbox replays each queued operation through the real route
-//     handler (same cookie, same user), so the target route audits it --
-//     auditing the outbox too would double-log every offline mutation.
+// A DELIBERATE non-audit is pinned as hard as the audits themselves:
 //   - notes' autosave PUT fires per debounced keystroke; auditing it would
 //     write hundreds of rows per editing session, and note content is
 //     private to the user while audit_logs is admin-readable.
@@ -225,10 +220,6 @@ ok(notesPutBody.length > 0 && !notesPutBody.includes('audit('),
   'notes.ts autosave PUT is deliberately unaudited (per-keystroke flood guard)')
 
 const sync = fs.readFileSync(path.join(routesDir, 'sync.ts'), 'utf8')
-const outboxBody = sync.slice(sync.indexOf("app.post('/outbox'"), sync.indexOf("app.post('/files/chunks/init'"))
-ok(outboxBody.length > 0 && !outboxBody.includes('audit('),
-  'sync.ts outbox is deliberately unaudited (replayed routes audit; no double-log)')
-ok(/audit\((?:[^()]|\([^()]*\))*'upload',\s*'file'/.test(sync), 'sync.ts audits the chunked-upload complete')
-ok(/via:\s*'offline_sync'/.test(sync), 'sync.ts chunked-upload audit is marked offline_sync')
+ok(!/app\.(post|put|patch|delete)\(/.test(sync) && !sync.includes('audit('), 'sync.ts is read-only (GET /owner): the retired outbox and chunk-upload mutations are gone, so nothing needs an audit row')
 
 console.log(`\nAll ${checks} audit-coverage checks passed.`)

@@ -155,7 +155,7 @@ async function main() {
     const body = squash(migrationText)
     const repair = squash(costs.catalogCostRepairAllSql({ inputPolicy: 'legacy' }))
     assert.ok(body.includes(repair), 'the repair is catalogCostRepairAllSql()')
-    assert.ok(body.endsWith(squash(costs.catalogCostOnHandTriggerSql({ inputPolicy: 'legacy' }))), 'the triggers are catalogCostOnHandTriggerSql()')
+    assert.ok(body.endsWith(squash(costs.catalogCostOnHandTriggerSql({ inputPolicy: 'legacy', primaryKeyPlan: false }))), 'the triggers are catalogCostOnHandTriggerSql()')
     assert.ok(migrationText.includes('test-migration-0195-on-hand-cost-pure.cjs'), 'the header names this file')
     const firstUpdate = body.search(/\bUPDATE\b/)
     assert.ok(body.indexOf('INSERT INTO catalog_cost_repair_0195_backup') < firstUpdate, 'the backup is written before any UPDATE')

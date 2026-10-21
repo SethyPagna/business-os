@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import React, { act, useEffect, useRef, useState } from 'react'
+import React, { act, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import ts from 'typescript'
 
@@ -55,26 +55,28 @@ function deferred() {
   const promise = new Promise(done => { resolve = done })
   return { promise, resolve }
 }
-const reads: ReturnType<typeof deferred>[] = []
+// 6.0.895 (R2): the shell no longer reads a pending-sale count or polls for it.
+// What it keeps is one IndexedDB probe per signed-in account (useLegacyQueueCount),
+// and its count must stay fenced to that account exactly as the old count was.
+assert.doesNotMatch(appSource, /getPendingSyncState|acceptsOfflineSaleNotice|sync:offline-sale/)
+const probes: ReturnType<typeof deferred>[] = []
 const production = evaluate([
-  extract(appSource, 'pendingSaleOwnerForUser'),
-  extract(appSource, 'acceptsOfflineSaleNotice'),
-  extract(appSource, 'useSyncErrorBanner'),
-].join('\n'), ['useSyncErrorBanner', 'acceptsOfflineSaleNotice'], {
-  useState, useEffect, useRef, ...scopes, ...ownership,
-  getAppShellApi: () => ({ getPendingSyncState: () => { const request = deferred(); reads.push(request); return request.promise } }),
-  scheduleInitialPendingSyncRefresh: (refresh: () => void) => { refresh(); return () => {} },
-  PENDING_SYNC_POLL_INTERVAL_MS: 20_000,
-  createPendingSyncPoll: () => ({ observe() {}, cancel() {}, isPolling: () => false }),
-  persistentNoticeFingerprint: () => '', FRONTEND_BUILD_HASH: 'test',
-  SYNC_ERROR_RESOLVED_EVENT: 'sync:error-resolved', shouldClearResolvedSyncError: () => false,
+  extract(appSource, 'writeOwnerForUser'),
+  extract(appSource, 'useLegacyQueueCount'),
+].join('\n'), ['useLegacyQueueCount'], {
+  useState, useEffect, useRef, useCallback, ...scopes, ...ownership,
+  countLegacyQueuedRecords: () => { const request = deferred(); probes.push(request); return request.promise },
+  visibleTimeout: (run: () => void) => { run(); return () => {} },
+  LEGACY_QUEUE_PROBE_DELAY_MS: 5000,
 })
 const container = doc.createElement('div')
 const root = createRoot(container as Element)
-const frames: Array<{ actor: number | null; total: number | null }> = []
+const frames: Array<{ actor: number | null; count: number }> = []
+let recount = () => {}
 function Probe({ user }: { user: typeof userA | null }) {
-  const result = production.useSyncErrorBanner(user)
-  const frame = { actor: user?.id ?? null, total: result.pendingSync?.total ?? null }
+  const result = production.useLegacyQueueCount(user)
+  recount = result.recount
+  const frame = { actor: user?.id ?? null, count: result.count }
   frames.push(frame)
   return React.createElement('span', null, JSON.stringify(frame))
 }
@@ -83,37 +85,30 @@ async function render(user: typeof userA | null) {
 }
 const visible = () => JSON.parse(container.textContent)
 await render(userA)
-await act(async () => reads[0].resolve({ owner: ownerA, total: 11, review_token: 'a' }))
-assert.equal(visible().total, 11)
-await act(async () => { events.dispatchEvent(new Event('sync:queue-changed')) })
-const delayedA = reads.at(-1)!
+assert.equal(probes.length, 1, 'one probe for the signed-in account')
+await act(async () => probes[0].resolve(3))
+assert.equal(visible().count, 3)
+await render(userA)
+assert.equal(probes.length, 1, 'no poll: re-rendering the same account probes nothing')
+await act(async () => recount())
+const delayedA = probes.at(-1)!
 setActor(userB)
 const frameStart = frames.length
 await render(userB)
-assert.ok(frames.slice(frameStart).every(frame => frame.total === null), 'A count must disappear on the first B render, before cleanup effects')
-await act(async () => delayedA.resolve({ owner: ownerA, total: 99 }))
-assert.deepEqual(visible(), { actor: 2, total: null }, 'late A promise cannot repopulate B')
-const ownerB = ownership.captureOfflineSaleOwner()
-await act(async () => reads.at(-1)!.resolve({ owner: ownerB, total: 2 }))
-assert.equal(visible().total, 2)
-await act(async () => { events.dispatchEvent(new Event('sync:queue-changed')) })
-const delayedB = reads.at(-1)!
+assert.ok(frames.slice(frameStart).every(frame => frame.count === 0), 'A count must disappear on the first B render, before effects')
+await act(async () => delayedA.resolve(99))
+assert.deepEqual(visible(), { actor: 2, count: 0 }, 'late A probe cannot repopulate B')
+await act(async () => probes.at(-1)!.resolve(2))
+assert.equal(visible().count, 2)
+const probesBeforeLogout = probes.length
 await render(null)
-await act(async () => delayedB.resolve({ owner: ownerB, total: 22 }))
-assert.deepEqual(visible(), { actor: null, total: null })
-await render(userB)
-await act(async () => reads.at(-1)!.resolve({ owner: ownerA, total: 111 }))
-assert.equal(visible().total, null, 'even current-scope reads cannot display an incorrect returned owner')
-const scopeB = scopes.captureActorReadScope()
-assert.equal(production.acceptsOfflineSaleNotice({ offline_owner: ownerA }, userB, scopeB), false)
-assert.equal(production.acceptsOfflineSaleNotice({}, userB, scopeB), false)
-assert.equal(production.acceptsOfflineSaleNotice({ offline_owner: ownerB }, userB, scopeB), true)
+assert.deepEqual(visible(), { actor: null, count: 0 })
+assert.equal(probes.length, probesBeforeLogout, 'a signed-out shell never probes')
 setSyncServerUrl('https://other.test')
 await render(userB)
-assert.equal(visible().total, null)
-assert.equal(production.acceptsOfflineSaleNotice({ offline_owner: ownerB }, userB, scopeB), false, 'old authority notice denied')
+assert.equal(visible().count, 0, 'another server is another owner: its count starts unknown')
 await act(async () => root.unmount())
-console.log('PASS mounted shell counts and receipt events are owner/scope fenced across delayed replies, logout and authority changes')
+console.log('PASS the legacy-queue count is probed once per account and fenced across delayed replies, logout and authority changes')
 
 setSyncServerUrl('https://shop.test')
 setActor(userA)

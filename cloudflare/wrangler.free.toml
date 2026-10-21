@@ -238,6 +238,23 @@ dataset = "Business_OS_Analytics"
 binding = "CACHE"
 id = "de5f3b41c7264e4582077176fd0c1fe8"
 
+# Per-network limit on cold storefront searches (routes/portal.ts): an
+# anonymous visitor picks a search's cost by picking its text, so a search the
+# edge cache cannot answer counts here before any D1 read; over the limit is a
+# 429 with no D1 statement. A cache hit never counts. namespace_id is an
+# account-chosen integer unique per limiter; the counter is per Cloudflare
+# location and approximate. Works on Free and Paid. The zone WAF rate rule is
+# the outer guard (an owner action in the dashboard, not set here).
+[[ratelimits]]
+name = "PORTAL_SEARCH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+# The deployed version's id, folded into the storefront's edge cache keys so a
+# new build never reads entries an older build stored.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [[queues.producers]]
 binding = "IMPORT_QUEUE"
 queue = "business-os-import"

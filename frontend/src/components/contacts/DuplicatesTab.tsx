@@ -85,8 +85,8 @@ const SEVERITY_STYLE: Record<ContactDuplicateSeverity, string> = {
 // language. Fixed by actually wiring `t` through.
 const SEVERITY_LABEL_KEY: Record<ContactDuplicateSeverity, [string, string]> = {
   phone_conflict: ['duplicate_severity_phone_conflict', 'Phone conflict'],
-  exact_match: ['duplicate_severity_exact_match', 'Likely duplicate'],
-  name_only: ['duplicate_severity_name_only', 'Same name'],
+  exact_match: ['duplicate_severity_exact_match', 'Exact match'],
+  name_only: ['duplicate_severity_name_only', 'Name only'],
 }
 
 const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
@@ -158,6 +158,7 @@ function ClusterCard({
               onClick={() => setPendingAction({ kind: 'dismiss' })}
               disabled={busy}
               title={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
+              aria-label={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
               className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
             >
               <EyeOff className="h-3.5 w-3.5" />
@@ -609,16 +610,16 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
           <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
             {counts.phone_conflict > 0 ? (
               <span className="text-red-600 dark:text-red-400">
-                {counts.phone_conflict} {(t(SEVERITY_LABEL_KEY.phone_conflict[0]) || SEVERITY_LABEL_KEY.phone_conflict[1]).toLowerCase()}{counts.phone_conflict === 1 ? '' : 's'}
+                {t(SEVERITY_LABEL_KEY.phone_conflict[0])} · {counts.phone_conflict}
               </span>
             ) : null}
             {counts.exact_match > 0 ? (
               <span className="text-amber-700 dark:text-amber-400">
-                {counts.exact_match} {(t(SEVERITY_LABEL_KEY.exact_match[0]) || SEVERITY_LABEL_KEY.exact_match[1]).toLowerCase()}{counts.exact_match === 1 ? '' : 's'}
+                {t(SEVERITY_LABEL_KEY.exact_match[0])} · {counts.exact_match}
               </span>
             ) : null}
             {counts.name_only > 0 ? (
-              <span>{counts.name_only} {(t(SEVERITY_LABEL_KEY.name_only[0]) || SEVERITY_LABEL_KEY.name_only[1]).toLowerCase()}</span>
+              <span>{t(SEVERITY_LABEL_KEY.name_only[0])} · {counts.name_only}</span>
             ) : null}
             {canBulkContacts && canResolveConflicts ? <button
               type="button"

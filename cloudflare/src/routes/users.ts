@@ -6,6 +6,7 @@ import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
+import { DEFAULT_ROLE_PERMISSIONS } from '../lib/roleDefaults'
 import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -27,7 +28,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 //
 // What's intentionally NOT ported, and why:
 // - Google/Supabase-linked identity sync (createOrUpdateAuthUser,
-//   repairGoogleIdentityForUser, provider-disconnect, auth-methods
+//   repairGoogleIdentityForUser, auth-methods
 //   provider probing). The Docker backend's own isGoogleAuthConfigured()
 //   always returns false in this build -- every one of those code paths is
 //   already dead in the source we're porting from. (Superseded: the Worker
@@ -384,13 +385,6 @@ app.get('/users/:id/auth-methods', async (c) => {
   })
 })
 
-// Google is disconnected through POST /api/auth/oauth/unlink (password
-// re-check, own account only); there is no other provider to disconnect.
-app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Use Disconnect Google in My Profile. No other sign-in provider is supported.' }, 400))
-
-app.post('/users/:id/contact-verification/request', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
-app.post('/users/:id/contact-verification/confirm', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
-
 // Same reasoning as routes/files.ts: no `sharp` in a Worker isolate, so the
 // frontend compresses/resizes with Canvas before sending (see
 // frontend/src/utils/imageCompression.ts), targeting 180KB. This is a
@@ -593,7 +587,9 @@ app.post('/users', async (c) => {
     return c.json({ success: true, id: createdId })
   } catch (error) {
     const message = String((error as Error)?.message || '')
-    return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to create user' }, 500)
+    const mapped = mapIdentityErrorMessage(message)
+    if (!mapped) console.error('[users] failed to create user', error)
+    return c.json({ success: false, error: mapped || 'Failed to create user' }, 500)
   }
 })
 
@@ -712,7 +708,9 @@ app.put('/users/:id', async (c) => {
   } catch (error) {
     if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
-    return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to update user' }, 500)
+    const mapped = mapIdentityErrorMessage(message)
+    if (!mapped) console.error('[users] failed to update user', error)
+    return c.json({ success: false, error: mapped || 'Failed to update user' }, 500)
   }
 })
 
@@ -818,7 +816,9 @@ app.put('/users/:id/profile', async (c) => {
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
   } catch (error) {
     const message = String((error as Error)?.message || '')
-    return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to update profile' }, 500)
+    const mapped = mapIdentityErrorMessage(message)
+    if (!mapped) console.error('[users] failed to update profile', error)
+    return c.json({ success: false, error: mapped || 'Failed to update profile' }, 500)
   }
 })
 
@@ -1009,6 +1009,14 @@ app.get('/roles', async (c) => {
     `SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles ORDER BY is_system DESC, lower(name) ASC`,
   ).all()
   return c.json(rows)
+})
+
+// The permissions a freshly seeded Admin, Manager and Employee start with: the same constant the seed inserts
+// (lib/roleDefaults.ts), so the role editor's "reset to defaults" cannot drift from the server. Read-only.
+app.get('/roles/defaults', (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  return c.json({ success: true, defaults: DEFAULT_ROLE_PERMISSIONS })
 })
 
 app.post('/roles', async (c) => {

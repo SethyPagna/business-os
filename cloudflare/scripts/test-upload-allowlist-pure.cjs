@@ -311,71 +311,9 @@ function makeDoState() {
   }
 }
 
-// Fake SYNC_UPLOADS namespace: one real SyncUploadSession per DO name, so
-// the test sees exactly which name routes/sync.ts derives.
-const doNames = []
-const doInstances = new Map()
-const SYNC_UPLOADS = {
-  idFromName(name) { doNames.push(name); return name },
-  get(id) {
-    if (!doInstances.has(id)) {
-      const state = makeDoState()
-      doInstances.set(id, { state, session: new doModule.SyncUploadSession(state, { ASSETS }) })
-    }
-    const { session } = doInstances.get(id)
-    return { fetch: (url, init) => session.fetch(new Request(url, init)) }
-  },
-}
-
-const syncRoute = loadTs('routes/sync.ts', {
-  hono: { Hono },
-  '../lib/auth': { requireAuth: async (c, next) => {
-    if (!c.env.TEST_USER) return c.json({ error: 'Unauthorized' }, 401)
-    c.set('user', c.env.TEST_USER)
-    await next()
-  } },
-  '../lib/offlineSaleOwnership': { canonicalOfflineSaleOwner: () => null },
-  '../lib/audit': { audit: async () => {} },
-  './files': { hasFullLibraryAccess: () => true, canWireProductImages: () => true },
-  '../index': {},
-})
-const syncApp = syncRoute.createSyncRoute(new Hono())
-const uploaderA = { ...librarian, id: 7 }
-const uploaderB = { ...librarian, id: 9, username: 'other-librarian' }
-
 async function sha256Hex(data) {
   const digest = await crypto.subtle.digest('SHA-256', data)
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-async function syncPost(user, pathname, body) {
-  const response = await syncApp.request(`http://local${pathname}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    { TEST_USER: user, ASSETS, SYNC_UPLOADS }, { waitUntil() {}, passThroughOnException() {} })
-  return { status: response.status, json: await response.json() }
-}
-
-async function initAndChunk(user, uploadId, buffer, fileName, mime, manifestOverrides = {}) {
-  const init = await syncPost(user, '/files/chunks/init', {
-    upload_id: uploadId, size: buffer.length, chunk_count: 1, sha256: await sha256Hex(buffer), chunk_size: 1024 * 1024, file_name: fileName, mime,
-    ...manifestOverrides,
-  })
-  if (init.status !== 200) return { init }
-  const chunk = await syncPost(user, `/files/chunks/${uploadId}/chunk`, {
-    chunk_index: 0, chunk_sha256: await sha256Hex(buffer), chunk: Buffer.from(buffer).toString('base64'),
-  })
-  return { init, chunk }
-}
-
-let uploadSeq = 0
-async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
-  puts.length = 0
-  const uploadId = `u${++uploadSeq}`
-  const staged = await initAndChunk(uploaderA, uploadId, buffer, fileName, mime, manifestOverrides)
-  const state = doInstances.get(`${uploaderA.id}:${uploadId}`)?.state
-  if (staged.init.status !== 200) return { ...staged.init, state, stage: 'init' }
-  assert.equal(staged.chunk.status, 200, JSON.stringify(staged.chunk.json))
-  const complete = await syncPost(uploaderA, `/files/chunks/${uploadId}/complete`, {})
-  return { ...complete, state, stage: 'complete' }
 }
 
 ;(async () => {
@@ -512,74 +450,9 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     assert.ok(!store.has('uploads/' + asset.stored_name))
   }
 
-  // Chunked path: HTML is rejected on the reassembled buffer, nothing
-  // stored, staged chunks dropped.
+  // The chunked-upload routes were removed; the retired DO still refuses a
+  // request without an owner, and one staged for another owner.
   {
-    const result = await chunkedUpload(HTML, 'photo.jpg', 'image/jpeg')
-    assert.equal(result.status, 400)
-    assert.equal(result.json.code, 'unsupported_file_type')
-    assert.equal(puts.length, 0)
-    assert.equal(result.state.map.size, 0, 'rejected chunked upload must drop its staged chunks')
-  }
-  for (const [buffer, name, mime] of [[SVG, 'logo.svg', 'image/svg+xml'], [POLYGLOT_JPEG, 'photo.jpg', 'image/jpeg']]) {
-    const result = await chunkedUpload(buffer, name, mime)
-    assert.equal(result.status, 400, `${name} via chunks must be rejected`)
-    assert.equal(puts.length, 0)
-  }
-  // Chunked path: a real PNG with hostile manifest claims is stored with the
-  // server-derived type and extension; a PDF is refused.
-  {
-    const result = await chunkedUpload(PNG, 'evil.svg', 'text/html')
-    assert.equal(result.status, 200, JSON.stringify(result.json))
-    assert.equal(puts[0].contentType, 'image/png')
-    assert.match(puts[0].key, /^uploads\/evil-\d+-[a-f0-9]{8}\.png$/)
-    assert.equal(result.json.asset.mime_type, 'image/png')
-    assert.equal(result.json.asset.media_type, 'image')
-    assert.equal(result.json.asset.public_path, `/${puts[0].key}`)
-  }
-  {
-    const result = await chunkedUpload(PDF, 'report.pdf', 'application/pdf')
-    assert.equal(result.status, 400, JSON.stringify(result.json))
-    assert.equal(result.json.code, 'unsupported_file_type')
-    assert.equal(puts.length, 0)
-  }
-  // Chunked path: an inflated chunk count is refused at init (it would make
-  // /complete loop and allocate for chunks that cannot exist).
-  {
-    const result = await chunkedUpload(PNG, 'x.png', 'image/png', { chunk_count: 1000000 })
-    assert.equal(result.stage, 'init')
-    assert.equal(result.status, 400)
-    assert.equal(result.json.code, 'invalid_manifest')
-  }
-
-  // F14: the DO is named <user id>:<uploadId>, and a second uploader who
-  // reuses the same uploadId can neither finish, overwrite nor reset the
-  // first uploader's staged upload.
-  {
-    doNames.length = 0
-    puts.length = 0
-    const staged = await initAndChunk(uploaderA, 'shared-id', PNG, 'mine.png', 'image/png')
-    assert.equal(staged.chunk.status, 200)
-    assert.deepEqual([...new Set(doNames)], [`${uploaderA.id}:shared-id`], 'DO name must be bound to the authenticated user')
-
-    const hijackComplete = await syncPost(uploaderB, '/files/chunks/shared-id/complete', {})
-    assert.equal(hijackComplete.status, 404, 'another user must not finish this upload')
-    assert.equal(puts.length, 0)
-    const hijackChunk = await syncPost(uploaderB, '/files/chunks/shared-id/chunk', {
-      chunk_index: 0, chunk_sha256: await sha256Hex(HTML), chunk: Buffer.from(HTML).toString('base64'),
-    })
-    assert.equal(hijackChunk.status, 404, 'another user must not overwrite a chunk of this upload')
-    // B's /init with the same id lands in B's own DO -- A's staged state survives.
-    const bInit = await syncPost(uploaderB, '/files/chunks/init', {
-      upload_id: 'shared-id', size: HTML.length, chunk_count: 1, sha256: await sha256Hex(HTML), chunk_size: 1024 * 1024,
-    })
-    assert.equal(bInit.status, 200)
-    assert.ok(doInstances.get(`${uploaderA.id}:shared-id`).state.map.has('chunk:0'), "A's staged chunk must survive B's /init")
-
-    const own = await syncPost(uploaderA, '/files/chunks/shared-id/complete', {})
-    assert.equal(own.status, 200, JSON.stringify(own.json))
-    assert.equal(puts[0].contentType, 'image/png')
-
     // The DO itself refuses a request without an owner, and a manifest
     // staged for one owner from a request naming another.
     const state = makeDoState()

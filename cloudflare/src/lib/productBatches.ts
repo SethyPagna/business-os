@@ -34,6 +34,7 @@
 import type { D1Compat } from './db'
 import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { executeStockTransaction } from './stockTransaction'
@@ -188,7 +189,7 @@ export async function prepareReceiptLotTarget(db: D1Compat, input: {
     FROM (SELECT 1) LEFT JOIN product_batches pb ON pb.variant_product_id=@productId`)
     .all<ReceiptLotCandidate & { received_cost_usd: number | null; baseline_batch_id: number; maximum_batch_id: number }>({ productId: input.productId })
   const lots = rows.filter(row => row.id != null)
-  const target = resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
+  const target = resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || businessToday(),
     unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(rows[0]?.baseline_batch_id) || 0, input.batchId)
   return { ...target, maximumBatchId: Number(rows[0]?.maximum_batch_id) || 0,
     existingReceivedCostUsd: lots.find(lot => lot.id === target.existingBatchId)?.received_cost_usd ?? null }
@@ -293,7 +294,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
@@ -686,7 +687,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // @batchKey), so it can be dropped into a statement's own VALUES list.
   buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   let receiptLotTarget: ReceiptLotTarget | undefined
   if (input.historicalReceiptReplay && input.batchId == null) throw new Error('Historical receipt replay requires its recorded batch')
   if (!input.provenanceKey && !input.historicalReceiptReplay) receiptLotTarget = await prepareReceiptLotTarget(db, input)
@@ -785,7 +786,7 @@ export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: Rece
   }
 }
 
-// Thrown by removeStockFromBatch when the chosen batch doesn't have enough
+// Thrown when the chosen batch doesn't have enough
 // at this branch -- distinct from a generic Error so routes/inventory.ts
 // can report the batch's own available figure, not just "insufficient
 // stock" (which would be misleading if the *product* has plenty of stock
@@ -897,56 +898,6 @@ export function planUnreceiveBatchStock(input: { batchId: number; quantity: numb
       params,
     },
   ]
-}
-
-// Mirror of receiveBatchStock for the remove side of mandatory batch
-// selection (Inventory's "Adjust stock" > Remove, see routes/inventory.ts's
-// /adjust). Validates against the BATCH's own quantity at this branch, not
-// just the product's overall total -- a product can have plenty of total
-// stock while the specific lot the person picked has less than they're
-// trying to remove, and that's a real error, not something to silently
-// satisfy from a different batch behind their back. Same three-way atomic
-// write as receiveBatchStock, decrementing instead of incrementing, with
-// the same MAX(0, ...) floor guard routes/inventory.ts's own decrement
-// path already uses so a race can never push either figure negative.
-export async function removeStockFromBatch(db: D1Compat, input: {
-  batchId: number
-  productId: number
-  branchId: number
-  quantity: number
-}): Promise<{ productName: string | null; lotCode: string | null; batchNumber: number | null }> {
-  const batch = await db.prepare(`
-    SELECT pb.id AS id, p.name AS productName, pb.lot_code AS lotCode, pb.batch_number AS batchNumber, COALESCE(bbs.quantity, 0) AS available
-    FROM product_batches pb
-    JOIN products p ON p.id = pb.variant_product_id
-    LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
-    WHERE pb.id = @batchId AND pb.variant_product_id = @productId
-  `).get<{ id: number; productName: string | null; lotCode: string | null; batchNumber: number | null; available: number }>({
-    batchId: input.batchId,
-    productId: input.productId,
-    branchId: input.branchId,
-  })
-  if (!batch) throw new Error('Selected received date does not belong to this product')
-  const available = Number(batch.available) || 0
-  if (input.quantity > available) throw new InsufficientBatchStockError(available)
-
-  await executeStockTransaction(db, [
-    {
-      sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
-            WHERE batch_id = @batchId AND branch_id = @branchId`,
-      params: { batchId: input.batchId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,
-      params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: input.productId, quantity: input.quantity },
-    },
-  ], 'retry')
-
-  return { productName: batch.productName, lotCode: batch.lotCode, batchNumber: batch.batchNumber }
 }
 
 // Resolves which batch a transferred lot should land in at the
@@ -1069,6 +1020,11 @@ export type FifoLotAvailability = {
   available: number
 }
 
+// CROSS JOIN pins product_batches (variant_product_id index) as the outer
+// loop: without table statistics SQLite otherwise walks every positive lot of
+// the branch (idx_branch_batch_stock_branch_qty) and probes product_batches
+// per lot. Same rows and ORDER BY either way.
+//
 // Active lots with sellable stock at the branch, oldest received_at first
 // (NULL received dates sort last -- an undated legacy lot is drawn only
 // after every dated one), then batch_number/id for a stable tiebreak.
@@ -1076,7 +1032,7 @@ export async function readFifoLotAvailability(db: D1Compat, productId: number, b
   const rows = await db.prepare(`
     SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
-    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
   `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
@@ -1109,7 +1065,7 @@ export async function readFifoLotAvailabilityForCart(
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
            pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
-    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+    CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
       AND bbs.branch_id IN (${branchIds.map(() => '?').join(',')})
       AND pb.is_active = 1 AND bbs.quantity > 0

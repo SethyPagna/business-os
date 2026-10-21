@@ -78,7 +78,7 @@ CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, sa
  label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
- total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
+ total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
 
 INSERT INTO settings VALUES('pos_payment_methods','["Cash","ABA"]');
 
@@ -120,7 +120,7 @@ const db = {
 const seen = []
 const KERNEL = {
   revenue_usd: 312.5, cost_usd: 190.25, profit_usd: 122.25,
-  delivery_usd: 14, pending_revenue_usd: 47.5, refund_usd: 8.75,
+  delivery_usd: 14, pending_revenue_usd: 47.5, not_paid_owed_usd: 47.5, refund_usd: 8.75,
 }
 const businessDateWindow = load('lib/businessDateWindow.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
@@ -236,7 +236,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.equal(figures.credit_usd, 47.5, 'unpaid sales are carried as an amount owed')
   const composed = recon.composeShiftFigures({
     opening: { usd: 1, khr: 2 }, counted: { usd: null, khr: 3 },
-    totals: { ...KERNEL, pending_revenue_usd: -12 },
+    totals: { ...KERNEL, not_paid_owed_usd: -12 },
     expenses: { usd: 9, khr: 32_000 }, deliveryFees: { usd: 5, khr: 12_000 }, courier: { usd: 3, khr: 4_000 },
   })
   assert.equal(composed.credit_usd, 0, 'a negative amount owed is a data defect, never printed as negative money')

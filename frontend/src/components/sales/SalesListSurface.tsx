@@ -42,6 +42,7 @@ interface SaleRecord {
   receipt_number?: string
   created_at?: string
   sale_status?: string
+  status_before_return?: string | null
   cashier_name?: string
   payment_method?: string
   total_usd?: number
@@ -108,6 +109,8 @@ interface SalesListSurfaceProps {
    * Sep 6 2026). Printed POSITIVE beside the revenue, never with a minus and
    * never as a deduction — these rows are already inside `revenue`. */
   creditUsd: number | null
+  /** Revenue without Not Paid sales; null while unknown. */
+  paidOnlyUsd: number | null
   /** Predicate: does this sale count toward the money shown? Used to make the
    * day-group header counts money-counting too, so they sum to the footer. */
   isCountedSale: (sale: SaleRecord) => boolean
@@ -148,6 +151,7 @@ export default function SalesListSurface({
   revenue,
   revenueCount,
   creditUsd,
+  paidOnlyUsd,
   isCountedSale,
   salesSections,
   selectAllRef,
@@ -336,7 +340,7 @@ export default function SalesListSurface({
                                   {sale.customer_phone?.trim() ? <div className="detail-scroll-text text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
-                              <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
+                              <td className="px-3 py-1.5"><StatusBadge sale={sale} t={t} /></td>
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
@@ -368,6 +372,7 @@ export default function SalesListSurface({
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
           {/* The credit rides BESIDE the revenue, positive and unsigned: it is
               part of the figure to its left, not something to take off it. */}
+          {creditUsd === null || creditUsd > 0 ? <> · {t('revenue_paid_only') || 'Revenue (paid only)'} {paidOnlyUsd === null ? '—' : fmtUSD(paidOnlyUsd)}</> : null}
           {creditUsd === null || creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Not Paid'} {creditUsd === null ? '—' : fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
@@ -526,7 +531,7 @@ export default function SalesListSurface({
                                 still shrink inside the flex-nowrap row). */}
                             <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
-                              <span className="shrink-0"><StatusBadge status={status} t={t} /></span>
+                              <span className="shrink-0"><StatusBadge sale={sale} t={t} /></span>
                               {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="shrink-0 whitespace-nowrap"><span className="badge-blue shrink-0 whitespace-nowrap text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue shrink-0 whitespace-nowrap text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>

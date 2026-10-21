@@ -56,6 +56,9 @@ import {
   PRODUCTS_FTS_BM25_SQL,
   searchTermBarcodeKey,
   searchTermBarcodeKeys,
+  limitSearchTermGroups,
+  SEARCH_MAX_GROUPS,
+  SEARCH_MAX_WORDS,
   tokenizeSearchTermGroups,
 } from './searchMatch'
 
@@ -174,8 +177,9 @@ export interface ProductSearchQuery {
   whereClause?: string
   // bm25 relevance (+ the exact-barcode offset), or undefined when nothing
   // was typed / nothing scored. ASC. When it reads the FTS rank it refers
-  // to the `rankCteSql` CTE, so it is only valid inside a statement whose
-  // WITH carries that CTE (lib/familyPagination.ts does this for you).
+  // to the `rankCteSql` CTE's columns, so it is only valid inside a statement
+  // whose WITH carries that CTE and whose FROM joins it (lib/familyPagination.ts
+  // does both for you).
   matchRankSql?: string
   // `__fts_rank AS MATERIALIZED (...)`: the products_fts MATCH run ONCE per
   // statement, yielding (id, rank) for every FTS hit. Set exactly when
@@ -211,8 +215,11 @@ export const MATCH_TIER_OTHER = 3
 // re-ran the whole MATCH for every candidate row: a common word ("glow",
 // 242 products) or a 2-letter prefix ("ro", 458) cost 216-358 ms per
 // statement on the seeded lab DB, twice per search (count + page).
-// MATERIALIZED runs the MATCH once and the per-row read becomes an indexed
-// lookup into that result: 13-25 ms, identical rows (I4-1).
+// MATERIALIZED runs the MATCH once (I4-1). The per-row read must be a
+// LEFT JOIN on the CTE (lib/familyPagination.ts adds it when matchRankSql
+// reads the CTE), never a correlated `SELECT ... FROM __fts_rank WHERE id =
+// p.id`: a CTE has no index, so that form scanned the whole table once per
+// candidate row (a join gets an automatic index built once).
 export const FTS_RANK_CTE_NAME = '__fts_rank'
 
 // The stored, already-normalized name column with a cheap fallback for any
@@ -282,20 +289,18 @@ function buildMatchTierSql(
 // every caller gains the tier. Each strategy's own "why" lives on its
 // builder in lib/searchMatch.ts; the one-line notes here say only what the
 // clause is for.
-export function buildProductSearchQuery(
+function buildProductSearchQueryFromGroups(
   rawSearchText: string,
   params: Record<string, unknown>,
-  options: ProductSearchQueryOptions = {},
+  options: ProductSearchQueryOptions,
+  termGroups: string[][],
 ): ProductSearchQuery {
   const prefix = options.paramPrefix || ''
   const nameNormalizedColumn = options.nameNormalizedColumn || 'p.name_normalized'
   const nameColumn = options.nameColumn || 'p.name'
   const barcodeColumn = options.barcodeColumn || 'p.barcode'
   const titleOnly = Boolean(options.titleOnly)
-  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, prefix, titleOnly, options.catalogOnly)
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-  const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
-  if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
 
   // A checked UPC-E/UPC-A query is an exact scanner lookup. Letting it also
   // enter FTS/trigram matching would re-admit an unrelated seven-digit
@@ -395,12 +400,12 @@ export function buildProductSearchQuery(
   let matchRankSql: string | undefined
   let rankCteSql: string | undefined
   // The FTS rank is computed once per statement in rankCteSql (see
-  // FTS_RANK_CTE_NAME for why) and looked up per row. Rows that arrived via
-  // a trigram/LIKE fallback have no FTS hit, COALESCE to 0 and stay
-  // orderable rather than dropping out of the sort.
+  // FTS_RANK_CTE_NAME for why) and joined per row by familyPagination. Rows
+  // that arrived via a trigram/LIKE fallback have no FTS hit, COALESCE to 0
+  // and stay orderable rather than dropping out of the sort.
   if (!titleOnly && ftsMatch) {
     rankCteSql = `${FTS_RANK_CTE_NAME} AS MATERIALIZED (SELECT rowid AS id, ${PRODUCTS_FTS_BM25_SQL} AS bm25_rank FROM products_fts WHERE products_fts MATCH @${prefix}ftsQuery)`
-    matchRankSql = `COALESCE((SELECT ${FTS_RANK_CTE_NAME}.bm25_rank FROM ${FTS_RANK_CTE_NAME} WHERE ${FTS_RANK_CTE_NAME}.id = p.id), 0)`
+    matchRankSql = `COALESCE(${FTS_RANK_CTE_NAME}.bm25_rank, 0)`
   }
   // Kept for callers that order by match_rank alone; match_tier expresses
   // the same "exact barcode leads" rule as a discrete key, and the two
@@ -420,6 +425,33 @@ export function buildProductSearchQuery(
       prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,
     }),
   }
+}
+
+// D1 refuses a statement with more than 100 bound parameters, and each search word binds up to
+// ~5 (hybrid + short-word + partial-word clauses). The caps below are the ones the storefront
+// already used; the budget trims trailing words of an adversarial query (short or code-like words
+// bind the most) so the search tail alone stays at or under SEARCH_PARAM_BUDGET, leaving
+// 100 - SEARCH_PARAM_BUDGET for the caller's filters, branch, promotions and paging.
+export const SEARCH_PARAM_BUDGET = 56
+
+export function buildProductSearchQuery(
+  rawSearchText: string,
+  params: Record<string, unknown>,
+  options: ProductSearchQueryOptions = {},
+): ProductSearchQuery {
+  const titleOnly = Boolean(options.titleOnly)
+  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, options.paramPrefix || '', titleOnly, options.catalogOnly)
+  let termGroups = limitSearchTermGroups(tokenizeSearchTermGroups(rawSearchText, SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS), SEARCH_MAX_GROUPS, SEARCH_MAX_WORDS)
+  while (termGroups.length) {
+    const bound: Record<string, unknown> = {}
+    const query = buildProductSearchQueryFromGroups(rawSearchText, bound, options, termGroups)
+    if (Object.keys(bound).length <= SEARCH_PARAM_BUDGET || termGroups.flat().length === 1) {
+      Object.assign(params, bound)
+      return query
+    }
+    termGroups = termGroups.map((group, index) => (index === termGroups.length - 1 ? group.slice(0, -1) : group)).filter((group) => group.length)
+  }
+  return { hasSearchTerm: false, titleOnly }
 }
 
 // The family-level ORDER BY every product picker uses, assembled in one

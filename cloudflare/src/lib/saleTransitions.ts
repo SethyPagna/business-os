@@ -198,10 +198,14 @@ export type TransitionGuardResult = { ok: true } | { ok: false; error: string }
 // manually would claim stock came back with no return record behind it.
 // Out of 'cancelled' the only road is back to where the sale was when it
 // was cancelled -- the stock math for any other target would be a guess.
+// A sale with a return tag (returnTagged, or a retired return label as
+// oldStatus) may otherwise only be paid: Not Paid -> a paid status moves its
+// payment state, never the tag (owner, 20 Oct 2026).
 export function guardSaleStatusTransition(
   oldStatus: string,
   newStatus: string,
   statusBeforeCancel: string | null,
+  returnTagged = false,
 ): TransitionGuardResult {
   if (oldStatus === newStatus) return { ok: true }
   // Un-cancel first: its one allowed target may itself BE a return status
@@ -218,7 +222,8 @@ export function guardSaleStatusTransition(
   if (RETURN_STATUSES.has(newStatus)) {
     return { ok: false, error: 'Return statuses are set by recording an actual return (Returns page), not by switching the status by hand.' }
   }
-  if (RETURN_STATUSES.has(oldStatus) && newStatus !== 'cancelled') {
+  if ((returnTagged || RETURN_STATUSES.has(oldStatus)) && newStatus !== 'cancelled') {
+    if (oldStatus === 'awaiting_payment') return { ok: true }
     return { ok: false, error: 'This sale has recorded returns -- its status is managed by the returns flow. Only cancellation is allowed from here.' }
   }
   return { ok: true }

@@ -56,6 +56,7 @@ const noop = async () => {}
 const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {} }
 
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },

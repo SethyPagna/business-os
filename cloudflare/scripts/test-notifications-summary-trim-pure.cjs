@@ -36,6 +36,7 @@ const ledger = []
 function category(sql) {
   if (/out_of_stock_threshold/.test(sql) && /FROM products/.test(sql)) return 'inventory'
   if (/expiry_date/.test(sql) && /FROM products/.test(sql)) return 'expiry'
+  if (/credit_due_date/.test(sql) && /FROM product_batches/.test(sql)) return 'supplier_credit'
   if (/loyalty-ledger|GROUP BY customer_id/.test(sql) || /FROM customers WHERE id IN/.test(sql)) return 'loyalty'
   if (/loyalty_points_enabled'/.test(sql)) return 'loyalty'
   if (/FROM sales/.test(sql)) return 'sales'
@@ -248,7 +249,36 @@ async function main() {
     assert.equal(statements('loyalty'), 0)
   })
 
+  await check('supplier credit is answered from the cache between writes: a second call reads no lots, a lot or product change re-reads them', async () => {
+    seedStockFixture(raw.db, () => {
+      const productId = raw.db.prepare("SELECT id FROM products WHERE name = 'Healthy 0'").get().id
+      raw.db.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, supplier_name, payment_status, credit_due_date, unit_cost_usd, received_cost_usd, received_quantity)
+        VALUES (?, 'sc1', 'SC1', '2026-09-01', 1, 'Bong Long', 'credit', date('now', '-3 day'), 5, 25, 5)`).run(productId)
+    })
+    await cacheModule.bumpVersion(env, 'products')
+    const cold = await summary()
+    assert.equal(statements('supplier_credit'), 1, 'first call reads the lots once')
+    assert.equal(section(cold, 'supplier_credit').count, 1)
+    const warm = await summary()
+    assert.equal(statements('supplier_credit'), 0, 'second call: zero lot statements (was one full lot scan every refresh)')
+    assert.deepEqual(section(warm, 'supplier_credit'), section(cold, 'supplier_credit'))
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'paid', credit_due_date = NULL WHERE lot_code = 'SC1'").run())
+    assert.equal(section(await summary(), 'supplier_credit').count, 1, 'control: not visible before the version bump -- the cache is real')
+    await cacheModule.bumpVersion(env, 'products') // what PATCH /api/batches/:id does
+    const paid = await summary()
+    assert.equal(statements('supplier_credit'), 1, 'the bump re-read the lots')
+    assert.equal(section(paid, 'supplier_credit'), undefined, 'marking the lot paid clears the reminder')
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'credit', credit_due_date = date('now', '-3 day') WHERE lot_code = 'SC1'").run())
+    await cacheModule.bumpVersion(env, 'products')
+    assert.equal(section(await summary(), 'supplier_credit').count, 1)
+    assert.equal(section(await summary(CASHIER), 'supplier_credit'), undefined, 'the cache never serves it to a non-admin')
+  })
+
+  // Since 6.0.888 the loyalty section costs nothing while the programme is off, so these two cases switch it on.
   await check("a sale/return/customer edit re-runs loyalty only (and does not touch inventory)", async () => {
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('loyalty_points_enabled', 'true') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
+    await cacheModule.bumpVersion(env, 'settings')
+    await summary()
     for (const namespace of ['sales', 'returns', 'customers']) {
       await cacheModule.bumpVersion(env, namespace)
       await summary()
@@ -263,6 +293,9 @@ async function main() {
     assert.equal(statements('inventory'), 1)
     assert.equal(statements('expiry'), 1)
     assert.ok(statements('loyalty') >= 1)
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('loyalty_points_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
+    await cacheModule.bumpVersion(env, 'settings')
+    await summary()
   })
 
   await check('changing the low-stock config changes the answer at once -- the config is part of the cache key, no bump needed', async () => {
@@ -300,6 +333,15 @@ async function main() {
     assert.equal(section(await summary(viewOnly), 'sales').count, 1, 'a view-only user sees it (hasPermission would have hidden it)')
     assert.equal(section(await summary(fullButHidden), 'sales'), undefined, 'sales:view switched off hides it (hasPermission would have shown it)')
     assert.equal(JSON.stringify(await summary(fullButHidden)).includes('R-1'), false, 'and the receipt number is nowhere in the body')
+  })
+
+  // 0263 (6.0.890): a delivery order is Completed (or Not Paid) with the delivery_pending tag, not the retired word.
+  await check('the delivery queue reads the delivery tag: a tagged sale is listed, a cancelled one is not', async () => {
+    seedStockFixture(raw.db, () => raw.db.exec(`INSERT INTO sales (receipt_number, total_usd, sale_status, delivery_pending) VALUES
+      ('R-D1', 9, 'completed', 1), ('R-D2', 9, 'cancelled', 1), ('R-D3', 9, 'completed', 0)`))
+    const ids = (section(await summary(ADMIN), 'sales').items || []).map((item) => item.label)
+    assert.ok(ids.includes('R-D1'), `a Completed sale with the delivery tag is in the delivery queue (${ids})`)
+    assert.ok(!ids.includes('R-D2') && !ids.includes('R-D3'), 'a cancelled tagged sale and an untagged sale are not')
   })
 
   await check('GET /summary/items returns the whole inventory list for "show all", gated like the section', async () => {

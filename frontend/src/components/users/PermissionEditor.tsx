@@ -1,6 +1,10 @@
 import { Fragment, useState } from 'react'
+import Search from 'lucide-react/dist/esm/icons/search.js'
+import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import PermissionFieldChips from './PermissionFieldChips.tsx'
 import { PERMISSION_SECTIONS, permissionDefinitionValue, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome, type ActionRequirement } from '../../utils/permissionActions.ts'
@@ -12,10 +16,27 @@ type PermissionState = Record<string, PermissionValue>
 // (permissionDefinitions.ts's `middleTier`).
 type Tier = 'full' | 'review' | 'view' | 'none'
 // Section-level picker: 'none'/'full' bulk-set every key the section defines
-// (setSectionMode) and 'custom' reveals the section's own per-key controls. It
-// aggregates the same per-key data those controls edit, so it adds no permission
-// key and no storage shape.
-type SectionMode = 'none' | 'full' | 'custom'
+// (setSectionMode), 'view'/'review' set only the section's tiered key and 'custom'
+// reveals the per-key controls. It aggregates the same per-key data those controls
+// edit, so it adds no permission key and no storage shape. The header chip, the
+// picker and the glance line all read sectionInfo, so they cannot disagree.
+type SectionMode = 'none' | 'view' | 'review' | 'full' | 'custom'
+
+// Field groups render as one row of toggle chips instead of one switch per field.
+const FIELD_GROUP_PREFIXES = ['inventory_check_show_', 'products_image_only_show_']
+const fieldGroupPrefix = (key: string): string | undefined => FIELD_GROUP_PREFIXES.find((prefix) => key.startsWith(prefix))
+
+// Tap targets grow to 44px on touch screens only, so the desktop editor stays compact.
+const TOUCH_TARGET = '[@media(pointer:coarse)]:min-h-[44px]'
+
+function SensitiveMark({ sensitivity, label }: { sensitivity: PermissionSensitivity; label: string }) {
+  if (sensitivity === 'normal') return null
+  return (
+    <span role="img" aria-label={label} title={label} className={`inline-flex flex-shrink-0 ${sensitivity === 'critical' ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}`}>
+      <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+    </span>
+  )
+}
 
 interface PermissionEditorProps {
   permissions?: string | Record<string, unknown> | null
@@ -55,14 +76,24 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   // `tier: true` without also adding its own explanation.
   const reviewDescriptionFor = (permission: PermissionDefinition): string => {
     const fallback = permission.reviewDescription
-      || translate('review_required_generic_desc', 'Some actions in this section are limited or need admin approval under Partial Access.')
+      || translate('review_required_generic_desc', 'Some actions in this section are limited or need admin approval under Review.')
     return permission.reviewTKey ? translate(permission.reviewTKey, fallback) : fallback
   }
   const sensitivityLabel = (value: PermissionSensitivity): string => {
     if (value === 'critical') return translate('permission_sensitive_critical', 'Sensitive')
-    if (value === 'high') return translate('permission_sensitive_high', 'Review')
+    if (value === 'high') return translate('permission_sensitive_high', 'Sensitive')
     return translate('permission_sensitive_normal', 'Standard')
   }
+  // One tier vocabulary everywhere: None, View, Review, Full (and Custom for a mixed section).
+  const modeLabel = (mode: SectionMode): string => {
+    if (mode === 'none') return translate('none', 'None')
+    if (mode === 'view') return translate('view', 'View')
+    if (mode === 'review') return translate('review_required', 'Review')
+    if (mode === 'full') return translate('label_full_access', 'Full')
+    return translate('permission_custom', 'Custom')
+  }
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const [query, setQuery] = useState('')
   // One short word per action outcome, plus the colour it renders in.
   // Deliberately terse: the point of the per-action matrix is that an
   // admin can scan a column of buttons and see at a glance which ones this
@@ -144,23 +175,51 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     section.permissions.length > 1 || section.permissions.some((permission) => permission.tier)
   )
 
-  // The at-a-glance read: one state per section, computed from the same per-key
-  // data the controls edit, so an admin can scan the list before opening anything.
-  const sectionGlance = (section: PermissionSection): { label: string; tone: 'full' | 'none' | 'partial' } => {
-    const keys = section.permissions
-    const granted = keys.filter((permission) => tierOf(permissionDefinitionValue(permission, perms)) !== 'none').length
-    const middleCount = keys.filter((permission) => ['review', 'view'].includes(tierOf(permissionDefinitionValue(permission, perms)))).length
-    if (granted === 0) return { label: translate('none', 'None'), tone: 'none' }
-    if (granted === keys.length && middleCount === 0) return { label: translate('label_full_access', 'Full Access'), tone: 'full' }
-    if (middleCount > 0) return { label: translate('review_required', 'Partial Access'), tone: 'partial' }
-    return { label: `${granted}/${keys.length}`, tone: 'partial' }
+  // A section's tiered key, when it has one, and the middle tier that key offers.
+  const leadOf = (section: PermissionSection): { permission: PermissionDefinition; middle: 'view' | 'review' } | null => {
+    const permission = section.permissions.find((entry) => entry.tier)
+    return permission ? { permission, middle: permission.middleTier === 'view' ? 'view' : 'review' } : null
   }
-  const glanceChipClass = (tone: 'full' | 'none' | 'partial'): string => (
-    tone === 'full'
+
+  // The single answer to "what is this section set to": a middle tier on the section's
+  // tiered key wins, otherwise the per-key aggregate (or Custom while the admin has the
+  // breakdown open).
+  const sectionModeOf = (section: PermissionSection): SectionMode => {
+    const lead = leadOf(section)
+    const leadTier = lead ? tierOf(perms[lead.permission.key]) : 'none'
+    if (leadTier === 'review' || leadTier === 'view') return leadTier
+    return customOpenSections.has(section.key) ? 'custom' : sectionDataMode(section)
+  }
+
+  // Actions an admin switched off while the tier still grants them: the "n off" the
+  // chips show, so a section that reads Full is never silently narrower than it looks.
+  const sectionOffCount = (section: PermissionSection): number => {
+    let count = 0
+    for (const permission of section.permissions) {
+      const value = permissionDefinitionValue(permission, perms)
+      const tier: Tier = permission.tier ? tierOf(value) : value ? 'full' : 'none'
+      for (const action of actionsForKey(permission.key)) {
+        if (action.follows || outcomeAt(action, tier) === 'block') continue
+        if (isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)) count += 1
+      }
+    }
+    return count
+  }
+
+  const sectionInfo: Record<string, { mode: SectionMode; off: number }> = {}
+  for (const section of PERMISSION_SECTIONS) {
+    if (section.key !== 'full_access') sectionInfo[section.key] = { mode: sectionModeOf(section), off: sectionOffCount(section) }
+  }
+  const modeChipClass = (mode: SectionMode): string => (
+    mode === 'full'
       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-      : tone === 'partial'
+      : mode === 'review'
         ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
-        : 'bg-gray-100 text-gray-500 dark:bg-zinc-800 dark:text-gray-400'
+        : mode === 'view'
+          ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-200'
+          : mode === 'custom'
+            ? 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+            : 'bg-gray-100 text-gray-500 dark:bg-zinc-800 dark:text-gray-400'
   )
 
   const setSectionMode = (section: PermissionSection, mode: 'none' | 'full') => {
@@ -273,7 +332,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     const needsList = (requirements: ActionRequirement[]) => requirements.map((requirement) => translate(requirement.tKey, requirement.label)).join(', ')
     return (
       <div className={`${className} rounded-lg border border-gray-200 bg-white/70 p-1.5 dark:border-zinc-700 dark:bg-zinc-900/40`}>
-        <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        <div className="mb-1 px-1 text-[11px] font-semibold leading-5 text-gray-400 dark:text-gray-500">
           {translate('perm_actions_heading', 'Buttons and actions on this page')}
         </div>
         {/* Each row is a control: the tier sets the baseline, clicking a row switches that single action off
@@ -325,7 +384,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
             const canToggle = tierOutcome !== 'block' && !viewLocked
             const toolNotes: string[] = []
             if (canToggle && !overriddenOff && tier === 'review') {
-              if (action.controlReview === 'block') toolNotes.push(translate('perm_action_review_tool_full', 'Under Partial Access an edit waits for approval. The tool itself needs Full Access.'))
+              if (action.controlReview === 'block') toolNotes.push(translate('perm_action_review_tool_full', 'Under Review an edit waits for approval. The tool itself needs Full Access.'))
               for (const control of controls) {
                 if (outcomeAt(control, tier) === 'block') toolNotes.push(translate('perm_action_control_needs_full', '{control} needs Full Access.').replace('{control}', translate(control.tKey, control.label)))
               }
@@ -347,7 +406,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                     : canToggle
                     ? (toolNote ? `${toolNote} ${toggleHint}` : toggleHint)
                     : translate('perm_action_tier_blocked', 'Already blocked by the selected tier.')}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${TOUCH_TARGET} ${
                     canToggle
                       ? 'hover:bg-gray-100 dark:hover:bg-zinc-800'
                       : 'cursor-default opacity-60'
@@ -376,91 +435,172 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   }
 
   const activeCount = Object.keys(perms).filter((key) => perms[key]).length
+  const permissionsWord = translate('permissions', 'Permissions')
+
+  // Both bulk buttons replace the whole draft, so each shows before -> after first.
+  const requestAll = async () => {
+    const confirmed = await askToConfirm({
+      title: translate('perm_confirm_all_title', 'Give this role full administrator access?'),
+      items: [{ label: permissionsWord, value: `${activeCount} → ${translate('perm_confirm_all_after', 'Full administrator')}` }],
+      note: translate('perm_confirm_all_note', 'Administrators can use every section. Nothing is saved until you save the role.'),
+      confirmLabel: translate('select_all', 'Select all'),
+    })
+    if (confirmed) onChange({ all: true })
+  }
+  const requestClear = async () => {
+    const confirmed = await askToConfirm({
+      title: translate('perm_confirm_clear_title', 'Clear every permission for this role?'),
+      items: [{ label: permissionsWord, value: `${activeCount} → 0` }],
+      note: translate('perm_confirm_clear_note', 'Nothing is saved until you save the role.'),
+      confirmLabel: translate('deselect_all', 'Clear'),
+      danger: true,
+    })
+    if (confirmed) onChange({})
+  }
+
+  const needle = query.trim().toLowerCase()
+  const sectionMatches = (section: PermissionSection): boolean => {
+    if (!needle) return true
+    const names = [translate(section.tKey, section.label)]
+    for (const permission of section.permissions) {
+      names.push(labelFor(permission))
+      for (const action of actionsForKey(permission.key)) names.push(translate(action.tKey, action.label))
+    }
+    return names.some((name) => name.toLowerCase().includes(needle))
+  }
+  const visibleSections = PERMISSION_SECTIONS.filter(sectionMatches)
+  const jumpToSection = (key: string) => {
+    document.getElementById(`perm-section-${key}`)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+  }
+
+  const glance = (['full', 'review', 'view', 'custom', 'none'] as const)
+    .map((mode) => ({ mode, count: Object.values(sectionInfo).filter((info) => info.mode === mode).length }))
+    .filter((entry) => entry.count > 0)
+  const offTotal = Object.values(sectionInfo).reduce((sum, info) => sum + info.off, 0)
+  const nOff = (count: number): string => translate('perm_n_off', '{n} off').replace('{n}', String(count))
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-sm text-gray-500">
-          {activeCount} {translate('permissions', activeCount === 1 ? 'permission' : 'permissions')}
+          {activeCount} {permissionsWord}
         </span>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => onChange({ all: true })} className="text-xs text-blue-500 hover:underline">
-            {translate('select_all', 'All')}
+        <div className="flex gap-1">
+          <button type="button" onClick={requestAll} disabled={!!perms.all} className={`rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-40 dark:text-blue-300 dark:hover:bg-blue-900/30 ${TOUCH_TARGET}`}>
+            {translate('select_all', 'Select all')}
           </button>
-          <span className="text-gray-300">|</span>
-          <button type="button" onClick={() => onChange({})} className="text-xs text-red-500 hover:underline">
+          <button type="button" onClick={requestClear} disabled={activeCount === 0} className={`rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 dark:text-red-300 dark:hover:bg-red-950/30 ${TOUCH_TARGET}`}>
             {translate('deselect_all', 'Clear')}
           </button>
         </div>
       </div>
 
       {/* The whole role in one line before any scrolling. */}
-      {(() => {
-        const scanned = PERMISSION_SECTIONS.filter((section) => section.key !== 'full_access')
-        const counts = { full: 0, none: 0, partial: 0 }
-        for (const section of scanned) counts[sectionGlance(section).tone] += 1
-        return (
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <span className="font-semibold">{translate('perm_role_summary', 'This role at a glance:')}</span>
-            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('full')}`}>{counts.full} {translate('label_full_access', 'Full Access')}</span>
-            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('partial')}`}>{counts.partial} {translate('permission_custom', 'Custom')}</span>
-            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('none')}`}>{counts.none} {translate('none', 'None')}</span>
-          </div>
-        )
-      })()}
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <span className="font-semibold leading-6">{translate('perm_role_summary', 'This role at a glance:')}</span>
+        {glance.map((entry) => (
+          <span key={entry.mode} data-perm-chip="glance" className={`rounded-full px-2 py-0.5 font-semibold leading-5 ${modeChipClass(entry.mode)}`}>{entry.count} {modeLabel(entry.mode)}</span>
+        ))}
+        {offTotal > 0 ? <span data-perm-chip="glance-off" className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold leading-5 text-gray-600 dark:bg-zinc-800 dark:text-gray-300">{nOff(offTotal)}</span> : null}
+      </div>
+
+      <div className="mb-3 flex items-center gap-2">
+        <label className="relative block w-40 flex-shrink-0 sm:w-52">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={translate('perm_find', 'Find permission')}
+            aria-label={translate('perm_find', 'Find permission')}
+            className={`input h-8 w-full pl-7 text-xs ${TOUCH_TARGET}`}
+          />
+        </label>
+        <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5" aria-label={translate('perm_jump_to', 'Jump to section')}>
+          {visibleSections.filter((section) => section.key !== 'full_access').map((section) => (
+            <button
+              type="button"
+              key={section.key}
+              onClick={() => jumpToSection(section.key)}
+              className={`flex-shrink-0 whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-0.5 text-xs leading-5 text-gray-600 hover:bg-gray-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:bg-zinc-800 ${TOUCH_TARGET}`}
+            >
+              {translate(section.tKey, section.label)}
+            </button>
+          ))}
+        </nav>
+      </div>
+      {confirmDialog}
+      {visibleSections.length === 0 ? (
+        <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{translate('perm_find_none', 'No matching permission')}</p>
+      ) : null}
       <div className="space-y-3">
-        {PERMISSION_SECTIONS.map((section) => {
+        {visibleSections.map((section) => {
           // The master "Full Administrator Access" section keeps its
           // original single-toggle behavior -- a None/Full/Custom picker
           // wrapping the one all-or-nothing override key wouldn't add
           // anything.
           const isMasterSection = section.key === 'full_access'
           const customizable = !isMasterSection && sectionIsCustomizable(section)
-          const dataMode = isMasterSection ? 'full' : sectionDataMode(section)
-          const effectiveMode: SectionMode = dataMode === 'custom' || customOpenSections.has(section.key) ? 'custom' : dataMode
-          const showBreakdown = isMasterSection || !customizable || effectiveMode === 'custom'
+          const info = isMasterSection ? null : sectionInfo[section.key]
+          const effectiveMode: SectionMode = info ? info.mode : 'full'
+          const lead = leadOf(section)
+          const showBreakdown = isMasterSection || !customizable || sectionDataMode(section) === 'custom' || customOpenSections.has(section.key)
+          const pickerOptions: Array<{ value: SectionMode; label: string }> = [
+            { value: 'none', label: modeLabel('none') },
+            ...(lead ? [{ value: lead.middle as SectionMode, label: modeLabel(lead.middle) }] : []),
+            { value: 'full', label: modeLabel('full') },
+            { value: 'custom', label: modeLabel('custom') },
+          ]
+          const pickMode = (mode: SectionMode) => {
+            if (mode === 'custom') openSectionCustom(section.key)
+            else if (mode === 'review' || mode === 'view') setTier(lead?.permission.key as string, mode)
+            else setSectionMode(section, mode === 'full' ? 'full' : 'none')
+          }
+          const sectionName = translate(section.tKey, section.label)
           return (
-          <section key={section.key} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
+          <section key={section.key} id={`perm-section-${section.key}`} className="scroll-mt-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
             {/* Header on one row: the description lives in the info hint, and a live state chip
                 makes the whole role readable top to bottom without opening a section. */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">
                 <InfoHint
                   className="flex-shrink-0"
-                  label={translate(section.tKey, section.label)}
+                  label={sectionName}
                   text={translate(`${section.tKey}_desc`, section.description)}
                 />
-                <span className="truncate text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {translate(section.tKey, section.label)}
+                <span className="min-w-0 break-words text-sm font-semibold leading-6 text-gray-700 dark:text-gray-200">
+                  {sectionName}
                 </span>
-                {!isMasterSection ? (() => {
-                  const glance = sectionGlance(section)
-                  return (
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${glanceChipClass(glance.tone)}`}>
-                      {glance.label}
-                    </span>
-                  )
-                })() : null}
+                {info ? (
+                  <span data-perm-chip="mode" className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold leading-5 ${modeChipClass(info.mode)}`}>
+                    {modeLabel(info.mode)}
+                  </span>
+                ) : null}
+                {info && info.off > 0 ? (
+                  <span data-perm-chip="off" className="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold leading-5 text-gray-600 dark:bg-zinc-800 dark:text-gray-300">
+                    {nOff(info.off)}
+                  </span>
+                ) : null}
               </div>
               {customizable ? (
-                <div className="flex overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-700" role="group" aria-label={`${translate(section.tKey, section.label)} access mode`}>
-                  {([
-                    { value: 'none' as const, label: translate('none', 'None') },
-                    { value: 'full' as const, label: translate('label_full_access', 'Full Access') },
-                    { value: 'custom' as const, label: translate('permission_custom', 'Custom') },
-                  ]).map((option, index) => (
+                <div className="flex max-w-full overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-700" role="group" aria-label={translate('perm_access_level', '{section} access').replace('{section}', sectionName)}>
+                  {pickerOptions.map((option, index) => (
                     <button
                       type="button"
                       key={option.value}
-                      onClick={() => (option.value === 'custom' ? openSectionCustom(section.key) : setSectionMode(section, option.value))}
+                      onClick={() => pickMode(option.value)}
                       aria-pressed={effectiveMode === option.value}
-                      className={`px-2.5 py-1 text-xs font-medium transition-colors ${index > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''} ${
+                      className={`min-w-[3.75rem] px-2.5 py-1.5 text-sm font-semibold leading-5 transition-colors ${TOUCH_TARGET} ${index > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''} ${
                         effectiveMode === option.value
                           ? option.value === 'custom'
                             ? 'bg-slate-600 text-white'
                             : option.value === 'full'
                               ? 'bg-blue-600 text-white'
-                              : 'bg-gray-400 text-white'
+                              : option.value === 'review'
+                                ? 'bg-amber-500 text-white'
+                                : option.value === 'view'
+                                  ? 'bg-teal-600 text-white'
+                                  : 'bg-gray-400 text-white'
                           : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:hover:bg-zinc-800'
                       }`}
                     >
@@ -473,22 +613,26 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
             {!showBreakdown ? null : (
             <div className="space-y-1.5">
               {section.permissions.map((permission) => {
-                const sensitive = permission.sensitivity === 'critical' || permission.sensitivity === 'high'
+                // Nine "Show ..." rows and eight image-only rows collapse to one chip row each,
+                // drawn where the group's first field sits.
+                const groupPrefix = fieldGroupPrefix(permission.key)
+                if (groupPrefix) {
+                  const groupFields = section.permissions.filter((entry) => entry.key.startsWith(groupPrefix))
+                  if (groupFields[0]?.key !== permission.key) return null
+                  return (
+                    <PermissionFieldChips
+                      key={groupPrefix}
+                      heading={translate('perm_fields_shown', 'Fields shown')}
+                      fields={groupFields.map((entry) => ({ key: entry.key, label: labelFor(entry), active: !!permissionDefinitionValue(entry, perms) }))}
+                      onToggle={toggle}
+                    />
+                  )
+                }
 
                 if (permission.tier) {
                   const tier = tierOf(perms[permission.key])
-                  // The middle option is the section's declared flavor: a
-                  // read-only "View only" (VIEW_TIER_KEYS) or the amber
-                  // "Partial Access" that queues writes (default).
-                  const isViewTier = permission.middleTier === 'view'
-                  const middleOption: { value: Tier; label: string } = isViewTier
-                    ? { value: 'view', label: translate('view_only', 'View only') }
-                    : { value: 'review', label: translate('review_required', 'Partial Access') }
-                  const tierOptions: { value: Tier; label: string }[] = [
-                    { value: 'none', label: translate('none', 'None') },
-                    middleOption,
-                    { value: 'full', label: translate('label_full_access', 'Full Access') },
-                  ]
+                  // The tier itself is picked in the section header; this row keeps the section's
+                  // one explanation (the info hint) and the action switches that follow from it.
                   return (
                     <div
                       key={permission.key}
@@ -498,8 +642,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           : 'border-transparent bg-white/70 dark:bg-zinc-900/40'
                       }`}
                     >
-                      <div className="flex w-full flex-wrap items-center gap-3">
-                        <span className={`inline-flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium ${tier !== 'none' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                      <div className="flex w-full flex-wrap items-center gap-2">
+                        <span className={`inline-flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium leading-6 ${tier !== 'none' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
                           {/* The info icon leads the label it explains, as in MergeDuplicatesReviewModal.tsx and BulkImportModal.tsx. */}
                           <InfoHint
                             className="flex-shrink-0"
@@ -508,50 +652,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           />
                           {labelFor(permission)}
                         </span>
-                        {sensitive ? (
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                            permission.sensitivity === 'critical'
-                              ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200'
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
-                          }`}>
-                            {sensitivityLabel(permission.sensitivity)}
-                          </span>
-                        ) : null}
-                        <div className="flex overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-700" role="group" aria-label={labelFor(permission)}>
-                          {tierOptions.map((option, index) => (
-                            <button
-                              type="button"
-                              key={option.value}
-                              onClick={() => setTier(permission.key, option.value)}
-                              aria-pressed={tier === option.value}
-                              className={`min-w-[5.5rem] px-3 py-2 text-sm font-semibold transition-colors ${index > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''} ${
-                                tier === option.value
-                                  ? option.value === 'review'
-                                    ? 'bg-amber-500 text-white'
-                                    : option.value === 'view'
-                                      ? 'bg-teal-600 text-white'
-                                      : option.value === 'full'
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-400 text-white'
-                                  : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:hover:bg-zinc-800'
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
+                        <SensitiveMark sensitivity={permission.sensitivity} label={sensitivityLabel(permission.sensitivity)} />
                       </div>
-                      {/* The picked tier's scope is shown inline, not only in the (i) tooltip above, so
-                          reviewing a role's Custom breakdown needs no hover or tap. */}
-                      {tier === 'review' ? (
-                        <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                          {reviewDescriptionFor(permission)}
-                        </p>
-                      ) : tier === 'view' ? (
-                        <p className="mt-2 rounded-lg bg-teal-50 px-2.5 py-1.5 text-xs text-teal-800 dark:bg-teal-950/30 dark:text-teal-200">
-                          {reviewDescriptionFor(permission)}
-                        </p>
-                      ) : null}
                       {renderActionRows(permission, tier, 'mt-2')}
                     </div>
                   )
@@ -560,17 +662,17 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                 const active = !!permissionDefinitionValue(permission, perms)
                 const exclusivity = permission.exclusiveWithTier
                 const blockedByTier = !!exclusivity && !active && tierOf(perms[exclusivity]) !== 'none'
-                const blockedTierLabel = blockedByTier
-                  ? (tierOf(perms[exclusivity as string]) === 'review' ? translate('review_required', 'Partial Access') : translate('label_full_access', 'Full Access'))
-                  : ''
+                const blockedTierLabel = blockedByTier ? modeLabel(tierOf(perms[exclusivity as string]) as SectionMode) : ''
                 const toggleButton = (
                   <button
                     type="button"
-                    onClick={() => toggle(permission.key)}
+                    role="switch"
+                    aria-checked={active}
+                    onClick={() => (permission.key === 'all' && !active ? requestAll() : toggle(permission.key))}
                     disabled={blockedByTier}
                     title={blockedByTier ? translate('perm_overridden_by_tier', `Already covered by this role's ${blockedTierLabel} Products access -- turn that down to None first to use this instead.`) : undefined}
                     aria-disabled={blockedByTier}
-                    className={`flex w-full select-none items-center gap-3 rounded-xl border p-2.5 text-left transition-colors ${
+                    className={`flex w-full select-none items-center gap-3 rounded-xl border p-2.5 text-left transition-colors ${TOUCH_TARGET} ${
                       blockedByTier
                         ? 'cursor-not-allowed border-transparent bg-gray-50 opacity-50 dark:bg-zinc-900/20'
                         : 'cursor-pointer'
@@ -580,14 +682,13 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                         : blockedByTier ? '' : 'border-transparent bg-white/70 hover:bg-gray-50 dark:bg-zinc-900/40 dark:hover:bg-gray-700/50'
                     }`}
                   >
-                    <div
-                      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border-2 transition-colors ${
-                        active ? 'border-blue-600 bg-blue-600' : 'border-gray-300 dark:border-gray-600'
-                      }`}
+                    <span
+                      aria-hidden="true"
+                      className={`relative inline-block h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active ? 'bg-blue-600' : 'bg-gray-300 dark:bg-zinc-600'}`}
                     >
-                      {active ? <span className="text-[10px] font-bold text-white">OK</span> : null}
-                    </div>
-                    <span className={`min-w-0 flex-1 text-sm font-medium ${active ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${active ? 'left-[1.1rem]' : 'left-0.5'}`} />
+                    </span>
+                    <span className={`min-w-0 flex-1 text-sm font-medium leading-6 ${active ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
                       {labelFor(permission)}
                       {blockedByTier ? (
                         <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">
@@ -595,15 +696,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                         </span>
                       ) : null}
                     </span>
-                    {sensitive ? (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                        permission.sensitivity === 'critical'
-                          ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200'
-                          : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
-                      }`}>
-                        {sensitivityLabel(permission.sensitivity)}
-                      </span>
-                    ) : null}
+                    <SensitiveMark sensitivity={permission.sensitivity} label={sensitivityLabel(permission.sensitivity)} />
                   </button>
                 )
                 // An on/off switch reads as Full when on and None when off.

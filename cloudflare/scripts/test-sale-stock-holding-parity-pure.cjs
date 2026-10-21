@@ -56,7 +56,7 @@ const saleItemPricing = compile('saleItemPricing.ts', { './moneyPrecision': mone
 const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
   './stockTransaction': compile('stockTransaction.ts'),
-  './batchCode': compile('batchCode.ts'),
+  './batchCode': compile('batchCode.ts'), './businessDateWindow': compile('businessDateWindow.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': moneyPrecision,
 })

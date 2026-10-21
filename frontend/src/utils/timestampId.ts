@@ -52,13 +52,11 @@ export function stockSessionId(rawCreatedAt: unknown): string {
 }
 
 // Hand-synced mirror of cloudflare/src/lib/receiptNumber.ts's guard -- keep
-// the two regexes identical. The client mints its own receipt id for an
-// offline sale (api/saleWriteTransport.ts), so it also has to be able to tell
-// a real business id from a foreign one: on 2026-09-02 a reconciliation pack
-// wrote the old system's `NNNNNN@YYYY-MM-DD` invoice label onto 15,004 sales
-// (repaired by migration 0107), and the queue must never replay that shape
-// back to the server. The server normalises anyway; this stops the wrong
-// number reaching the printed offline receipt in the first place.
+// the two regexes identical. A foreign label can still arrive in data: on
+// 2026-09-02 a reconciliation pack wrote the old system's `NNNNNN@YYYY-MM-DD`
+// invoice label onto 15,004 sales (repaired by migration 0107). The server
+// normalises any supplied label; this lets the client tell a real business id
+// from a foreign one.
 export const BUSINESS_RECEIPT_NUMBER_RE = /^(?:RCP-|RET-|SRET-)?\d{8}-\d{6}(?:-[0-9A-Z]{1,4})?$/
 
 export function isBusinessReceiptNumber(value: unknown): boolean {

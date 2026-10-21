@@ -26,7 +26,8 @@ function compileSubject() {
   const localRequire = (request) => {
     if (request === './db') return {}
     if (request === './loyaltyEligibility') return compileLib('loyaltyEligibility',localRequire)
-    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
+    if (request === './saleStatusResolution') return compileLib('saleStatusResolution', localRequire)
+    if (request === './financialPrecision') return compileLib('financialPrecision', localRequire)
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
     // CUTOVER-LR: the coded redirect refusal and the in-batch redirect predicate come from the kernel.

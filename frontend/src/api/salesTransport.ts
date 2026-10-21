@@ -230,10 +230,10 @@ export type SaleItemAddition = {
  * other sale write does, so two people editing the same receipt get a write
  * conflict rather than a silent last-write-wins.
  *
- * Deliberately NOT mirrored to the local db and NOT queued offline: it moves
+ * Deliberately NOT mirrored to the local db and never queued: it moves
  * stock and changes what the customer owes against a row whose current state
- * only the server knows. A replay from an outbox minutes later could deduct
- * units a different sale has since taken.
+ * only the server knows. A delayed replay could deduct units a different sale
+ * has since taken.
  *
  * N18: `review.client_request_id` is CHECKED here rather than assumed. The
  * Worker rejects a body without one, and the caller's id must be the STABLE
@@ -315,9 +315,9 @@ export interface SaleAmendmentRequest {
  * Same discipline as addSaleItems above and for the same reasons: it carries
  * the expected-updated-at stamp so two people correcting the same receipt get
  * a write conflict rather than a silent last-write-wins, and it is
- * deliberately NOT queued offline -- it moves stock in BOTH directions against
- * a row whose current state only the server knows, and a replay from an outbox
- * minutes later could hand back units another sale has since taken.
+ * deliberately never queued -- it moves stock in BOTH directions against
+ * a row whose current state only the server knows, and a delayed replay could
+ * hand back units another sale has since taken.
  *
  * Carries the same client_request_id guard as addSaleItems, for the same
  * reason: POST /amendments refuses a body without one (routes/sales.ts), and
@@ -448,24 +448,6 @@ export function getSalesStatsStrip(params: { startDate: string; endDate: string;
 // ---- Phase X (Part 395): daily report + per-courier delivery totals -------
 // No local fallbacks that fabricate zeros: a failed report read should show
 // the error path, never an all-zero report that reads as "no sales".
-
-export function getSalesDailyReport(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
-  return route(
-    `sales:daily-report:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales/daily-report', query)),
-    null,
-  )
-}
-
-export function getSalesDayReport(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
-  return route(
-    `sales:day-report:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales/day-report', query)),
-    null,
-  )
-}
 
 export function getDeliveryContactReport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })

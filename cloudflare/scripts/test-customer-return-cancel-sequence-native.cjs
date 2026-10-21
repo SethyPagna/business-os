@@ -163,7 +163,8 @@ async function main() {
       return { id: Number(created.body.id), quote: quoted.body }
     }
     const statusOf = async id => (await db.prepare('SELECT status FROM returns WHERE id=?').bind(id).first()).status
-    const saleStatus = async saleId => (await db.prepare('SELECT sale_status FROM sales WHERE id=?').bind(saleId).first()).sale_status
+    // 6.0.905: a return is a tag beside the payment state (sales.return_state), never a sale_status word.
+    const saleStatus = async saleId => { const row = await db.prepare('SELECT sale_status,return_state FROM sales WHERE id=?').bind(saleId).first(); return `${row.sale_status}/${row.return_state}` }
     const itemRows = async ids => JSON.stringify((await db.prepare(`SELECT id,return_id,sale_item_id,quantity,total_usd,
       total_khr,refund_snapshot_json FROM return_items WHERE return_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`)
       .bind(...ids).all()).results)
@@ -200,7 +201,7 @@ async function main() {
     assert.deepEqual([r2.quote.calculated_refund_usd, r2.quote.total_refund_usd], [3.3366, 3.33])
     assert.equal(await snapshotField(r2.id, 'returned_quantity_before'), 1)
     assert.equal(await activePaid(1), 6.67)
-    assert.equal(await saleStatus(1), 'partial_return')
+    assert.equal(await saleStatus(1), 'completed/partial')
 
     // 2. Cancel R1, then quote and create R3. Before the fix the quote was
     // refused with customer_return_cohort_invalid and the sale could never
@@ -238,7 +239,7 @@ async function main() {
     assert.equal(await headerRows([r2.id, r3.id]), othersBeforeRestore, 'restoring rewrites no other return header')
     assert.equal(await activePaid(1), 10.01, 'three restored units pay the line entitlement exactly, never more')
     assert.ok(await activePaid(1) <= first.payoutCap)
-    assert.equal(await saleStatus(1), 'partial_return', 'the second sale line is still unreturned')
+    assert.equal(await saleStatus(1), 'completed/partial', 'the second sale line is still unreturned')
 
     // 4. Undo then redo that restoration with R3 present; both directions must
     // land on the step 3 state and rewrite nothing.

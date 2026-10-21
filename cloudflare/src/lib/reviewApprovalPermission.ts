@@ -8,7 +8,7 @@ import { roundMoney4, subtractDecimalSum } from './moneyPrecision'
 import { readProductMoneyPlan } from './productWrites'
 import { normalizeProductDiscountBody, productDiscountChanged, PRODUCT_DISCOUNT_PRICE_FIELDS } from './productDiscountGate'
 import { productImageFieldsChanged, productImageFieldsChangedResolved } from './productImagePermission'
-import { findSameIdentityProduct } from './productIdentity'
+import { productSupplierChanged } from './productSupplierGate'
 
 // Finding H (12 Oct 2026): approving a queued request replays its write with the REVIEWER's authority
 // (lib/reviewApply.ts), so the reviewer must hold, right now, the same grant the direct route demands for
@@ -76,19 +76,21 @@ export async function reviewApprovalPermissionError(env: Env, user: SessionUser,
     // Same policy as the direct POST: initial selling/wholesale prices are not gated, a discount is.
     if (priceDenied && productDiscountChanged(null, body)) return refusal('products:price')
     if (imageDenied && productImageFieldsChanged(body)) return refusal('products:image')
-    // Owner ruling 16 (13 Oct 2026): a queued create that now matches an existing product is approved as the fold,
-    // and a starting quantity on it becomes a stock-in on that product -- an inventory adjust, like every receipt.
-    if (getActionTier(user, 'inventory', 'adjust') !== 'full' && Number(body.stock_quantity) > 0
-      && await findSameIdentityProduct(getDb(env), String(body.name || '').trim(), body.barcode, null)) return refusal('inventory:adjust')
+    // A starting quantity is a stock-in however the approval lands: on a new product (audit P2-b) or, by owner
+    // ruling 16 (13 Oct 2026), on the existing product a queued create now matches -- an inventory adjust, like every receipt.
+    if (getActionTier(user, 'inventory', 'adjust') !== 'full' && Number(body.stock_quantity) > 0) return refusal('inventory:adjust')
     return null
   }
 
   const checksPrice = priceDenied && [...PRICE_FIELDS, ...PRODUCT_DISCOUNT_PRICE_FIELDS].some(field => owns(body, field))
   const checksImages = imageDenied && (owns(body, 'image_path') || owns(body, 'image_gallery'))
-  if (!checksPrice && !checksImages) return null
+  // A queued supplier change is approved with the REVIEWER's grant, like a price (owner, 19 Oct 2026).
+  const checksSupplier = getActionTier(user, 'products', 'supplier') !== 'full' && owns(body, 'supplier')
+  if (!checksPrice && !checksImages && !checksSupplier) return null
   const db = getDb(env)
   const current = await db.prepare('SELECT * FROM products WHERE id = @id').get<Record<string, unknown>>({ id: row.entity_id })
   if (!current) return null
+  if (checksSupplier && productSupplierChanged(current.supplier, body)) return refusal('products:supplier')
   if (checksPrice) {
     // A saved plan is the direct route's own comparison (routes/products.ts productPriceChanged); updateRow
     // guards its before-image, so the plan's before IS the value being replaced.

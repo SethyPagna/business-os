@@ -112,53 +112,45 @@ function emitBuildManifest(): Plugin {
   return {
     name: 'business-os-build-manifest',
     generateBundle(_options, bundle) {
-      // woff2 belongs here with the JS and CSS. The Khmer UI font is
-      // SELF-HOSTED (@fontsource/noto-sans-khmer, three weights), and a font
-      // file that is only cached opportunistically is not cached at all on a
-      // phone that installs the app and is then taken offline: iOS falls back
-      // to whatever Khmer face the system has, which renders the app in a
-      // different, taller face than the one every line box is sized for. Only
-      // woff2 -- the .woff twins beside it exist for browsers this app does
-      // not support, and precaching both would double the bytes for nothing.
-      const offlineAssetUrls = Object.values(bundle)
-        .map((output) => `/${output.fileName.replace(/\\/g, '/')}`)
+      const assetUrl = (fileName: string) => `/${fileName.replace(/\\/g, '/')}`
+      // woff2 belongs here with the JS and CSS: the Khmer UI font is
+      // self-hosted, and iOS falls back to a taller system Khmer face (every
+      // line box is sized for this one) until the file is cached. Only woff2;
+      // the .woff twins exist for browsers this app does not support.
+      const buildAssetUrls = Object.values(bundle)
+        .map((output) => assetUrl(output.fileName))
         .filter((fileName) => /\.(?:js|css|woff2)$/i.test(fileName))
         .sort()
-      const eagerFromRoutes = new Set(
-        toRoutePreloadFiles(bundle, eagerPrecacheChunkNames).map((fileName) => `/${fileName.replace(/\\/g, '/')}`),
-      )
-      // A cached HTML document is not an offline shell until its lazy public
-      // root, transitive static imports and extracted CSS are available too.
+      // A cached HTML document cannot boot until its lazy public root,
+      // transitive static imports and extracted CSS are available too.
       const required = new Set<string>()
       const visitStartup = (fileName: string) => {
-        const url = `/${fileName.replace(/\\/g, '/')}`
+        const url = assetUrl(fileName)
         if (required.has(url)) return
         required.add(url)
         const chunk = bundle[fileName]
         if (!isBundleChunk(chunk)) return
         for (const dependency of chunk.imports) visitStartup(dependency)
         const metadata = (chunk as OutputChunk & { viteMetadata?: { importedCss?: Set<string> } }).viteMetadata
-        for (const css of metadata?.importedCss ?? []) required.add(`/${css.replace(/\\/g, '/')}`)
+        for (const css of metadata?.importedCss ?? []) required.add(assetUrl(css))
       }
       for (const chunk of Object.values(bundle)) {
         if (isBundleChunk(chunk) && (chunk.isEntry || chunk.name === 'PublicCatalogRoot')) visitStartup(chunk.fileName)
       }
-      for (const url of required) eagerFromRoutes.add(url)
-      // Entry chunks (the ones index.html itself references) are always
-      // eager -- they are already a hard install gate via requiredEntryAssets
-      // in service-worker.ts; this just keeps the manifest's own eager/
-      // deferred split consistent with that gate instead of contradicting it.
-      for (const output of Object.values(bundle)) {
-        if (isBundleChunk(output) && output.isEntry) {
-          eagerFromRoutes.add(`/${output.fileName.replace(/\\/g, '/')}`)
-        }
-      }
-      // The Khmer font is always eager too -- it is only cached opportunistically
-      // otherwise, and a deferred pass could still be running when the user
-      // switches to Khmer, briefly showing the wrong font (see the woff2 comment
-      // above for why this actually matters on iOS).
-      const eagerAssetUrls = offlineAssetUrls.filter((url) => eagerFromRoutes.has(url) || url.endsWith('.woff2'))
-      const deferredAssetUrls = offlineAssetUrls.filter((url) => !eagerAssetUrls.includes(url))
+      const requiredUrls = [...required].sort()
+      // Only the pack of the staff device's UI language is precached; the
+      // service worker learns it at runtime (UI_LANGUAGE_URL in service-worker.ts).
+      const languagePacks = Object.fromEntries(['en', 'km']
+        .map((language) => [language, toRoutePreloadFiles(bundle, [`lang-${language}`])[0]])
+        .filter(([, fileName]) => Boolean(fileName))
+        .map(([language, fileName]) => [language, assetUrl(fileName as string)]))
+      const languagePackUrls = new Set(Object.values(languagePacks))
+      const adminEager = new Set([
+        ...requiredUrls,
+        ...toRoutePreloadFiles(bundle, adminEagerPrecacheChunkNames).map(assetUrl),
+        ...buildAssetUrls.filter((url) => url.endsWith('.woff2')),
+      ])
+      const adminEagerUrls = buildAssetUrls.filter((url) => adminEager.has(url) && !languagePackUrls.has(url))
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-build.json',
@@ -173,10 +165,17 @@ function emitBuildManifest(): Plugin {
         fileName: 'business-os-precache.json',
         source: JSON.stringify({
           hash: buildHash,
-          assets: offlineAssetUrls,
-          eager: eagerAssetUrls,
-          deferred: deferredAssetUrls,
-          required: [...required].sort(),
+          languagePacks,
+          hosts: {
+            // Staff host: shell at install, every other route in the background.
+            admin: {
+              required: requiredUrls,
+              eager: adminEagerUrls,
+              deferred: buildAssetUrls.filter((url) => !adminEager.has(url) && !languagePackUrls.has(url)),
+            },
+            // Storefront: only what its first paint needs; the rest on demand.
+            shop: { required: requiredUrls, eager: requiredUrls, deferred: [] },
+          },
         }, null, 2),
       })
     },
@@ -202,10 +201,8 @@ const routePreloadChunkNames = {
   // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas and
   // qrcode, and no startup chunk imports it: Receipt, printReceipt and
   // settings-otp-modal import() it,
-  // and only the lazy scanner chunk (vendor-zxing) imports it statically
-  // (measured in the emitted graph) -- yet it was preloaded at
-  // fetchpriority=high on every admin cold load. It stays in the eager
-  // precache below, so an installed PWA still prints offline.
+  // and nothing imports it statically -- yet it was preloaded at
+  // fetchpriority=high on every admin cold load.
   //
   // I6-3: 'app-shared' (the /src/components/shared/ catch-all, 257 KB raw /
   // 76 KB gz) is a static import of AdminRoot and of PublicCatalogRoot, so
@@ -311,25 +308,14 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): st
 // P4-4b fix 5: the service worker used to precache all generated chunks
 // (274 assets / 7.92 MB at the time this was measured) synchronously at
 // install, so a new build saturated a cellular/iOS connection before the
-// app shell could even finish activating -- part of the same "takes a
-// while to load" complaint fix 4 addressed for navigations. Only the app
-// shell chunks, the active language packs and the routes an offline POS
-// actually needs (POS itself plus the shared product/API chunks it
-// depends on) need to be ready before first paint; everything else is
-// precached lazily after the worker activates (see precacheDeferredAssets
-// in service-worker.ts). This reuses the SAME chunk-name lists already
-// computed for route preloading (routePreloadChunkNames,
-// toRoutePreloadFiles) instead of a new classification mechanism.
-const eagerPrecacheChunkNames = [...new Set([
+// app shell could even finish activating. On the staff host only the shell
+// (these route-preload lists) is installed eagerly; every other route is
+// precached after activation (precacheDeferredAssets in service-worker.ts).
+// Offline selling is cancelled, so POS, receipt printing and both language
+// packs no longer justify an eager slot.
+const adminEagerPrecacheChunkNames = [...new Set([
   ...routePreloadChunkNames.admin,
-  ...routePreloadChunkNames.pos,
-  'lang-en',
-  'lang-km',
-  // Receipt printing (html2canvas) and receipt QR codes (qrcode) must work
-  // offline the first time after an install or update, before any page has
-  // pulled this chunk in. It left the admin preload list in I6-2; it did not
-  // leave the offline set.
-  'vendor',
+  ...routePreloadChunkNames.login,
 ])]
 
 // I6-1: language pack chunk per UI language code. The route preload script
@@ -555,6 +541,7 @@ function deferRenderBlockingStylesheets(): Plugin {
 
 const appShellIconNames = new Set([
   'arrow-down',
+  'arrow-down-wide-narrow',
   'arrow-up',
   'badge-dollar-sign',
   'bell',
@@ -565,6 +552,8 @@ const appShellIconNames = new Set([
   'database-backup',
   'folder-open',
   'languages',
+  'layers',
+  'list',
   'layout-dashboard',
   'log-out',
   'moon',
@@ -572,6 +561,8 @@ const appShellIconNames = new Set([
   'package',
   'receipt',
   'rotate-ccw',
+  'rotate-cw',
+  'tags',
   'server',
   'settings',
   'shopping-bag',
@@ -879,10 +870,19 @@ function manualChunks(id: string): string | undefined {
       // portalMotion.ts (reduced-motion scroll behaviour) is imported by PublicCatalogPage,
       // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
       || normalized.includes('/src/components/catalog/portalMotion.ts')
+      // PortalSocialRow.tsx (the one social icon map + header row) and
+      // portalSocialLinks.ts (its builders) are imported by the storefront page and
+      // its surface (catalog-public), the editor preview (catalog), About
+      // (catalog-secondary-tabs) and the footer (catalog-legal), so they live here.
+      || normalized.includes('/src/components/catalog/PortalSocialRow.tsx')
+      || normalized.includes('/src/components/catalog/portalSocialLinks.ts')
+      // aiProviderDisclosure.ts (the AI provider map) is read by the assistant tab
+      // (catalog) and the privacy policy (catalog-legal); in either chunk it would
+      // add a catalog <-> catalog-legal cycle.
+      || normalized.includes('/src/components/catalog/legal/aiProviderDisclosure.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
-      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PublicCatalogPage
-      // -> catalog-public, CatalogPage -> catalog, CatalogSecondaryTabs,
-      // LegalPages -> catalog-legal). Left to the generic
+      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PortalSocialRow
+      // -> catalog-public-core). Left to the generic
       // '/src/components/shared/' catch-all further down, it lands in 'app-shared' --
       // and since PublicCatalogPage (catalog-public) statically imports it, that
       // creates a catalog-public -> app-shared back-edge with no corresponding
@@ -1087,7 +1087,9 @@ function manualChunks(id: string): string | undefined {
   }
   if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
-  if (/[\\/]node_modules[\\/]@zxing[\\/]/.test(id)) return 'vendor-zxing'
+  // ts-custom-error is @zxing/library's own dependency; in the generic 'vendor'
+  // bucket it made opening the scanner fetch html2canvas and qrcode too.
+  if (/[\\/]node_modules[\\/](?:@zxing|ts-custom-error)[\\/]/.test(id)) return 'vendor-zxing'
   if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return undefined
   // P9-perf (Sep 16 2026): xlsx (SheetJS) was falling into the generic
   // catch-all 'vendor' bucket alongside qrcode and html2canvas. All three

@@ -18,7 +18,7 @@ import {
 // call the same function -- see the header note there for what changed and why.
 import {
   composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
-  SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
+  refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
@@ -221,6 +221,9 @@ function profitValue(profitUsd: unknown, missingLines?: unknown, knownLines?: un
   if (!wholeCount(knownLines)) return `${bi('Unknown', 'មិនស្គាល់')} (${missing})`
   return `${usd(profitUsd)} (${missing} ${unknownCostWord()})`
 }
+/** Owner, 20 Oct 2026: revenue and profit WITHOUT Not Paid sales, printed under the full figure only when Not Paid sales moved it. */
+const paidOnlyRows = (key: 'revenuePaidOnly' | 'profitPaidOnly', withUsd: unknown, withoutUsd: unknown): string[] =>
+  (withoutUsd == null || Number(withoutUsd) === Number(withUsd) ? [] : [labeled(key, usd(withoutUsd))])
 /** The courier cost part of a delivery row (empty when there is nothing to say). NULL is not $0: a recorded $0 prints, an unrecorded one is counted. */
 function courierCostPart(costUsd: number | null | undefined, unrecorded?: unknown): string {
   const missing = wholeCount(unrecorded)
@@ -533,6 +536,8 @@ type UnitBucket = { count: number; quantity: number } | null | undefined
 type SalesBucket = {
   count: number; usd: number; cancelled: number; refundUsd: number
   profitUsd: number; deliveryFeeUsd: number; creditUsd: number
+  /** Revenue and profit without Not Paid sales; optional for callers without the kernel (the pure tests). */
+  usdWithoutNotPaid?: number; profitWithoutNotPaidUsd?: number
   // The courier money actually paid out on the day's sales, in both
   // currencies: courierPayoutsWhere (lib/shiftReconciliation.ts), the query
   // the shift report's delivery cost reads, which leaves out a payout that is
@@ -606,11 +611,10 @@ async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals
       count: totals.tx_count, usd: totals.revenue_usd,
       cancelled: totals.cancelled_tx_count, refundUsd: totals.refund_usd,
       profitUsd: totals.profit_usd, deliveryFeeUsd: totals.delivery_usd,
-      // Not Paid on the kernel's net basis -- inside revenue and profit
-      // above, printed on its own line as a POSITIVE "Credit" figure and
-      // never subtracted from anything (the owner: "just use credit ...
-      // instead of $-n ... just $n").
-      creditUsd: totals.pending_revenue_usd,
+      usdWithoutNotPaid: totals.revenue_without_not_paid_usd, profitWithoutNotPaidUsd: totals.profit_without_not_paid_usd,
+      // What Not Paid sales still owe (owner, 21 Oct 2026), a POSITIVE memo
+      // never subtracted from anything.
+      creditUsd: totals.not_paid_owed_usd,
       // The courier half of the delivery cost, off the SAME query the shift
       // report's delivery cost reads (courierPayoutsWhere), over this day's
       // sales -- not the kernel's raw delivery_actual_cost_usd, which counts
@@ -881,9 +885,10 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
-    const sales = [labeled('revenue', usd(stats.sales?.usd))]
+    const sales = [labeled('revenue', usd(stats.sales?.usd)), ...paidOnlyRows('revenuePaidOnly', stats.sales?.usd, stats.sales?.usdWithoutNotPaid)]
     if (extra.sales?.totalDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
     sales.push(labeled('profit', profitValue(stats.sales?.profitUsd, stats.sales?.costMissingLines, stats.sales?.costKnownLines)))
+    sales.push(...paidOnlyRows('profitPaidOnly', stats.sales?.profitUsd, stats.sales?.profitWithoutNotPaidUsd))
     if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
     // The courier money is a SALES figure -- it comes out of the day's
     // deliveries, not out of the fees table -- and it is normally reported
@@ -987,6 +992,7 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
     const lines = [
       reportTitle('🛍️', 'Sales', 'ការលក់', date),
       sectionHeader('sales', REPORT_SECTION_EDGE), labeled('revenue', usd(stats.sales?.usd)),
+      ...paidOnlyRows('revenuePaidOnly', stats.sales?.usd, stats.sales?.usdWithoutNotPaid),
       sectionHeader('invoices', REPORT_SECTION_EDGE), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
       sectionHeader('latestReceipts', REPORT_SECTION_EDGE),
     ]
@@ -1282,6 +1288,9 @@ export type ShiftReportFigures = {
   // and the day summary read, never a second revenue computed here.
   revenueUsd: number
   profitUsd: number
+  /** Same meaning as SalesBucket's usdWithoutNotPaid / profitWithoutNotPaidUsd. */
+  revenueWithoutNotPaidUsd?: number
+  profitWithoutNotPaidUsd?: number
   /** Same meaning as SalesBucket's costMissingLines / costKnownLines. */
   costMissingLines?: number
   costKnownLines?: number
@@ -1297,7 +1306,7 @@ export type ShiftReportFigures = {
   // The delivery-cost line prints only when this is above zero.
   deliveryCostRecorded: number
   // Customer refunds, on the kernel's net basis. NOT the same figure as
-  // creditUsd: credit is a sale that has not been paid for, a refund is
+  // creditUsd: credit is what Not Paid sales still owe, a refund is
   // money that was taken and given back. Printed as the ONE refunds line --
   // no per-return breakdown.
   refundUsd: number
@@ -1486,7 +1495,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
 
   // 2. Sales -- Revenue and Profit print unconditionally, even at $0.00 (a
   // quiet shift is still a real one); every other line is dropped when zero.
-  const sales = [labeled('revenue', usd(figures.revenueUsd))]
+  const sales = [labeled('revenue', usd(figures.revenueUsd)), ...paidOnlyRows('revenuePaidOnly', figures.revenueUsd, figures.revenueWithoutNotPaidUsd)]
   if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
   if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
   // Gross sales explains the two cuts above it, so it prints only when there
@@ -1494,8 +1503,9 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // twice under two names is the repetition the redesign takes out.
   if ((figures.itemDiscountUsd || figures.invoiceDiscountUsd) && figures.grossSalesUsd != null) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
   sales.push(labeled('profit', profitValue(figures.profitUsd, figures.costMissingLines, figures.costKnownLines)))
+  sales.push(...paidOnlyRows('profitPaidOnly', figures.profitUsd, figures.profitWithoutNotPaidUsd))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
-  // Always positive, always labelled "Not Paid" -- never "$-n", never
+  // Always positive -- what Not Paid sales still owe, never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
   if (figures.creditUsd) sales.push(labeled('credit', usd(figures.creditUsd)))
   // Directly below Not Paid (owner, Sep 14 2026: "also add one row below
@@ -1675,6 +1685,8 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     edited: counts.edited,
     // Canonical revenue, straight off the kernel -- never re-derived here.
     revenueUsd: totals.revenue_usd,
+    revenueWithoutNotPaidUsd: totals.revenue_without_not_paid_usd,
+    profitWithoutNotPaidUsd: totals.profit_without_not_paid_usd,
     // Cost and profit as the Reports hub defines them. No second definition
     // lives here: if that one changes, this line changes with it, which is the
     // only way the shift message and the day report can stay reconcilable.
@@ -1690,10 +1702,9 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // yesterday's receipt is yesterday's figure -- otherwise the two surfaces
     // would disagree about the same money.
     refundUsd: totals.refund_usd,
-    // Not Paid, on the same net basis. Included in business revenue/profit,
-    // but never in collected cash. Always printed as a positive "Credit"
-    // figure -- see the owner's ruling in the header comment.
-    creditUsd: totals.pending_revenue_usd,
+    // What Not Paid sales still owe after deposits and returns (owner, 21 Oct
+    // 2026). Always printed as a positive memo.
+    creditUsd: totals.not_paid_owed_usd,
     // The owner's two discount rows, straight off the kernel: the per-item
     // cuts, and the store + membership cuts taken on the receipt.
     itemDiscountUsd: totals.item_discount_usd,
@@ -1922,6 +1933,8 @@ export function shiftOverviewFilters(shift: { business_date: string; branch_id: 
 
 export type ShiftOverviewFigures = {
   revenueUsd: number; profitUsd: number; grossSalesUsd: number; itemDiscountUsd: number; invoiceDiscountUsd: number
+  /** Same meaning as SalesBucket's usdWithoutNotPaid / profitWithoutNotPaidUsd. */
+  revenueWithoutNotPaidUsd?: number; profitWithoutNotPaidUsd?: number
   /** Same meaning as SalesBucket's costMissingLines / costKnownLines. */
   costMissingLines?: number; costKnownLines?: number
   deliveryFeeUsd: number; creditUsd: number; refundUsd: number
@@ -2050,12 +2063,13 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   const showExpenses = categories?.fees !== false
   const extra = figures.sections ?? {}
 
-  const sales = [labeled('revenue', usd(figures.revenueUsd))]
+  const sales = [labeled('revenue', usd(figures.revenueUsd)), ...paidOnlyRows('revenuePaidOnly', figures.revenueUsd, figures.revenueWithoutNotPaidUsd)]
   if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
   if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
   if (extra.sales && figures.itemDiscountUsd && figures.invoiceDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
   if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
   sales.push(labeled('profit', profitValue(figures.profitUsd, figures.costMissingLines, figures.costKnownLines)))
+  sales.push(...paidOnlyRows('profitPaidOnly', figures.profitUsd, figures.profitWithoutNotPaidUsd))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
   if (figures.creditUsd) sales.push(labeled('credit', notPaidValue(figures.creditUsd, extra.sales)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
@@ -2158,9 +2172,10 @@ export async function shiftOverviewFigures(
   ])
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
+    revenueWithoutNotPaidUsd: totals.revenue_without_not_paid_usd, profitWithoutNotPaidUsd: totals.profit_without_not_paid_usd,
     costMissingLines: totals.cost_missing_snapshot_lines, costKnownLines: totals.cost_known_lines,
     itemDiscountUsd: totals.item_discount_usd, invoiceDiscountUsd: totals.discount_usd,
-    deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.pending_revenue_usd, refundUsd: totals.refund_usd,
+    deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.not_paid_owed_usd, refundUsd: totals.refund_usd,
     invoices: totals.tx_count, cancelled: totals.cancelled_tx_count,
     paymentMethods: foldRows(
       payments.map((row) => ({ method: row.label || row.key || 'Unknown', count: row.tx_count, usd: row.revenue_usd })),
@@ -3073,6 +3088,8 @@ export type TelegramReturnSummary = {
   receiptNumber?: string | null; party?: string | null; branch?: string | null
   reason?: string | null; returnType?: string | null; settlement?: string | null
   items: TelegramReturnLine[]; refundUsd?: number | null; refundKhr?: number | null
+  /** Part of a customer return that lowered a Not Paid sale's debt; refundUsd/refundKhr are then the cash part. */
+  debtLoweredUsd?: number | null
   compensationUsd?: number | null; compensationKhr?: number | null; lossUsd?: number | null; lossKhr?: number | null
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
@@ -3157,6 +3174,7 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
       // (a replacement, a write-off) already says so on its own Settlement
       // line, so "Refund: none" was a line that stated nothing.
       : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : ''),
+    ret.kind === 'customer' && (ret.debtLoweredUsd || 0) > 0 ? `Debt lowered: ${usd(Number(ret.debtLoweredUsd))}` : '',
     ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
     ret.by ? `By: ${ret.by}` : '',
   ]
@@ -3166,35 +3184,52 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
 // route just wrote, incl. the lot each line landed in and its branch) and the
 // resulting on-hand per product, so the route hands over only the header.
 type ReturnItemRow = { product_name: string | null; quantity: number; total_usd: number | null; stock_action: string | null; lot_code: string | null; received_at: string | null; branch_on_hand: number | null; total_on_hand: number | null }
-export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>): Promise<boolean> {
-  const db = getDb(env)
-  const [items, replacements] = await Promise.all([
-    db.prepare(`SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code, pb.received_at,
-        (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
-        (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
-      FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
-      WHERE ri.return_id = @returnId ORDER BY ri.id`).all<ReturnItemRow>({ returnId }),
-    db.prepare('SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id').all<{ product_name: string | null; quantity: number }>({ returnId }).catch(() => []),
-  ])
-  return sendTelegramEvent(env, {
-    // A customer return is the `returns` family (its own switch and topic);
-    // it is NOT also sent as a sale. A supplier return stays a stock-out.
-    type: base.kind === 'supplier' ? 'stock_out' : 'returns',
-    heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
-    lines: formatReturnTelegramLines({
-      ...base,
-      items: items.map((row) => ({
-        product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
-        refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
-        stockAction: base.kind === 'supplier' ? null : row.stock_action,
-        receivedDate: row.received_at,
-        lot: row.lot_code,
-        branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
-        totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
-      })),
-      replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
-    }),
-  })
+/**
+ * One settings read, then -- only when the return alert is on -- ONE read of
+ * the recorded lines and replacements. `after` (the replacement sale's own
+ * alert) goes out on the same settings read: an exchange is the costliest
+ * return request in D1 statements, so its notifications share what they can.
+ */
+export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>, after: TelegramEvent[] = []): Promise<boolean> {
+  const config = await getTelegramConfig(env)
+  // A customer return is the `returns` family (its own switch and topic);
+  // it is NOT also sent as a sale. A supplier return stays a stock-out.
+  const type: TelegramEventType = base.kind === 'supplier' ? 'stock_out' : 'returns'
+  let sent = false
+  if (telegramEventIsOn(config, type)) {
+    const recorded = await getDb(env).prepare(`SELECT
+        (SELECT json_group_array(json_object('product_name',product_name,'quantity',quantity,'total_usd',total_usd,'stock_action',stock_action,
+          'lot_code',lot_code,'received_at',received_at,'branch_on_hand',branch_on_hand,'total_on_hand',total_on_hand)) FROM (
+          SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code, pb.received_at,
+            (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
+            (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
+          FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
+          WHERE ri.return_id = @returnId ORDER BY ri.id)) AS items,
+        (SELECT json_group_array(json_object('product_name',product_name,'quantity',quantity)) FROM (
+          SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id)) AS replacements`)
+      .get<{ items: string | null; replacements: string | null }>({ returnId })
+    const items = JSON.parse(recorded?.items || '[]') as ReturnItemRow[]
+    const replacements = JSON.parse(recorded?.replacements || '[]') as Array<{ product_name: string | null; quantity: number }>
+    sent = await deliverTelegramEvent(config, {
+      type,
+      heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
+      lines: formatReturnTelegramLines({
+        ...base,
+        items: items.map((row) => ({
+          product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
+          refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
+          stockAction: base.kind === 'supplier' ? null : row.stock_action,
+          receivedDate: row.received_at,
+          lot: row.lot_code,
+          branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
+          totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
+        })),
+        replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
+      }),
+    }, {})
+  }
+  for (const event of after) await deliverTelegramEvent(config, event, {})
+  return sent
 }
 
 // ---- Return cancelled / restored (owner, 27 Sep 2026) ----------------------
@@ -3205,9 +3240,11 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
 // status NOW, so an undo of a cancel reports a restore without the caller
 // having to work out the direction.
 
+// refund*: the cash part only (what left, or comes back to, a drawer -- the shift drawer SQL); debtLoweredUsd: the
+// part that lowered a Not Paid sale's debt instead (returns.owed_reduction_usd).
 export type TelegramReturnStatusRow = {
   returnNumber: string; receiptNumber?: string | null; party?: string | null; branch?: string | null
-  refundUsd?: number | null; refundKhr?: number | null
+  refundUsd?: number | null; refundKhr?: number | null; debtLoweredUsd?: number | null
 }
 
 /**
@@ -3241,6 +3278,8 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
       ].filter(Boolean)))
     }
   }
+  const debtLowered = input.kind === 'customer' ? input.returns.reduce((sum, ret) => sum + (Number(ret.debtLoweredUsd) || 0), 0) : 0
+  if (debtLowered > 0) lines.push(`Debt lowered: ${usd(debtLowered)}`)
   if (input.by) lines.push(`By: ${input.by}`)
   return lines.filter(Boolean)
 }
@@ -3254,6 +3293,7 @@ type ReturnStatusDbRow = {
   id: number; return_number: string | null; status: string | null; return_scope: string | null
   receipt_number: string | null; customer_name: string | null; supplier_name: string | null
   branch_name: string | null; total_refund_usd: number | null; total_refund_khr: number | null
+  owed_reduction_usd: number | null; cash_usd: number | null; cash_khr: number | null
 }
 
 /**
@@ -3267,7 +3307,8 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
   if (!ids.length) return
   const rows = await getDb(env).prepare(`
     SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
-      ${branchHistoryNameSql('r.branch_name', 'b.name')} AS branch_name, r.total_refund_usd, r.total_refund_khr
+      ${branchHistoryNameSql('r.branch_name', 'b.name')} AS branch_name, r.total_refund_usd, r.total_refund_khr,
+      r.owed_reduction_usd, ${refundDrawerUsdSql('r')} AS cash_usd, ${refundDrawerKhrSql('r')} AS cash_khr
     FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
     WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
   `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })
@@ -3282,7 +3323,8 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
       receiptNumber: row.receipt_number,
       party: kind === 'supplier' ? row.supplier_name : row.customer_name,
       branch: row.branch_name,
-      refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr,
+      ...(kind === 'customer' ? { refundUsd: Number(row.cash_usd) || 0, refundKhr: Number(row.cash_khr) || 0, debtLoweredUsd: Number(row.owed_reduction_usd) || 0 }
+        : { refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr }),
     })
     groups.set(key, group)
   }

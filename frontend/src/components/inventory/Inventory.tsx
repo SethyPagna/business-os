@@ -1714,6 +1714,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const stripRevenue = Number(kernelTotals.revenue_usd) || 0
   const stripCogs = Number(kernelTotals.cost_usd) || 0
   const stripProfit = Number(kernelTotals.profit_usd) || 0
+  // Owner, 20 Oct 2026: the kernel's revenue and profit WITHOUT Not Paid sales, shown only when Not Paid moved them.
+  const stripRevenuePaidOnly = typeof kernelTotals.revenue_without_not_paid_usd === 'number' && kernelTotals.revenue_without_not_paid_usd !== stripRevenue
+    ? kernelTotals.revenue_without_not_paid_usd : null
+  const stripProfitPaidOnly = stripRevenuePaidOnly !== null && typeof kernelTotals.profit_without_not_paid_usd === 'number' ? kernelTotals.profit_without_not_paid_usd : null
   const stripGross = Number(stripDisplayTotals.gross_sales_usd) || 0
   const stripItemDiscount = Number(kernelTotals.item_discount_usd) || 0
   const stripStoreDiscount = Number(kernelTotals.store_discount_usd) || 0
@@ -1798,9 +1802,11 @@ ${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} â
       details: [
         { label: tr('stats_gross', 'Gross sales'), value: fmtUSD(stripGross) },
         { label: String(inventoryStatLabels.revenue), value: fmtUSD(stripRevenue) },
+        ...(stripRevenuePaidOnly === null ? [] : [{ label: tr('revenue_paid_only', 'Revenue (paid only)'), value: fmtUSD(stripRevenuePaidOnly) }]),
         ...(canViewCosts ? [
           { label: String(inventoryStatLabels.cogs), value: fmtUSD(stripCogs) },
           { label: tr('gross_profit', 'Gross profit'), value: fmtUSD(stripProfit), tone: 'ok' as const },
+          ...(stripProfitPaidOnly === null ? [] : [{ label: tr('profit_paid_only', 'Profit (paid only)'), value: fmtUSD(stripProfitPaidOnly) }]),
           { label: marginShortLabel, value: stripRevenue > 0 ? `${((stripProfit / stripRevenue) * 100).toFixed(1)}%` : 'â€”' },
         ] : []),
       ],

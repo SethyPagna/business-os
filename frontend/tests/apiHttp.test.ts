@@ -57,7 +57,7 @@ import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../sr
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
 import { resetActorReadSession } from '../src/api/actorReadScope.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
-import { dispatchSyncUpdates, emitSyncQueueChanged } from '../src/api/syncRuntime.ts'
+import { dispatchSyncUpdates } from '../src/api/syncRuntime.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
 
 type TestCallback = () => void | Promise<void>
@@ -495,10 +495,11 @@ await runTest('read routes return fallback on transient gateway errors without s
   }
 })
 
-await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
+await runTest('integration doctor reads by GET with no null body; only the deep R2 write probe is a POST', () => {
   const source = fs.readFileSync(new URL('../src/api/systemRuntime.ts', import.meta.url), 'utf8')
   const block = source.match(/export function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
-  assert.match(block, /apiFetch\('GET',\s*`\/api\/system\/integration-doctor\$\{suffix\}`,\s*undefined,/)
+  assert.match(block, /apiFetch\('GET',\s*'\/api\/system\/integration-doctor',\s*undefined,/)
+  assert.match(block, /deep\s*\?\s*apiFetch\('POST',\s*'\/api\/system\/integration-doctor',\s*\{\},/)
   assert.doesNotMatch(block, /apiFetch\('GET'[\s\S]*,\s*null\s*,/)
   assert.doesNotMatch(block, /\n\s*true,\s*\n\s*\)/)
 })
@@ -890,14 +891,11 @@ await runTest('sync runtime helpers emit compact window events with timestamps',
 
   try {
     dispatchSyncUpdates(['products', 'dashboard'], 'unit-test')
-    emitSyncQueueChanged({ reason: 'unit-test-queue', queued: 1 })
-    assert.equal(events.length, 3)
+    assert.equal(events.length, 2)
     assert.equal(events[0].type, 'sync:update')
     assert.equal((events[0] as CustomEvent).detail.channel, 'products')
     assert.equal((events[1] as CustomEvent).detail.channel, 'dashboard')
-    assert.equal(events[2].type, 'sync:queue-changed')
-    assert.equal((events[2] as CustomEvent).detail.queued, 1)
-    assert.equal(typeof (events[2] as CustomEvent).detail.ts, 'number')
+    assert.equal(typeof (events[1] as CustomEvent).detail.ts, 'number')
   } finally {
     globalThis.window = originalWindow
     globalThis.CustomEvent = originalCustomEvent
@@ -1004,7 +1002,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /from '\.\/syncRuntime\.ts'/)
   assert.doesNotMatch(source, /from '\.\/syncPreview\.ts'/)
   assert.doesNotMatch(source, /import\('\.\/localDb\.ts'\)/)
-  assert.match(source, /function loadPendingSyncTransport\(\) \{[\s\S]*import\('\.\/pendingSyncTransport\.ts'\)/)
+  assert.doesNotMatch(source, /pendingSyncTransport/)
   assert.doesNotMatch(source, /from '\.\/systemJobs\.ts'/)
   assert.match(source, /function loadSystemJobsTransport\(\) \{[\s\S]*import\('\.\/systemJobs\.ts'\)/)
   assert.doesNotMatch(source, /from '\.\/systemRuntime\.ts'/)
@@ -1147,7 +1145,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(userAdminTransportSource, /import \{ getUsers as getUsersRequest \} from '\.\/userReadTransport\.ts'/)
   assert.match(userAdminTransportSource, /export function getUserProfile/)
   assert.match(userAdminTransportSource, /export function getUserAuthMethods/)
-  assert.match(userAdminTransportSource, /provider-disconnect/)
+  assert.doesNotMatch(userAdminTransportSource, /provider-disconnect/)
   assert.match(userAdminTransportSource, /export function resetPassword/)
   assert.match(userAdminTransportSource, /export function getRoles/)
   assert.match(userAdminTransportSource, /import\('\.\/lazyLocalDb\.ts'\)/)
@@ -1206,7 +1204,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(pendingSyncTransportSource, /sameQueuedSaleRevision\(current, row\)/)
   assert.match(pendingSyncTransportSource, /offlineSaleOwnersMatch\(current\?\.payload\?\.offline_owner, review\.owner\)/)
   assert.match(pendingSyncTransportSource, /await queue\.delete\(row\._seq\)/)
-  assert.match(pendingSyncTransportSource, /dispatchSyncUpdates\(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue'\)/)
+  assert.match(pendingSyncTransportSource, /if \(row\._seq == null \|\| row\.status === 'syncing' \|\| !exported\.has\(row\._seq\)\) continue/)
   assert.match(pendingSyncTransportSource, /export async function getPendingSyncState/)
   assert.match(pendingSyncTransportSource, /serializePendingSyncPreview\(sorted\)/)
   assert.match(pendingSyncTransportSource, /export async function retryPendingSyncNow\(reviewToken\?: string\): Promise<unknown>[\s\S]*validatedReview\(reviewToken\)[\s\S]*syncPendingSalesQueue\(\{ force: true, manualRecovery: true, expectedOwner: review\.owner, reviewedRows: review\.rows \}\)/)
@@ -1298,9 +1296,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /markNotificationSummaryMissing/)
   assert.doesNotMatch(source, /clearNotificationSummaryMissing/)
   assert.match(source, /export async function getNotificationSummary\(\) \{[\s\S]*loadNotificationSummaryTransport\(\)[\s\S]*getNotificationSummaryRequest\(\)/)
-  assert.match(syncRuntimeSource, /export function registerOutboxBackgroundSync/)
+  assert.doesNotMatch(syncRuntimeSource, /registerOutboxBackgroundSync|emitSyncQueueChanged/)
   assert.match(syncRuntimeSource, /export function dispatchSyncUpdates/)
-  assert.match(syncRuntimeSource, /export function emitSyncQueueChanged/)
   assert.match(browserDialogsSource, /export function openCSVDialog/)
   // openCSVDialog now delegates file-reading to parseImportFile (which
   // itself supports both CSV/TSV text and real Excel workbooks) rather

@@ -311,7 +311,7 @@ async function importSale(h, rowNumber, status, lines, { paidUsd, jobId = 'al-im
   const result = await h.call('POST', '/__fixture/import-sale', { jobId, rowNumber, data,
     nowIso: '2026-10-12T02:00:00.000Z', actor: { id: 901, username: 'al_admin', name: 'AL Admin' } })
   assert.equal(result.status, 200, `real import writer refused the fixture sale: ${JSON.stringify(result.body)}`)
-  const sale = await h.one('SELECT id,sale_status,stock_skipped,money_precision_version FROM sales WHERE client_request_id=?', result.body.clientRequestId)
+  const sale = await h.one('SELECT id,sale_status,return_state,stock_skipped,money_precision_version FROM sales WHERE client_request_id=?', result.body.clientRequestId)
   const items = await h.all('SELECT id,product_id,quantity,returned_quantity FROM sale_items WHERE sale_id=? ORDER BY id', sale.id)
   return { sale, items }
 }
@@ -347,7 +347,8 @@ async function main() {
         assert.equal(fixture.items[0].quantity, 3)
         assert.equal(fixture.items[0].returned_quantity, 2)
         assert.equal(fixture.sale.stock_skipped, 1)
-        assert.equal(fixture.sale.sale_status, 'partial_return')
+        // Owner, 20 Oct 2026: the CSV's partial_return is the return tag of a Completed sale.
+        assert.deepEqual([fixture.sale.sale_status, fixture.sale.return_state], ['completed', 'partial'])
         assert.notEqual(fixture.sale.money_precision_version, 1, 'imported sales are legacy-money sales; the legacy return body applies')
       }
     })

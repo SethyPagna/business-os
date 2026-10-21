@@ -12,11 +12,7 @@ import {
 import { getLocalDb } from './lazyLocalDb.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from './actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE, sameQueuedSaleRevision, stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
-import {
-  OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
-  dispatchSyncUpdates,
-  emitSyncQueueChanged,
-} from './syncRuntime.ts'
+import { OFFLINE_SALE_SYNC_UPDATE_CHANNELS, dispatchSyncUpdates } from './syncRuntime.ts'
 
 type SalePayload = Record<string, unknown>
 type LocalRow = Record<string, unknown> & { _seq?: number }
@@ -79,7 +75,7 @@ async function updateQueuedRow(row: LocalRow, updates: Record<string, unknown> =
   })
 }
 
-async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>): Promise<boolean> {
+async function completeQueuedSale(row: LocalRow): Promise<boolean> {
   if (row._seq == null) return false
   const queueSeq = row._seq
   const db = await getLocalDb()
@@ -97,20 +93,7 @@ async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>
     return true
   })
   if (!completed) return false
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
-  if (typeof window !== 'undefined') {
-    dispatchSyncUpdates(OFFLINE_SALE_SYNC_UPDATE_CHANNELS, 'offline-sale-synced')
-    window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        receiptNumber: result?.receiptNumber || result?.receipt_number || row.entity_name || null,
-        client_request_id: (row?.payload as SalePayload | undefined)?.client_request_id || row.id || null,
-        offline_owner: (row.payload as SalePayload | undefined)?.offline_owner,
-        duplicate: !!result?.duplicate,
-        ts: Date.now(),
-      },
-    }))
-  }
+  dispatchSyncUpdates(OFFLINE_SALE_SYNC_UPDATE_CHANNELS, 'offline-sale-synced')
   return true
 }
 
@@ -125,7 +108,6 @@ async function failQueuedSale(row: LocalRow, error: unknown, { retryable = false
     error: err?.message || asText(error || 'Sync failed'),
     error_code: asText((error as { code?: unknown } | null)?.code) || null,
   })
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
 }
 
 async function markQueuedSaleConflict(row: LocalRow, error: unknown): Promise<void> {
@@ -136,19 +118,6 @@ async function markQueuedSaleConflict(row: LocalRow, error: unknown): Promise<vo
     error: err?.message || asText(error || 'Server has a newer version. Review before syncing.'),
     conflict: true,
   })
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, conflict: 1 })
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('sync:write-conflict', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        entity_table: row.entity_table || 'sales',
-        entity_id: row.entity_id ?? null,
-        entity_name: row.entity_name || null,
-        refreshChannels: ['sales', 'products', 'inventory', 'dashboard'],
-        ts: Date.now(),
-      },
-    }))
-  }
 }
 
 function createSaleRequest(payload: SalePayload): Promise<unknown> {
@@ -231,7 +200,7 @@ async function runPendingSalesQueueSync({ force = false, expectedOwner, reviewed
         await quarantine(claimed)
         continue
       }
-      if (await completeQueuedSale(claimed, response)) result.synced += 1
+      if (await completeQueuedSale(claimed)) result.synced += 1
     } catch (error) {
       const failure = error as { status?: number; code?: string }
       if (!isActorReadScopeCurrent(scope, false) || failure.status === 401 || failure.status === 403 || String(failure.code || '').startsWith('offline_owner_')) {

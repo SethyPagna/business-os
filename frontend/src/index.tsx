@@ -13,6 +13,12 @@ import {
 } from './runtime/runtimeErrorClassifier.ts'
 import { installNumberInputWheelGuard } from './runtime/numberInputWheelGuard.ts'
 import { installHorizontalDragScroll } from './runtime/horizontalDragScroll.ts'
+import { installBeforeInstallPromptCapture } from './utils/standaloneNavigation.ts'
+
+// Armed before React mounts: Chromium fires beforeinstallprompt once, possibly
+// before the lazy root commits, and an event nobody preventDefault()s is gone.
+// Never torn down, so the stored event outlives every mount.
+installBeforeInstallPromptCapture()
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }

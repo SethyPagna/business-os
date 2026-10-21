@@ -1,10 +1,11 @@
 import { mergeCostContinuationGuard, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
 import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph, type MergeCostAuthority } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { acquisitionCostResponses, canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
+import { PRODUCT_SUPPLIER_REFUSAL, productSupplierChanged } from '../lib/productSupplierGate'
 import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
@@ -12,6 +13,7 @@ import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteL
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
+import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -24,8 +26,8 @@ import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBindin
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
-import { getProductSalesBreakdown } from '../lib/salesAnalytics'
-import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
+import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
+import { businessToday, localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
@@ -87,6 +89,7 @@ import {
   type ProductConflictActionStockRow,
 } from '../lib/productConflictActionGroups'
 import { attachBatchCounts } from '../lib/productBatches'
+import { readTaggedLotGroups } from '../lib/damagedLotActions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { ProductRemoveError, parseProductRemovePlan, prepareProductRemovePlan, prepareProductRemoveReviewPlans,
   productRemoveApplyStatements, productRemovePlanDigest, productRemoveQueueStatements, productRemoveReviewQueueStatements,
@@ -394,10 +397,61 @@ function isImageOnlyRead(user: SessionUser, surface: ProductReadSurface): boolea
   return getActionTier(user, 'products', 'view') === 'none'
 }
 
-function restrictListPayloadForImageOnly<T extends { items?: unknown }>(payload: T, user: SessionUser): T {
-  if (!Array.isArray(payload?.items)) return payload
+// The ONE image-only list read, shared by /search and /bootstrap. It never goes
+// through the shared response cache (that cache is keyed by URL, not by user, so
+// a payload built for one grant set could be served to another), validates every
+// parameter against the caller's grants (lib/productImageOnlyQuery.ts) and
+// returns only what the role may see: projected rows, the page counters and the
+// filter options for the fields it is granted. promotion_rules never ride along.
+type ImageOnlyList = {
+  items: Array<Partial<Record<string, unknown>>>
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  facets: { categories?: string[]; brands?: string[] }
+  grants: ImageOnlyGrants
+}
+
+async function loadImageOnlyList(env: Env, user: SessionUser, rawQuery: Record<string, string>, extraKeys: readonly string[] = []): Promise<ImageOnlyList> {
   const mergedPermissions = getMergedPermissions(user)
-  return { ...payload, items: payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, mergedPermissions)) }
+  const { query, received, grants } = parseImageOnlyQuery(rawQuery, mergedPermissions, extraKeys)
+  const payload = await searchImageOnlyProductsWithIndexFallback(env, query, {
+    received, facets: { brand: grants.brand, category: grants.category },
+  })
+  return {
+    items: payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, mergedPermissions)),
+    total: payload.total,
+    page: payload.page,
+    pageSize: payload.pageSize,
+    totalPages: payload.totalPages,
+    facets: payload.facets ?? {},
+    grants,
+  }
+}
+
+function imageOnlyQueryErrorResponse(c: Context, error: unknown): Response {
+  if (!(error instanceof ImageOnlyQueryError)) throw error
+  return c.json({ error: error.code, code: error.code, parameter: error.parameter }, error.status)
+}
+
+// /filters has no `surface` parameter, so the vocabulary is projected only for a
+// reader whose single route into the catalog is the image-only Products role.
+// Anyone who can also read POS, Inventory or Promotions needs the full lists.
+function isImageOnlyVocabularyUser(user: SessionUser): boolean {
+  return isImageOnlyRead(user, 'products')
+    && productSurfaceDenialReason(user, 'pos') !== null
+    && productSurfaceDenialReason(user, 'inventory') !== null
+    && getActionTier(user, 'promotions', 'view') === 'none'
+}
+
+function projectVocabularyForImageOnly(vocabulary: Awaited<ReturnType<typeof loadProductFilters>>, user: SessionUser) {
+  const grants = getMergedPermissions(user)
+  return {
+    brands: grants.products_image_only_show_brand === true ? vocabulary.brands : [],
+    categories: grants.products_image_only_show_category === true ? vocabulary.categories : [],
+    units: [], suppliers: [], tags: [], promotions: [], initials: [],
+  }
 }
 
 // Scoped by the SAME active filters as searchProductsPayload (branch,
@@ -627,7 +681,41 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
   })
 }
 
-type ProductSearchOptions = { useSearchIndex?: boolean }
+type ProductSearchOptions = {
+  useSearchIndex?: boolean
+  // Image-only reads only (see loadImageOnlyList). Adds the received-window
+  // predicate and the brand/category option lists; absent for every other reader.
+  imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean } }
+}
+
+// Brand/category options over the same filtered cohort the list shows, each
+// list ignoring its OWN selection (so picking a brand keeps its siblings) and
+// the search text (options describe the cohort, not the typed term). Both
+// lists go out as one batch.
+async function loadImageOnlyFacets(
+  db: ReturnType<typeof getDb>, query: Record<string, string>, lowStock: LowStockConfig,
+  imageOnly: NonNullable<ProductSearchOptions['imageOnly']>,
+): Promise<{ categories?: string[]; brands?: string[] }> {
+  const fields = ([['brands', 'brand', imageOnly.facets.brand], ['categories', 'category', imageOnly.facets.category]] as const)
+    .filter(([, , granted]) => granted)
+  if (!fields.length) return {}
+  const withoutSearch = { ...query, query: '', q: '', search: '' }
+  const statements = fields.map(([, field]) => {
+    const filters = buildSearchFilters({ ...withoutSearch, [field]: '' }, lowStock)
+    pushReceivedWindow(filters.where, filters.params, imageOnly.received)
+    return {
+      sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${filters.joins.join('\n')} WHERE ${filters.where.join(' AND ')}
+        AND trim(COALESCE(p.${field}, '')) <> '' GROUP BY lower(trim(p.${field})) ORDER BY lower(value) ASC`,
+      params: filters.params,
+    }
+  })
+  const results = await db.batch(statements)
+  const facets: { categories?: string[]; brands?: string[] } = {}
+  fields.forEach(([key], index) => {
+    facets[key] = (results[index].results as Array<{ value: string }>).map((row) => row.value).filter(Boolean)
+  })
+  return facets
+}
 
 // The other half of the "group search hides sibling child rows" fix (see
 // familyMemberBaseWhereSql in familyPagination.ts for the parent_id-linked
@@ -859,14 +947,18 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // db stubs implement .all() synchronously (a plain array, not a real
     // Promise); Promise.resolve() normalizes either shape into a genuine
     // thenable so this arm composes safely inside Promise.all regardless.
-    query.money_precision_version==='1'
+    // Image-only reads neither show nor rank by promotions (the role may not see
+    // them, and a promoted-first lead would defeat its name sort), so they skip
+    // the rule read altogether.
+    options.imageOnly ? Promise.resolve<PromotionRule[]>([])
+    : query.money_precision_version==='1'
       ? Promise.resolve(db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>())
         .then(rows => rows.map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule))))
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
   const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
-  const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
+  const promotedRankSql = options.imageOnly ? undefined : `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
     where.push(productPromotedSql(promotionRules, params))
@@ -892,6 +984,9 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     params.initial = initial.toUpperCase()
     where.push(initialClause)
   }
+  // Image-only received window. Deliberately here and not in buildSearchFilters,
+  // which every other product reader shares and which must stay all-time.
+  if (options.imageOnly) pushReceivedWindow(where, params, options.imageOnly.received)
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -921,11 +1016,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // discounted ones top. When nothing in the result set is an exact or
   // prefix match (every family lands in the same tier 3) the order is
   // byte-identical to before.
-  const effectiveFamilyOrderSql = buildFamilyRelevanceOrderSql(familyOrderSql, {
-    hasTier: Boolean(matchTierSql),
-    hasRank: Boolean(matchRankSql),
-    promotedFirst: true,
-  })
+  // An image-only list has no promoted-first lead: it is ordered by the caller's
+  // name sort alone (the role cannot see promotions, and a lead would defeat name_desc).
+  const familyRelevance = { hasTier: Boolean(matchTierSql), hasRank: Boolean(matchRankSql) }
+  const effectiveFamilyOrderSql = options.imageOnly
+    ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
+    : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
   const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
     db,
@@ -990,12 +1086,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     image_gallery: itemsWithGallery[index].image_gallery,
   }))
 
+  const facets = options.imageOnly ? await loadImageOnlyFacets(db, query, lowStockConfig, options.imageOnly) : undefined
+
   return {
     items: mergedItems.map(normalProductRow),
     total,
     page,
     pageSize,
     totalPages,
+    ...(facets ? { facets } : {}),
     // The active rule set rides every product payload so POS/Products can
     // evaluate the SAME kernel client-side (badges, cart pricing) without
     // a second fetch -- and inherit it offline with the cached response.
@@ -1052,7 +1151,8 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   // A present-but-unusable `ids` resolves to "no rows", never "everything":
   // returning the whole catalog to a by-id lookup is exactly the failure
   // being fixed.
-  // Not every unread param is a bug: `include` is also never parsed here, and
+  // Not every unread param is a bug: `include` is never parsed HERE (the one
+  // opt-in, tagged_lots, is read by GET /search -- productSearchIncludes), and
   // that is deliberate and harmless -- attachBranchStock/attachImageGallery/
   // attachBatchCounts run unconditionally for every product read, and the
   // Products page, POS and the branch stock column all depend on that data
@@ -1147,13 +1247,13 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
       if (multiCol) params[`${field}esc`] = escapeLike(values[0].toLowerCase())
       where.push(matchOneSql(field))
     } else if (values.length > 1) {
-      const clauses = values.map((value, index) => {
-        const key = `${field}${index}`
-        params[key] = value.toLowerCase()
-        if (multiCol) params[`${key}esc`] = escapeLike(value.toLowerCase())
-        return matchOneSql(key)
-      })
-      where.push(`(${clauses.join(' OR ')})`)
+      // One JSON list per field, so a long selection binds 1-2 parameters instead of 1-2 per value (D1 caps a statement at 100).
+      params[`${field}List`] = JSON.stringify(values.map((value) => value.toLowerCase()))
+      const exactSql = `lower(trim(COALESCE(p.${field}, ''))) IN (SELECT value FROM json_each(@${field}List))`
+      if (multiCol) {
+        params[`${field}EscList`] = JSON.stringify(values.map((value) => escapeLike(value.toLowerCase())))
+        where.push(`(${exactSql} OR EXISTS (SELECT 1 FROM json_each(@${field}EscList) WHERE ('||' || lower(COALESCE(p.${multiCol}, p.${field}, '')) || '||') LIKE '%||' || value || '||%' ESCAPE '\\'))`)
+      } else where.push(exactSql)
     }
   }
 
@@ -1228,12 +1328,50 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
   }
 }
 
+// The image-only twin of the function above: same index-unavailable fallback,
+// plus the received window and facets. Kept separate so the shared reader's
+// source (pinned by test-worker-perf-2-round-trips-pure.cjs) stays untouched.
+async function searchImageOnlyProductsWithIndexFallback(env: Env, query: Record<string, string>, imageOnly: NonNullable<ProductSearchOptions['imageOnly']>) {
+  try {
+    return await searchProductsPayload(env, query, { imageOnly })
+  } catch (error) {
+    if (!isProductSearchIndexUnavailable(error)) throw error
+    return searchProductsPayload(env, query, { imageOnly, useSearchIndex: false })
+  }
+}
+
+function productSearchIncludes(query: Record<string, string>): Set<string> {
+  return new Set(String(query.include || '').split(',').map((part) => part.trim()).filter(Boolean))
+}
+
+// include=tagged_lots folds the held-stock groups for exactly this page's rows
+// into the answer (the Products list used to make a second request for them).
+// Read live, after the page cache: held lots move without every writer bumping
+// the products version. Same gate and same reader as GET
+// /api/inventory/tagged-lots; they sit beside `items`, never inside a row, so
+// they still cannot reach a group total or a picker. A caller without
+// Inventory view gets no key and keeps the separate request's refusal.
+async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, query: Record<string, string>, payload: T): Promise<T & { tagged_lots?: unknown[] }> {
+  if (!productSearchIncludes(query).has('tagged_lots') || getActionTier(user, 'inventory', 'view') === 'none') return payload
+  const pageIds = (payload.items as Array<Record<string, unknown>>).map((row) => Number(row.id))
+  return { ...payload, tagged_lots: await readTaggedLotGroups(getDb(env), pageIds) }
+}
+
 app.get('/search', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
   const surface = parseProductReadSurface(query.surface)
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
+  if (isImageOnlyRead(user, surface)) {
+    c.header('Cache-Control', 'private, no-store')
+    try {
+      const { grants: _grants, ...list } = await loadImageOnlyList(c.env, user, query)
+      return c.json(list)
+    } catch (error) {
+      return imageOnlyQueryErrorResponse(c, error)
+    }
+  }
   if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
     return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
 
@@ -1247,7 +1385,7 @@ app.get('/search', async (c) => {
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
-  return c.json(isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(payload as { items?: unknown }, user) : payload)
+  return c.json(await attachFoldedTaggedLots(c.env, user, query, payload))
 })
 
 // ---- G37: the client search index ------------------------------------
@@ -1357,6 +1495,25 @@ app.get('/bootstrap', async (c) => {
   const surface = parseProductReadSurface(query.surface)
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
+  if (isImageOnlyRead(user, surface)) {
+    c.header('Cache-Control', 'private, no-store')
+    try {
+      const { grants, facets, ...list } = await loadImageOnlyList(c.env, user, query, ['metadata'])
+      const branches = grants.branchStock
+        ? await getDb(c.env).prepare('SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
+        : undefined
+      return c.json({
+        ...list,
+        facets,
+        ...(shouldLoadProductBootstrapMetadata(query.metadata)
+          ? { filters: { brands: facets.brands ?? [], categories: facets.categories ?? [], units: [], suppliers: [], tags: [], promotions: [], initials: [] }, initials: [] }
+          : {}),
+        ...(branches ? { branches } : {}),
+      })
+    } catch (error) {
+      return imageOnlyQueryErrorResponse(c, error)
+    }
+  }
   if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
     return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
   const db = getDb(c.env)
@@ -1380,9 +1537,8 @@ app.get('/bootstrap', async (c) => {
     // first catalog window.
     db.prepare('SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all(),
   ])
-  const restrictedProducts = isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(products as { items?: unknown }, user) : products
   return c.json({
-    ...restrictedProducts,
+    ...products,
     ...(filters ? { filters, initials: filters.initials } : {}),
     branches: branchRows,
   })
@@ -1404,7 +1560,12 @@ function catalogVocabularyDenialReason(user: SessionUser): string | null {
 app.get('/filters', async (c) => {
   const denial = catalogVocabularyDenialReason(c.get('user'))
   if (denial) return c.json({ error: denial }, 403)
-  return c.json(await loadProductFilters(c.env, c.req.query()))
+  const user = c.get('user')
+  const imageOnly = isImageOnlyVocabularyUser(user)
+  // An image-only reader's filter query is ignored: any narrowing parameter would
+  // let the option lists answer questions about fields the role cannot see.
+  const vocabulary = await loadProductFilters(c.env, imageOnly ? {} : c.req.query())
+  return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
 // D4 (Part 578, item 4): a lot's supplier IDENTITY, resolving a name-only lot
@@ -1440,7 +1601,7 @@ app.get('/:id/detail-report', async (c) => {
   const productId = Number(c.req.param('id')) || 0
   if (!productId) return c.json({ error: 'Product not found' }, 404)
   const query = c.req.query()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = businessToday()
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.startDate || '')) ? String(query.startDate) : '2000-01-01'
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.endDate || '')) ? String(query.endDate) : today
 
@@ -1495,7 +1656,8 @@ app.get('/:id/detail-report', async (c) => {
     LIMIT 100
   `).all<Record<string, unknown>>({ productId })
 
-  const sales = await getProductSalesBreakdown(c.env, productId, { startDate, endDate })
+  const sales = await getProductSalesBreakdown(getDb(c.env), productId, { startDate, endDate },
+    { day: localDateExpr('s.created_at'), month: localMonthExpr('s.created_at') })
 
   return c.json({
     product_id: productId,
@@ -1538,20 +1700,19 @@ app.get('/:id/sales-detail', async (c) => {
   // the drill-down's @period key (a breakdown row's local day/month) resolves to
   // the same rows -- a UTC period here would mismatch on the local-day edges.
   const periodExpr = mode === 'month' ? localMonthExpr('s.created_at') : localDateExpr('s.created_at')
-  const rows = await getDb(c.env).prepare(`
-    SELECT s.id, s.receipt_number, s.created_at, s.customer_name,
-           COALESCE(SUM(si.quantity), 0) AS qty,
-           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    WHERE si.product_id = @productId
-      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
-      AND ${periodExpr} = @period
-    GROUP BY s.id
-    ORDER BY s.created_at DESC
-    LIMIT 200
-  `).all<Record<string, unknown>>({ productId, period })
-  return c.json({ period, mode, sales: rows || [] })
+  // The breakdown's own ledger, one group per sale, so the drilled rows add up to the row that opened them.
+  const ledger = await productLedgerGroups(getDb(c.env), productId, [`${periodExpr} = @period`], { period }, 's.id')
+  const money = new Map(ledger.map((row) => [Number(row.grp), row]))
+  const heads = money.size ? await getDb(c.env).prepare(`
+    SELECT id, receipt_number, created_at, customer_name FROM sales
+    WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))
+    ORDER BY created_at DESC, id DESC LIMIT 200
+  `).all<Record<string, unknown>>({ ids: JSON.stringify([...money.keys()]) }) : []
+  const rows = (heads || []).map((head) => {
+    const row = money.get(Number(head.id))
+    return { ...head, qty: Number(row?.qty_sold) || 0, revenue_usd: Math.round((Number(row?.revenue_usd) || 0) * 10_000) / 10_000 }
+  })
+  return c.json({ period, mode, sales: rows })
 })
 
 // The batches/lots ONE supplier delivered for this product. supplierKey is the
@@ -1592,12 +1753,14 @@ app.get('/:id/supplier-purchases', async (c) => {
 // undoable/redoable via the supplier.backfill applier -- the reversal (each
 // lot's prior supplier_id/_name) goes to undo_snapshots, a small action_history
 // row points at it. Gated by the products EDIT action (attributing a lot's
-// supplier is a product edit), full tier -- the same tier the applier demands.
+// supplier is a product edit), full tier -- the same tier the applier demands -- and by products:supplier.
 app.post('/:id/suppliers/backfill', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'edit') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  // Attributing lots to a supplier is a supplier change: the same switch as PUT /:id (owner, 19 Oct 2026).
+  if (getActionTier(user, 'products', 'supplier') === 'none') return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
   const productId = Number(c.req.param('id')) || 0
   if (!productId) return c.json({ error: 'Product not found' }, 404)
   const body = await c.req.json().catch(() => ({})) as { supplierId?: unknown; batchIds?: unknown }
@@ -2074,7 +2237,11 @@ async function findSameProductIdentityProduct(
 // The Sep 16 2026 create-fold (a create that identifies as the SAME product as an existing active row folds into
 // it) lives in lib/createFold.ts so the review applier folds a queued create the same way. Owner ruling 16 (13 Oct
 // 2026): a starting quantity typed on a fold is recorded as a normal stock-in, never dropped.
-import { foldCreateIntoExisting, foldCreateWithStockInResponse, startingStockFingerprint } from '../lib/createFold'
+import { foldCreateIntoExisting, foldCreateWithStockInResponse, foldStockInPermissionRefusal, startingStockFingerprint } from '../lib/createFold'
+
+// Opening stock on a new product is a stock-in, so it takes the inventory:adjust grant a fold's starting quantity takes.
+const openingStockRefusal = (user: SessionUser, body: Record<string, unknown>) =>
+  Number(body.stock_quantity) > 0 ? foldStockInPermissionRefusal(user) : null
 
 function productStatusInputRefusal(c: any, body: Record<string, unknown>) {
   try { assertProductStatusInput(body) } catch (error) {
@@ -2196,10 +2363,13 @@ app.post('/', async (c) => {
   const normalizedBrands = normalizeMultiValue(body.brand, body.brands)
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
+  const stockRefusal = openingStockRefusal(user, body)
+  if (stockRefusal) return c.json(stockRefusal.body, stockRefusal.status)
+
   let created
   try {
     created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c),
-      { actorId: user.id, fingerprint: startingStockFingerprint(body, destination) })
+      { actorId: user.id, fingerprint: startingStockFingerprint(body, destination) }, { id: actorId(user), name: actorSnapshot(user) })
   } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
@@ -2469,6 +2639,17 @@ app.put('/:id', async (c) => {
     // OPUS-H-2: compared exactly; only the form's own 4-decimal rendering of a stored amount is dropped (kept as stored).
     keepStoredDiscountRendering(storedDiscount, body)
     if (productDiscountChanged(storedDiscount, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
+  }
+  // Owner, 19 Oct 2026: the supplier is its own action (products:supplier, off for the Employee default). Refused
+  // here, before the image, identity-fold and review-queue steps, so a refusal has no side effect. The form posts
+  // the stored supplier back on every save: an unchanged one (any letter case or spacing) is dropped from the body
+  // so the stored spelling stays, and the rest of the edit goes through.
+  if (getActionTier(user, 'products', 'supplier') === 'none' && Object.prototype.hasOwnProperty.call(body, 'supplier')) {
+    const storedSupplier = await getDb(c.env).prepare('SELECT supplier FROM products WHERE id = @id').get<{ supplier: string | null }>({ id })
+    if (storedSupplier) {
+      if (productSupplierChanged(storedSupplier.supplier, body)) return c.json(PRODUCT_SUPPLIER_REFUSAL, 403)
+      delete body.supplier
+    }
   }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
@@ -3009,8 +3190,10 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   if (!changesImages) omitUnchangedProductImageFields(body)
+  const stockRefusal = openingStockRefusal(user, body)
+  if (stockRefusal) return c.json(stockRefusal.body, stockRefusal.status)
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c), undefined, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -9837,6 +10020,10 @@ app.post('/lookups/replace', async (c) => {
   const type = String(body.type || '').trim().toLowerCase()
   const field = ({ brand: 'brand', category: 'category', unit: 'unit', supplier: 'supplier' } as Record<string, string>)[type]
   if (!field) return c.json({ success: false, error: 'Invalid lookup type' }, 400)
+  // Renaming, merging or clearing a supplier rewrites products.supplier on every matching product: a supplier change.
+  if (type === 'supplier' && getActionTier(user, 'products', 'supplier') === 'none') {
+    return c.json({ success: false, ...PRODUCT_SUPPLIER_REFUSAL }, 403)
+  }
 
   const rawFrom = Array.isArray(body.from) ? body.from : [body.from]
   const sourceEntries: string[] = []

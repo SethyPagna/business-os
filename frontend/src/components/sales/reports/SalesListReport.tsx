@@ -187,6 +187,8 @@ export default function SalesListReport(p: ReportViewProps) {
         `${basisLabel} ${fmtMoney(basisOf(totals))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
         totals.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(totals.pending_revenue_usd)}` : null,
+        // Each receipt row is exact at 4 places, so this difference is the paid-only sum itself (owner, 20 Oct 2026).
+        totals.pending_revenue_usd ? `${tr('revenue_paid_only', 'Revenue (paid only)')} ${fmtMoney(round4(totals.net_revenue_usd - totals.pending_revenue_usd))}` : null,
         showProfit ? `${profitLabel(totals, tr)} ${fmtMoney(num(totals.gross_profit_usd))} (${fmtPct(pct(num(totals.gross_profit_usd), basisOf(totals)))})` : null,
       ])
     : ''

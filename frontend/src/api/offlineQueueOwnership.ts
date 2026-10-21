@@ -21,7 +21,7 @@ export function authenticatedOrganizationId(user: Record<string, unknown>): numb
   return value as number | null
 }
 
-// Keep this validator identical to the standalone service worker counterpart.
+// Keep this validator identical to the Worker's parseOfflineSaleOwner (cloudflare/src/lib/offlineSaleOwnership.ts).
 // Ownership is a consistency fence; the server still obtains identity from auth.
 export function normalizeOfflineSaleOwner(value: unknown): OfflineSaleOwner | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null

@@ -44,8 +44,15 @@ assert.doesNotMatch(
   /COALESCE\(sale_status, 'completed'\) = 'awaiting_(?:payment|delivery)'/,
   'notification status equality must not wrap the indexed sale_status column',
 )
-assert.match(notifications, /WHERE sale_status = 'awaiting_payment'/)
-assert.match(notifications, /WHERE sale_status = 'awaiting_delivery'/)
+// Not Paid reads the payment state a return keeps (lib/salesStatus.ts notPaidSaleSql): two plain equality terms.
+assert.match(notifications, /WHERE \$\{notPaidSaleSql\('sales'\)\}/)
+assert.match(read('cloudflare', 'src', 'lib', 'salesStatus.ts'),
+  /\(\$\{alias\}\.sale_status = 'awaiting_payment' OR \(\$\{alias\}\.sale_status IN \('partial_return', 'returned'\) AND \$\{alias\}\.status_before_return = 'awaiting_payment'\)\)/)
+// The delivery queue reads the delivery tag (lib/salesStatus.ts deliveryPendingSaleSql, owner 20 Oct 2026); its tag term is a
+// plain equality on the column the partial index idx_sales_delivery_pending_created (0263) covers.
+assert.match(notifications, /WHERE \$\{deliveryPendingSaleSql\('sales'\)\}/)
+assert.match(read('cloudflare', 'src', 'lib', 'salesStatus.ts'),
+  /\(\$\{alias\}\.delivery_pending = 1 AND COALESCE\(\$\{alias\}\.sale_status, ''\) <> 'cancelled'\)/)
 
 assert.match(staticHeaders, /\/assets\/\*[\s\S]*max-age=31536000, immutable/)
 assert.match(staticHeaders, /\/index\.html[\s\S]*max-age=0, must-revalidate/)
@@ -57,6 +64,7 @@ db.exec(`
     id INTEGER PRIMARY KEY,
     client_request_id TEXT,
     sale_status TEXT,
+    delivery_pending INTEGER NOT NULL DEFAULT 0,
     created_at TEXT
   );
   CREATE UNIQUE INDEX idx_sales_client_request_unique_pg
@@ -64,6 +72,8 @@ db.exec(`
     WHERE client_request_id IS NOT NULL AND client_request_id <> '';
   CREATE INDEX idx_sales_status_created_pg
     ON sales(sale_status, created_at DESC, id DESC);
+  CREATE INDEX idx_sales_delivery_pending_created
+    ON sales(delivery_pending, created_at DESC, id DESC) WHERE delivery_pending = 1;
 
   CREATE TABLE returns (id INTEGER PRIMARY KEY, client_request_id TEXT);
   CREATE UNIQUE INDEX idx_returns_client_request_unique_pg
@@ -108,8 +118,13 @@ assert.match(
   /idx_products_client_request_unique_pg/,
 )
 assert.match(
-  plan("SELECT id FROM sales WHERE sale_status = 'awaiting_delivery' ORDER BY created_at DESC LIMIT 25"),
-  /idx_sales_status_created_pg/,
+  plan("SELECT id FROM sales WHERE delivery_pending = 1 AND COALESCE(sale_status, '') <> 'cancelled' ORDER BY created_at DESC LIMIT 25"),
+  /idx_sales_delivery_pending_created/,
+)
+// Control: without the tag term the same ordered read cannot use the partial index.
+assert.doesNotMatch(
+  plan("SELECT id FROM sales WHERE COALESCE(sale_status, '') <> 'cancelled' ORDER BY created_at DESC LIMIT 25"),
+  /idx_sales_delivery_pending_created/,
 )
 
 db.close()

@@ -2,9 +2,9 @@
 // (/api/reports/business-summary/{sales,returns,expenses}). Plain read-only GETs, no
 // offline mirror/dedupe (this is an export-time report pull, not app state
 // that needs to work while offline) -- same shape salesTransport.ts already
-// uses for its own read-only aggregate endpoints (getSalesStatsStrip,
-// getSalesDailyReport): apiFetch directly, no local fallback that could
-// fabricate a zero/empty result and silently produce a wrong export.
+// uses for its own read-only aggregate endpoints (getSalesStatsStrip): apiFetch
+// directly, no local fallback that could fabricate a zero/empty result and
+// silently produce a wrong export.
 import { apiFetch } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 

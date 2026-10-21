@@ -139,6 +139,7 @@ const commandCatalog = {
   timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
   deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
   counts: () => wrangler('counts', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', countsSql()], 'confirm'),
+  importMigrationLedger: () => wrangler('import-migration-ledger', ['d1', 'execute', 'business-os-import', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'], 'confirm'),
   migrationsList: (db) => wrangler(`migrations-list:${db}`, ['d1', 'migrations', 'list', db, '--remote'], 'confirm'),
   migrationsApply: (db) => {
     const entry = DATABASES.find((d) => d.name === db)
@@ -165,6 +166,7 @@ function sampleCatalog() {
     ...DATABASES.map((d) => commandCatalog.timeTravelInfo(d.name)),
     commandCatalog.deploymentStatus(),
     commandCatalog.counts(),
+    commandCatalog.importMigrationLedger(),
     commandCatalog.guardState(guardStateSql()),
     commandCatalog.guardStageApply('.guard-stage-sample.toml'),
     ...DATABASES.map((d) => commandCatalog.migrationsList(d.name)),
@@ -232,12 +234,38 @@ function classifyResponse(res) {
 // ------------------------------------------------------------- migrations
 
 function parseMigrationNames(text) {
-  const seen = new Set()
-  const out = []
-  for (const m of String(text || '').matchAll(/\b(\d{4}_[A-Za-z0-9_.-]+?\.sql)\b/g)) {
-    if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]) }
+  const lines = String(text || '').replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  if (lines.some(line => /\b(?:error|failed|failure)\b/i.test(line))) throw Error('Failed migration list')
+  const empty = lines.findIndex(line => /^(?:✅\s*)?No migrations to apply!$/.test(line))
+  const start = lines.indexOf('Migrations to be applied:')
+  if (empty >= 0) {
+    if (empty !== lines.length - 1 || start >= 0 || lines.filter(line => /No migrations to apply!/.test(line)).length !== 1
+      || lines.slice(0, empty).some(line => /\.sql\b/.test(line))) throw Error('Ambiguous migration list')
+    return []
   }
-  return out
+  if (start < 0 || lines.lastIndexOf('Migrations to be applied:') !== start) throw Error('Unrecognized migration list')
+  const names = []
+  for (const line of lines.slice(start + 1)) {
+    if (/^[┌┬┐├┼┤└┴┘─]+$/.test(line) || /^│\s*Name\s*│$/i.test(line)) continue
+    const match = /^│\s*(\d{4}_[A-Za-z0-9_.-]+\.sql)\s*│$/.exec(line)
+    if (!match || names.includes(match[1])) throw Error('Invalid or duplicate migration list row')
+    names.push(match[1])
+  }
+  if (!names.length || lines.slice(0, start).some(line => /No migrations to apply!|\.sql\b/.test(line))) throw Error('Ambiguous migration list')
+  return names
+}
+
+function validateImportMigrationLedger(json, candidate) {
+  const meta = Array.isArray(json) && json[0]?.meta
+  if (!Array.isArray(json) || json.length !== 1 || json[0]?.success !== true || !Array.isArray(json[0].results)
+    || !meta || typeof meta !== 'object' || Array.isArray(meta)
+    || meta.rows_written !== 0 || meta.changes !== 0 || meta.changed_db !== false) throw Error('Unreadable import migration ledger')
+  const names = json[0].results.map(row => {
+    if (!row || Object.keys(row).length !== 1 || typeof row.name !== 'string' || !/^\d{4}_[A-Za-z0-9_.-]+\.sql$/.test(row.name)) throw Error('Invalid import migration ledger row')
+    return row.name
+  })
+  if (new Set(names).size !== names.length || JSON.stringify([...names].sort()) !== JSON.stringify([...candidate].sort())) throw Error('Import migration ledger differs from candidate; no import migrations are authorized')
+  return names
 }
 
 function guardStageConfig(config, directory) {
@@ -456,7 +484,7 @@ module.exports = {
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
-  classifyResponse, lowerHeaders, parseMigrationNames, firstCommentLine, tablesTouched,
+  classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,
 }

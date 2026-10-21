@@ -215,6 +215,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
   './batchCode': batchCode,
+  './businessDateWindow': businessDateWindow,
   './searchMatch': searchMatch,
   // importImageMatch.ts is pure (no D1/Env dependency) -- productWrites.ts's
   // syncProductImageGallery now derives its slice cap through it
@@ -283,6 +284,7 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
     './productIdentity': loadReal('lib/productIdentity.ts', { './sqlBinding': sqlBinding,
       './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }) }),
     './moneyPrecision': loadReal('lib/moneyPrecision.ts'), './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
+    './productSupplierGate': loadReal('lib/productSupplierGate.ts'),
   }),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   ...dbStub,

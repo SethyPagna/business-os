@@ -79,7 +79,7 @@ async function main(){
  assert.deepEqual(db.prepare('SELECT * FROM transfer_run_retired_keys ORDER BY request_id').all(),retired)
  assert.equal(db.prepare('SELECT COUNT(*) n FROM transfer_run_lifecycle_guard').get().n,0)
  assert.equal(db.prepare('SELECT cost_price_usd c FROM products WHERE id=900001').get().c,3.123456)
- // Settings write/read and sync replay use settings, never this internal flag.
+ // Settings write/read use settings, never this internal flag.
  db.prepare('INSERT INTO settings(key,value) VALUES(?,?)').run('business_dataset_generation','spoofed')
  assert.equal(await store.readBusinessDatasetGeneration(adapter),target)
  const generations=()=>db.prepare('SELECT generation FROM business_dataset_generations ORDER BY generation').all().map(r=>r.generation)
@@ -102,7 +102,7 @@ async function main(){
  const settings=fs.readFileSync(path.join(__dirname,'../src/routes/settings.ts'),'utf8')
  assert.ok(!settings.includes('system_flags'))
  const sync=fs.readFileSync(path.join(__dirname,'../src/routes/sync.ts'),'utf8')
- assert.match(sync,/'settings.update': \{ method: 'POST', path: '\/api\/settings' \}/)
+ assert.ok(!sync.includes('/api/settings'))
  assert.ok(!sync.includes('system_flags'))
  console.log('PASS reservation union idempotent, digest/org collision fail-closed, flag isolated from settings/sync, precision unchanged')
  db.close()

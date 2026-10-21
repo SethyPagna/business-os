@@ -65,7 +65,16 @@ const boundaries: Array<[string, string]> = [
   ['components/shared/lightboxSwipe.ts', 'image-lightbox'],
   ['components/shared/documentScrollLock.ts', 'app-shell'],
   ['components/navigation/Sidebar.tsx', 'Sidebar'],
+  ['utils/useDebouncedValue.ts', 'shared-ui'],
+  ['utils/visibilityPolling.ts', 'admin-shared-utils'],
+  ['utils/filePicker.ts', 'admin-shared-utils'],
+  ['components/catalog/productDetailSections.ts', 'admin-shared-utils'],
   ['components/shared/MinimizedWorkTray.tsx', 'Sidebar'],
+  // 6.0.880 L1: unpinned, financialPrecision.ts rode 'dashboard-export', so
+  // POS, Receipt and every sales page statically loaded export code + SheetJS.
+  ['utils/financialPrecision.ts', 'money-core'],
+  ['utils/reportMoney.ts', 'money-core'],
+  ['utils/saleStatusResolution.ts', 'money-core'],
 ]
 for (const [relative, expected] of boundaries) {
   const id = path.join(frontend, 'src', relative)
@@ -73,7 +82,7 @@ for (const [relative, expected] of boundaries) {
   assert.equal(chunkFor(id), expected, relative)
   assert.equal(chunkFor(id.replace(/\//g, '\\')), expected, `Windows: ${relative}`)
 }
-for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal']) {
+for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal', 'rotate-cw', 'tags', 'layers', 'list', 'arrow-down-wide-narrow']) {
   assert.equal(chunkFor(`/fixture/node_modules/lucide-react/dist/esm/icons/${icon}.js`), 'shared-ui', icon)
 }
 assert.equal(neutralPrimitiveChunk('/fixture/src/components/catalog/CatalogPage.tsx'), undefined)
@@ -95,6 +104,10 @@ assert.equal(chunkFor('/fixture/node_modules/qrcode/lib/browser.js'), 'vendor')
 assert.equal(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), 'vendor-xlsx')
 assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/qrcode/lib/browser.js'))
 assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/html2canvas/dist/html2canvas.js'))
+// 6.0.880 L3: @zxing/library's own dependency rides with it; in generic
+// 'vendor' it made opening the scanner fetch html2canvas and qrcode.
+assert.equal(chunkFor('/fixture/node_modules/ts-custom-error/dist/custom-error.mjs'), 'vendor-zxing')
+assert.equal(chunkFor('C:\\fixture\\node_modules\\ts-custom-error\\dist\\custom-error.mjs'), 'vendor-zxing')
 
 function staticImports(file: string): string[] {
   const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
@@ -199,6 +212,20 @@ if (process.argv.includes('--bundle')) {
     assert.ok(bytes < 1_854_755, `${entryName} must improve the measured baseline closure: ${bytes}`)
     console.log(`PASS emitted ${entryName} closure: ${closure.size} chunks, ${bytes} bytes`)
   }
+  // 6.0.880 L1/L3: SheetJS and the export code load only through a dynamic
+  // import from an Export action, and the scanner never pulls receipt libraries.
+  for (const [entryName, forbidden] of [
+    ...['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales']
+      .map((name) => [name, ['vendor-xlsx', 'dashboard-export']] as const),
+    ['vendor-zxing', ['vendor']] as const,
+  ]) {
+    const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
+    const entry = files.find(file => match(entryName).test(file))
+    assert.ok(entry, `missing exact ${entryName} chunk`)
+    const closure = closureOf([entry])
+    for (const name of forbidden) assert.equal([...closure].some(file => match(name).test(file)), false, `${entryName} statically pulls ${name}`)
+  }
+  console.log('PASS till, sales and report pages load no SheetJS/export code statically; the scanner loads no receipt libraries')
   const html = fs.readFileSync(path.join(frontend, 'dist/index.html'), 'utf8')
   const preloadJson = html.match(/var preloads = (\{[^\n]+\});/)
   assert.ok(preloadJson, 'built HTML must contain the actual route preload lists')

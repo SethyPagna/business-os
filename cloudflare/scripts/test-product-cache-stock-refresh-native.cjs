@@ -224,7 +224,8 @@ const version = (namespace) => kv.get(`v2:${namespace}`) ?? null
   check("routes/sales.ts bumps 'stock' on its four stock-moving paths", (salesSrc.match(/bumpVersion\(c\.env, 'stock'\)/g) || []).length === 4)
   check("routes/sales.ts bumps 'products' nowhere", !/bumpVersions?\([^)]*'products'/.test(salesSrc))
   check("lib/saleBulkStatus.ts bumps 'stock', not 'products'", /bumpVersion\(env, 'stock'\)/.test(bulkSrc) && !/bumpVersion\(env, 'products'\)/.test(bulkSrc))
-  check("portal cache key includes the 'stock' version", /getVersionWithFallback\(c\.env, 'stock'\)/.test(portalSrc))
+  // 6.0.896: one batched version read (lib/cache.ts getVersionsWithFallback) keys the stock entry.
+  check("portal cache key includes the 'stock' version", /scope\.stock \? \['stock'\][\s\S]{0,300}getVersionsWithFallback\(c\.env, namespaces[\s\S]{0,600}version\('stock'\)/.test(portalSrc))
 
   console.log(`\n${checks} checks passed`)
 })().catch((error) => { console.error(error); process.exit(1) })

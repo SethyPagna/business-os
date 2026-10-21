@@ -7,7 +7,8 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, applierAlsoActionDenied, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -299,7 +300,8 @@ app.get('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
+    console.error('[action-history] load failed', error)
+    return c.json({ success: false, error: 'Failed to load action history' }, 500)
   }
 })
 
@@ -435,7 +437,8 @@ app.post('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to record action history' }, 500)
+    console.error('[action-history] record failed', error)
+    return c.json({ success: false, error: 'Failed to record action history' }, 500)
   }
 })
 
@@ -469,7 +472,8 @@ app.patch('/:id', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to update action history' }, 500)
+    console.error('[action-history] update failed', error)
+    return c.json({ success: false, error: 'Failed to update action history' }, 500)
   }
 })
 
@@ -538,7 +542,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       ? !canReplayStockSessionPayload(user, payload)
       : applierPermissionTier(user, applier) !== 'full'
         || (replayChangesProductImages && getActionTier(user, 'products', 'image') !== 'full'))) {
-      return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+      return c.json({ success: false, error: 'You do not have permission to perform this action', ...(applierAlsoActionDenied(user, applier) ? { code: PRODUCT_SUPPLIER_REFUSAL.code } : {}) }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
     // itself (require_applied) and the Worker cannot either (no registered
@@ -690,7 +694,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const transactionRefusal = stockTransactionRefusal(error)
     if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
-    return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)
+    console.error(`[action-history] ${direction} failed`, error)
+    return c.json({ success: false, error: `Failed to ${direction} action history` }, 500)
   }
 }
 

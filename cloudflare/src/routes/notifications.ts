@@ -2,6 +2,7 @@ import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
+import { deliveryPendingSaleSql, notPaidSaleSql } from '../lib/salesStatus'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
@@ -398,12 +399,12 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
     db.prepare(`
       SELECT id, receipt_number, total_usd FROM sales
-      WHERE sale_status = 'awaiting_payment'
+      WHERE ${notPaidSaleSql('sales')}
       ORDER BY created_at DESC LIMIT 50
     `).all<{ id: number; receipt_number: string; total_usd: number }>(),
     db.prepare(`
       SELECT id, receipt_number, total_usd FROM sales
-      WHERE sale_status = 'awaiting_delivery'
+      WHERE ${deliveryPendingSaleSql('sales')}
       ORDER BY created_at DESC LIMIT 50
     `).all<{ id: number; receipt_number: string; total_usd: number }>(),
   ])
@@ -758,8 +759,9 @@ app.get('/summary', async (c) => {
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
   if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
-  if (preferences.loyaltyEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
-    loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
+  // Loyalty off: no cache-version read and no ledger or settings read at all.
+  if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
+    loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
       () => buildLoyaltySection(c.env, preferences.loyaltyThreshold, () => requestMetricsOf(c)?.invocation.attemptedStatements || 0))
   }
   // Pending Share & Reward submissions are an approve/reject queue (an
@@ -778,7 +780,8 @@ app.get('/summary', async (c) => {
   // who can act on it — admin-control users only (was: anyone with
   // inventory access; the user asked for "reminder for admin" and for the
   // supplier section to be hidden from employees).
-  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
+  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cachedSection('supplier_credit', ['products', 'stock', 'settings'], String(preferences.supplierCreditDays),
+    () => buildSupplierCreditSection(c.env, preferences.supplierCreditDays)))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
   // deliberately unused — that record was STALE: requiresDeviceApproval is

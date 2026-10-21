@@ -22,7 +22,7 @@ import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
+import { getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
@@ -30,7 +30,7 @@ import { FOREGROUND_RESUME_GAP_REASON } from '../../utils/permissionRefreshAccum
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
-import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
+import { getDashboardSaleLabel, getDashboardSaleTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
 import { showsBranchComparison } from '../../utils/branchScope.ts'
@@ -263,8 +263,6 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboard: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
-  getAnalytics: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
   getDashboardInsightList: (params: DashboardRangeQuery & { insight: DashboardInsightKind; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
@@ -276,8 +274,16 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
+// Summary and analytics are both halves of GET /api/dashboard/startup, which the Worker builds
+// from the same dashboardSummary/dashboardAnalytics calls /api/dashboard and /api/analytics answer
+// with. Loaders started together (re-activation, a sync refresh, Retry) share that one read through
+// route()'s in-flight de-duplication of the same range key.
+function startupHalf(data: unknown, half: 'summary' | 'analytics'): unknown {
+  return data && typeof data === 'object' ? (data as Record<string, unknown>)[half] : undefined
+}
+
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
+  return { getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -526,11 +532,10 @@ function ChartFallback({ className = 'h-52' }: { className?: string }) {
   )
 }
 
+// Owner rule: 24-hour clock everywhere ("17:00", never "5 PM").
 function formatDashboardHourLabel(hourValue: unknown): string {
   const hour = ((Number(hourValue) % 24) + 24) % 24
-  if (hour === 0) return '12 AM'
-  if (hour === 12) return '12 PM'
-  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
+  return `${String(hour).padStart(2, '0')}:00`
 }
 
 function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
@@ -602,7 +607,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
   fmtKHR: FormatMoneyFn
-  formatStatus: (status: unknown) => string
+  formatStatus: (sale: DashboardSale) => string
   onOpenSale: (sale: DashboardSale) => void
   onViewMore: () => void
 }) {
@@ -614,7 +619,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="detail-scroll-text text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleTone(sale)}`}>{formatStatus(sale)}</div></div>
           </button>
         ))}
       </div>
@@ -1028,11 +1033,11 @@ export default function Dashboard() {
     if (markLoading) setLoading(true)
     try {
       const query = getCurrentDashboardRange()
-      const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboard(query),
+      const data = startupHalf(await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStartup(query),
         label,
         DASHBOARD_SUMMARY_TIMEOUT_MS,
-      )
+      ), 'summary')
       if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
@@ -1048,7 +1053,7 @@ export default function Dashboard() {
         setSummaryError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getDashboard failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
+      console.error('[Dashboard] summary failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
       setSummaryError(getErrorMessage(error, 'Dashboard summary failed to load.'))
       return null
     } finally {
@@ -1136,11 +1141,11 @@ export default function Dashboard() {
     if (!silent) setAnalyticsLoading(true)
     const query = getCurrentDashboardRange()
     try {
-      const data = await withLoaderTimeout(
-        () => getDashboardApi().getAnalytics(query),
+      const data = startupHalf(await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStartup(query),
         'Dashboard analytics',
         DASHBOARD_ANALYTICS_TIMEOUT_MS,
-      )
+      ), 'analytics')
       if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       if (!isDashboardAnalyticsPayload(data)) {
         throw new Error('Dashboard analytics returned incomplete data.')
@@ -1156,7 +1161,7 @@ export default function Dashboard() {
         setAnalyticsError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getAnalytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
+      console.error('[Dashboard] analytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
       setAnalyticsError(getErrorMessage(error, 'Dashboard analytics failed to load.'))
       return null
     } finally {
@@ -1412,6 +1417,15 @@ export default function Dashboard() {
   // profit by the server kernel. Showing it here must never add or subtract
   // it from either headline.
   const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Owner, 20 Oct 2026: revenue and profit WITH and WITHOUT Not Paid, each
+  // rounded once by the kernel (revenue - paid only = Not Paid to the cent),
+  // and what Not Paid sales still owe. Presence-signalled: an older Worker
+  // sends none, and the lines are left out rather than derived here.
+  const aRevenuePaidOnly = analytics?.totals?.revenue_without_not_paid_usd
+  const aProfitPaidOnly = analytics?.totals?.profit_without_not_paid_usd
+  const aNotPaidOwed = analytics?.totals?.not_paid_owed_usd
+  const aShowPaidOnly = typeof aRevenuePaidOnly === 'number' && aRevenuePaidOnly !== aRevenue
+  const revenuePaidOnlyLabel = translateOr('revenue_paid_only', 'Revenue (paid only)')
   // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
   // stat a break down of revenue/profit excluding the losses caused by this.
   // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
@@ -1508,7 +1522,7 @@ export default function Dashboard() {
   const estProfitLabel = translateOr('profit', 'Est. Profit', 'ប្រាក់ចំណេញ')
   const stockValueFormulaText = translateOr('dashboard_formula_stock_value', 'Stock value = quantity on hand x unit cost')
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
-  const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
+  const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = paid sales with tax and delivery + amounts paid on Not Paid sales − cash refunds')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
   const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
@@ -1532,8 +1546,8 @@ export default function Dashboard() {
   const grossShortLabel = translateOr('gross_short', 'Gross')
   const saleShortLabel = translateOr('sale_short', 'sale')
   const marginShortLabel = translateOr('profit_margin_short', 'margin')
-  const formatSaleStatus = useCallback((status: unknown) => {
-    return getDashboardSaleStatusLabel(status, t)
+  const formatSaleStatus = useCallback((sale: DashboardSale) => {
+    return getDashboardSaleLabel(sale, t)
   }, [t])
 
   // Still serves the Best Hour drill below (openHourDetail). The period
@@ -1648,7 +1662,8 @@ export default function Dashboard() {
 ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, revenueTerms(aFormulaTotals), fmtUSD, translateOr)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
-      sub: aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
+      sub: aShowPaidOnly ? `${revenuePaidOnlyLabel} ${fmtUSD(aRevenuePaidOnly)}`
+        : aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
       color: 'text-green-600',
       trend: calcTrend(aRevenue, aPrevRevenue),
       // Slimmed (user, Aug 29 -- "too many folded stats inside, i want it
@@ -1657,6 +1672,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
       // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
+        ...(aShowPaidOnly ? [{ label: revenuePaidOnlyLabel, value: fmtUSD(aRevenuePaidOnly) }] : []),
         // The equation's own two terms, in order, so the drill and the info
         // formula are the same arithmetic. Refunds here is the SALE-basis
         // reversal already taken off revenue -- not the Returns card's
@@ -1665,6 +1681,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
         ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Not Paid'), value: fmtUSD(aCredit) }] : []),
+        ...(typeof aNotPaidOwed === 'number' && aNotPaidOwed > 0 ? [{ label: translateOr('not_paid_owed', 'Still owed'), value: fmtUSD(aNotPaidOwed) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
@@ -1719,6 +1736,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       // headlines its own card) -- the profit formula's own parts remain.
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
+        ...(aShowPaidOnly && typeof aProfitPaidOnly === 'number' ? [{ label: translateOr('profit_paid_only', 'Profit (paid only)'), value: fmtUSD(aProfitPaidOnly) }] : []),
         { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
         // The two delivery terms profit actually carries. Store-paid delivery
         // is NOT one of them and moved to the Delivery card, where it is a
@@ -2562,8 +2580,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               </div>
               <div className="shrink-0 text-right">
                 <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
-                  {formatSaleStatus(sale.sale_status)}
+                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleTone(sale)}`}>
+                  {formatSaleStatus(sale)}
                 </div>
               </div>
             </button>
@@ -2726,7 +2744,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <div className="modal-scroll grid grid-cols-2 gap-2 p-4">
               {([
                 { label: t('date') || 'Date', value: fmtTime(recentSaleDetail.created_at) },
-                { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail.sale_status) },
+                { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail) },
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
                 { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },

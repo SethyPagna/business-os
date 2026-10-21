@@ -14,8 +14,8 @@
 // registered wrappers (WRAPPERS). A variable call site, a wrapper call with a variable, or a use of either helper
 // other than a direct call fails, so a new one cannot slip in.
 //
-// Each editor row's Partial Access outcome is also compared with how the Worker's getActionTier gates treat a
-// Partial Access caller (passesPartial): a row cannot show Hidden where the Worker only stops 'none', nor Allowed
+// Each editor row's Review outcome is also compared with how the Worker's getActionTier gates treat a
+// Review caller (passesPartial): a row cannot show Hidden where the Worker only stops 'none', nor Allowed
 // where every gate demands Full Access.
 //
 // Run: node scripts/test-permission-catalog-parity-pure.cjs [--table]
@@ -111,7 +111,7 @@ function snippetAt(text, open) {
   return collapse(text.slice(open, open + 160))
 }
 
-// Whether a Partial Access caller gets past one getActionTier call: true when only 'none' stops it or it queues,
+// Whether a Review caller gets past one getActionTier call: true when only 'none' stops it or it queues,
 // false when the call demands Full Access (or the result is tested for it, or a 'review' branch refuses with 403),
 // null when the result is used some other way.
 function passesPartial(text, callStart, callEnd) {
@@ -188,6 +188,8 @@ const WRAPPERS = {
   denyUnlessFullContactAction: { file: 'routes/contacts.ts', literal: /denyUnlessFullContactAction\(\s*c\s*,\s*'([a-z_]+)'\s*\)/g },
   requireAction: { file: 'routes/promotions.ts', literal: /requireAction\(\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*\)/g },
 }
+// An applier def's second grant: `permission: 'products', action: 'edit', alsoAction: 'supplier'` reaches products:supplier.
+const alsoActionPairs = (text) => quoted(text, /permission:\s*'([a-z_]+)'[^{}]*?alsoAction:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`)
 const DYNAMIC_SITES = [
   { file: 'lib/importEngine.ts', needle: "isActionBlocked(actor, section, 'import')", reach: IMPORT_SECTIONS('lib/importEngine.ts') },
   { file: 'routes/importJobs.ts', needle: "isActionBlocked(user, overrideSection, 'import')", reach: IMPORT_SECTIONS('routes/importJobs.ts') },
@@ -212,6 +214,11 @@ const DYNAMIC_SITES = [
     file: 'lib/undoAppliers.ts',
     needle: 'getActionTier(user, applier.permission, applier.action)',
     reach: () => quoted(textOf('lib/undoAppliers.ts'), /permission:\s*'([a-z_]+)',\s*action:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`),
+  },
+  {
+    file: 'lib/undoAppliers.ts',
+    needle: 'getActionTier(user, applier.permission, applier.alsoAction)',
+    reach: () => alsoActionPairs(textOf('lib/undoAppliers.ts')),
   },
   {
     file: 'routes/contacts.ts',
@@ -390,8 +397,8 @@ const ALWAYS_REFUSED = {
   'branches:delete': 'Shop and Warehouse are fixed: the route checks the switch and then always answers 409, so there is nothing to grant.',
 }
 const SECTION_LEVEL = {
-  'audit_log:view': 'The section tier is the switch (None / View only = own entries / Full = everyone), so a separate row would say the same thing twice.',
-  'promotions:view': 'The section tier is the switch (None / View only / Full), so a separate row would say the same thing twice.',
+  'audit_log:view': 'The section tier is the switch (None / View = own entries / Full = everyone), so a separate row would say the same thing twice.',
+  'promotions:view': 'The section tier is the switch (None / View / Full), so a separate row would say the same thing twice.',
 }
 const BROWSER_ONLY = {
   dashboard_export: { gates: [['frontend/src/components/dashboard/Dashboard.tsx', /hasPermission\('dashboard_export'\)/]], why: 'The export file is built in the browser from data already loaded.' },
@@ -409,17 +416,17 @@ const PENDING_OWNER = {
 const MASTER_KEY = { all: 'The administrator override, evaluated by isAdminControlUser in lib/permissions.ts.' }
 // Keys the Worker checks that the editor has no key for.
 const WORKER_ONLY_KEYS = {}
-// Rows that show Partial Access as blocked although a gate on the same action only stops 'none': the route first
-// refuses a Partial Access caller outright, then honours the switch for a Full Access one.
+// Rows that show Review as blocked although a gate on the same action only stops 'none': the route first
+// refuses a Review caller outright, then honours the switch for a Full Access one.
 const REFUSED_AT_PARTIAL = {
-  'contacts:delete': { file: 'routes/contacts.ts', proof: [/Deleting a \$\{config\.entity\} requires Full Access to Contacts -- Partial Access support for this action is not built/] },
-  'contacts:merge': { file: 'routes/contacts.ts', proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Partial Access support for this action is not built/] },
-  'contacts:bulk_delete': { file: 'routes/contacts.ts', proof: [/Bulk delete requires Full Access to Contacts -- Partial Access support for this action is not built/] },
+  'contacts:delete': { file: 'routes/contacts.ts', proof: [/Deleting a \$\{config\.entity\} requires Full Access to Contacts -- Review support for this action is not built/] },
+  'contacts:merge': { file: 'routes/contacts.ts', proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Review support for this action is not built/] },
+  'contacts:bulk_delete': { file: 'routes/contacts.ts', proof: [/Bulk delete requires Full Access to Contacts -- Review support for this action is not built/] },
   'contacts:bulk': {
     file: 'routes/contacts.ts',
-    proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Partial Access support/, /Bulk delete requires Full Access to Contacts -- Partial Access support/],
+    proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Review support/, /Bulk delete requires Full Access to Contacts -- Review support/],
   },
-  'returns:edit': { file: 'routes/returns.ts', proof: [/Editing a return requires Full Access to Returns -- Partial Access support for this action is not built yet/] },
+  'returns:edit': { file: 'routes/returns.ts', proof: [/Editing a return requires Full Access to Returns -- Review support for this action is not built yet/] },
 }
 // Page controls that ride an editor row's switch but are gated more tightly (a followed control in
 // PERMISSION_ACTIONS), each proved against the route that refuses a weaker caller.
@@ -533,12 +540,26 @@ check('every editor row belongs to a permission key the editor renders', () => {
   assert.deepEqual(orphans, [], `PERMISSION_ACTIONS rows for keys the editor never lists (they would never render): ${orphans.join(', ')}`)
 })
 
+check('every second grant an undo applier names (alsoAction) is an action the role editor can switch off', () => {
+  const pairs = alsoActionPairs(textOf('lib/undoAppliers.ts'))
+  assert.ok(pairs.includes('products:supplier'), 'the scan sees the supplier.backfill second grant')
+  const missing = pairs.filter((pair) => !editorRows.has(pair))
+  assert.deepEqual(missing, [], `an applier demands a second grant the editor has no row for: ${missing.join(', ')}`)
+})
+
+check('control: an alsoAction the editor does not know is caught, a real one is not', () => {
+  const pairs = alsoActionPairs("x = { permission: 'products', action: 'edit', alsoAction: 'no_such_action', run: async () => {} }")
+  assert.deepEqual(pairs, ['products:no_such_action'])
+  assert.equal(editorRows.has(pairs[0]), false, 'the invented grant has no editor row, so the check above would fail on it')
+  assert.equal(editorRows.has('products:supplier'), true)
+})
+
 check('every Worker action has an editor row, or is listed with its reason', () => {
   const unexplained = [...workerActions.keys()].filter((pair) => !editorRows.has(pair) && !ALWAYS_REFUSED[pair] && !SECTION_LEVEL[pair]).sort()
   assert.deepEqual(unexplained, [], `Worker checks these actions but the editor cannot switch them off.\nAdd a row to PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts) or list a reason here:\n${unexplained.map((pair) => `${pair}  <- ${workerActions.get(pair).join(', ')}`).join('\n')}`)
 })
 
-check('every row shows the Partial Access outcome the Worker gives its switch', () => {
+check('every row shows the Review outcome the Worker gives its switch', () => {
   const problems = []
   for (const [pair, action] of editorAction) {
     const sites = (partialSites.get(pair) || []).filter((site) => site.passes !== null)
@@ -548,21 +569,21 @@ check('every row shows the Partial Access outcome the Worker gives its switch', 
     if (action.controlReview) {
       if (!passes.length || !refuses.length) problems.push(`${pair}: the row separates its badge from its page tool, but the Worker has ${passes.length} lenient and ${refuses.length} Full-only gates`)
     } else if (action.review === 'block') {
-      if (passes.length && !REFUSED_AT_PARTIAL[pair]) problems.push(`${pair}: the editor shows Partial Access as blocked, but the Worker lets it through (only 'none' stops it) in ${where(passes)}`)
+      if (passes.length && !REFUSED_AT_PARTIAL[pair]) problems.push(`${pair}: the editor shows Review as blocked, but the Worker lets it through (only 'none' stops it) in ${where(passes)}`)
     } else if (sites.length && !passes.length) {
-      problems.push(`${pair}: the editor shows ${action.review} at Partial Access, but every Worker gate demands Full Access (${where(refuses)})`)
+      problems.push(`${pair}: the editor shows ${action.review} at Review, but every Worker gate demands Full Access (${where(refuses)})`)
     }
   }
-  assert.deepEqual(problems, [], `The role editor and the Worker disagree about Partial Access.\nFix the row in PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts), or list a refusal in REFUSED_AT_PARTIAL:\n${problems.join('\n')}`)
+  assert.deepEqual(problems, [], `The role editor and the Worker disagree about Review.\nFix the row in PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts), or list a refusal in REFUSED_AT_PARTIAL:\n${problems.join('\n')}`)
 })
 
-check('a listed Partial Access refusal is still true', () => {
+check('a listed Review refusal is still true', () => {
   const problems = []
   for (const [pair, entry] of Object.entries(REFUSED_AT_PARTIAL)) {
     const action = editorAction.get(pair)
-    if (!action || action.review !== 'block') problems.push(`${pair} is listed as refused at Partial Access but the editor row is ${action ? action.review : 'gone'}`)
-    if (!(partialSites.get(pair) || []).some((site) => site.passes === true)) problems.push(`${pair}: no Worker gate lets Partial Access through any more; remove it from REFUSED_AT_PARTIAL`)
-    for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair}: ${entry.file} no longer refuses a Partial Access caller (${proof})`)
+    if (!action || action.review !== 'block') problems.push(`${pair} is listed as refused at Review but the editor row is ${action ? action.review : 'gone'}`)
+    if (!(partialSites.get(pair) || []).some((site) => site.passes === true)) problems.push(`${pair}: no Worker gate lets Review through any more; remove it from REFUSED_AT_PARTIAL`)
+    for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair}: ${entry.file} no longer refuses a Review caller (${proof})`)
   }
   assert.deepEqual(problems, [])
 })

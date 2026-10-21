@@ -25,6 +25,7 @@ import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTra
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { FOREGROUND_RESUME_REASON } from '../../utils/permissionRefreshAccumulator.ts'
+import { planThrottledSyncReload } from '../../api/syncRuntime.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
@@ -180,6 +181,10 @@ const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
 // for the record of that call if a shorter/separate expiry schedule turns
 // out to be wanted after all.
 const NOTIFICATION_SUMMARY_IDLE_REFRESH_MS = 2 * 60 * 60 * 1000
+// Every sale on any device pushes sales/inventory; the bell's counts need not follow each one.
+// A push on the notifications channel (device approvals) is the bell's own news and reloads at once.
+const NOTIFICATION_SYNC_RELOAD_MIN_INTERVAL_MS = 30_000
+const NOTIFICATION_IMMEDIATE_SYNC_CHANNELS: ReadonlySet<string> = new Set(['notifications'])
 
 const TONE_CLASS: Record<Tone, string> = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -502,6 +507,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const refreshTimerRef = useRef<number | null>(null)
   const refreshDueWhileHiddenRef = useRef(false)
   const failureCountRef = useRef(0)
+  const lastSummaryLoadAtRef = useRef(0)
 
   useEffect(() => {
     const syncVisibility = () => setVisibilityActive(matchesVisibilityMode(visibility))
@@ -545,6 +551,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   }, [])
 
   const loadSummary = useCallback(async (silent = false) => {
+    lastSummaryLoadAtRef.current = Date.now()
     const requestId = beginTrackedRequest(requestRef)
     const visibleRequestId = !silent && aliveRef.current ? beginTrackedRequest(visibleLoadRequestRef) : 0
     if (visibleRequestId) setLoading(true)
@@ -706,9 +713,17 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
     if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
-      void loadSummary(true)
+      const plan = planThrottledSyncReload(
+        syncChannel.channel,
+        Date.now() - lastSummaryLoadAtRef.current,
+        NOTIFICATION_SYNC_RELOAD_MIN_INTERVAL_MS,
+        NOTIFICATION_IMMEDIATE_SYNC_CHANNELS,
+      )
+      // The trailing reload replaces the idle timer; loadSummary re-arms it.
+      if (plan.runNow) void loadSummary(true)
+      else scheduleRefresh(plan.delayMs)
     }
-  }, [loadSummary, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
+  }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {

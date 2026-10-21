@@ -25,6 +25,11 @@ export function getRoles(): Promise<unknown> {
   )
 }
 
+// What a freshly seeded Admin, Manager and Employee start with (admin only). Never offline: a stale copy could reset a role to the wrong keys.
+export function getRoleDefaults(): Promise<unknown> {
+  return route('roles:defaults', () => apiFetch('GET', '/api/roles/defaults'), null)
+}
+
 export function getUserProfile(id: string | number): Promise<unknown> {
   return route(
     `users:profile:${id}`,
@@ -83,15 +88,6 @@ export function removeUserAvatar(id: string | number): Promise<unknown> {
   return route(
     'users:removeAvatar',
     () => apiFetch('DELETE', `/api/users/${encodeId(id)}/avatar`),
-    null,
-    true,
-  )
-}
-
-export function disconnectUserAuthProvider(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  return route(
-    'users:disconnectProvider',
-    () => apiFetch('POST', `/api/users/${encodeId(id)}/provider-disconnect`, payload),
     null,
     true,
   )

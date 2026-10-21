@@ -5,8 +5,8 @@
 // on POST /sales, /sales/:id/items, /sales/:id/amendments, /returns,
 // /branches/transfer, /branches/transfer-bulk and /inventory/transfer. Each
 // of those returns a 400 whose `error` is the EXACT English of a pack key --
-// deliberately, so a rejection that outruns the UI (an offline sale replayed
-// later, a stale tab, an amendment posted from a modal, an API caller) can be
+// deliberately, so a rejection that outruns the UI (a stale tab, an
+// amendment posted from a modal, an API caller) can be
 // shown to the operator in their own language instead of surfacing as an
 // English sentence in the middle of a Khmer screen.
 //
@@ -94,6 +94,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
   product_merge_permission_required: 'product_merge_permission_required',
+  customer_return_owed_unreadable: 'customer_return_owed_unreadable',
+  return_refund_khr_unavailable: 'return_refund_khr_unavailable',
+  return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
+  product_supplier_edit_required: 'product_supplier_edit_required',
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',

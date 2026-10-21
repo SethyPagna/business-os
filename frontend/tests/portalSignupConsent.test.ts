@@ -30,6 +30,12 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 type ConsentProps = { copy: CopyFn; checked: boolean; onChange: (next: boolean) => void; error?: string }
 
 let ConsentField: React.FunctionComponent<ConsentProps> | null = null
+type ConsentModule = {
+  signupConsentFields: (consent: boolean, locale: string) => Record<string, unknown>
+  consentRequiredMessage: (copy: CopyFn, mode: 'signin' | 'signup') => string
+  AGE_CONFIRMATION_REQUIRED_CODE: string
+}
+let consentModule: ConsentModule | null = null
 
 async function loadConsentField(): Promise<React.FunctionComponent<ConsentProps>> {
   if (ConsentField) return ConsentField
@@ -47,6 +53,7 @@ async function loadConsentField(): Promise<React.FunctionComponent<ConsentProps>
     (_all, specifier) => `from "${pathToFileURL(requireFrom.resolve(specifier)).href}"`,
   )
   const mod = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+  consentModule = mod as unknown as ConsentModule
   ConsentField = (mod as { default: React.FunctionComponent<ConsentProps> }).default
   return ConsentField
 }
@@ -73,7 +80,7 @@ test('the consent checkbox is required, unticked, labelled, and links to both po
   const id = checkbox[0].match(/id="([^"]+)"/)
   assert.ok(id, 'the checkbox needs an id for its label')
   assert.match(html, new RegExp(`<label[^>]*for="${id[1]}"`), 'the checkbox has no associated label')
-  assert.match(html, /I agree to the Terms &amp; Conditions and the Privacy Policy\./)
+  assert.match(html, /I am 16 or older, and I agree to the Terms &amp; Conditions and the Privacy Policy\./)
   assert.match(html, /href="[^"]*legal=terms"/, 'the consent line must link to the Terms')
   assert.match(html, /href="[^"]*legal=privacy"/, 'the consent line must link to the Privacy Policy')
 })
@@ -119,7 +126,7 @@ test('the Khmer visitor gets Khmer, not English', async () => {
 test('the consent value is sent to the server, not only checked in the browser', () => {
   assert.match(
     accountSource,
-    /signUp\(\{ name, phone: signupPhone, membershipId, password: signupPassword, consent, consentLocale \}\)/,
+    /signUp\(\{ name, phone: signupPhone, membershipId, password: signupPassword, \.\.\.signupConsentFields\(consent, consentLocale\) \}\)/,
     'the sign-up payload drops consent',
   )
   assert.match(accountSource, /const \[consent, setConsent\] = useState\(false\)/, 'consent must default to unticked')
@@ -132,6 +139,23 @@ test('the consent value is sent to the server, not only checked in the browser',
   assert.ok(guard < call, 'the consent guard must run before signUp')
 })
 
+test('the sign-up payload carries ageConfirmed only when the combined tick is checked', async () => {
+  await loadConsentField()
+  const { signupConsentFields } = consentModule as ConsentModule
+  assert.deepEqual(signupConsentFields(true, 'km'), { consent: true, consentLocale: 'km', ageConfirmed: true })
+  assert.deepEqual(signupConsentFields(false, 'en'), { consent: false, consentLocale: 'en' })
+  assert.ok(!('ageConfirmed' in signupConsentFields(false, 'en')), 'an unticked box must not claim the age')
+})
+
+test('the Worker age refusal shows the translated consent message, not the raw server text', async () => {
+  await loadConsentField()
+  const { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage } = consentModule as ConsentModule
+  assert.equal(AGE_CONFIRMATION_REQUIRED_CODE, 'age_confirmation_required')
+  assert.match(accountSource, /errorCode === AGE_CONFIRMATION_REQUIRED_CODE \? consentRequiredMessage\(copy, 'signup'\)/)
+  assert.match(consentRequiredMessage(copyIn('en'), 'signup'), /16 or older/)
+  assert.match(consentRequiredMessage(copyIn('km'), 'signup'), KHMER)
+})
+
 // --- parity with the Worker -----------------------------------------------
 
 test('the browser rule and the Worker rule are the same rule', () => {
@@ -139,6 +163,9 @@ test('the browser rule and the Worker rule are the same rule', () => {
   // prompt, the Worker is the enforcement.
   assert.match(workerAccounts, /consentGiven\(input\.consent\)/, 'the Worker does not check consent')
   assert.match(workerAccounts, /code: 'consent_required'/, 'the Worker has no consent_required refusal')
+  assert.match(workerAccounts, /input\.ageConfirmed !== true/, 'the Worker does not require the age confirmation')
+  assert.match(workerAccounts, /code: 'age_confirmation_required'/)
+  assert.match(workerRoute, /ageConfirmed: body\.ageConfirmed/, 'the signup route never forwards ageConfirmed')
   assert.match(workerRoute, /consent: body\.consent/, 'the signup route never forwards consent')
   // Refused BEFORE any customer lookup, so the endpoint cannot double as a
   // phone-existence oracle for a caller who never consents.

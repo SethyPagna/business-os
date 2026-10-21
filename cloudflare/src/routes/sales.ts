@@ -133,8 +133,9 @@ import {
   type SaleRecordEventRow,
   type SaleRecordChange,
 } from '../lib/saleRecords'
-import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
+import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, RETURN_STATUSES, SALE_RETURN_EVIDENCE_SQL, SALE_STATE_SET_SQL, requestedSaleState, sameSaleState, saleStateParams, saleStatusFilterSql, saleStatusWord } from '../lib/salesStatus'
+import { returnDebtLoweredSql } from '../lib/returnRefundSplit'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, saleReadsNotPaid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -469,8 +470,12 @@ app.get('/money-precision-capability', async (c) => {
   return c.json({ money_precision_version: 1, schema_ready: await saleMoneySchemaReady(db), historical_edit_ready:await historicalEditSchemaReady(db) })
 })
 
+// Positive answer only (see operationWritesReady in routes/fees.ts).
+let historicalEditSchemaAvailable = false
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
-  return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  if (historicalEditSchemaAvailable) return true
+  historicalEditSchemaAvailable = !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  return historicalEditSchemaAvailable
 }
 
 const DELIVERY_FEE_PAYER_ERROR = 'Delivery fee must be paid by the customer or by the store.'
@@ -676,13 +681,77 @@ app.post('/', async (c) => {
     })
   }
 
+  // ---- 1a. Start every read that depends only on the request ----
+  // They run in one round trip instead of a chain of them. Each is awaited
+  // where its answer is first used below, in the original order, so the
+  // validation order and the error a caller sees are unchanged; only a request
+  // that is refused early has issued reads it did not need.
+  const readStarted = <T>(read: Promise<T>): Promise<T> => { const settled = Promise.resolve(read); settled.catch(() => undefined); return settled }
+  const saleBranchIds = [saleHeaderBranchId]
+  const productIds = [...new Set(normalized.map((i) => i.product_id))]
+  // Damaged-source lines check against their LOT below, not branch_stock --
+  // their units were never in sellable stock to begin with.
+  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock && !item.damaged_lot_id)
+  const branchIdsNeedingStock = [...new Set(stockCheckItems.map((item) => item.branch_id as number))]
+  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
+  const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
+  const saleBranchRowsRead = readStarted(selectInChunks(saleBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk)))
+  // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
+  // 100 distinct products, but a wholesale/imported sale does, and the
+  // failure mode is a rejected checkout, not a degraded one.
+  const productsRead = readStarted(selectInChunks(productIds, 0, (chunk) => db
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk)))
+  // Batched by branch (one query per distinct branch_id in this sale, not
+  // one query per line item): the common case is one branch, one query.
+  const stockByBranchRead = readStarted(Promise.all(branchIdsNeedingStock.map(async (branchId) => {
+    const productIdsForBranch = [...new Set(
+      stockCheckItems.filter((item) => item.branch_id === branchId).map((item) => item.product_id),
+    )]
+    // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
+    const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
+    return [branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity]))] as const
+  })))
+  const lotsByProductBranchRead = readStarted(readFifoLotAvailabilityForCart(
+    db,
+    normalized
+      .filter((item) => !item.damaged_lot_id && item.branch_id)
+      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
+  ))
+  const damagedLotRowsRead = damagedItems.length
+    ? readStarted(selectInChunks(damagedLotIds, 0, (chunk) => db
+      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk)))
+    : null
+  const rateSettingRowsRead = readStarted(db.prepare(
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
+  ).all<{ key: string; value: string }>())
+  const customerRead = body.customer_id
+    ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_id]))
+    : body.customer_membership_number
+      ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_membership_number]))
+      : null
+  const loyaltyEnabledRowRead = readStarted(db.prepare(
+    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
+  ).get<{ value: string }>())
+  const pricingRuleRowsRead = readStarted(db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>())
+  const deliveryContactRead = Boolean(body.is_delivery) && body.delivery_contact_id
+    ? readStarted(db.prepare('SELECT id, name, phone, area, address FROM delivery_contacts WHERE id = ?').get<{ id: number; name: string | null; phone: string | null; area: string | null; address: string | null }>([body.delivery_contact_id]))
+    : null
+  const receiptNumberTaken = async (candidate: string) =>
+    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  const clientReceiptNumber = normalizeClientReceiptNumber(body.receipt_number)
+  const mintedReceiptNumberRead = clientReceiptNumber ? null : readStarted(uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+  const branchRowRead = body.branch_id ? readStarted(db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id])) : null
+
   // ---- 1b. The selling branch ----
   // A line may name its own branch, so this checks the DISTINCT set the cart
   // actually resolved to rather than trusting body.branch_id alone.
-  const saleBranchIds = [saleHeaderBranchId]
-  const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
+  const saleBranchRows = await saleBranchRowsRead
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
@@ -690,13 +759,7 @@ app.post('/', async (c) => {
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
-  // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
-  // 100 distinct products, but a wholesale/imported sale does, and the
-  // failure mode is a rejected checkout, not a degraded one.
-  const productIds = [...new Set(normalized.map((i) => i.product_id))]
-  const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+  const products = await productsRead
   const productMap = new Map(products.map((p) => [p.id, p]))
 
   // D1's batch() is atomic but cannot branch mid-batch (see lib/db.ts) --
@@ -705,29 +768,7 @@ app.post('/', async (c) => {
   // building the atomic write batch below. Skipped entirely when this sale's
   // status does not deduct stock -- matches
   // PATCH /:id/status's own wasStockDeducted/willStockBeDeducted gate below.
-  //
-  // Batched by branch (one query per distinct branch_id in this sale, not
-  // one query per line item) -- a sale with, say, 15 line items previously
-  // issued 15 sequential `branch_stock` round-trips to D1 here, one right
-  // after another, purely to check availability, adding real latency to
-  // every checkout. The common case (one branch per sale) now costs exactly
-  // one query, matching the same IN(...) batching pattern already used just
-  // above for the `products` lookup.
-  // Damaged-source lines check against their LOT below, not branch_stock --
-  // their units were never in sellable stock to begin with.
-  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock && !item.damaged_lot_id)
-  const stockByBranch = new Map<number, Map<number, number>>()
-  const branchIdsNeedingStock = [...new Set(stockCheckItems.map((item) => item.branch_id as number))]
-  for (const branchId of branchIdsNeedingStock) {
-    const productIdsForBranch = [...new Set(
-      stockCheckItems.filter((item) => item.branch_id === branchId).map((item) => item.product_id),
-    )]
-    // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
-    const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
-    stockByBranch.set(branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity])))
-  }
+  const stockByBranch = new Map<number, Map<number, number>>(await stockByBranchRead)
   for (const item of stockCheckItems) {
     const available = stockByBranch.get(item.branch_id as number)?.get(item.product_id) || 0
     if (item.quantity > available) {
@@ -747,12 +788,7 @@ app.post('/', async (c) => {
   // Read all ordinary lines once. The same mutable map is reserved by
   // explicit picks below, then consumed by FIFO for unpicked lines, so an
   // explicit and automatic line cannot both plan the same units.
-  const lotsByProductBranch = await readFifoLotAvailabilityForCart(
-    db,
-    normalized
-      .filter((item) => !item.damaged_lot_id && item.branch_id)
-      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
-  )
+  const lotsByProductBranch = await lotsByProductBranchRead
   // A selected unlotted remainder is a factual claim, not an escape hatch:
   // the branch must hold more aggregate stock than EVERY positive recorded
   // lot, including inactive lots that remain attributable in the ledger.
@@ -777,8 +813,8 @@ app.post('/', async (c) => {
   for (const [branchId, productIds] of unlottedRequestsByBranch.entries()) {
     const rows = await selectInChunks(productIds, 1, (chunk) => db.prepare(`
       SELECT pb.variant_product_id AS product_id, bbs.branch_id, SUM(bbs.quantity) AS quantity
-      FROM branch_batch_stock bbs
-      JOIN product_batches pb ON pb.id = bbs.batch_id
+      FROM product_batches pb
+      CROSS JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
       WHERE bbs.branch_id = ?
         AND pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
         AND bbs.quantity > 0
@@ -838,14 +874,10 @@ app.post('/', async (c) => {
   // 11.9: damaged-source availability (plain read, same validate-then-write
   // shape as above; consumeDamagedLot's own WHERE clause below remains the
   // real race guard).
-  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
-  if (damagedItems.length) {
+  if (damagedLotRowsRead) {
     // One chunked read instead of a SELECT per damaged line -- same batched
     // shape as the branch_stock and branch_batch_stock checks above.
-    const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
-    const damagedLotRows = await selectInChunks(damagedLotIds, 0, (chunk) => db
-      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk))
+    const damagedLotRows = await damagedLotRowsRead
     const damagedLotMap = new Map(damagedLotRows.map((row) => [Number(row.id), row]))
     for (const item of damagedItems) {
       const lot = damagedLotMap.get(Number(item.damaged_lot_id))
@@ -911,19 +943,13 @@ app.post('/', async (c) => {
   // Part 534: KHR change converts at its own configured rate. Read the
   // SETTING (not a client field) so the stored change_khr matches what the
   // POS displayed from the same setting.
-  const rateSettingRows = await db.prepare(
-    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
-  ).all<{ key: string; value: string }>()
+  const rateSettingRows = await rateSettingRowsRead
   const rateSettings = Object.fromEntries(rateSettingRows.map((row) => [row.key, row.value]))
   const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate)
     : Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
   const changeExchangeRateSetting = rateSettings.change_exchange_rate
   let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
-  if (body.customer_id) {
-    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get([body.customer_id]) || null
-  } else if (body.customer_membership_number) {
-    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get([body.customer_membership_number]) || null
-  }
+  if (customerRead) customer = await customerRead || null
   const customerStateGuard = customer ? {
     id: customer.id,
     isAnonymous: isAnonymousCustomer(customer) ? 1 : 0,
@@ -945,9 +971,7 @@ app.post('/', async (c) => {
   // SETTING and never from the request -- a stale till that still shows the
   // points panel must not be able to accrue or spend against a programme the
   // shop has switched off. Absent = on, matching buildPortalConfig's default.
-  const loyaltyEnabledRow = await db.prepare(
-    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
-  ).get<{ value: string }>()
+  const loyaltyEnabledRow = await loyaltyEnabledRowRead
   const loyaltyPointsEnabled = isLoyaltyEnabled(loyaltyEnabledRow?.value)
   let redemptionGuard: Awaited<ReturnType<typeof preparePointsRedemption>> | null = null
 
@@ -977,7 +1001,7 @@ app.post('/', async (c) => {
   // ---- 3. Calculate totals (pure computation, no I/O) ----
   // Capture complete active-rule membership, not only the displayed winner.
   // Source CAS below rejects concurrent product/rule changes before any write.
-  const pricingRuleRows = await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  const pricingRuleRows = await pricingRuleRowsRead
   if (pricingRuleRows.length > 100) return c.json({error:'Too many active promotion rules to capture safely.',code:'sale_item_pricing_limit'},409)
   const capturedRules = pricingRuleRows.map(row => normalizePromotionRule(row,1))
   if (capturedRules.some(rule => !rule)) return c.json({error:'Promotion configuration needs review.',code:'sale_item_pricing_invalid'},409)
@@ -1150,6 +1174,10 @@ app.post('/', async (c) => {
       }, 400)
     }
   }
+  // Owner, 20 Oct 2026: a paid order still to be delivered is Completed with
+  // the delivery-pending tag; awaiting_delivery is request vocabulary only.
+  const deliveryPending = saleStatus === 'awaiting_delivery' ? 1 : 0
+  if (deliveryPending) saleStatus = 'completed'
 
   let nativeChange
   try {
@@ -1211,9 +1239,7 @@ app.post('/', async (c) => {
   // therefore re-asserts uniqueness in-transaction (receiptNumberGuard in
   // step 5) and a lost race re-mints and retries, bounded -- see
   // RECEIPT_NUMBER_RETRY_LIMIT. `let` because a retry replaces it.
-  const receiptNumberTaken = async (candidate: string) =>
-    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
-  let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
+  let receiptNumber = clientReceiptNumber || await mintedReceiptNumberRead!
   // The sale is always stamped with the server clock; a client created_at is
   // only audited (lib/clientTimestamp.ts). An older claim was refused above.
 
@@ -1221,13 +1247,11 @@ app.post('/', async (c) => {
   // computed with the totals above, since the customer-paid portion is part
   // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
-  if (isDelivery && body.delivery_contact_id) {
-    deliveryContact = await db.prepare('SELECT id, name, phone, area, address FROM delivery_contacts WHERE id = ?').get([body.delivery_contact_id]) || null
-  }
+  if (deliveryContactRead) deliveryContact = await deliveryContactRead || null
 
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
-  const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
+  const branchRow = branchRowRead ? await branchRowRead : null
   // The snapshot embeds the receipt number, so a receipt-race retry rebuilds
   // it from the same inputs (and the same recordedAt) with the new number.
   const snapshotRecordedAt = new Date().toISOString()
@@ -1299,7 +1323,7 @@ app.post('/', async (c) => {
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, search_normalized, items, creation_snapshot_json, created_at, updated_at
+        loyalty_accrual, sale_status, delivery_pending, search_normalized, items, creation_snapshot_json, created_at, updated_at
       ) SELECT @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -1310,7 +1334,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        ${loyaltyAccrualSql('@loyalty_accrual')}, @sale_status, @delivery_pending, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1415,6 +1439,7 @@ app.post('/', async (c) => {
       delivery_actual_cost_usd: deliveryActualCostUsd,
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
+      delivery_pending: deliveryPending,
     },
   }
 
@@ -2101,6 +2126,18 @@ app.post('/:id/line-receipt/:kind', async (c) => {
   return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
 })
 
+// The list's status filter, on the two-status model: Not Paid and Completed
+// read the payment state, and the retired values select their tag, so a
+// returned or delivery-pending sale is listed under its payment state too.
+function saleStatusFilterClause(raw: string, params: Record<string, unknown>): string | null {
+  const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)
+  const terms = statuses.map((status, index) => {
+    params[`status${index}`] = status
+    return saleStatusFilterSql('s', status, `status${index}`)
+  })
+  return terms.length ? `(${terms.join(' OR ')})` : null
+}
+
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -2222,9 +2259,21 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
+  // oldStatus is the stored word (stock math: every status but cancelled
+  // holds the same units). The write is the two-status model (owner, 20 Oct
+  // 2026): the payment state in sale_status and the return and delivery tags
+  // beside it; a retired status on the row is translated, never written back.
   const oldStatus = sale.sale_status || 'completed'
-  if (oldStatus === saleStatus && !paymentFieldsSent) {
-    return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
+  const current = saleStoredState(sale)
+  const paymentFromStatus = current.saleStatus
+  // Un-cancel goes back to where the sale was, tags included.
+  const beforeCancel = current.saleStatus === 'cancelled' ? saleStoredState({ ...sale, sale_status: sale.status_before_cancel || 'completed' }) : null
+  const target = beforeCancel && saleStatus !== 'cancelled' ? beforeCancel : requestedSaleState(current, saleStatus)
+  const requestedPayment = beforeCancel && saleStatus === (sale.status_before_cancel || 'completed') ? beforeCancel.saleStatus : requestedSaleState(beforeCancel ?? current, saleStatus).saleStatus
+  const writtenStatus = target.saleStatus
+  // A request for the retired return word the row already carries is a no-op too.
+  if ((sameSaleState(current, target) || (RETURN_STATUSES.has(saleStatus) && oldStatus === saleStatus)) && !paymentFieldsSent) {
+    return c.json({ id: Number(id), sale_status: sale.sale_status, updated_at: sale.updated_at || null })
   }
   if (!paymentFieldsSent && !statusRequestId) {
     return c.json({
@@ -2237,8 +2286,16 @@ app.patch('/:id/status', async (c) => {
   // Which transitions are legal at all (returns-flow ownership of
   // partial_return/returned; un-cancel only back to where the sale was) --
   // see lib/saleTransitions.ts.
-  const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
+  const guard = guardSaleStatusTransition(current.saleStatus, RETURN_STATUSES.has(saleStatus) && !beforeCancel ? saleStatus : requestedPayment, beforeCancel?.saleStatus ?? null, current.returnState !== null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // What a Not Paid sale owes is its total less the debt its active customer
+  // returns lowered less what was paid (owner, 29 Sep 2026).
+  const saleMoney: RecordedSaleMoney = saleReadsNotPaid(sale)
+    ? { ...sale, refund_usd: sumRefundsUsd((await db.prepare(`SELECT ${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id = ?
+        AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'`)
+        .all<{ debt_lowered_usd: number | string | null }>([id])).map((row) => row.debt_lowered_usd ?? 0)) }
+    : sale
 
   // S4-41, the forward half. A Not Paid sale may take a paid status
   // (completed / awaiting_delivery) only when the payment already recorded on
@@ -2257,7 +2314,7 @@ app.patch('/:id/status', async (c) => {
   // correction mode is reachable ONLY through it. Refusing it would leave a
   // mis-keyed tender uncorrectable forever. A reopened sale keeps its tender,
   // so putting a fully paid one back (the reopen's Undo) passes the check below.
-  if (!paymentFieldsSent && statusChangeNeedsPayment(oldStatus, saleStatus, sale)) {
+  if (!paymentFieldsSent && statusChangeNeedsPayment(paymentFromStatus, saleStatus, saleMoney)) {
     return c.json({
       error: 'This sale is not fully paid, so it cannot be marked Completed or Awaiting Delivery. Record the payment first.',
       code: 'insufficient_payment_for_status',
@@ -2427,8 +2484,8 @@ app.patch('/:id/status', async (c) => {
   // identity; actor/status/timestamp proximity is not proof of one act.
   const statusOperationId = statusSourceId || crypto.randomUUID()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
-  const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
-  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
+  const updates = [SALE_STATE_SET_SQL, 'updated_at = @updated_at']
+  const updateParams: Record<string, unknown> = { ...saleStateParams(target), id, updated_at: mutationStamp }
   const emptySettlementNote = paymentFieldsSent && body.notes !== undefined && !String(body.notes ?? '').trim()
   if (body.notes !== undefined && !emptySettlementNote) {
     updates.push('notes = @notes')
@@ -2464,7 +2521,7 @@ app.patch('/:id/status', async (c) => {
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   let paymentCorrection = false
   if (paymentFieldsSent) {
-    const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
+    const isDeferredPaymentSettle = paymentFromStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing a Not Paid sale.' }, 400)
@@ -2510,7 +2567,7 @@ app.patch('/:id/status', async (c) => {
         existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
         existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
         existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
-        totalUsd: sale.total_usd,
+        totalUsd: Number(saleMoney.refund_usd) > 0 ? subtractMoney4(sale.total_usd as number | string, saleMoney.refund_usd as string) : sale.total_usd,
         exchangeRate: latestRate,
         changeExchangeRateRaw: settingMap.change_exchange_rate,
       })
@@ -2522,7 +2579,7 @@ app.patch('/:id/status', async (c) => {
     }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
-    const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan)
+    const after = buildSaleSettlementAfterState(before, sale, target, settlementPlan)
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2542,13 +2599,15 @@ app.patch('/:id/status', async (c) => {
       'change_exchange_rate = @change_exchange_rate',
       'search_normalized = @search_normalized',
     )
-    Object.assign(updateParams, { ...after, lines: undefined })
+    Object.assign(updateParams, { ...after, lines: undefined, status_before_return: undefined, ...saleStateParams(target) })
     settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp).slice(1)
     settlementOperationId = crypto.randomUUID()
     settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
     settlementResponse = {
       id: Number(id),
-      sale_status: saleStatus,
+      sale_status: writtenStatus,
+      return_state: target.returnState,
+      delivery_pending: target.deliveryPending ? 1 : 0,
       updated_at: mutationStamp,
       exchange_rate: after.exchange_rate,
       payment_method: after.payment_method,
@@ -2587,7 +2646,7 @@ app.patch('/:id/status', async (c) => {
     updateParams.cancel_reason = cancelReason
     updateParams.cancel_note = cancelNote
     updateParams.cancelled_by_name = actorSnapshot(user)
-    updateParams.status_before_cancel = oldStatus
+    updateParams.status_before_cancel = current.saleStatus
   } else if (oldStatus === 'cancelled') {
     // Un-cancel: the cancellation record clears, and its linked lost-fee
     // expense row (if any) is removed WITH it, atomically -- money
@@ -2660,7 +2719,8 @@ app.patch('/:id/status', async (c) => {
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   if (!paymentFieldsSent && statusSourceId && statusDigest) {
     directStatusResponse = {
-      id: Number(id), sale_status: saleStatus, updated_at: mutationStamp,
+      // Replay responses are whitelisted (saleRecordEvents.ts RESPONSE_KEYS); tags are read from the sale.
+      id: Number(id), sale_status: writtenStatus, updated_at: mutationStamp,
       ...(skipStock ? { stock_skipped: 1 } : {}),
     }
     const statusChanges: Array<{
@@ -2669,8 +2729,8 @@ app.patch('/:id/status', async (c) => {
       after: { state: 'known_value'; value: string } | { state: 'known_none' }
     }> = [{
       field: 'sale_status',
-      before: { state: 'known_value', value: oldStatus },
-      after: { state: 'known_value', value: saleStatus },
+      before: { state: 'known_value', value: saleStatusWord(current) },
+      after: { state: 'known_value', value: saleStatusWord(target) },
     }]
     const cancellationTransition = oldStatus === 'cancelled' || saleStatus === 'cancelled'
     if (cancellationTransition) {
@@ -2699,7 +2759,7 @@ app.patch('/:id/status', async (c) => {
     statusEventBytes = statusEvent.eventsBytes
     statements.push(statusEvent.statement)
   }
-  if (saleStatus === 'awaiting_payment' && (oldStatus === 'completed' || oldStatus === 'awaiting_delivery')) {
+  if (target.saleStatus === 'awaiting_payment' && current.saleStatus === 'completed') {
     statements.push({
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
             VALUES(@actor,@actorName,'sale_payment_correction_opened','sale',@saleId,@details,'sale',@saleId,@details)`,
@@ -2709,7 +2769,7 @@ app.patch('/:id/status', async (c) => {
         saleId: String(id),
         details: JSON.stringify({
           operationId: statusOperationId,
-          oldStatus,
+          oldStatus: saleStatusWord(current),
           newStatus: saleStatus,
           reason: 'completed_sale_reopened_for_payment_correction',
         }),
@@ -2848,7 +2908,7 @@ app.patch('/:id/status', async (c) => {
   if (!writesStock) statements.push(ordinaryBusinessMaintenanceGuard)
   if (settlementSnapshot || directStatusResponse) {
     assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
-      saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
+      saleId: Number(id), before: oldStatus, after: writtenStatus, response: directStatusResponse,
     }, settlementEventBytes + statusEventBytes)
   }
   try {
@@ -2904,8 +2964,9 @@ app.patch('/:id/status', async (c) => {
       ...(!paymentFieldsSent && statusSourceId ? { record_event: {
         source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
       } } : {}),
-      oldStatus,
-      newStatus: saleStatus,
+      oldStatus: saleStatusWord(current),
+      newStatus: saleStatusWord(target),
+      ...(current.returnState ? { returnState: current.returnState } : {}),
       ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
       ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
       restoredUnits: plan.restoredUnits,
@@ -2947,8 +3008,8 @@ app.patch('/:id/status', async (c) => {
     type: 'status',
     lines: formatSaleStatusTelegramLines({
       receipt: sale.receipt_number || id,
-      fromStatus: oldStatus,
-      toStatus: saleStatus,
+      fromStatus: saleStatusWord(current),
+      toStatus: saleStatusWord(target),
       customer: sale.customer_name,
       reason: cancelReason ? cancelReasonLabel(cancelReason) : null,
       skippedUnits: skipStock ? totalSkippedUnits : 0,
@@ -3362,12 +3423,7 @@ app.post('/:id/items', async (c) => {
   // A sale can carry real return records while its status row says something
   // else (imported/legacy rows), so the guard is given the evidence, not
   // just the label -- see guardSaleLineAddition's own comment.
-  const returnedRow = await db.prepare(`
-    SELECT 1 AS found FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
-    LIMIT 1
-  `).get<{ found: number }>([saleId])
+  const returnedRow = await db.prepare(SALE_RETURN_EVIDENCE_SQL).get<{ found: number }>({ saleId })
   const guard = guardSaleLineAddition(saleStatus, !!returnedRow)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
 
@@ -4262,12 +4318,7 @@ app.post('/:id/amendments', async (c) => {
   // else (imported/legacy rows), so the guard is given the EVIDENCE, not the
   // label -- the identical read S4-24b's addition guard uses, applied to every
   // amendment kind rather than only to additions.
-  const returnedRow = await db.prepare(`
-    SELECT 1 AS found FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
-    LIMIT 1
-  `).get<{ found: number }>([saleId])
+  const returnedRow = await db.prepare(SALE_RETURN_EVIDENCE_SQL).get<{ found: number }>({ saleId })
 
   const windowRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>([AMENDMENT_WINDOW_SETTING_KEY])
   const guard = guardSaleAmendment({
@@ -5837,18 +5888,8 @@ app.get('/', async (c) => {
     params.branchId = query.branchId
   }
   if (query.status) {
-    const statuses = String(query.status).split(',').map((v) => v.trim()).filter(Boolean)
-    if (statuses.length === 1) {
-      where.push('s.sale_status = @status')
-      params.status = statuses[0]
-    } else if (statuses.length > 1) {
-      const keys = statuses.map((status, index) => {
-        const key = `status${index}`
-        params[key] = status
-        return `@${key}`
-      })
-      where.push(`s.sale_status IN (${keys.join(', ')})`)
-    }
+    const clause = saleStatusFilterClause(String(query.status), params)
+    if (clause) where.push(clause)
   }
 
   const searchClause = buildSalesSearchWhere(query, params)
@@ -5980,16 +6021,17 @@ app.get('/', async (c) => {
         // Read recorded operands, never SQLite binary-money SUM. A bounded page
         // must refuse excessive linked history rather than silently omit refunds.
         const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnDebtLoweredSql('returns')} AS debt_lowered_usd,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
       ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
     `).all<Record<string,unknown>>(chunk))
         if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
-        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal;debtLowered:unknown[]}>()
         for(const row of refundRows){
-          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero(),debtLowered:[]}
           group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+          group.debtLowered.push(row.debt_lowered_usd??0)
           map.set(id,group)
         }
         return map
@@ -6048,6 +6090,8 @@ app.get('/', async (c) => {
         items: itemsForResponse,
         refund_usd: refundUsd.toNumber(4),
         refund_khr: refundKhr.toNumber(4),
+        // The debt the active returns lowered: what a Not Paid sale's balance subtracts (lib/returnRefundSplit.ts).
+        return_owed_reduction_usd: Number(sumRefundsUsd((refund?.debtLowered??[]) as Array<number|string>)),
         return_count: refund?.count || 0,
         // Never 0: a sale always has at least the fact that it happened, and
         // that is the record every later one is relative to.
@@ -6123,18 +6167,8 @@ app.get('/stats', async (c) => {
     }
   }
   if (query.status) {
-    const statuses = String(query.status).split(',').map((v) => v.trim()).filter(Boolean)
-    if (statuses.length === 1) {
-      where.push('s.sale_status = @status')
-      params.status = statuses[0]
-    } else if (statuses.length > 1) {
-      const keys = statuses.map((status, index) => {
-        const key = `status${index}`
-        params[key] = status
-        return `@${key}`
-      })
-      where.push(`s.sale_status IN (${keys.join(', ')})`)
-    }
+    const clause = saleStatusFilterClause(String(query.status), params)
+    if (clause) where.push(clause)
   }
   if (query.branchId) {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
@@ -6158,6 +6192,8 @@ app.get('/stats', async (c) => {
       revenue_count: snapshot.sales.length,
       revenue_usd: totals.revenue_usd,
       pending_revenue_usd: totals.pending_revenue_usd,
+      revenue_without_not_paid_usd: totals.revenue_without_not_paid_usd,
+      not_paid_owed_usd: totals.not_paid_owed_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
@@ -6182,7 +6218,7 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,
   // recovered by subtraction (AL finding L4, lib/reportProfitView.ts).
   if(canViewCosts)return costViewProfit(row)
   const courierMoney=canViewCourier?Object.fromEntries(COURIER_COST_KEYS.filter(key=>key in row).map(key=>[key,row[key]])):{}
-  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
+  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,profit_without_not_paid_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
     returned_cost_shortfall_usd,cost_missing_snapshot_lines,cost_known_lines,cost_complete,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
     // Stock removed entirely, priced at COST, and the two figures derived from
@@ -6546,7 +6582,7 @@ app.get('/export', async (c) => {
     total_transactions: 0, completed_transactions: 0, revenue_usd: 0,
     cogs_usd: 0, gross_profit_usd: 0, gross_margin_pct: 0,
     total_discounts_usd: 0, total_tax_usd: 0, total_delivery_usd: 0,
-    total_refunds_usd: 0, net_revenue_usd: 0, avg_order_usd: 0,
+    total_refunds_usd: 0, net_revenue_usd: 0, net_revenue_without_not_paid_usd: 0, not_paid_owed_usd: 0, avg_order_usd: 0,
   }
   if (!snapshotMaxId) {
     return c.json({
@@ -6732,6 +6768,9 @@ app.get('/export', async (c) => {
     total_delivery_usd: salesTotals.delivery_usd,
     total_refunds_usd: totalRefundsUsd,
     net_revenue_usd: netRevenueUsd,
+    // Owner, 20-21 Oct 2026: the same net revenue without Not Paid sales, and what those still owe.
+    net_revenue_without_not_paid_usd: salesTotals.revenue_without_not_paid_usd,
+    not_paid_owed_usd: salesTotals.not_paid_owed_usd,
     avg_order_usd: salesTotals.avg_order_usd,
   }
   // AL finding L4: the summary carries COGS, the delivery fee and net revenue,

@@ -49,6 +49,7 @@ const salesStatus = compile('salesStatus.ts')
 const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
   './batchCode': compile('batchCode.ts'),
+  './businessDateWindow': compile('businessDateWindow.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': compile('moneyPrecision.ts'),
 })
@@ -313,13 +314,14 @@ console.log('PASS reasons + held() math')
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
   // Z0: the sale write path auto-allocates FIFO lots and records them, and
   // the transition/returns paths restore to the same lots.
-  assert.match(salesSrc, /const lotsByProductBranch = await readFifoLotAvailabilityForCart\(/, 'sale checkout reads one authoritative product+branch lot map for the whole cart')
+  assert.match(salesSrc, /const lotsByProductBranchRead = readStarted\(readFifoLotAvailabilityForCart\(/, 'sale checkout starts one authoritative product+branch lot read for the whole cart')
+  assert.match(salesSrc, /const lotsByProductBranch = await lotsByProductBranchRead/, 'and uses that one map where the lots are first needed')
   assert.match(salesSrc, /productId: item\.product_id, branchId: item\.branch_id as number/, 'the checkout lot read is keyed by each line\'s product and branch')
   assert.match(salesSrc, /autoAllocationsByItemIndex/, 'sale checkout records multi-lot allocations')
   assert.match(salesSrc, /FROM sale_item_batch_allocations WHERE sale_item_id IN/, 'the transition route fetches each line\'s allocations')
   const returnsBatchSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
   assert.match(returnsBatchSrc, /fetchSaleItemAllocations/, 'returns restock consults recorded allocations for multi-lot lines')
-  assert.match(salesSrc, /guardSaleStatusTransition\(oldStatus, saleStatus, sale\.status_before_cancel \|\| null\)/, 'route must consult the transition guard')
+  assert.match(salesSrc, /guardSaleStatusTransition\(current\.saleStatus, /, 'route must consult the transition guard')
   assert.match(salesSrc, /planSaleStockTransition\(\{/, 'route must build stock statements through the kernel')
   assert.match(salesSrc, /COALESCE\(r\.status, 'completed'\) != 'cancelled'\s*\n\s*AND COALESCE\(r\.return_scope, 'customer'\) = 'customer'/, 'returned-quantity query counts non-cancelled customer returns -- and deliberately does NOT filter return_to_stock (a damaged return is written off, not still out)')
   const returnedQuerySql = salesSrc.slice(salesSrc.indexOf('SELECT ri.sale_item_id'), salesSrc.indexOf('GROUP BY ri.sale_item_id'))

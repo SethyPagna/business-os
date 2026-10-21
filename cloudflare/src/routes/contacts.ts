@@ -9,6 +9,7 @@ import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMEN
 import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { PRODUCT_SUPPLIER_REFUSAL, supplierContactChangeReachesProducts } from '../lib/productSupplierGate'
 import { audit, buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
@@ -575,10 +576,14 @@ function conflictResult(error: unknown) {
 // merge must repoint them WHEN present without throwing on a DB where they
 // have not been applied -- the same resilience the ar/ap read endpoints
 // already carry (see /customers/reports/ar-invoices).
+// Present tables are remembered for the isolate; a missing one is re-checked.
+const tablesPresent = new Set<string>()
 async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
+  if (tablesPresent.has(name)) return true
   const row = await db
     .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
     .get<{ ok: number }>({ name })
+  if (row) tablesPresent.add(name)
   return Boolean(row)
 }
 
@@ -746,6 +751,20 @@ function contactMergeRefusal(error: unknown, legacy: boolean, accounts: ContactM
 // Suppliers have no membership/portal/anonymous complexity, so this needs
 // none of those merge-route guards -- just the plan, the batch, and a cache
 // bump.
+// Owner rule (19 Oct 2026): the supplier of a product is changed only with products:supplier. A supplier contact
+// rename-with-carry or merge relabels or repoints products, so it is held to the same switch -- but only when a
+// product or lot actually uses the supplier. Conservative reading; the owner may relax it for a rename.
+async function refuseSupplierContactProductChange(
+  db: ReturnType<typeof getDb>,
+  user: SessionUser | undefined,
+  config: ContactConfig,
+  input: { names: string[]; supplierIds?: number[] },
+): Promise<{ body: typeof PRODUCT_SUPPLIER_REFUSAL; status: 403 } | null> {
+  if (config.table !== 'suppliers' || getActionTier(user, 'products', 'supplier') !== 'none') return null
+  if (!await supplierContactChangeReachesProducts(db, input)) return null
+  return { body: PRODUCT_SUPPLIER_REFUSAL, status: 403 }
+}
+
 async function mergeSupplierIntoExisting(
   env: Env,
   config: ContactConfig,
@@ -813,6 +832,11 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   const db = getDb(env)
   const settings = await loadSettingsMap(env)
   const config = buildPortalConfig(settings, env)
+  // Off: nothing earns and nothing is shown, so the four ledger reads are skipped; the data is untouched.
+  if (!config.loyaltyPointsEnabled) {
+    for (const id of customerIds) result.set(id, summarizePoints([], [], [], config, []))
+    return result
+  }
   const idChunks = chunkForBinding(customerIds)
 
   const salesRows: Array<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }> = []
@@ -1351,7 +1375,7 @@ function registerContactRoutes(config: ContactConfig) {
   app.post(`${config.path}/merge`, async (c) => {
     const user = c.get('user')
     if (getPermissionTier(user, 'contacts') === 'review') {
-      return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
+      return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Review support for this action is not built.` }, 403)
     }
     // The Duplicates tab offers Merge only with contacts:resolve_conflicts
     // (DuplicatesTab.tsx canMergeDuplicates); the same gate as the sibling
@@ -1437,6 +1461,13 @@ function registerContactRoutes(config: ContactConfig) {
         code: 'contact_merge_not_duplicates',
       }, 409)
     }
+
+    const supplierMergeDenied = await refuseSupplierContactProductChange(db, user, config, {
+      // A chosen name for the kept supplier also relabels the products that carry its old name.
+      names: [...merged.map((row) => String(row.name || '')), ...(request.choices && 'name' in request.choices ? [String(keeper.name || '')] : [])],
+      supplierIds: merged.map((row) => Number(row.id)),
+    })
+    if (supplierMergeDenied) return c.json(supplierMergeDenied.body, supplierMergeDenied.status)
 
     const portalAccounts = config.table === 'customers'
       ? await db.prepare(`SELECT id, contact_id, membership_id, name FROM portal_accounts WHERE contact_id IN (${idList}) ORDER BY id`).all<ContactMergePortalAccount>(idParams)
@@ -1875,12 +1906,20 @@ function registerContactRoutes(config: ContactConfig) {
     if (duplicateDecision.resolvedExisting) {
       const keeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
       if (keeper) {
+        // The fold repoints this supplier's products and lots onto the kept one: a product supplier change.
+        const foldDenied = await refuseSupplierContactProductChange(db, user, config, { names: [String(current.name || '')], supplierIds: [Number(id)] })
+        if (foldDenied) return c.json(foldDenied.body, foldDenied.status)
         const mergedResult = await mergeSupplierIntoExisting(c.env, config, user, keeper, current)
         c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: Number(keeper.id), mergedId: Number(current.id) }).catch(() => {}))
         return c.json(mergedResult)
       }
       // The matched row vanished between the check above and now (a race) --
       // nothing left to fold into; fall through and save the edit normally.
+    }
+    // A carrying rename relabels products.supplier; "rename only this contact" leaves the products alone.
+    if (nameChanged && renameScope === 'carry') {
+      const renameDenied = await refuseSupplierContactProductChange(db, user, config, { names: [String(current.name || '')] })
+      if (renameDenied) return c.json(renameDenied.body, renameDenied.status)
     }
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
@@ -2102,7 +2141,7 @@ function registerContactRoutes(config: ContactConfig) {
     // treating it as queueable would be inventing a spec line, not
     // following one.
     if (getPermissionTier(user, 'contacts') === 'review') {
-      return c.json({ error: `Deleting a ${config.entity} requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
+      return c.json({ error: `Deleting a ${config.entity} requires Full Access to Contacts -- Review support for this action is not built.` }, 403)
     }
     // Per-action override (Part 546): 'contacts:delete' switched off.
     if (getActionTier(user, 'contacts', 'delete') === 'none') {
@@ -2160,7 +2199,7 @@ function registerContactRoutes(config: ContactConfig) {
     const tier = getPermissionTier(user, 'contacts')
     if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     if (tier === 'review') {
-      return c.json({ error: `Bulk delete requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
+      return c.json({ error: `Bulk delete requires Full Access to Contacts -- Review support for this action is not built.` }, 403)
     }
     // Per-action override (Part 546): 'contacts:bulk_delete' switched off.
     if (getActionTier(user, 'contacts', 'bulk_delete') === 'none') {
@@ -2729,10 +2768,7 @@ app.get('/customers/reports/ar-invoices', async (c) => {
   const pageSize = clampInt(query.page_size, 25, 1, 100)
   const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
 
-  const ledgerExists = await db
-    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='customer_receivables' LIMIT 1")
-    .get<{ ok: number }>()
-  if (!ledgerExists) {
+  if (!await hasTable(db, 'customer_receivables')) {
     return c.json({
       invoices: [], totals: { invoices: 0, total_usd: 0, paid_usd: 0, outstanding_usd: 0, outstanding_count: 0 },
       page, page_size: pageSize, total_invoices: 0, meta: { customers: [] }, ledger_ready: false,

@@ -13,10 +13,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { FacebookIcon, InstagramIcon } from '../../shared/BrandIcons.tsx'
+import { PORTAL_SOCIAL_ICONS, PortalSocialText } from '../PortalSocialRow.tsx'
+import type { SocialPlatform } from '../../../utils/socialHandles.ts'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
@@ -29,6 +29,8 @@ import {
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
 import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
+import { aiProviderNames, aiProviderState } from './aiProviderDisclosure.ts'
+import type { AiProviderState } from './aiProviderDisclosure.ts'
 
 export const LEGAL_QUERY_PARAM = 'legal'
 
@@ -76,7 +78,7 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 /** A storefront section the footer can jump to (the nav's own tabs). */
 export type PortalFooterQuickLink = { key: string; label: string; onSelect: () => void }
 /** An already-normalised external profile link (website/facebook/...). */
-export type PortalFooterSocialLink = { key: string; label: string; value: string }
+export type PortalFooterSocialLink = { key: string; label: string; value: string; platform?: string; accessibleName?: string; latin?: boolean }
 
 export type PortalFooterProps = {
   copy: CopyFn
@@ -98,8 +100,8 @@ const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-se
 const FOOTER_LINK_CLASS = 'inline-flex min-h-10 items-center text-sm leading-6 text-slate-700 underline-offset-2 transition hover:text-slate-900 hover:underline dark:text-neutral-200 dark:hover:text-white'
 
 function SocialIcon({ kind }: { kind: string }) {
-  const Icon = kind === 'facebook' ? FacebookIcon : kind === 'instagram' ? InstagramIcon : kind === 'telegram' ? Send : Globe
-  return <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+  const Icon = PORTAL_SOCIAL_ICONS[kind as SocialPlatform] || Globe
+  return <Icon className="h-4 w-4 shrink-0" />
 }
 
 /**
@@ -180,17 +182,33 @@ export default function PortalFooter({
   )
 
   const details: LegalBusinessDetails = useMemo(() => ({
-    name: sanitizeBusinessDetail(businessName) || 'This business',
+    name: sanitizeBusinessDetail(businessName) || text('portal_legal_business_fallback'),
     legalName: sanitizeBusinessDetail(legalName),
     registrationNumber: sanitizeBusinessDetail(registrationNumber, 80),
     address: sanitizeBusinessDetail(address, 300),
     phone: sanitizeBusinessDetail(phone, 60),
     email: sanitizeBusinessDetail(email, 120),
-  }), [businessName, legalName, registrationNumber, address, phone, email])
+  }), [businessName, legalName, registrationNumber, address, phone, email, text])
+
+  // The privacy policy names the AI provider(s) behind the assistant. Which
+  // ones is runtime data (D1), so the page asks once it is opened; until the
+  // answer lands, or if it fails, the policy keeps its neutral sentence.
+  const [aiState, setAiState] = useState<AiProviderState>({ kind: 'unknown' })
+  // copy() answers in the storefront language; asking it for 'en' / 'ខ្មែរ' tells the page which sentence to use.
+  const pick = useCallback((en: string, km: string) => (copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? km : en), [copy])
+  useEffect(() => {
+    if (activePage !== 'privacy' || typeof window === 'undefined') return undefined
+    let live = true
+    const api = (window as Window & { api?: { getPortalAiStatus?: () => Promise<unknown> } }).api
+    Promise.resolve(api?.getPortalAiStatus?.())
+      .then((status) => { if (live) setAiState(aiProviderState(status)) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [activePage])
 
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
-  const telegramLink = socialLinks.find((link) => link.key === 'telegram')
+  const telegramLink = socialLinks.find((link) => (link.platform ?? link.key) === 'telegram')
   const [concernsBefore, concernsAfter = ''] = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM).split('{contact}')
 
   const openPage = useCallback((page: LegalPageKey) => {
@@ -367,9 +385,9 @@ export default function PortalFooter({
               <ul className="flex flex-col">
                 {socialLinks.map((link) => (
                   <li key={link.key}>
-                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer">
-                      <SocialIcon kind={link.key} />
-                      <span className="notranslate break-words" translate="no">{link.label}</span>
+                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer" aria-label={link.accessibleName}>
+                      <SocialIcon kind={link.platform ?? link.key} />
+                      <PortalSocialText text={link.label} latin={link.latin ?? true} />
                     </a>
                   </li>
                 ))}
@@ -391,7 +409,7 @@ export default function PortalFooter({
                   key={page}
                   href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
                   aria-current={activePage === page ? 'page' : undefined}
-                  className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  className="inline-flex min-h-11 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
                   onClick={(event) => {
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
                     event.preventDefault()
@@ -405,7 +423,10 @@ export default function PortalFooter({
           </nav>
         </div>
         <div className="mx-auto mt-6 flex max-w-5xl flex-wrap items-center justify-between gap-x-4 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
-          <span>{fill('portal_legal_footer_rights')}</span>
+          <div className="min-w-0">
+            <p>{fill('portal_legal_footer_rights')}</p>
+            <p data-portal-footer-independent="true">{text('portal_legal_footer_independent')}</p>
+          </div>
           <a
             href="/THIRD_PARTY_NOTICES.txt"
             target="_blank"
@@ -419,7 +440,7 @@ export default function PortalFooter({
       </footer>
 
       {activePage ? (
-        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} />
+        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} />
       ) : null}
     </>
   )
@@ -432,6 +453,8 @@ function LegalReader({
   details,
   onClose,
   onNavigate,
+  aiState,
+  pick,
 }: {
   page: LegalPageKey
   text: (key: string) => string
@@ -439,6 +462,8 @@ function LegalReader({
   details: LegalBusinessDetails
   onClose: () => void
   onNavigate: (page: LegalPageKey) => void
+  aiState: AiProviderState
+  pick: (en: string, km: string) => string
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -510,7 +535,7 @@ function LegalReader({
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <h1
             id={titleId}
-            className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900 dark:text-neutral-100"
+            className="min-w-0 flex-1 break-words text-base font-semibold leading-7 text-slate-900 dark:text-neutral-100"
             style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
           >
             {text(LEGAL_PAGE_TITLE_KEY[page])}
@@ -522,7 +547,7 @@ function LegalReader({
             onClick={onClose}
             aria-label={text('portal_legal_close')}
             title={text('portal_legal_close')}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
             <X className="h-5 w-5" />
           </button>
@@ -543,7 +568,9 @@ function LegalReader({
           <section key={section.heading} className="mt-6">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{fill(section.heading)}</h2>
             {section.bodies.map((body) => (
-              <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
+              body === 'portal_legal_privacy_ai_b'
+                ? <AiProviderParagraphs key={body} body={body} state={aiState} text={text} fill={fill} pick={pick} />
+                : <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
             ))}
             {page === 'cookies' && section.heading === 'portal_legal_cookies_table_h' ? (
               <StorageTable text={text} />
@@ -557,7 +584,7 @@ function LegalReader({
               key={other}
               type="button"
               onClick={() => onNavigate(other)}
-              className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              className="inline-flex min-h-11 items-center rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
             >
               {text(LEGAL_PAGE_TITLE_KEY[other])}
             </button>
@@ -565,6 +592,38 @@ function LegalReader({
         </nav>
       </div>
     </div>
+  )
+}
+
+// The assistant paragraph of the privacy policy: neutral until the provider list
+// is known, "no AI provider" when the assistant is off, otherwise the provider
+// names, what each one does with a question, and a link to its own terms.
+export function AiProviderParagraphs({ body, state, text, fill, pick }: {
+  body: string
+  state: AiProviderState
+  text: (key: string) => string
+  fill: (key: string) => string
+  pick: (en: string, km: string) => string
+}) {
+  if (state.kind === 'off') return <p className="mt-2">{fill('portal_legal_privacy_ai_off')}</p>
+  if (state.kind === 'unknown') return <p className="mt-2">{fill(body)}</p>
+  return (
+    <>
+      <p className="mt-2">{fill('portal_legal_privacy_ai_named').replace('{providers}', pick(aiProviderNames(state, 'en'), aiProviderNames(state, 'km')))}</p>
+      {state.providers.map((provider) => (
+        <p key={provider.id} className="mt-2" data-portal-ai-provider={provider.id}>
+          {pick(provider.retention.en, provider.retention.km)}{' '}
+          <a
+            href={provider.policyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center break-words underline underline-offset-2"
+          >
+            {text('portal_legal_ai_provider_terms').replace('{provider}', provider.displayName)}
+          </a>
+        </p>
+      ))}
+    </>
   )
 }
 

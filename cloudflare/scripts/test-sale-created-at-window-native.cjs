@@ -7,9 +7,7 @@
 // records what was claimed. A claim older than 10 minutes is refused with 409
 // sale_created_at_too_old: no sale, line, stock movement or stock change, and
 // one 'sale_refused' audit row naming the actor, the claim, the receive time
-// and the request id. The same holds for a sales.create replayed through
-// /api/sync/outbox, whose result carries the server's code. A repeat of an
-// already-recorded sale returns the original sale. The owner fence and the
+// and the request id. A repeat of an already-recorded sale returns the original sale. The owner fence and the
 // money-precision check answer before the refusal. A claim that matches a
 // closed shift segment's last second, or runs ahead of the open segment's
 // close, must still land in the segment the sale was rung in, so the segment's
@@ -19,21 +17,13 @@
 //
 // Run (from cloudflare/): node scripts/run-native-suite.cjs sale-created-at-window
 const assert = require('node:assert/strict')
-const { createHash } = require('node:crypto')
 const H = require('./harness/al_money_native.cjs')
 
 const MINUTE = 60 * 1000
 const DAY = 24 * 60 * MINUTE
 const storedMs = value => Date.parse(`${String(value).replace(' ', 'T')}Z`)
 const storedShape = ms => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
-const QUOTE_FIELDS = ['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr']
 const TOO_OLD_ERROR = 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.'
-
-const stableStringify = value => {
-  if (value == null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
-}
 
 async function main() {
   const h = await H.startWorker()
@@ -177,43 +167,12 @@ async function main() {
       assert.deepEqual(afterOrder, beforeOrder, 'neither refusal wrote anything')
     })
 
-    const quoteProbe = await asEmployee.call('POST', '/api/sales', { branch_id: 1, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, payment_currency: 'USD',
-      client_request_id: 'window-quote-probe-0001', offline_owner: owner, payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], payment_method: 'Cash', amount_paid_usd: 5, amount_paid_khr: 0,
-      items: [{ product_id: 12, quantity: 1, branch_id: 1, batch_id: 5012, client_line_key: 'quote-probe-line', pricing_source: 'selling',
-        pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } }] }, 'quote probe')
-    const quote = Object.fromEntries(QUOTE_FIELDS.map(name => [name, quoteProbe.body.pricing_quotes && quoteProbe.body.pricing_quotes[0][name]]))
-    const outbox = async (key, createdAt) => {
-      const payload = { branch_id: 1, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, payment_currency: 'USD', offline_owner: owner,
-        created_at: createdAt, payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], payment_method: 'Cash', amount_paid_usd: 5, amount_paid_khr: 0,
-        items: [{ product_id: 12, quantity: 1, branch_id: 1, batch_id: 5012, client_line_key: `${key}-line-1`, pricing_source: 'selling', pricing_quote: quote }] }
-      const operation = { operation_id: 'sales.create', client_request_id: key, schema_version: 1, base_updated_at: '2026-09-15T00:00:00.000Z',
-        payload_digest: createHash('sha256').update(stableStringify(payload)).digest('hex'), payload }
-      return asEmployee.call('POST', '/api/sync/outbox', { operations: [operation] }, `outbox sales.create claiming ${createdAt}`)
-    }
     const beforeOutbox = await counts()
-    const oldViaOutbox = await outbox('window-outbox-old-0001', stale)
-    const afterOldOutbox = await counts()
-    const oldOutboxRow = await read('window-outbox-old-0001')
-    const oldOutboxRefusals = await refusalRows('window-outbox-old-0001')
-    const recentMs = Date.now() - 2 * MINUTE
-    const recentViaOutbox = await outbox('window-outbox-recent-0001', new Date(recentMs).toISOString())
-    const recentOutboxRow = await read('window-outbox-recent-0001')
-    r.check(`/api/sync/outbox replay of sales.create with an old claim is rejected with the server's code and message and nothing is written (result ${JSON.stringify(oldViaOutbox.body.results && oldViaOutbox.body.results[0]).slice(0, 260)})`, () => {
-      assert.ok(quoteProbe.body.pricing_quotes, `quote probe: ${JSON.stringify(quoteProbe.body).slice(0, 200)}`)
-      const result = oldViaOutbox.body.results[0]
-      assert.equal(result.status, 'rejected')
-      assert.equal(result.code, 'sale_created_at_too_old')
-      assert.equal(result.error, TOO_OLD_ERROR)
-      assert.equal(oldViaOutbox.body.success, false)
-      assert.equal(oldOutboxRow, null)
-      assert.deepEqual(afterOldOutbox, beforeOutbox)
-      assert.equal(oldOutboxRefusals.length, 1)
-    })
-    r.check(`/api/sync/outbox control: the same replay with a claim two minutes ago is applied at the server clock (result ${JSON.stringify(recentViaOutbox.body.results && recentViaOutbox.body.results[0]).slice(0, 220)})`, () => {
-      const result = recentViaOutbox.body.results[0]
-      assert.equal(result.status, 'applied', JSON.stringify(result).slice(0, 300))
-      serverClock(recentOutboxRow, 'outbox 2 minutes ago')
-      assert.equal(recentOutboxRow.audit.claimed_created_at, storedShape(recentMs))
+    const outbox = await asEmployee.call('POST', '/api/sync/outbox', { operations: [] }, 'retired outbox route')
+    const afterOutbox = await counts()
+    r.check('/api/sync/outbox is retired: a sales.create replay route no longer exists, so no old claim can reach a sale through it', () => {
+      assert.equal(outbox.status, 404)
+      assert.deepEqual(afterOutbox, beforeOutbox)
     })
 
     const utcWallMs = Date.now() - 5 * MINUTE
@@ -240,8 +199,8 @@ async function main() {
       assert.equal(offsetRow.audit.claimed_created_at, storedShape(offsetMs))
     })
     const refusals = await refusalTotal()
-    r.check(`every refusal wrote exactly one audit row and nothing else did (four refusals: two direct, one zone-less, one outbox; got ${refusals})`, () => {
-      assert.equal(refusals, 4)
+    r.check(`every refusal wrote exactly one audit row and nothing else did (three refusals: two direct, one zone-less; got ${refusals})`, () => {
+      assert.equal(refusals, 3)
     })
 
     const secondCookie = await h.addEmployee(951, 'window_cashier_two', { pos: true, sales: true })

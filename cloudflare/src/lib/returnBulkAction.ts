@@ -11,8 +11,15 @@ import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './sale
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
-import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
-import { importedReturnLines, importedReturnedQuantitySql } from './saleTransitions'
+import {
+  assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams,
+} from './returnCreateAction'
+import { importedReturnLines } from './saleTransitions'
+import {
+  carriesRetiredReturnLabel, planReturnMoney, readSalesReturnMoney, RETURN_REOPENS_PAID_SALE_DEBT, RETURN_REOPENS_PAID_SALE_DEBT_ERROR, ReturnMoneyError,
+  saleReturnRecordWord, saleReturnStateSql, saleReturnTagStatement,
+} from './returnRefundSplit'
+import { saleStoredState, type SaleReturnState } from './saleStatusResolution'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -24,6 +31,7 @@ const RETURN_BULK_MOVEMENT_LIMIT = 256
 
 type Row = Record<string, unknown>
 type Statement = { sql: string; params: Record<string, unknown> }
+
 type ReturnField = 'status' | 'return_type' | 'supplier_settlement'
 
 type BulkRequest = {
@@ -120,10 +128,20 @@ type Member = {
   reason: 'changed' | 'source_mismatch' | 'scope_mismatch'
   updateSale: boolean
   stock: StockDelta[]
+  // A restored customer return is a new refund: its debt/cash split is taken
+  // again against the sale as it stands. Absent on older snapshots and on
+  // every other member, which then leave both columns alone.
+  money?: { before: ReturnMoneyState; after: ReturnMoneyState }
 }
 
-type SaleStatusSnapshot = { saleId: number; before: string; after: string }
-type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
+type ReturnMoneyState = { owed_reduction_usd: number; refund_currency: string | null }
+// before/after: the sale's Records status word on each side (saleReturnRecordWord:
+// the return tag, else the payment state). payment*: written by 6.0.884 only,
+// when a return still moved the payment state; read for Records, never replayed.
+type SaleStatusSnapshot = { saleId: number; before: string; after: string; paymentBefore?: string; paymentAfter?: string }
+// tagged: written by the two-status Worker (6.0.905), whose apply already rewrote any retired return word on each touched
+// sale; a replay of it needs no sale read. Older snapshots may have left one, so their replay reads the sales first.
+type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[]; tagged?: true }
 
 // `code` names a business refusal the client restates in the operator's
 // language; without one the route answers the generic write_conflict /
@@ -287,38 +305,47 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
 function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
+  const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
   return [
     ...stockStatements(member, direction, user, stamp),
     {
-      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,updated_at=@stamp WHERE id=@id`,
-      params: { ...target, stamp, id: member.id },
+      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,${money ? 'owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,' : ''}updated_at=@stamp WHERE id=@id`,
+      params: { ...target, ...(money ?? {}), stamp, id: member.id },
     },
   ]
 }
 
-// The units a sales import recorded as already returned (sale_items.returned_quantity, restocked by the import itself) are
-// committed returns of their line for the status, exactly as the single return create / edit count them
-// (routes/returns.ts importedReturnLines -> projectedSaleStatusForReturnCreate / ...ForReturnEdit). The in-batch capacity
-// guards use the SQL twin importedReturnedQuantitySql (lib/saleTransitions.ts); this status derivation, and the pre-read
-// that records it (saleStatusSnapshots), must too, or restoring a return would leave a sale one imported unit short of
-// 'returned' and cancelling the last recorded return would forget the imported unit and report the sale as not returned.
-function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string): Statement {
-  if (exactStatus) return { sql: 'UPDATE sales SET sale_status=@status,updated_at=@stamp WHERE id=@saleId', params: { saleId, stamp, status: exactStatus } }
-  return {
-    sql: `UPDATE sales SET sale_status = CASE
-            WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer')
-              AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=@saleId AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(status_before_return,'completed')
-            WHEN NOT EXISTS(
-              SELECT 1 FROM sale_items si
-              WHERE si.sale_id=@saleId AND COALESCE((
-                SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id=ri.return_id
-                WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer'
-                  AND (ri.sale_item_id=si.id OR (ri.sale_item_id IS NULL AND ri.product_id=si.product_id))
-              ),0) + ${importedReturnedQuantitySql('si')} < si.quantity
-            ) THEN 'returned'
-            ELSE 'partial_return' END,
-          updated_at=@stamp WHERE id=@saleId`,
-    params: { saleId, stamp },
+/**
+ * The money half of a status change (owner, 29 Sep 2026): a restored return
+ * splits its refund again into debt lowered and cash (lib/returnRefundSplit.ts
+ * planReturnMoney) and sets member.money. A return never moves the payment
+ * state (owner, 20 Oct 2026), so a change that would leave a paid sale owing
+ * again is refused instead.
+ */
+async function planStatusMoney(db: D1Compat, members: Member[]): Promise<void> {
+  const touched = members.filter(member => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
+  for (const [saleId, money] of await readSalesReturnMoney(db, [...new Set(touched.map(member => member.saleId!))])) {
+    const own = touched.filter(member => member.saleId === saleId)
+    const status = new Map(own.map(member => [member.id, member.after.status]))
+    const restored = own.filter(member => member.after.status === 'completed').map(member => member.id).sort((a, b) => a - b)
+    const rows = money.returns.map(row => ({ id: Number(row.id), active: (status.get(Number(row.id)) ?? row.status) !== 'cancelled',
+      refundUsd: row.total_refund_usd, owedReductionUsd: row.owed_reduction_usd,
+      currency: restored.includes(Number(row.id)) ? row.refund_currency ?? 'USD' : row.refund_currency }))
+    let plan: ReturnType<typeof planReturnMoney>
+    try { plan = planReturnMoney({ sale: money.sale, returns: rows, recompute: restored }) } catch (error) {
+      if (error instanceof ReturnMoneyError) fail(error.message, 409, error.code)
+      throw error
+    }
+    if (plan.reopensPaidSaleDebt) fail(RETURN_REOPENS_PAID_SALE_DEBT_ERROR, 409, RETURN_REOPENS_PAID_SALE_DEBT)
+    for (const id of restored) {
+      const stored = money.returns.find(row => Number(row.id) === id)
+      if (!stored || !plan.owedReductionUsd.has(id)) continue
+      const currency = stored.refund_currency == null ? null : String(stored.refund_currency)
+      own.find(member => member.id === id)!.money = {
+        before: { owed_reduction_usd: Number(stored.owed_reduction_usd) || 0, refund_currency: currency },
+        after: { owed_reduction_usd: plan.owedReductionUsd.get(id)!, refund_currency: currency ?? 'USD' },
+      }
+    }
   }
 }
 
@@ -339,39 +366,42 @@ function assertBounded(statements: Statement[], snapshot: Snapshot, eventsBytes 
   }
 }
 
-async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<SaleStatusSnapshot[]> {
+type SaleTagRow = { saleId: number; sale_status: string | null; status_before_return: string | null; return_state: string | null; delivery_pending: number | null; tagAfter: SaleReturnState | null }
+
+// Each touched sale as stored, and the tag its returns give once every changed member stands at `target`
+// (lib/returnCreateAction.ts saleReturnStateSql, imported units included). One read.
+async function saleTagRows(db: D1Compat, members: Member[], target: 'before' | 'after'): Promise<SaleTagRow[]> {
   const overrides = members.filter((member) => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
-    .map((member) => ({ id: member.id, status: member.after.status }))
+    .map((member) => ({ id: member.id, status: member[target].status }))
   const saleIds = [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]
   if (!saleIds.length) return []
   const effective = `(COALESCE((SELECT json_extract(o.value,'$.status') FROM json_each(@overrides) o
     WHERE CAST(json_extract(o.value,'$.id') AS INTEGER)=r.id),COALESCE(r.status,'completed')))`
   const rows = await db.prepare(`
-    SELECT s.id AS saleId,COALESCE(s.sale_status,'completed') AS beforeStatus,
-      CASE
-        WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=s.id AND ${effective}!='cancelled'
-          AND COALESCE(r.return_scope,'customer')='customer')
-          AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(s.status_before_return,'completed')
-        WHEN NOT EXISTS(
-          SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND COALESCE((
-            SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id=ri.return_id
-            WHERE r.sale_id=s.id AND ${effective}!='cancelled' AND COALESCE(r.return_scope,'customer')='customer'
-              AND (ri.sale_item_id=si.id OR (ri.sale_item_id IS NULL AND ri.product_id=si.product_id))
-          ),0) + ${importedReturnedQuantitySql('si')} < si.quantity
-        ) THEN 'returned' ELSE 'partial_return' END AS afterStatus
+    SELECT s.id AS saleId,s.sale_status,s.status_before_return,s.return_state,s.delivery_pending,
+      ${saleReturnStateSql('s.id', `${effective}!='cancelled'`)} AS tagAfter
     FROM sales s
     WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
     ORDER BY s.id
-  `).all<{ saleId: number; beforeStatus: string; afterStatus: string }>({
-    overrides: JSON.stringify(overrides), saleIds: JSON.stringify(saleIds),
-  })
-  return rows.map((row) => ({ saleId: Number(row.saleId), before: String(row.beforeStatus), after: String(row.afterStatus) }))
+  `).all<SaleTagRow>({ overrides: JSON.stringify(overrides), saleIds: JSON.stringify(saleIds) })
+  return rows.map(row => ({ ...row, saleId: Number(row.saleId) }))
+}
+
+// The sales write of one touched sale: the exact (v1) tag when the entitlement computed one, else the tag read in-batch.
+function saleTagStatement(row: SaleTagRow, stamp: string, exact: Map<number, SaleReturnState | null>): Statement {
+  return saleReturnTagStatement({ saleId: row.saleId, stamp,
+    tag: exact.has(row.saleId) ? exact.get(row.saleId)! : { sql: saleReturnStateSql('@saleId') },
+    retired: carriesRetiredReturnLabel(row) ? saleStoredState(row) : null })
 }
 
 function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
   return buildSaleRecordEventsInsert((snapshot.saleStatuses || []).flatMap((status) => {
-    const before = via === 'undo' ? status.after : status.before
-    const after = via === 'undo' ? status.before : status.after
+    // A change of payment state alone (a restore that clears the debt) is recorded as that state moving.
+    const paid = status.before === status.after && status.paymentBefore !== undefined && status.paymentBefore !== status.paymentAfter
+    const left = paid ? status.paymentBefore! : status.before
+    const right = paid ? status.paymentAfter! : status.after
+    const before = via === 'undo' ? right : left
+    const after = via === 'undo' ? left : right
     if (before === after) return []
     const related = snapshot.members.filter((member) => member.changed && member.saleId === status.saleId).map((member) => member.returnNumber)
     return [{
@@ -416,12 +446,12 @@ function entitlementGraphExpression(): string {
 }
 
 async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'before' | 'after'): Promise<{
-  guards: Statement[]; saleStatuses: SaleStatusSnapshot[]
+  guards: Statement[]; exactTags: Map<number, SaleReturnState | null>
 }> {
   const changed = members.filter(member => member.changed && member.scope === 'customer'
     && member.saleId && member.before.status !== member.after.status)
   const saleIds = [...new Set(changed.map(member => member.saleId!))]
-  if (!saleIds.length) return { guards: [], saleStatuses: [] }
+  if (!saleIds.length) return { guards: [], exactTags: new Map() }
   const entitlementSaleIds = JSON.stringify(saleIds)
   const graph = await db.prepare(`SELECT ${entitlementGraphExpression()} AS value`).get<{ value: string }>({ entitlementSaleIds })
   const authorityJson = String(graph?.value || '')
@@ -433,11 +463,11 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     fail('The exact refund history is too large to restore safely.', 400)
   }
   const override = new Map(changed.map(member => [member.id, member[target].status]))
-  const saleLines = await db.prepare(`SELECT s.id AS sale_id,s.sale_status,s.status_before_return,
+  const saleLines = await db.prepare(`SELECT s.id AS sale_id,
     si.id AS sale_item_id,si.product_id,si.product_name,si.quantity,si.returned_quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
     WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
     ORDER BY s.id,si.id`).all<Row>({ saleIds: entitlementSaleIds })
-  const exactStatuses: SaleStatusSnapshot[] = []
+  const exactTags = new Map<number, SaleReturnState | null>()
   for (const saleId of saleIds) {
     const headers = parsed.returns.filter(row => Number(row.sale_id) === saleId)
     if (!headers.some(row => Number(row.money_precision_version) === 1)) {
@@ -521,12 +551,10 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
         if (remainder !== '0') fullyReturned = false
       }
     } catch { fail('The exact refund entitlement changed. Review the return history before restoring it.', 409) }
-    const sale = lines[0]
-    exactStatuses.push({ saleId, before: normalize(sale.sale_status, 'completed'),
-      after: !projected.length ? normalize(sale.status_before_return, 'completed') : fullyReturned ? 'returned' : 'partial_return' })
+    exactTags.set(saleId, !projected.length ? null : fullyReturned ? 'full' : 'partial')
   }
   return { guards: [guard(`${entitlementGraphExpression()}=@entitlementAuthorityJson`, { entitlementSaleIds, entitlementAuthorityJson: authorityJson })],
-    saleStatuses: exactStatuses }
+    exactTags }
 }
 
 async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[] }> {
@@ -733,10 +761,14 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
-  const ordinarySaleStatuses = request.field === 'status' ? await saleStatusSnapshots(db, members) : []
-  const exactBySale = new Map(entitlement.saleStatuses.map(status => [status.saleId, status]))
-  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
-    saleStatuses: ordinarySaleStatuses.map(status => exactBySale.get(status.saleId) || status) }
+  const saleRows = request.field === 'status' ? await saleTagRows(db, members, 'after') : []
+  if (request.field === 'status') await planStatusMoney(db, members)
+  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members, tagged: true,
+    saleStatuses: saleRows.map(row => {
+      const stored = saleStoredState(row)
+      const tag = entitlement.exactTags.has(row.saleId) ? entitlement.exactTags.get(row.saleId)! : row.tagAfter
+      return { saleId: row.saleId, before: saleReturnRecordWord(stored), after: saleReturnRecordWord({ ...stored, returnState: tag }) }
+    }) }
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -760,9 +792,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
-  for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
-    statements.push(saleStatusStatement(saleId, stamp, exactBySale.get(saleId)?.after))
-  }
+  for (const row of saleRows) statements.push(saleTagStatement(row, stamp, entitlement.exactTags))
   const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: RETURN_BULK_ACTION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
@@ -824,10 +854,13 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
     statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
-  const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
-  for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
-    statements.push(saleStatusStatement(saleId, stamp, replayExact.get(saleId)?.after))
-  }
+  // The tag is derived again from the returns as the replay leaves them, never copied from the snapshot:
+  // snapshots written before 0263 carry retired status words.
+  const replaySales = snapshot.tagged
+    ? [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]
+      .map((saleId): SaleTagRow => ({ saleId, sale_status: null, status_before_return: null, return_state: null, delivery_pending: null, tagAfter: null }))
+    : await saleTagRows(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
+  for (const row of replaySales) statements.push(saleTagStatement(row, stamp, replayEntitlement.exactTags))
   const nextGeneration = Number(generation) + 1
   const recordEvents = returnSaleRecordEvents(snapshot, nextGeneration, direction, user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)

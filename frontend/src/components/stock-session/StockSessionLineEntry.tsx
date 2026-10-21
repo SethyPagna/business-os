@@ -16,6 +16,7 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
 import type { LineEntryField, StockMode, StockSessionProduct } from '../../utils/stockSessionDraft.ts'
 import { IconField, InsetNumberField, INVALID_RING } from './StockSessionSharedDetails.tsx'
+import { isImeComposingKey } from '../../utils/imeComposition.ts'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
@@ -239,7 +240,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
         className="flex min-w-0 items-center gap-1.5"
         onKeyDown={(event) => {
           // Only the box's own Enter adds; a picked suggestion has already handled it.
-          if (event.key !== 'Enter' || event.defaultPrevented || (event.target as HTMLElement).tagName !== 'INPUT') return
+          if (event.key !== 'Enter' || event.defaultPrevented || isImeComposingKey(event) || (event.target as HTMLElement).tagName !== 'INPUT') return
           event.preventDefault()
           onAdd()
         }}

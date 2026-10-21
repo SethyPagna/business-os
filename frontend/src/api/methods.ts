@@ -22,7 +22,6 @@ let rfidTransportPromise = null
 let salesTransportPromise = null
 let settingsTransportPromise = null
 let returnsTransportPromise = null
-let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
 let notificationSummaryTransportPromise = null
 let systemJobsTransportPromise = null
@@ -127,11 +126,6 @@ function loadSettingsTransport() {
 function loadReturnsTransport() {
   if (!returnsTransportPromise) returnsTransportPromise = import('./returnsTransport.ts')
   return returnsTransportPromise
-}
-
-function loadPendingSyncTransport() {
-  if (!pendingSyncTransportPromise) pendingSyncTransportPromise = import('./pendingSyncTransport.ts')
-  return pendingSyncTransportPromise
 }
 
 function loadDriveSyncTransport() {
@@ -259,21 +253,6 @@ function scheduleSensitiveMirrorPurge() {
   }, SENSITIVE_MIRROR_PURGE_DELAY_MS)
 }
 
-export async function discardPendingSyncQueue(reason = 'Reviewed pending sales were cleared.', reviewToken?: string) {
-  const { discardPendingSyncQueue: discardPendingSyncQueueRequest } = await loadPendingSyncTransport()
-  return discardPendingSyncQueueRequest(reason, reviewToken)
-}
-
-export async function getPendingSyncState() {
-  const { getPendingSyncState: getPendingSyncStateRequest } = await loadPendingSyncTransport()
-  return getPendingSyncStateRequest()
-}
-
-export async function retryPendingSyncNow(reviewToken?: string) {
-  const { retryPendingSyncNow: retryPendingSyncNowRequest } = await loadPendingSyncTransport()
-  return retryPendingSyncNowRequest(reviewToken)
-}
-
 // mirrorTables: when omitted, every local IndexedDB mirror table is wiped
 // (the right call for factory-reset / data-path switch, which really do
 // invalidate everything). When passed, only those tables are cleared --
@@ -347,10 +326,6 @@ export const login = async (payload) => {
 export const logout = async () => {
   const { logout: logoutRequest } = await loadAuthTransport()
   return logoutRequest()
-}
-export const resetPasswordWithOtp = async (payload) => {
-  const { resetPasswordWithOtp: resetPasswordWithOtpRequest } = await loadAuthTransport()
-  return resetPasswordWithOtpRequest(payload)
 }
 export const requestPasswordResetEmail = async (payload) => {
   const { requestPasswordResetEmail: requestPasswordResetEmailRequest } = await loadAuthTransport()
@@ -986,10 +961,6 @@ export const setUserAvatar = async (id, avatarPath) => {
 export const removeUserAvatar = async (id) => {
   const { removeUserAvatar: removeUserAvatarRequest } = await loadUserAdminTransport()
   return removeUserAvatarRequest(id)
-}
-export const disconnectUserAuthProvider = async (id, d) => {
-  const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadUserAdminTransport()
-  return disconnectUserAuthProviderRequest(id, d)
 }
 export const changeUserPassword = async (id, d) => {
   const { changeUserPassword: changeUserPasswordRequest } = await loadUserAdminTransport()

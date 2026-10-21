@@ -67,6 +67,7 @@ function loadProductWrites(db) {
     if (request === './stockMutationReceipt') return { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } }
     if (request === './media') return { sanitizeMediaList: (value) => Array.isArray(value) ? value : [] }
     if (request === './batchCode') return { dateToBatchCode: () => '11092026' }
+    if (request === './businessDateWindow') return { businessToday: () => '2026-11-09' }
     if (request === './searchMatch') return { normalizeSearchText: String, compactSearchText: String }
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
     if (request === './schemaProbe') return {

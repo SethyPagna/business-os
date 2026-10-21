@@ -86,7 +86,9 @@ import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
-import { PAID_SALE_STATUSES, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
+import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
+import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDisplay.ts'
+import { returnOwedReductionUsd } from '../../utils/receiptTotals.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -156,6 +158,7 @@ interface SaleRecord extends Record<string, unknown> {
   created_at?: string
   updated_at?: string
   sale_status?: string
+  status_before_return?: string | null
   // S4-2 (migration 0114): 1 when an admin deliberately changed this sale's
   // status without moving stock. The sale stays outside the stock ledger
   // from then on, so the confirmation says so instead of promising a
@@ -179,6 +182,9 @@ interface SaleRecord extends Record<string, unknown> {
   total?: number
   total_khr?: number
   net_total_usd?: number
+  // GET /api/sales: the active customer refunds, and the part of them that lowered the debt.
+  refund_usd?: number
+  return_owed_reduction_usd?: number
 }
 
 // The page's sort vocabulary (see utils/listSort.ts). Labels are attached
@@ -827,7 +833,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `sales` above is capped at the list endpoint's page limit, so the
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
-  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
+  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; revenue_without_not_paid_usd: number | null; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
 
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
@@ -852,6 +858,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       setSalesStats({
         revenue_usd: Number(row.revenue_usd) || 0,
         pending_revenue_usd: Number(row.pending_revenue_usd) || 0,
+        revenue_without_not_paid_usd: typeof row.revenue_without_not_paid_usd === 'number' ? row.revenue_without_not_paid_usd : null,
         total_count: Number(row.total_count) || 0,
         revenue_count: Number(row.revenue_count) || 0,
         truncated_in_list: Boolean(row.truncated_in_list),
@@ -1182,7 +1189,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return false
     }
     const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId)
-    const previousStatus = previousSale?.sale_status || 'completed'
+    // The shown status: Mark delivered moves Awaiting Delivery to Completed, and Undo puts the delivery back.
+    const previousStatus = previousSale ? saleStatusDisplay(previousSale).status : 'completed'
     // Cancelling needs its reason (+ optional lost fee) -- the backend
     // refuses without one. First entry opens the dialog; the dialog calls
     // back in with `extra` filled. Undo (recordHistory=false, back to the
@@ -1665,8 +1673,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       : buildTimeActionSections(filtered, {
         getDate: (sale) => sale?.created_at,
         getItemId: (sale) => Number(sale?.id),
-        getActionKey: (sale) => sale?.sale_status || 'completed',
-        getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+        getActionKey: (sale) => saleStatusDisplay(sale).status,
+        getActionLabel: (sale) => getStatusLabel(saleStatusDisplay(sale).status, t),
         // All-time day grouping: the actual date narrowing happens
         // server-side via salesDateRange, so the client grouper is never
         // asked to also filter by year/month (that Period picker is gone).
@@ -1706,8 +1714,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       : buildTimeActionSections(pagedSales, {
         getDate: (sale) => sale?.created_at,
         getItemId: (sale) => Number(sale?.id),
-        getActionKey: (sale) => sale?.sale_status || 'completed',
-        getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+        getActionKey: (sale) => saleStatusDisplay(sale).status,
+        getActionLabel: (sale) => getStatusLabel(saleStatusDisplay(sale).status, t),
         year: 'all',
         month: 'all',
         timeMode: timeGroupingMode,
@@ -1828,6 +1836,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const removalLossUsd = Number(totals.removal_loss_usd) || 0
     const revenueInclLosses = Number(totals.revenue_after_losses_usd ?? (revenueUsd - removalLossUsd))
     const profitInclLosses = Number(totals.profit_after_losses_usd ?? (profitUsd - removalLossUsd))
+    // Owner, 20 Oct 2026: the kernel's revenue and profit WITHOUT Not Paid sales, and what those still owe.
+    // Printed only when Not Paid sales moved the figure; absent from an older Worker, never derived here.
+    const revenuePaidOnly = typeof totals.revenue_without_not_paid_usd === 'number' && totals.revenue_without_not_paid_usd !== revenueUsd
+      ? totals.revenue_without_not_paid_usd : null
+    const profitPaidOnly = revenuePaidOnly !== null && typeof totals.profit_without_not_paid_usd === 'number' ? totals.profit_without_not_paid_usd : null
+    const notPaidOwedUsd = Number(totals.not_paid_owed_usd) || 0
     // The two figures the cards below print equations for. net_sales_usd
     // arrived with the Sep 6 kernel; read the identity backwards if an
     // older Worker is answering, rather than print a sum that will not foot.
@@ -1872,6 +1886,8 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
           { label: translateOr('stats_gross', 'Gross sales'), value: fmtUSD(recognizedGrossUsd) },
           { label: translateOr('discounts_total', 'Total discounts'), value: fmtUSD(totalDiscountUsd), tone: totalDiscountUsd > 0 ? ('warn' as const) : undefined },
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
+          ...(revenuePaidOnly === null ? [] : [{ label: translateOr('revenue_paid_only', 'Revenue (paid only)'), value: fmtUSD(revenuePaidOnly) }]),
+          ...(notPaidOwedUsd > 0 ? [{ label: translateOr('not_paid_owed', 'Still owed'), value: fmtUSD(notPaidOwedUsd) }] : []),
           { label: translateOr('stats_store_discount', 'Store discount'), value: fmtUSD(Number(totals.store_discount_usd) || 0), tone: 'warn' as const },
           { label: translateOr('stats_member_discount', 'Member discount'), value: fmtUSD(Number(totals.membership_discount_usd) || 0), tone: 'warn' as const },
           // The refund term of the revenue identity: refunds attributed back
@@ -1924,6 +1940,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
           ]),
           { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          ...(profitPaidOnly === null ? [] : [{ label: translateOr('profit_paid_only', 'Profit (paid only)'), value: fmtUSD(profitPaidOnly) }]),
           // Same excluding/including pair the Dashboard's Profit card shows,
           // same keys/labels (Dashboard.tsx), never a new pair of strings.
           ...(hasLosses ? [
@@ -2015,6 +2032,11 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
   const creditUsd: number | null = salesStats
     ? salesStats.pending_revenue_usd
     : saleListCreditUsd(filtered)
+  // Revenue without Not Paid sales (owner, 20 Oct 2026): the server's once-rounded figure; the page-only
+  // fallback keeps the same identity, revenue - Not Paid, from its two cent-rounded mirrors.
+  const paidOnlyUsd: number | null = salesStats
+    ? salesStats.revenue_without_not_paid_usd
+    : creditUsd === null ? null : Math.round((revenue - creditUsd) * 100) / 100
 
   const toggleSelected = (saleId: number | string) => {
     if (!canBulkSales) return
@@ -2101,14 +2123,15 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       : valueChoice(text, emptyLabel)
   }
   const uniqueChoices = (choices: BulkSaleChoice[]): BulkSaleChoice[] => Array.from(new Map(choices.map((choice) => [choice.key, choice])).values())
-  const choiceForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice => field === 'status'
-    ? { key: `value:${String(sale.sale_status || 'completed').toLocaleLowerCase()}`, label: getStatusLabel(String(sale.sale_status || 'completed'), t), value: String(sale.sale_status || 'completed') }
-    : field === 'payment_method'
-      ? valueChoice(sale.payment_method, translateOr('none', 'None'))
-      : field === 'delivery_contact'
-        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_driver', 'No driver'))
-        : linkedChoice(sale.customer_id, sale.customer_name, translateOr('no_customer', 'No customer'))
+  const statusChoice = (status: string): BulkSaleChoice => ({ key: `value:${status.toLocaleLowerCase()}`, label: getStatusLabel(status, t), value: status })
+  const choiceForSale = (sale: SaleRecord, field: Exclude<BulkSaleField, 'status'>): BulkSaleChoice => field === 'payment_method'
+    ? valueChoice(sale.payment_method, translateOr('none', 'None'))
+    : field === 'delivery_contact'
+      ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_driver', 'No driver'))
+      : linkedChoice(sale.customer_id, sale.customer_name, translateOr('no_customer', 'No customer'))
   const choicesForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice[] => {
+    // A status matches as the Worker matches it: the shown status, and Completed for a paid order awaiting delivery.
+    if (field === 'status') return saleStatusWords(sale).map(statusChoice)
     if (field !== 'payment_method') return [choiceForSale(sale, field)]
     let details: unknown = sale.payment_details
     if (typeof details === 'string') { try { details = JSON.parse(details) } catch { details = [] } }
@@ -2167,7 +2190,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         // S4-41: a Not Paid sale whose recorded payment does not cover it cannot
         // become paid. The Worker refuses a group containing one, so the review
         // names it and leaves it out instead (the same rule, shared file).
-        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(sale.sale_status, status, sale)).map((status) => `value:${status}`) } : {}),
+        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(salePaymentStatus(sale), status, { ...sale, refund_usd: returnOwedReductionUsd(sale) })).map((status) => `value:${status}`) } : {}),
       })),
       sourceChoices,
       targetChoices,
@@ -2268,7 +2291,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
     // dialog as a single change, which states the before/after and offers
     // the admin-only "Don't touch stock" lock for the whole batch.
     if (!confirmed && !extra) {
-      const distinctStatuses = Array.from(new Set(scopeSales.map((sale) => String(sale.sale_status || 'completed'))))
+      const distinctStatuses = Array.from(new Set(scopeSales.map((sale) => saleStatusDisplay(sale).status)))
       finishSingleAction(bulkStatusInFlightRef)
       setStatusPrompt({
         mode: 'bulk',
@@ -2851,6 +2874,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         revenue={revenue}
         revenueCount={revenueCount}
         creditUsd={creditUsd}
+        paidOnlyUsd={paidOnlyUsd}
         isCountedSale={isCountedSale as SalesListSurfaceProps['isCountedSale']}
         salesSections={salesSections as SalesListSurfaceProps['salesSections']}
         selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}

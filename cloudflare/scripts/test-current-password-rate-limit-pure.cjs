@@ -89,6 +89,7 @@ const guard = fs.existsSync(guardPath)
 let db
 let actor
 const usersRoute = load('routes/users.ts', {
+  '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },

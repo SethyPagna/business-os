@@ -16,6 +16,14 @@ const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 
 const fs = require('fs')
 const path = require('path')
+// Bundled (esbuild) so a kernel's own imports resolve without a hand-written map.
+function bundledKernel(rel) {
+  const out = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '..', 'src', rel)], bundle: true, write: false,
+    format: 'cjs', platform: 'node', target: 'es2022', external: ['cloudflare:*'], logLevel: 'silent' })
+  const m = { exports: {} }
+  new Function('module', 'exports', 'require', out.outputFiles[0].text)(m, m.exports, require)
+  return m.exports
+}
 const ts = require('typescript')
 const assert = require('assert')
 const Module = require('module')
@@ -27,6 +35,13 @@ function seedRows(raw,seed) {
   return raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get() ? seedStockFixture(raw,seed) : seed()
 }
 let rawDb = openDb(loadAll())
+// 6.0.905 (owner, 20 Oct 2026): a return is the tag beside the payment state (sales.return_state) and never a
+// sale_status word; the word it used to write is read off the tag, and the column may hold no return word.
+function returnWord(id) {
+  const row = rawDb.prepare('SELECT sale_status,return_state FROM sales WHERE id=?').get([id])
+  assert.ok(!['partial_return', 'returned'].includes(row.sale_status), `sale ${id} carries a retired word: ${row.sale_status}`)
+  return row.return_state === 'full' ? 'returned' : row.return_state === 'partial' ? 'partial_return' : row.sale_status
+}
 assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 function deactivatePre0154LegacyLot(batchId) {
   const deactivate = () => seedRows(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId]))
@@ -157,7 +172,11 @@ const stockTransaction = loadReal('lib/stockTransaction.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+// Fixture helper: drain a lot through the strict plan inside the stock transaction.
+async function drainLot(database, input) {
+  await stockTransaction.executeStockTransaction(database, productBatches.planRemoveStockFromBatch(input).statements, 'retry')
+}
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 // P4-3: real, pure -- used by the new damaged-return-disposition tests below
@@ -248,6 +267,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
+  // Migration 0260: the route splits a refund into the debt it lowers and the cash it pays,
+  // and its report sums drawer cash with the shift kernel's own SQL.
+  '../lib/returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  '../lib/shiftReconciliation': bundledKernel('lib/shiftReconciliation.ts'),
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
   '../lib/productMergeLineage': productMergeLineageKernel,
   '../lib/saleMoneyPrecision': saleMoneyPrecisionKernel,
@@ -364,7 +387,7 @@ async function main() {
   await check('v1 customer return writes exact net entitlement, snapshots and stock under one stale-graph guard', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 2, lotCode: 'V1-LOT' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 1 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 1 })
     const pricingPool = { version: 1, pool_key: 'return-v1-pool', evaluation_time: '2026-09-13T00:00:00.000Z',
       exchange_rate: 4000, rules: [], lines: [{ line_key: 'return-v1-line', source: 'selling',
         product: { id: 1, selling_price_usd: 10, selling_price_khr: 40000, wholesale_price_usd: null,
@@ -518,7 +541,7 @@ async function main() {
       sale_id: 1, reason: 'Fractional remainder', expected_quote: expectedQuote,
       items: [{ sale_item_id: 1, quantity: 0.2, stock_action: 'none', branch_id: 1 }] })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE sale_id=1').get().n, 2)
   })
 
@@ -628,7 +651,7 @@ async function main() {
     // A prior sale drew 5 units from a specific batch (as sales.ts's own
     // lot picker would have recorded on sale_items.batch_id).
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-A' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const beforeBatchQty = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity
@@ -672,7 +695,7 @@ async function main() {
   await check('editing a return reverses the SAME batch it originally restocked, not the aggregate blindly', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-B' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const created = await req('POST', '/', {
@@ -710,8 +733,8 @@ async function main() {
     const batchA = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-01-05' })
     const batchB = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-03-20' })
     assert.notStrictEqual(batchA.batchId, batchB.batchId, 'sanity: the two receives must be distinct lots')
-    await productBatches.removeStockFromBatch(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
-    await productBatches.removeStockFromBatch(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
+    await drainLot(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
+    await drainLot(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, NULL)').run())
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @a, 1, 3, 0)').run({ a: batchA.batchId }))
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @b, 1, 2, 0)').run({ b: batchB.batchId }))
@@ -756,7 +779,7 @@ async function main() {
     const b1 = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 5, receivedDate: '2026-01-02' })
     const b2 = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 5, receivedDate: '2026-02-02' })
     for (const [batchId, productId, quantity] of [[a1.batchId, 1, 2], [a2.batchId, 1, 1], [b1.batchId, 2, 1], [b2.batchId, 2, 2]]) {
-      await productBatches.removeStockFromBatch(db, { batchId, productId, branchId: 1, quantity })
+      await drainLot(db, { batchId, productId, branchId: 1, quantity })
     }
     seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3),(2,1,2,'Different Serum',3)").run())
     for (const [saleItemId, batchId, quantity] of [[1, a1.batchId, 2], [1, a2.batchId, 1], [2, b1.batchId, 1], [2, b2.batchId, 2]]) {
@@ -791,7 +814,7 @@ async function main() {
       items: [{ sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 5, return_to_stock: true }],
     })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     const before = rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: created.json.id })
     const frozen = {
       client_request_id: 'return-edit-frozen-status', expected_updated_at: before.updated_at,
@@ -801,7 +824,7 @@ async function main() {
     const edited = await req('PATCH', `/${created.json.id}`, frozen)
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
     assert.strictEqual(edited.json.updated_at, rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: created.json.id }).updated_at)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
     const event = rawDb.prepare("SELECT source_id,changes_json FROM sale_record_events WHERE source_kind='return_edit'").get()
     const receipt = rawDb.prepare("SELECT id,request_json,response_json FROM return_mutation_receipts WHERE request_id='return-edit-frozen-status'").get()
     assert.strictEqual(event.source_id, receipt.id)
@@ -864,7 +887,7 @@ async function main() {
     seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run())
     seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,3)").run())
     const linked = await req('POST', '/', { sale_id: 1, reason: 'One of three', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }] })
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
     const linkedEdit = await req('PATCH', `/${linked.json.id}`, {
       client_request_id: 'return-edit-status-unchanged', reason: 'Still one of three',
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }],
@@ -930,7 +953,7 @@ async function main() {
     })
     assert.strictEqual(eventFailure.status, 500)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM return_items WHERE return_id=@id').get({ id: linked.json.id }).quantity, 2)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-bad-event'").get().n, 0)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_edit'").get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_bulk_guards').get().n, 0)
@@ -1705,13 +1728,13 @@ async function main() {
     // while an impossible replacement is requested. The compiled action must
     // refuse before its single batch; there is no compensation phase.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-R' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
 
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
-      // Passes every pre-check and then fails INSIDE applyReplacementStock
+      // Passes every pre-check and then fails INSIDE the atomic replacement write
       // on the plain branch_stock aggregate: product 2 has no stock at all,
       // 99 requested.
       // It has to be product 2 and not product 1: product 1 IS lot-tracked
@@ -1780,7 +1803,7 @@ async function main() {
     seed()
     // A lot-backed sale and a return that restocked into that lot.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
-    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
     const created = await req('POST', '/', {
       sale_id: 1,
@@ -2058,14 +2081,14 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_create'").get().n, 1)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
 
     const retry = await reqExact('POST', '/', loserPayload)
     assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 2)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 2)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
   })
 
   await check('status-unchanged and manual creates keep receipts without inventing sale events', async () => {

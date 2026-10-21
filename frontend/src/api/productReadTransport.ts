@@ -114,6 +114,34 @@ function canonicalizeSearchTerm(params: QueryParams): QueryParams {
   return next
 }
 
+// The closed key set GET /api/products/search accepts from a `products_image_only` user
+// (cloudflare/src/lib/productImageOnlyQuery.ts). The server answers any other key with 400
+// image_only_filter_invalid and a filter whose products_image_only_show_* grant is missing with 403
+// image_only_filter_hidden, so the image-only view builds its request from this type alone. Dates are inclusive
+// YYYY-MM-DD business days; stockState is in_stock | low | out | healthy.
+export type ImageOnlyProductSearchParams = {
+  q?: string
+  page?: number
+  pageSize?: number
+  sort?: 'name_asc' | 'name_desc'
+  category?: string
+  brand?: string
+  stockState?: 'in_stock' | 'low' | 'out' | 'healthy'
+  startDate?: string
+  endDate?: string
+}
+
+// What that reader answers with: `facets` carry only the option lists the role may see (categories needs
+// show_category, brands needs show_brand), computed over the same scope as the list.
+export type ImageOnlyProductSearchPayload = {
+  items: unknown[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  facets: { categories?: string[]; brands?: string[] }
+}
+
 export function searchProducts(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(canonicalizeSearchTerm(params))
   const cacheKey = `products:search:${query}`

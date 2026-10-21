@@ -34,7 +34,7 @@ const common = {
   './lazyLocalDb.ts': { getLocalDb: async () => db }, './http.ts': api,
   './actorReadScope.ts': { captureActorReadScope: () => 1, isActorReadScopeCurrent: () => true },
   './offlineQueueOwnership.ts': ownership,
-  './syncRuntime.ts': { dispatchSyncUpdates() {}, emitSyncQueueChanged() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
+  './syncRuntime.ts': { dispatchSyncUpdates() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
 }
 function load(file: string, dependencies: Row): Row {
   const source = fs.readFileSync(new URL(`../src/api/${file}.ts`, import.meta.url), 'utf8')
@@ -73,6 +73,11 @@ for (const action of ['discard', 'recover']) {
     }
     const eligible = shown.filter(seq => count !== 40 || (seq !== 1 && seq !== 2))
     if (action === 'discard') {
+      // 6.0.895: only rows exported in this review can be cleared. The export
+      // is taken here, after the post-review changes, so changed rows are not
+      // in the file and stay on the device.
+      const file = await pending.exportPendingSyncReview(state.review_token)
+      assert.deepEqual(file.rows.map((item: Row) => item._seq).sort((a: number, b: number) => a - b), [...eligible].sort((a, b) => a - b))
       const result = await pending.discardPendingSyncQueue('explicit review', state.review_token)
       assert.equal(result.discarded, eligible.length)
     } else {
@@ -86,3 +91,11 @@ for (const action of ['discard', 'recover']) {
     console.log(`PASS ${action}: ${count} rows, visible ordered prefix only; foreign, unseen, new and changed rows retained`)
   }
 }
+
+// 6.0.895: a review that was never exported clears nothing, and the review is spent.
+seed(3)
+const unexported = await pending.getPendingSyncState()
+assert.equal((await pending.discardPendingSyncQueue('explicit review', unexported.review_token)).discarded, 0)
+assert.equal(rows.size, 3 + 3, 'every row stays when nothing was exported')
+await assert.rejects(pending.exportPendingSyncReview(unexported.review_token), /Keep this pending sale/)
+console.log('PASS clear without an export of the same review removes nothing')

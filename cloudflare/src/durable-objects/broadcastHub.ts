@@ -5,7 +5,7 @@
 // its own poll/refetch-on-focus.
 //
 // One Durable Object instance for the whole Worker (see index.ts: always
-// addressed via idFromName('global')) holds the live WebSocket connections
+// addressed via broadcastHubStub) holds the live WebSocket connections
 // using the Hibernatable WebSockets API (state.acceptWebSocket), so idle
 // connections don't keep the DO billed as "active" between messages -- the
 // DO can hibernate and Cloudflare wakes it back up on the next message or
@@ -96,11 +96,9 @@ export class BroadcastHub {
 // The hub lives where it is first created unless a location hint is given.
 // The original 'global' instance was created without one; the business, D1
 // and the pinned Worker placement are all in APAC, so sockets now connect to
-// an APAC-hinted instance. broadcast() also posts to the legacy instance so
-// tabs still attached to it keep receiving updates until they reconnect;
-// drop LEGACY_HUB_NAME once one release has cycled every open tab.
+// an APAC-hinted instance. The class and binding are shared; broadcast() no
+// longer posts to the old 'global' instance.
 const HUB_NAME = 'global-apac'
-const LEGACY_HUB_NAME = 'global'
 
 export function broadcastHubStub(env: Env): DurableObjectStub {
   return env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(HUB_NAME), { locationHint: 'apac' })
@@ -113,15 +111,11 @@ export function broadcastHubStub(env: Env): DurableObjectStub {
 export async function broadcast(env: Env, channel: BroadcastChannel, payload?: unknown): Promise<void> {
   try {
     const body = JSON.stringify({ channel, payload })
-    const post = (stub: DurableObjectStub) => stub.fetch('https://broadcast-hub.internal/broadcast', {
+    await broadcastHubStub(env).fetch('https://broadcast-hub.internal/broadcast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
     })
-    await Promise.all([
-      post(broadcastHubStub(env)),
-      post(env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(LEGACY_HUB_NAME))),
-    ])
   } catch (error) {
     console.error('[broadcastHub] failed to broadcast', channel, error)
   }

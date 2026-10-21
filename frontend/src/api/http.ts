@@ -320,9 +320,24 @@ export function markApiVersionMismatch(path: unknown, status = 404): ApiRuntimeE
 
 export function cacheGet(key: string): any {
   const e = _cache[key]
-  return (e && isActorReadScopeCurrent(e.scope) && Date.now() - e.ts < CACHE_TTL) ? e.data : null
+  return (e && isActorReadScopeCurrent(e.scope) && Date.now() - e.ts < freshCacheTtl(key)) ? e.data : null
 }
 export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now(), scope: captureActorReadScope(key) } }
+// Stable lookup lists change only through writes that push their own channel (categories/units
+// also follow product values, see DERIVED_READ_PREFIXES). While the sync socket is open every
+// change clears the entry, so it may outlive CACHE_TTL; the socket opening drops the entries read
+// before it (a closed socket may have missed a push). Exact keys only: stock, permission, role,
+// user and session reads keep CACHE_TTL.
+const SOCKET_BACKED_LOOKUP_TTL_MS: Record<string, number> = {
+  'branches:get': 5 * 60_000,
+  'categories:get': 5 * 60_000,
+  'units:get': 5 * 60_000,
+}
+function freshCacheTtl(key: string): number {
+  const lookupTtl = SOCKET_BACKED_LOOKUP_TTL_MS[key]
+  return lookupTtl && _syncSocketOpen ? lookupTtl : CACHE_TTL
+}
+
 async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<T>): Promise<T> {
   token.pending++
   if (token.valid) _readCacheTokens.add(token)
@@ -364,7 +379,8 @@ const DERIVED_READ_PREFIXES: Record<string, string[]> = {
   customers: ['sales', 'returns'],
   sales: ['dashboard', 'analytics'],
   returns: ['dashboard', 'analytics'],
-  products: ['dashboard', 'analytics'],
+  // GET /api/categories and /api/units also list the values products carry.
+  products: ['dashboard', 'analytics', 'categories', 'units'],
   inventory: ['dashboard', 'analytics'],
 }
 
@@ -1324,6 +1340,9 @@ export function ensureHealthLifecycleListeners(): void {
     const connected = (event as CustomEvent<{ connected?: boolean }>).detail?.connected === true
     const changed = connected !== _syncSocketOpen
     _syncSocketOpen = connected
+    if (changed && connected) {
+      for (const key of Object.keys(SOCKET_BACKED_LOOKUP_TTL_MS)) cacheInvalidate(key)
+    }
     // The socket is the fastest signal we have. It dropping (server outage,
     // redeploy, dead network that 'offline' never reported) or coming back
     // (possibly onto a new Worker build) is worth one probe right away rather
@@ -1337,13 +1356,12 @@ export function ensureHealthLifecycleListeners(): void {
 // ?€?€?€ Stale-while-revalidate cache (extended TTL for offline resilience) ?€?€?€?€
 const STALE_TTL   = 45_000    // 45 s ??serve stale while revalidating (was 5 min; reduced so a
                                // server restart clears stale data quickly without blanking the UI)
-const FRESH_TTL   = CACHE_TTL // 20 s ??treat as fresh, skip server
 
 export function cacheGetStale(key: string): CacheState {
   const e = _cache[key]
   if (!e || !isActorReadScopeCurrent(e.scope)) return { data: null, stale: false }
   const age = Date.now() - e.ts
-  if (age < FRESH_TTL) return { data: e.data, stale: false }
+  if (age < freshCacheTtl(key)) return { data: e.data, stale: false }
   if (age < STALE_TTL) return { data: e.data, stale: true  }
   return { data: null, stale: false }
 }

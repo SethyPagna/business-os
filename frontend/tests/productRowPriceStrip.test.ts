@@ -163,18 +163,19 @@ runTest('the unit chip inside the strip is not left larger than the prices', () 
 // reasoning above stops holding and this file says so.
 
 runTest('the desktop qty cell keeps its deliberate wrap, and the premise for that still holds', () => {
-  const qtyCell = /className=\{`flex flex-wrap items-center justify-end gap-x-1 gap-y-0\.5 font-bold \$\{stockStatusTextClass\}`\}/
-  assert.match(products, qtyCell, 'the desktop qty+unit cell must keep flex-wrap and gap-y-0.5 (Aug 19 2026: a long/Khmer unit name must drop, not spill past the cell edge)')
+  // 6.0.873: the desktop qty cell moved to ProductStockCell (ProductRowParts.tsx), fed the same status class.
+  const rowParts = fs.readFileSync(new URL('../src/components/products/surfaces/ProductRowParts.tsx', import.meta.url), 'utf8')
+  const qtyCell = /className=\{`flex flex-wrap items-center justify-end gap-x-1 gap-y-0\.5 font-bold \$\{qtyClassName\}`\}/
+  assert.match(rowParts, qtyCell, 'the desktop qty+unit cell must keep flex-wrap and gap-y-0.5 (Aug 19 2026: a long/Khmer unit name must drop, not spill past the cell edge)')
   const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
-  assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed /, 'the desktop table must stay table-fixed at min-w-[58rem] -- that is the whole reason the price columns cannot squeeze the qty column')
+  assert.match(surface, /<table className="w-full table-fixed[^"]*" style=\{\{ minWidth: /, 'the desktop table must stay table-fixed with its own declared minimum width -- that is the whole reason the price columns cannot squeeze the qty column')
   // Positive control on the "different cell" half: the prices really are in
   // other <td>s, so the qty cell's wrap cannot be the owner's price-driven one.
   // (The cost is a <span className="block"> since 25 Sep 2026: it sits inside
   // the button that opens the cost calculation, and a button holds phrasing
   // content only. Same line, same column.)
-  for (const priceCell of [`<span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>`, '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
-    assert.ok(products.includes(priceCell), `the desktop prices must stay in their own column: ${priceCell}`)
-  }
+  assert.ok(products.includes(`<span className="block font-medium text-red-700 dark:text-red-400">{costUsd === null ? '—' : fmtUSD(costUsd)}</span>`), 'the desktop cost must stay in its own column')
+  assert.ok(rowParts.includes('font-semibold text-green-700 dark:text-green-400') && rowParts.includes('{fmtUSD(usd)}'), 'the desktop selling price must stay in its own column (ProductPriceCell)')
   // And the MOBILE strip -- the row where the four values really do share one
   // flex line -- must not have been "fixed" by copying this wrap back onto it.
   assert.doesNotMatch(stripMarkup(), /flex-wrap/, 'the desktop ruling must not leak onto the mobile strip')
@@ -315,7 +316,11 @@ runTest('the model still covers the worst case the acceptance named', () => {
   assert.doesNotMatch(strip, /fmtKHR/, 'the strip must carry no KHR figure, or the width model no longer covers the acceptance worst case')
   // Positive control: the three riel sites the grep names really are in this
   // file, so the assertion above is a real distinction and not a dead regex.
-  assert.equal((products.match(/fmtKHR\(/g) || []).length, 3, 'Products.tsx must still hold exactly the three desktop <td> riel sites')
+  // 6.0.873: selling/wholesale riel render in ProductPriceCell; Products.tsx keeps the cost's.
+  const partsSource = fs.readFileSync(new URL('../src/components/products/surfaces/ProductRowParts.tsx', import.meta.url), 'utf8')
+  // Two calls, one site: the Khmer-typography probe and the text itself.
+  assert.equal((products.match(/fmtKHR\(/g) || []).length, 2, 'Products.tsx must still hold exactly the desktop cost riel site')
+  assert.equal((partsSource.match(/fmtKHR\(/g) || []).length, 2, 'ProductPriceCell holds the selling/wholesale riel site (probe + text)')
   // And the four digits actually modelled are the quantity.
   assert.ok(strip.includes('String(qty || 0)'), 'the four-digit token in the model stands in for the strip quantity')
 })

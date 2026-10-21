@@ -7,6 +7,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import SectionSwitcher from '../shared/SectionSwitcher'
@@ -92,6 +93,7 @@ type ReviewSubmissionItem = {
 
 type AppContextValue = {
   settings: Record<string, unknown>
+  user: PermissionUser
   saveSettings: (newSettings: Record<string, string>, options?: Record<string, unknown>) => Promise<unknown>
   notify: (message: string, type?: string) => void
   t: (key: string) => string
@@ -308,7 +310,7 @@ async function submitPortalReview(id: string | number, payload: Record<string, u
 }
 
 export default function LoyaltyPointsPage() {
-  const { settings, saveSettings, notify, t, language, fmtUSD, fmtKHR } = useApp()
+  const { settings, saveSettings, notify, t, language, fmtUSD, fmtKHR, user } = useApp()
   // G2: this component renders inside the Promotions page now, so its
   // load/refresh lifecycle keys on that page's activity.
   const isActive = useIsPageActive('promotions')
@@ -649,6 +651,7 @@ export default function LoyaltyPointsPage() {
                   name="loyalty_points_enabled"
                   type="checkbox"
                   checked={!!form.loyalty_points_enabled}
+                  disabled={!isAdminControlUser(user)}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('loyalty_points_enabled', event.target.checked)}
                 />
               </label>

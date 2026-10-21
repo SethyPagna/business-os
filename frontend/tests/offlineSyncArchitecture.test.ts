@@ -22,35 +22,22 @@ const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.me
 const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
 
-await runTest('legacy service-worker triggers cannot replay retained business writes', async () => {
-  assert.match(swSource, /const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'/)
-  assert.match(swSource, /self\.addEventListener\('sync'/)
-  assert.match(swSource, /event\.tag === OUTBOX_SYNC_TAG/)
-  assert.match(swSource, /indexedDB\.open\(DB_NAME\)/)
-  assert.match(swSource, /readQueuedBusinessOutbox/)
-  assert.match(swSource, /credentials: 'include'/)
-  assert.match(swSource, /fetch\(`\$\{base\}\/api\/sync\/outbox`/)
+// 6.0.880: the worker's unreachable outbox replay is removed, not just gated.
+// A legacy Background Sync registration or SYNC_NOW message now reaches no
+// handler; retained rows stay in IndexedDB for the foreground manual review.
+await runTest('legacy service-worker triggers cannot replay retained business writes', () => {
+  assert.doesNotMatch(swSource, /self\.addEventListener\('sync'/)
+  assert.doesNotMatch(swSource, /BUSINESS_OS_SYNC_NOW/)
+  assert.doesNotMatch(swSource, /indexedDB\.open/)
+  assert.doesNotMatch(swSource, /\/api\/sync\/outbox/)
   assert.doesNotMatch(swSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
   assert.doesNotMatch(swSource, new RegExp(`x-auth-${'session'}`))
-  const trigger = swSource.match(/function syncOutboxOnce\(\) \{[\s\S]*?\n\}/)?.[0] || ''
-  assert.ok(trigger)
-  let calls = 0
-  const result = await new Function('syncOutbox', `${trigger}; return syncOutboxOnce()`)(() => { calls++; return Promise.resolve() })
-  assert.equal(calls, 0, 'old sync/message events must not send business writes')
-  assert.equal(result.manual_recovery_required, true)
 })
 
-await runTest('service worker preserves conflicts and auth failures instead of overwriting newer server state', () => {
-  assert.match(swSource, /status === 409/)
-  assert.match(swSource, /status: 'conflict'/)
-  assert.match(swSource, /retry_at: null/)
-  assert.match(swSource, /status === 401 \|\| status === 403/)
-  assert.match(swSource, /reason: 'auth_required'/)
-})
-
+// 6.0.895 (R2): the no-op registration hook and the outbox tag are deleted, not kept as stubs.
 await runTest('browser no longer registers or messages automatic business replay', () => {
   assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
-  assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
+  assert.doesNotMatch(syncRuntimeSource, /registerOutboxBackgroundSync|OUTBOX_SYNC_TAG/)
   assert.doesNotMatch(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.doesNotMatch(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
   assert.doesNotMatch(webApiSource, /queueBusinessOutboxOperation/)
@@ -64,8 +51,7 @@ await runTest('foreground replay does not exist: no decryption or network dispat
   assert.doesNotMatch(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
   assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\//)
   assert.doesNotMatch(webApiSource, /code: 'legacy_recovery_required'/)
-  assert.match(webApiSource, /String\(type\)\.startsWith\('BUSINESS_OS_OUTBOX_'\)/)
-  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_CONFLICT/)
+  assert.doesNotMatch(webApiSource, /BUSINESS_OS_OUTBOX_|forwardServiceWorkerOutboxEvent/)
   assert.doesNotMatch(webApiSource, /function dispatchOutbox(?:File)?Progress/)
 })
 
@@ -88,7 +74,7 @@ await runTest('legacy sale payloads retain their original identity and never dis
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
   assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
   assert.doesNotMatch(saleWriteTransportSource, /registerOutboxBackgroundSync/)
-  assert.match(saleWriteTransportSource, /emitSyncQueueChanged/)
+  assert.doesNotMatch(saleWriteTransportSource, /emitSyncQueueChanged|sync:write-conflict|sync:offline-sale-synced/)
   assert.match(saleWriteTransportSource, /payload.client_request_id !== row.id/)
   assert.match(saleWriteTransportSource, /options.manualRecovery !== true/)
   assert.doesNotMatch(saleWriteTransportSource, /queueOfflineSale\(/)

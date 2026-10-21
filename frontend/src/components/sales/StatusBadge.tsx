@@ -1,3 +1,5 @@
+import { saleStatusChipWords } from '../../utils/saleStatusDisplay.ts'
+
 type SaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery' | 'cancelled' | 'partial_return' | 'returned'
 type TranslateFn = (key: string) => string
 
@@ -51,16 +53,39 @@ export function getStatusBadgeLabel(status: unknown, t?: TranslateFn) {
   return getStatusLabel(status, t).replace(STATUS_DECORATION_PREFIX, '').trim()
 }
 
+type SaleStatusRow = Parameters<typeof saleStatusChipWords>[0]
+
 type StatusBadgeProps = {
+  /** A sale row, shown in the two-status model: its status, then its tags (utils/saleStatusDisplay.ts). */
+  sale?: SaleStatusRow
+  /** A bare status word with no row behind it (a report bucket): one chip. */
   status?: unknown
   t?: TranslateFn
 }
 
-export default function StatusBadge({ status, t }: StatusBadgeProps) {
-  const s = isSaleStatus(status) ? status : 'completed'
+function saleStatusChips(sale: SaleStatusRow): SaleStatus[] {
+  return saleStatusChipWords(sale).map((word) => isSaleStatus(word) ? word : 'completed')
+}
+
+/** The badge as text, for a label or a detail row: "Completed · Returned". */
+export function getSaleStatusText(sale: SaleStatusRow, t?: TranslateFn) {
+  return saleStatusChips(sale).map((s) => getStatusBadgeLabel(s, t)).join(' · ')
+}
+
+function Chip({ s, t }: { s: SaleStatus; t?: TranslateFn }) {
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s]}`}>
       {getStatusBadgeLabel(s, t)}
+    </span>
+  )
+}
+
+export default function StatusBadge({ sale, status, t }: StatusBadgeProps) {
+  const chips = sale ? saleStatusChips(sale) : [isSaleStatus(status) ? status : 'completed']
+  if (chips.length === 1) return <Chip s={chips[0]} t={t} />
+  return (
+    <span className="inline-flex flex-nowrap items-center gap-1">
+      {chips.map((s) => <Chip key={s} s={s} t={t} />)}
     </span>
   )
 }

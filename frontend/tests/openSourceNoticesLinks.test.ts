@@ -20,6 +20,7 @@ function compile(rel: string, resolve: (id: string) => unknown, loader: 'ts' | '
 }
 
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
+const aiProviderDisclosure = await import('../src/components/catalog/legal/aiProviderDisclosure.ts') as Record<string, any>
 const Icon = () => null
 const brandIcons = compile('../src/components/shared/BrandIcons.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
@@ -29,7 +30,10 @@ const legalPages = compile('../src/components/catalog/legal/LegalPages.tsx', (id
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
   if (id.endsWith('/legalContent.ts')) return legalContent
+  if (id.endsWith('/aiProviderDisclosure.ts')) return aiProviderDisclosure
   if (id.endsWith('/BrandIcons.tsx')) return brandIcons
+  // This footer renders no social links, so the shared icon map and text are not exercised here.
+  if (id.endsWith('/PortalSocialRow.tsx')) return { PORTAL_SOCIAL_ICONS: {}, PortalSocialText: () => null }
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 }, 'tsx')
@@ -74,11 +78,12 @@ runCase('the same link renders in Khmer with the Khmer label, never the English 
 
 runCase('the footer row that holds the link has Khmer-safe line height and keeps the rights line and a 40px target', () => {
   const markup = renderFooter('km')
-  const row = markup.match(/<div class="[^"]*border-t[^"]*"><span>[^<]*<\/span><a\b[^>]*data-portal-footer-notices[\s\S]*?<\/a><\/div>/)?.[0] ?? ''
+  // 6.0.864 grouped the rights line with the independent-retailer line in one block; the link stays beside that block.
+  const row = markup.match(/<div class="[^"]*border-t[^"]*"><div class="min-w-0"><p>[^<]*<\/p><p data-portal-footer-independent="true">[^<]*<\/p><\/div><a\b[^>]*data-portal-footer-notices[\s\S]*?<\/a><\/div>/)?.[0] ?? ''
   assert.ok(row, 'the notices link is not in the same row as the rights line')
   assert.match(row, /leading-relaxed/)
   assert.doesNotMatch(row, /leading-5/)
-  assert.match(row, /<span>គេហទំព័រនេះដំណើរការដោយ/)
+  assert.match(row, /<p>គេហទំព័រនេះដំណើរការដោយ/)
   assert.match(noticesLink(markup), /min-h-10/)
 })
 

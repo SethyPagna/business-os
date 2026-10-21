@@ -34,6 +34,9 @@ const permissions = load(path.join(root, 'lib/permissions.ts'))
 const app = new Hono()
 app.onError((error, c) => {
   if (error instanceof Tripwire) return c.json({ tripwire: true }, 598)
+  // lib/cache.ts (896) turns a throwing CACHE.get into this error when D1 does not hold the version either: the KV
+  // tripwire fired, so the read counts as reached. Any other error still escapes, and a denial still asserts reads === 0.
+  if (/^Cache version for [a-z_]+ is unreadable: KV failed and D1 does not hold it$/.test(String(error?.message))) return c.json({ tripwire: true }, 598)
   throw error
 })
 // routes/sales.ts mounts before compat, matching index.ts.

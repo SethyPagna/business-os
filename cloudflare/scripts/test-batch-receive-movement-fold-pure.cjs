@@ -81,6 +81,7 @@ const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', {
   './db': {},
   './batchCode': batchCode,
+  './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './moneyPrecision': moneyPrecision,
   './sqlBinding': sqlBinding,
   './receivingBranch': loadReal('lib/receivingBranch.ts'),

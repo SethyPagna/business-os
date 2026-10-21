@@ -4,7 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { buildLiveLookupMutationPlan } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { hasPermission } from '../lib/permissions'
+import { getActionTier } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
 import { mergeLookupSuggestionRows, usedLookupValuesSql, type UsedLookupValue } from '../lib/lookupSuggestions'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -62,10 +62,12 @@ for (const prefix of ['/categories', '/units']) {
 // to any authenticated (POS) or even anonymous (portal) reader; the only
 // thing that actually needs gating is *writing* to this shared lookup
 // table. GET stays open to any authenticated user (requireAuth above);
-// every mutating verb gets its own `requireProductsPermission` check.
-function requireProductsPermission(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Response | null {
-  if (!hasPermission(c.get('user'), 'products')) {
-    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
+// every mutating verb gets its own `requireManageLookups` check. That is the Full products:manage_lookups action
+// (security audit P2-e), the same grant as POST /products/rename-brand and /products/lookups/replace: a plain products
+// grant, or an Employee preset with manage_lookups off, can no longer rename, merge or delete a category or unit.
+function requireManageLookups(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Response | null {
+  if (getActionTier(c.get('user'), 'products', 'manage_lookups') !== 'full') {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:manage_lookups' }, 403)
   }
   return null
 }
@@ -123,7 +125,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
   })
 
   app.post(`/${table}`, async (c) => {
-    const denied = requireProductsPermission(c)
+    const denied = requireManageLookups(c)
     if (denied) return denied
     const user = c.get('user')
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -159,7 +161,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
   })
 
   async function updateHandler(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
-    const denied = requireProductsPermission(c)
+    const denied = requireManageLookups(c)
     if (denied) return denied
     const user = c.get('user')
     const id = Number(c.req.param('id'))
@@ -254,7 +256,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
   app.patch(`/${table}/:id`, updateHandler)
 
   app.delete(`/${table}/:id`, async (c) => {
-    const denied = requireProductsPermission(c)
+    const denied = requireManageLookups(c)
     if (denied) return denied
     const user = c.get('user')
     const id = c.req.param('id')

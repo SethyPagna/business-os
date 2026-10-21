@@ -35,6 +35,9 @@ const USER_AGENTS = {
   iphoneFirefox: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15',
   iphoneEdge: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/129.0.2792.84 Version/18.0 Mobile/15E148 Safari/604.1',
   androidChrome: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
+  iphoneChromeOld: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0.6668.46 Mobile/15E148 Safari/604.1',
+  iphoneOpera: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) OPiOS/16.0.15.124050 Mobile/15E148 Safari/9537.53',
+  iphoneInstagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 Instagram 350.0.0.10.100',
   desktopChrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
 }
 
@@ -127,16 +130,49 @@ await check('the installed app never gets the band or the menu entry', async () 
   assert.equal(installed.installMenuRoute(), null, 'display-mode standalone: no menu entry')
 })
 
-await check('iOS Safari gets the Share route; other iOS browsers get nothing', async () => {
-  useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
-  const safari = await freshInstallModule()
-  assert.equal(safari.installBandRoute(), 'ios-share')
-  assert.equal(safari.installMenuRoute(), 'ios-share')
-  for (const userAgent of [USER_AGENTS.iphoneChrome, USER_AGENTS.iphoneFirefox, USER_AGENTS.iphoneEdge]) {
+await check('iOS Safari, and Chrome/Firefox/Edge on iOS 16.4+, get the Share route; Opera, old iOS and in-app browsers get nothing', async () => {
+  for (const userAgent of [USER_AGENTS.iphoneSafari, USER_AGENTS.iphoneChrome, USER_AGENTS.iphoneFirefox, USER_AGENTS.iphoneEdge]) {
+    useDevice({ userAgent, maxTouchPoints: 5 })
+    const install = await freshInstallModule()
+    assert.equal(install.installBandRoute(), 'ios-share', userAgent)
+    assert.equal(install.installMenuRoute(), 'ios-share', userAgent)
+  }
+  for (const userAgent of [USER_AGENTS.iphoneChromeOld, USER_AGENTS.iphoneOpera, USER_AGENTS.iphoneInstagram]) {
     useDevice({ userAgent, maxTouchPoints: 5 })
     const other = await freshInstallModule()
-    assert.equal(other.installBandRoute(), null, `${userAgent} cannot Add to Home Screen the way the hint describes`)
+    assert.equal(other.installBandRoute(), null, `${userAgent} cannot Add to Home Screen`)
     assert.equal(other.installMenuRoute(), null)
+  }
+})
+
+await check('a beforeinstallprompt fired before capture is lost; captured at entry it is kept once', async () => {
+  const device = useDevice({ userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 })
+  moduleInstance += 1
+  const late = await import(`../src/utils/standaloneNavigation.ts?instance=${moduleInstance}`) as InstallModule
+  const lost = installPromptEvent()
+  device.window.dispatchEvent(lost)
+  late.installBeforeInstallPromptCapture()
+  assert.equal(lost.defaultPrevented, false, 'nothing was listening, so the browser keeps its own infobar and the event is gone')
+  assert.equal(late.installBandRoute(), null, 'a late capture has nothing to offer')
+
+  const kept = installPromptEvent()
+  device.window.dispatchEvent(kept)
+  assert.equal(kept.defaultPrevented, true)
+  assert.equal(late.installBandRoute(), 'native-prompt')
+  const stop = late.installBeforeInstallPromptCapture()
+  stop()
+  assert.equal(late.installBandRoute(), 'native-prompt', 'a second call is idempotent and its teardown never reaches the first capture')
+  assert.equal(await late.promptAppInstall(), true)
+  assert.equal(kept.prompted, 1, 'replayed exactly once')
+})
+
+await check('index.tsx arms the capture before React mounts; no component tears it down', () => {
+  const entry = read('src/index.tsx')
+  const capture = entry.indexOf('installBeforeInstallPromptCapture()')
+  assert.ok(capture > 0, 'index.tsx calls the capture')
+  assert.ok(capture < entry.indexOf('ReactDOM.createRoot'), 'the capture is armed before createRoot')
+  for (const rel of ['src/App.tsx', 'src/components/catalog/PublicCatalogPage.tsx']) {
+    assert.doesNotMatch(read(rel), /installBeforeInstallPromptCapture/, `${rel} must not own (or tear down) the capture`)
   }
 })
 
@@ -200,9 +236,14 @@ await check('an accepted native prompt records the install; a declined one only 
   assert.equal(declined.storage.getItem(INSTALLED_KEY), null)
   assert.equal(declineInstall.installBandRoute(), null, 'the prompt is single-use, so nothing is left to offer')
   assert.equal(await declineInstall.promptAppInstall(), false, 'a second click must not replay a spent prompt')
+  const retry = installPromptEvent('accepted')
+  declined.window.dispatchEvent(retry)
+  assert.equal(declineInstall.installBandRoute(), 'native-prompt', 'the browser offering again brings the offer back')
+  assert.equal(await declineInstall.promptAppInstall(), true)
+  assert.equal(retry.prompted, 1)
 })
 
-await check('a closed band never returns on that device, and the menu entry stays', async () => {
+await check('a closed band stays closed for 30 days, then the offer returns; the menu entry never goes', async () => {
   const ios = useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
   const first = await freshInstallModule()
   let notified = 0
@@ -211,11 +252,16 @@ await check('a closed band never returns on that device, and the menu entry stay
   assert.ok(notified > 0)
   assert.equal(first.installBandRoute(), null)
   assert.equal(first.installMenuRoute(), 'ios-share', 'closing the bar keeps the pull entry')
-  await withClockAdvancedBy(400 * DAY_MS, async () => {
-    const reloaded = await freshInstallModule()
-    assert.equal(reloaded.installBandRoute(), null, 'no snooze: the bar stays closed long after any snooze would end')
-  })
   assert.ok(ios.storage.getItem(DISMISSED_KEY), 'the choice is stored for the device')
+  await withClockAdvancedBy(29 * DAY_MS, async () => {
+    assert.equal((await freshInstallModule()).installBandRoute(), null, 'day 29: still closed')
+  })
+  await withClockAdvancedBy(31 * DAY_MS, async () => {
+    const reloaded = await freshInstallModule()
+    assert.equal(reloaded.installBandRoute(), 'ios-share', 'day 31: the band is offered again')
+    reloaded.dismissInstallBand()
+    assert.equal(reloaded.installBandRoute(), null, 'closing it again closes it again')
+  })
 
   const android = useDevice({ userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 })
   const beforeClose = await freshInstallModule()
@@ -223,8 +269,11 @@ await check('a closed band never returns on that device, and the menu entry stay
   beforeClose.dismissInstallBand()
   const afterReload = await freshInstallModule()
   android.window.dispatchEvent(installPromptEvent())
-  assert.equal(afterReload.installBandRoute(), null, 'the Android half is closed for good too')
+  assert.equal(afterReload.installBandRoute(), null, 'closed on Android too')
   assert.equal(afterReload.installMenuRoute(), 'native-prompt')
+  await withClockAdvancedBy(31 * DAY_MS, async () => {
+    assert.equal(afterReload.installBandRoute(), 'native-prompt', 'and it returns after 30 days')
+  })
 })
 
 await check('the old iOS hint dismissal alone keeps the band closed', async () => {
@@ -236,6 +285,9 @@ await check('the old iOS hint dismissal alone keeps the band closed', async () =
   const install = await freshInstallModule()
   assert.equal(install.installBandRoute(), null)
   assert.equal(install.installMenuRoute(), 'ios-share')
+  await withClockAdvancedBy(15 * DAY_MS, async () => {
+    assert.equal(install.installBandRoute(), 'ios-share', 'the legacy dismissal also lapses after 30 days')
+  })
 })
 
 await check('blocked storage still closes the band for this page, without throwing', async () => {
@@ -311,8 +363,11 @@ function compileComponent(rel: string, deps: Record<string, unknown>): Component
 type Language = 'en' | 'km'
 const inlineCopy = (language: Language) => (_key: string, fallback: string, fallbackKm: string) => (language === 'km' ? fallbackKm : fallback)
 
+const pathRouting = await import('../src/app/pathRouting.ts')
 const compileBand = (install: InstallModule): ComponentModule => compileComponent('src/components/shared/InstallPromptBand.tsx', {
   '../../utils/standaloneNavigation.ts': install,
+  '../../app/pathRouting.ts': pathRouting,
+  '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
   './InfoHint.tsx': InfoHintStub,
 })
 
@@ -381,6 +436,9 @@ const INSTALL_PACK_KEYS = [
   'ios_install_step_menu',
   'ios_install_step_add',
   'ios_install_step_web_app',
+  'install_shop_band',
+  'install_shop_ios_hint',
+  'install_shop_detail',
 ]
 
 await check('both packs carry the install keys once, side by side, with real Khmer', () => {
@@ -424,7 +482,6 @@ await check('every install band text carries its own Khmer and no offline promis
   assertEveryTranslateCallHasKhmer('src/components/shared/InstallPromptBand.tsx', 5)
 })
 
-const pathRouting = await import('../src/app/pathRouting.ts')
 const packText = (language: Language) => {
   const packs = { en: readPack('en'), km: readPack('km') }
   return (key: string): string => String(packs[language][key] ?? packs.en[key] ?? key)
@@ -613,7 +670,7 @@ await check('the shop account button exists only when an install is possible, ne
     ['iOS home-screen app', { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, iosStandalone: true }],
     ['display-mode standalone with a captured prompt', { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5, displayModeStandalone: true }, (win) => { win.dispatchEvent(installPromptEvent()) }],
     ['Android before Chrome says the page is installable', { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 }],
-    ['Chrome on iPhone, which cannot Add to Home Screen', { userAgent: USER_AGENTS.iphoneChrome, maxTouchPoints: 5 }],
+    ['an in-app browser on iPhone, which cannot Add to Home Screen', { userAgent: USER_AGENTS.iphoneInstagram, maxTouchPoints: 5 }],
     ['an install already recorded on this device', { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, storage: memoryStorage({ [INSTALLED_KEY]: String(Date.now()) }) }],
   ]
   for (const [name, device, afterLoad] of cases) {

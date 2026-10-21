@@ -15,6 +15,7 @@ import {
   type SettlementRow,
 } from '../src/components/sales/saleSettlement.ts'
 import { createSingleUseResult } from '../src/components/sales/saleStatusConfirmation.ts'
+import { saleStatusDisplay } from '../src/utils/saleStatusDisplay.ts'
 import { directMutationOutcomeIsUnknown, freezeDirectMutationBody, loadPendingDirectMutationSlot, mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState, savePendingDirectMutationSlot } from '../src/utils/directMutationRequest.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -120,6 +121,7 @@ for (const unreadable of ['stale', 'null'] as const) {
     window: { setTimeout: (callback: () => void) => callback(), dispatchEvent: () => {} },
     notify: () => {}, t: (key: string) => key, translateOr: (_key: string, fallback: string) => fallback,
     getStatusLabel: (value: string) => value, getErrorMessage: (error: unknown) => String(error), isWriteConflict: () => false,
+    saleStatusDisplay,
   }
   deps.resolveUnknownSaleWrite = salesCallback('resolveUnknownSaleWrite', '\n  }, [actionHistory', deps, true)
   const handle = salesCallback('handleStatusChange', '\n  const replaySaleStatusHistory', deps)
@@ -273,7 +275,11 @@ assert.equal(pastBand[1]?.usd, '0.01', 'past the band the shortfall is prefilled
 assert.match(editorSource, /const remaining = settlementOutstandingUsd\(rows, \{ totalUsd, exchangeRate, moneyPrecisionVersion \}\)/)
 assert.doesNotMatch(editorSource, /totalUsd - totals\.paidEquivalentUsd/, 'the float shortfall must not decide Outstanding')
 assert.match(modalSource, /<SaleSettlementEditor[\s\S]*?moneyPrecisionVersion=\{usesSavedExchangeRate \? 1 : 0\}/)
-assert.match(modalSource, /settlementOutstandingUsd\(settlementRows, \{ totalUsd, exchangeRate: settlementSession\.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate \? 1 : 0 \}\) > 0/)
+// A return lowers what is owed by its debt part (owner, 29 Sep / 5-6 Oct 2026): the gate and the editor settle the
+// total less that part, as the Worker's settlement does (saleStatusTagsDisplay.test.ts runs it).
+assert.match(modalSource, /const payableUsd = totals\.owedReductionUsd > 0 \? subtractMoney4\(totalUsd, totals\.owedReductionUsd\) : totalUsd/)
+assert.match(modalSource, /settlementOutstandingUsd\(settlementRows, \{ totalUsd: payableUsd, exchangeRate: settlementSession\.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate \? 1 : 0 \}\) > 0/)
+assert.match(modalSource, /<SaleSettlementEditor[\s\S]*?totalUsd=\{payableUsd\}/)
 assert.match(modalSource, /moneyPrecisionVersion: savedRate \? 1 : 0,\s*configuredMethods,/, 'the prefill reads the sale on the basis settlement checks')
 // The add-items projection of what is still owed reads the same kernel answer.
 assert.match(modalSource, /recordedSaleOutstandingUsd\(\{ \.\.\.sale, total_usd: projectedTotalUsd, exchange_rate: totals\.exchangeRate \}\)/)

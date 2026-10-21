@@ -331,7 +331,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   const load = async () => {
     setLoading(true)
     try {
-      const result = await getPossiblySameProducts() as { clusters?: Cluster[] }
+      const result = await getPossiblySameProducts({ fresh: true }) as { clusters?: Cluster[] }
       setClusters(Array.isArray(result?.clusters) ? result.clusters : [])
       setLoaded(true)
     } catch {

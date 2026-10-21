@@ -44,7 +44,7 @@ async function checkEnvelopeRoutes(api) {
   function pure(name) {
     if (modules.has(name)) return modules.get(name).exports
     if (['branchWrites', 'canonicalBranchIdentity', 'branchRoles'].includes(name)) assert.ok(name, 'selected real branch dependency')
-    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard', 'productCostReview', 'catalogCostRecompute', 'moneyPrecision', 'stockTransaction'].includes(name), name)
+    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard', 'productCostReview', 'catalogCostRecompute', 'moneyPrecision', 'stockTransaction', 'productSupplierGate'].includes(name), name)
     const m = { exports: {} }; modules.set(name, m)
     const code = ts.transpileModule(fs.readFileSync(path.join(root, 'lib', name + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
@@ -73,6 +73,7 @@ async function checkEnvelopeRoutes(api) {
     '../lib/branchRedirectWrite': { branchRedirectTarget: () => null },
     '../lib/reviewApply': { productRemovePendingPointer: () => false, applyApprovedPendingAction: unused },
     '../lib/reviewApprovalPermission': { reviewApprovalPermissionError: unused },
+    '../lib/productSupplierGate': pure('productSupplierGate'),
     '../lib/productDiscountGate': { normalizeProductDiscountBody: () => null, ProductDiscountInputError: class ProductDiscountInputError extends Error {} },
     '../lib/productImagePermission': {}, '../lib/productDelete': { PRODUCT_REMOVE_ACTION_KIND: 'product.remove' },
     '../lib/undoAppliers': { SALE_ADD_ITEMS_ACTION_KIND: 'sale.items.add', PRODUCT_MERGE_GROUP_ACTION_KIND: 'product.merge.group', branchCutoverClosureRefusal: () => null, ...undoModule.exports },
@@ -92,7 +93,7 @@ async function checkEnvelopeRoutes(api) {
   for(const table of ['sales','inventory_movements','returns','stock_row_moves'])native.exec('CREATE TABLE '+table+'(branch_id INTEGER,branch_name TEXT,updated_at TEXT)')
   native.exec("INSERT INTO branches(id,name,is_default,is_active,notes)VALUES(1,'Warehouse',1,1,'after'),(2,'Shop',0,1,NULL)")
   const declarations=undoSource.statements.filter(node=>
-    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayPermissionEffects','readMergeReplayPermissionSnapshot','mergeReplayChoicePermissionFromSnapshot','mergeReplayImagesFromSnapshot','mergeReversalHasSavedImageEffect','mergeChoicePermissionError','intIds','replayRefusalCode'].includes(node.name?.text))
+    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','applierAlsoActionDenied','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayPermissionEffects','readMergeReplayPermissionSnapshot','mergeReplayChoicePermissionFromSnapshot','mergeReplayImagesFromSnapshot','mergeReversalHasSavedImageEffect','mergeChoicePermissionError','intIds','replayRefusalCode'].includes(node.name?.text))
     ||(ts.isClassDeclaration(node)&&node.name?.text==='UndoConflictError')
     ||(ts.isVariableStatement(node)&&node.declarationList.declarations.some(d=>/^(UNDO_|STOCK_SESSION_UNDO_CLOSED_BY_MERGE$|isUndoClosedByMerge$|PRODUCT_MERGE_GROUP_ACTION_KIND$|PRODUCT_MERGE_APPLIER_KINDS$)/.test(d.name.getText(undoSource)))))
   const registry=undoSource.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(d=>d.name.getText(undoSource)==='APPLIERS')
@@ -472,7 +473,7 @@ async function checkLiteralProductGallery(api) {
       const app = new Hono()
       app.use('*', async (c, next) => { c.set('user', who); await next() }); app.use('*', api.acquisitionCostResponses)
       const handler = ts.transpileModule(searchNode.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-      new Function('app', 'parseProductReadSurface', 'productSurfaceDenialReason', 'productSearchCacheVersion', 'cachedJsonResponse', 'searchProductsWithIndexFallback', 'refreshCachedProductRows', 'isImageOnlyRead', 'restrictListPayloadForImageOnly', handler)(app, () => 'products', () => null, async () => 'fixture', async (_r, _ctx, _version, _ttl, produce) => produce(), async () => payload, () => { throw Error('Unexpected refresh') }, () => false, () => { throw Error('Unexpected image-only restriction') })
+      new Function('app', 'parseProductReadSurface', 'productSurfaceDenialReason', 'productSearchCacheVersion', 'cachedJsonResponse', 'searchProductsWithIndexFallback', 'refreshCachedProductRows', 'isImageOnlyRead', 'restrictListPayloadForImageOnly', 'attachFoldedTaggedLots', handler)(app, () => 'products', () => null, async () => 'fixture', async (_r, _ctx, _version, _ttl, produce) => produce(), async () => payload, () => { throw Error('Unexpected refresh') }, () => false, () => { throw Error('Unexpected image-only restriction') }, async (_env, _user, _query, list) => list)
       app.get('/detail', c => c.json({ item: products[0] }))
       const res = await app.request('/search', {}, {}, { waitUntil() {}, passThroughOnException() {} }), body = await res.json(), detail = await app.request('/detail'), detailBody = await detail.json()
       console.log('LITERAL_GALLERY_ROUTE', JSON.stringify({ role: who.role_code, viewCost: api.canViewAcquisitionCosts(who), status: res.status, returned: body.items[0].image_gallery, client: client.normalizeProductGallery(body.items[0].image_gallery, body.items[0].image_path) }))

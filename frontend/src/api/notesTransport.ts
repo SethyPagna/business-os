@@ -3,8 +3,7 @@ import { apiFetch, route } from './http.ts'
 // Personal, per-user autosaved notes -- a private scratchpad (see
 // cloudflare/src/routes/notes.ts). No local/offline mirror: this is a
 // low-stakes convenience feature, not core business data, so a failed
-// save while offline just surfaces as a normal error rather than needing
-// an outbox/sync story like sales or inventory writes.
+// save just surfaces as a normal error.
 
 export type NoteRecord = {
   id: number

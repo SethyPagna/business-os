@@ -68,7 +68,7 @@ const OPEN = { customer_portal_signup_enabled: 'true', customer_portal_submissio
 
 async function withMember() {
   const h = createPortalHarness({ sources, settings: OPEN })
-  const signup = await h.request('/auth/signup', 'POST', { name: 'Visitor', phone: PHONE, password: PASSWORD, consent: true, consentLocale: 'en' }, { ip: '192.0.2.1' })
+  const signup = await h.request('/auth/signup', 'POST', { name: 'Visitor', phone: PHONE, password: PASSWORD, consent: true, ageConfirmed: true, consentLocale: 'en' }, { ip: '192.0.2.1' })
   assert.equal(signup.status, 200, `fixture sign-up: ${JSON.stringify(signup.body)}`)
   return h
 }
@@ -159,7 +159,7 @@ async function main() {
 
   await check('route: a cross-site or text/plain sign-up writes nothing', async () => {
     const h = createPortalHarness({ sources, settings: OPEN })
-    const body = { name: 'Forged', phone: '012 999 333', password: 'forged-pass', consent: true, consentLocale: 'en' }
+    const body = { name: 'Forged', phone: '012 999 333', password: 'forged-pass', consent: true, ageConfirmed: true, consentLocale: 'en' }
     const plain = await h.request('/auth/signup', 'POST', undefined, { ip: '198.51.100.11', rawBody: JSON.stringify(body), headers: { 'Content-Type': 'text/plain', 'Sec-Fetch-Site': null } })
     const cross = await h.request('/auth/signup', 'POST', body, { ip: '198.51.100.11', headers: { 'Sec-Fetch-Site': 'cross-site' } })
     assert.equal(plain.status, 403)

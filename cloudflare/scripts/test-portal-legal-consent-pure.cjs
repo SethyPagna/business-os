@@ -159,7 +159,7 @@ async function run() {
 
   await check('signup with consent succeeds and records the version and time', async () => {
     const result = await accounts.signupPortalAccount(env, {
-      name: 'Consented Customer', phone: '012 222 333', password: 'sup3rsecret', consent: true,
+      name: 'Consented Customer', phone: '012 222 333', password: 'sup3rsecret', consent: true, ageConfirmed: true,
     })
     assert.strictEqual(result.ok, true, `signup failed: ${result.error || ''}`)
     const row = migratedDb.prepare('SELECT consent_version, consent_at, name FROM portal_accounts WHERE id = ?').get([result.accountId])
@@ -171,7 +171,7 @@ async function run() {
 
   await check('"true" from a form post counts as consent', async () => {
     const result = await accounts.signupPortalAccount(env, {
-      name: 'String Consent', phone: '012 444 555', password: 'sup3rsecret', consent: 'true',
+      name: 'String Consent', phone: '012 444 555', password: 'sup3rsecret', consent: 'true', ageConfirmed: true,
     })
     assert.strictEqual(result.ok, true, `signup failed: ${result.error || ''}`)
   })
@@ -186,7 +186,7 @@ async function run() {
     })
     assert.strictEqual(refused.code, 'consent_required', 'the rule must hold before the migration too')
     const result = await preAccounts.signupPortalAccount(env, {
-      name: 'Pre Migration', phone: '012 666 777', password: 'sup3rsecret', consent: true,
+      name: 'Pre Migration', phone: '012 666 777', password: 'sup3rsecret', consent: true, ageConfirmed: true,
     })
     assert.strictEqual(result.ok, false)
     assert.strictEqual(result.status, 503)

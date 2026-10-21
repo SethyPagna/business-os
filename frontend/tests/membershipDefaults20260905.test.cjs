@@ -115,7 +115,7 @@ async function offline() {
     './offlineQueueOwnership.ts': ownership,
     './actorReadScope.ts': { captureActorReadScope: () => 1, isActorReadScopeCurrent: () => true },
     './lazyLocalDb.ts': { getLocalDb: async () => ({ table: () => table, transaction: async (...args) => args.at(-1)() }) },
-    './syncRuntime.ts': { emitSyncQueueChanged() {}, dispatchSyncUpdates() {}, OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
+    './syncRuntime.ts': { dispatchSyncUpdates() {}, OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
     './http.ts': {
       route: (_channel, run) => run(), isNetErr: () => false, isTransientGatewayError: status => status === 503,
       isWriteBlockedError: () => false, isWriteConflictError: () => false,

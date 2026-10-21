@@ -143,32 +143,6 @@ export function shouldResetForRuntimeChange(
   return false
 }
 
-export function buildQueuedOperationScope(extra: Record<string, unknown> = {}): RuntimeDescriptor & Record<string, unknown> {
-  return {
-    ...readStoredRuntimeDescriptor(),
-    queuedAt: new Date().toISOString(),
-    ...extra,
-  }
-}
-
-export function doesQueuedScopeMatchCurrent(
-  scope: RuntimeDescriptorInput,
-  currentScope: RuntimeDescriptorInput = readStoredRuntimeDescriptor(),
-): boolean {
-  const queued = normalizeRuntimeDescriptor(scope)
-  const current = normalizeRuntimeDescriptor(currentScope)
-  if (!queued.serverStartTime || !queued.storageVersion || !queued.dataRootKey) return false
-  if (!current.serverStartTime || !current.storageVersion || !current.dataRootKey) return false
-
-  if (queued.serverStartTime !== current.serverStartTime) return false
-  if (queued.storageVersion !== current.storageVersion) return false
-  if (queued.dataRootKey !== current.dataRootKey) return false
-  if (queued.organizationPublicId && current.organizationPublicId && queued.organizationPublicId !== current.organizationPublicId) {
-    return false
-  }
-  return true
-}
-
 async function mapRuntimeCleanup<T>(items: readonly T[], worker: (item: T) => Promise<boolean>): Promise<boolean[]> {
   const queue = Array.isArray(items) ? [...items] : []
   if (!queue.length) return []

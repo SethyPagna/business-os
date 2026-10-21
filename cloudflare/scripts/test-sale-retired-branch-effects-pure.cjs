@@ -253,8 +253,11 @@ function ledgerSnapshot(db, schemaDb = db) {
     const columns = schemaDb.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(table).map(row => row.name)
     if (schemaDb !== db) {
       const extras = db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(table).map(row => row.name).filter(column => !columns.includes(column))
-      assert.deepEqual(extras, table === 'products' ? ['cost_review_key'] : [], `${table}: only declared current metadata is outside the historical projection`)
+      // 0263 (lane 6.0.890): the sale tags are current metadata; these sales carry none.
+      const saleTags = ['return_state', 'return_review_state', 'return_reviewed_at', 'return_reviewed_by_id', 'return_reviewed_by_name', 'delivery_pending']
+      assert.deepEqual(extras, table === 'products' ? ['cost_review_key'] : table === 'sales' ? saleTags : [], `${table}: only declared current metadata is outside the historical projection`)
       if (table === 'products') assert.equal(db.prepare('SELECT COUNT(*) AS n FROM products WHERE cost_review_key IS NOT NULL').get().n, 0)
+      if (table === 'sales') assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sales WHERE return_state IS NOT NULL OR return_review_state IS NOT NULL OR return_reviewed_at IS NOT NULL OR return_reviewed_by_id IS NOT NULL OR return_reviewed_by_name IS NOT NULL OR delivery_pending <> 0').get().n, 0)
     }
     return [table, db.prepare(`SELECT ${columns.map(column => '"' + column + '"').join(',')} FROM ${table} ORDER BY rowid`).all()]
   }))

@@ -53,6 +53,7 @@ const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'catalogCostRecompute', 'branchWrites', 'canonicalBranchIdentity', 'branchRoles'])
 real.add('reviewApprovalPermission')
 real.add('productDiscountGate')
+real.add('businessDateWindow')
 // 6.0.132: the products route folds a create through lib/createFold.ts, which writes its request receipt.
 real.add('createFold')
 real.add('stockMutationReceipt')

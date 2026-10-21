@@ -14,10 +14,11 @@ import { executeStockTransaction } from './stockTransaction'
 //
 // Same defaults as the backend (org name "Business OS" / slug "business-os",
 // admin username "admin", DEFAULT_ROLE_PERMISSIONS from
-// backend/src/permissions.ts) so a factory-reset instance behaves the same
+// roleDefaults.ts, ported from backend/src/permissions.ts) so a factory-reset instance behaves the same
 // way an equivalent Docker/Postgres instance would after first boot.
 
 import { getDb } from './db'
+import { DEFAULT_ROLE_PERMISSIONS, type DefaultRolePermissionValue } from './roleDefaults'
 import { productHasStockSql } from './productStockGuard'
 import { assertCustomTableName } from './customTableName'
 import { buildInClause } from './sqlBinding'
@@ -25,88 +26,7 @@ import type { Env } from '../index'
 import { hashPassword } from './passwordHash'
 import { newPasswordProblem, setPasswordMustChange } from './passwordPolicy'
 
-// Default posture (progress.md "Permissions -- default posture"): every
-// page's default permission tier is None unless the role is Admin. Manager
-// and Employee used to seed with several sections pre-granted (pos,
-// products, inventory, sales, contacts, customer_portal, audit_log for
-// Manager; pos, products, contacts for Employee) -- that meant a brand-new
-// Manager/Employee role on a freshly-seeded instance already had write
-// access to real business data before an admin had reviewed or granted
-// anything. Manager still seeds to `{}` (nothing granted), matching what
-// PermissionEditor.tsx's own "new role" form defaults to. Employee receives
-// only the explicitly approved front-line POS/Sales defaults below;
-// unrelated page grants remain absent. Admin is unchanged (`{all: true}`).
-//
-// This only affects instances seeded from empty -- the loop below only
-// force-rewrites the *admin* role's permissions back to this default on
-// every ensure call; Manager/Employee are only inserted once (if the code
-// doesn't already exist) and are otherwise left alone as editable by the
-// org, so an existing installation's already-customized Manager/Employee
-// roles are not silently reset by this change.
-type DefaultRolePermissionValue = boolean | 'review' | 'view'
-const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermissionValue>> = {
-  admin: { all: true },
-  manager: {},
-  employee: {
-    pos: true,
-    inventory_checks: true,
-    inventory_check_show_price: true,
-    inventory_check_show_barcode: true,
-    inventory_check_show_category: true,
-    inventory_check_show_brand: true,
-    inventory_check_show_stock: true,
-    inventory_check_show_received: true,
-    inventory_check_show_sales: true,
-    inventory_check_show_customers: true,
-    inventory_check_show_cost: false,
-    // Receipt/print settings (page menu + avatar dropdown, Sep 16 2026 owner
-    // request) is an operational tool for whoever actually prints receipts,
-    // not an admin-only setting -- an Employee needs to change print modes
-    // (paper size, contrast, footer) without needing the broader `settings`
-    // grant. See routes/settings.ts's settingsBucketPermissionFor() and
-    // permissionDefinitions.ts's own 'receipt_settings' row for the rest of
-    // this key's plumbing.
-    receipt_settings: true,
-    // Owner, 5 Oct 2026: front-line staff edit product information and upload
-    // images, and nothing else on Products. The section is Full with every other
-    // action switched off (an override can only remove what the tier grants), so
-    // View, Edit and Image stay on. Evening revision: the DEFAULT selling and
-    // wholesale price is its own action, off here (they adjust a price per sale in
-    // the POS cart instead). Cost is a separate pair of grants that stays
-    // off by default: cost price is never visible or editable to an Employee
-    // until an admin turns product_cost_view / product_cost_edit on.
-    products: true,
-    'products:add': false,
-    'products:delete': false,
-    'products:bulk_delete': false,
-    'products:variant': false,
-    'products:import': false,
-    'products:import_replace_all': false,
-    'products:export': false,
-    'products:merge_duplicates': false,
-    'products:zero_qty_cleanup': false,
-    'products:manage_lookups': false,
-    'products:price': false,
-    'products:history': false,
-    product_cost_view: false,
-    product_cost_edit: false,
-    sales: true,
-    'sales:status': true,
-    'sales:customer': true,
-    'sales:add_items': true,
-    'sales:amend': true,
-    'sales:bulk': false,
-    'sales:import': false,
-    'sales:export': false,
-    returns: true,
-    'returns:bulk': false,
-    'returns:export': false,
-    contacts: 'review',
-    'contacts:bulk': false,
-    'contacts:financial_history': false,
-    contacts_suppliers: false,
-  },
-}
+// The seeded role permissions live in roleDefaults.ts (shared with GET /api/roles/defaults).
 
 export type CoreDataInvariants = {
   organizationId: number

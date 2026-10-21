@@ -74,6 +74,7 @@ const productBatches = compile('productBatches.ts', { './receivingBranch': compi
   './stockTransaction': stockTransaction,
   './db': {},
   './batchCode': compile('batchCode.ts'),
+  './businessDateWindow': compile('businessDateWindow.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': moneyPrecision,
 })
@@ -104,6 +105,9 @@ const subject = compile('saleAmendments.ts', {
   './saleLineAddition': saleLineAddition,
   './moneyPrecision': moneyPrecision,
 })
+const saleStatusResolution = compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision })
+// saleBulkStatus imports returnDebtLoweredSql from the returns-money kernel (lane 884).
+const returnRefundSplit = compile('returnRefundSplit.ts', { './db': {}, './moneyPrecision': moneyPrecision, './saleStatusResolution': saleStatusResolution, './salesStatus': salesStatus, './saleTransitions': saleTransitions })
 const saleBulkStatus = compile('saleBulkStatus.ts', {
   './stockTransaction': stockTransaction,
   './db': {},
@@ -120,7 +124,8 @@ const saleBulkStatus = compile('saleBulkStatus.ts', {
   './branchRoleGuards': {},
   './branchEffect': {},
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }) },
-  './saleStatusResolution': compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision }),
+  './saleStatusResolution': saleStatusResolution,
+  './returnRefundSplit': returnRefundSplit,
 })
 
 const {

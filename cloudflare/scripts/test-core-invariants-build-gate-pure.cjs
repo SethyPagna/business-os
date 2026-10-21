@@ -41,6 +41,7 @@ const deps = () => ({
   // E6 moved the admin-seed hash into lib/passwordHash (same stub as the sibling core-data tests).
   './passwordHash': { hashPassword: async () => 'focused-test-hash' },
   './passwordPolicy': load('lib/passwordPolicy.ts'),
+  './roleDefaults': load('lib/roleDefaults.ts'),
 })
 // One fresh module instance = one cold isolate.
 const isolate = () => load('lib/coreDataInvariants.ts', deps())

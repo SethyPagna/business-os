@@ -643,6 +643,47 @@ await runTest('the status-change fixtures discriminate against the pre-guard rou
   for (const fixture of band) assert.equal(fixture.expected, false, `"${fixture.name}" is inside the band`)
 })
 
+// Owner, 20 Oct 2026: sale_status is the payment state only; returns and
+// delivery are tags. Rows written before the held normalization keep a retired
+// word, and both copies must read them as the two-status row they stand for.
+// Each "retired" row is one the old readers took at face value (a return word
+// or awaiting_delivery as the status itself).
+type StoredFixture = { name: string; row: Record<string, unknown>; expected: uiCopy.SaleStoredState; notPaid: boolean; retired?: true }
+const STORED_FIXTURES: StoredFixture[] = [
+  { name: 'new Not Paid with a partial return tag', row: { sale_status: 'awaiting_payment', return_state: 'partial', delivery_pending: 0 },
+    expected: { saleStatus: 'awaiting_payment', returnState: 'partial', deliveryPending: false }, notPaid: true },
+  { name: 'new Completed, fully returned, delivery pending', row: { sale_status: 'completed', return_state: 'full', delivery_pending: 1 },
+    expected: { saleStatus: 'completed', returnState: 'full', deliveryPending: true }, notPaid: false },
+  { name: 'retired partial_return over Not Paid', row: { sale_status: 'partial_return', status_before_return: 'awaiting_payment' },
+    expected: { saleStatus: 'awaiting_payment', returnState: 'partial', deliveryPending: false }, notPaid: true, retired: true },
+  { name: 'retired returned with no payment state (imported, pre-0125) reads Completed', row: { sale_status: 'returned', status_before_return: null },
+    expected: { saleStatus: 'completed', returnState: 'full', deliveryPending: false }, notPaid: false, retired: true },
+  { name: 'retired returned over awaiting_delivery keeps the delivery tag', row: { sale_status: 'returned', status_before_return: 'awaiting_delivery' },
+    expected: { saleStatus: 'completed', returnState: 'full', deliveryPending: true }, notPaid: false, retired: true },
+  { name: 'retired awaiting_delivery is a paid sale with the delivery tag', row: { sale_status: 'awaiting_delivery' },
+    expected: { saleStatus: 'completed', returnState: null, deliveryPending: true }, notPaid: false, retired: true },
+  { name: 'the retired label outranks a stale tag column (its writer ran last)', row: { sale_status: 'returned', status_before_return: 'completed', return_state: 'partial' },
+    expected: { saleStatus: 'completed', returnState: 'full', deliveryPending: false }, notPaid: false, retired: true },
+  { name: 'a missing status is a legacy Completed sale', row: {},
+    expected: { saleStatus: 'completed', returnState: null, deliveryPending: false }, notPaid: false },
+  { name: 'cancelled keeps its tags', row: { sale_status: 'cancelled', return_state: 'partial', delivery_pending: 1 },
+    expected: { saleStatus: 'cancelled', returnState: 'partial', deliveryPending: true }, notPaid: false },
+]
+
+await runTest('both copies read a stored sale in the two-status model identically, and correctly', async () => {
+  const worker = await loadWorkerCopy()
+  for (const fixture of STORED_FIXTURES) {
+    assert.deepEqual(uiCopy.saleStoredState(fixture.row), fixture.expected, `UI: ${fixture.name}`)
+    assert.deepEqual(worker.saleStoredState(fixture.row), fixture.expected, `Worker: ${fixture.name}`)
+    assert.equal(uiCopy.saleReadsNotPaid(fixture.row), fixture.notPaid, `UI Not Paid: ${fixture.name}`)
+    assert.equal(worker.saleReadsNotPaid(fixture.row), fixture.notPaid, `Worker Not Paid: ${fixture.name}`)
+  }
+  const retired = STORED_FIXTURES.filter((fixture) => fixture.retired)
+  assert.ok(retired.length >= 4, 'expected several retired rows')
+  // Read at face value (the old readers), none of these is its stored state.
+  for (const fixture of retired) assert.notEqual(String(fixture.row.sale_status), fixture.expected.saleStatus, `"${fixture.name}" does not discriminate`)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

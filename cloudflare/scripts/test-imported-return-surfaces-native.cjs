@@ -28,7 +28,7 @@ async function main() {
       const read = await h.call('GET', H.fresh(`/api/sales?id=${saleId}`), undefined, `GET /api/sales?id=${saleId}`, { observe: true })
       const sale = (Array.isArray(read.body) ? read.body : read.body.sales || read.body.rows || []).find(row => Number(row.id) === Number(saleId))
       const items = sale ? (typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items) : []
-      return { status: read.status, sale_status: sale && sale.sale_status, item: items[0] || {} }
+      return { status: read.status, sale_status: sale && sale.sale_status, return_state: sale && sale.return_state, item: items[0] || {} }
     }
     const before = await line(imported.sale.id)
     r.check(`an imported line reports its imported returned units (returned ${before.item.returned_quantity}, imported ${before.item.imported_returned_quantity})`, () => {
@@ -39,11 +39,12 @@ async function main() {
     const last = await h.call('POST', '/api/returns', { client_request_id: 'surface-last-unit', sale_id: imported.sale.id, reason: 'surface probe',
       return_type: 'restock', items: [{ sale_item_id: imported.items[0].id, product_id: 801, quantity: 1, applied_price_usd: 5, stock_action: 'restock', branch_id: 1 }] }, 'return the last imported unit')
     const after = await line(imported.sale.id)
-    r.check(`after the last unit is returned the line reads 3 returned, 2 of them imported, and the sale is returned (create ${last.status}; ${after.item.returned_quantity}/${after.item.imported_returned_quantity}; ${after.sale_status})`, () => {
+    r.check(`after the last unit is returned the line reads 3 returned, 2 of them imported, and the sale is returned (create ${last.status}; ${after.item.returned_quantity}/${after.item.imported_returned_quantity}; ${after.sale_status}/${after.return_state})`, () => {
       assert.equal(last.status, 200, JSON.stringify(last.body).slice(0, 200))
       assert.equal(Number(after.item.returned_quantity), 3)
       assert.equal(Number(after.item.imported_returned_quantity), 2)
-      assert.equal(after.sale_status, 'returned', 'the status projection counts the imported units too')
+      // 6.0.905: "returned" is the full-return tag beside Completed, never a sale_status word.
+      assert.deepEqual([after.sale_status, after.return_state], ['completed', 'full'], 'the tag projection counts the imported units too')
     })
     const pos = await H.createSale(h, { key: 'surface-pos', status: 'completed', lines: [{ productId: 802, quantity: 2 }],
       paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'POS control sale' })

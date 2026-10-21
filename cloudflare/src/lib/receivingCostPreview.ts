@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
 import { normalizeTypedDate } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { CATALOG_COST_DERIVE_SQL } from './catalogCostRecompute'
 import { multiplyMoney4, nullableMoney4, roundMoney4 } from './moneyPrecision'
 import { effectiveUnitCost } from './stockSessionMath'
@@ -36,7 +37,7 @@ const object = (value: unknown): value is Row => value !== null && typeof value 
 const positiveId = (value: unknown): number | null => (typeof value === 'number' || typeof value === 'string')
   && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null
 
-export function parseReceivingCostPreview(raw: unknown, today = new Date().toISOString().slice(0, 10)): PreviewLine[] {
+export function parseReceivingCostPreview(raw: unknown, today = businessToday()): PreviewLine[] {
   if (!object(raw) || !Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 25) {
     throw new ReceivingCostPreviewInputError('Provide between 1 and 25 receiving lines.')
   }

@@ -173,8 +173,9 @@ const salesAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
 const kernelCalls = []
 const totalsFor = (kernel, filters) => ({
   ...salesAnalyticsReal.emptySalesTotals(),
-  revenue_usd: kernel.revenueByDay[filters.startDate] ?? 0, profit_usd: 150.25, gross_sales_usd: 450, item_discount_usd: 12.5, discount_usd: 25, total_discount_usd: 37.5,
-  delivery_usd: 6, pending_revenue_usd: 40, pending_tx_count: 3, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
+  revenue_usd: kernel.revenueByDay[filters.startDate] ?? 0, profit_usd: 150.25,
+  revenue_without_not_paid_usd: (kernel.revenueByDay[filters.startDate] ?? 0) - 40, profit_without_not_paid_usd: 110.25, gross_sales_usd: 450, item_discount_usd: 12.5, discount_usd: 25, total_discount_usd: 37.5,
+  delivery_usd: 6, pending_revenue_usd: 40, not_paid_owed_usd: 40, pending_tx_count: 3, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
 })
 const KERNEL_A = {
   revenueByDay: { [DAY]: 412.5, [YESTERDAY]: 375, [LAST_WEEK]: 450 },
@@ -315,10 +316,10 @@ async function main() {
     rowsUnder(single.sales, '=====Received=====').join('\n'))
   const salesRows = rowsUnder(single.sales, '=====Sales=====')
   check('sales & payments: Not Paid carries its receipt count, and the total discount sits under its two parts',
-    salesRows.includes('· Not Paid: 3 · $40.00') && salesRows.indexOf('· Total discount: $37.50') === salesRows.indexOf('· Discount on invoices: $25.00') + 1,
+    salesRows.includes('· Still owed: 3 · $40.00') && salesRows.indexOf('· Total discount: $37.50') === salesRows.indexOf('· Discount on invoices: $25.00') + 1,
     salesRows.join('\n'))
   check('without the switch Not Paid is the amount alone and there is no total discount row',
-    rowsUnder(quiet.text, '=====Sales=====').includes('· Not Paid: $40.00') && !quiet.text.includes('Total discount'))
+    rowsUnder(quiet.text, '=====Sales=====').includes('· Still owed: $40.00') && !quiet.text.includes('Total discount'))
   telegramLang.setTelegramLanguage('en')
   const oneCut = telegram.formatShiftOverview('Synthetic Shop A', {
     business_date: DAY, branch_id: null, branch_name: null, user_name: 'Za', shift_code: 'S-20260923-0807-Za', opened_at: '2026-09-23T01:07:00.000Z', closed_at: CLOSED_AT,
@@ -365,8 +366,8 @@ async function main() {
   const full = await overview(envA)
   assert.deepStrictEqual(full.text.split('\n').slice(5), [
     '· Open: 23/09/2026 08:07', '· Close: 23/09/2026 18:30',
-    '=====Sales=====', '· Revenue: $412.50', '· Discount on items: $12.50', '· Discount on invoices: $25.00', '· Total discount: $37.50', '· Gross sales: $450.00',
-    '· Profit: $150.25', '· Delivery fee: $6.00', '· Not Paid: 3 · $40.00', '· Refunds: $10.00',
+    '=====Sales=====', '· Revenue: $412.50', '· Revenue (paid only): $372.50', '· Discount on items: $12.50', '· Discount on invoices: $25.00', '· Total discount: $37.50', '· Gross sales: $450.00',
+    '· Profit: $150.25', '· Profit (paid only): $110.25', '· Delivery fee: $6.00', '· Still owed: 3 · $40.00', '· Refunds: $10.00',
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
@@ -465,7 +466,7 @@ async function main() {
       '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Low stock=====', '=====Returns=====', '=====Compare====='])
       && ['=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers====='].every((header) => JSON.stringify(rowsUnder(today.text, header)) === JSON.stringify(rowsUnder(plain.text, header)))
       && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.5000', '· Riverside: 3 · $50.0000'])
-      && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
+      && rowsUnder(today.text, '=====Sales=====').includes('· Still owed: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
     today.text)
   check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[2000]', JSON.stringify(buttonCalls))
   check('Send today\'s summary: returns and the same-time comparison for the whole shop',
