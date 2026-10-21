@@ -145,6 +145,19 @@ export function osaDistance(a: string, b: string, limit: number): number {
 
 const MIN_REAL_CODE_LENGTH = 4
 const UPC_PAIR_KEY = /^upc[ae]:/
+const KHMER_ZERO_CODE = 0x17e0
+
+// The Windows Khmer layout makes a scanner gun type ០-៩ for 0-9. Code keys and
+// code texts fold them; name terms never do, so a Khmer-numbered name still
+// matches as typed. searchMatch.ts's foldNativeDigits is the same fold (this
+// file stays import-free for the bare-require test loaders).
+function foldKhmerDigits(value: string): string {
+  return value.replace(/[\u17E0-\u17E9]/g, (digit) => String(digit.charCodeAt(0) - KHMER_ZERO_CODE))
+}
+
+function compactCode(value: unknown): string {
+  return foldKhmerDigits(String(value ?? '')).trim().toLowerCase().replace(/[\s-]+/g, '')
+}
 
 function upcCheckDigit(elevenDigits: string): string {
   let sum = 0
@@ -204,7 +217,7 @@ function upcPairKeys(digits: string): string[] {
 }
 
 export function codeKeys(value: unknown): string[] {
-  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  const raw = compactCode(value)
   if (raw.length < MIN_REAL_CODE_LENGTH) return []
   const primary = raw.replace(/^0+/, '')
   if (!primary) return []
@@ -428,7 +441,7 @@ export function createSearchIndexBuilder(): SearchIndexBuilder {
       const keys: string[] = []
       for (const code of [row.barcode, row.sku]) {
         for (const key of codeKeys(code)) if (!keys.includes(key)) keys.push(key)
-        const text = String(code ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+        const text = compactCode(code)
         if (text.length >= MIN_REAL_CODE_LENGTH) index.codeTexts.push([doc, text])
       }
       index.docCodeKeys.push(keys)
@@ -522,8 +535,9 @@ function tokenHits(index: SearchTermIndex, token: string, last: boolean, run: bo
       if (text.includes(token)) addHit(hits, doc, text.split(' ').includes(token) ? LEVEL_EXACT : LEVEL_PREFIX, weight)
     }
   }
-  if (/^[0-9]{5,}$/.test(token)) {
-    for (const [doc, text] of index.codeTexts) if (text.includes(token)) addHit(hits, doc, LEVEL_PREFIX, WEIGHT_CODE)
+  const codeToken = foldKhmerDigits(token)
+  if (/^[0-9]{5,}$/.test(codeToken)) {
+    for (const [doc, text] of index.codeTexts) if (text.includes(codeToken)) addHit(hits, doc, LEVEL_PREFIX, WEIGHT_CODE)
   }
   const shape = skeleton(token)
   const budget = token.length >= 4 && /^\p{L}+$/u.test(token) && !isKhmerToken(token) ? fuzzyBudget(shape.length) : 0
