@@ -30,7 +30,7 @@ import { paidItemsTotal, supplierTotalMatches } from '../lib/stockSessionMath'
 // sequential D1 reads (resolve target product/variant, existing lot lookup)
 // interleaved with its own writes (mostly one env.DB.batch() per line inside
 // the kernel already -- see lib/productBatches.ts's receiveBatchStock and
-// removeStockFromBatch). Combining N lines' reads
+// planRemoveStockFromBatch). Combining N lines' reads
 // and writes into fewer than N round trips to D1 itself would require the
 // kernels to return statement lists instead of executing directly, which
 // they do not; that is a larger change than this lane's scope covers (see

@@ -45,7 +45,7 @@ function load(text: string, dependencies: Row): Row {
   new Function('require', 'module', 'exports', output)((key: string) => { assert.ok(key in dependencies, key); return dependencies[key] }, module, module.exports)
   return module.exports
 }
-const syncRuntime = { dispatchSyncUpdates() {}, emitSyncQueueChanged() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] }
+const syncRuntime = { dispatchSyncUpdates() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] }
 const pending = load(source('api/pendingSyncTransport.ts'), {
   './lazyLocalDb.ts': { getLocalDb: async () => db }, './saleWriteTransport.ts': { syncPendingSalesQueue: async (options: Row) => { recoveryCalls.push(options); return { success: true } } },
   './http.ts': api, './actorReadScope.ts': actorScope, './offlineQueueOwnership.ts': ownership, './syncPreview.ts': { serializePendingSyncPreview }, './syncRuntime.ts': syncRuntime,
@@ -98,8 +98,7 @@ await test('all automatic sale triggers are absent and background registration i
   const web = source('web-api.ts'); const sw = source('public-runtime/service-worker.ts'); const runtime = source('api/syncRuntime.ts')
   const functionBody = (text: string, name: string) => { const parsed = ts.createSourceFile('test.ts', text, ts.ScriptTarget.Latest, true); return parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(parsed) || '' }
   assert.doesNotMatch(functionBody(web, 'ensureSessionRecoveryListeners'), /syncPendingSalesQueue/)
-  assert.doesNotMatch(functionBody(sw, 'syncOutbox'), /replayQueuedSale\(/)
-  assert.doesNotMatch(functionBody(sw, 'syncOutboxOnce'), /syncOutbox\(/)
+  assert.doesNotMatch(sw, /syncOutbox/)
   assert.doesNotMatch(runtime, /registerOutboxBackgroundSync|OUTBOX_SYNC_TAG|\.register\(|postMessage\(/)
   assert.match(web, /module\.discardPendingSyncQueue\(reason, reviewToken\)/)
 })

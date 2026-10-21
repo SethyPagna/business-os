@@ -289,7 +289,7 @@ export async function commitStockInLinesInRounds<L>(
 // Milestone A stock-session wire. The caller owns stable request/line ids:
 // retries must send the byte-equivalent logical request so the Worker can
 // return its immutable receipt instead of applying stock twice. Deliberately
-// network-only -- there is no offline/outbox replay contract for this write.
+// network-only.
 export function createInventorySession(payload: InventoryStockSessionRequest): Promise<InventoryStockSessionReceipt> {
   return route(
     'inventory:session:create',

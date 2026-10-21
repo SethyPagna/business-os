@@ -3535,8 +3535,7 @@ export default function POS() {
       } else {
         // A warehouse line refused by the Worker reads back as the pack
         // sentence the sheet's greyed pill shows, not as the server's
-        // English -- this is the path an offline sale replayed later, or a
-        // stale tab, actually arrives on.
+        // English -- this is the path a stale tab actually arrives on.
         notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       }
     } catch (e) {

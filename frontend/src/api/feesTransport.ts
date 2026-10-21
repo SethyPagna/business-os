@@ -8,9 +8,8 @@ import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
-// fee save while offline just surfaces as a normal error rather than
-// needing an outbox/sync story like sales or inventory writes, since fees
-// aren't part of the POS checkout critical path.
+// fee save just surfaces as a normal error, since fees aren't part of the
+// POS checkout critical path.
 
 // 'expense' joined the set with the old-system expense migration (Part 379):
 // 4,240 historical expense entries carry fee_type='expense', and manual

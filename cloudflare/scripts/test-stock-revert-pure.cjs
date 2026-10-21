@@ -100,7 +100,7 @@ async function counterFor(originalId) {
 ;(async () => {
   // ---- case 1: revert a batch-less ADD (revert removes the stock) ----------
   // Batch-less because the batch primitives (receiveBatchStock /
-  // removeStockFromBatch) are covered by their own pure tests; this test
+  // planRemoveStockFromBatch) are covered by their own pure tests; this test
   // pins the NEW orchestration -- direction, aggregate move, counter-movement,
   // double-revert guard -- against the real schema.
   seedStockFixture(db,()=>db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, cost_price_usd, cost_price_khr, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 99, 396000, 1)`).run({}))

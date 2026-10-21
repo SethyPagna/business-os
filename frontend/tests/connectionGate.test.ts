@@ -164,7 +164,7 @@ try {
       './lazyLocalDb.ts': { getLocalDb: async () => ({}) },
       './actorReadScope.ts': { captureActorReadScope: () => 1, isActorReadScopeCurrent: () => true },
       './offlineQueueOwnership.ts': owner,
-      './syncRuntime.ts': { OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [], dispatchSyncUpdates: noop, emitSyncQueueChanged: noop },
+      './syncRuntime.ts': { OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [], dispatchSyncUpdates: noop },
     }
     const output = ts.transpileModule(read('../src/api/saleWriteTransport.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     const module = { exports: {} as Record<string, (payload: Record<string, unknown>) => Promise<unknown>> }

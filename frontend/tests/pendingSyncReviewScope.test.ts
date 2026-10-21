@@ -34,7 +34,7 @@ const common = {
   './lazyLocalDb.ts': { getLocalDb: async () => db }, './http.ts': api,
   './actorReadScope.ts': { captureActorReadScope: () => 1, isActorReadScopeCurrent: () => true },
   './offlineQueueOwnership.ts': ownership,
-  './syncRuntime.ts': { dispatchSyncUpdates() {}, emitSyncQueueChanged() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
+  './syncRuntime.ts': { dispatchSyncUpdates() {}, DISCARD_SYNC_UPDATE_CHANNELS: [], OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
 }
 function load(file: string, dependencies: Row): Row {
   const source = fs.readFileSync(new URL(`../src/api/${file}.ts`, import.meta.url), 'utf8')

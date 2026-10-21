@@ -1734,7 +1734,7 @@ async function main() {
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
-      // Passes every pre-check and then fails INSIDE applyReplacementStock
+      // Passes every pre-check and then fails INSIDE the atomic replacement write
       // on the plain branch_stock aggregate: product 2 has no stock at all,
       // 99 requested.
       // It has to be product 2 and not product 1: product 1 IS lot-tracked

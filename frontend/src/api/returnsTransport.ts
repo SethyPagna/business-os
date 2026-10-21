@@ -105,7 +105,7 @@ export async function getReturnQuoteV1(saleId: number, items: Array<{ sale_item_
   const scope = captureActorReadScope('returns')
   assertActorReadScope(scope)
   if (navigator.onLine === false && !(await confirmServerReachable())) throw returnV1Error('return_v1_unavailable')
-  // POST is a read: never route through write invalidation or the offline queue.
+  // POST is a read: never route through write invalidation.
   const result = await apiFetch('POST', '/api/returns/quote', { sale_id: saleId, items }) as Record<string, unknown>
   assertActorReadScope(scope)
   requireReturnCapability(result)
