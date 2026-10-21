@@ -7723,5 +7723,6 @@
   "decrease_quantity": "បន្ថយចំនួន",
   "remove_divider": "លុបបន្ទាត់បំបែក",
   "payment_method_new_name": "ឈ្មោះថ្មី",
-  "receipt_aba_payment_qr_alt": "QR ទូទាត់ ABA"
+  "receipt_aba_payment_qr_alt": "QR ទូទាត់ ABA",
+  "scan_moved_to_search": "បាកូដត្រូវបានផ្លាស់ទៅប្រអប់ស្វែងរក"
 }

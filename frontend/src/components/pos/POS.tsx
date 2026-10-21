@@ -43,6 +43,7 @@ import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import InfoHint from '../shared/InfoHint'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -88,6 +89,7 @@ import {
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { findScanHit } from '../../utils/scanExactHit.ts'
 import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
@@ -240,6 +242,9 @@ type ProductGroupMeta = {
   hasMultipleItems?: boolean
   maxSellingPriceUsd?: number
   minSellingPriceUsd?: number
+  // The group's child rows with branch-only duplicates merged, as the
+  // Products list shows them: what a scanned barcode is matched against.
+  rows?: ProductRecord[]
   stockTotal?: number
 }
 
@@ -1286,6 +1291,11 @@ export default function POS() {
   const [receiptQueue, setReceiptQueue] = useState<Record<string, unknown>[]>([])
 
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const productScrollRef = useRef<HTMLDivElement | null>(null)
+  // The code of a scan whose exact match has not been shown yet. A scan only
+  // fills the search; once its single match is on screen the card is scrolled
+  // to and (desktop) focused, and this is cleared. Typing clears it too.
+  const pendingScanRef = useRef<string | null>(null)
   const catalogRequestRef = useRef(0)
   const catalogLoadPromiseRef = useRef<Promise<{ prods: ProductRecord[] } | null> | null>(null)
   const pendingCatalogLoadRef = useRef<{ label: string, options?: CatalogLoadOptions } | null>(null)
@@ -2545,6 +2555,43 @@ export default function POS() {
 
   const pagedProductCards = visibleProductCards
 
+  // Typing, the camera and the scanner gun all end in changeSearch, so a scan is
+  // kept across a reload (pos_search) exactly like typed text. A scan never adds
+  // or picks anything: it fills the search and the list narrows.
+  const changeSearch = useCallback((next: string) => {
+    writePosStorage('session', 'pos_search', next)
+    setSearch(next)
+  }, [])
+  const applyScan = useCallback((code: string) => {
+    pendingScanRef.current = code
+    changeSearch(code)
+  }, [changeSearch])
+  const posOverlayOpen = Boolean(detailProduct || imageLightbox || receiptQueue.length || showStatusPicker || showAddCustomer || showAddDelivery)
+  useScannerWedge({
+    enabled: isActive && !posOverlayOpen,
+    searchRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      applyScan(code)
+      if (origin === 'field') notify(t('scan_moved_to_search'), 'info')
+    },
+  })
+
+  // The one card whose child row carries exactly the searched barcode (two rows
+  // sharing it single out nothing). Ringed in the grid; for a scan it is also
+  // scrolled to and, on desktop, focused so Enter is a deliberate confirm.
+  const scanHitId = useMemo(
+    () => findScanHit(visibleProductCards, (card) => card.__groupMeta?.rows ?? [card], debouncedProductSearch)?.group.id ?? null,
+    [debouncedProductSearch, visibleProductCards],
+  )
+  useEffect(() => {
+    const code = pendingScanRef.current
+    if (!code || scanHitId === null || debouncedProductSearch !== code) return
+    pendingScanRef.current = null
+    const card = productScrollRef.current?.querySelector<HTMLElement>('[data-scan-hit="true"]')
+    card?.scrollIntoView({ block: 'nearest' })
+    if (isDesktopViewport) card?.focus({ preventScroll: true })
+  }, [debouncedProductSearch, isDesktopViewport, scanHitId])
+
   const getVariantChoices = useCallback((product: ProductRecord) => {
     return getVariantChoicesForProduct(product, variantChildrenByParentId) as unknown as ProductRecord[]
   }, [variantChildrenByParentId])
@@ -3653,9 +3700,12 @@ export default function POS() {
                   ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
                   : (t('search_mode_or_hint') || 'Matching ANY term - change in Filters to match ALL terms instead')}
                 value={search}
-                onChange={e => { const next = e.target.value; writePosStorage('session', 'pos_search', next); setSearch(next) }}
+                onChange={e => { pendingScanRef.current = null; changeSearch(e.target.value) }}
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
               />
-              <ScanSearchButton onDetected={setSearch} t={t} />
+              <ScanSearchButton onDetected={applyScan} t={t} />
               {/* AND/OR toggle no longer sits here as its own button (Aug
                   19 2026 UI request) -- reachable again from inside the
                   Filter menu (search_mode section, see FilterPanel.tsx). */}
@@ -3695,7 +3745,7 @@ export default function POS() {
               the scroll-position read always fell back to the (never
               moving, since POS scrolls internally) window scrollTop and
               the top bar could never hide, unlike every other page. */}
-          <div className="page-scroll flex-1 overflow-y-auto overflow-x-hidden p-3">
+          <div ref={productScrollRef} className="page-scroll flex-1 overflow-y-auto overflow-x-hidden p-3">
             {/* Batch/expiry tracking could not be looked up. Selling from
                 the wrong lot is a real inventory error (FIFO/expiry), and
                 the old behaviour -- silently treating the failure as "no
@@ -3773,6 +3823,7 @@ export default function POS() {
                     posPresentation
                     key={p.id}
                     product={p}
+                    scanHit={p.id === scanHitId}
                     variants={getVariantChoices(p)}
                     groupMeta={p.__groupMeta || null}
                     getStock={getPosCardStock}
@@ -4606,6 +4657,7 @@ export default function POS() {
           <ProductDetailSheet
             posPresentation
             product={detailProduct}
+            scanQuery={debouncedProductSearch}
             promotionRules={promotionRules}
             exchangeRate={exchangeRate}
             t={t}

@@ -78,6 +78,13 @@ export interface ProductCardProps {
    * nothing -- tapping it still opens the product, because the card does.
    */
   onOpenImage?: () => void
+  /**
+   * This card holds the one child row whose barcode is exactly what was
+   * scanned or typed: outline it and mark it so the grid can scroll to it.
+   * Nothing is picked -- the person still taps the card (or presses Enter).
+   * An outline, not a ring: `.dark .card` forces its own box-shadow.
+   */
+  scanHit?: boolean
 }
 
 function asNumber(value: unknown): number {
@@ -136,6 +143,7 @@ function ProductCardComponent({
   copy,
   onOpen,
   onOpenImage,
+  scanHit = false,
 }: ProductCardProps) {
   const displayName = String(product.__displayName || product.name || '')
   const unit = String(product.unit || '')
@@ -163,7 +171,8 @@ function ProductCardComponent({
     <div
       role="button"
       tabIndex={0}
-      className={`card relative min-w-0 cursor-pointer ${posPresentation ? 'p-2 sm:p-2.5' : 'p-3'} text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
+      data-scan-hit={scanHit ? 'true' : undefined}
+      className={`card relative min-w-0 cursor-pointer ${posPresentation ? 'p-2 sm:p-2.5' : 'p-3'} text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}${scanHit ? ' outline outline-2 outline-primary-500' : ''}`}
       onClick={() => onOpen({ groupProduct, inStock })}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
