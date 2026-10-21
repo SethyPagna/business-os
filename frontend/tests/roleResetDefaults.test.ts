@@ -2,8 +2,9 @@
 //
 //   * the action loads GET /api/roles/defaults into the editor DRAFT only: nothing is written, the stored role is
 //     untouched until Save
-//   * Save of an existing role opens the shared ConfirmDialog review listing EVERY changed key, before -> after,
-//     with translated labels and the sensitivity shield; the admin confirms and the role is written once
+//   * Save of an existing role opens the shared ConfirmDialog review: one row per changed MODULE (6.0.936; it listed
+//     every stored key before), in the editor's words, with the sensitivity shield; the admin confirms and the role
+//     is written once
 //   * admin only; offered on the seeded Employee/Manager roles only; a failed load keeps the draft
 //   * roleDiff is the pure core: absent is "Not set", not Off; unknown keys are listed raw, never dropped
 //
@@ -13,8 +14,8 @@
 // Run: node tests/roleResetDefaults.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import type { Harness, MemoryNode, MountedSurface } from './mountedComponentHarness.ts'
-import { diffRolePermissions, roleValueLabel } from '../src/components/users/roleDiff.ts'
+import { propsOf, type Harness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { diffRolePermissions, roleValueLabel, summarizeRoleChangesByModule } from '../src/components/users/roleDiff.ts'
 import { resettableRoleCode } from '../src/components/users/roleDefaultsReset.ts'
 import { DEFAULT_ROLE_PERMISSIONS } from '../../cloudflare/src/lib/roleDefaults.ts'
 
@@ -138,7 +139,7 @@ await runTest('reset loads the defaults into the draft and writes nothing', asyn
   }
 })
 
-await runTest('Save lists every changed key before -> after in the shared review; confirm writes once', async () => {
+await runTest('Save lists one row per changed module in the shared review; confirm writes once', async () => {
   const { page, calls } = await mountRoles()
   try {
     const editor = await openEditor(page, 'Employee')
@@ -148,15 +149,18 @@ await runTest('Save lists every changed key before -> after in the shared review
     assert.ok(review, 'Save opens the review first')
     assert.equal(calls.updates.length, 0, 'nothing is written before the admin confirms')
     const rows = review.querySelectorAll('dt').map((dt) => dt.textContent)
-    const expected = diffRolePermissions(STORED_EMPLOYEE, DEFAULT_ROLE_PERMISSIONS.employee, tr)
-    assert.ok(expected.length >= 3)
-    assert.equal(review.querySelectorAll('dt').length, expected.length, 'one row per changed key, no more, no fewer')
+    const expected = summarizeRoleChangesByModule(STORED_EMPLOYEE, DEFAULT_ROLE_PERMISSIONS.employee, tr, { from: 'Employee', to: 'Employee' })
+    const stored = diffRolePermissions(STORED_EMPLOYEE, DEFAULT_ROLE_PERMISSIONS.employee, tr)
+    assert.ok(expected.length >= 3 && expected.length < stored.length / 2, `${stored.length} stored keys fold into ${expected.length} module rows`)
+    assert.equal(review.querySelectorAll('dt').length, expected.length, 'one row per changed module, no more, no fewer')
     const text = review.textContent
-    assert.ok(text.includes(`${en.perm_value_on} → ${en.perm_value_not_set}`), 'dashboard: On -> Not set')
-    assert.ok(text.includes(`${en.perm_value_not_set} → ${en.off}`), 'supplier: Not set -> Off')
-    assert.ok(text.includes(`${en.perm_value_on} → ${en.off}`), 'cost view: On -> Off')
-    assert.ok(rows.some((row) => row.includes(`${en.products}: ${en.perm_act_products_supplier}`)), 'translated label of the supplier switch')
+    assert.ok(!text.includes(en.perm_value_not_set), 'the review speaks the editor\'s words, not "Not set"')
+    assert.ok(text.includes(`${en.label_full_access} → ${en.none}`), 'dashboard: Full -> None')
+    assert.ok(rows.includes(en.perm_section_dashboard) && rows.includes(en.perm_section_sales), 'a module row carries the module name')
+    assert.ok(text.includes(`− ${en.perm_short_cost_view}`), 'cost view: its own line, switched off')
+    assert.match(text, new RegExp(`✕[^✓−+]*${en.supplier}`), 'the supplier switch is named on its module row')
     assert.ok(review.querySelectorAll('[role=img]').some((mark) => mark.getAttribute('aria-label') === en.permission_sensitive_high), 'the sensitivity shield marks the cost switch')
+    assert.ok(!text.includes('Applies right away'), 'nobody holds the role here, so there is nothing to announce')
     await page.click(page.button(new RegExp(`^${en.save}`), review), { until: () => calls.updates.length === 1, waitingFor: 'the single write' })
     assert.equal(calls.updates.length, 1, 'confirm writes exactly once')
     assert.equal(calls.updates[0].id, 2)
@@ -190,8 +194,8 @@ await runTest('a failed load keeps the draft, says so, and offers no review', as
     await page.click(resetButton(page)[0], { until: () => calls.defaults === 1, waitingFor: 'the defaults request' })
     await page.settle()
     assert.ok(calls.notices.some(([message, type]) => message === 'network down' && type === 'error'), 'the failure is shown, not swallowed')
-    await page.click(page.button(new RegExp(`^${en.save}`), editor))
-    assert.equal(dialogTitled(page, en.role_review_title), undefined, 'an untouched draft has nothing to review')
+    assert.equal(propsOf(page.button(new RegExp(`^${en.save}`), editor)).disabled, true, 'an untouched draft has nothing to save, so Save stays off')
+    assert.equal(dialogTitled(page, en.role_review_title), undefined, 'and nothing is up for review')
     assert.equal(calls.updates.length, 0)
   } finally {
     await page.unmount()

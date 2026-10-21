@@ -5,24 +5,34 @@ import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
+import ShieldPlus from 'lucide-react/dist/esm/icons/shield-plus.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
+import UsersIcon from 'lucide-react/dist/esm/icons/users.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu from '../shared/FilterMenu'
 import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import Modal from '../shared/Modal'
-import { useFormDirty } from '../../utils/formDirty.ts'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { isDirtySince, stableSnapshot, useFormDirty } from '../../utils/formDirty.ts'
+import type { CloseGuard } from '../../utils/useCloseGuard.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { rolePermissionLabel } from './rolePermissionLabel.ts'
-import { diffRolePermissions, roleValueLabel } from './roleDiff.ts'
+import { summarizeRoleChangesByModule, type RoleChangeRow } from './roleDiff.ts'
+import { levelWord } from './rolePermissionLabel.ts'
+import { roleTierCounts } from './permissionSummary.ts'
 import { resettableRoleCode } from './roleDefaultsReset.ts'
 import { ROLE_PRESETS } from './rolePresetDefaults'
 import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
@@ -30,6 +40,10 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
+import { clearWorkDraft, readWorkDraft, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { copyPasswordToClipboard, passwordNoticeKey, requestPasswordSave } from '../../utils/passwordManager.ts'
 import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
@@ -280,6 +294,81 @@ const INITIAL_ROLE_FORM: RoleFormState = {
   name: '',
   permissions: {},
 }
+
+// The form a role opens with; a new role opens blank.
+const roleFormOf = (role: RoleRecord | null): RoleFormState => (role
+  ? { name: role.name || '', permissions: normalizePermissionState(role.permissions) }
+  : INITIAL_ROLE_FORM)
+
+// Keys of a minimized role draft: one chip per role (or one for the new-role form).
+const roleFormWorkKey = (roleId?: EntityId | null): string => `role-form-${roleId ?? 'new'}`
+const roleFormDraftBaseKey = (roleId?: EntityId | null): string => `role_${roleId ?? 'new'}`
+
+// Icon-only buttons share one shape: the name rides the tooltip and the aria-label, touch screens get 44px. The colours
+// are separate so a delete button never stacks two text colours for the same theme.
+const ICON_BUTTON_SHAPE = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-md disabled:opacity-40 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11'
+const ICON_BUTTON_CLASS = `${ICON_BUTTON_SHAPE} text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-gray-100`
+const ICON_BUTTON_DANGER_CLASS = `${ICON_BUTTON_SHAPE} text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-950/30`
+const TIER_DOT = { full: 'bg-blue-600', review: 'bg-amber-500', view: 'bg-teal-600' } as const
+
+function SensitiveMark({ sensitivity, tr }: { sensitivity: RoleChangeRow['sensitivity']; tr: Translate }) {
+  if (sensitivity === 'normal') return null
+  const label = tr(sensitivity === 'critical' ? 'permission_sensitive_critical' : 'permission_sensitive_high', 'Sensitive')
+  return (
+    <span role="img" aria-label={label} title={label} className={`mt-0.5 inline-flex shrink-0 ${sensitivity === 'critical' ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}`}>
+      <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+    </span>
+  )
+}
+
+// A review row: the module with its shield, then its level move, the controls switched off, and each separate
+// switch on a line of its own so a level change can never hide one.
+function RoleReviewLabel({ row, tr }: { row: RoleChangeRow; tr: Translate }) {
+  return (
+    <span className="inline-flex items-start gap-1 text-sm font-medium text-gray-900 dark:text-gray-100" title={row.hint}>
+      <SensitiveMark sensitivity={row.sensitivity} tr={tr} />
+      <span className="break-words">{row.label}</span>
+    </span>
+  )
+}
+
+function RoleReviewValue({ row, tr }: { row: RoleChangeRow; tr: Translate }) {
+  return (
+    <div className="space-y-0.5">
+      {row.lines.map((line, index) => (
+        <div key={index} className={line.kind === 'level' ? (line.unchanged ? 'text-sm font-normal text-gray-500 dark:text-gray-400' : 'text-sm') : 'flex items-start justify-end gap-1 text-xs font-normal leading-5 text-gray-600 dark:text-gray-300'}>
+          {line.sensitivity ? <SensitiveMark sensitivity={line.sensitivity} tr={tr} /> : null}
+          <span className="break-words">{line.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Modules per level (Full, Review, View) and the actions switched off. Each segment names its own level -- the same
+// word and dot colour as the editor's column header -- so the strip reads without a legend; a level nobody holds is
+// left out. The numbers are spelled out in full for screen readers and on hover.
+function RoleTierStrip({ permissions, tr }: { permissions: unknown; tr: Translate }) {
+  const counts = roleTierCounts(normalizePermissionState(permissions))
+  const spoken = tr('role_tier_strip_aria', 'Full {full}, Review {review}, View {view}, {off} off')
+    .replace('{full}', String(counts.full)).replace('{review}', String(counts.review)).replace('{view}', String(counts.view)).replace('{off}', String(counts.off))
+  return (
+    <span role="img" aria-label={spoken} title={spoken} className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-medium leading-6 text-gray-600 dark:text-gray-300">
+      {(['full', 'review', 'view'] as const).filter((level) => counts[level] > 0).map((level) => (
+        <span key={level} className="inline-flex items-center gap-1 whitespace-nowrap">
+          <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-sm ${TIER_DOT[level]}`} />
+          {levelWord(level, tr)} {counts[level]}
+        </span>
+      ))}
+      {counts.off > 0 ? (
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <X className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {tr('off', 'Off')} {counts.off}
+        </span>
+      ) : null}
+    </span>
+  )
+}
 const LazyPermissionEditor = lazyRetry(async () => ({ default: (await import('./PermissionEditor')).default }), 'users-permission-editor')
 const LazyUserDetailSheet = lazyRetry(async () => ({ default: (await import('./UserDetailSheet')).default }), 'users-user-detail-sheet')
 const LazyUserProfileModal = lazyRetry(async () => ({ default: (await import('./UserProfileModal')).default }), 'users-user-profile-modal')
@@ -487,6 +576,8 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null)
   const [selectedRole, setSelectedRole] = useState<RoleRecord | null>(null)
   const [search, setSearch] = useState('')
+  // The Roles tab has its own search: text typed for users must not filter the roles list.
+  const [roleSearch, setRoleSearch] = useState('')
   // Role/Status filter -- Users was the one remaining list page with a
   // search box but no FilterMenu at all (found during the Part 124
   // cross-page consistency audit; every other list page in the app has
@@ -531,7 +622,9 @@ export default function Users() {
   // dirtiness and each re-baselines on the record it is editing (one modal
   // instance is reused for every user/role).
   const { dirty: userFormDirty } = useFormDirty(userForm, String(selectedUser?.id ?? 'new'))
-  const { dirty: roleFormDirty } = useFormDirty(roleForm, String(selectedRole?.id ?? 'new'))
+  // Unsaved means "differs from the saved role" (a blank form when creating), so a draft restored from a minimized
+  // chip counts as unsaved work too, which a first-render baseline would not.
+  const roleFormDirty = isDirtySince(stableSnapshot(roleFormOf(selectedRole)), roleForm)
   const { dirty: passwordFormDirty } = useFormDirty(passwordForm, String(selectedUser?.id ?? 'new'))
   const [deletingRoleId, setDeletingRoleId] = useState<EntityId | null>(null)
   const saveUserInFlightRef = useRef(false)
@@ -543,6 +636,9 @@ export default function Users() {
   // The role-save review (before -> after for every changed key) is open; commitSaveRole writes on confirm.
   const [roleConfirmOpen, setRoleConfirmOpen] = useState(false)
   const [loadingRoleDefaults, setLoadingRoleDefaults] = useState(false)
+  const [rolePreset, setRolePreset] = useState('')
+  // The footer's Discard asks "Discard unsaved changes?" before it puts the saved role back in the editor.
+  const [roleDiscardOpen, setRoleDiscardOpen] = useState(false)
   const selectedRoleIdRef = useRef<EntityId | null>(null)
   // The shared Modal has no Escape handling; these two review dialogs promise
   // Escape aborts, so they wire their own (abort only -- never a write).
@@ -557,7 +653,7 @@ export default function Users() {
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [userConfirmOpen, roleDeleteTarget, roleConfirmOpen])
-  useEffect(() => { if (modal !== 'editRole') setRoleConfirmOpen(false) }, [modal])
+  useEffect(() => { if (modal !== 'editRole') { setRoleConfirmOpen(false); setRoleDiscardOpen(false) } }, [modal])
   const [profileOpen, setProfileOpen] = useState(false)
   const [otpRecoveryTarget, setOtpRecoveryTarget] = useState<UserRecord | null>(null)
   const [loading, setLoading] = useState(false)
@@ -784,6 +880,15 @@ export default function Users() {
     })
     return sortRecords(matched, userSortSpec, userSortFields)
   }, [search, users, roleFilter, statusFilter, userSortFields, userSortSpec])
+  const filteredRoles = useMemo(() => {
+    const query = roleSearch.trim().toLowerCase()
+    return query ? roles.filter((role) => String(role.name ?? '').toLowerCase().includes(query)) : roles
+  }, [roles, roleSearch])
+  const assignedCounts = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const user of users) counts.set(Number(user.role_id), (counts.get(Number(user.role_id)) ?? 0) + 1)
+    return counts
+  }, [users])
   const userFilterActiveCount = (roleFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)
   const userFilterSections = useMemo(() => ([
     {
@@ -855,6 +960,7 @@ export default function Users() {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
     setSelectedRole(null)
     setRoleForm(INITIAL_ROLE_FORM)
+    setRolePreset('')
     setModal('editRole')
   }
 
@@ -862,34 +968,16 @@ export default function Users() {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
     if (role?.is_system) return notify(tr('system_role_edit_locked', 'System roles cannot be edited here.'), 'error')
     setSelectedRole(role)
-    setRoleForm({
-      name: role.name || '',
-      permissions: normalizePermissionState(role.permissions),
-    })
+    setRoleForm(roleFormOf(role))
     setModal('editRole')
   }
 
-  const getRolePermissions = (role: RoleRecord | null | undefined): string[] => {
-    const value = normalizePermissionState(role?.permissions)
-    return Object.keys(value).filter((key) => value[key] && rolePermissionLabel(key, tr) !== null)
-  }
-
-  const getRolePermissionValue = (role: RoleRecord | null | undefined, key: string): PermissionValue => {
-    const value = normalizePermissionState(role?.permissions)
-    return value[key] ?? false
-  }
-
-  const getPermissionSummary = (role: RoleRecord): string => {
-    const value = normalizePermissionState(role?.permissions)
-    const keys = Object.keys(value).filter((key) => value[key] && rolePermissionLabel(key, tr) !== null)
-    if (!keys.length) return tr('no_permissions', 'No permissions')
-    if (keys.includes('all')) return tr('full_access', 'Full access')
-    return keys
-      .map((key) => {
-        const label = rolePermissionLabel(key, tr) || key
-        return value[key] === 'review' ? `${label} (${tr('review_required', 'Review')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View')})` : label
-      })
-      .join(', ')
+  // The Users tab, narrowed to the people holding this role.
+  const showRoleUsers = (role: RoleRecord): void => {
+    setRoleFilter(String(role.id))
+    setStatusFilter('all')
+    setSearch('')
+    setTab('users')
   }
 
   const buildRoleWritePayload = useCallback((role: Partial<RoleRecord> = {}): Record<string, unknown> => ({
@@ -972,7 +1060,7 @@ export default function Users() {
         const replayScope = userEditReplayScope(previousSnapshot, nextSnapshot, renameScope)
         const actor = { id: currentUser?.id, name: currentUser?.name }
         actionHistory.pushAction({
-          label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          label: tr('user_history_edit', 'Edit user {name}').replace('{name}', previousSnapshot.name || nextSnapshot.name || '').trim(),
           undo: async () => {
             const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
               .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
@@ -1101,30 +1189,111 @@ export default function Users() {
     }
   }
 
-  const buildRoleReviewItems = (): ConfirmReviewItem[] => {
-    const items: ConfirmReviewItem[] = []
-    const newName = roleForm.name.trim()
-    if (selectedRole && String(selectedRole.name || '').trim() !== newName) {
-      items.push({ label: tr('role_name', 'Role name'), value: `${String(selectedRole.name || '')} → ${newName}` })
+  // Minimize parks the editor as a chip, the way the Branch form does (utils/minimizedWork.ts). The draft is written
+  // when the admin minimizes, under the account and server the editor was opened under, and read back (then cleared)
+  // when the chip is restored; dismissing the chip clears it (MinimizedWorkTray).
+  const roleAuthority = useFrozenDraftAuthority(modal === 'editRole' ? roleFormDraftBaseKey(selectedRole?.id) : null, { formIdentity: String(selectedRole?.id ?? 'new') }).authority
+  const canMinimizeRoleForm = canManage && roleAuthority !== null
+  const preserveRoleForm = () => {
+    if (!roleAuthority) return
+    // A chip parked now would sit in the new account's list pointing at the old account's draft.
+    if (!isDraftAuthorityCurrent(roleAuthority)) {
+      notify(draftAuthorityChangedText(t), 'warning')
+      return
     }
-    for (const change of diffRolePermissions(selectedRole?.permissions, roleForm.permissions, tr)) {
-      const sensitive = tr(change.sensitivity === 'critical' ? 'permission_sensitive_critical' : 'permission_sensitive_high', 'Sensitive')
-      items.push({
-        label: (
-          <span className="inline-flex items-start gap-1">
-            {change.sensitivity !== 'normal' ? (
-              <span role="img" aria-label={sensitive} title={sensitive} className={`mt-px inline-flex shrink-0 ${change.sensitivity === 'critical' ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}`}>
-                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-              </span>
-            ) : null}
-            <span>{change.label}</span>
-          </span>
-        ),
-        value: `${roleValueLabel(change.before, tr)} → ${roleValueLabel(change.after, tr)}`,
-      })
+    writeWorkDraft(roleAuthority.draftKey, roleForm)
+    // Storage can be full or blocked and the write is silent: a chip with no draft behind it would lose the work.
+    if (stableSnapshot(readWorkDraft<RoleFormState>(roleAuthority.draftKey)?.data) !== stableSnapshot(roleForm)) {
+      notify(tr('unable_to_minimize', 'Unable to minimize this edit.'), 'error')
+      return
     }
-    return items
+    const name = roleForm.name.trim()
+    minimizeWork({
+      key: roleFormWorkKey(selectedRole?.id),
+      kind: 'role_form',
+      pageId: 'settings',
+      anchor: 'hub:settings:users',
+      label: selectedRole ? `${tr('edit_role', 'Edit role')} — ${selectedRole.name}` : `${tr('create_role', 'Create role')}${name ? ` — ${name}` : ''}`,
+      payload: { roleId: selectedRole?.id ?? null },
+      draftKey: roleAuthority.draftKey,
+    })
+    setModal(null)
+    setSelectedRole(null)
+    setRoleForm(INITIAL_ROLE_FORM)
   }
+
+  // Reopens a parked editor. Whatever is wrong (not an admin, another role open, the role gone) puts the chip back
+  // and says so: nothing is dropped.
+  const roleModalOpenRef = useRef(false)
+  roleModalOpenRef.current = modal === 'editRole'
+  const restoreRoleForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    const refuse = (message: string): false => {
+      reparkDeniedRestore(entry)
+      notify(message, 'warning')
+      return false
+    }
+    if (!canManage) return refuse(tr('access_denied', 'Access denied'))
+    if (roleModalOpenRef.current) return refuse(tr('role_draft_open_first', 'Close or minimize the open role first.'))
+    const draft = entry.draftKey ? readWorkDraft<Partial<RoleFormState>>(entry.draftKey)?.data : undefined
+    if (!draft || typeof draft.name !== 'string') return refuse(tr('failed_to_load_data', 'Failed to load data'))
+    const roleId = entry.payload?.roleId
+    let role: RoleRecord | null = null
+    if (roleId !== null && roleId !== undefined) {
+      try {
+        role = normalizeRoles(await getUsersApi().getRoles()).find((candidate) => String(candidate.id) === String(roleId)) ?? null
+      } catch {
+        return refuse(tr('roles_load_failed', 'Failed to load roles'))
+      }
+      if (!role) return refuse(tr('role_not_found', 'Role not found'))
+      if (role.is_system) return refuse(tr('system_role_edit_locked', 'System roles cannot be edited here.'))
+    }
+    setSelectedRole(role)
+    setRoleForm({ name: draft.name, permissions: normalizePermissionState(draft.permissions) })
+    setRolePreset('')
+    setTab('roles')
+    setModal('editRole')
+    if (entry.draftKey) clearWorkDraft(entry.draftKey)
+    return true
+  }, [canManage, notify, tr])
+  useEffect(() => {
+    const pending = consumePendingRestore('role_form')
+    if (pending) void restoreRoleForm(pending).then((restored) => { if (restored) markRestoreHandled('role_form') })
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'role_form' || !detail.entry) return
+      void restoreRoleForm(detail.entry as MinimizedWorkEntry).then((restored) => { if (restored) markRestoreHandled('role_form') })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreRoleForm])
+
+  // The footer's Discard asks the same question the X asks ("Discard unsaved changes?", Discard / Back), but it
+  // answers by putting the saved role back in the editor instead of leaving it.
+  const roleDiscardGuard: CloseGuard = {
+    requestClose: () => setRoleDiscardOpen(true),
+    promptOpen: roleDiscardOpen,
+    options: ['discard', 'back'],
+    dismissPrompt: () => setRoleDiscardOpen(false),
+    discardAndClose: () => {
+      setRoleForm(roleFormOf(selectedRole))
+      setRolePreset('')
+      setRoleDiscardOpen(false)
+    },
+    saveAndClose: () => undefined,
+    saving: false,
+    workLabel: null,
+  }
+
+  const roleAssignedCount = selectedRole ? assignedCounts.get(Number(selectedRole.id)) ?? 0 : 0
+  // The save review and the footer count read the same rows: one per changed module, plus the name.
+  const roleChangeRows = useMemo<RoleChangeRow[]>(() => (modal === 'editRole'
+    ? summarizeRoleChangesByModule(selectedRole?.permissions, roleForm.permissions, tr, { from: selectedRole?.name ?? '', to: roleForm.name })
+    : []), [modal, selectedRole, roleForm, tr])
+
+  const buildRoleReviewItems = (): ConfirmReviewItem[] => roleChangeRows.map((row) => ({
+    label: <RoleReviewLabel row={row} tr={tr} />,
+    value: <RoleReviewValue row={row} tr={tr} />,
+  }))
 
   const handleSaveRole = async () => {
     if (!roleForm.name.trim()) {
@@ -1140,9 +1309,8 @@ export default function Users() {
       setRoleForm(INITIAL_ROLE_FORM)
       return
     }
-    // Nothing is written until the admin has seen every change: an edit opens the review first.
-    if (selectedRole) setRoleConfirmOpen(true)
-    else await commitSaveRole()
+    // Nothing is written until the admin has seen every change, a new role included.
+    setRoleConfirmOpen(true)
   }
 
   const commitSaveRole = async () => {
@@ -1170,7 +1338,7 @@ export default function Users() {
         const previousSnapshot = cloneHistorySnapshot(selectedRole)
         const nextSnapshot = cloneHistorySnapshot({ ...selectedRole, ...payload, id: selectedRole.id })
         actionHistory.pushAction({
-          label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          label: tr('role_history_edit', 'Edit role {name}').replace('{name}', previousSnapshot.name || nextSnapshot.name || '').trim(),
           undo: async () => {
             const undoResult = await runRoleMutation(() => getUsersApi().updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
               .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
@@ -1189,7 +1357,7 @@ export default function Users() {
         const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdRoleId })
         if (createdRoleId > 0) {
           actionHistory.pushAction({
-            label: `Add role ${createdSnapshot.name || ''}`.trim(),
+            label: tr('role_history_add', 'Add role {name}').replace('{name}', createdSnapshot.name || '').trim(),
             undo: async () => {
               const undoResult = await runRoleMutation(() => getUsersApi().deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name }), 'Undo role creation')
               if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo role creation')
@@ -1221,9 +1389,9 @@ export default function Users() {
   const handleDeleteRole = async (role: RoleRecord): Promise<void> => {
     if (!canManage) return notify('No permission', 'error')
     if (role?.is_system) return notify(tr('system_role_edit_locked', 'System roles cannot be edited here.'), 'error')
-    const assignedCount = users.filter((user) => Number(user.role_id) === Number(role.id)).length
+    const assignedCount = assignedCounts.get(Number(role.id)) ?? 0
     if (assignedCount > 0) {
-      notify(tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', String(assignedCount)), 'error')
+      notify(tr('role_delete_blocked', '{n} people still use this role').replace('{n}', String(assignedCount)), 'error')
       return
     }
     if (deletingRoleId != null) return
@@ -1248,7 +1416,7 @@ export default function Users() {
       }
       let restoredRoleId = 0
       actionHistory.pushAction({
-        label: `Delete role ${snapshot.name || ''}`.trim(),
+        label: tr('role_history_delete', 'Delete role {name}').replace('{name}', snapshot.name || '').trim(),
         undo: async () => {
           const undoResult = await runRoleMutation(() => getUsersApi().createRole(buildRoleWritePayload(snapshot)), 'Undo role deletion')
           if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
@@ -1311,56 +1479,49 @@ export default function Users() {
         <div className="mb-2 text-xs text-blue-600 dark:text-blue-300">{tr('loading', 'Loading...')}</div>
       ) : null}
 
-      {/* Toolbar + search row pin to the top of the page's scroll container
-          while scrolling -- same `sticky top-2` treatment as
-          Products/Inventory/Sales/Returns/Branches/Contacts/AuditLog. This
-          page was the one remaining list page without it (found during a
-          ripple-consistency audit); grouped into the same single sticky
-          wrapper those pages use rather than two independently-sticky
-          siblings. History (bundles Undo/Redo) and the primary Add/Create
-          action still each take an equal share of the toolbar row's full
-          width (flex-1, labels always visible) -- previously only
-          History's wrapper grew to fill the row while the small icon
-          button inside it stayed put, so a wide invisible History control
-          sat crowded right up against Add User/Create role with barely
-          any visual gap. Search box stays on its own line below so it
-          always gets full width to breathe. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
-        <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
-          <ActionHistoryBar history={actionHistory} t={t} className="min-w-0 flex-1" showLabel />
-          {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4 shrink-0" /><span className="truncate">{t('add_user') || 'Add user'}</span></button> : null}
-          {tab === 'roles' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateRole}><span className="truncate">{t('create_role') || 'Create role'}</span></button> : null}
-        </div>
+      {/* Toolbar + search pin to the top of the page's scroll container while scrolling -- the same `sticky top-2`
+          treatment as Products/Inventory/Sales/Returns/Branches/Contacts/AuditLog, in one sticky wrapper.
+          History and the primary Add/Create action hug their content (icon + word); Add/Create sits at the right edge.
+          From 768px everything shares one row -- History, the search, Add/Create -- and below that the search drops to
+          its own full-width line under History and Add/Create. DOM order is History, search, Add/Create (the tab order of
+          the wide layout); `order-*` lifts the button beside History on a narrow screen. */}
+      <div className="sticky top-2 z-30 -mx-1 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-2 pt-1 md:flex-nowrap md:gap-x-2">
+          <ActionHistoryBar history={actionHistory} t={t} className="order-1 w-auto shrink-0" showLabel />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <SearchInput
-            id="users-search"
-            name="users_search"
-            value={search}
-            onChange={setSearch}
-            placeholder={tr('search_users_placeholder', 'Search users, phone, email, or role')}
-          />
-          {/* Filter only applies to the users list (role_id/is_active
-              columns) -- the roles tab renders `roles` directly with no
-              filtering of its own, so the trigger stays hidden there
-              rather than sitting inert. */}
-          {tab === 'users' ? (
-            <>
-              <SortChip
-                spec={userSortSpec}
-                fields={userSortFields}
-                onChange={setUserSortSpec}
-                label={tr('sort', 'Sort')}
-              />
-              <FilterMenu
-                label={tr('filters', 'Filters')}
-                activeCount={userFilterActiveCount}
-                sections={userFilterSections}
-                onClear={userFilterActiveCount > 0 ? clearUserFilters : null}
-                mobileIconOnly
-              />
-            </>
-          ) : null}
+          <div className="order-3 flex w-full min-w-0 flex-wrap items-center gap-2 md:order-2 md:w-auto md:flex-1 md:flex-nowrap">
+            <SearchInput
+              id={tab === 'roles' ? 'roles-search' : 'users-search'}
+              name={tab === 'roles' ? 'roles_search' : 'users_search'}
+              value={tab === 'roles' ? roleSearch : search}
+              onChange={tab === 'roles' ? setRoleSearch : setSearch}
+              placeholder={tab === 'roles' ? tr('role_search_placeholder', 'Search roles') : tr('search_users_placeholder', 'Search users, phone, email, or role')}
+            />
+            {/* Filter only applies to the users list (role_id/is_active
+                columns) -- the roles tab renders `roles` directly with no
+                filtering of its own, so the trigger stays hidden there
+                rather than sitting inert. */}
+            {tab === 'users' ? (
+              <>
+                <SortChip
+                  spec={userSortSpec}
+                  fields={userSortFields}
+                  onChange={setUserSortSpec}
+                  label={tr('sort', 'Sort')}
+                />
+                <FilterMenu
+                  label={tr('filters', 'Filters')}
+                  activeCount={userFilterActiveCount}
+                  sections={userFilterSections}
+                  onClear={userFilterActiveCount > 0 ? clearUserFilters : null}
+                  mobileIconOnly
+                />
+              </>
+            ) : null}
+          </div>
+
+          {tab === 'users' && canManage ? <button type="button" className="btn-primary order-2 ml-auto inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:text-sm md:order-3 md:ml-0" onClick={openCreateUser}><UserPlus className="h-4 w-4 shrink-0" /><span>{t('add_user') || 'Add user'}</span></button> : null}
+          {tab === 'roles' && canManage ? <button type="button" className="btn-primary order-2 ml-auto inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:text-sm md:order-3 md:ml-0" title={tr('create_role', 'Create role')} onClick={openCreateRole}><ShieldPlus className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{t('create') || 'Create'}</span></button> : null}
         </div>
       </div>
 
@@ -1493,39 +1654,59 @@ export default function Users() {
           {rolesLoading && !roles.length ? (
             <div className="card p-4 text-sm text-gray-500 dark:text-gray-400">{tr('loading', 'Loading...')}</div>
           ) : null}
-          {roles.map((role) => {
-            const assignedCount = users.filter((user) => Number(user.role_id) === Number(role.id)).length
-            const permissionKeys = getRolePermissions(role)
+          {filteredRoles.map((role) => {
+            const assignedCount = assignedCounts.get(Number(role.id)) ?? 0
+            const editable = canManage && !role.is_system
+            const blockedLabel = tr('role_delete_blocked', '{n} people still use this role').replace('{n}', String(assignedCount))
+            const peopleLabel = tr('role_people_count', '{n} people').replace('{n}', String(assignedCount))
+            const editLabel = t('edit') || 'Edit'
+            const deleteLabel = t('delete') || 'Delete'
             return (
-              <div key={role.id} className="card p-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <span className="text-base font-semibold text-gray-900 dark:text-white">{role.name}</span>
-                      {role.is_system ? <span className="badge-blue text-xs">{tr('system_role', 'System')}</span> : <span className="badge-green text-xs">{tr('custom_role', 'Custom')}</span>}
-                      <span className="text-xs text-gray-400">{tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', String(assignedCount))}</span>
-                    </div>
-                    <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">{getPermissionSummary(role)}</p>
-                    <div className="flex flex-wrap gap-1">
-                      {permissionKeys.length === 0 ? <span className="text-xs italic text-gray-400">{tr('no_permissions', 'No permissions')}</span> : null}
-                      {permissionKeys.map((key) => (
-                        <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                          {rolePermissionLabel(key, tr)}
-                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Review')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View')})` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+              <div key={role.id} className={`card p-3 ${editable ? 'cursor-pointer' : ''}`} onClick={editable ? () => openEditRole(role) : undefined}>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <span className="min-w-0 break-words text-base font-semibold leading-relaxed text-gray-900 dark:text-white">{role.name}</span>
+                  {String(role.code ?? '').trim().toLowerCase() === 'admin' ? <span className="badge-blue text-xs">{tr('role_admin_badge', 'Admin')}</span> : null}
+                  {resettableRoleCode(role) ? <span className="badge-green text-xs">{tr('default_label', 'Default')}</span> : null}
+                  <button
+                    type="button"
+                    className="inline-flex h-7 items-center justify-center gap-1 rounded-full px-2 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-slate-700 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-[44px]"
+                    title={peopleLabel}
+                    aria-label={peopleLabel}
+                    onClick={(event) => { event.stopPropagation(); showRoleUsers(role) }}
+                  >
+                    <UsersIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    {assignedCount}
+                  </button>
+                  <div className="order-last w-full sm:order-none sm:w-auto"><RoleTierStrip permissions={role.permissions} tr={tr} /></div>
                   {canManage ? (
-                    <div className="flex gap-2">
-                      <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openEditRole(role)} disabled={Boolean(role.is_system)}>{t('edit') || 'Edit'}</button>
-                      {!role.is_system ? <button type="button" className="btn-danger px-3 py-1 text-xs" onClick={() => handleDeleteRole(role)} disabled={deletingRoleId === role.id}>{deletingRoleId === role.id ? (t('loading') || 'Deleting...') : (t('delete') || 'Delete')}</button> : null}
+                    <div className="ml-auto flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                      <button type="button" className={ICON_BUTTON_CLASS} title={editLabel} aria-label={editLabel} onClick={() => openEditRole(role)} disabled={Boolean(role.is_system)}>
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      {!role.is_system ? (
+                        // A disabled button swallows hover in some browsers, so the reason rides the wrapper too.
+                        <span className="inline-flex" title={assignedCount > 0 ? blockedLabel : undefined}>
+                          <button
+                            type="button"
+                            className={ICON_BUTTON_DANGER_CLASS}
+                            title={assignedCount > 0 ? blockedLabel : deleteLabel}
+                            aria-label={assignedCount > 0 ? blockedLabel : deleteLabel}
+                            onClick={() => handleDeleteRole(role)}
+                            disabled={deletingRoleId === role.id || assignedCount > 0}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
               </div>
             )
           })}
+          {!rolesLoading && roles.length > 0 && filteredRoles.length === 0 ? (
+            <div className="card p-4 text-sm text-gray-500 dark:text-gray-400">{t('no_data') || 'No data'}</div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1698,13 +1879,13 @@ export default function Users() {
         />
       ) : null}
 
-      {roleConfirmOpen && modal === 'editRole' && selectedRole ? (
+      {roleConfirmOpen && modal === 'editRole' ? (
         <ConfirmDialog
           t={t}
           title={tr('role_review_title', 'Review role changes')}
           message={roleForm.name.trim()}
           items={buildRoleReviewItems()}
-          note={tr('affected_users_logout_warning', 'Affected users must log out and back in for changes to take effect.')}
+          note={roleAssignedCount > 0 ? tr('role_review_applies_now', 'Applies right away to {n} people with this role.').replace('{n}', String(roleAssignedCount)) : undefined}
           confirmLabel={t('save') || 'Save'}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
@@ -1727,42 +1908,23 @@ export default function Users() {
       ) : null}
 
       {modal === 'editRole' ? (
-        <Modal title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')} onClose={() => setModal(null)} wide unsavedChanges={{ dirty: roleFormDirty }}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="role-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_name', 'Role name')}</label>
-              <input id="role-name" name="role_name" autoComplete="off" className="input" value={roleForm.name} onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))} />
-            </div>
-            {!selectedRole ? (
-              // Only offered when creating a brand-new role -- a one-click
-              // fill for roleForm.permissions, not a locked-in template.
-              // Never shown while editing an existing role, so a preset
-              // click can never silently overwrite hand-tuned permissions
-              // someone already saved.
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_preset_label', 'Start from a preset (optional)')}</label>
-                <div className="flex flex-wrap gap-2">
-                  {ROLE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      title={tr(preset.descriptionKey, preset.description)}
-                      className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
-                      onClick={() => setRoleForm((prev) => ({ ...prev, permissions: { ...preset.permissions } }))}
-                    >
-                      {tr(preset.labelKey, preset.label)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
-                {roleResetCode ? (
+        <Modal
+          title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')}
+          onClose={() => setModal(null)}
+          wide
+          unsavedChanges={{ dirty: roleFormDirty }}
+          onMinimize={canMinimizeRoleForm ? preserveRoleForm : undefined}
+          headerExtra={canMinimizeRoleForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveRoleForm} disabled={saving} /> : null}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="role-name" className="sr-only">{tr('role_name', 'Role name')}</label>
+              <input id="role-name" name="role_name" autoComplete="off" className="input h-10 min-w-0 flex-1 [@media(pointer:coarse)]:h-11" placeholder={tr('role_name', 'Role name')} value={roleForm.name} onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))} />
+              {selectedRole ? (
+                roleResetCode ? (
                   <button
                     type="button"
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-gray-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+                    className={ICON_BUTTON_CLASS}
                     title={roleResetLabel}
                     aria-label={roleResetLabel}
                     disabled={loadingRoleDefaults || saving}
@@ -1770,21 +1932,54 @@ export default function Users() {
                   >
                     <RotateCcw className="h-4 w-4" aria-hidden="true" />
                   </button>
-                ) : null}
-              </div>
-              <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>
-                <LazyPermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} t={t} />
-              </Suspense>
+                ) : null
+              ) : (
+                // Only offered when creating: a one-click fill of the draft, never a template that stays locked in.
+                // It is not shown while editing, so a pick can never overwrite permissions someone already saved.
+                <AppSelect
+                  id="role-preset"
+                  name="role_preset"
+                  value={rolePreset}
+                  onChange={(key) => {
+                    setRolePreset(key)
+                    setRoleForm((prev) => ({ ...prev, permissions: { ...(ROLE_PRESETS.find((preset) => preset.key === key)?.permissions ?? {}) } }))
+                  }}
+                  ariaLabel={tr('role_start_from', 'Start from')}
+                  prefix={tr('role_start_from', 'Start from')}
+                  className="w-44 shrink-0 sm:w-56"
+                  buttonClassName="h-10 w-full [@media(pointer:coarse)]:h-11"
+                  menuClassName="min-w-[12rem]"
+                  options={[
+                    { value: '', label: tr('none', 'None') },
+                    ...ROLE_PRESETS.map((preset) => ({ value: preset.key, label: <span title={tr(preset.descriptionKey, preset.description)}>{tr(preset.labelKey, preset.label)}</span> })),
+                  ]}
+                />
+              )}
             </div>
-            <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-              {tr('affected_users_logout_warning', 'Affected users must log out and back in for changes to take effect.')}
-            </div>
-            <div className="flex justify-end">
-              <button type="button" className={MAIN_ACTION_BUTTON_CLASS} onClick={handleSaveRole} disabled={saving}>
+            <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>
+              <LazyPermissionEditor permissions={roleForm.permissions} baseline={selectedRole?.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} t={t} />
+            </Suspense>
+            {/* Pinned to the bottom of the dialog like the review dialog's buttons, so Save is never three screens away. */}
+            <div className="sticky bottom-0 z-30 -mx-3 -mb-3 flex items-center gap-2 border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
+              <span className="min-w-0 flex-1 text-xs leading-5 text-gray-500 dark:text-gray-400" role="status">
+                {roleChangeRows.length === 1 ? tr('role_change_one', '1 change') : tr('role_changes_count', '{n} changes').replace('{n}', String(roleChangeRows.length))}
+              </span>
+              <button
+                type="button"
+                className={ICON_BUTTON_CLASS}
+                title={tr('discard_changes', 'Discard changes')}
+                aria-label={tr('discard_changes', 'Discard changes')}
+                disabled={roleChangeRows.length === 0 || saving}
+                onClick={() => setRoleDiscardOpen(true)}
+              >
+                <Undo2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <button type="button" className={`${MAIN_ACTION_BUTTON_CLASS} [@media(pointer:coarse)]:h-11`} onClick={handleSaveRole} disabled={saving || roleChangeRows.length === 0 || !roleForm.name.trim()}>
                 <Save className="h-4 w-4" aria-hidden="true" />
                 {saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}
               </button>
             </div>
+            <UnsavedChangesPrompt guard={roleDiscardGuard} />
           </div>
         </Modal>
       ) : null}

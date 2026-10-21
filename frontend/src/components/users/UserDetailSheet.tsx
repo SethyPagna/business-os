@@ -1,6 +1,10 @@
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import ShieldOff from 'lucide-react/dist/esm/icons/shield-off.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtDate } from '../../utils/formatters'
-import { describePermissionMap, permissionTierWord, type PermissionEntry } from './rolePermissionLabel.ts'
+import { normalizePermissionState } from '../../utils/permissions.ts'
+import PermissionSummaryList from './PermissionSummaryList.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 
 type TranslateFunction = (key: string) => string
@@ -54,22 +58,13 @@ function buildRowData(user: UserDetail, role: UserRole | undefined, t: Translate
   ]
 }
 
-function PermissionChip({ entry, tr, off, bare }: { entry: PermissionEntry; tr: (key: string, fallback: string) => string; off?: boolean; bare?: boolean }) {
-  const tier = permissionTierWord(entry.tier, tr)
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs leading-5 ${off ? 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
-      {entry.label}
-      {tier && !bare ? ` (${tier})` : ''}
-    </span>
-  )
-}
+// Icon-only actions: the name rides the tooltip and the aria-label, and touch screens get a 44px target.
+const ICON_BUTTON = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-gray-100 dark:hover:bg-slate-700 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11'
 
 export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp, onEdit, onResetPw, onRecoverOtp, onClose, t }: UserDetailSheetProps) {
   const role = roles?.find((item) => Number(item.id) === Number(user.role_id))
   const tr = (key: string, fallback: string) => translateLabel(t, key, fallback)
-  const rolePermissions = describePermissionMap(role?.permissions, tr)
-  const userExceptions = describePermissionMap(user.permissions, tr)
-  const exceptionCount = userExceptions.granted.length + userExceptions.off.length + (userExceptions.all ? 1 : 0)
+  const exceptionCount = Object.keys(normalizePermissionState(user.permissions)).length
   const rowData = buildRowData(user, role, t)
 
   return (
@@ -88,7 +83,7 @@ export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp,
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"
+            className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
             aria-label={translateLabel(t, 'close', 'Close')}
           >
             <X className="h-4 w-4" />
@@ -105,65 +100,50 @@ export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp,
 
           <div className="flex gap-3">
             <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'permissions', 'Permissions')}</span>
-            <div className="flex flex-1 flex-wrap gap-1">
-              {!rolePermissions.all && rolePermissions.granted.length === 0 ? <span className="text-xs italic text-gray-400">{translateLabel(t, 'none', 'None')}</span> : null}
-              {rolePermissions.all ? (
-                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs leading-5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                  {translateLabel(t, 'full_access', 'Full access')}
-                </span>
-              ) : rolePermissions.granted.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} />)}
+            <div className="min-w-0 flex-1">
+              <PermissionSummaryList permissions={role?.permissions} mode="role" tr={tr} />
             </div>
           </div>
-
-          {rolePermissions.off.length > 0 ? (
-            <div className="flex gap-3">
-              <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'perm_switched_off_heading', 'Switched off')}</span>
-              <div className="flex flex-1 flex-wrap gap-1">
-                {rolePermissions.off.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} off bare />)}
-              </div>
-            </div>
-          ) : null}
 
           {exceptionCount > 0 ? (
             <div className="flex gap-3">
               <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{translateLabel(t, 'perm_user_exceptions_heading', 'Individual exceptions')}</span>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">
                   {exceptionCount === 1
                     ? translateLabel(t, 'perm_user_exceptions_one', '1 individual exception')
                     : translateLabel(t, 'perm_user_exceptions_other', '{n} individual exceptions').replace('{n}', String(exceptionCount))}
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {userExceptions.all ? (
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs leading-5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                      {translateLabel(t, 'full_access', 'Full access')}
-                    </span>
-                  ) : null}
-                  {userExceptions.granted.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} />)}
-                  {userExceptions.off.map((entry) => <PermissionChip key={entry.key} entry={entry} tr={tr} off />)}
-                </div>
+                <PermissionSummaryList permissions={user.permissions} mode="exceptions" tr={tr} />
               </div>
             </div>
           ) : null}
         </div>
 
         {canManage ? (
-          <div className="flex flex-wrap gap-3 border-t border-gray-200 p-4 dark:border-gray-700">
-            <button type="button" className="btn-primary flex-1" onClick={onEdit}>{translateLabel(t, 'edit', 'Edit')}</button>
+          <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+            <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 [@media(pointer:coarse)]:h-11" onClick={onEdit}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              {translateLabel(t, 'edit', 'Edit')}
+            </button>
             <button
               type="button"
-              className="rounded-lg bg-orange-100 px-4 py-2 text-sm font-medium text-orange-600 dark:bg-orange-900/30 dark:text-orange-300"
+              className={`${ICON_BUTTON} text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100`}
+              title={translateLabel(t, 'reset_password', 'Reset password')}
+              aria-label={translateLabel(t, 'reset_password', 'Reset password')}
               onClick={onResetPw}
             >
-              {translateLabel(t, 'reset_password', 'Reset password')}
+              <KeyRound className="h-4 w-4" aria-hidden="true" />
             </button>
             {canRecoverOtp && onRecoverOtp ? (
               <button
                 type="button"
-                className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                className={`${ICON_BUTTON} text-red-600 dark:text-red-300`}
+                title={translateLabel(t, 'reset_2fa', 'Reset 2FA')}
+                aria-label={translateLabel(t, 'reset_2fa', 'Reset 2FA')}
                 onClick={onRecoverOtp}
               >
-                {translateLabel(t, 'reset_2fa', 'Reset 2FA')}
+                <ShieldOff className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
           </div>

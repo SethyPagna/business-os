@@ -2412,8 +2412,8 @@ assert.doesNotMatch(
 )
 assert.match(
   usersPage,
-  /import \{ rolePermissionLabel \} from '\.\/rolePermissionLabel\.ts'/,
-  'Users route should keep lightweight permission labels without pulling in the permission editor UI',
+  /import \{ roleTierCounts \} from '\.\/permissionSummary\.ts'/,
+  'Users route should read the lightweight permission model for its level strip without pulling in the permission editor UI',
 )
 assert.match(
   fs.readFileSync(new URL('../src/components/users/rolePermissionLabel.ts', import.meta.url), 'utf8'),
@@ -2447,8 +2447,13 @@ assert.match(
 )
 assert.match(
   userDetailSheet,
-  /from '\.\/(?:permissionDefinitions|rolePermissionLabel\.ts)'/,
+  /from '\.\/(?:permissionDefinitions|rolePermissionLabel\.ts|PermissionSummaryList\.tsx)'/,
   'UserDetailSheet should read shared permission metadata without importing the permission editor',
+)
+assert.doesNotMatch(
+  userDetailSheet,
+  /PermissionEditor/,
+  'UserDetailSheet reads the role through the pure permission model (PermissionSummaryList -> permissionSummary.ts), never the editor UI',
 )
 assert.match(
   userProfileModal,

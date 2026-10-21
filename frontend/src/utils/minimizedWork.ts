@@ -22,6 +22,7 @@ export type MinimizedWorkKind =
   | 'receive_batch'
   | 'create_products_session'
   | 'branch_form'
+  | 'role_form'
   | 'fee_form'
   | 'product_detail'
   | 'return_detail'

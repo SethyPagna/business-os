@@ -40,6 +40,8 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   receive_batch: null,
   // Branch add/edit drafts are keyed by entity and new chips carry that key.
   branch_form: null,
+  // Role drafts are keyed by role and new chips carry that key.
+  role_form: null,
   fee_form: null,
   // detail tabs manage their own keyed drafts; nothing global to clear
   product_detail: null,
