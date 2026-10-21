@@ -173,8 +173,12 @@ await runTest('both scanner entry points warm the modal chunk before the click t
     assert.match(source, /const importBarcodeScannerModal = \(\) => import\('[^']*scanning\/BarcodeScannerModal'\)/, `${entry.name} must share one importer between lazyRetry and the preload`)
     assert.match(source, /const preloadBarcodeScannerModal = preloadLazy\(importBarcodeScannerModal\)/, `${entry.name} must build its preload from that importer`)
     for (const handler of ['onPointerDown', 'onTouchStart', 'onMouseEnter', 'onFocus']) {
+      // pointerdown also starts the engine warm-up (scannerWarmup.ts); the other three only preload the chunk.
+      const expected = handler === 'onPointerDown'
+        ? 'onPointerDown={() => { preloadBarcodeScannerModal(); warmScanner() }}'
+        : `${handler}={preloadBarcodeScannerModal}`
       assert.ok(
-        source.includes(`${handler}={preloadBarcodeScannerModal}`),
+        source.includes(expected),
         `${entry.name}'s scanner trigger must warm the chunk on ${handler}, which fires before click`,
       )
     }
@@ -374,18 +378,19 @@ interface CameraProbe {
 
 interface CameraOptions {
   native?: boolean
+  detector?: unknown
   capabilities?: Record<string, unknown>
   rejectTorch?: boolean
 }
 
 function installCamera(
   permissionState: 'granted' | 'prompt' | 'denied',
-  { native = true, capabilities, rejectTorch = false }: CameraOptions = {},
+  { native = true, detector, capabilities, rejectTorch = false }: CameraOptions = {},
 ): CameraProbe {
   const probe: CameraProbe = { getUserMediaCalls: 0, tracks: [], requested: [], applied: [] }
   scannerEvents.length = 0
   framesLeft = 120
-  if (native) memoryWindow.BarcodeDetector = FakeBarcodeDetector
+  if (native) memoryWindow.BarcodeDetector = detector ?? FakeBarcodeDetector
   else delete memoryWindow.BarcodeDetector
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -425,6 +430,38 @@ const frontendRoot = resolve(testDir, '..')
 // pre-change component when proving this test discriminates.
 const modulePath = process.env.SCANNER_MODULE_PATH || '/src/components/products/scanning/BarcodeScannerModal.tsx'
 
+// Stand-ins for the retail ZXing modules the decoder imports by deep path.
+// BarcodeFormat is evaluated by every decoder load, so it records the moment
+// the chunk is EVALUATED (what the real chunk costs on iOS); each OneDReader
+// built records a reader; each decode hands out the next queued read (an EAN-13
+// value) or reports nothing found.
+const ZXING_DEEP_PREFIX = '@zxing/library/esm/core/'
+const emptyClass = (name: string) => `export default class ${name} {}`
+const ZXING_STUBS: Record<string, string> = {
+  BarcodeFormat: `globalThis.__scannerEvents.push('zxing-module-evaluated')
+    export default { EAN_13: 7, EAN_8: 6, UPC_A: 14, UPC_E: 15, CODE_128: 4, CODE_39: 2, ITF: 8 }`,
+  DecodeHintType: 'export default { POSSIBLE_FORMATS: 2, TRY_HARDER: 3 }',
+  NotFoundException: 'export default class NotFoundException extends Error {}',
+  ChecksumException: 'export default class ChecksumException extends Error {}',
+  FormatException: 'export default class FormatException extends Error {}',
+  RGBLuminanceSource: emptyClass('RGBLuminanceSource'),
+  BinaryBitmap: emptyClass('BinaryBitmap'),
+  'common/HybridBinarizer': emptyClass('HybridBinarizer'),
+  'oned/MultiFormatUPCEANReader': emptyClass('MultiFormatUPCEANReader'),
+  'oned/Code39Reader': emptyClass('Code39Reader'),
+  'oned/Code128Reader': emptyClass('Code128Reader'),
+  'oned/ITFReader': emptyClass('ITFReader'),
+  'oned/OneDReader': `import NotFoundException from '${ZXING_DEEP_PREFIX}NotFoundException'
+    export default class OneDReader {
+      constructor() { globalThis.__scannerEvents.push('zxing-reader-created') }
+      decode() {
+        const text = (globalThis.__zxingReads || []).shift()
+        if (!text) throw new NotFoundException()
+        return { getText: () => text, getBarcodeFormat: () => 7 }
+      }
+    }`,
+}
+
 const vite = await createServer({
   root: frontendRoot,
   configFile: false,
@@ -441,7 +478,8 @@ const vite = await createServer({
       resolveId(id) {
         if (id.includes('lucide-react')) return '\0scanner-icon'
         if (/shared\/Modal$/.test(id)) return '\0scanner-modal'
-        if (id === '@zxing/library') return '\0scanner-zxing'
+        // The decoder imports the retail readers by deep path (never the package root).
+        if (id.startsWith(ZXING_DEEP_PREFIX)) return `\0scanner-zxing:${id.slice(ZXING_DEEP_PREFIX.length)}`
         return null
       },
       load(id) {
@@ -450,29 +488,7 @@ const vite = await createServer({
           return `import React from 'react'
             export default function Modal({ children }) { return React.createElement('div', { role: 'dialog' }, children) }`
         }
-        // Records the moment the decoder module is EVALUATED, which is what the
-        // real ZXing chunk costs on iOS. Each decode hands out the next queued
-        // read (an EAN-13 value) or reports nothing found.
-        if (id === '\0scanner-zxing') {
-          return `globalThis.__scannerEvents.push('zxing-module-evaluated')
-            export const BarcodeFormat = { EAN_13: 7, EAN_8: 6, UPC_A: 14, UPC_E: 15, CODE_128: 4, CODE_39: 2, ITF: 8 }
-            export const DecodeHintType = { POSSIBLE_FORMATS: 2, TRY_HARDER: 3 }
-            export class NotFoundException extends Error {}
-            export class ChecksumException extends Error {}
-            export class FormatException extends Error {}
-            export class RGBLuminanceSource {}
-            export class HybridBinarizer {}
-            export class BinaryBitmap {}
-            export class MultiFormatReader {
-              constructor() { globalThis.__scannerEvents.push('zxing-reader-created') }
-              setHints() {}
-              decodeWithState() {
-                const text = (globalThis.__zxingReads || []).shift()
-                if (!text) throw new NotFoundException()
-                return { getText: () => text, getBarcodeFormat: () => 7 }
-              }
-            }`
-        }
+        if (id.startsWith('\0scanner-zxing:')) return ZXING_STUBS[id.slice('\0scanner-zxing:'.length)]
         return null
       },
     },
@@ -486,6 +502,9 @@ async function mountScanner(
   onDetected: (value: string) => void = () => {},
 ): Promise<{ probe: CameraProbe; text: string; events: string[]; container: MemoryNode; root: ReturnType<typeof createRoot>; unmount: () => Promise<void> }> {
   const probe = installCamera(probePermission, options)
+  // The warm-up and the decoder keep per-module caches: a fresh graph per mount
+  // keeps scenarios independent and re-records the stub's evaluation event.
+  vite.moduleGraph.invalidateAll()
   const module = await vite.ssrLoadModule(modulePath) as { default: React.ComponentType<Record<string, unknown>> }
   const container = memoryDocument.createElement('div')
   memoryDocument.body.appendChild(container)
@@ -651,6 +670,96 @@ try {
       assert.equal(mounted.probe.getUserMediaCalls, 1)
     } finally {
       liveVideoFrames = false
+      await mounted.unmount()
+    }
+  })
+
+  // --- S1a (6.0.922): which engine runs, which native result wins ------------
+
+  async function waitFor(condition: () => boolean, attempts = 40): Promise<void> {
+    for (let wait = 0; wait < attempts && !condition(); wait += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
+    }
+  }
+
+  await runTest('a native detector that reads none of our formats is never built: ZXing starts at once and reads', async () => {
+    liveVideoFrames = true
+    ;(globalThis as { __zxingReads?: string[] }).__zxingReads = ['3348901729222', '3348901729222']
+    let constructed = 0
+    let detectCalls = 0
+    class QrOnlyDetector {
+      static async getSupportedFormats(): Promise<string[]> { return ['qr_code'] }
+      constructor() { constructed += 1 }
+      async detect(): Promise<unknown[]> { detectCalls += 1; return [] }
+    }
+    const detected: string[] = []
+    const mounted = await mountScanner('granted', { detector: QrOnlyDetector }, (value) => detected.push(value))
+    try {
+      await waitFor(() => detected.length > 0)
+      assert.deepEqual(detected, ['3348901729222'], `ZXing must read straight away, got ${JSON.stringify(detected)}: ${mounted.events.join(' -> ')}`)
+      assert.equal(constructed, 0, 'a detector with no retail format must not be built with the retail list anyway')
+      assert.equal(detectCalls, 0, 'and must never be asked to detect')
+    } finally {
+      liveVideoFrames = false
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('a native detector that lists retail formats gets only those, and ZXing does not load while it is healthy', async () => {
+    liveVideoFrames = true
+    let requestedFormats: string[] = []
+    let detectCalls = 0
+    class RetailDetector {
+      static async getSupportedFormats(): Promise<string[]> { return ['qr_code', 'ean_13', 'data_matrix'] }
+      constructor(options: { formats: string[] }) { requestedFormats = options.formats }
+      async detect(): Promise<unknown[]> { detectCalls += 1; return [] }
+    }
+    const mounted = await mountScanner('granted', { detector: RetailDetector })
+    try {
+      await waitFor(() => detectCalls > 0)
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)) })
+      assert.deepEqual(requestedFormats, ['ean_13'])
+      assert.ok(detectCalls > 0, 'the native detector is the first engine')
+      assert.ok(!mounted.events.includes('zxing-module-evaluated'), `ZXing must wait out its head start, got: ${mounted.events.join(' -> ')}`)
+    } finally {
+      liveVideoFrames = false
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('the code inside the guide wins over the first code the detector lists, and is emitted as read', async () => {
+    liveVideoFrames = true
+    performance.clearMarks()
+    class TwoCodeDetector {
+      static async getSupportedFormats(): Promise<string[]> { return ['ean_13', 'upc_a'] }
+      async detect(): Promise<unknown[]> {
+        // The fake video is 64x48 and has no layout, so the guide is 86% x 70% of the frame: x 4..60, y 7..41.
+        return [
+          { rawValue: '4006381333931', format: 'ean_13', boundingBox: { x: 0, y: 0, width: 2, height: 2 } },
+          { rawValue: '036000291452', format: 'upc_a', boundingBox: { x: 20, y: 15, width: 20, height: 10 } },
+        ]
+      }
+    }
+    const detected: string[] = []
+    const mounted = await mountScanner('granted', { detector: TwoCodeDetector }, (value) => detected.push(value))
+    try {
+      await waitFor(() => detected.length > 0)
+      assert.deepEqual(detected, ['036000291452'], 'the second code sits in the guide and is the one the person aimed at; UPC-A is not padded to EAN-13')
+      const startOf = (step: string) => performance.getEntriesByName(`scanner:${step}`)[0]?.startTime
+      assert.ok(startOf('stream') !== undefined && startOf('decoder-ready') !== undefined && startOf('read') !== undefined, 'stream, decoder-ready and read are all marked')
+      assert.ok(startOf('stream') <= startOf('decoder-ready') && startOf('decoder-ready') <= startOf('read'), 'in that order')
+    } finally {
+      liveVideoFrames = false
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('the camera is asked for 30 fps alongside the 1080p request', async () => {
+    const mounted = await mountScanner('granted')
+    try {
+      const video = (mounted.probe.requested[0] as { video: { frameRate: unknown } }).video
+      assert.deepEqual(video.frameRate, { ideal: 30 }, '30 fps is a preference, never a hard limit that can stop the camera opening')
+    } finally {
       await mounted.unmount()
     }
   })

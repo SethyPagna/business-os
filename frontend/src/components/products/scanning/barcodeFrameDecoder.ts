@@ -2,13 +2,32 @@
 // own loop decodes one whole grayscale frame and thresholds each scanned row
 // on that row's histogram, so a pale foil label on a dark box reads as blank,
 // and a code standing on its end is never seen. This file owns the frame
-// instead: centre crop, then the whole frame; plain grayscale, then a locally
+// instead: the area the on-screen guide outlines (a still photo has no guide, so
+// its centre), then the whole frame; plain grayscale, then a locally
 // normalised and thresholded copy; each upright and turned 90 degrees.
+
+import type BitArray from '@zxing/library/esm/core/common/BitArray'
+import type HintType from '@zxing/library/esm/core/DecodeHintType'
+import type Result from '@zxing/library/esm/core/Result'
 
 /** Retail and stock symbologies, in BarcodeDetector naming. QR is left out on
  * purpose: no caller scans one, and boxes often carry a marketing QR beside
  * the EAN that would otherwise win the race. */
 export const RETAIL_BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
+
+// A 1-3 character Code 128 / Code 39 / ITF "read" is noise that happens to
+// form a valid start/stop pattern; no product barcode is that short.
+const MIN_REAL_BARCODE_LENGTH = 4
+
+/** Live loop timing: how often the native detector looks at a frame, and the
+ * head start it gets before ZXing joins in. A fixed time, so changing the
+ * cadence cannot silently change how long a foil label waits for ZXing. */
+export const NATIVE_TICK_INTERVAL_MS = 120
+export const NATIVE_ONLY_MS = 1000
+
+export function zxingHeadStartOver(nativeStartedAt: number, now: number): boolean {
+  return now - nativeStartedAt >= NATIVE_ONLY_MS
+}
 
 export interface LumaFrame {
   data: Uint8ClampedArray
@@ -41,8 +60,9 @@ function expandUpcE(code: string): string {
   return `${system}${body}${check}`
 }
 
-/** EAN/UPC reads must carry a valid check digit; other retail symbologies only
- * need printable text (Code 128 and ITF verify their own checksums in ZXing). */
+/** EAN/UPC reads must carry a valid check digit; Code 128, Code 39 and ITF need
+ * printable text of at least MIN_REAL_BARCODE_LENGTH characters (ZXing checks
+ * Code 128 and ITF's own checksums, Code 39 has none by default). */
 export function isAcceptableBarcodeRead(read: BarcodeRead | null | undefined): read is BarcodeRead {
   const text = String(read?.text || '').trim()
   if (!text || /[\u0000-\u001f]/.test(text)) return false
@@ -51,6 +71,9 @@ export function isAcceptableBarcodeRead(read: BarcodeRead | null | undefined): r
     case 'ean_8': return text.length === 8 && gtinChecksumOk(text)
     case 'upc_a': return text.length === 12 && gtinChecksumOk(text)
     case 'upc_e': return text.length === 8 && /^[01]\d{7}$/.test(text) && gtinChecksumOk(expandUpcE(text))
+    case 'code_128':
+    case 'code_39':
+    case 'itf': return text.length >= MIN_REAL_BARCODE_LENGTH
     // Native detectors report a format; anything outside the retail set (a
     // box's marketing QR) is not a product code.
     default: return !read?.format || RETAIL_BARCODE_FORMATS.includes(read.format)
@@ -70,6 +93,45 @@ export function createReadConfirmer(): (read: BarcodeRead | null, source: 'nativ
     candidate = text
     return null
   }
+}
+
+export interface Rect { x: number; y: number; width: number; height: number }
+
+/** Formats to ask the native BarcodeDetector for, from its own supported list
+ * (`null`: it cannot list them, so assume ours). Empty means it reads none of
+ * the retail formats, and the live loop should start ZXing at once instead of
+ * waiting on a detector that can never answer. */
+export function planNativeFormats(supported: readonly unknown[] | null): string[] {
+  if (supported === null) return [...RETAIL_BARCODE_FORMATS]
+  return supported.map((format) => String(format || '')).filter((format) => RETAIL_BARCODE_FORMATS.includes(format))
+}
+
+export interface NativeDetection {
+  rawValue?: unknown
+  format?: unknown
+  boundingBox?: Rect | null
+}
+
+function centreInside(box: Rect | null | undefined, area: Rect): boolean {
+  if (!box) return false
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  return x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height
+}
+
+/** The read to act on from one native detection pass. A second code elsewhere
+ * on the box must not beat the one in the guide, so an acceptable result whose
+ * box centre lies in `guide` wins; otherwise the first acceptable result does
+ * (a detector that reports no box ranks every result as outside). */
+export function pickNativeRead(results: readonly NativeDetection[], guide: Rect): BarcodeRead | null {
+  let outside: BarcodeRead | null = null
+  for (const result of results) {
+    const read = { text: String(result?.rawValue || '').trim(), format: String(result?.format || '') }
+    if (!isAcceptableBarcodeRead(read)) continue
+    if (centreInside(result.boundingBox, guide)) return read
+    outside ??= read
+  }
+  return outside
 }
 
 function rgbaToLuma(rgba: Uint8ClampedArray, width: number, height: number): LumaFrame {
@@ -186,7 +248,7 @@ export function rotateQuarter(frame: LumaFrame): LumaFrame {
 type Region = 'centre' | 'full'
 type Variant = 'gray' | 'smooth' | 'contrast' | 'threshold'
 
-/** Lazily produced views of one frame: the centre of the on-screen guide box
+/** Lazily produced views of one frame: the guide area (the centre of a photo)
  * and the whole picture, each already capped in size. */
 export interface FrameRegions {
   centre: () => LumaFrame
@@ -253,10 +315,56 @@ export function runDecodeLadder(
 
 const MAX_SIDE = 1280
 
-/** Grabs regions from a video or image through one reusable canvas: the
- * centre 60% x 60% (where the guide box asks for the code) at up to native
- * resolution, and the whole picture, each capped at MAX_SIDE. */
-export function createFrameGrabber() {
+/** The on-screen scan box: its size as a percentage of the visible video area,
+ * centred in it. The scanner modal draws its overlay from SCAN_GUIDE_BOX and
+ * the grabber decodes the same box, so the code the person aims into the guide
+ * is the code that gets read. */
+export interface GuideBox { widthPercent: number; heightPercent: number }
+export const SCAN_GUIDE_BOX: GuideBox = { widthPercent: 86, heightPercent: 70 }
+
+export interface ViewSize { width: number; height: number }
+
+/** On-screen size of the element showing a video, or null when it is not laid
+ * out (a detached image, a test double). */
+export function viewOf(element: { clientWidth?: number; clientHeight?: number }): ViewSize | null {
+  return element.clientWidth && element.clientHeight ? { width: element.clientWidth, height: element.clientHeight } : null
+}
+
+/** Where `box` sits in the camera frame. The video fills its view with
+ * object-fit: cover, so the view shows a centred crop of the frame scaled by
+ * max(view / frame); the guide is centred in that crop, hence in the frame.
+ * Rounded outward so the rect always contains the guide. A null view means
+ * the frame is shown whole. */
+export function guideRectInFrame(frameWidth: number, frameHeight: number, view: ViewSize | null, box: GuideBox): Rect {
+  const scale = view ? Math.max(view.width / frameWidth, view.height / frameHeight) : 1
+  const visibleWidth = view ? view.width / scale : frameWidth
+  const visibleHeight = view ? view.height / scale : frameHeight
+  const width = (visibleWidth * box.widthPercent) / 100
+  const height = (visibleHeight * box.heightPercent) / 100
+  const left = (frameWidth - width) / 2
+  const top = (frameHeight - height) / 2
+  const x = Math.max(0, Math.floor(left))
+  const y = Math.max(0, Math.floor(top))
+  return {
+    x,
+    y,
+    width: Math.min(frameWidth, Math.ceil(left + width)) - x,
+    height: Math.min(frameHeight, Math.ceil(top + height)) - y,
+  }
+}
+
+// A still photo has no guide to follow: its middle is where the subject is.
+function photoCentre(width: number, height: number): Rect {
+  const centreWidth = Math.round(width * 0.6)
+  const centreHeight = Math.round(height * 0.6)
+  return { x: (width - centreWidth) >> 1, y: (height - centreHeight) >> 1, width: centreWidth, height: centreHeight }
+}
+
+/** Grabs regions from a video or image through one reusable canvas: the area
+ * `guide` outlines on screen (the centre 60% x 60% for a photo, which has no
+ * guide) at up to native resolution, and the whole picture, each capped at
+ * MAX_SIDE. */
+export function createFrameGrabber(guide?: GuideBox) {
   let canvas: HTMLCanvasElement | null = null
   let context: CanvasRenderingContext2D | null = null
   const grab = (source: CanvasImageSource, sx: number, sy: number, sw: number, sh: number): LumaFrame => {
@@ -274,52 +382,126 @@ export function createFrameGrabber() {
     return rgbaToLuma(context.getImageData(0, 0, width, height).data, width, height)
   }
   return (source: CanvasImageSource, sourceWidth: number, sourceHeight: number): FrameRegions => {
-    const cw = Math.round(sourceWidth * 0.6)
-    const ch = Math.round(sourceHeight * 0.6)
+    const centre = guide
+      ? guideRectInFrame(sourceWidth, sourceHeight, viewOf(source as { clientWidth?: number; clientHeight?: number }), guide)
+      : photoCentre(sourceWidth, sourceHeight)
     return {
-      centre: () => grab(source, (sourceWidth - cw) >> 1, (sourceHeight - ch) >> 1, cw, ch),
+      centre: () => grab(source, centre.x, centre.y, centre.width, centre.height),
       full: () => grab(source, 0, 0, sourceWidth, sourceHeight),
     }
   }
+}
+
+// Only the retail readers, by deep path. The package root also pulls in the QR,
+// DataMatrix, PDF417, Aztec and RSS decoders through MultiFormatReader: about
+// 330 KB of what used to be a 448 KB chunk, none of it reachable from a caller.
+async function importZxing() {
+  const [
+    { default: BarcodeFormat },
+    { default: DecodeHintType },
+    { default: BinaryBitmap },
+    { default: RGBLuminanceSource },
+    { default: HybridBinarizer },
+    { default: NotFoundException },
+    { default: ChecksumException },
+    { default: FormatException },
+    { default: OneDReader },
+    { default: MultiFormatUPCEANReader },
+    { default: Code39Reader },
+    { default: Code128Reader },
+    { default: ITFReader },
+  ] = await Promise.all([
+    import('@zxing/library/esm/core/BarcodeFormat'),
+    import('@zxing/library/esm/core/DecodeHintType'),
+    import('@zxing/library/esm/core/BinaryBitmap'),
+    import('@zxing/library/esm/core/RGBLuminanceSource'),
+    import('@zxing/library/esm/core/common/HybridBinarizer'),
+    import('@zxing/library/esm/core/NotFoundException'),
+    import('@zxing/library/esm/core/ChecksumException'),
+    import('@zxing/library/esm/core/FormatException'),
+    import('@zxing/library/esm/core/oned/OneDReader'),
+    import('@zxing/library/esm/core/oned/MultiFormatUPCEANReader'),
+    import('@zxing/library/esm/core/oned/Code39Reader'),
+    import('@zxing/library/esm/core/oned/Code128Reader'),
+    import('@zxing/library/esm/core/oned/ITFReader'),
+  ])
+  return {
+    BarcodeFormat, DecodeHintType, BinaryBitmap, RGBLuminanceSource, HybridBinarizer,
+    NotFoundException, ChecksumException, FormatException,
+    OneDReader, MultiFormatUPCEANReader, Code39Reader, Code128Reader, ITFReader,
+  }
+}
+
+type Zxing = Awaited<ReturnType<typeof importZxing>>
+
+let zxingLoad: Promise<Zxing> | null = null
+function loadZxing(): Promise<Zxing> {
+  // A failed fetch is not kept: the scan that follows a speculative warm-up
+  // has to be able to try again.
+  zxingLoad ??= importZxing().catch((error) => {
+    zxingLoad = null
+    throw error
+  })
+  return zxingLoad
+}
+
+/** Starts fetching the retail ZXing chunk without building a decoder. */
+export async function prefetchZxing(): Promise<void> {
+  await loadZxing()
+}
+
+/** What ZXing's MultiFormatOneDReader does for the retail formats, minus its
+ * imports of Code 93, Codabar and RSS: every row goes to each reader in turn,
+ * UPC/EAN first. */
+function createRetailReader({ OneDReader, NotFoundException, MultiFormatUPCEANReader, Code39Reader, Code128Reader, ITFReader }: Zxing, hints: Map<HintType, unknown>) {
+  const readers = [new MultiFormatUPCEANReader(hints), new Code39Reader(), new Code128Reader(), new ITFReader()]
+  class RetailReader extends OneDReader {
+    decodeRow(rowNumber: number, row: BitArray, rowHints?: Map<HintType, unknown>): Result {
+      for (const reader of readers) {
+        try {
+          return reader.decodeRow(rowNumber, row, rowHints)
+        } catch (_) {
+          // This reader sees no code in this row; the next one may.
+        }
+      }
+      throw new NotFoundException()
+    }
+  }
+  return new RetailReader()
 }
 
 /** Two readers per session, both limited to the retail formats: a fast one and
  * a TRY_HARDER one. Only "nothing here" exceptions count as a miss; anything
  * else is a real fault and propagates. */
 export async function loadLumaDecoder(): Promise<LumaDecoder> {
-  const zxing = await import('@zxing/library')
+  const zxing = await loadZxing()
+  const { BarcodeFormat, DecodeHintType, BinaryBitmap, RGBLuminanceSource, HybridBinarizer, NotFoundException, ChecksumException, FormatException } = zxing
   const formatByName: Record<string, number> = {
-    ean_13: zxing.BarcodeFormat.EAN_13,
-    ean_8: zxing.BarcodeFormat.EAN_8,
-    upc_a: zxing.BarcodeFormat.UPC_A,
-    upc_e: zxing.BarcodeFormat.UPC_E,
-    code_128: zxing.BarcodeFormat.CODE_128,
-    code_39: zxing.BarcodeFormat.CODE_39,
-    itf: zxing.BarcodeFormat.ITF,
+    ean_13: BarcodeFormat.EAN_13,
+    ean_8: BarcodeFormat.EAN_8,
+    upc_a: BarcodeFormat.UPC_A,
+    upc_e: BarcodeFormat.UPC_E,
+    code_128: BarcodeFormat.CODE_128,
+    code_39: BarcodeFormat.CODE_39,
+    itf: BarcodeFormat.ITF,
   }
   const nameByFormat = new Map(Object.entries(formatByName).map(([name, format]) => [format, name]))
   const possibleFormats = RETAIL_BARCODE_FORMATS.map((name) => formatByName[name])
   const createReader = (tryHarder: boolean) => {
-    const reader = new zxing.MultiFormatReader()
-    const hints = new Map<number, unknown>([[zxing.DecodeHintType.POSSIBLE_FORMATS, possibleFormats]])
-    if (tryHarder) hints.set(zxing.DecodeHintType.TRY_HARDER, true)
-    reader.setHints(hints as never)
-    return reader
+    const hints = new Map<HintType, unknown>([[DecodeHintType.POSSIBLE_FORMATS, possibleFormats]])
+    if (tryHarder) hints.set(DecodeHintType.TRY_HARDER, true)
+    return { reader: createRetailReader(zxing, hints), hints }
   }
   const fast = createReader(false)
   const hard = createReader(true)
   return (frame, tryHarder) => {
-    const reader = tryHarder ? hard : fast
+    const { reader, hints } = tryHarder ? hard : fast
     try {
-      const source = new zxing.RGBLuminanceSource(frame.data, frame.width, frame.height)
-      const result = reader.decodeWithState(new zxing.BinaryBitmap(new zxing.HybridBinarizer(source)))
+      const source = new RGBLuminanceSource(frame.data, frame.width, frame.height)
+      const result = reader.decode(new BinaryBitmap(new HybridBinarizer(source)), hints)
       return { text: String(result.getText() || '').trim(), format: nameByFormat.get(result.getBarcodeFormat()) || '' }
     } catch (error) {
-      if (
-        error instanceof zxing.NotFoundException
-        || error instanceof zxing.ChecksumException
-        || error instanceof zxing.FormatException
-      ) return null
+      if (error instanceof NotFoundException || error instanceof ChecksumException || error instanceof FormatException) return null
       throw error
     }
   }

@@ -50,9 +50,12 @@ assert.deepEqual(hits, [], `no file may still mention the Scanbot SDK: ${hits.jo
 const modal = fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/BarcodeScannerModal.tsx'), 'utf8')
 assert.ok(modal.includes('BarcodeDetector'), 'modal keeps the native BarcodeDetector path')
 assert.ok(modal.includes('loadLumaDecoder'), 'modal keeps the ZXing fallback')
+// S1a (6.0.922): the fallback no longer goes through MultiFormatReader (which
+// drags every 2D decoder into the chunk); it runs the retail 1D readers itself.
+const decoderSource = fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/barcodeFrameDecoder.ts'), 'utf8')
 assert.ok(
-  fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/barcodeFrameDecoder.ts'), 'utf8').includes('new zxing.MultiFormatReader()'),
-  'the ZXing fallback decodes with MultiFormatReader',
+  decoderSource.includes('class RetailReader extends OneDReader') && decoderSource.includes('@zxing/library/esm/core/oned/Code128Reader'),
+  'the ZXing fallback decodes with the retail 1D readers',
 )
 assert.ok(modal.includes("from './cameraPolicy.ts'"), 'modal imports the camera policy check from cameraPolicy.ts')
 assert.ok(

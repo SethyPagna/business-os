@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
 import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
+import { warmScanner } from '../scanning/scannerWarmup.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
@@ -1893,7 +1894,7 @@ function ProductFormContent({
                   type="button"
                   className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('barcode')}
-                  onPointerDown={preloadBarcodeScannerModal}
+                  onPointerDown={() => { preloadBarcodeScannerModal(); warmScanner() }}
                   onTouchStart={preloadBarcodeScannerModal}
                   onMouseEnter={preloadBarcodeScannerModal}
                   onFocus={preloadBarcodeScannerModal}
