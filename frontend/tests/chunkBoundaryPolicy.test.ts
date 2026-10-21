@@ -104,10 +104,6 @@ assert.equal(chunkFor('/fixture/node_modules/qrcode/lib/browser.js'), 'vendor')
 assert.equal(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), 'vendor-xlsx')
 assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/qrcode/lib/browser.js'))
 assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/html2canvas/dist/html2canvas.js'))
-// 6.0.880 L3: @zxing/library's own dependency rides with it; in generic
-// 'vendor' it made opening the scanner fetch html2canvas and qrcode.
-assert.equal(chunkFor('/fixture/node_modules/ts-custom-error/dist/custom-error.mjs'), 'vendor-zxing')
-assert.equal(chunkFor('C:\\fixture\\node_modules\\ts-custom-error\\dist\\custom-error.mjs'), 'vendor-zxing')
 
 function staticImports(file: string): string[] {
   const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)

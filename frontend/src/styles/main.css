@@ -756,22 +756,42 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-  /* Barcode scanner video shell (BarcodeScannerModal.tsx). Was a raw
-     Tailwind `h-[50vh]` arbitrary value -- plain `vh` on mobile Safari/older
-     Chrome measures the viewport WITH the address bar included, not the
-     actually-visible area, so on a short/landscape phone screen the video
-     block could measure taller than what's really visible, pushing the
-     modal's total height past what Modal.tsx's own `max-h-modal-92` (which
-     already correctly falls back to `dvh`) expected -- the two rules were
-     computing against different viewport definitions. This class uses the
-     same vh-then-dvh-override pattern as `.max-h-modal-92` so both agree,
-     and caps against a lower ceiling (46vh vs the old 50vh) with a smaller
-     floor (200px vs 240px) so there's more slack for the header/manual-
-     entry section to still fit above the fold on short screens. */
+  /* Barcode scanner sheet (BarcodeScannerModal.tsx): the camera view is the
+     whole sheet, min(62dvh, 520px) tall and as wide as the dialog. Plain `vh`
+     on mobile Safari/older Chrome measures the viewport WITH the address bar,
+     so it is declared first and `dvh` overrides it -- the same vh-then-dvh
+     pattern as `.max-h-modal-92`, so the sheet and the dialog around it agree
+     on how tall the screen is. The floor keeps the blocked/unsupported panel
+     (icon, a sentence, a button, a hint) whole on a short landscape screen. */
   .scanner-video-shell {
-    height: min(46vh, 420px);
-    height: min(46dvh, 420px);
-    min-height: 200px;
+    height: min(62vh, 520px);
+    height: min(62dvh, 520px);
+    min-height: 280px;
+  }
+
+  /* The scan line sweeps the guide top to bottom; with reduced motion it rests
+     across the middle instead (its `top-1/2` class). */
+  .scanner-scan-line {
+    animation: scannerSweep 1.6s ease-in-out infinite alternate;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scanner-scan-line { animation: none; }
+    .scanner-read-flash::after { animation: none; }
+  }
+
+  /* An accepted read (scanning/scanFeedback.ts adds the class): the guide turns
+     green and the whole view flashes once before the sheet closes. */
+  .scanner-read-flash .scanner-guide {
+    border-color: rgb(74 222 128);
+    background-color: rgb(74 222 128 / 0.3);
+  }
+  .scanner-read-flash::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-color: rgb(34 197 94 / 0.35);
+    animation: scannerFlash 150ms ease-out forwards;
   }
 
   .three-dot-btn {
@@ -1049,6 +1069,8 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 /* Animations */
 .fade-in { animation: fadeIn 0.15s ease; }
 @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+@keyframes scannerSweep { from { top: 6%; } to { top: 94%; } }
+@keyframes scannerFlash { from { opacity: 1; } to { opacity: 0.4; } }
 
 /* Mobile card-table */
 @media (max-width:767px) {

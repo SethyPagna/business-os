@@ -158,7 +158,7 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   assert.doesNotMatch(source + hook, /camera_permission_ready/, 'the two-step "start the camera when you are ready" copy is retired')
 
   assert.match(hook, /const closeScanner[\s\S]*?cleanup\(\)[\s\S]*?onClose\(\)/, 'closing the scanner must stop tracks before dismissing the modal')
-  assert.match(hook, /const completeDetection = useCallback\([\s\S]*?detectionHandledRef\.current[\s\S]*?onDetected\(nextValue\)[\s\S]*?finally[\s\S]*?onClose\(\)/, 'every successful detection must publish once and close the scanner')
+  assert.match(hook, /const completeDetection = useCallback\([\s\S]*?detectionHandledRef\.current[\s\S]*?onDetected\(nextValue\)[\s\S]*?finally[\s\S]*?setTimeout\(onClose, closeDelayMs\)/, 'every successful detection must publish once and then close the scanner, after the flash window')
   assert.match(hook, /expectedStartToken\?\: number[\s\S]*?startTokenRef\.current !== expectedStartToken/, 'a stale decoder result must not publish after a new camera start or close')
   assert.match(hook, /const scanToken = startTokenRef\.current[\s\S]*?detector\.detect\(video\)[\s\S]*?startTokenRef\.current !== scanToken/, 'native detection must reject a result from an obsolete camera session')
   assert.match(hook, /client\.decode\(frames, false\)\.then\(\s*\(read\) => \{\s*if \(detectionHandledRef\.current \|\| startTokenRef\.current !== scanToken\) return/, 'a worker result must be dropped when the camera session it came from is over')
@@ -231,7 +231,8 @@ try {
     const mounted = await mountScanner('granted')
     try {
       assert.equal(mounted.probe.getUserMediaCalls, 1, 'mounting the scanner must request the camera exactly once, with no Start/Request tap')
-      assert.match(mounted.text, /Center the barcode inside the frame/, 'a granted camera must land on the live scanning view')
+      assert.ok(findByLabel(mounted.container, 'Point the camera at a barcode.'), 'a granted camera must land on the live scanning view, named for screen readers')
+      assert.equal(mounted.text.trim(), '', 'the live view carries no visible text')
       assert.doesNotMatch(mounted.text, /Request camera access|Start camera/, 'a working camera must never be shown a start button first')
     } finally {
       await mounted.unmount()

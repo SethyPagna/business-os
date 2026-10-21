@@ -110,6 +110,13 @@ class MemoryNode {
   setAttribute(name: string, value: unknown): void { this.attributes.set(name, String(value)) }
   removeAttribute(name: string): void { this.attributes.delete(name) }
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null }
+  // The one class operation the page performs itself (scanFeedback.ts flashes the view), kept in the class attribute.
+  classList = {
+    add: (name: string): void => {
+      const classes = (this.getAttribute('class') ?? '').split(' ').filter(Boolean)
+      if (!classes.includes(name)) this.setAttribute('class', [...classes, name].join(' '))
+    },
+  }
   focus(): void { this.ownerDocument.activeElement = this }
   click(): void { events.push('photo-input-click') }
   play(): Promise<void> { return Promise.resolve() }

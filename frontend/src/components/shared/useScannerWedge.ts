@@ -1,8 +1,9 @@
 /*
  * useScannerWedge -- a barcode gun (keyboard wedge) on any keyboard layout.
  *
- * CONTRACT, for every surface that calls this (POS and Products today; the
- * Inventory count page and stock sessions / transfers next):
+ * CONTRACT, for every surface that calls this (each page or dialog whose search
+ * box has a camera scan button: POS, Products, Inventory and its count page,
+ * stock sessions, transfers, returns, sales, promotions, branch stock):
  *
  *   useScannerWedge({ enabled, searchRef, onScan })
  *

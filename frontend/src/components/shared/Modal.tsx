@@ -53,6 +53,12 @@ type ModalProps = {
   // modal. Give them an explicit higher layer so their controls and scan
   // result cannot fall behind or interact with the parent workflow.
   layer?: 'default' | 'nested'
+  /**
+   * The content draws its own header and close control, as the camera sheet does with its close button over the
+   * video. No header row and no body padding render, so the content runs edge to edge; `title` stays as the dialog's
+   * screen-reader name. The content must offer a way out: Modal no longer does.
+   */
+  bare?: boolean
   // S4-21: REQUIRED, and required on purpose. Every modal must say whether
   // closing it can lose work; a new modal that says nothing does not
   // compile, which is the only version of "every modal and float in the
@@ -67,7 +73,7 @@ type ModalProps = {
   unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, keyboard = false, layer = 'default', unsavedChanges }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, keyboard = false, layer = 'default', bare = false, unsavedChanges }: ModalProps) {
   const titleId = useId()
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
@@ -184,9 +190,11 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     >
       <div
         ref={panelRef}
-        className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto`}
+        className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto${bare ? ' overflow-hidden' : ''}`}
         style={draggable && (offset.x || offset.y) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
       >
+        {bare ? <h2 id={titleId} className="sr-only">{title}</h2> : null}
+        {bare ? null : (
         <div
           className={`flex min-w-0 items-center justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4 flex-shrink-0 ${draggable ? 'cursor-move select-none touch-none' : ''}`}
           onPointerDown={handlePointerDown}
@@ -217,11 +225,12 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           ) : null}
           </div>
         </div>
+        )}
         {/* The guarded close is published to the content so a Cancel button
             inside the modal goes through the SAME check as the ✕ -- see
             modalCloseContext.ts. */}
         <ModalCloseContext.Provider value={requestClose}>
-          <div className="modal-scroll p-3 sm:p-4">{children}</div>
+          <div className={bare ? 'modal-scroll' : 'modal-scroll p-3 sm:p-4'}>{children}</div>
         </ModalCloseContext.Provider>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />

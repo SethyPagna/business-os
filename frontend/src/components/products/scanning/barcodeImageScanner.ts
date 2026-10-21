@@ -7,6 +7,20 @@ import {
 import { acquireDecodeClient, type DecodeClient } from './decodeWorkerClient.ts'
 import type { NativeBarcodeDetectorConstructor } from './scannerWarmup.ts'
 
+/** Why a photo gave no barcode. The scanner modal turns each into a translated sentence;
+ * the message is for developers and logs, never shown to a person. */
+export type PhotoScanFailure = 'no-photo' | 'unreadable' | 'no-barcode'
+
+export class PhotoScanError extends Error {
+  failure: PhotoScanFailure
+
+  constructor(failure: PhotoScanFailure, message: string) {
+    super(message)
+    this.name = 'PhotoScanError'
+    this.failure = failure
+  }
+}
+
 /** A decoded photo: what the native detector and the pixel grabber both read. */
 export interface PhotoImage {
   source: ImageBitmap | HTMLImageElement
@@ -38,7 +52,7 @@ async function openPhoto(file: Blob): Promise<PhotoImage> {
     const image = new Image()
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve()
-      image.onerror = () => reject(new Error('Unable to open the selected image.'))
+      image.onerror = () => reject(new PhotoScanError('unreadable', 'Unable to open the selected image.'))
       image.src = url
     })
     return { source: image, width: image.naturalWidth, height: image.naturalHeight, release: () => {} }
@@ -73,7 +87,7 @@ async function detectWithNativeBarcodeDetector(source: PhotoImage['source'], opt
 }
 
 export async function scanBarcodeFromImageFile(file: unknown, options: ScanBarcodeOptions = {}): Promise<string> {
-  if (!file) throw new Error('Choose a photo before scanning.')
+  if (!file) throw new PhotoScanError('no-photo', 'Choose a photo before scanning.')
 
   const image = await (options.openImage || openPhoto)(file as Blob)
   try {
@@ -90,7 +104,7 @@ export async function scanBarcodeFromImageFile(file: unknown, options: ScanBarco
     try {
       await client.ready
       const read = await client.decode(frames, true)
-      if (!read) throw new Error('We could not find a barcode in that photo.')
+      if (!read) throw new PhotoScanError('no-barcode', 'We could not find a barcode in that photo.')
       return read.text.trim()
     } finally {
       client.terminate()

@@ -156,7 +156,7 @@ runTest('the overlay is drawn from the same box the grabber decodes', () => {
   const camera = fs.readFileSync(new URL('../src/components/products/scanning/useBarcodeCamera.ts', import.meta.url), 'utf8')
   assert.match(camera, /createFrameGrabber\(SCAN_GUIDE_BOX\)/, 'the live grabber decodes the shared guide box')
   assert.match(modal, /const GUIDE_STYLE = \{ width: `\$\{SCAN_GUIDE_BOX\.widthPercent\}%`, height: `\$\{SCAN_GUIDE_BOX\.heightPercent\}%` \}/, 'the overlay size comes from the shared guide box')
-  assert.equal((modal.match(/style=\{GUIDE_STYLE\}/g) || []).length, 2, 'both the outline and the corner frame use it')
+  assert.equal((modal.match(/style=\{GUIDE_STYLE\}/g) || []).length, 1, 'the one guide outline uses it (the corner frame was dropped with the compact sheet)')
   assert.doesNotMatch(modal, /h-\[70%\] w-\[86%\]/, 'no second, hand-copied guide size may remain in the overlay classes')
 })
 
