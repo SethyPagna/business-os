@@ -92,7 +92,16 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
       AND (@receivedFrom IS NULL OR date(receipt.received_at)>=@receivedFrom)
       AND (@receivedTo IS NULL OR date(receipt.received_at)<=@receivedTo))`)
   }
-  if (query.query) { params.nameQuery = query.query.normalize('NFC').toLowerCase(); conditions.push('(instr(lower(p.name),@nameQuery)>0 OR instr(lower(p.parent_name),@nameQuery)>0)') }
+  if (query.query) {
+    const text = query.query.normalize('NFC')
+    params.nameQuery = text.toLowerCase()
+    // A scanned code finds its product for everyone who can search. Without the barcode field only the whole code
+    // matches, so a hidden barcode or SKU can never be reconstructed from a prefix.
+    if (!access.fields.barcode) params.codeQuery = text
+    const codeMatch = access.fields.barcode ? 'instr(lower(p.__code_barcode),@nameQuery)>0 OR instr(lower(p.__code_sku),@nameQuery)>0'
+      : 'p.__code_barcode=@codeQuery OR p.__code_sku=@codeQuery'
+    conditions.push(`(instr(lower(p.name),@nameQuery)>0 OR instr(lower(p.parent_name),@nameQuery)>0 OR ${codeMatch})`)
+  }
   for (const field of ['brand', 'category'] as const) {
     const values = (query[field] || '').normalize('NFC').split(',').map(value => value.trim().toLowerCase()).filter(value => value && value !== 'all')
     if (!values.length) continue
@@ -115,7 +124,8 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   if (query.stockState === 'in_stock') stockConditions.push('p.__quantity>p.__out')
   if (query.stockState === 'low_stock') stockConditions.push('p.__quantity>p.__out AND p.__quantity<=p.__low')
   if (query.stockState === 'out_of_stock') stockConditions.push('p.__quantity<=p.__out')
-  const columns = ['p.id', 'p.name', 'p.image_path', 'p.unit', 'p.parent_id', 'p.is_group', 'p.is_grouped_cached', 'p.created_at']
+  // The __code_ columns only feed the search match; projectInventoryCheckProduct drops them from every row.
+  const columns = ['p.id', 'p.name', 'p.image_path', 'p.unit', 'p.parent_id', 'p.is_group', 'p.is_grouped_cached', 'p.created_at', 'p.barcode AS __code_barcode', 'p.sku AS __code_sku']
   if (access.fields.barcode) columns.push('p.barcode', 'p.sku')
   if (access.fields.brand) columns.push('p.brand', 'p.brands')
   if (access.fields.category) columns.push('p.category', 'p.categories')
@@ -136,6 +146,11 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
     requested_ids(product_id) AS (SELECT id FROM cohort)`
   return { query, page, pageSize, branchId, params, ctes, saleClauses, stockFiltered: stockConditions.length > 0 }
 }
+// Earliest expiry among the product's dated lots that still hold stock in the branch scope (every branch when none).
+// Read only for the returned page rows (see __page), never per cohort row; it counts the same lots as the stock ledger.
+const NEXT_EXPIRY_SQL = `(SELECT MIN(pb.expiry_date) FROM product_batches pb JOIN branch_batch_stock bs ON bs.batch_id=pb.id
+  WHERE pb.variant_product_id=__page.id AND bs.quantity>0 AND trim(COALESCE(pb.expiry_date,''))<>''
+  AND (@branchId IS NULL OR bs.branch_id=@branchId))`
 const STOCK_ROW_COLUMNS = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged',
   'missing_branch_allocation', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
 const PAGE_STOCK_PREFIX = '__page_stock_'
@@ -228,20 +243,23 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   // Ranking by name, price, cost, date or sales needs no stock: rank stock-free, then read stock for the page rows only.
   const rankWithStock = plan.stockFiltered || sort === 'stock'
   const pageStock = access.fields.stock && !rankWithStock ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
+  // A dated lot with stock shows stock exists, so the expiry follows the stock field as well as the received field.
+  const showNextExpiry = access.fields.received && access.fields.stock
   let summary: Record<string, unknown> = {}
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db: { batch: async statements => {
       const pageSql = `${statements[1].sql}\nLIMIT 501`
       // Same snapshot, same order: a page family is complete on its page, so its window aggregates equal the ranking's
       // family aggregates, and family_root_id then id are the helper's own terminal keys.
-      const stockedPageSql = pageStock && `WITH __page AS MATERIALIZED (${pageSql}), stock AS (${pageStock.rowsSql})
-        SELECT __page.*,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)} FROM __page LEFT JOIN stock ON stock.product_id=__page.id
+      const wrappedPageSql = (pageStock || showNextExpiry) && `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : ''}
+        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}
+        FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
         ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
-      const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: stockedPageSql || pageSql },
+      const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql || pageSql },
         { sql: summarySql, params: { ...plan.params, rankingLimit: limit } }])
       summary = (result[2].results?.[0] || {}) as Record<string, unknown>
-      if (stockedPageSql) for (const row of (result[1].results || []) as Array<Record<string, unknown>>) {
+      if (pageStock) for (const row of (result[1].results || []) as Array<Record<string, unknown>>) {
         for (const key of Object.keys(row)) if (key.startsWith(PAGE_STOCK_PREFIX)) { row[key.slice(PAGE_STOCK_PREFIX.length)] = row[key]; delete row[key] }
       }
       return result.slice(0, 2)

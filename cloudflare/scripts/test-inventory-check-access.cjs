@@ -107,6 +107,12 @@ check('whitelist projection drops nested/account/PII and ungranted derived field
   assert.equal('stock_value_usd' in partialStockValue, false, 'stock value requires both stock and cost')
   assert.deepEqual(worker.projectInventoryCheckProduct({ id: 4, name: { cost: 3 }, image_path: ['private'], stock_quantity: Infinity }, worker.getInventoryCheckAccess(user({}, {}, 'admin'))), { id: 4 })
 })
+check('next expiry is projected for the received field only', () => {
+  const row = { id: 4, name: 'Example', next_expiry_date: '2027-03-01' }
+  const project = permissions => worker.projectInventoryCheckProduct(row, worker.getInventoryCheckAccess(user({ inventory_checks: true, ...permissions })))
+  assert.equal(project({ inventory_check_show_received: true }).next_expiry_date, '2027-03-01')
+  for (const permissions of [{}, { inventory_check_show_stock: true }, { inventory_check_show_received: false }]) assert.equal(Object.hasOwn(project(permissions), 'next_expiry_date'), false, JSON.stringify(permissions))
+})
 check('hidden field sort/filter inference is refused, including barcode search', () => {
   const access = worker.getInventoryCheckAccess(user({ inventory: 'review' }))
   for (const [key, value] of [['stockState', 'low_stock'], ['brand', 'B'], ['category', 'A'], ['barcode', '123'], ['barcode', 'all'], ['sortBy', 'stock'], ['sortBy', 'qty_sold'], ['sortBy', 'customer_count'], ['sortBy', 'received_date'], ['sortBy', 'price'], ['sortBy', 'cost'], ['searchFields', 'barcode']]) {
