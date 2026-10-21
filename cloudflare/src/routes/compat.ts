@@ -265,7 +265,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
     `).get(params),
     loadDashboardStockOverview(env, overviewCtx),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+      SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause('sales')}
@@ -413,7 +413,7 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     const params = dashboardRangeParams(range, branchId)
     const saleBranchClause = branchId ? ' AND sales.branch_id = @branchId' : ''
     const rows = await db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+      SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause}

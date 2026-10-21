@@ -5,6 +5,7 @@ import ts from 'typescript'
 import { fileURLToPath } from 'node:url'
 import { captureActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel } from '../src/api/actorReadScope.ts'
 import { directMutationRefusedBeforeWrite } from '../src/utils/directMutationRequest.ts'
+import { saleStatusDisplay } from '../src/utils/saleStatusDisplay.ts'
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const source = fs.readFileSync(path.join(root, 'src/components/sales/Sales.tsx'), 'utf8')
@@ -25,7 +26,7 @@ const context = {
   notify:(value:string)=>{notices.push(value)},getErrorMessage:(error:Error)=>error.message,
   sessionStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)},
   window:{dispatchEvent:()=>{}},CustomEvent:class { constructor(_name:string,_payload:unknown){} },crypto:globalThis.crypto,
-  pendingBulkRequest:null as Record<string,unknown>|null, directMutationRefusedBeforeWrite,
+  pendingBulkRequest:null as Record<string,unknown>|null, directMutationRefusedBeforeWrite, saleStatusDisplay,
   savePendingBulkRequest:(request:Record<string,unknown>|null)=>{
     context.pendingBulkRequest=request
     if(request) storage.set('pending',JSON.stringify(request)); else storage.delete('pending')

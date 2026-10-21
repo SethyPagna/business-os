@@ -107,7 +107,16 @@ async function main() {
     VALUES (20, 'other-branch', '2026-09-11 05:00:00', 'completed', 2, 100, 100),
            (21, 'cancelled', '2026-09-11 05:00:00', 'cancelled', 1, 100, 100)`).run())
 
+  // Two-status model (owner, 20 Oct 2026; 0263): a POS delivery order is stored
+  // completed + delivery_pending, so the recent-sales card needs the tags to
+  // read it as Awaiting Delivery (frontend utils/saleStatusDisplay.ts).
+  seedStockFixture(db,()=>db.prepare("UPDATE sales SET delivery_pending = 1 WHERE id = 2").run())
+  seedStockFixture(db,()=>db.prepare("UPDATE sales SET return_state = 'full' WHERE id = 4").run())
   const summary = await request('/dashboard', timed)
+  const tagsOf = rows => Object.fromEntries(rows.filter(row => [2, 3, 4].includes(row.id))
+    .map(row => [row.id, [row.sale_status, row.delivery_pending, row.return_state, row.status_before_return]]))
+  const expectedTags = { 2: ['completed', 1, null, null], 3: ['completed', 0, null, null], 4: ['completed', 0, 'full', null] }
+  equal(tagsOf(summary.recent_sales), expectedTags, 'recent sales carry the delivery and return tags beside the payment state (base: tags absent)')
   equal(summary.today_count, 6, 'summary selected sale count')
   equal(summary.today_total, 60, 'summary selected gross amount')
   equal(summary.today_return_count, 6, 'summary return-date activity excludes supplier and late refund')
@@ -136,6 +145,7 @@ async function main() {
   equal(startup.summary, summary, 'startup summary matches standalone')
   equal(startup.analytics, analytics, 'startup analytics matches standalone')
 
+  equal(tagsOf((await request('/dashboard/insight-list', { ...timed, insight: 'recent_sales' })).items), expectedTags, 'the recent-sales drilldown carries the same tags')
   for (const [insight, key, expected] of [['recent_sales', 'id', [...selected, 21]], ['top_products', 'qty_sold', [6]], ['top_products_qty', 'qty_sold', [6]], ['top_customers', 'sale_count', [6]], ['expiring_products', 'id', [1]]]) {
     const list = await request('/dashboard/insight-list', { ...timed, insight })
     equal(list.items.map(row => row[key]).sort((a, b) => a - b), expected, `${insight} drilldown parity`)

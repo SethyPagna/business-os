@@ -24,9 +24,11 @@ assert.equal(normalizeDashboardSaleStatus('refunded'), 'returned', 'legacy refun
 assert.equal(normalizeDashboardSaleStatus(undefined), 'completed', 'missing legacy status keeps the completed fallback')
 
 const dashboard = readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
-assert.match(dashboard, /getDashboardSaleStatusLabel\(status, t\)/, 'dashboard labels use the runtime status helper')
-assert.match(dashboard, /formatStatus\(sale\.sale_status\)/, 'recent-sale rows read the API sale_status field')
-assert.match(dashboard, /getDashboardSaleStatusTone\(sale\.sale_status\)/, 'recent-sale tone reads the same API field')
-assert.doesNotMatch(dashboard, /getDashboardSaleStatusTone\(sale\.sale_status\)[^}]*\}\s*>\s*<[^>]+Icon/, 'recent-sale status badges stay text-only')
+// Two-status model (owner, 20 Oct 2026): a recent sale reads its whole row -- a delivery order is stored
+// completed + delivery_pending -- through the shared helper (saleStatusTagsDisplay.test.ts runs it).
+assert.match(dashboard, /getDashboardSaleLabel\(sale, t\)/, 'dashboard labels use the runtime status helper')
+assert.match(dashboard, /formatStatus\(sale\)/, 'recent-sale rows read the API row, tags included')
+assert.match(dashboard, /getDashboardSaleTone\(sale\)/, 'recent-sale tone reads the same row')
+assert.doesNotMatch(dashboard, /getDashboardSaleTone\(sale\)[^}]*\}\s*>\s*<[^>]+Icon/, 'recent-sale status badges stay text-only')
 
 console.log('PASS dashboard sale status presentation')

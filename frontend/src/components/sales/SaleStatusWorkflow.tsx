@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
-import { ALL_STATUSES, getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
+import { getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
+import { saleStatusDestinations, type SaleReturnTag } from '../../utils/saleStatusDisplay.ts'
 
 type TranslateFn = (key: string) => string
 
 export default function SaleStatusWorkflow({
   currentStatus,
+  returnTag = null,
   selectedStatus,
   notes,
   saving,
@@ -20,7 +22,9 @@ export default function SaleStatusWorkflow({
   confirmDisabled = false,
   showNotes = true,
 }: {
+  /** The shown status word (saleStatusDisplay), not the raw column. */
   currentStatus: string
+  returnTag?: SaleReturnTag | null
   selectedStatus: string
   notes: string
   saving: boolean
@@ -39,9 +43,11 @@ export default function SaleStatusWorkflow({
   useEffect(() => {
     if (reviewRequestId > 0) setStep('review')
   }, [reviewRequestId])
-  const destinations = ALL_STATUSES
-    .filter((status) => !['partial_return', 'returned', currentStatus].includes(status))
-    .filter((status) => currentStatus !== 'partial_return' || status === 'cancelled')
+  const destinations = saleStatusDestinations({ status: currentStatus, returnTag })
+  // Completed from Awaiting Delivery is the delivery itself; the review still shows both statuses.
+  const destinationLabel = (status: string) => status === 'completed' && currentStatus === 'awaiting_delivery'
+    ? t('sale_mark_delivered') || 'Mark delivered'
+    : getStatusLabel(status, t)
 
   if (step === 'destination') {
     return (
@@ -53,7 +59,7 @@ export default function SaleStatusWorkflow({
             className="min-h-11 shrink-0 whitespace-nowrap rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium leading-relaxed text-gray-800 hover:border-blue-500 hover:bg-blue-50 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-700"
             onClick={() => { onSelect(status); setStep('review') }}
           >
-            {getStatusLabel(status, t)}
+            {destinationLabel(status)}
           </button>
         ))}
       </div>
