@@ -8,6 +8,7 @@ import { continuousReadWindowSql, parseContinuousReadWindow } from './continuous
 import { localDateAtOrAfter, localDateAtOrBefore } from './businessDateWindow'
 import { lowStockThresholdSql, type LowStockConfig } from './lowStockSettings'
 import { stockVisibleProductSql } from './productStockGuard'
+import { foldNativeDigits } from './searchMatch'
 import type { PermissionUser } from './permissions'
 
 export { getInventoryCheckAccess as getInventoryCheckProductsAccess } from './inventoryCheckAccess'
@@ -96,9 +97,12 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
     const text = query.query.normalize('NFC')
     params.nameQuery = text.toLowerCase()
     // A scanned code finds its product for everyone who can search. Without the barcode field only the whole code
-    // matches, so a hidden barcode or SKU can never be reconstructed from a prefix.
-    if (!access.fields.barcode) params.codeQuery = text
-    const codeMatch = access.fields.barcode ? 'instr(lower(p.__code_barcode),@nameQuery)>0 OR instr(lower(p.__code_sku),@nameQuery)>0'
+    // matches, so a hidden barcode or SKU can never be reconstructed from a prefix. Codes are Latin digits: a scanner
+    // on the Khmer keyboard layout types ៣ for 3, so the code parameters fold them; the name match keeps what was typed.
+    const code = foldNativeDigits(text)
+    params.codeNeedle = code.toLowerCase()
+    if (!access.fields.barcode) params.codeQuery = code
+    const codeMatch = access.fields.barcode ? 'instr(lower(p.__code_barcode),@codeNeedle)>0 OR instr(lower(p.__code_sku),@codeNeedle)>0'
       : 'p.__code_barcode=@codeQuery OR p.__code_sku=@codeQuery'
     conditions.push(`(instr(lower(p.name),@nameQuery)>0 OR instr(lower(p.parent_name),@nameQuery)>0 OR ${codeMatch})`)
   }

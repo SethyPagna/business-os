@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import Play from 'lucide-react/dist/esm/icons/play.js'
@@ -8,6 +9,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
 import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
@@ -16,19 +18,26 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
 import { isAdminControlUser } from '../../utils/permissions.ts'
 import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
+import { getDirtyWork } from '../../utils/dirtyWork.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
+import { isExactBarcodeHit } from '../../utils/scanExactHit.ts'
+import { foldNativeDigits } from '../../utils/searchMatch.ts'
+import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
+import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
-import InventoryCheckRows from './InventoryCheckRows.tsx'
+import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
+import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
-import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
+import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
 import HubSectionNav from '../shared/HubSectionNav.tsx'
 import { useHubSection } from '../shared/hubNavigation.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
-import Modal from '../shared/Modal.tsx'
+import { useScannerWedge } from '../shared/useScannerWedge.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
@@ -47,6 +56,8 @@ type Selection = { branchId: string; sessionId: string; creatorName?: string | n
 type Section = 'products' | 'sessions' | 'issues'
 type ControlIntent = { range: DateTimeRange; query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; showCustomerRanking: boolean }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
+/** A search that came from Enter, the camera or a scanner gun. Nothing is ever saved by it: it narrows the list and points at the one exact row. */
+type Scan = { token: number; query: string; target: InventoryCheckFocusRequest['target'] }
 // Definite server refusals (the request was answered and nothing was written). Each gets its own concise message;
 // unlike an unknown outcome, the frozen attempt is dropped so the operator can correct and send a fresh request.
 const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
@@ -64,6 +75,22 @@ function isStaleConflict(cause: unknown) {
   return status === 409 && code !== 'inventory_check_owner_required'
 }
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', state: '', reason: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
+/** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
+const SEARCH_PAUSE_MS = 300
+
+const atLeast = (width: number) => typeof window.matchMedia === 'function' && window.matchMedia(`(min-width: ${width}px)`).matches
+/** Where a scan puts the keyboard: a desktop lands in the row's Count box, a tablet on its tick, a phone only highlights (no keyboard pop-up). */
+function scanFocusTarget(canCount: boolean): Scan['target'] {
+  return atLeast(1024) ? canCount ? 'count' : 'action' : atLeast(768) ? 'action' : 'none'
+}
+/** A lone token with a digit in it (Latin or Khmer) is the shape of a barcode or SKU: only such a search is judged as a scan. A name typed and sent with Enter just narrows the list. */
+const looksLikeCode = (query: string) => /^\S{4,}$/.test(query.trim()) && /\d/.test(foldNativeDigits(query))
+/** The one checkable row a scanned code names, or null. A viewer who cannot see barcodes gets the only row the exact-code search left. */
+function scanHitOf(products: readonly InventoryCheckProduct[], query: string, barcodeVisible: boolean): InventoryCheckProduct | null {
+  const rows = products.filter(product => !product.is_group && product.checkable !== false)
+  const hits = barcodeVisible ? rows.filter(row => isExactBarcodeHit({ barcode: row.barcode }, query) || isExactBarcodeHit({ barcode: row.sku }, query)) : rows
+  return hits.length === 1 ? hits[0] : null
+}
 
 function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
   const visible = { ...product }
@@ -146,11 +173,19 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
+  const compact = useIsCompactViewport()
   const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
   const [range, setRange] = useState<DateTimeRange>(() => bootstrapIntent?.range ?? statsPresetRange('all'))
   const [sessionRange, setSessionRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
   const [sessionFilters, setSessionFilters] = useState<SessionListFilters>(initialSessionFilters)
+  // `query` is what the box shows; `appliedQuery` is what the server was asked. Typing moves the first and the list follows after a pause.
   const [query, setQuery] = useState(bootstrapIntent?.query ?? '')
+  const [appliedQuery, setAppliedQuery] = useState(bootstrapIntent?.query ?? '')
+  const [scan, setScan] = useState<Scan | null>(null)
+  const scanSeq = useRef(0)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const [searchFocus, setSearchFocus] = useState(0)
+  const [gunScan, setGunScan] = useState<{ code: string; token: number } | null>(null)
   const [showCustomerRanking, setShowCustomerRanking] = useState(bootstrapIntent?.showCustomerRanking ?? false)
   const [filters, setFilters] = useState<InventoryCheckFilters>({ ...(bootstrapIntent?.filters ?? initialFilters), branchId })
   const [pagination, setPagination] = useState<{ section: Section; page: number }>(bootstrapIntent?.pagination ?? { section, page: 1 })
@@ -158,12 +193,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const setPage = (value: number) => setPagination({ section, page: value })
   const [pageSize, setPageSize] = useState(bootstrapIntent?.pageSize ?? 20)
   const [refresh, setRefresh] = useState(0)
+  const [sessionReload, setSessionReload] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [sessions, setSessions] = useState<{ items: InventoryCheckSession[]; total: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [sessionError, setSessionError] = useState('')
   const [writeError, setWriteError] = useState('')
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -190,20 +227,24 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-  const params: QueryParams = { ...filters, ...continuousRangeParams(range), query, page, pageSize, sessionId, state: section === 'issues' ? 'issue' : filters.state, ...(showCustomerRanking && access.canViewCustomerDetails ? { customerRanking: '1' } : {}) }
+  const params: QueryParams = { ...filters, ...continuousRangeParams(range), query: appliedQuery, page, pageSize, sessionId, state: section === 'issues' ? 'issue' : filters.state, ...(showCustomerRanking && access.canViewCustomerDetails ? { customerRanking: '1' } : {}) }
   const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
   // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
-  // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (after a save,
-  // Close/Resume or the Refresh button) reloads in the background while the existing rows stay mounted.
+  // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (the Refresh button,
+  // Close/Resume or a conflict) reloads in the background while the existing rows stay mounted. A saved tick reloads nothing.
   const scopeKey = JSON.stringify([section === 'sessions' ? sessionParams : params, section])
   const requestKey = JSON.stringify([section === 'sessions' ? sessionParams : params, section, refresh])
   const queryFence = useRef(requestKey)
   queryFence.current = requestKey
   const [loadedKey, setLoadedKey] = useState('')
-  const fresh = loadedKey === scopeKey
+  // The session loads on its own clock: only when it is chosen or reloaded, never because the search or a filter changed.
+  const [sessionLoadedFor, setSessionLoadedFor] = useState('')
+  const fresh = loadedKey === scopeKey && (section === 'sessions' || !sessionId || sessionLoadedFor === sessionId)
+  const reloadAll = () => { setRefresh(value => value + 1); setSessionReload(value => value + 1) }
   // The server's own verdict (can_edit) can only narrow what this account's role and ownership allow here.
   const canEdit = access.canCheck && !!session && session.can_edit !== false && (isAdminControlUser(user) || Number(session.created_by) === Number(user?.id))
   const canViewCounts = access.fields.stock || (!!session && Number(session.created_by) === Number(user?.id))
+  const savedReasons = useSavedStockReasons('adjust')
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
@@ -229,18 +270,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           const result = await readInventoryCheckSessions(sessionParams, abort.signal)
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
-          const [products, selected] = await Promise.all([
-            readInventoryCheckProducts<ProductsResult>(params, abort.signal),
-            sessionId ? readInventoryCheckSession(sessionId, abort.signal) : Promise.resolve(null),
-          ])
+          const products = await readInventoryCheckProducts<ProductsResult>(params, abort.signal)
           if (publish()) {
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { range: { ...range }, query, filters: { ...filters }, pagination: { ...pagination }, pageSize, showCustomerRanking } })
               return
             }
             setData(showCustomerRanking && access.canViewCustomerDetails ? products : { ...products, rankings: { products: products.rankings?.products } })
-            setSession(selected?.item ?? null)
-            setItems(selected?.items ?? [])
             setLoadedKey(scopeKey)
           }
         }
@@ -251,23 +287,63 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     void load()
     return () => { live = false; abort.abort() }
   }, [requestKey])
+  useEffect(() => {
+    if (!sessionId) return
+    const abort = new AbortController()
+    let live = true
+    const publish = () => live && !abort.signal.aborted && current()
+    setSessionError('')
+    void readInventoryCheckSession(sessionId, abort.signal).then(selected => {
+      if (publish()) { setSession(selected.item); setItems(selected.items); setSessionLoadedFor(sessionId) }
+    }).catch(() => { if (publish()) setSessionError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) })
+    return () => { live = false; abort.abort() }
+  }, [sessionId, sessionReload])
+
+  function applyQuery(value: string, scanning: boolean) {
+    setQuery(value)
+    if (value !== appliedQuery) { setAppliedQuery(value); setPage(1) }
+    setScan(scanning && looksLikeCode(value) ? { token: ++scanSeq.current, query: value, target: scanFocusTarget(access.fields.stock) } : null)
+  }
+  function typeQuery(value: string) {
+    if (controlsLocked) return
+    if (value === '') applyQuery('', false)
+    else { setQuery(value); setScan(null) }
+  }
+  function submitQuery(value: string) {
+    if (controlsLocked) return
+    setWriteError('')
+    applyQuery(value, true)
+  }
+  const applyQueryRef = useRef(applyQuery)
+  applyQueryRef.current = applyQuery
+
+  // A scanner gun: the hook has already cancelled the Enter and put a quantity box back as it was. The scan then does what typing the
+  // code and pressing Enter does -- but only once the row's own restore has rendered, so a row left unchanged does not count as unsaved work.
+  useScannerWedge({ enabled: section !== 'sessions', searchRef, onScan: code => setGunScan({ code, token: ++scanSeq.current }) })
+  useEffect(() => {
+    if (!gunScan) return
+    setGunScan(null)
+    if (busy || createAttempt.current || getDirtyWork().some(work => work.pageId === 'inventory')) { setWriteError(tr('inventory_check_count_blocked_busy', 'Finish or cancel the open check first.')); return }
+    setWriteError('')
+    applyQuery(gunScan.code, true)
+  }, [gunScan])
 
   function changeFilters(patch: Partial<InventoryCheckFilters>) {
     if (controlsLocked) return
     if (patch.branchId !== undefined && patch.branchId !== branchId) { onSelect({ branchId: patch.branchId, sessionId: '' }); return }
-    setFilters(previous => ({ ...previous, ...patch })); setPage(1)
+    setFilters(previous => ({ ...previous, ...patch })); setPage(1); setScan(null)
   }
   function changeSessionFilters(patch: Partial<SessionListFilters>) {
     if (controlsLocked) return
     setSessionFilters(previous => ({ ...previous, ...patch })); setPage(1)
   }
-  // Clears search, dates and every Filters-menu choice. A chosen branch is a selection, so clearing it re-selects "all branches".
+  // Clears search, dates and every Filters-menu choice (Sort included). A chosen branch is a selection, so clearing it re-selects "all branches".
   function clearFilters() {
     if (controlsLocked) return
     if (branchId && branches.length > 1) { onSelect({ branchId: '', sessionId: '' }); return }
     if (section === 'sessions') { setSessionFilters(initialSessionFilters); setSessionRange(statsPresetRange('all')) } else {
-      setFilters(previous => ({ ...initialFilters, branchId: previous.branchId, sortBy: previous.sortBy, sortDirection: previous.sortDirection }))
-      setQuery(''); setRange(statsPresetRange('all'))
+      setFilters(previous => ({ ...initialFilters, branchId: previous.branchId }))
+      setQuery(''); setAppliedQuery(''); setScan(null); setRange(statsPresetRange('all'))
     }
     setPage(1)
   }
@@ -289,15 +365,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         attempts.current.delete(id)
         setSession(result.session)
         setItems(previous => previous.map(item => Number(item.product_id) === id ? result.item : item))
-        // The PATCH already answered with the saved item and session. Stats and rankings are stock-based, so only a
-        // list filtered by count state or reason can change membership.
-        if (section === 'issues' || filters.state || filters.reason) setRefresh(value => value + 1)
+        // The PATCH already answered with the saved item and session, and the rows stay where they are even under a state
+        // or reason filter (no row slides away under the thumb): a tick reads neither the products nor the session again.
       }
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
       if (refusal) attempts.current.delete(id)
       // A definite conflict means the page is behind the server (revision, baseline or stock moved): reload it.
-      if (current() && isStaleConflict(cause)) setRefresh(value => value + 1)
+      if (current() && isStaleConflict(cause)) reloadAll()
       if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
       throw cause
     } finally { inFlight.current = false; if (current()) { setBusy(false); setSavingId(null) } }
@@ -306,6 +381,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // The products a new session would hold: the checkable rows of the page on screen (unchanged membership rule).
   const countableIds = fresh && data ? [...new Set(data.items.filter(product => !product.is_group && (product as InventoryCheckProduct & { checkable?: boolean }).checkable !== false).map(product => Number(product.id)))].filter(id => Number.isSafeInteger(id) && id > 0) : []
   const branches = data?.branches ?? []
+  const soleBranch = branches.length === 1 ? branches[0] : null
   const branchName = branches.find(branch => String(branch.id) === (session ? String(session.branch_id) : branchId))?.name ?? null
 
   async function start() {
@@ -314,7 +390,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const productIds = countableIds
       if (!productIds.length || productIds.length > 500) return
       // The review shows exactly the ids that will be created; a retry after an unknown outcome reuses the frozen request below.
-      const scopeText = describeCountScope(t, { query, range, filters, stateApplies: section !== 'issues' })
+      const scopeText = describeCountScope(t, { query: appliedQuery, range, filters, stateApplies: section !== 'issues' })
       const confirmed = await askToConfirm({
         title: tr('inventory_check_count_review_title', 'Start a count session?'),
         items: [{ label: t('products'), value: productIds.length }, { label: t('branch'), value: branchName ?? '—' }, { label: t('filters'), value: scopeText || t('none') }],
@@ -356,7 +432,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
       const result = await changeInventoryCheckSession(writeScope, attempt.action, attempt.revision, attempt.requestId)
-      if (current()) { lifecycleAttempt.current = null; setSession(result.item); setRefresh(value => value + 1) }
+      if (current()) { lifecycleAttempt.current = null; setSession(result.item); reloadAll() }
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
       if (refusal) lifecycleAttempt.current = null
@@ -393,16 +469,23 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   if (showCustomerRanking && access.canViewCustomerDetails) cards.push({ key: 'top_customers', label: t('top_customers'), value: <span className="block truncate text-xs">{customerRanking[0]?.name || '—'}</span>, hint: tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.'), details: customerRanking.map(customer => ({ label: customer.name, value: customer.sale_count })) })
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
+  // Typing is read after a pause. A row being edited holds the list still (the controls are disabled), so the pause restarts once it is done.
+  useEffect(() => {
+    if (query === appliedQuery || controlsLocked) return
+    const timer = window.setTimeout(() => { setAppliedQuery(query); setPage(1) }, SEARCH_PAUSE_MS)
+    return () => window.clearTimeout(timer)
+  }, [query, appliedQuery, controlsLocked, section])
 
   // Session bar facts. The single-session read sends no creator name or branch name: the list's creator rides in the
   // selection, the viewer's own username covers their own sessions, and the branch comes from the branch list.
   const progress = session?.progress ?? { total: items.length, done: items.filter(item => item.state === 'done').length, issue: items.filter(item => item.state === 'issue').length, unstarted: items.filter(item => item.state === 'unstarted').length }
   const ownSession = !!session && Number(session.created_by) === Number(user?.id)
   const creatorName = session?.creator_name ?? selection.creatorName ?? (ownSession ? String(user?.username || '') : '')
+  const sessionDetails = session ? [fmtDateTime24(session.started_at), branchName, creatorName && `@${creatorName}`].filter(Boolean).join(' · ') : ''
 
-  // Count: why it is unavailable is the answer to "why can't I press it".
+  // Count: why it is unavailable is the answer to "why can't I press it". A search still waiting for its pause is not the list on screen yet.
   const countBlocked = busy || rowEditing ? tr('inventory_check_count_blocked_busy', 'Finish or cancel the open check first.')
-    : !fresh ? tr('inventory_check_count_blocked_loading', 'Wait for the list to finish loading.')
+    : !fresh || query !== appliedQuery ? tr('inventory_check_count_blocked_loading', 'Wait for the list to finish loading.')
     : !canWriteToServer ? tr('inventory_check_count_blocked_offline', 'Saving is unavailable while offline.')
     : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
     : !countableIds.length ? tr('inventory_check_count_blocked_empty', 'No products on this page to count.') : ''
@@ -410,6 +493,34 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: section !== 'issues' }) > 0 || !!query.trim() || !!(range.startDate || range.endDate)
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
   const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : section === 'issues' && !sessionId ? data?.issues?.length : visibleProducts.length)
+
+  // A scan points at the one exact row of the list on screen (product rows only: the all-sessions Issues list has none).
+  const showsProductRows = section === 'products' || (section === 'issues' && !!sessionId)
+  const scanHit = scan && fresh && showsProductRows ? scanHitOf(visibleProducts, scan.query, access.fields.barcode) : null
+  const focusRequest: InventoryCheckFocusRequest | undefined = scan && scanHit ? { id: scanHit.id, token: scan.token, target: scan.target } : undefined
+  const scanMissed = !!scan && loadedNothing && showsProductRows
+  const scanRef = useRef(scan)
+  scanRef.current = scan
+  const scanHitId = useRef<string | null>(null)
+  scanHitId.current = scanHit ? String(scanHit.id) : null
+  // After the scanned row is saved the next scan starts clean: on a desktop or tablet the search is emptied and focused, on a phone the list stays.
+  const onCommitted = useCallback((id: number | string): boolean => {
+    if (!scanRef.current || scanHitId.current !== String(id)) return false
+    setScan(null)
+    if (!atLeast(768)) return false
+    applyQueryRef.current('', false)
+    setSearchFocus(value => value + 1)
+    return true
+  }, [])
+  useEffect(() => {
+    if (searchFocus && !controlsLocked) { searchRef.current?.focus(); setSearchFocus(0) }
+  }, [searchFocus, controlsLocked])
+  // A miss leaves the code selected in Search so the next one replaces it; only a desktop-sized screen takes focus (no phone keyboard).
+  useEffect(() => {
+    if (!scanMissed) return
+    if (!compact) searchRef.current?.focus()
+    searchRef.current?.select()
+  }, [scanMissed, scan?.token])
 
   const rangeNotes = <span className="flex shrink-0 items-center">
     <InfoHint text={tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')} label={tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')} />
@@ -419,7 +530,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     setShowCustomerRanking(value => !value)
     setData(previous => previous ? { ...previous, rankings: { products: previous.rankings?.products } } : previous)
   }}><Users className="h-4 w-4" aria-hidden="true" /></button> : null
-  const facetsLimited = fresh && Object.values(data?.facetsLimited ?? {}).some(Boolean)
+  const facetsLimited = fresh ? data?.facetsLimited : undefined
+  const refreshAction = <IconAction label={t('refresh')} disabled={controlsLocked} onClick={reloadAll}><RefreshCw className="h-5 w-5" aria-hidden="true" /></IconAction>
 
   const issueRows = section === 'issues' && !sessionId && fresh ? (data?.issues ?? []).map(issue => {
     const product = visibleProducts.find(candidate => Number(candidate.id) === issue.product_id) ?? { id: issue.product_id, name: `#${issue.product_id}` }
@@ -429,77 +541,106 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     return { key: `${issue.session_id}:${issue.product_id}`, product, observation: { product_id: issue.product_id, state: 'issue' as const, counted_quantity: showCount ? issue.counted_quantity ?? null : null, reason: issue.reason, revision: issue.revision },
       chip: <button type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button> }
   }) : []
-  const rowProps = { canViewStock: access.fields.stock, canViewCounts, canViewPrice: access.fields.price, canViewCost: access.fields.cost, t, onOpenProduct: setDetail } as const
+  const rowProps = { canViewStock: access.fields.stock, canViewCounts, canViewPrice: access.fields.price, canViewCost: access.fields.cost, canViewSales: access.fields.sales, canViewCustomers: access.fields.customers, t, onOpenProduct: setDetail } as const
+  const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
+  // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
+  const sheetHeader = showsProductRows && fresh && visibleProducts.length ? <InventoryCheckSheetHeader canCheck={canCheckRows} inSession={!!sessionId} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
+    canViewPrice={access.fields.price} canViewCost={access.fields.cost} canViewSales={access.fields.sales} canViewCustomers={access.fields.customers} t={t} /> : null
 
-  return <div className="page-scroll min-w-0 space-y-2 p-3" data-inventory-check-page>
+  const countAction = section !== 'sessions' && access.canCheck ? <>
+    {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
+    <button type="button" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60" aria-disabled={countBlocked ? true : undefined}
+      aria-label={countableIds.length ? `${countLabel} (${countableIds.length})` : countLabel} title={countBlocked || tr('inventory_check_count_tooltip', 'Count the products listed on this page')}
+      onClick={() => { if (!countBlocked) void start() }}><Play className="h-4 w-4" aria-hidden="true" />{countLabel}
+      {countableIds.length ? <span data-count-pill className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{countableIds.length}</span> : null}</button>
+  </> : null
+  const viewOnly = <span className="inline-flex shrink-0 items-center">
+    <span role="img" aria-label={t('view_only')} title={t('view_only')} className="inline-flex"><Eye className="h-4 w-4 text-gray-500 dark:text-gray-300" aria-hidden="true" /></span>
+    <InfoHint text={tr('inventory_check_read_only_hint', 'You can view this session. Only its creator or an administrator can change it.')} label={tr('inventory_check_read_only_hint', 'You can view this session. Only its creator or an administrator can change it.')} />
+  </span>
+  // One line, never wrapped: leave, the ring and counts (the middle scrolls sideways if a name is long), then History / Close / Refresh.
+  const sessionBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-actions>
+    <IconAction label={tr('inventory_check_leave_session', 'Leave session')} disabled={controlsLocked} onClick={() => onSelect({ branchId, sessionId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
+    {session && fresh ? <div className="scroll-x-clean min-w-0 flex-1" data-inventory-check-session-bar>
+      <div className="inline-flex items-center gap-2 align-middle text-xs">
+        <ProgressRing progress={progress} t={t} />
+        <SessionCounts progress={progress} t={t} />
+        <span className="hidden shrink-0 text-gray-600 sm:inline dark:text-gray-300" data-session-details>{sessionDetails}</span>
+        <span className="inline-flex shrink-0 sm:hidden"><InfoHint text={sessionDetails} label={tr('inventory_check_session_details', 'Session details')} /></span>
+        {session.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}
+        {!canEdit ? viewOnly : null}
+      </div>
+    </div> : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
+    <IconAction label={t('history')} onClick={() => setHistoryPage(1)}><History className="h-5 w-5" aria-hidden="true" /></IconAction>
+    {canEdit && fresh ? <IconAction label={lifecycleAttempt.current ? t('retry') : session?.status === 'open' ? tr('inventory_check_close_session', 'Close session') : tr('inventory_check_resume_session', 'Resume session')}
+      disabled={controlsLocked || !canWriteToServer || attempts.current.size > 0} onClick={() => { void lifecycle() }}>
+      {lifecycleAttempt.current ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : session?.status === 'open' ? <Lock className="h-5 w-5" aria-hidden="true" /> : <Unlock className="h-5 w-5" aria-hidden="true" />}
+    </IconAction> : null}
+    {refreshAction}
+  </div>
+  // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
+  const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
+    {sessionId ? sessionBar : <>
+      {soleBranch ? <SoleBranchLabel name={soleBranch.name} label={t('branch')} className="min-w-0 flex-1 text-xs" /> : <span className="flex-1" />}
+      {countAction}
+      {refreshAction}
+    </>}
+  </div>
+
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <HubSectionNav pageId="inventory" active={section} sections={[
       { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
-    ]} onChange={id => { if (!busy && !createAttempt.current) setSection(id as Section) }} />
-    {/* Pinned: dates (with the Stats chip), then search / scan / Filters, then the sort row. Open stat cards scroll inside the cap. */}
-    <div className="sticky top-0 z-30 -mx-3 max-h-[calc(70*var(--app-vh))] min-w-0 space-y-1 overflow-y-auto bg-gray-50 px-3 pb-1 dark:bg-gray-900" data-inventory-check-pinned>
-      {section === 'sessions'
-        ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }} />
-        : <StatsStrip layout="scroll" compactRange cards={cards} t={t} loading={loading} range={range} rangeDisabled={!access.fields.received || controlsLocked} rangeActions={rangeNotes}
-          onRangeChange={value => { if (!controlsLocked) { setRange(value); setPage(1) } }} />}
-      <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-query-lock>
-        {section === 'sessions'
-          ? <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
-          : <InventoryCheckControls query={query} onQueryChange={value => { if (!controlsLocked) { setQuery(value); setPage(1) } }} filters={filters} onFiltersChange={changeFilters} onClear={clearFilters} fields={access.fields}
-            showSessionStates={!!sessionId} showStateFilter={section !== 'issues'} optionsLimited={facetsLimited} trailing={customerToggle}
-            branches={branches} brands={data?.facets?.brands} categories={data?.facets?.categories} reasons={data?.facets?.reasons} t={t} />}
-      </fieldset>
-    </div>
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs" data-inventory-check-actions>
-      {sessionId ? <>
-        <IconAction label={tr('inventory_check_leave_session', 'Leave session')} disabled={controlsLocked} onClick={() => onSelect({ branchId, sessionId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
-        {session && fresh ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1" data-inventory-check-session-bar>
-          <span className="font-semibold">{fmtDateTime24(session.started_at)}</span>
-          {branchName ? <span className="detail-scroll-text min-w-0 leading-relaxed">{branchName}</span> : null}
-          {creatorName ? <span className="text-gray-500" title={tr('inventory_check_created_by', 'Created by')}>@{creatorName}</span> : null}
-          <SessionStatusChip status={session.status} t={t} />
-          {!canEdit ? <span className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 px-2 text-[11px] font-semibold leading-relaxed text-gray-600 dark:bg-zinc-800 dark:text-gray-300">{t('view_only')}<InfoHint text={tr('inventory_check_read_only_hint', 'You can view this session. Only its creator or an administrator can change it.')} label={tr('inventory_check_read_only_hint', 'You can view this session. Only its creator or an administrator can change it.')} /></span> : null}
-          <SessionCounts progress={progress} t={t} />
-        </div> : <span className="h-4 w-40 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
-        <IconAction label={t('history')} onClick={() => setHistoryPage(1)}><History className="h-5 w-5" aria-hidden="true" /></IconAction>
-        {canEdit && fresh ? <IconAction label={lifecycleAttempt.current ? t('retry') : session?.status === 'open' ? tr('inventory_check_close_session', 'Close session') : tr('inventory_check_resume_session', 'Resume session')}
-          disabled={controlsLocked || !canWriteToServer || attempts.current.size > 0} onClick={() => { void lifecycle() }}>
-          {lifecycleAttempt.current ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : session?.status === 'open' ? <Lock className="h-5 w-5" aria-hidden="true" /> : <Unlock className="h-5 w-5" aria-hidden="true" />}
-        </IconAction> : null}
-      </> : section !== 'sessions' && access.canCheck ? <>
-        <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60" aria-disabled={countBlocked ? true : undefined} title={countBlocked || tr('inventory_check_count_tooltip', 'Count the products listed on this page')}
-          onClick={() => { if (!countBlocked) void start() }}><Play className="h-4 w-4" aria-hidden="true" />{countLabel}</button>
-        {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
-      </> : null}
-      <span className="ml-auto flex items-center"><IconAction label={t('refresh')} disabled={controlsLocked} onClick={() => setRefresh(value => value + 1)}><RefreshCw className="h-5 w-5" aria-hidden="true" /></IconAction></span>
-    </div>
-    {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
-    {error ? <div role="alert" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-red-700">
-      <span className="min-w-0 break-words">{error}</span>
-      <IconAction label={t('retry')} onClick={() => setRefresh(value => value + 1)}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
-    </div> : null}
-    {loading && !fresh && !error ? <ListSkeleton loadingText={t('loading')} /> : null}
-    {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
-      : section === 'issues' && !sessionId ? <div className="min-w-0 divide-y" aria-label={t('issues')}>
-        {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
+    ]} onChange={id => { if (!busy && !createAttempt.current) { setSection(id as Section); setScan(null) } }}>
+      <div className="page-scroll min-w-0 space-y-2 px-3 pb-3" data-inventory-check-page>
+        {/* Pinned: dates (with the Stats chip), then search / scan / Filters beside the context bar, then the column header. Open stat cards scroll inside the cap. */}
+        <div className="sticky top-0 z-30 -mx-3 max-h-[calc(70*var(--app-vh))] min-w-0 space-y-1 overflow-y-auto bg-gray-50 px-3 pb-1 pt-2 dark:bg-gray-900" data-inventory-check-pinned>
+          {section === 'sessions'
+            ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }}
+              leading={<fieldset disabled={controlsLocked} className="min-w-0 shrink-0" data-inventory-check-query-lock>
+                <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
+              </fieldset>} actions={refreshAction} />
+            : <>
+              <StatsStrip layout="scroll" compactRange cards={cards} t={t} loading={loading} range={range} rangeDisabled={!access.fields.received || controlsLocked} rangeActions={<>{rangeNotes}{customerToggle}</>}
+                onRangeChange={value => { if (!controlsLocked) { setRange(value); setPage(1); setScan(null) } }} />
+              <div className="flex min-w-0 flex-col gap-1 lg:flex-row lg:items-center lg:gap-2">
+                <fieldset disabled={controlsLocked} className="min-w-0 lg:w-[26rem] lg:shrink-0" data-inventory-check-query-lock>
+                  <InventoryCheckControls query={query} onQueryChange={typeQuery} onQuerySubmit={submitQuery} searchRef={searchRef} scanLabelled={compact && !!sessionId && canCheckRows}
+                    filters={filters} onFiltersChange={changeFilters} onClear={clearFilters} fields={access.fields}
+                    showSessionStates={!!sessionId} showStateFilter={section !== 'issues'} limited={facetsLimited}
+                    branches={branches} brands={data?.facets?.brands} categories={data?.facets?.categories} reasons={data?.facets?.reasons} t={t} />
+                </fieldset>
+                {contextBar}
+              </div>
+              {sheetHeader}
+            </>}
+        </div>
+        {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
+        {error || sessionError ? <div role="alert" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-red-700">
+          <span className="min-w-0 break-words">{error || sessionError}</span>
+          <IconAction label={t('retry')} onClick={reloadAll}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
+        </div> : null}
+        {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
+        {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
+          : section === 'issues' && !sessionId ? <div className="min-w-0 divide-y" aria-label={t('issues')}>
+            {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
+          </div>
+            : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={adornments} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
+              canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={[...savedReasons.map(reason => reason.label), ...(data?.facets?.reasons ?? [])]} focusRequest={focusRequest} onCommitted={onCommitted}
+              {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
+        {section !== 'sessions' && unavailableProducts.length ? <InventoryCheckRows products={unavailableProducts} observations={observations} adornments={unavailableAdornments} canCheck={false} inSession={!!sessionId} {...rowProps} canViewPrice={false} canViewCost={false} onSave={() => { throw new Error('This original session product is unavailable.') }} /> : null}
+        {loadedNothing ? <div className="flex min-w-0 flex-col items-center gap-2 py-6 text-center text-xs text-gray-500" data-inventory-check-empty={section}>
+          <p className="break-words leading-relaxed">{section === 'sessions' ? (sessionFiltersActive ? tr('inventory_check_sessions_no_match', 'No count sessions match these filters.') : tr('inventory_check_sessions_empty', 'No count sessions yet.'))
+            : section === 'issues' ? tr('inventory_check_issues_empty', 'No issues found.')
+              : scanMissed ? (sessionId ? tr('inventory_check_scan_not_in_session', 'Not in this session.') : tr('inventory_check_scan_no_match', 'No product with this code.'))
+                : tr('inventory_check_empty', 'No matching products.')}</p>
+          {(section === 'sessions' ? sessionFiltersActive : filtersActive) ? <button type="button" className="btn-secondary inline-flex min-h-10 items-center gap-1 px-3 text-xs" disabled={controlsLocked} onClick={clearFilters}><X className="h-4 w-4" aria-hidden="true" />{t('clear')}</button>
+            : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
+        </div> : null}
+        {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null}
+        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} t={t} onClose={() => setDetail(null)} /> : null}
+        {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}
+        {confirmDialog}
       </div>
-        : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={adornments} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy} canCheck={fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current} {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
-    {section !== 'sessions' && unavailableProducts.length ? <InventoryCheckRows products={unavailableProducts} observations={observations} adornments={unavailableAdornments} canCheck={false} {...rowProps} canViewPrice={false} canViewCost={false} onSave={() => { throw new Error('This original session product is unavailable.') }} /> : null}
-    {loadedNothing ? <div className="flex min-w-0 flex-col items-center gap-2 py-6 text-center text-xs text-gray-500" data-inventory-check-empty={section}>
-      <p className="break-words leading-relaxed">{section === 'sessions' ? (sessionFiltersActive ? tr('inventory_check_sessions_no_match', 'No count sessions match these filters.') : tr('inventory_check_sessions_empty', 'No count sessions yet.'))
-        : section === 'issues' ? tr('inventory_check_issues_empty', 'No issues found.') : tr('inventory_check_empty', 'No matching products.')}</p>
-      {(section === 'sessions' ? sessionFiltersActive : filtersActive) ? <button type="button" className="btn-secondary min-h-10 px-3 text-xs" disabled={controlsLocked} onClick={clearFilters}>{t('clear_filters')}</button>
-        : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
-    </div> : null}
-    {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) setPage(value) }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1) } }} t={t} compact /></fieldset> : null}
-    {detail && fresh ? <Modal title={detail.name} onClose={() => setDetail(null)} keyboard size="sm" unsavedChanges="read-only"><dl className="grid grid-cols-2 gap-2 text-xs">
-      {unavailableIds.has(String(detail.id)) ? <p className="col-span-2 text-amber-800 dark:text-amber-200">{t('inventory_check_unavailable_member_hint')}</p> : null}
-      {access.fields.barcode ? <><dt>{t('barcode')}</dt><dd className="break-all">{detail.barcode || detail.sku || '—'}</dd></> : null}
-      {access.fields.stock ? <><dt>{tr('inventory_check_current_stock', 'Current stock')}</dt><dd>{detail.quantity ?? '—'}</dd><dt>{tr('inventory_check_starting_stock', 'Starting stock')}</dt><dd>{items.find(item => String(item.product_id) === String(detail.id))?.baseline_quantity ?? '—'}</dd></> : null}
-      {access.fields.brand ? <><dt>{t('brand')}</dt><dd>{detail.brand || '—'}</dd></> : null}
-      {access.fields.category ? <><dt>{t('category')}</dt><dd>{detail.category || '—'}</dd></> : null}
-      {access.fields.stock && items.find(item => String(item.product_id) === String(detail.id))?.stock_changed ? <p className="col-span-2 text-amber-700">{tr('inventory_check_stock_changed', 'Stock changed since this session started.')}</p> : null}
-    </dl></Modal> : null}
-    {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}
-    {confirmDialog}
+    </HubSectionNav>
   </div>
 }
