@@ -242,6 +242,13 @@ export const BACKUP_TABLES = [
   'imported_sale_stock_skip_0235',
   'imported_sale_stock_skip_guard_0235',
   'sale_status_normalization_ledger',
+  // Inventory-check history (0259) and the branch-cutover journal (0224): immutable by trigger
+  // except while the restore maintenance flag is set (0268). Sessions first: items and events
+  // reference them. branch_cutovers has no foreign keys.
+  'inventory_check_sessions',
+  'inventory_check_items',
+  'inventory_check_events',
+  'branch_cutovers',
   'audit_logs',
   'custom_tables',
   'custom_fields',

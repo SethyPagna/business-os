@@ -92,17 +92,8 @@ const UNRULED = {
   sale_not_paid_repair_0173: '0173 repair before-values',
 }
 
-// Backup decided (BACKUP_TABLES) but a restore cannot yet replay them: their
-// no_delete / immutable-insert triggers (0259, 0224, 0225) have no restore
-// maintenance carve-out like shift_close_figures_no_delete (0237), so
-// DELETE FROM aborts the restore. Needs a migration; adding them to
-// BACKUP_TABLES first would make every restore fail. Do not add new tables here.
-const UNRULED_SINCE_BASE = {
-  inventory_check_sessions: 'backup decided; blocked on restore carve-out in 0259 triggers',
-  inventory_check_items: 'backup decided; blocked on restore carve-out in 0259 triggers',
-  inventory_check_events: 'backup decided; blocked on restore carve-out in 0259 triggers',
-  branch_cutovers: 'backup decided; blocked on restore carve-out in 0224/0225 triggers',
-}
+// Tables backed up but not yet restorable, each blocked on a trigger carve-out. Empty since 0268.
+const UNRULED_SINCE_BASE = {}
 Object.assign(UNRULED, UNRULED_SINCE_BASE)
 
 const backupSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'backup.ts'), 'utf8')
@@ -142,8 +133,9 @@ check('every BACKUP_TABLES entry exists in the migrated schema', () => {
   assert.deepEqual(ghosts, [], `backed up but never created: ${ghosts.join(', ')}`)
 })
 
-check('the unruled list only shrinks (base-era 19, plus the four blocked on trigger carve-outs)', () => {
-  assert.ok(Object.keys(UNRULED).length <= 19 + Object.keys(UNRULED_SINCE_BASE).length, 'do not park new tables in UNRULED -- decide')
+check('the unruled list only shrinks (base-era 19; none blocked on a trigger carve-out)', () => {
+  assert.deepEqual(Object.keys(UNRULED_SINCE_BASE), [], 'a backed-up table must be restorable: carve out its triggers, do not park it')
+  assert.ok(Object.keys(UNRULED).length <= 19, 'do not park new tables in UNRULED -- decide')
 })
 
 console.log(`\n${passed} check(s) passed.`)

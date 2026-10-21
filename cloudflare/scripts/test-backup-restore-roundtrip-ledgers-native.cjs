@@ -2,7 +2,9 @@
 // for the ledgers that decide stock math and idempotency: stock_mutation_receipts
 // (0192), imported_sale_stock_skip_0235 and its guard, and
 // sale_status_normalization_ledger (0263). Rows must survive byte-identically,
-// and password_reset_requests (transient reset requests) must never reach a backup.
+// and password_reset_requests (transient reset requests) must never reach a backup. The immutable
+// history tables (0259 inventory checks, 0224 branch cutovers) round-trip too: their guards carry the
+// restore carve-out of 0268.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -12,6 +14,25 @@ const { unstable_splitSqlQuery: split } = require('wrangler')
 const root = path.resolve(__dirname, '..')
 
 const COVERED = ['stock_mutation_receipts', 'imported_sale_stock_skip_0235', 'imported_sale_stock_skip_guard_0235', 'sale_status_normalization_ledger']
+const HISTORY = ['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events', 'branch_cutovers']
+const CUTOVER_ID = '00000000-0000-4000-8000-000000000001'
+const HEX = 'a'.repeat(64)
+const cutoverStep = (phase, set = '') => `UPDATE branch_cutovers SET phase='${phase}', revision=revision+1${set} WHERE operation_id='${CUTOVER_ID}'`
+const HISTORY_SEED = [
+  `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,scope_json,started_at,updated_at)
+     VALUES('s-ខ្មែរ',1,1,7,'Count ខ្មែរ','{"a":1}','2026-10-01 00:00:00','2026-10-01 00:00:01'),('s2',1,1,7,'Second','{}','2026-10-02','2026-10-02')`,
+  `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
+     VALUES('s-ខ្មែរ',11,1,'{"n":"x"}',3.5,'{}'),('s-ខ្មែរ',12,1,'{}',NULL,'{}')`,
+  `INSERT INTO inventory_check_events(id,session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+     VALUES(5,'s-ខ្មែរ',NULL,7,'create','r1','h1','{}','{}','{}','2026-10-01'),(9,'s-ខ្មែរ',11,7,'observe','r2','h2','{}','{"q":3}','{}','2026-10-01')`,
+  `INSERT INTO branch_cutovers(operation_id,begin_request_id,actor_id,organization_id,control_incarnation,maintenance_token,
+     source_branch_id,target_branch_id,intent_json,intent_digest,source_preimage_json,target_preimage_json,maintenance_flag_json,
+     capture_digest,snapshot_digest,verification_digest,created_at,updated_at)
+     VALUES('${CUTOVER_ID}','begin_request_1',7,'org','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-000000000091',1,2,'{}','${HEX}',
+     '{"id":1}','{"id":2}','{}','${HEX}','${HEX}','${HEX}','2026-10-01 00:00:00','2026-10-01 00:00:00')`,
+  cutoverStep('snapshots', `, manifest_json='{}', manifest_digest='${HEX}'`), cutoverStep('verifying'), cutoverStep('ready'),
+  cutoverStep('completed', `, terminal_json='{"version":1,"operationId":"${CUTOVER_ID}","kind":"completed"}'`),
+]
 const SEED = [
   `INSERT INTO stock_mutation_receipts(id,actor_id,request_id,kind,request_json,written,response_status,response_json,created_at,completed_at)
      VALUES(41,7,'req-ខ្មែរ-1','adjust','{"lines":[{"p":1,"d":2.5}]}',1,200,'{"ok":true}','2026-10-01 01:02:03','2026-10-01 01:02:04'),
@@ -52,8 +73,8 @@ async function main() {
       }
     }
     for (const t of [...COVERED, 'password_reset_requests']) await db.prepare(`DELETE FROM ${t}`).run()
-    for (const sql of SEED) await db.prepare(sql).run()
-    const dump = async () => JSON.stringify(await Promise.all(COVERED.map(async (t) =>
+    for (const sql of [...SEED, ...HISTORY_SEED]) await db.prepare(sql).run()
+    const dump = async () => JSON.stringify(await Promise.all([...COVERED, ...HISTORY].map(async (t) =>
       [t, (await db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()).results])))
     const call = async (input) => {
       const response = await mf.dispatchFetch('http://local.test/', { method: 'POST', body: JSON.stringify(input) })
@@ -64,11 +85,12 @@ async function main() {
     const before = await dump()
     const { key, text } = await call({ mode: 'backup' })
     const doc = JSON.parse(text)
-    for (const t of COVERED) assert.ok(doc.tables[t], `${t} is in the backup`)
+    for (const t of [...COVERED, ...HISTORY]) assert.ok(doc.tables[t], `${t} is in the backup`)
     assert.equal(doc.tables.stock_mutation_receipts.rows.length, 2)
     assert.ok(!('password_reset_requests' in doc.tables), 'password_reset_requests is not a backup table')
     assert.ok(!text.includes('secret-device-must-not-leave'), 'reset-request data never reaches the backup bytes')
-    console.log('PASS backup carries the four ledgers and none of password_reset_requests')
+    assert.equal(doc.tables.branch_cutovers.rows[0].phase, 'completed')
+    console.log('PASS backup carries the four ledgers, the four history tables and none of password_reset_requests')
 
     for (const t of COVERED) await db.prepare(`DELETE FROM ${t}`).run()
     await db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(9,'live-only','adjust','{}')").run()
@@ -83,11 +105,15 @@ async function main() {
       db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(state),
       db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"),
     ])
+    // The guards refuse these deletes until the restore flag is set; the restore itself deletes the same way.
+    for (const t of [...HISTORY].reverse()) await db.prepare(`DELETE FROM ${t}`).run()
+    await db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,scope_json,started_at,updated_at) VALUES('live-only',1,1,7,'Live','{}','x','x')").run()
+    assert.notEqual(await dump(), before)
     const restored = await call({ mode: 'restore', key, token })
     assert.equal(restored.error, null, restored.error)
     assert.equal(await dump(), before, 'restored rows are byte-identical, ids included')
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM password_reset_requests').first()).n, 1, 'restore leaves live reset requests alone')
-    console.log('PASS restore returns every covered row byte-identically on the full migration chain')
+    console.log('PASS restore returns every covered and history row byte-identically on the full migration chain')
   } finally { await mf.dispose() }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1 })
