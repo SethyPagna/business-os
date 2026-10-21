@@ -33,6 +33,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import InfoHint from '../shared/InfoHint'
 import ProductNameRail from '../shared/ProductNameRail'
 // N13: a receipt id is never truncated -- it is shown in full and copied in
@@ -328,6 +329,18 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [failedAttempts, setFailedAttempts] = useState<FailedStockAttempt[]>([])
   const requestRef = useRef(0)
   const stockWorkflowOpen = fastStockInOpen
+  // The scanner gun fills the ledger search the camera and the keyboard fill
+  // (setSearch). While the Stock Session is open it is a dialog above this
+  // section and takes the scans itself.
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: !stockWorkflowOpen,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setSearch(code)
+      if (origin === 'field') app.notify(tr(t, 'scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
 
   // A hardware scanner behaves like a keyboard. Blur and disable the ledger
   // search before opening an adjustment workflow so its barcode cannot be
@@ -1122,7 +1135,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           className="w-full"
         />
         <div className="min-w-48 flex-1 sm:max-w-96">
-          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} disabled={stockWorkflowOpen} />
+          <SearchInput id="stock-ledger-search" inputRef={searchInputRef} name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} disabled={stockWorkflowOpen} />
         </div>
         {/* The barcode scanner rides the ledger search too (user, Aug 31:
             "bring the barcode scanner back") -- scanning a product fills the

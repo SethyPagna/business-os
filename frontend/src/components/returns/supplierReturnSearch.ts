@@ -1,6 +1,7 @@
 import {
   barcodeKeysMatch,
   barcodeSearchKeys,
+  foldNativeDigits,
   searchTermBarcodeKeys,
   sortBySearchRelevance,
 } from '../../utils/searchMatch.ts'
@@ -29,8 +30,10 @@ export function supplierReturnProductMatchesSearch(
   const textHaystack = `${product.name || ''} ${product.sku || ''} ${product.category || ''} ${product.brand || ''}`.toLowerCase()
   if (textHaystack.includes(term)) return true
 
-  const barcodeText = String(product.barcode ?? '').trim().toLowerCase()
-  if (!barcodeText.includes(term)) return false
+  // Both sides fold Khmer digits (a gun on the Khmer layout types them), but only
+  // for the barcode: a Khmer numeral in a name stays as typed.
+  const barcodeText = foldNativeDigits(String(product.barcode ?? '').trim().toLowerCase())
+  if (!barcodeText.includes(foldNativeDigits(term))) return false
 
   // A valid UPC-E and its UPC-A expansion can share the same stripped text
   // with an unrelated seven-digit internal code. Once either side is in the

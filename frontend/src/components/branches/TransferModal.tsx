@@ -37,6 +37,7 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import { hasTransferPair, soleActiveBranch } from '../../utils/branchCollapse.ts'
@@ -491,6 +492,21 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     setShowAllProducts(false)
     setSearch(barcode)
   }, [])
+  // The scanner gun fills the same search through the same handler as the
+  // camera, and a burst that lands in a quantity box is put back and moved here.
+  // Registered for as long as the float is open, so the page behind never
+  // answers a scan; a locked form (the fieldset below) ignores it like typing.
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const entryLocked = saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      if (entryLocked) return
+      handleTransferProductScan(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
 
   useEffect(() => {
     // Re-arm on mount, not just init-once: StrictMode's dev double-mount runs
@@ -1471,6 +1487,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               </label>
               <div className="mb-2 flex min-w-0 items-center gap-2">
                 <input
+                  ref={searchInputRef}
                   id="transfer-product-search"
                   name="transfer_product_search"
                   className="input min-w-0 flex-1"
@@ -1697,6 +1714,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               </label>
               <div className="sticky top-0 z-10 mb-2 flex min-w-0 items-center gap-2 bg-white pb-1 dark:bg-gray-800">
                 <input
+                  ref={searchInputRef}
                   id="transfer-product-search-multi"
                   name="transfer_product_search_multi"
                   className="input min-w-0 flex-1"

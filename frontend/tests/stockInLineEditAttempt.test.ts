@@ -29,7 +29,8 @@ function harness(componentSource = source) {
     ...refusalHelpers, stockRevertErrorText, getStockLedger: async () => ({ items: [] }),
     useState(initial: unknown) { const index = slot++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], (next: unknown) => { slots[index] = typeof next === 'function' ? next(slots[index]) : next }] },
     useRef(initial: unknown) { const index = slot++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index] },
-    useCallback: (fn: unknown) => fn, useMemo: (fn: () => unknown) => fn(), useEffect: () => {},
+    // useScannerWedge (6.0.934) listens on the window; these handlers never see a key, so it is a no-op here.
+    useCallback: (fn: unknown) => fn, useMemo: (fn: () => unknown) => fn(), useEffect: () => {}, useScannerWedge: () => {},
     useApp: () => ({ user: state.user, fmtKHR: String }), canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true,
     DEFAULT_PAGE_SIZE: 25, clampPage: () => 1, groupByBusinessDay: () => [],
     getStockInSessions: async () => ({ sessions: [], total: 0 }),

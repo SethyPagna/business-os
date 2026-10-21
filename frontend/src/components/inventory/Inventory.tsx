@@ -21,6 +21,7 @@ import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -1086,6 +1087,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value)
   }, [])
+  // The scanner gun fills the search the camera and the keyboard fill, through
+  // the same handler.
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: isActive,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      handleSearchChange(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
 
   // The row and detail Adjust open the Stock Session with that product picked.
   const openAdjust = (p: InventoryProduct) => openFastStockIn(p)
@@ -2392,6 +2404,7 @@ ${inventoryFeesFormulaText}`,
           <div className="flex items-center gap-1.5">
             <SearchInput
               id="inventory-search"
+              inputRef={searchInputRef}
               name="inventory_search"
               ariaLabel="Inventory search"
               value={search}

@@ -4,6 +4,7 @@
 // (cloudflare/src/lib/productImageOnlyQuery.ts), so a control is never offered that would answer 403.
 // Option lists come from the search response's own `facets` -- never the shared filter vocabulary, which would
 // hand the whole taxonomy to a role that was not granted it.
+import { useRef } from 'react'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import Tag from 'lucide-react/dist/esm/icons/tag.js'
@@ -12,6 +13,8 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
+import { useApp } from '../../AppContext'
 import type { DateTimeRange, DateTimeRangeSource } from '../shared/DateTimeRangePicker.tsx'
 
 export type ImageOnlyScope = {
@@ -47,6 +50,17 @@ export default function ProductsImageOnlyControls({
   showBatches, showStock, showCategory, showBrand, range, onRangeChange, search, onSearchChange,
   scope, onScopeChange, categories, brands, t,
 }: Props) {
+  const { notify } = useApp() as unknown as { notify: (message: string, tone?: string) => void }
+  // The scanner gun fills the search the camera and the keyboard fill (onSearchChange).
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      onSearchChange(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
   const all: AppSelectOption = { value: '', label: t('all') }
   const select = (key: string, label: string, Icon: typeof Boxes, value: string, options: AppSelectOption[], onChange: (next: string) => void) => (
     <AppSelect key={key} value={value} options={options} onChange={onChange}
@@ -59,7 +73,7 @@ export default function ProductsImageOnlyControls({
         <StatsRangeRow layout="scroll" compactRange range={range} onRangeChange={onRangeChange} t={t} />
       ) : null}
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-        <SearchInput id="products-image-only-search" value={search} onChange={onSearchChange}
+        <SearchInput id="products-image-only-search" inputRef={searchInputRef} value={search} onChange={onSearchChange}
           ariaLabel={t('search')} placeholder={t('search')} className="block min-w-0 flex-1" inputClassName="h-11" />
         <ScanSearchButton onDetected={onSearchChange} t={t} />
       </div>

@@ -12,6 +12,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import SectionTitleAction from '../shared/SectionTitleAction.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { createRowSearch } from '../../utils/rowSearch.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { ProductImg } from './shared/primitives.tsx'
@@ -303,6 +304,16 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
+  // The scanner gun fills the filter the camera and the keyboard fill (setSearch).
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setSearch(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
   const [severityFilter, setSeverityFilter] = useState<Severity | 'all'>('all')
   const [dismissingId, setDismissingId] = useState<string | null>(null)
   const [mergingId, setMergingId] = useState<string | null>(null)
@@ -781,6 +792,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
         <div className="relative min-w-[9rem] flex-1 shrink-0">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <input
+            ref={searchInputRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
