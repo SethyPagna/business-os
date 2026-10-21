@@ -9,7 +9,8 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 //   - a code that is not in the open session says so; a saved scan row clears Search again on a desktop;
 //   - a saved tick reads neither the products nor the session again; a query change reads products only;
 //   - a gun burst into a Count box puts that box back and fills Search (blocked, and said so, while a row holds unsaved work);
-//   - the same for the open editor's Reason box (6.0.940): it saves the issue on Enter, so a burst there must not become a reason.
+//   - the same for the open editor's Reason box (6.0.940): it saves the issue on Enter, so a burst there must not become a reason;
+//   - a burst put back from a field says "Barcode moved to search" like every other surface (6.0.945), but only when the scan is accepted.
 const fixture = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
@@ -88,7 +89,7 @@ const fixture = String.raw`
     return stamps
   }
   window.history.replaceState(null, '', '/inventory#hub:inventory:' + (params.get('section') || 'products'))
-  const app = { ...FALLBACK_APP_CONTEXT, t, language, page: 'inventory', authReady: true, canWriteToServer: true, settings: { navigation_mode: 'sections' }, AccessDenied: () => null,
+  const app = { ...FALLBACK_APP_CONTEXT, t, language, page: 'inventory', authReady: true, canWriteToServer: true, notify: (message, kind) => { window.__notices = window.__notices || []; window.__notices.push([message, kind]) }, settings: { navigation_mode: 'sections' }, AccessDenied: () => null,
     user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true } },
     navigateTo: (page, anchor) => { window.history.pushState(null, '', '/inventory#' + (anchor || '')); window.dispatchEvent(new CustomEvent('bos:navigate', { detail: { page, path: '/inventory', anchor } })) } }
   createRoot(document.getElementById('root')).render(<AppContext.Provider value={app}><div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><InventoryChecksPage /></div></AppContext.Provider>)
@@ -106,6 +107,7 @@ const settleReads = async () => { await browser.pause(700) }
 const rowIds = () => browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-inventory-check-row]'), row => row.getAttribute('data-inventory-check-row'))`)
 const searchValue = () => browser.evaluate<string>(`document.querySelector('#inventory-check-search').value`)
 const focused = () => browser.evaluate<{ id: string; count: boolean; action: string | null; row: string | null }>(`(() => { const a = document.activeElement; const row = a && a.closest ? a.closest('[data-inventory-check-row]') : null; return { id: a ? a.id : '', count: !!a && a.hasAttribute('data-check-count'), action: a ? a.getAttribute('data-check-action') : null, row: row ? row.getAttribute('data-inventory-check-row') : null } })()`)
+const notices = () => browser.evaluate<unknown[]>('window.__notices || []')
 const hitRows = () => browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-scan-hit]'), row => row.getAttribute('data-inventory-check-row'))`)
 
 // A scanner gun: trusted key events whose key is the Khmer layout's digit and whose code is the physical key, each `gapMs` after the last by timestamp.
@@ -251,6 +253,7 @@ await browser.run('PASS Inventory scan flow: debounce, Enter, one-hit focus by s
   await browser.waitFor('hit focused', async () => { const where = await focused(); return where.count && where.row === '13' ? true : null })
   assert.equal(await browser.evaluate(`document.querySelector('[data-inventory-check-row="13"] [data-check-count]').value`), '', 'no digit of the code stayed in a Count box')
   assert.equal(await count('patch'), 0, 'a gun burst saves nothing')
+  assert.deepEqual(await notices(), [[en.scan_moved_to_search, 'info']], 'a burst put back from a Count box says the code moved to Search, as every other surface does')
   // With unsaved work in a row the page does not swap the list under it: the box is still put back, the code is not lost silently.
   await openSession(1280)
   await browser.evaluate(`document.querySelector('[data-inventory-check-row="14"] [data-check-count]').focus()`)
@@ -262,6 +265,7 @@ await browser.run('PASS Inventory scan flow: debounce, Enter, one-hit focus by s
   assert.equal(await count('products'), readsBeforeBlocked, 'the unsaved row holds the list still')
   assert.ok((await browser.evaluate<string>(`Array.from(document.querySelectorAll('[role="alert"]'), node => node.textContent).join('|')`)).includes(en.inventory_check_count_blocked_busy), 'and the page says why')
   assert.equal(await count('patch'), 0)
+  assert.deepEqual(await notices(), [], 'a blocked scan moved nothing, so it does not say the code moved')
   // 6b. The open editor's Reason box (saves the issue on Enter): the burst is not typed into the reason and saves nothing.
   await openSession(1280)
   await browser.mouseClick('[data-inventory-check-row="14"] [data-check-action="issue"]')
@@ -286,4 +290,5 @@ await browser.run('PASS Inventory scan flow: debounce, Enter, one-hit focus by s
   await gunBurst('8850001112223')
   await browser.waitFor('idle burst narrowed', async () => (await rowIds()).join() === '12' ? true : null)
   assert.equal(await searchValue(), '8850001112223', 'a scan with nothing focused is no longer lost')
+  assert.deepEqual(await notices(), [], 'nothing was put back from a field, so there is nothing to announce')
 })

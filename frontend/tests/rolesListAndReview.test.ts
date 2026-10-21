@@ -162,7 +162,10 @@ await runTest('B1 pure: extras are their own lines and Full never folds them in;
   const moduleRows = rows.filter((row) => row.kind === 'module')
   const firstQuiet = moduleRows.findIndex((row) => row.sensitivity !== 'critical')
   assert.ok(firstQuiet > 0 && moduleRows.slice(firstQuiet).every((row) => row.sensitivity !== 'critical'), 'every module holding a critical change comes before the quiet ones')
-  assert.equal(moduleRows[moduleRows.length - 1].id, 'dashboard', 'Dashboard is first in the catalogue but a quiet change, so it is listed last')
+  assert.deepEqual(moduleRows.slice(firstQuiet).map((row) => row.id), ['dashboard', 'customer_portal', 'library'], 'the quiet changes keep catalogue order: Dashboard, then the two modules Settings Full now includes')
+  const included = en.perm_covered_by_module.replace('{module}', en.perm_section_settings)
+  assert.deepEqual(rows.find((row) => row.id === 'customer_portal')?.lines.map((line) => line.text), [included, `+ ${en.perm_short_posts}`, `+ ${en.faq}`, `+ ${en.about}`, `+ ${en.perm_short_site_setup}`], 'Settings Full opens the four Website Editor areas, and the review says why')
+  assert.deepEqual(rows.find((row) => row.id === 'library')?.lines.map((line) => line.text), [`${en.none} → ${en.label_full_access}`, included], 'and the Library, which the Worker opens for Settings Full')
   const products = rows.find((row) => row.id === 'products')
   assert.ok(products, 'one row for Products')
   const [level, ...rest] = products.lines

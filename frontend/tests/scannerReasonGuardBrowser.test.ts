@@ -250,9 +250,10 @@ try {
   })
 
   // ---------------------------------------------------------------- the stock-session float
+  // The item is as picking it left it (Qty 1 and the catalogue cost and price): only the Reason is typed, and clearing keeps the
+  // reason, so a scan may clear the item. With a typed Qty the item is kept instead (6.0.945), in the next case.
   await test('session: a burst into the line\'s Reason box leaves the reason as it was, adds no line, and lands in the search', async () => {
     await open('session')
-    await page.fill('input[aria-label="Qty"]', '5')
     await page.fill('input[aria-label="Reason"]', 'Shelf')
     await page.focus('input[aria-label="Reason"]')
     await typeKeys(gun(CODE), 4)
@@ -261,6 +262,20 @@ try {
     assert.equal(await lineAdded(), false, 'the burst\'s Enter did not run the Reason box\'s add')
     assert.equal(await page.inputValue('input[aria-label="Reason"]'), 'Shelf', 'the Reason box is exactly as it was: no digit of the code stayed in it')
     assert.deepEqual(await notices(), [['Barcode moved to search', 'info']])
+  })
+
+  await test('session: the same burst into the Reason box of an item with a typed Qty puts the reason back, adds no line, and keeps the item (6.0.945)', async () => {
+    await open('session')
+    await page.fill('input[aria-label="Qty"]', '5')
+    await page.fill('input[aria-label="Reason"]', 'Shelf')
+    await page.focus('input[aria-label="Reason"]')
+    await typeKeys(gun(CODE), 4)
+    await page.waitForTimeout(400)
+    assert.equal(await page.locator(SEARCH_SESSION).count(), 0, 'the typed item stays, so the search stays hidden')
+    assert.equal(await lineAdded(), false, 'the burst\'s Enter did not run the Reason box\'s add')
+    assert.equal(await page.inputValue('input[aria-label="Reason"]'), 'Shelf', 'no digit of the code stayed in the Reason box')
+    assert.equal(await page.inputValue('input[aria-label="Qty"]'), '5', 'and the typed quantity is still there')
+    assert.deepEqual(await notices(), [['Add or clear this item first', 'warning']])
   })
 
   await test('session: a person typing a reason and pressing Enter still adds the line', async () => {

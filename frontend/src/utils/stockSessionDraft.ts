@@ -639,6 +639,25 @@ export function lineEntryRefusal(input: {
   return { key: gate, fallback: gate, field: gate === 'supplier_required' ? 'supplier' : 'cost', gate }
 }
 
+export type LineEntryValues = { quantity: string; unitCost: string; sellingPrice: string; expiryDate: string }
+
+const sameEntryValue = (typed: string, filled: string): boolean => {
+  const a = String(typed ?? '').trim()
+  const b = String(filled ?? '').trim()
+  return a === b || (a !== '' && b !== '' && Number.isFinite(Number(a)) && Number(a) === Number(b))
+}
+
+/**
+ * Whether clearing the entry row would throw away something a person typed: a quantity, cost, price or date that is
+ * not what the row was loaded with (`loaded`: what picking the product filled in, or the line being edited), or a
+ * product made in this session that is not an item yet. The reason and the condition tag are not counted: clearing
+ * the row keeps both for the next item. A scan clears a picked row, so it asks this first.
+ */
+export function lineEntryHasTypedValues(entry: LineEntryValues & { holdsNewProduct: boolean }, loaded: Partial<LineEntryValues>): boolean {
+  if (entry.holdsNewProduct) return true
+  return (['quantity', 'unitCost', 'sellingPrice', 'expiryDate'] as const).some((field) => !sameEntryValue(entry[field], loaded[field] ?? ''))
+}
+
 export type SessionLinesRefusal = { key: string; messageKey: string; fallback: string; field: 'qty' | 'supplier' | 'cost' }
 
 /**

@@ -396,20 +396,70 @@ await test('the Website Editor row shows a half-filled Full dot for some grants 
   await surface.unmount()
 })
 
-await test('Settings Full shows the extras the Worker includes as locked on, and Receipts and Security as separate switches', async () => {
+await test('Settings Full shows every extra the Worker includes as locked on; only Security stays a separate switch', async () => {
   const { surface } = await mountEditor({ settings: true })
   await openModule(surface, 'settings')
   const grant = (key: string) => surface.find((node) => node.getAttribute('data-perm-grant') === key, key)
-  for (const key of ['business_identity', 'sales_policy', 'drive_credentials']) {
+  for (const key of ['business_identity', 'sales_policy', 'receipt_settings', 'drive_credentials']) {
     assert.equal(grant(key).getAttribute('aria-checked'), 'true', `${key} is held`)
     assert.equal(propsOf(grant(key)).disabled, true, `${key} cannot be switched off here`)
-    assert.ok((grant(key).getAttribute('title') ?? '').includes(en.perm_covered_by_full))
+    assert.ok((grant(key).getAttribute('title') ?? '').includes(en.perm_covered_by_full), `${key} says it is included`)
   }
-  for (const key of ['receipt_settings', 'security_settings']) {
-    assert.equal(grant(key).getAttribute('aria-checked'), 'false', `${key} stays separate`)
-    assert.notEqual(propsOf(grant(key)).disabled, true)
-  }
+  assert.equal(grant('security_settings').getAttribute('aria-checked'), 'false', 'Security stays separate: no Worker route grants it through Settings')
+  assert.notEqual(propsOf(grant('security_settings')).disabled, true)
   assert.ok((cell(surface, 'settings', 'full').getAttribute('title') ?? '').includes(en.perm_full_includes_some))
+  await surface.unmount()
+})
+
+await test('Settings Full also holds the Website Editor and the Library: both rows read Full, locked, and say whose Full includes them', async () => {
+  const included = en.perm_covered_by_module.replace('{module}', en.perm_section_settings)
+  const { surface, state } = await mountEditor({ settings: true })
+  for (const id of ['customer_portal', 'library']) {
+    assert.equal(cell(surface, id, 'full').getAttribute('aria-pressed'), 'true', `${id} reads Full`)
+    assert.equal(cell(surface, id, 'none').getAttribute('aria-pressed'), 'false', `${id} does not read None`)
+    for (const level of ['none', 'full']) {
+      assert.equal(propsOf(cell(surface, id, level)).disabled, true, `${id} ${level} is locked`)
+      assert.ok((cell(surface, id, level).getAttribute('title') ?? '').includes(included), `${id} ${level} says "${included}"`)
+    }
+    await surface.call(cell(surface, id, 'none'), 'onClick', [])
+    await surface.call(cell(surface, id, 'full'), 'onClick', [])
+  }
+  assert.equal(state.calls, 0, 'a locked dot changes nothing')
+  assert.ok(moduleNode(surface, 'library').textContent.includes(included), 'the Library has no words of its own, so its row says why it is Full')
+  await openModule(surface, 'customer_portal')
+  assert.ok(moduleNode(surface, 'customer_portal').textContent.includes(included), 'the open Website Editor panel says it too')
+  for (const key of ['portal_posts', 'portal_faq', 'portal_about', 'customer_portal']) {
+    const chip = surface.find((node) => node.getAttribute('data-perm-grant') === key, key)
+    assert.equal(chip.getAttribute('aria-checked'), 'true', `${key} is held`)
+    assert.equal(propsOf(chip).disabled, true, `${key} cannot be switched off while Settings is Full`)
+    assert.ok((chip.getAttribute('title') ?? '').includes(included), `${key} names the module whose Full includes it, not just 'Full'`)
+  }
+  await surface.unmount()
+  const view = await mountEditor({ settings: 'view' })
+  for (const id of ['customer_portal', 'library']) {
+    assert.equal(cell(view.surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} is None under Settings View`)
+    assert.notEqual(propsOf(cell(view.surface, id, 'full')).disabled, true, `${id} is a normal row under Settings View`)
+  }
+  await view.surface.unmount()
+})
+
+await test('in Khmer the included rows and chips use the Khmer words, with the module name filled in', async () => {
+  const included = km.perm_covered_by_module.replace('{module}', km.perm_section_settings)
+  const { surface } = await mountEditor({ settings: true }, { language: km })
+  assert.ok(included !== en.perm_covered_by_module && !/[A-Za-z]/.test(included), 'the Khmer note is Khmer')
+  assert.ok((cell(surface, 'library', 'full').getAttribute('title') ?? '').includes(included))
+  await openModule(surface, 'customer_portal')
+  assert.ok(moduleNode(surface, 'customer_portal').textContent.includes(included))
+  assert.ok(moduleNode(surface, 'library').textContent.includes(included))
+  await openModule(surface, 'settings')
+  assert.ok((surface.find((node) => node.getAttribute('data-perm-grant') === 'receipt_settings', 'receipts').getAttribute('title') ?? '').includes(km.perm_covered_by_full))
+  await surface.unmount()
+})
+
+await test('the gold dot follows a row held through Settings Full, which the save review also lists', async () => {
+  const { surface } = await mountEditor({ settings: true }, { baseline: { settings: 'view' } })
+  const dotted = modules(surface).filter((node) => node.getAttribute('data-perm-changed') === 'true').map((node) => node.getAttribute('data-perm-module'))
+  assert.deepEqual(dotted, ['customer_portal', 'settings', 'library'], 'Settings moved, and so did the two rows it now includes (catalogue order)')
   await surface.unmount()
 })
 

@@ -8,7 +8,9 @@
 //
 // Nothing here changes the stored format. A level tap writes the same keys the old pickers wrote, with one
 // deliberate difference: Full sets a module's main key and nothing else, so costs, destructive imports, Security,
-// Drive, backup restore and the Suppliers section stay separate switches.
+// backup restore and the Suppliers section stay separate switches. What the Worker already grants through Settings
+// Full (Identity, Policies, Receipts, Drive, the Website Editor, the Library) reads as held and locked, never as off
+// (see `coveredBy`): the grid describes what a role can really do.
 import { PERMISSION_SECTIONS, permissionDefinitionValue, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions.ts'
 import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, type ActionOutcome, type ActionRequirement, type PermissionAction } from '../../utils/permissionActions.ts'
 import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
@@ -95,7 +97,7 @@ export function tierLevel(value: PermissionValue | undefined): Level {
 /** The tier the action table is read at: the level for a tiered module, on/off for the rest. */
 function actionTierOf(row: ModuleRow, perms: PermissionState): Level {
   if (!row.lead) return 'none'
-  return row.lead.tier ? tierLevel(perms[row.lead.key]) : perms[row.lead.key] === true ? 'full' : 'none'
+  return row.lead.tier ? tierLevel(perms[row.lead.key]) : perms[row.lead.key] === true || isCoveredByFull(row.lead, perms) ? 'full' : 'none'
 }
 
 /** Whether the Inventory check sessions row inherits from Inventory: it is not set and Inventory is on. */
@@ -180,6 +182,8 @@ export function chipStates(row: ModuleRow, perms: PermissionState): ChipState[] 
 export interface ModuleState {
   level: Level
   admin: boolean
+  /** The key whose Full already grants this whole row (Library, Website Editor under Settings Full): the row reads Full and is locked. */
+  coveredBy: string | null
   /** A group row with some but not all grants on. */
   partial: { on: number; total: number } | null
   /** The Inventory check sessions row, not set, while Inventory is on: counting follows Inventory. */
@@ -201,6 +205,35 @@ export function isCoveredByFull(def: PermissionDefinition, perms: PermissionStat
   return !!def.coveredBy && perms[def.coveredBy] === true
 }
 
+/**
+ * The key whose Full already grants every key of this row: the Library, and the Website Editor's four areas, under
+ * Settings Full. Such a row reads Full whatever it stores, and a level tap cannot change that, exactly as for a
+ * covered extra. Null for every row that keeps its own grants (including the Settings row, whose extras are chips).
+ */
+export function rowCoveredBy(row: ModuleRow, perms: PermissionState): string | null {
+  const defs = row.group.length ? row.group : row.lead && !row.lead.tier ? [row.lead] : []
+  const cover = defs[0]?.coveredBy
+  return cover && defs.every((def) => def.coveredBy === cover) && perms[cover] === true ? cover : null
+}
+
+/** The module whose Full holds a grant, and whether that is the grant's own module. Null for a grant nothing covers. */
+function coveringSection(def: PermissionDefinition): { section: PermissionSection; own: boolean } | null {
+  if (!def.coveredBy) return null
+  const section = PERMISSION_SECTIONS.find((entry) => entry.permissions.some((candidate) => candidate.key === def.coveredBy))
+  return section ? { section, own: section.permissions.some((candidate) => candidate.key === def.key) } : null
+}
+
+/**
+ * The words that say a grant is held without being stored: "Included in Full" beside the module that holds it,
+ * "Included in Settings Full" on any other row (where "Full" alone would read as that row's own). Empty when nothing covers it.
+ */
+export function coverNote(def: PermissionDefinition, tr: Translate): string {
+  const cover = coveringSection(def)
+  if (!cover) return ''
+  if (cover.own) return tr('perm_covered_by_full', 'Included in Full')
+  return tr('perm_covered_by_module', 'Included in {module} Full').replace('{module}', tr(cover.section.tKey, cover.section.label))
+}
+
 /** What the role really holds: stored on, or included in the module's Full. */
 const isGranted = (perms: PermissionState, def: PermissionDefinition): boolean => isOn(perms, def.key) || isCoveredByFull(def, perms)
 
@@ -213,11 +246,11 @@ export function moduleState(row: ModuleRow, perms: PermissionState): ModuleState
   let partial: ModuleState['partial'] = null
   if (admin) level = 'full'
   else if (row.group.length) {
-    const on = row.group.filter((def) => isOn(perms, def.key)).length
+    const on = row.group.filter((def) => isGranted(perms, def)).length
     if (on === row.group.length) level = 'full'
     else if (on > 0) partial = { on, total: row.group.length }
   } else if (row.lead) {
-    level = row.lead.tier ? tierLevel(perms[row.lead.key]) : perms[row.lead.key] === true ? 'full' : 'none'
+    level = row.lead.tier ? tierLevel(perms[row.lead.key]) : perms[row.lead.key] === true || isCoveredByFull(row.lead, perms) ? 'full' : 'none'
   }
   const held: PermissionDefinition[] = [
     ...(row.lead && level !== 'none' && !row.group.length ? [row.lead] : []),
@@ -228,6 +261,7 @@ export function moduleState(row: ModuleRow, perms: PermissionState): ModuleState
   return {
     level,
     admin,
+    coveredBy: admin ? null : rowCoveredBy(row, perms),
     partial,
     follows: followsMain(row, perms),
     extrasOn,
@@ -293,6 +327,8 @@ export function moduleChanged(row: ModuleRow, perms: PermissionState, baseline: 
   if (baseline === undefined || baseline === null) return false
   const before = normalizePermissionState(baseline)
   if (!!before.all !== !!perms.all) return true
+  // A row held through another module's Full (Library, Website Editor) changes when that Full does, though none of its keys moved.
+  if (rowCoveredBy(row, perms) !== rowCoveredBy(row, before)) return true
   return rowKeys(row, perms, before).some((key) => readValue(perms, key, row) !== readValue(before, key, row))
 }
 
@@ -330,6 +366,8 @@ function exclusivityOf(key: string): PermissionDefinition | undefined {
 export function applyModuleLevel(row: ModuleRow, level: Level, perms: PermissionState): PermissionState {
   if (perms.all) return perms
   if (level !== 'none' && level !== 'full' && level !== row.middle) return perms
+  // Settings Full already grants this whole row on the Worker; a tap here would only look like it switched it off.
+  if (rowCoveredBy(row, perms)) return perms
   // The count-session row decides on its own, and the Worker reads whether the key is PRESENT: absent follows
   // Inventory, true grants, an explicit false denies. So None stores a false instead of deleting the key (deleting
   // it would quietly hand counting back to Inventory), and following again is its own tap (followInventory).

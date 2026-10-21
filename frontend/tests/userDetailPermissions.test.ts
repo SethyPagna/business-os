@@ -53,6 +53,26 @@ for (const [name, language] of [['English', en], ['Khmer', km]] as const) {
   })
 }
 
+for (const [name, language] of [['English', en], ['Khmer', km]] as const) {
+  await test(`${name} user detail: a role with Settings Full also reads Full in the Website Editor and the Library, which the Worker includes`, async () => {
+    const props = {
+      user: { id: 8, name: 'Sok', username: 'sok', role_id: 4, is_active: 1, permissions: '{}' },
+      roles: [{ id: 4, name: 'Manager', permissions: JSON.stringify({ settings: true }) }],
+      t: pack(language),
+    }
+    const surface = await harness.mount({ component: 'components/users/UserDetailSheet.tsx', props, app: { t: pack(language) }, doubles: {} })
+    const [roleList] = surface.findAll((node) => node.tagName === 'UL')
+    const lines = roleList.querySelectorAll('li').map((line) => line.textContent)
+    assert.equal(lines.length, 3, 'one line each for the three modules, and nothing else')
+    assert.deepEqual(['perm_section_customer_portal', 'perm_section_settings', 'perm_section_library'].map((key, index) => lines[index].startsWith(language[key])), [true, true, true], 'in catalogue order')
+    for (const line of lines) assert.ok(line.includes(language.label_full_access), `"${line}" reads Full`)
+    const editor = lines[0]
+    for (const word of ['perm_short_posts', 'faq', 'about']) assert.ok(editor.includes(language[word]), `the Website Editor line names ${word}`)
+    assert.ok(editor.includes('+1'), 'and counts the fourth area')
+    await surface.unmount()
+  })
+}
+
 await harness.close()
 console.log(failed ? `\n${failed} test(s) FAILED` : '\nall tests passed')
 if (failed) process.exitCode = 1
