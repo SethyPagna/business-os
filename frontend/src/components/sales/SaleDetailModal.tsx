@@ -58,6 +58,8 @@ import {
   type StagedAddLine,
 } from './saleAddLines.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 // The POS's own product card and the one 'units at this branch' rule it is
 // read with -- the same rule saleAddLines.ts caps a staged line by.
 import ProductCard from '../pos/ProductCard.tsx'
@@ -443,7 +445,7 @@ export default function SaleDetailModal({
     if (!pendingStatus || !statusRecoveryOwner) return
     return claimSyncProblemPresentation(statusRecoveryOwner)
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
-  const { navigateTo, user, authReady } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean }
+  const { navigateTo, user, authReady, notify } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean; notify?: (message: string, kind?: string) => void }
   const securityFingerprint = saleSecurityFingerprint(user, authReady)
   const moneyCapability = useSaleMoneyCapability(Boolean(sale && user && authReady), securityFingerprint, sale?.money_precision_version !== 1)
   const savedMoneyVersion = sale?.money_precision_version === 1 ? 1 : 0
@@ -939,6 +941,39 @@ export default function SaleDetailModal({
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+
+  // ---- scanner: camera and gun ----
+  // A scan only fills a search; the person still picks the card. Typing, the camera
+  // and the gun all end in changeAddQuery. It sits above the `!sale` return because
+  // the two hooks below cannot follow it.
+  const changeAddQuery = (value: string): void => {
+    // Invalidate immediately, before React commits the next render/effect.
+    // This closes the small window in which an older query could resolve
+    // after the user has already typed a different value.
+    ++addSearchSeqRef.current
+    setAddQuery(value)
+  }
+  // Typing into the add-items box is dropped while a disabled sale branch has no
+  // redirect yet (focusing the box asks for one), so a scan asks the same first.
+  const fillAddSearch = (value: string): void => {
+    if (!saleBranchDisabled || stockRedirect !== null) { changeAddQuery(value); return }
+    void confirmStockRedirect().then((ready) => { if (ready && detailAliveRef.current) changeAddQuery(value) })
+  }
+  const replaceSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const tellScanMoved = (origin: ScanOrigin): void => {
+    if (origin === 'field') notify?.(translateOr('scan_moved_to_search', 'Barcode moved to search', 'បាកូដត្រូវបានផ្លាស់ទៅប្រអប់ស្វែងរក'), 'info')
+  }
+  // One target at a time: the replace-line search while it is open, else add-items.
+  useScannerWedge({
+    enabled: replaceLineId === null,
+    searchRef: addSearchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => { fillAddSearch(code); tellScanMoved(origin) },
+  })
+  useScannerWedge({
+    enabled: replaceLineId !== null,
+    searchRef: replaceSearchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => { changeAddQuery(code); tellScanMoved(origin) },
+  })
 
   const items = useMemo(() => parseItems(sale?.items), [sale?.items])
 
@@ -1600,13 +1635,6 @@ export default function SaleDetailModal({
     const text = addQuery.trim()
     if (text.length < 2 || !addSearchCanLoadMore || addSearching || addLoadingMore) return
     void loadAddProductSearchPage(text, addSearchPage.page + 1, true)
-  }
-  const changeAddQuery = (value: string): void => {
-    // Invalidate immediately, before React commits the next render/effect.
-    // This closes the small window in which an older query could resolve
-    // after the user has already typed a different value.
-    ++addSearchSeqRef.current
-    setAddQuery(value)
   }
   const searchProgressLabel = `${t('showing') || 'Showing'} ${addSearchVisible} ${t('of') || 'of'} ${addSearchTotal} ${t('products') || 'products'}`
   const addedSubtotalUsd = sumMoney4(addLines.map(line => multiplyMoney4(line.unitPriceUsd, line.quantity)))
@@ -2320,13 +2348,17 @@ export default function SaleDetailModal({
                                 second picker with its own bugs. */}
                             {replaceLineId === lineId ? (
                               <div className="mt-2">
-                                <input
-                                  type="search"
-                                  value={addQuery}
-                                  onChange={(event) => changeAddQuery(event.target.value)}
-                                  placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
-                                  className="w-full rounded border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                                />
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    ref={replaceSearchInputRef}
+                                    type="search"
+                                    value={addQuery}
+                                    onChange={(event) => changeAddQuery(event.target.value)}
+                                    placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
+                                    className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                                  />
+                                  <ScanSearchButton onDetected={changeAddQuery} t={(key) => t(key) || key} />
+                                </div>
                                 {addSearching && addCandidates.length === 0 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
                                 ) : null}
@@ -2623,21 +2655,24 @@ export default function SaleDetailModal({
               <label htmlFor="sale-add-item-search" className="mb-1 block text-xs text-gray-400">
                 {t('product') || 'Product'}
               </label>
-              <input
-                id="sale-add-item-search"
-                ref={addSearchInputRef}
-                className="input h-10 text-sm"
-                value={addQuery}
-                onFocus={(event) => {
-                  if (!saleBranchDisabled || stockRedirect !== null) return
-                  const input = event.currentTarget
-                  input.blur()
-                  void confirmStockRedirect().then((ready) => { if (ready) input.focus() })
-                }}
-                onChange={(event) => { if (!saleBranchDisabled || stockRedirect !== null) changeAddQuery(event.target.value) }}
-                placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
-                autoComplete="off"
-              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="sale-add-item-search"
+                  ref={addSearchInputRef}
+                  className="input h-10 min-w-0 flex-1 text-sm"
+                  value={addQuery}
+                  onFocus={(event) => {
+                    if (!saleBranchDisabled || stockRedirect !== null) return
+                    const input = event.currentTarget
+                    input.blur()
+                    void confirmStockRedirect().then((ready) => { if (ready) input.focus() })
+                  }}
+                  onChange={(event) => { if (!saleBranchDisabled || stockRedirect !== null) changeAddQuery(event.target.value) }}
+                  placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
+                  autoComplete="off"
+                />
+                <ScanSearchButton onDetected={fillAddSearch} t={(key) => t(key) || key} />
+              </div>
               {saleBranchDisabled && stockRedirect !== null ? (
                 <p data-sale-stock-redirect="" className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                   {translateOr('branch_redirect_to', 'Redirect to')}: <span className="font-semibold text-gray-700 dark:text-gray-200">{branchRows?.find((row) => Number(row.id) === stockRedirect)?.name || `#${stockRedirect}`}</span>

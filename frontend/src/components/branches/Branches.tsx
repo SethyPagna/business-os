@@ -29,6 +29,7 @@ import FilterMenu from '../shared/FilterMenu'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
@@ -311,6 +312,48 @@ function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:tex
         <div className={`detail-scroll-text text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
         {sub ? <div className="mt-0.5 min-w-0 detail-scroll-text text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">{sub}</div> : null}
       </button>
+    </div>
+  )
+}
+
+// One scanner-gun target per expanded branch (a hook cannot run inside the map):
+// a scan made with nothing focused goes to the branch opened last. Typing, the
+// camera and the gun all end in `onChange`, so a scan reaches the same
+// debounced server search a typed code does.
+function BranchStockSearch({ id, branchName, value, enabled, onChange, notify, t, tr }: {
+  id: string | number
+  branchName: string
+  value: string
+  enabled: boolean
+  onChange: (value: string) => void
+  notify: NotifyFunction
+  t: TranslateFunction
+  tr: (key: string, fallback: string) => string
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled,
+    searchRef: inputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      onChange(code)
+      if (origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
+  const placeholder = tr('branch_stock_search_placeholder', 'Search products in this branch')
+  return (
+    <div className="mb-2 flex min-w-0 items-center gap-1.5 sm:max-w-sm">
+      <input
+        ref={inputRef}
+        id={`branch-stock-search-${id}`}
+        name={`branch_stock_search_${id}`}
+        type="search"
+        className="input h-9 min-w-0 flex-1 text-sm"
+        placeholder={placeholder}
+        aria-label={`${placeholder} — ${branchName}`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <ScanSearchButton onDetected={onChange} t={(key) => t(key) || key} className="h-9 w-9 rounded-lg" />
     </div>
   )
 }
@@ -1536,23 +1579,16 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                               function ... above the each branch['s products] and
                               below the mini sections") -- server-backed, so it
                               finds products beyond the 20 rows already loaded. */}
-                          <div className="mb-2 flex min-w-0 items-center gap-1.5 sm:max-w-sm">
-                            <input
-                              id={`branch-stock-search-${branch.id}`}
-                              name={`branch_stock_search_${branch.id}`}
-                              type="search"
-                              className="input h-9 min-w-0 flex-1 text-sm"
-                              placeholder={tr('branch_stock_search_placeholder', 'Search products in this branch')}
-                              aria-label={`${tr('branch_stock_search_placeholder', 'Search products in this branch')} — ${branch.name || ''}`}
-                              value={branchStockSearch[String(branch.id)] ?? ''}
-                              onChange={(event) => handleBranchStockSearchChange(branch.id, event.target.value)}
-                            />
-                            <ScanSearchButton
-                              onDetected={(value) => handleBranchStockSearchChange(branch.id, value)}
-                              t={(key) => t(key) || key}
-                              className="h-9 w-9 rounded-lg"
-                            />
-                          </div>
+                          <BranchStockSearch
+                            id={branch.id}
+                            branchName={branch.name || ''}
+                            value={branchStockSearch[String(branch.id)] ?? ''}
+                            enabled={isActive}
+                            onChange={(value) => handleBranchStockSearchChange(branch.id, value)}
+                            notify={notify}
+                            t={t}
+                            tr={tr}
+                          />
 
                           {inStock.length === 0 ? (
                             <p className="rounded-lg bg-gray-50 py-4 text-center text-sm text-gray-400 dark:bg-gray-700/30">

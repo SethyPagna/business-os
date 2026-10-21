@@ -21,6 +21,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import Modal from '../shared/Modal.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import SearchInput from '../shared/SearchInput.tsx'
 import { Skeleton } from '../shared/kit'
 import ContactPicker from '../contacts/ContactPicker.tsx'
@@ -199,6 +200,17 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [settlement, setSettlement] = useState<SettlementMethod>('refund')
   const [notes, setNotes] = useState('')
   const [search, setSearch] = useState('')
+  // The scanner gun fills the search the camera and the keyboard fill (setSearch);
+  // a burst into a returned-quantity box is put back and moved here.
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setSearch(code)
+      if (origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [compensationUsd, setCompensationUsd] = useState('')
   const [compensationKhr, setCompensationKhr] = useState('')
@@ -504,6 +516,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           <div className="mb-2 flex items-center gap-1.5">
             <SearchInput
               id="supplier-return-search"
+              inputRef={searchInputRef}
               value={search}
               onChange={setSearch}
               placeholder={tr('search_products', 'Search products…')}

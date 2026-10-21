@@ -710,7 +710,9 @@ await runTest('remaining product search surfaces expose controlled icon-only sca
       name: 'branch stock',
       path: '../src/components/branches/Branches.tsx',
       importPath: '../shared/ScanSearchButton.tsx',
-      wiring: /onDetected=\{\(value\) => handleBranchStockSearchChange\(branch\.id, value\)\}/,
+      // The per-branch search is its own component since 6.0.934 (a scanner-gun hook cannot run inside the
+      // map): the camera hands the code to the component's onChange, which the page binds to the typed handler.
+      wiring: /<ScanSearchButton onDetected=\{onChange\}[\s\S]*<BranchStockSearch[\s\S]*?onChange=\{\(value\) => handleBranchStockSearchChange\(branch\.id, value\)\}/,
     },
     {
       name: 'supplier return product picker',

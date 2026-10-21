@@ -32,6 +32,7 @@ import { StockLineChange } from '../shared/StockLineChange.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { IconField, InsetNumberField } from '../stock-session/StockSessionSharedDetails.tsx'
@@ -248,6 +249,17 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const [sessions, setSessions] = useState<Session[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  // Typing, the camera and the scanner gun all end here: a new search starts on page 1.
+  const changeSearch = (value: string) => { setSearch(value); setPage(1) }
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      changeSearch(code)
+      if (origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalSessions, setTotalSessions] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -602,8 +614,8 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
 
   return <div className="space-y-3">
     <div className="sticky top-0 z-20 flex gap-2 bg-gray-50 py-1 dark:bg-gray-900">
-      <div className="min-w-0 flex-1"><SearchInput id="stock-in-session-search" value={search} onChange={(value) => { setSearch(value); setPage(1) }} placeholder={tr('search_stock_sessions', 'Search products, suppliers, users…')} /></div>
-      <ScanSearchButton onDetected={(value) => { setSearch(value); setPage(1) }} t={t} />
+      <div className="min-w-0 flex-1"><SearchInput id="stock-in-session-search" inputRef={searchInputRef} value={search} onChange={changeSearch} placeholder={tr('search_stock_sessions', 'Search products, suppliers, users…')} /></div>
+      <ScanSearchButton onDetected={changeSearch} t={t} />
     </div>
     {loading ? <div className="py-10 text-center text-sm text-gray-400">{tr('loading', 'Loading')}…</div> : loadError ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"><p>{loadError}</p><button type="button" className="btn-secondary mt-3 h-9 px-3 text-xs" onClick={() => void load()}>{tr('retry', 'Retry')}</button></div> : !sessions.length ? <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400 dark:border-gray-700">{tr('no_stock_sessions', 'No stock-in sessions found')}</div> : (<>
       <div className="desktop-dense-only dense-data-shell">

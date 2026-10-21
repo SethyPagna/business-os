@@ -18,6 +18,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import Modal from '../shared/Modal.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { fmtTime } from '../../utils/formatters'
@@ -584,6 +585,18 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       setReplacementSearching(false)
     }
   }
+  // The scanner gun does what the camera does: the code becomes the replacement
+  // query and narrows the list (the person still picks the row). A burst into a
+  // returned quantity or a lot box is put back and moved here.
+  const replacementSearchRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: step === 'items',
+    searchRef: replacementSearchRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      void searchReplacementCatalog(code)
+      if (origin === 'field') notify(T('scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
   const removeReplacement = (lineKey: string) => setReplacements((prev) => prev.filter((line) => line.key !== lineKey))
 
   // Load ONE sale (by exact id) and open the item step on it. Both entry
@@ -1402,6 +1415,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 </div>
                 <div className="flex gap-2">
                   <input
+                    ref={replacementSearchRef}
                     className="input h-9 min-w-0 flex-1 py-1 text-xs"
                     value={replacementQuery}
                     onChange={(event) => { setReplacementQuery(event.target.value); setReplacementSearched(false) }}

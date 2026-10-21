@@ -22,6 +22,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -228,6 +229,23 @@ export default function PromotionsPage() {
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerResults, setPickerResults] = useState<ProductLite[]>([])
   const searchSeq = useRef(0)
+
+  // The scanner gun fills the same two searches the camera and the keyboard fill.
+  // The editors are plain overlays, not dialogs, so the page's own search stands
+  // down while one is open and the rule editor's picker takes the scan instead.
+  const discountSearchRef = useRef<HTMLInputElement | null>(null)
+  const pickerSearchRef = useRef<HTMLInputElement | null>(null)
+  const movedNotice = (origin: ScanOrigin) => { if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info') }
+  useScannerWedge({
+    enabled: activeSection === 'discounts' && canManageDiscounts && !draft && !discountDraft,
+    searchRef: discountSearchRef,
+    onScan: (code: string, origin: ScanOrigin) => { setProductQuery(code); movedNotice(origin) },
+  })
+  useScannerWedge({
+    enabled: Boolean(draft) && canManagePromotions,
+    searchRef: pickerSearchRef,
+    onScan: (code: string, origin: ScanOrigin) => { setPickerQuery(code); movedNotice(origin) },
+  })
 
   const loadRules = useCallback(async () => {
     setRulesLoading(true)
@@ -657,6 +675,7 @@ export default function PromotionsPage() {
               <div className="relative min-w-0 flex-1">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
+                  ref={discountSearchRef}
                   className={`${inputCls} pl-8`}
                   placeholder={t('promo_search_product_placeholder') || 'Search a product to set its discount...'}
                   value={productQuery}
@@ -939,7 +958,7 @@ export default function PromotionsPage() {
                   )}
                   <div className="flex min-w-0 items-start gap-1.5">
                     <div className="relative min-w-0 flex-1">
-                      <input className={inputCls} value={pickerQuery}
+                      <input ref={pickerSearchRef} className={inputCls} value={pickerQuery}
                         placeholder={t('promo_pick_products_placeholder') || 'Search products to add...'}
                         onChange={(event) => setPickerQuery(event.target.value)} />
                       {pickerResults.length > 0 && (

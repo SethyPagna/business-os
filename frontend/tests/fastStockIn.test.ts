@@ -165,8 +165,12 @@ runTest('STK-06: an unmatched scan or search offers prefilled creation', () => {
   assert.match(modalSource, /const \[scannedBarcode, setScannedBarcode\]/)
   assert.match(modalSource, /onScan=\{\(value\) => \{[^]*?setScannedBarcode\(barcode\)/s)
   assert.match(modalSource, /const createText = mode === 'add' && canCreate && !picked && query\.trim\(\)\.length >= 2 && searchCompleteFor === query\.trim\(\) \? query\.trim\(\) : null/)
-  assert.match(modalSource, /const looksLikeBarcode = \/\^\\d\{6,\}\$\/\.test\(text\) \|\| \(scannedBarcode && scannedBarcode === text\)/)
-  assert.match(modalSource, /setCreateForm\(\{ name: looksLikeBarcode \? '' : text, barcode: looksLikeBarcode \? text : '' \}\)/)
+  // 6.0.934: the same rule, moved to utils/stockSessionCreateSeed.ts so Khmer digits (a scanner gun on the
+  // Khmer layout) fold to ASCII first; the behaviour is proved in scannerSurfacesStockSessionCreateMounted.test.ts.
+  assert.match(modalSource, /setCreateForm\(createFormSeed\(text, scannedBarcode\)\)/)
+  const createSeedSource = readFileSync(new URL('../src/utils/stockSessionCreateSeed.ts', import.meta.url), 'utf8')
+  assert.match(createSeedSource, /const looksLikeBarcode = \/\^\\d\{6,\}\$\/\.test\(barcode\) \|\| \(scannedBarcode !== '' && scannedBarcode === text\)/)
+  assert.match(createSeedSource, /looksLikeBarcode \? \{ name: '', barcode \} : \{ name: text, barcode: '' \}/)
 })
 
 runTest('STK-06: creation reuses ProductForm and resumes without losing the stock session', () => {

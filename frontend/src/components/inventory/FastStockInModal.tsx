@@ -34,6 +34,7 @@ import { adjustBranchQuantity, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_
 import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
+import { createFormSeed } from '../../utils/stockSessionCreateSeed.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useDialogKeyboard } from '../shared/useDialogKeyboard.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -784,8 +785,7 @@ export default function FastStockInModal({
     const text = query.trim()
     if (!text) return
     persistSessionDraft()
-    const looksLikeBarcode = /^\d{6,}$/.test(text) || (scannedBarcode && scannedBarcode === text)
-    setCreateForm({ name: looksLikeBarcode ? '' : text, barcode: looksLikeBarcode ? text : '' })
+    setCreateForm(createFormSeed(text, scannedBarcode))
   }
 
   // Another account signed in (or the session is locked): nothing more is sent
@@ -1395,7 +1395,9 @@ export default function FastStockInModal({
                   setQuery(barcode)
                   setPicked(null)
                   setScannedBarcode(barcode)
+                  setCreatePayload(null)
                 }}
+                onScanMoved={() => notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')}
                 picked={picked}
                 pickedStock={branchQuantity}
                 pickedIsNew={Boolean(createPayload) || (picked ? createdProductIds.includes(String(picked.id)) : false)}

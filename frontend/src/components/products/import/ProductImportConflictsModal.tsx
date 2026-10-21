@@ -10,7 +10,7 @@
 // key family below deliberately mirrors the sibling's
 // contacts_import_conflicts_* names, and productImportReviewSurfaces.test.ts
 // pins both the lookups and the pack entries.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../../AppContext'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
@@ -18,6 +18,7 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Modal from '../../shared/Modal'
 import ScanSearchButton from '../../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../../shared/useScannerWedge.ts'
 import { getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import PaginationControls from '../../shared/PaginationControls'
 
@@ -69,6 +70,18 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
   const [unresolved, setUnresolved] = useState(0)
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
+  // The scanner gun fills the search the camera and the keyboard fill. Its Enter
+  // would otherwise click a focused Use safe result / Skip row button.
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: true,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setQuery(code)
+      setPage(1)
+      if (origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
+    },
+  })
   const [loading, setLoading] = useState(true)
   const [savingRow, setSavingRow] = useState<number | null>(null)
 
@@ -136,7 +149,7 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
         <div className="flex min-w-0 items-center gap-1.5">
           <label className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder={tr('products_import_conflicts_search', 'Search product, barcode, or SKU')} />
+            <input ref={searchInputRef} type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder={tr('products_import_conflicts_search', 'Search product, barcode, or SKU')} />
           </label>
           <ScanSearchButton onDetected={(value) => { setQuery(value); setPage(1) }} t={scannerText} />
         </div>
