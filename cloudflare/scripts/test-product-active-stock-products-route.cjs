@@ -157,7 +157,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
-  '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({}) },
+  '../lib/productSalesLedger': { getProductSalesBreakdown: async () => ({}), productLedgerGroups: async () => [] },
   '../lib/bulkDeleteEngine': { createBulkDeleteJob: async () => { if (bulkAdmissionError) throw bulkAdmissionError; return {} }, getBulkDeleteJob: async () => null, reapStalledBulkDeleteJobs: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
   '../lib/uploadSecurity': { validateUploadedBuffer: async () => ({ ok: true }) },

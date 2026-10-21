@@ -323,10 +323,10 @@ const LABELS = {
   reviewLaterOpen: { en: 'Opened at a later time', km: 'បើកនៅម៉ោងក្រោយ' },
   reviewReopenedAfterEarlierClose: { en: 'Reopened after an earlier-time close', km: 'បើកឡើងវិញពីការបិទដែលមានម៉ោងមុន' },
   staleShiftNeedsAdmin: { en: 'An earlier shift is still open: an administrator must close it', km: 'វេនមុនមួយនៅបើក៖ អ្នកគ្រប់គ្រងត្រូវមកបិទ' },
-  // The sale's unpaid amount stays a positive memo -- see formatShiftReport
-  // and formatDaySummary. This label is deliberately separate from supplier
+  // What Not Paid sales still owe (owner, 21 Oct 2026), a positive memo -- see
+  // formatShiftReport and formatDaySummary. Deliberately separate from supplier
   // and store credit, which are different financial concepts.
-  credit: { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },
+  credit: { en: 'Still owed', km: 'ប្រាក់នៅជំពាក់' },                // km.json not_paid_owed
 
   // --- sectioned layout (owner, Sep 21 2026: "just smarter and compact ...
   // enough spacing and separations that it feels easy to read and clean,
@@ -344,6 +344,9 @@ const LABELS = {
   // "Sales" names the section; the money inside it is the canonical revenue,
   // under the word the owner's own reference layout uses ("Revenue: $ 0.00").
   revenue: { en: 'Revenue', km: 'ចំណូល' },                          // km.json revenue
+  // Owner, 20 Oct 2026: revenue and profit also WITHOUT Not Paid sales.
+  revenuePaidOnly: { en: 'Revenue (paid only)', km: 'ចំណូល (បានបង់)' },   // km.json revenue_paid_only
+  profitPaidOnly: { en: 'Profit (paid only)', km: 'ចំណេញ (បានបង់)' },     // km.json profit_paid_only
   // The owner's reference splits the cut two ways -- "Discount on Items" and
   // "Discount on Invoices" -- so the two figures keep their own names instead
   // of collapsing into the receipt summary's single `discount` label.

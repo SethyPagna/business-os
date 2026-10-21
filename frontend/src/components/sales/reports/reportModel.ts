@@ -425,6 +425,11 @@ export interface ReportTotals {
    */
   net_sales_usd?: number
   pending_revenue_usd: number
+  /** Owner, 20 Oct 2026: revenue without Not Paid sales; revenue_usd - this = pending_revenue_usd to the cent.
+   *  Presence-signalled like net_sales_usd: an older Worker sends neither, and a 0 would print a false figure. */
+  revenue_without_not_paid_usd?: number
+  /** What Not Paid sales still owe after amounts paid and returns, delivery included. */
+  not_paid_owed_usd?: number
   collected_total_usd: number
   avg_order_usd: number
   // ---- the awaiting-payment cohort (S4R3-6) --------------------------------
@@ -450,6 +455,8 @@ export interface ReportTotals {
   cost_missing_snapshot_lines?: number
   pending_cost_usd?: number
   pending_profit_usd?: number
+  /** profit_usd without Not Paid sales; admin money like profit_usd. */
+  profit_without_not_paid_usd?: number
   // ---- stock removed entirely, priced at cost (owner, Sep 14 2026) ---------
   // "for the losses due to remove stock actions, i want in stat a break down of
   // revenue/profit excluding the losses caused by this. and including caused by
@@ -479,6 +486,8 @@ export interface ReportTotals {
 // field left out of this list silently reads 0 on every totals line -- which
 // looks like "the figure vanished" rather than like an error -- so a new
 // non-admin field on SalesTotals belongs in the interface above AND here.
+/** The with/without Not Paid pair's public figures (owner, 20-21 Oct 2026): copied and summed only when sent. */
+const NOT_PAID_SPLIT_KEYS = ['revenue_without_not_paid_usd', 'not_paid_owed_usd'] as const
 const TOTAL_KEYS: Array<keyof ReportTotals> = [
   'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'item_discount_usd', 'total_discount_usd', 'tax_usd', 'delivery_usd',
   'store_delivery_usd', 'delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_sale_count', 'delivery_margin_usd',
@@ -502,6 +511,7 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
   // as "this window sold nothing net" rather than "the server did not say".
   if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round4(num(r.net_sales_usd))
+  for (const k of NOT_PAID_SPLIT_KEYS) if (typeof r[k] === 'number') out[k] = round4(num(r[k]))
   if (typeof r.cost_usd === 'number') {
     out.cost_usd = num(r.cost_usd)
     out.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
@@ -516,6 +526,7 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
       out.profit_usd = num(r.profit_usd)
       out.margin_pct = typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
       out.pending_profit_usd = num(r.pending_profit_usd)
+      if (typeof r.profit_without_not_paid_usd === 'number') out.profit_without_not_paid_usd = num(r.profit_without_not_paid_usd)
     }
   }
   if (r.profit_excludes_delivery === true) out.profit_excludes_delivery = true
@@ -579,6 +590,8 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   let missing = 0
   let pendingCost = 0
   let pendingProfit = 0
+  const allProfitPaidOnly = allProfit && rows.every((r) => typeof r.profit_without_not_paid_usd === 'number')
+  let profitPaidOnly = 0
   // Same all-or-nothing rule the profit keys use: one row that never carried
   // the removal block would make the summed loss quietly short, so the absence
   // propagates instead of being filled with a zero nobody measured.
@@ -598,6 +611,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       missing += num(r.cost_missing_snapshot_lines)
       pendingCost += num(r.pending_cost_usd)
       pendingProfit += num(r.pending_profit_usd)
+      if (allProfitPaidOnly) profitPaidOnly += num(r.profit_without_not_paid_usd)
     }
     if (allLosses) {
       removalLoss += num(r.removal_loss_usd)
@@ -611,6 +625,9 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   out.avg_order_usd = out.tx_count > 0 ? round2(out.revenue_usd / out.tx_count) : 0
   if (rows.some((r) => r.courier_cost_hidden)) out.courier_cost_hidden = true
   if (allNetSales) out.net_sales_usd = round4(netSales)
+  for (const k of NOT_PAID_SPLIT_KEYS) {
+    if (rows.length > 0 && rows.every((r) => typeof r[k] === 'number')) out[k] = round4(rows.reduce((sum, r) => sum + num(r[k]), 0))
+  }
   if (allProfit) {
     if (rows.some((r) => r.profit_excludes_delivery)) out.profit_excludes_delivery = true
     out.cost_usd = round4(cost)
@@ -619,6 +636,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     out.cost_missing_snapshot_lines = missing
     out.pending_cost_usd = round4(pendingCost)
     out.pending_profit_usd = round4(pendingProfit)
+    if (allProfitPaidOnly) out.profit_without_not_paid_usd = round4(profitPaidOnly)
   }
   if (allLosses) {
     out.removal_loss_usd = round4(removalLoss)
@@ -728,6 +746,8 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     // like profit_rounding.
     net_sales_floor: round2(netSales - headerNet),
     pending_credit: t.pending_revenue_usd,
+    revenue_paid_only: num(t.revenue_without_not_paid_usd),
+    not_paid_owed: num(t.not_paid_owed_usd),
     refunds: t.refund_usd,
     revenue: t.revenue_usd,
     // net sales and refunds are round2'd on their own, so the step to REVENUE
@@ -783,6 +803,7 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     )
     fig.pending_cogs = num(t.pending_cost_usd)
     fig.pending_profit = num(t.pending_profit_usd)
+    if (typeof t.profit_without_not_paid_usd === 'number') fig.profit_paid_only = t.profit_without_not_paid_usd
     fig.pending_rounding = round2(
       num(t.pending_profit_usd)
         - (t.pending_revenue_usd - num(t.pending_cost_usd) + (goodsOnly ? 0 : t.pending_delivery_usd - t.pending_delivery_cost_usd)),
@@ -859,7 +880,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   if (revenueRounding.usd !== 0) lines.push(revenueRounding)
   lines.push(
     line('revenue', 'revenue', 'Revenue', 'total', 'revenue', ['rpt_hint_revenue', 'Net sales of all non-cancelled sales minus refunds. Tax and delivery are excluded.']),
-    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Cash actually collected; Not Paid sales are excluded.']),
+    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Money actually taken: paid sales with their tax and delivery, plus amounts paid on Not Paid sales, less cash refunds.']),
   )
   if (hasProfit(sales)) {
     lines.push(
@@ -974,13 +995,18 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
 }
 
 /**
- * Credit is already included in sales, revenue, COGS and profit. This single
- * positive memo reports the outstanding subset once without subtracting it
- * again or repeating the retired debt label.
+ * Not Paid is already included in sales, revenue, COGS and profit. These memos
+ * report it once -- its revenue, the revenue and profit without it (owner, 20
+ * Oct 2026) and what it still owes -- never subtracting anything again.
  */
 function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
-  return [line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
+  return [
+    line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Revenue of Not Paid sales. Included in revenue and profit; Revenue (paid only) leaves it out.']),
+    ...(typeof t.revenue_without_not_paid_usd === 'number' ? [line('revenue_paid_only', 'revenue_paid_only', 'Revenue (paid only)', 'memo', 'pending', ['rpt_hint_revenue_paid_only', 'Revenue without Not Paid sales. Revenue − Revenue (paid only) = Not Paid.'])] : []),
+    ...(typeof t.profit_without_not_paid_usd === 'number' ? [line('profit_paid_only', 'profit_paid_only', 'Profit (paid only)', 'memo', 'pending')] : []),
+    ...(typeof t.not_paid_owed_usd === 'number' ? [line('not_paid_owed', 'not_paid_owed', 'Still owed', 'memo', 'pending', ['rpt_hint_not_paid_owed', 'What Not Paid sales still owe after amounts paid and returns, delivery included.'])] : []),
+  ]
 }
 
 /**

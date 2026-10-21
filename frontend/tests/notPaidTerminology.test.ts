@@ -78,7 +78,8 @@ assert.equal(km.ar_overpaid, 'សមតុល្យអតិថិជន')
 
 const telegramLang = read('../../cloudflare/src/lib/telegramLang.ts')
 const telegram = read('../../cloudflare/src/lib/telegram.ts')
-assert.match(telegramLang, /credit: \{ en: 'Not Paid', km: 'ប្រាក់ជំពាក់' \}/)
+// Owner, 21 Oct 2026: the Telegram line is the amount Not Paid sales still OWE, labelled so.
+assert.match(telegramLang, /credit: \{ en: 'Still owed', km: 'ប្រាក់នៅជំពាក់' \}/)
 // UPDATED Sep 23 2026. The unsettled sale's total no longer needs a branch of
 // its own to be called Not Paid: the money line is labelled with the sale's
 // STATUS, whatever that status is, and `awaiting payment` is spelled Not Paid

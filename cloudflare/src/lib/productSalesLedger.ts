@@ -120,7 +120,8 @@
 // against. Per-product revenue is derived from the LINE totals, which those
 // receipts do carry, so the pair is already matched and dropping them would
 // delete real line income instead of protecting it.
-import { netSaleExpr, recognizedExpr, RESTOCKED_RETURN_LINE } from './salesAnalytics'
+import { netSaleExpr, recognizedExpr, RESTOCKED_RETURN_LINE, whereActiveSales, type SalesFilters } from './salesAnalytics'
+import type { D1Compat } from './db'
 
 export type ProductSalesLedgerOptions = {
   /**
@@ -149,6 +150,12 @@ export type ProductSalesLedgerOptions = {
    * Applied to BOTH sides, which is what makes clause 1 hold.
    */
   saleClauses?: string[]
+  /**
+   * An expression over the sale row (aliased `s`) -- a local day, a month, the
+   * sale id. Each product's row is then split by it (column `grp`, with
+   * `sale_count`), so a breakdown reads the same netted figures as the list.
+   */
+  groupExpr?: string
 }
 
 /** The sale's net value in KHR -- netSaleExpr's twin, floored the same way. */
@@ -181,7 +188,7 @@ function refundBasisLineExpr(lineCol: string, subtotalCol: string, netSql: strin
  * does, so the four surfaces cannot drift apart again.
  */
 export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = {}): string {
-  const { requestedIds = false, branchScoped = false, saleClauses = [] } = options
+  const { requestedIds = false, branchScoped = false, saleClauses = [], groupExpr } = options
   const soldIdsJoin = requestedIds ? 'JOIN requested_ids ids ON ids.product_id = si.product_id' : ''
   const returnIdsJoin = requestedIds ? 'JOIN requested_ids ids ON ids.product_id = ri.product_id' : ''
   // The sale-side predicate, shared verbatim by both halves apart from the
@@ -202,8 +209,9 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   // that filter deliberately OFF -- as the denominators the apportionment
   // divides by. They have to be the same expression, or a branch's share would
   // be measured against a different number from the one it is subtracted from.
-  const soldLinesSql = (scope: string, byBranch: boolean) => `
-      SELECT si.sale_id AS sale_id,
+  const soldLinesSql = (scope: string, byBranch: boolean, grouped = false) => `
+      SELECT si.sale_id AS sale_id,${grouped && groupExpr ? `
+             ${groupExpr} AS grp,` : ''}
              si.product_id AS product_id,
              si.branch_id AS branch_id,
              SUM(si.quantity) AS qty_sold,
@@ -220,7 +228,7 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
       ${soldIdsJoin}
       JOIN sales s ON s.id = si.sale_id
       WHERE ${scope}
-      GROUP BY si.sale_id, si.product_id${byBranch ? ', si.branch_id' : ''}`
+      GROUP BY si.sale_id, si.product_id${byBranch ? ', si.branch_id' : ''}${grouped && groupExpr ? ', grp' : ''}`
 
   // Every branch line of the sale for that product, NEVER branch-filtered,
   // with the sale's whole figure for the product beside each branch's share of
@@ -393,7 +401,7 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
       GROUP BY r.sale_id, ri.product_id`
 
   return `
-    SELECT sold.product_id AS product_id,
+    SELECT sold.product_id AS product_id,${groupExpr ? ' sold.grp AS grp, COUNT(DISTINCT sold.sale_id) AS sale_count,' : ''}
            -- Units carry the SAME residual cap as the money below. After the
            -- apportionment above, a branch is only offered the share of a
            -- reversal that belongs to it, so this bites on ONE case: a return
@@ -429,10 +437,56 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
            -- Sold lines with no recorded cost. SUM() above skips them, so the
            -- COGS is the sum of the KNOWN lines; this is how many were left out.
            SUM(sold.cogs_unknown_lines) AS cogs_unknown_lines
-    FROM (${soldLinesSql(soldScope, branchScoped)}
+    FROM (${soldLinesSql(soldScope, branchScoped, true)}
     ) sold
     LEFT JOIN (${retSql}
     ) ret ON ret.sale_id = sold.sale_id AND ret.product_id = sold.product_id${branchScoped ? ' AND ret.branch_id = sold.branch_id' : ''}
-    GROUP BY sold.product_id
+    GROUP BY sold.product_id${groupExpr ? ', sold.grp' : ''}
   `
+}
+
+/**
+ * One product's sales, net of receipt discounts and returns, split by
+ * `groupExpr` over the sale row `s`: productSalesLedger's figures, the ones the
+ * Inventory list prints, so the detail page cannot disagree with the list.
+ */
+export async function productLedgerGroups(
+  db: Pick<D1Compat, 'prepare'>, productId: number, saleClauses: string[], params: Record<string, unknown>, groupExpr: string,
+): Promise<Array<Record<string, unknown> & { grp: unknown }>> {
+  const rows = await db.prepare(`WITH requested_ids(product_id) AS (SELECT @productId)
+    ${buildProductSalesLedgerSql({ requestedIds: true, saleClauses, groupExpr })}`)
+    .all<Record<string, unknown> & { grp: unknown }>({ ...params, productId })
+  return rows || []
+}
+
+// D3 (Part 422): the product detail page's sales breakdown -- how much of
+// ONE product sold per day and per month, through the SAME active-sales
+// predicate every other number on the Sales surfaces uses (single-source
+// rule; a cancelled sale never counts anywhere). Day rows cover the filter
+// range; month rows aggregate the same range by month. The caller hands in
+// the local day and month expressions over `s.created_at`.
+export type ProductSalesBreakdownRow = {
+  period: string
+  qty: number
+  revenue_usd: number
+  sale_count: number
+}
+
+export async function getProductSalesBreakdown(
+  db: Pick<D1Compat, 'prepare'>,
+  productId: number,
+  f: SalesFilters,
+  periods: { day: string; month: string },
+): Promise<{ by_day: ProductSalesBreakdownRow[]; by_month: ProductSalesBreakdownRow[] }> {
+  const { sql: activeSql, params } = whereActiveSales('s', f)
+  const run = async (periodExpr: string): Promise<ProductSalesBreakdownRow[]> => {
+    const rows = await productLedgerGroups(db, productId, [activeSql], params, periodExpr)
+    return rows.sort((a, b) => String(b.grp).localeCompare(String(a.grp))).map((row) => ({
+      period: String(row.grp || ''),
+      qty: Number(row.qty_sold) || 0,
+      revenue_usd: Math.round((Number(row.revenue_usd) || 0) * 100) / 100,
+      sale_count: Number(row.sale_count) || 0,
+    }))
+  }
+  return { by_day: await run(periods.day), by_month: await run(periods.month) }
 }

@@ -171,10 +171,10 @@ test('business rows exclude drawer counts and keep Credit positive once', () => 
   const rows = shiftFigureRows(shiftFiguresOf(shift))
   assert.deepEqual(rows.map((row) => row.key), [
     'sales', 'cogs', 'profit', 'delivery_fees', 'delivery_actual_cost',
-    'shift_other_expenses', 'refunds', 'credit_awaiting_payment',
+    'shift_other_expenses', 'refunds', 'not_paid_owed',
   ])
-  assert.equal(rows.find((row) => row.key === 'credit_awaiting_payment')?.usd, 12)
-  assert.equal(rows.filter((row) => row.key === 'credit_awaiting_payment').length, 1)
+  assert.equal(rows.find((row) => row.key === 'not_paid_owed')?.usd, 12)
+  assert.equal(rows.filter((row) => row.key === 'not_paid_owed').length, 1)
   assert.equal(rows.find((row) => row.key === 'profit')?.tone, 'positive')
   assert.ok(rows.every((row) => row.usd !== 999), 'registered drawer counts never enter business rows')
 })
@@ -184,7 +184,7 @@ test('removal losses are three rows directly below unpaid, omitted when the Work
   const rows = shiftFigureRows({ ...figures, removal_loss_usd: 30, revenue_after_losses_usd: 70, profit_after_losses_usd: -2 })
   assert.deepEqual(rows.map((row) => row.key), [
     'sales', 'cogs', 'profit', 'delivery_fees', 'delivery_actual_cost',
-    'shift_other_expenses', 'refunds', 'credit_awaiting_payment',
+    'shift_other_expenses', 'refunds', 'not_paid_owed',
     'rpt_removal_loss', 'rpt_revenue_after_losses', 'rpt_profit_after_losses',
   ])
   // The canonical figures above stay exactly what they were.
@@ -228,7 +228,7 @@ test('the removal-loss row carries unvaluedCount only when the Worker reports un
 
 test('negative stale Credit is floored without changing any other figure', () => {
   const rows = shiftFigureRows({ ...figures, credit_usd: -4 })
-  assert.equal(rows.find((row) => row.key === 'credit_awaiting_payment')?.usd, 0)
+  assert.equal(rows.find((row) => row.key === 'not_paid_owed')?.usd, 0)
   assert.equal(rows.find((row) => row.key === 'profit')?.usd, 58)
 })
 

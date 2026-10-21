@@ -26,7 +26,7 @@ import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBindin
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
-import { getProductSalesBreakdown } from '../lib/salesAnalytics'
+import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
 import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
@@ -1656,7 +1656,8 @@ app.get('/:id/detail-report', async (c) => {
     LIMIT 100
   `).all<Record<string, unknown>>({ productId })
 
-  const sales = await getProductSalesBreakdown(c.env, productId, { startDate, endDate })
+  const sales = await getProductSalesBreakdown(getDb(c.env), productId, { startDate, endDate },
+    { day: localDateExpr('s.created_at'), month: localMonthExpr('s.created_at') })
 
   return c.json({
     product_id: productId,
@@ -1699,20 +1700,19 @@ app.get('/:id/sales-detail', async (c) => {
   // the drill-down's @period key (a breakdown row's local day/month) resolves to
   // the same rows -- a UTC period here would mismatch on the local-day edges.
   const periodExpr = mode === 'month' ? localMonthExpr('s.created_at') : localDateExpr('s.created_at')
-  const rows = await getDb(c.env).prepare(`
-    SELECT s.id, s.receipt_number, s.created_at, s.customer_name,
-           COALESCE(SUM(si.quantity), 0) AS qty,
-           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    WHERE si.product_id = @productId
-      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
-      AND ${periodExpr} = @period
-    GROUP BY s.id
-    ORDER BY s.created_at DESC
-    LIMIT 200
-  `).all<Record<string, unknown>>({ productId, period })
-  return c.json({ period, mode, sales: rows || [] })
+  // The breakdown's own ledger, one group per sale, so the drilled rows add up to the row that opened them.
+  const ledger = await productLedgerGroups(getDb(c.env), productId, [`${periodExpr} = @period`], { period }, 's.id')
+  const money = new Map(ledger.map((row) => [Number(row.grp), row]))
+  const heads = money.size ? await getDb(c.env).prepare(`
+    SELECT id, receipt_number, created_at, customer_name FROM sales
+    WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))
+    ORDER BY created_at DESC, id DESC LIMIT 200
+  `).all<Record<string, unknown>>({ ids: JSON.stringify([...money.keys()]) }) : []
+  const rows = (heads || []).map((head) => {
+    const row = money.get(Number(head.id))
+    return { ...head, qty: Number(row?.qty_sold) || 0, revenue_usd: Math.round((Number(row?.revenue_usd) || 0) * 10_000) / 10_000 }
+  })
+  return c.json({ period, mode, sales: rows })
 })
 
 // The batches/lots ONE supplier delivered for this product. supplierKey is the

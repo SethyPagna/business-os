@@ -244,7 +244,7 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // they are OMITTED rather than zeroed, like every other gated key here.
   const {
     cost_usd, profit_usd, cost_missing_snapshot_lines, cost_known_lines, cost_complete, pending_cost_usd, pending_profit_usd,
-    unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
+    profit_without_not_paid_usd, unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
     delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
     recognized_delivery_cost_usd, pending_delivery_cost_usd, margin_pct,
     removal_loss_usd, removal_loss_qty, removal_loss_unvalued_rows,
@@ -273,6 +273,7 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
     pending_cost_usd: money(num(pending_cost_usd)),
     pending_profit_usd: money(num(pending_profit_usd)),
+    ...(profit_without_not_paid_usd === undefined ? {} : { profit_without_not_paid_usd: money(num(profit_without_not_paid_usd)) }),
     unvalued_cost_usd: money(num(unvalued_cost_usd)),
     returned_cost_usd: money(num(returned_cost_usd)),
     returned_cost_shortfall_usd: money(num(returned_cost_shortfall_usd)),

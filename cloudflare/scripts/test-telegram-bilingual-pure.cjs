@@ -76,7 +76,7 @@ for (const [heading, km] of Object.entries(lang.TELEGRAM_HEADINGS)) {
 const englishLabels = Object.values(lang.TELEGRAM_LABELS).map((entry) => entry.en)
 assert.equal(new Set(englishLabels).size, englishLabels.length, 'two label keys share one English label')
 assert.deepEqual(lang.TELEGRAM_LABELS.cashEnd, { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' })
-assert.deepEqual(lang.TELEGRAM_LABELS.credit, { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' })
+assert.deepEqual(lang.TELEGRAM_LABELS.credit, { en: 'Still owed', km: 'ប្រាក់នៅជំពាក់' }) // owner, 21 Oct 2026: the amount Not Paid sales still owe
 assert.deepEqual(lang.TELEGRAM_LABELS.cashReview, { en: 'Cash review needed', km: 'ត្រូវពិនិត្យសាច់ប្រាក់' })
 // The Sep 21 2026 section titles and figures.
 assert.deepEqual(lang.TELEGRAM_LABELS.shiftReport, { en: 'Shift report', km: 'របាយការណ៍វេន' })

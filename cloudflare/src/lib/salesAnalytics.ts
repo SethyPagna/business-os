@@ -37,10 +37,13 @@
 //                         (unpaid credit) cohort. It is a SUBSET of
 //                         revenue_usd, reported so the unpaid part is visible
 //                         -- never a complement, and never added to revenue.
-//   collected_total_usd = collected sale value + collected tax and delivery,
-//                         minus refunds paid out. This cash-oriented secondary
-//                         figure excludes awaiting-payment credit even though
-//                         that credit is recognized in revenue and profit.
+//   revenue_without_not_paid_usd = revenue_usd less WHOLE Not Paid sales
+//                         (owner, 20 Oct 2026); revenue_usd minus it is
+//                         pending_revenue_usd exactly
+//   not_paid_owed_usd  = what Not Paid sales still owe after deposits and
+//                         the debt their returns lowered (owner, 21 Oct 2026)
+//   collected_total_usd = money actually taken (paid sales' payable, Not
+//                         Paid sales' deposits) minus cash refunds
 //   returned_cost_usd  = SUM(return_items.cost_price_usd * quantity) for lines
 //                         that went back on the SELLABLE shelf (stock_action
 //                         'restock'), on non-cancelled customer returns
@@ -138,7 +141,6 @@ import {
   localRangeClockError,
   isLocalRangeClock,
   localDateExpr,
-  localMonthExpr,
   localDateRangeClause,
   localDateAtOrAfter,
   localDateAtOrBefore,
@@ -392,13 +394,24 @@ export interface SalesTotals {
   // Unpaid credit (awaiting_payment) measured on the same net basis. It is
   // INSIDE revenue_usd (clause 4 of the scoping rule) and isolated here so the
   // unpaid part is visible; never add the two together.
+  // Owner 20 Oct 2026: revenue is shown WITH and WITHOUT Not Paid. The
+  // "without" figure leaves out WHOLE Not Paid sales. revenue_usd and
+  // revenue_without_not_paid_usd are each rounded once from the exact sums,
+  // and pending_revenue_usd is their exact difference, so
+  // revenue_usd - revenue_without_not_paid_usd = pending_revenue_usd to the cent.
   pending_revenue_usd: number
-  // Secondary cash figure: collected sale value, tax, and customer-paid
-  // delivery, less refunds paid out. Awaiting-payment credit stays out even
-  // though it is inside revenue/profit. Never the headline.
+  revenue_without_not_paid_usd: number
+  // What Not Paid sales still owe: total charged (delivery and tax included)
+  // less deposits and the debt their returns lowered (owner, 21 Oct 2026).
+  not_paid_owed_usd: number
+  // Secondary cash figure: money actually taken -- sale value, tax and
+  // customer-paid delivery on paid sales, deposits on Not Paid sales -- less
+  // cash refunds. Never the headline.
   collected_total_usd: number
   cost_usd: number
   profit_usd: number
+  // profit_usd without Not Paid sales; profit_usd - this = pending_profit_usd exactly. Cost money, gated with profit_usd.
+  profit_without_not_paid_usd: number
   avg_order_usd: number
   // ---- unknown cost (owner, 14 Oct 2026) -----------------------------------
   // A NULL cost snapshot is UNKNOWN, not $0: cost_usd and profit_usd above sum
@@ -465,7 +478,8 @@ export function emptySalesTotals(): SalesTotals {
     returned_cost_usd: 0, returned_cost_shortfall_usd: 0,
     unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
     refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
-    revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    revenue_usd: 0, pending_revenue_usd: 0, revenue_without_not_paid_usd: 0, not_paid_owed_usd: 0, collected_total_usd: 0,
+    cost_usd: 0, profit_usd: 0, profit_without_not_paid_usd: 0, avg_order_usd: 0,
     cost_missing_snapshot_lines: 0, cost_known_lines: 0, cost_complete: true,
   }
 }
@@ -1093,7 +1107,7 @@ async function readSalesReportPass(
       ${customerAnonymous} AS customer_is_anonymous,
       s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
       s.delivery_fee_usd,s.delivery_fee_paid_by,s.delivery_actual_cost_usd,s.is_delivery,
-      s.source_return_id,s.amount_paid_usd${salePrecision},
+      s.source_return_id,s.amount_paid_usd,${saleColumn('amount_paid_khr','0')},${saleColumn('exchange_rate','NULL')}${salePrecision},
       ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
       ${linkedDeliveryFee} AS delivery_has_linked_fee
     FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget, options.maxReceipts)
@@ -1104,7 +1118,9 @@ async function readSalesReportPass(
   const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
-  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
+  // The debt half of a refund (0260); absent columns read as a pre-0260 row.
+  const returnDebt = returnColumns.has('owed_reduction_usd') && returnColumns.has('refund_currency') ? ',r.owed_reduction_usd,r.refund_currency' : ''
+  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}
     FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
       AND (${primary.sql})`, 'r.id', primary.params, rowBudget)
@@ -1191,7 +1207,7 @@ const REPORT_EXACT_KEYS = [
   'recognizedNet','pendingRevenue','recognizedTax','recognizedDelivery','recognizedStoreDelivery','recognizedDeliveryCost',
   'collected','refund','refundPaid','refundCharged','refundExcess','pendingGross','pendingStoreDiscount',
   'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost','pendingReturnedCost',
-  'itemDiscount','pendingItemDiscount','unvaluedCost',
+  'itemDiscount','pendingItemDiscount','unvaluedCost','notPaidOwed',
 ] as const
 type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
 type ReportExactBucket = {
@@ -1254,6 +1270,8 @@ type ReportSaleFacts = {
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
   itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number; knownCostLines: number
+  /** What a recognized Not Paid sale still owes; 0 on every other sale. */
+  owed: ReportExactDecimal
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1314,6 +1332,30 @@ function reportV1RefundReversal(
     merchandise = merchandise.add(entitlement.subtract(taxPart))
   }
   return { merchandise, tax }
+}
+
+// What a Not Paid sale still owes (owner, 21 Oct 2026): the exact-rational reading of
+// saleStatusResolution.ts recordedSaleOutstandingUsd over the debt its returns lowered
+// (returnRefundSplit.ts planReturnMoney). Every amount is quantized half-up to four places
+// as that formula does; a legacy rate is quantized too, a V1 rate stays exact; a shortfall
+// of at most half a cent is paid. Held to that formula by test-revenue-not-paid-split-pure.cjs.
+// Money that cannot be read refuses the report, like every other unreadable amount here.
+const reportQ4 = (value: unknown): ReportExactDecimal =>
+  ReportExactDecimal.recorded(ReportExactDecimal.recorded(value == null || value === '' ? 0 : value as string | number).toText(4))
+function reportStillOwed(sale: ReportScalarRow, returned: ReportScalarRow[]): ReportExactDecimal {
+  // A pre-0260 return (no currency) lowered its whole refund on a sale that reads Not Paid.
+  const lowered = returned.reduce((sum, row) => sum.add(reportQ4(row.refund_currency == null ? row.total_refund_usd : row.owed_reduction_usd)),
+    ReportExactDecimal.zero())
+  const paidKhr = reportQ4(sale.amount_paid_khr)
+  let shortfall = reportQ4(sale.total_usd).subtract(lowered).subtract(reportQ4(sale.amount_paid_usd))
+  if (paidKhr.compare(ReportExactDecimal.zero()) !== 0) {
+    const v1 = Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null
+    const rate = sale.exchange_rate == null || sale.exchange_rate === '' ? null
+      : v1 ? ReportExactDecimal.recorded(sale.exchange_rate as string | number) : reportQ4(sale.exchange_rate)
+    if (!rate || !rate.isPositive()) throw new ReportMoneyPrecisionError('unsupported_row')
+    shortfall = shortfall.subtract(paidKhr.divide(rate))
+  }
+  return shortfall.compare(ReportExactDecimal.recorded('0.005')) <= 0 ? ReportExactDecimal.zero() : ReportExactDecimal.recorded(shortfall.toText(4))
 }
 
 // Every view of one snapshot (totals, period series, each grouping, the product split) walks the same per-sale
@@ -1406,8 +1448,9 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_fee_usd', version)
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
+    const owed = recognized && awaiting ? reportStillOwed(sale, returns.get(Number(sale.id)) || []) : ReportExactDecimal.zero()
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, knownCostLines }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, knownCostLines, owed }
   })
 }
 
@@ -1425,6 +1468,20 @@ export function reportMoneyDiagnostic(value: object): ReportMoneyReadDiagnostic 
 function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMoneyReadDiagnostic): T {
   Object.defineProperty(value, REPORT_MONEY_DIAGNOSTIC, { value: diagnostic, enumerable: false })
   return value
+}
+
+/**
+ * Money actually taken on one recognized sale, less what was given back. A
+ * paid sale took its payable; a Not Paid sale took its total less the debt its
+ * returns lowered and what it still owes (its deposits). refundPaid is every
+ * refund on the sale, so the debt half cancels and only cash refunds remain.
+ */
+function reportCollected(fact: ReportSaleFacts): ReportExactDecimal {
+  const { sale, version } = fact
+  if (fact.awaiting) return reportMoney(sale, 'total_usd', version).subtract(fact.refundPaid).subtract(fact.owed)
+  const payable = Number(sale.source_return_id || 0) !== 0
+    ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
+  return payable.subtract(fact.refundPaid)
 }
 
 function aggregateReportSnapshot(
@@ -1462,15 +1519,11 @@ function aggregateReportSnapshot(
     reportAdd(bucket, 'returnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
     reportAdd(bucket, 'itemDiscount', fact.itemDiscount); reportAdd(bucket, 'unvaluedCost', fact.unvaluedCost)
     if (!fact.valued) bucket.unvaluedTx += 1
-    const collected = !fact.awaiting
-    if (collected) {
-      const payable = Number(sale.source_return_id || 0) !== 0
-        ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
-      reportAdd(bucket, 'collected', payable.subtract(fact.refundPaid))
-      reportAdd(bucket, 'refundPaid', fact.refundPaid)
-    }
+    reportAdd(bucket, 'collected', reportCollected(fact))
+    reportAdd(bucket, 'refundPaid', fact.refundPaid)
     if (fact.awaiting) {
       bucket.pendingTx += 1
+      reportAdd(bucket, 'notPaidOwed', fact.owed)
       reportAdd(bucket, 'pendingRevenue', recognizedNet.subtract(fact.refund)); reportAdd(bucket, 'pendingGross', subtotal)
       reportAdd(bucket, 'pendingStoreDiscount', storeDiscount); reportAdd(bucket, 'pendingMembershipDiscount', membershipDiscount)
       reportAdd(bucket, 'pendingDelivery', fact.delivery); reportAdd(bucket, 'pendingDeliveryCost', fact.deliveryActual)
@@ -1501,6 +1554,11 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
   const profit = revenue.subtract(netCost).add(deliveryNet)
   const pendingCost = m.pendingCost.subtract(m.pendingReturnedCost).max(zero)
   const pendingProfit = m.pendingRevenue.subtract(pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
+  // With and without Not Paid, each rounded once; the Not Paid part is their
+  // difference at the same places, so the pair foots to the cent (owner, 20 Oct 2026).
+  const rounded = (value: ReportExactDecimal) => ReportExactDecimal.recorded(value.toText(places))
+  const revenueWithout = rounded(revenue.subtract(m.pendingRevenue))
+  const profitWithout = rounded(profit.subtract(pendingProfit))
   const diagnostic: ReportMoneyReadDiagnostic = {
     precision_mode: snapshot.precision_mode,
     complete: bucket.missingCostLines === 0,
@@ -1532,7 +1590,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     pending_delivery_usd: m.pendingDelivery.toNumber(places),
     pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(places),
     pending_cost_usd: pendingCost.toNumber(places),
-    pending_profit_usd: pendingProfit.toNumber(places),
+    pending_profit_usd: rounded(profit).subtract(profitWithout).toNumber(places),
     pending_item_discount_usd: m.pendingItemDiscount.toNumber(places),
     cancelled_tx_count: bucket.cancelledTx,
     returned_cost_usd: m.cost.min(m.returnedCost).toNumber(places),
@@ -1544,10 +1602,13 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     refund_charged_usd: m.refundCharged.toNumber(places),
     refund_excess_usd: m.refundExcess.toNumber(places),
     revenue_usd: revenue.toNumber(places),
-    pending_revenue_usd: m.pendingRevenue.toNumber(places),
+    pending_revenue_usd: rounded(revenue).subtract(revenueWithout).toNumber(places),
+    revenue_without_not_paid_usd: revenueWithout.toNumber(places),
+    not_paid_owed_usd: m.notPaidOwed.toNumber(places),
     collected_total_usd: m.collected.toNumber(places),
     cost_usd: netCost.toNumber(places),
     profit_usd: profit.toNumber(places),
+    profit_without_not_paid_usd: profitWithout.toNumber(places),
     avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber(places) : 0,
     cost_missing_snapshot_lines: bucket.missingCostLines,
     cost_known_lines: bucket.knownCostLines,
@@ -1574,10 +1635,7 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
     const cost = rawCost.max(ReportExactDecimal.zero())
     const delivery = fact.recognized ? fact.delivery : ReportExactDecimal.zero()
     const deliveryActual = fact.recognized ? fact.deliveryActual : ReportExactDecimal.zero()
-    const payable = Number(sale.source_return_id || 0) !== 0
-      ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
-    const collected = fact.awaiting || !fact.recognized
-      ? ReportExactDecimal.zero() : payable.subtract(fact.refundPaid)
+    const collected = fact.recognized ? reportCollected(fact) : ReportExactDecimal.zero()
     const raw = String(sale.created_at || '')
     const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
     const row: Record<string, unknown> = {
@@ -1839,9 +1897,12 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     refund_excess_usd: round2(num(level.refund_excess_usd)),
     revenue_usd: round2(revenueUsd),
     pending_revenue_usd: round2(pendingRevenueUsd),
+    revenue_without_not_paid_usd: round2(revenueUsd - pendingRevenueUsd),
+    not_paid_owed_usd: round2(num(level.not_paid_owed_usd)),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),
+    profit_without_not_paid_usd: round2(profitUsd - pendingProfitUsd),
     avg_order_usd: txCount > 0 ? round2(revenueUsd / txCount) : 0,
     cost_missing_snapshot_lines: num(level.missing_snapshot_lines),
     cost_known_lines: num(level.cost_known_lines),
@@ -2232,12 +2293,9 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
     const sale = fact.sale
     const method = String(sale.payment_method || '').trim() || 'Unknown'
     const found = methods.get(method) || { tx_count: 0, collected: ReportExactDecimal.zero(), total: ReportExactDecimal.zero() }
-    const payable = Number(sale.source_return_id || 0) !== 0
-      ? reportMoney(sale, 'amount_paid_usd', fact.version)
-      : reportMoney(sale, 'total_usd', fact.version)
     found.tx_count += 1
     found.total = found.total.add(reportMoney(sale, 'total_usd', fact.version))
-    if (fact.recognized && !fact.awaiting) found.collected = found.collected.add(payable.subtract(fact.refundPaid))
+    if (fact.recognized) found.collected = found.collected.add(reportCollected(fact))
     methods.set(method, found)
   }
   return [...methods.entries()].map(([payment_method, value]) => ({
@@ -2586,12 +2644,14 @@ export async function getCustomerSalesTotals(
   f: SalesFilters & { customerId: number | string },
 ): Promise<CustomerSalesTotalsRow> {
   const db = getDb(env)
-  const retainedStatusExpr = (await reportTableColumns(db, 'sales')).has('status_before_return') ? 'sales.status_before_return' : 'NULL'
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   params.customerId = f.customerId
-  const row = await db.prepare(`
+  // Collected is the kernel's money taken less cash refunds, the figure Reports print under the same label.
+  const customerScope: SalesReportScalarScope = (alias) => ({
+    sql: `${alias}.customer_id = @reportScope_customerId`, params: { reportScope_customerId: f.customerId },
+  })
+  const [snapshot, row] = await Promise.all([readSalesReportSnapshot(env, f, false, customerScope), db.prepare(`
     SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.', retainedStatusExpr)} THEN ${collectedExpr('')} ELSE 0 END), 0) AS collected_usd,
            COALESCE(SUM(discount_usd), 0) AS discount_usd,
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
@@ -2599,10 +2659,10 @@ export async function getCustomerSalesTotals(
            MAX(created_at) AS last_sale_at
     FROM sales
     WHERE ${whereSql} AND sales.customer_id = @customerId
-  `).get<Record<string, unknown>>(params)
+  `).get<Record<string, unknown>>(params)])
   return {
     tx_count: num(row?.tx_count),
-    collected_usd: round2(num(row?.collected_usd)),
+    collected_usd: salesTotalsFromSnapshot(snapshot).collected_total_usd,
     discount_usd: round2(num(row?.discount_usd)),
     membership_discount_usd: round2(num(row?.membership_discount_usd)),
     points_redeemed: round2(num(row?.points_redeemed)),
@@ -2637,9 +2697,7 @@ export async function getSalesDayReport(
     .slice(0, 1000).map((fact) => {
       const sale = fact.sale
       const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
-      const payable = Number(sale.source_return_id || 0) !== 0
-        ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
-      const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
+      const collected = fact.recognized ? reportCollected(fact) : ReportExactDecimal.zero()
       return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
         customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
         payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
@@ -2675,50 +2733,6 @@ export function previousPeriodFilters(f: SalesFilters): SalesFilters {
     previous.createdTo = new Date(shift(createdTo)).toISOString().slice(0, 19).replace('T', ' ')
   }
   return previous
-}
-
-// D3 (Part 422): the product detail page's sales breakdown -- how much of
-// ONE product sold per day and per month, through the SAME active-sales
-// predicate every other number on the Sales surfaces uses (single-source
-// rule; a cancelled sale never counts anywhere). Day rows cover the filter
-// range; month rows aggregate the same range by month.
-export type ProductSalesBreakdownRow = {
-  period: string
-  qty: number
-  revenue_usd: number
-  sale_count: number
-}
-
-export async function getProductSalesBreakdown(
-  env: Env,
-  productId: number,
-  f: SalesFilters,
-): Promise<{ by_day: ProductSalesBreakdownRow[]; by_month: ProductSalesBreakdownRow[] }> {
-  const db = getDb(env)
-  const { sql: activeSql, params } = whereActiveSales('s', f)
-  const run = async (periodExpr: string): Promise<ProductSalesBreakdownRow[]> => {
-    const rows = await db.prepare(`
-      SELECT ${periodExpr} AS period,
-             COALESCE(SUM(si.quantity), 0) AS qty,
-             COALESCE(SUM(si.total_usd), 0) AS revenue_usd,
-             COUNT(DISTINCT s.id) AS sale_count
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${activeSql} AND si.product_id = @productId
-      GROUP BY period
-      ORDER BY period DESC
-    `).all<Record<string, unknown>>({ ...params, productId })
-    return (rows || []).map((row) => ({
-      period: String(row.period || ''),
-      qty: num(row.qty),
-      revenue_usd: round2(num(row.revenue_usd)),
-      sale_count: num(row.sale_count),
-    }))
-  }
-  return {
-    by_day: await run(localDateExpr('s.created_at')),
-    by_month: await run(localMonthExpr('s.created_at')),
-  }
 }
 
 // ---------------------------------------------------------------------------

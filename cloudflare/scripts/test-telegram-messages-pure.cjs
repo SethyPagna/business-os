@@ -452,14 +452,14 @@ for (const [english, status] of Object.entries(telegramLang.TELEGRAM_VALUE_PHRAS
   assert.equal(label.km, status.km, `"${status.en}" is spelled two ways: the label table says ${label.km}, the status table says ${status.km} (${english})`)
 }
 // POSITIVE CONTROL for the loop above: it must actually have compared
-// something -- "Not Paid" (the credit label) and "Cancelled" are the two.
+// something -- "Cancelled" is the one (the credit label reads "Still owed" since 21 Oct 2026).
 assert.deepEqual(
   Object.values(telegramLang.TELEGRAM_VALUE_PHRASES)
     .filter((phrase) => typeof phrase !== 'string')
     .map((phrase) => phrase.en)
     .filter((english) => Object.values(telegramLang.TELEGRAM_LABELS).some((label) => label.en === english))
     .sort(),
-  ['Cancelled', 'Not Paid'])
+  ['Cancelled'])
 
 // --- stock change with resulting on-hand ---
 assert.deepEqual(telegram.formatStockChangeTelegramLines({
@@ -595,7 +595,7 @@ assert.ok(!writeoff.some((line) => line.startsWith('Loss:') || line.startsWith('
 const lossFigures = { ...cancelledFigures, creditUsd: 12, removalLossUsd: 30 }
 const lossReport = telegram.formatShiftReport('Shop', closedThenCancelled, lossFigures, Date.parse('2026-09-05T12:00:00.000Z'))
 const lossLines = lossReport.split('\n')
-const unpaidAt = lossLines.findIndex((line) => line.startsWith('· Not Paid/ប្រាក់ជំពាក់:'))
+const unpaidAt = lossLines.findIndex((line) => line.startsWith('· Still owed/ប្រាក់នៅជំពាក់:'))
 const lossAt = lossLines.findIndex((line) => line.startsWith('· Loss/ខាតបង់:'))
 assert.ok(unpaidAt > 0, lossReport)
 assert.equal(lossAt, unpaidAt + 1, 'the Loss row sits DIRECTLY below Not Paid')
@@ -636,7 +636,7 @@ const daySales = {
 const zeroBucket = { count: 0, usd: 0, khr: 0, quantity: 0 }
 const dayWithLoss = telegram.formatDaySummary({ date: '2026-09-14', sales: daySales, fees: zeroBucket, stockIn: zeroBucket, stockOut: zeroBucket }, [])
 const dayLines = dayWithLoss.split('\n')
-const dayUnpaid = dayLines.findIndex((line) => line.startsWith('· Not Paid/ប្រាក់ជំពាក់:'))
+const dayUnpaid = dayLines.findIndex((line) => line.startsWith('· Still owed/ប្រាក់នៅជំពាក់:'))
 assert.ok(dayUnpaid > 0, dayWithLoss)
 assert.equal(dayLines[dayUnpaid + 1], '· Loss/ខាតបង់: $30.00', dayWithLoss)
 // Turning the sales category off takes the Loss row with it, like every other
