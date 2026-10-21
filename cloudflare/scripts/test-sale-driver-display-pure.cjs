@@ -28,9 +28,11 @@ const stripOutput = ts.transpileModule(stripSource, { compilerOptions: { target:
 const stripMoney = new Function('ReportExactDecimal', 'ReportMoneyPrecisionError', `${stripOutput}; return stripMoney`)(
   reportMoneyPrecision.ReportExactDecimal, reportMoneyPrecision.ReportMoneyPrecisionError,
 )
+// The list mapper sums returned debt with the real kernel helper (lane 884 moved it).
+const { sumRefundsUsd } = compileLib('saleStatusResolution.ts', { './financialPrecision': compileLib('financialPrecision.ts') })
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const shape = new AsyncFunction('sales', 'refundsBySale', 'itemsBySale', 'recordsBySale', 'SALE_RECORDS_SELF_COUNT',
-  'ReportExactDecimal', 'stripMoney', 'db', 'resolveProductMergeLineage', 'validateCapturedSaleBasket', mapper)
+  'ReportExactDecimal', 'stripMoney', 'db', 'resolveProductMergeLineage', 'validateCapturedSaleBasket', 'sumRefundsUsd', mapper)
 const db = new Database(':memory:')
 db.exec(`CREATE TABLE customers(id INTEGER PRIMARY KEY, membership_number TEXT, is_anonymous INTEGER DEFAULT 0);
 CREATE TABLE delivery_contacts(id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
@@ -46,7 +48,7 @@ assert.ok(!sql.includes('${'), 'unresolved query template')
 const rows = await shape(db.prepare(sql).all({limit:20,offset:0}), new Map(), new Map(), new Map(), 1,
   reportMoneyPrecision.ReportExactDecimal, stripMoney, db,
   async () => { throw new Error('v1 lineage is outside this legacy display fixture') },
-  () => { throw new Error('v1 basket validation is outside this legacy display fixture') })
+  () => { throw new Error('v1 basket validation is outside this legacy display fixture') }, sumRefundsUsd)
 assert.equal(rows.length,5)
 assert.equal(rows[0].delivery_contact_name,'ដារ៉ា');assert.equal(rows[0].delivery_contact_phone,'0012034567')
 assert.equal(rows[1].delivery_contact_name,'Original name');assert.equal(rows[1].delivery_contact_phone,'000123')

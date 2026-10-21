@@ -104,6 +104,9 @@ const subject = compile('saleAmendments.ts', {
   './saleLineAddition': saleLineAddition,
   './moneyPrecision': moneyPrecision,
 })
+const saleStatusResolution = compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision })
+// saleBulkStatus imports returnDebtLoweredSql from the returns-money kernel (lane 884).
+const returnRefundSplit = compile('returnRefundSplit.ts', { './db': {}, './moneyPrecision': moneyPrecision, './saleStatusResolution': saleStatusResolution, './salesStatus': salesStatus })
 const saleBulkStatus = compile('saleBulkStatus.ts', {
   './stockTransaction': stockTransaction,
   './db': {},
@@ -120,7 +123,8 @@ const saleBulkStatus = compile('saleBulkStatus.ts', {
   './branchRoleGuards': {},
   './branchEffect': {},
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }) },
-  './saleStatusResolution': compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision }),
+  './saleStatusResolution': saleStatusResolution,
+  './returnRefundSplit': returnRefundSplit,
 })
 
 const {

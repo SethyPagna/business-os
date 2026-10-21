@@ -42,7 +42,7 @@ const actual = new Set(['stockTransaction','loyaltyEligibility','businessDateWin
   'acquisitionCostAccess','courierCostAccess',
   'saleCustomerAssignmentGuard','customerPointsReturn',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
-  'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
+  'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution','returnRefundSplit',
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
