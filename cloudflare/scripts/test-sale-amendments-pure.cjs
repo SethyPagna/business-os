@@ -106,7 +106,7 @@ const subject = compile('saleAmendments.ts', {
 })
 const saleStatusResolution = compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision })
 // saleBulkStatus imports returnDebtLoweredSql from the returns-money kernel (lane 884).
-const returnRefundSplit = compile('returnRefundSplit.ts', { './db': {}, './moneyPrecision': moneyPrecision, './saleStatusResolution': saleStatusResolution, './salesStatus': salesStatus })
+const returnRefundSplit = compile('returnRefundSplit.ts', { './db': {}, './moneyPrecision': moneyPrecision, './saleStatusResolution': saleStatusResolution, './salesStatus': salesStatus, './saleTransitions': saleTransitions })
 const saleBulkStatus = compile('saleBulkStatus.ts', {
   './stockTransaction': stockTransaction,
   './db': {},
