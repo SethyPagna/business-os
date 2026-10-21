@@ -188,6 +188,8 @@ const WRAPPERS = {
   denyUnlessFullContactAction: { file: 'routes/contacts.ts', literal: /denyUnlessFullContactAction\(\s*c\s*,\s*'([a-z_]+)'\s*\)/g },
   requireAction: { file: 'routes/promotions.ts', literal: /requireAction\(\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*\)/g },
 }
+// An applier def's second grant: `permission: 'products', action: 'edit', alsoAction: 'supplier'` reaches products:supplier.
+const alsoActionPairs = (text) => quoted(text, /permission:\s*'([a-z_]+)'[^{}]*?alsoAction:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`)
 const DYNAMIC_SITES = [
   { file: 'lib/importEngine.ts', needle: "isActionBlocked(actor, section, 'import')", reach: IMPORT_SECTIONS('lib/importEngine.ts') },
   { file: 'routes/importJobs.ts', needle: "isActionBlocked(user, overrideSection, 'import')", reach: IMPORT_SECTIONS('routes/importJobs.ts') },
@@ -216,7 +218,7 @@ const DYNAMIC_SITES = [
   {
     file: 'lib/undoAppliers.ts',
     needle: 'getActionTier(user, applier.permission, applier.alsoAction)',
-    reach: () => quoted(textOf('lib/undoAppliers.ts'), /permission:\s*'([a-z_]+)',\s*action:\s*'[a-z_]+',\s*(?:\/\/[^\n]*\n\s*)*alsoAction:\s*'([a-z_]+)'/g).map((m) => `${m[1]}:${m[2]}`),
+    reach: () => alsoActionPairs(textOf('lib/undoAppliers.ts')),
   },
   {
     file: 'routes/contacts.ts',
@@ -536,6 +538,20 @@ check('every call to an action wrapper passes literals', () => {
 check('every editor row belongs to a permission key the editor renders', () => {
   const orphans = Object.keys(PERMISSION_ACTIONS).filter((key) => !definitionByKey.has(key))
   assert.deepEqual(orphans, [], `PERMISSION_ACTIONS rows for keys the editor never lists (they would never render): ${orphans.join(', ')}`)
+})
+
+check('every second grant an undo applier names (alsoAction) is an action the role editor can switch off', () => {
+  const pairs = alsoActionPairs(textOf('lib/undoAppliers.ts'))
+  assert.ok(pairs.includes('products:supplier'), 'the scan sees the supplier.backfill second grant')
+  const missing = pairs.filter((pair) => !editorRows.has(pair))
+  assert.deepEqual(missing, [], `an applier demands a second grant the editor has no row for: ${missing.join(', ')}`)
+})
+
+check('control: an alsoAction the editor does not know is caught, a real one is not', () => {
+  const pairs = alsoActionPairs("x = { permission: 'products', action: 'edit', alsoAction: 'no_such_action', run: async () => {} }")
+  assert.deepEqual(pairs, ['products:no_such_action'])
+  assert.equal(editorRows.has(pairs[0]), false, 'the invented grant has no editor row, so the check above would fail on it')
+  assert.equal(editorRows.has('products:supplier'), true)
 })
 
 check('every Worker action has an editor row, or is listed with its reason', () => {

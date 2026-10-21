@@ -80,13 +80,21 @@ check('WRITERS: the PUT, create, variant and stock-session create_receive writer
   assert.match(stockSession, /getActionTier\(user, 'products', 'price'\) === 'none'\s*&&\s*request\.items\.some\(\(line\) => line\.kind === 'create_receive' && line\.product && productDiscountChanged\(null, line\.product/, 'create_receive')
 })
 
-check('WRITERS left alone on purpose: they carry no products:price gate for the selling price either', () => {
-  // Import (products:import is its own Full-only action), merges (the standing rule decides prices) and the receipt
-  // unlocked-pricing block do not gate the SELLING price on products:price today, so a discount there follows the same
-  // gate (none). Pinned so that if one of them gains a selling-price gate, this test says the discount must follow.
-  for (const [rel, needle] of [['lib/importEngine.ts', "getActionTier(user, 'products', 'price')"], ['routes/importJobs.ts', "'products', 'price'"]]) {
-    assert.equal(read(rel).includes(needle), false, `${rel} gained a price gate: gate its discount columns the same way`)
+check('WRITERS left alone on purpose: merges and the receipt unlocked-pricing block carry no products:price gate', () => {
+  // Merges (the standing rule decides prices) and the receipt unlocked-pricing block do not gate the SELLING price on
+  // products:price today, so a discount there follows the same gate (none). Pinned so that if one of them gains a
+  // selling-price gate, this test says the discount must follow.
+  assert.equal(read('lib/importEngine.ts').includes("getActionTier(user, 'products', 'price')"), false)
+})
+
+check('WRITERS: the product import gates the discount block with the selling and wholesale prices (lane 6.0.901)', () => {
+  const engine = read('lib/importEngine.ts')
+  const columns = engine.slice(engine.indexOf('const PRODUCT_IMPORT_PRICE_COLUMNS'), engine.indexOf('/** The matched rows that WRITE'))
+  for (const field of ['discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr', 'discount_starts_at', 'discount_ends_at']) {
+    assert.ok(columns.includes(`'${field}'`), `the import price gate covers ${field}`)
   }
+  assert.match(engine, /productDiscountChanged\(null, priceDiscountBody/, 'a new product with a discount is refused like POST /products')
+  assert.match(read('routes/importJobs.ts'), /PRODUCT_DISCOUNT_PRICE_REFUSAL/)
 })
 
 console.log(`${passed} checks passed`)
