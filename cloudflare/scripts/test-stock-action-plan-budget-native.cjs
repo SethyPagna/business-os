@@ -13,6 +13,13 @@ const native = new Function('require', '__dirname', fixture + `
   return { makeDb, seedProduct, seedJob, applyStockActionsJob, runImportApply, loadReal, sw, APPLY_ACTOR, seedBatch, engine:engineMod.exports, transpile, makeRequire };
 `)(require, __dirname)
 const fence = native.loadReal('importMaintenanceFence')
+const fenceAbs = path.join(__dirname,'..','src','lib','importMaintenanceFence.ts')
+function freshFenceIsolate() {
+  const m = {exports:{}}
+  new Function('exports','require','module','__filename','__dirname',native.transpile(fenceAbs))(m.exports,native.makeRequire(path.dirname(fenceAbs)),m,fenceAbs,path.dirname(fenceAbs))
+  assert.notStrictEqual(m.exports,fence)
+  return m.exports
+}
 const queuePath = path.join(__dirname,'..','src','queue.ts')
 const queueModule = {exports:{}}
 new Function('exports','require','module',native.transpile(queuePath))(queueModule.exports,request =>
@@ -45,7 +52,11 @@ async function measure(tier, units, shape = {}) {
   if(shape.noFlag) sqlite.exec('DROP TABLE system_flags')
   let queued=0
   const env={DB:db,PLAN_TIER:tier,CACHE:{get:async()=>null,put:async()=>{},delete:async()=>{}},IMPORT_QUEUE:{send:async()=>{queued++}}}
-  const accounting=await fence.getImportFencedDb(env)
+  // 6.0.882 (1e590bab7) memoises a PRESENT system_flags table per isolate
+  // (positive only), so the earlier shapes have already taught the shared
+  // module that the table exists. A legacy database without the table is only
+  // ever met by an isolate that has not seen one: give it a fresh module.
+  const accounting=await (shape.noFlag?freshFenceIsolate():fence).getImportFencedDb(env)
   assert.strictEqual(accounting.importWriteFenceStatements,shape.noFlag?0:1,'actual factory records exact fence cost')
   assert.strictEqual(Object.getOwnPropertyDescriptor(accounting,'importWriteFenceStatements').writable,false,'accounting seam is readonly')
   assert.strictEqual(accounting.staging===accounting,!shape.separate,'staging alias is preserved precisely')

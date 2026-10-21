@@ -315,8 +315,18 @@ function readSource(...parts) {
 
 check('POST /api/sales normalises a client receipt number instead of trusting it', () => {
   const salesRoute = readSource('routes', 'sales.ts')
+  // 6.0.913 (045837a8b) starts the mint probe in parallel with the other
+  // checkout reads, so the expression is split across three lines; the
+  // invariant is unchanged. The raw client value reaches ONLY the normaliser...
+  assert.equal((salesRoute.match(/body\.receipt_number/g) || []).length, 1, 'body.receipt_number is read once, by the normaliser')
+  assert.match(salesRoute, /const clientReceiptNumber = normalizeClientReceiptNumber\(body\.receipt_number\)\r?\n/)
+  // ...a number is minted only when the client sent no valid one (the probe
+  // only reads, so an unused candidate consumes nothing)...
+  assert.match(salesRoute, /const mintedReceiptNumberRead = clientReceiptNumber \? null : readStarted\(uniqueBusinessDateTimeNumber\('', receiptNumberTaken\)\)/)
+  // ...and the sale takes the normalised client number or the minted one.
   // `let`: a receipt-race retry re-mints it (test-sale-receipt-number-race-pure.cjs).
-  assert.match(salesRoute, /(?:const|let) receiptNumber = normalizeClientReceiptNumber\(body\.receipt_number\) \|\| await uniqueBusinessDateTimeNumber\(/)
+  assert.match(salesRoute, /let receiptNumber = clientReceiptNumber \|\| await mintedReceiptNumberRead!\r?\n/)
+  assert.match(salesRoute, /adoptReceiptNumber\(await uniqueBusinessDateTimeNumber\('', receiptNumberTaken\)\)/)
   // The old unguarded pass-through must be gone, not merely shadowed.
   assert.doesNotMatch(salesRoute, /const receiptNumber = body\.receipt_number\?\.trim\(\) \|\|/)
   // ...and a legacy number stays findable through search.
