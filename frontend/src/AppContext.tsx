@@ -56,6 +56,7 @@ import {
   useSync,
   useT,
   type AppContextCoreValue,
+  type SyncContextCoreValue,
 } from './app/AppContextCore.tsx'
 
 export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
@@ -240,9 +241,6 @@ type AppContextValue = {
   /** C5: navigator.storage.persist()'s answer for this device, null until asked.
    *  false means the browser may evict IndexedDB -- including unsynced sales. */
   storagePersisted: boolean | null
-  syncChannel: SyncChannelUpdate | null
-  syncConnected: boolean
-  syncServerUnreachable: boolean
   syncUrl: string
   t: (key: string) => string
   theme: string
@@ -254,7 +252,7 @@ type AppContextValue = {
   user: AppUser | null
   writeConflict: WriteConflictDetail | null
 }
-type SyncContextValue = Pick<AppContextValue, 'syncChannel' | 'syncConnected' | 'syncServerUnreachable'>
+type SyncContextValue = SyncContextCoreValue
 
 function getAppApi(): AppRuntimeApi {
   if (typeof window === 'undefined') return {}
@@ -2814,10 +2812,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     usdToKhr, khrToUsd,
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
-    // Expose sync status so components that use useApp() (legacy) can read it.
-    syncConnected,
-    syncChannel,
-    syncServerUnreachable,
     canWriteToServer,
     recheckConnection,
     storagePersisted,
@@ -2838,9 +2832,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     usdToKhr, khrToUsd,
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
-    syncConnected,
-    syncChannel,
-    syncServerUnreachable,
     canWriteToServer,
     recheckConnection,
     storagePersisted,

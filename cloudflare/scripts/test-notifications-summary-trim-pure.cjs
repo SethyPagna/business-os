@@ -36,6 +36,7 @@ const ledger = []
 function category(sql) {
   if (/out_of_stock_threshold/.test(sql) && /FROM products/.test(sql)) return 'inventory'
   if (/expiry_date/.test(sql) && /FROM products/.test(sql)) return 'expiry'
+  if (/credit_due_date/.test(sql) && /FROM product_batches/.test(sql)) return 'supplier_credit'
   if (/loyalty-ledger|GROUP BY customer_id/.test(sql) || /FROM customers WHERE id IN/.test(sql)) return 'loyalty'
   if (/loyalty_points_enabled'/.test(sql)) return 'loyalty'
   if (/FROM sales/.test(sql)) return 'sales'
@@ -246,6 +247,31 @@ async function main() {
     assert.equal(statements('inventory'), 1)
     assert.equal(statements('expiry'), 1)
     assert.equal(statements('loyalty'), 0)
+  })
+
+  await check('supplier credit is answered from the cache between writes: a second call reads no lots, a lot or product change re-reads them', async () => {
+    seedStockFixture(raw.db, () => {
+      const productId = raw.db.prepare("SELECT id FROM products WHERE name = 'Healthy 0'").get().id
+      raw.db.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, supplier_name, payment_status, credit_due_date, unit_cost_usd, received_cost_usd, received_quantity)
+        VALUES (?, 'sc1', 'SC1', '2026-09-01', 1, 'Bong Long', 'credit', date('now', '-3 day'), 5, 25, 5)`).run(productId)
+    })
+    await cacheModule.bumpVersion(env, 'products')
+    const cold = await summary()
+    assert.equal(statements('supplier_credit'), 1, 'first call reads the lots once')
+    assert.equal(section(cold, 'supplier_credit').count, 1)
+    const warm = await summary()
+    assert.equal(statements('supplier_credit'), 0, 'second call: zero lot statements (was one full lot scan every refresh)')
+    assert.deepEqual(section(warm, 'supplier_credit'), section(cold, 'supplier_credit'))
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'paid', credit_due_date = NULL WHERE lot_code = 'SC1'").run())
+    assert.equal(section(await summary(), 'supplier_credit').count, 1, 'control: not visible before the version bump -- the cache is real')
+    await cacheModule.bumpVersion(env, 'products') // what PATCH /api/batches/:id does
+    const paid = await summary()
+    assert.equal(statements('supplier_credit'), 1, 'the bump re-read the lots')
+    assert.equal(section(paid, 'supplier_credit'), undefined, 'marking the lot paid clears the reminder')
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'credit', credit_due_date = date('now', '-3 day') WHERE lot_code = 'SC1'").run())
+    await cacheModule.bumpVersion(env, 'products')
+    assert.equal(section(await summary(), 'supplier_credit').count, 1)
+    assert.equal(section(await summary(CASHIER), 'supplier_credit'), undefined, 'the cache never serves it to a non-admin')
   })
 
   // Since 6.0.888 the loyalty section costs nothing while the programme is off, so these two cases switch it on.

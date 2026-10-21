@@ -65,6 +65,10 @@ const boundaries: Array<[string, string]> = [
   ['components/shared/lightboxSwipe.ts', 'image-lightbox'],
   ['components/shared/documentScrollLock.ts', 'app-shell'],
   ['components/navigation/Sidebar.tsx', 'Sidebar'],
+  ['utils/useDebouncedValue.ts', 'shared-ui'],
+  ['utils/visibilityPolling.ts', 'admin-shared-utils'],
+  ['utils/filePicker.ts', 'admin-shared-utils'],
+  ['components/catalog/productDetailSections.ts', 'admin-shared-utils'],
   ['components/shared/MinimizedWorkTray.tsx', 'Sidebar'],
   // 6.0.880 L1: unpinned, financialPrecision.ts rode 'dashboard-export', so
   // POS, Receipt and every sales page statically loaded export code + SheetJS.
@@ -78,7 +82,7 @@ for (const [relative, expected] of boundaries) {
   assert.equal(chunkFor(id), expected, relative)
   assert.equal(chunkFor(id.replace(/\//g, '\\')), expected, `Windows: ${relative}`)
 }
-for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal']) {
+for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal', 'rotate-cw', 'tags', 'layers', 'list', 'arrow-down-wide-narrow']) {
   assert.equal(chunkFor(`/fixture/node_modules/lucide-react/dist/esm/icons/${icon}.js`), 'shared-ui', icon)
 }
 assert.equal(neutralPrimitiveChunk('/fixture/src/components/catalog/CatalogPage.tsx'), undefined)

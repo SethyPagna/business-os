@@ -34,7 +34,7 @@ import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
-import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -129,7 +129,6 @@ interface SidebarAppContext {
   can: (permissionKey: string, actionKey: string) => boolean
   canAccessPage: (pageId: string) => boolean
   syncUrl?: string | null
-  syncConnected?: boolean
 }
 
 type NavigationItemWithIcon = NavigationItem & {
@@ -157,6 +156,7 @@ type SidebarProps = {
 }
 
 const useApp = useAppHook as () => SidebarAppContext
+const useSync = useSyncHook as () => { syncConnected?: boolean }
 const noInstallRouteOutsideBrowser = () => null
 const UserProfileModal = lazyRetry(async () => ({
   default: (await import('../users/UserProfileModal')).default as ComponentType<UserProfileModalProps>,
@@ -256,8 +256,8 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     can,
     canAccessPage,
     syncUrl,
-    syncConnected,
   } = useApp()
+  const { syncConnected } = useSync()
 
   const [moreOpen, setMoreOpen] = useState(false)
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
