@@ -279,6 +279,8 @@ const queueDispatchModule = loadPureSibling('queueDispatch')
 const permissionsModule = loadPureSibling('permissions')
 const acquisitionCostAccessModule = loadPureSibling('acquisitionCostAccess', name => name === './permissions' ? permissionsModule : require(name))
 const mediaModule = loadPureSibling('media')
+const productSupplierGateModule = loadPureSibling('productSupplierGate')
+const productDiscountGateModule = loadPureSibling('productDiscountGate')
 const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
   if (request === './media') return mediaModule
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
@@ -438,6 +440,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './importIncomingFiles') return { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) }
   if (request === './permissions') return permissionsModule
   if (request === './acquisitionCostAccess') return acquisitionCostAccessModule
+  if (request === './productSupplierGate') return productSupplierGateModule
+  if (request === './productDiscountGate') return productDiscountGateModule
   if (request === './media') return mediaModule
   if (request === './productImagePermission') return productImagePermissionModule
   if (request === './salesImportCommit') {
