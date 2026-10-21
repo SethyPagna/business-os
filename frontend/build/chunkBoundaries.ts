@@ -38,6 +38,14 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // Modal and lazy recovery share this React-only hook. Keep recovery from
   // importing the modal implementation back through its keyboard contract.
   ['/src/components/shared/useDialogKeyboard.ts', 'shared-ui'],
+  // Unpinned, Rollup filed this 5-line hook inside the storefront page chunk (catalog-public), so POS, Sales,
+  // Products, Inventory, Customers, Returns and Reports statically loaded the storefront and its legal pages.
+  ['/src/utils/useDebouncedValue.ts', 'shared-ui'],
+  // Dependency-free helpers shared by POS, Sales, Settings, Backup, the bell and the page host: unpinned, Rollup filed them in
+  // the website editor chunk (catalog), which then loaded with the till and the sales page.
+  ['/src/utils/visibilityPolling.ts', 'admin-shared-utils'],
+  ['/src/utils/filePicker.ts', 'admin-shared-utils'],
+  ['/src/components/catalog/productDetailSections.ts', 'admin-shared-utils'],
   // G37 client search index (admin pickers only: POS, Products, Inventory,
   // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
   // to the '/src/api/' fallback, the index transport and the shared search

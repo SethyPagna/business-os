@@ -681,13 +681,77 @@ app.post('/', async (c) => {
     })
   }
 
+  // ---- 1a. Start every read that depends only on the request ----
+  // They run in one round trip instead of a chain of them. Each is awaited
+  // where its answer is first used below, in the original order, so the
+  // validation order and the error a caller sees are unchanged; only a request
+  // that is refused early has issued reads it did not need.
+  const readStarted = <T>(read: Promise<T>): Promise<T> => { const settled = Promise.resolve(read); settled.catch(() => undefined); return settled }
+  const saleBranchIds = [saleHeaderBranchId]
+  const productIds = [...new Set(normalized.map((i) => i.product_id))]
+  // Damaged-source lines check against their LOT below, not branch_stock --
+  // their units were never in sellable stock to begin with.
+  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock && !item.damaged_lot_id)
+  const branchIdsNeedingStock = [...new Set(stockCheckItems.map((item) => item.branch_id as number))]
+  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
+  const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
+  const saleBranchRowsRead = readStarted(selectInChunks(saleBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk)))
+  // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
+  // 100 distinct products, but a wholesale/imported sale does, and the
+  // failure mode is a rejected checkout, not a degraded one.
+  const productsRead = readStarted(selectInChunks(productIds, 0, (chunk) => db
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk)))
+  // Batched by branch (one query per distinct branch_id in this sale, not
+  // one query per line item): the common case is one branch, one query.
+  const stockByBranchRead = readStarted(Promise.all(branchIdsNeedingStock.map(async (branchId) => {
+    const productIdsForBranch = [...new Set(
+      stockCheckItems.filter((item) => item.branch_id === branchId).map((item) => item.product_id),
+    )]
+    // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
+    const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
+    return [branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity]))] as const
+  })))
+  const lotsByProductBranchRead = readStarted(readFifoLotAvailabilityForCart(
+    db,
+    normalized
+      .filter((item) => !item.damaged_lot_id && item.branch_id)
+      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
+  ))
+  const damagedLotRowsRead = damagedItems.length
+    ? readStarted(selectInChunks(damagedLotIds, 0, (chunk) => db
+      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk)))
+    : null
+  const rateSettingRowsRead = readStarted(db.prepare(
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
+  ).all<{ key: string; value: string }>())
+  const customerRead = body.customer_id
+    ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_id]))
+    : body.customer_membership_number
+      ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_membership_number]))
+      : null
+  const loyaltyEnabledRowRead = readStarted(db.prepare(
+    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
+  ).get<{ value: string }>())
+  const pricingRuleRowsRead = readStarted(db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>())
+  const deliveryContactRead = Boolean(body.is_delivery) && body.delivery_contact_id
+    ? readStarted(db.prepare('SELECT id, name, phone, area, address FROM delivery_contacts WHERE id = ?').get<{ id: number; name: string | null; phone: string | null; area: string | null; address: string | null }>([body.delivery_contact_id]))
+    : null
+  const receiptNumberTaken = async (candidate: string) =>
+    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  const clientReceiptNumber = normalizeClientReceiptNumber(body.receipt_number)
+  const mintedReceiptNumberRead = clientReceiptNumber ? null : readStarted(uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+  const branchRowRead = body.branch_id ? readStarted(db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id])) : null
+
   // ---- 1b. The selling branch ----
   // A line may name its own branch, so this checks the DISTINCT set the cart
   // actually resolved to rather than trusting body.branch_id alone.
-  const saleBranchIds = [saleHeaderBranchId]
-  const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
+  const saleBranchRows = await saleBranchRowsRead
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
@@ -695,13 +759,7 @@ app.post('/', async (c) => {
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
-  // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
-  // 100 distinct products, but a wholesale/imported sale does, and the
-  // failure mode is a rejected checkout, not a degraded one.
-  const productIds = [...new Set(normalized.map((i) => i.product_id))]
-  const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+  const products = await productsRead
   const productMap = new Map(products.map((p) => [p.id, p]))
 
   // D1's batch() is atomic but cannot branch mid-batch (see lib/db.ts) --
@@ -710,29 +768,7 @@ app.post('/', async (c) => {
   // building the atomic write batch below. Skipped entirely when this sale's
   // status does not deduct stock -- matches
   // PATCH /:id/status's own wasStockDeducted/willStockBeDeducted gate below.
-  //
-  // Batched by branch (one query per distinct branch_id in this sale, not
-  // one query per line item) -- a sale with, say, 15 line items previously
-  // issued 15 sequential `branch_stock` round-trips to D1 here, one right
-  // after another, purely to check availability, adding real latency to
-  // every checkout. The common case (one branch per sale) now costs exactly
-  // one query, matching the same IN(...) batching pattern already used just
-  // above for the `products` lookup.
-  // Damaged-source lines check against their LOT below, not branch_stock --
-  // their units were never in sellable stock to begin with.
-  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock && !item.damaged_lot_id)
-  const stockByBranch = new Map<number, Map<number, number>>()
-  const branchIdsNeedingStock = [...new Set(stockCheckItems.map((item) => item.branch_id as number))]
-  for (const branchId of branchIdsNeedingStock) {
-    const productIdsForBranch = [...new Set(
-      stockCheckItems.filter((item) => item.branch_id === branchId).map((item) => item.product_id),
-    )]
-    // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
-    const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
-    stockByBranch.set(branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity])))
-  }
+  const stockByBranch = new Map<number, Map<number, number>>(await stockByBranchRead)
   for (const item of stockCheckItems) {
     const available = stockByBranch.get(item.branch_id as number)?.get(item.product_id) || 0
     if (item.quantity > available) {
@@ -752,12 +788,7 @@ app.post('/', async (c) => {
   // Read all ordinary lines once. The same mutable map is reserved by
   // explicit picks below, then consumed by FIFO for unpicked lines, so an
   // explicit and automatic line cannot both plan the same units.
-  const lotsByProductBranch = await readFifoLotAvailabilityForCart(
-    db,
-    normalized
-      .filter((item) => !item.damaged_lot_id && item.branch_id)
-      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
-  )
+  const lotsByProductBranch = await lotsByProductBranchRead
   // A selected unlotted remainder is a factual claim, not an escape hatch:
   // the branch must hold more aggregate stock than EVERY positive recorded
   // lot, including inactive lots that remain attributable in the ledger.
@@ -843,14 +874,10 @@ app.post('/', async (c) => {
   // 11.9: damaged-source availability (plain read, same validate-then-write
   // shape as above; consumeDamagedLot's own WHERE clause below remains the
   // real race guard).
-  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
-  if (damagedItems.length) {
+  if (damagedLotRowsRead) {
     // One chunked read instead of a SELECT per damaged line -- same batched
     // shape as the branch_stock and branch_batch_stock checks above.
-    const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
-    const damagedLotRows = await selectInChunks(damagedLotIds, 0, (chunk) => db
-      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk))
+    const damagedLotRows = await damagedLotRowsRead
     const damagedLotMap = new Map(damagedLotRows.map((row) => [Number(row.id), row]))
     for (const item of damagedItems) {
       const lot = damagedLotMap.get(Number(item.damaged_lot_id))
@@ -916,19 +943,13 @@ app.post('/', async (c) => {
   // Part 534: KHR change converts at its own configured rate. Read the
   // SETTING (not a client field) so the stored change_khr matches what the
   // POS displayed from the same setting.
-  const rateSettingRows = await db.prepare(
-    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
-  ).all<{ key: string; value: string }>()
+  const rateSettingRows = await rateSettingRowsRead
   const rateSettings = Object.fromEntries(rateSettingRows.map((row) => [row.key, row.value]))
   const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate)
     : Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
   const changeExchangeRateSetting = rateSettings.change_exchange_rate
   let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
-  if (body.customer_id) {
-    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get([body.customer_id]) || null
-  } else if (body.customer_membership_number) {
-    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get([body.customer_membership_number]) || null
-  }
+  if (customerRead) customer = await customerRead || null
   const customerStateGuard = customer ? {
     id: customer.id,
     isAnonymous: isAnonymousCustomer(customer) ? 1 : 0,
@@ -950,9 +971,7 @@ app.post('/', async (c) => {
   // SETTING and never from the request -- a stale till that still shows the
   // points panel must not be able to accrue or spend against a programme the
   // shop has switched off. Absent = on, matching buildPortalConfig's default.
-  const loyaltyEnabledRow = await db.prepare(
-    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
-  ).get<{ value: string }>()
+  const loyaltyEnabledRow = await loyaltyEnabledRowRead
   const loyaltyPointsEnabled = isLoyaltyEnabled(loyaltyEnabledRow?.value)
   let redemptionGuard: Awaited<ReturnType<typeof preparePointsRedemption>> | null = null
 
@@ -982,7 +1001,7 @@ app.post('/', async (c) => {
   // ---- 3. Calculate totals (pure computation, no I/O) ----
   // Capture complete active-rule membership, not only the displayed winner.
   // Source CAS below rejects concurrent product/rule changes before any write.
-  const pricingRuleRows = await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  const pricingRuleRows = await pricingRuleRowsRead
   if (pricingRuleRows.length > 100) return c.json({error:'Too many active promotion rules to capture safely.',code:'sale_item_pricing_limit'},409)
   const capturedRules = pricingRuleRows.map(row => normalizePromotionRule(row,1))
   if (capturedRules.some(rule => !rule)) return c.json({error:'Promotion configuration needs review.',code:'sale_item_pricing_invalid'},409)
@@ -1220,9 +1239,7 @@ app.post('/', async (c) => {
   // therefore re-asserts uniqueness in-transaction (receiptNumberGuard in
   // step 5) and a lost race re-mints and retries, bounded -- see
   // RECEIPT_NUMBER_RETRY_LIMIT. `let` because a retry replaces it.
-  const receiptNumberTaken = async (candidate: string) =>
-    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
-  let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
+  let receiptNumber = clientReceiptNumber || await mintedReceiptNumberRead!
   // The sale is always stamped with the server clock; a client created_at is
   // only audited (lib/clientTimestamp.ts). An older claim was refused above.
 
@@ -1230,13 +1247,11 @@ app.post('/', async (c) => {
   // computed with the totals above, since the customer-paid portion is part
   // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
-  if (isDelivery && body.delivery_contact_id) {
-    deliveryContact = await db.prepare('SELECT id, name, phone, area, address FROM delivery_contacts WHERE id = ?').get([body.delivery_contact_id]) || null
-  }
+  if (deliveryContactRead) deliveryContact = await deliveryContactRead || null
 
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
-  const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
+  const branchRow = branchRowRead ? await branchRowRead : null
   // The snapshot embeds the receipt number, so a receipt-race retry rebuilds
   // it from the same inputs (and the same recordedAt) with the new number.
   const snapshotRecordedAt = new Date().toISOString()

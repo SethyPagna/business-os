@@ -541,6 +541,7 @@ function deferRenderBlockingStylesheets(): Plugin {
 
 const appShellIconNames = new Set([
   'arrow-down',
+  'arrow-down-wide-narrow',
   'arrow-up',
   'badge-dollar-sign',
   'bell',
@@ -551,6 +552,8 @@ const appShellIconNames = new Set([
   'database-backup',
   'folder-open',
   'languages',
+  'layers',
+  'list',
   'layout-dashboard',
   'log-out',
   'moon',
@@ -558,6 +561,8 @@ const appShellIconNames = new Set([
   'package',
   'receipt',
   'rotate-ccw',
+  'rotate-cw',
+  'tags',
   'server',
   'settings',
   'shopping-bag',

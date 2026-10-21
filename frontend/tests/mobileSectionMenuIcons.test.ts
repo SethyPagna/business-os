@@ -58,8 +58,11 @@ const contextSource = String.raw`
       can: () => true,
       canAccessPage: () => true,
       syncUrl: null,
-      syncConnected: false,
     }
+  }
+
+  export function useSync() {
+    return { syncConnected: false, syncChannel: null, syncServerUnreachable: false }
   }
 `
 

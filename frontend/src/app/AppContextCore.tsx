@@ -45,9 +45,6 @@ export type AppContextCoreValue = {
   saveSettings: (...args: unknown[]) => Promise<PlainRecord>
   setPage: (page: string) => void
   settings: PlainRecord
-  syncChannel: SyncChannelUpdate | null
-  syncConnected: boolean
-  syncServerUnreachable: boolean
   syncUrl: string
   t: (key: string) => string
   theme: string
@@ -60,7 +57,11 @@ export type AppContextCoreValue = {
   writeConflict: PlainRecord | null
 }
 
-export type SyncContextCoreValue = Pick<AppContextCoreValue, 'syncChannel' | 'syncConnected' | 'syncServerUnreachable'>
+export type SyncContextCoreValue = {
+  syncChannel: SyncChannelUpdate | null
+  syncConnected: boolean
+  syncServerUnreachable: boolean
+}
 
 function normalizePriceValue(value: unknown): number {
   const numberValue = Number(value)
@@ -125,9 +126,6 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
   formatDateTime: (value: unknown) => String(value || ''),
   syncUrl: '',
   updateSyncUrl: () => {},
-  syncConnected: false,
-  syncChannel: null,
-  syncServerUnreachable: false,
   canWriteToServer: false,
   recheckConnection: async () => false,
   AccessDenied: () => null,

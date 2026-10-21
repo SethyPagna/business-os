@@ -780,7 +780,8 @@ app.get('/summary', async (c) => {
   // who can act on it — admin-control users only (was: anyone with
   // inventory access; the user asked for "reminder for admin" and for the
   // supplier section to be hidden from employees).
-  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
+  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cachedSection('supplier_credit', ['products', 'stock', 'settings'], String(preferences.supplierCreditDays),
+    () => buildSupplierCreditSection(c.env, preferences.supplierCreditDays)))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
   // deliberately unused — that record was STALE: requiresDeviceApproval is

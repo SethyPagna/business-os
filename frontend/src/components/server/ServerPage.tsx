@@ -8,7 +8,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Server from 'lucide-react/dist/esm/icons/server.js'
 import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
 import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -35,7 +35,6 @@ type AppContextValue = {
   settings?: Record<string, unknown>
   t: TranslationFn
   notify: (message: string, type?: string) => void
-  syncConnected?: boolean
   syncUrl?: string | null
   updateSyncUrl: (url: string | null) => void
   formatDateTime: (value: Date | string | number | null | undefined) => string
@@ -113,6 +112,7 @@ type ServerApi = {
 }
 
 const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => { syncConnected?: boolean }
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getServerApi(): ServerApi {
@@ -517,7 +517,8 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 }
 
 export default function ServerPage() {
-  const { t, notify, syncConnected, syncUrl, updateSyncUrl } = useApp()
+  const { t, notify, syncUrl, updateSyncUrl } = useApp()
+  const { syncConnected } = useSync()
   const isActive = useIsPageActive('server')
   const [urlInput, setUrlInput] = useState('')
   const [securityConfig, setSecurityConfig] = useState<SystemConfig | null>(null)

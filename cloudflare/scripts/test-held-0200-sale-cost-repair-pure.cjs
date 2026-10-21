@@ -362,6 +362,17 @@ const indexOnly = (text) => {
   return statements.length > 0 && statements.every((s) => /^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(s))
 }
 
+// A file of CREATE INDEX statements plus read-only SELECT CASE ... json_extract assertions (0267 fees/credit
+// indexes): the assertions read schema only, the indexes add seek paths, so no row or column changes.
+const indexWithAssertionsOnly = (text) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const isAssertion = (statement) => /^SELECT CASE WHEN /i.test(statement)
+    && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
+    && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement.replace(/pragma_table_info/gi, ''))
+  return statements.some((statement) => /^CREATE (UNIQUE )?INDEX /i.test(statement))
+    && statements.every((statement) => /^CREATE (UNIQUE )?INDEX /i.test(statement) || isAssertion(statement))
+}
+
 // A file made only of ALTER TABLE ... ADD COLUMN statements, none of whose new
 // columns the repair names, adds a value the repair never reads or writes, so it
 // cannot interact with it in either order (0208 free_quantity). A column the
@@ -906,7 +917,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
   assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -918,6 +929,15 @@ check('held: outside deploy chain, after dependencies including0195; independent
     for (const wrong of [`${tags}\nUPDATE sales SET return_state = 'full';`, `${tags}\nALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`,
       `${tags}\nCREATE TABLE IF NOT EXISTS sale_items (id INTEGER);`, `${tags}\nSELECT CASE WHEN (SELECT 1) THEN 1 ELSE json_extract('[]','$[x]') END; DELETE FROM sale_items;`,
       'CREATE INDEX i ON sale_items(id);']) assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  }
+  const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
+  if (chain.includes(feeIndexes)) {
+    const indexes = chainText(feeIndexes)
+    assert.ok(indexWithAssertionsOnly(indexes), 'control: the index-only 0267 with its assertions is independent')
+    for (const wrong of [`${indexes}\nUPDATE product_batches SET payment_status = 'paid';`, `${indexes}\nDELETE FROM fees;`,
+      `${indexes}\nALTER TABLE product_batches ADD COLUMN cost_price_usd REAL;`, 'SELECT CASE WHEN 1 THEN 1 ELSE json_extract(\'[]\',\'$[x]\') END;',
+      'CREATE INDEX i ON sale_items(id); UPDATE sale_items SET cost_price_usd = 0;'])
+      assert.equal(indexWithAssertionsOnly(wrong), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
   }
   assert.ok(!additiveUnread('ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;', migrationText) && !additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz INTEGER; UPDATE sale_items SET zzz = 1;', migrationText), 'control: a column the repair names, or any row change, is still a dependency')
   assert.ok(indexOnly('-- UPDATE sale_items SET cost_price_usd = 0;\n/* DELETE FROM sale_items; */\nCREATE INDEX i ON sale_items(id);'), 'control: SQL inside a comment never executes, so it is not a statement')
