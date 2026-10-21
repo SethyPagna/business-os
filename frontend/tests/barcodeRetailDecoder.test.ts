@@ -1,7 +1,7 @@
 // Scanner S1a (6.0.922): the ZXing fallback decodes with the retail readers
 // only, and still reads every retail format.
 //
-// Before: loadLumaDecoder imported the package root and decoded through
+// Before: the decoder imported the package root and decoded through
 // MultiFormatReader, which statically pulls in the QR, DataMatrix, PDF417,
 // Aztec and RSS decoders: a 448 KB chunk for a scanner that reads seven 1D
 // formats. Now it imports MultiFormatUPCEANReader, Code39Reader, Code128Reader
@@ -114,11 +114,13 @@ const FIXTURES: Array<{ name: string; modules: string; text: string; format: str
 
 // --- the module under test, through Vite SSR --------------------------------
 
-type Decoder = typeof import('../src/components/products/scanning/barcodeFrameDecoder.ts')
+type Zxing = typeof import('../src/components/products/scanning/barcodeZxing.ts')
+type Ladder = typeof import('../src/components/products/scanning/barcodeLadder.ts')
 
 try {
-  const decoder = await vite.ssrLoadModule('/src/components/products/scanning/barcodeFrameDecoder.ts') as Decoder
-  const decode = await decoder.loadLumaDecoder()
+  const zxing = await vite.ssrLoadModule('/src/components/products/scanning/barcodeZxing.ts') as Zxing
+  const ladder = await vite.ssrLoadModule('/src/components/products/scanning/barcodeLadder.ts') as Ladder
+  const decode = zxing.createLumaDecoder()
 
   for (const fixture of FIXTURES) {
     await runTest(`reads ${fixture.name} (fast and TRY_HARDER readers)`, () => {
@@ -129,8 +131,8 @@ try {
   }
 
   await runTest('a code turned on its end is read through the ladder, and a frame with nothing in it is a plain miss', () => {
-    const turned = decoder.rotateQuarter(frameOf(FIXTURES[0].modules))
-    const { read } = decoder.runDecodeLadder({ centre: () => turned, full: () => turned }, decode)
+    const turned = ladder.rotateQuarter(frameOf(FIXTURES[0].modules))
+    const { read } = ladder.runDecodeLadder({ centre: () => turned, full: () => turned }, decode)
     assert.deepEqual(read, { text: '5901234123457', format: 'ean_13' })
     const blank = { data: new Uint8ClampedArray(200 * 60).fill(255), width: 200, height: 60 }
     assert.equal(decode(blank, false), null)
@@ -140,10 +142,10 @@ try {
   await runTest('a 2-character Code 128 pattern ZXing happily decodes is not a read', () => {
     const frame = frameOf(code128('AB'))
     assert.deepEqual(decode(frame, false), { text: 'AB', format: 'code_128' }, 'the fixture is a real, decodable Code 128')
-    const { read } = decoder.runDecodeLadder({ centre: () => frame, full: () => frame }, decode)
+    const { read } = ladder.runDecodeLadder({ centre: () => frame, full: () => frame }, decode)
     assert.equal(read, null, 'the ladder must refuse a read shorter than 4 characters')
     const long = frameOf(code128('AB12'))
-    assert.deepEqual(decoder.runDecodeLadder({ centre: () => long, full: () => long }, decode).read, { text: 'AB12', format: 'code_128' })
+    assert.deepEqual(ladder.runDecodeLadder({ centre: () => long, full: () => long }, decode).read, { text: 'AB12', format: 'code_128' })
   })
 
   await runTest('only the retail readers were loaded: no QR, DataMatrix, PDF417, Aztec, RSS, Code 93 or Codabar module, and not the package root', () => {

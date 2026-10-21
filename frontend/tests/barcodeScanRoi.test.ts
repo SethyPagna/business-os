@@ -139,9 +139,22 @@ runTest('the whole-frame region and the still-photo centre are unchanged', () =>
   assert.deepEqual(centreDraw({}, 4000, 3000), { sx: 800, sy: 600, sw: 2400, sh: 1800 }, 'a photo has no guide: its centre 60% as before')
 })
 
+runTest('the grabber hands the worker camera RGBA pixels, capped at 1280 on the longest side, in a buffer it can take over', () => {
+  const regions = createFrameGrabber(BAND)({ clientWidth: 360, clientHeight: 380 } as unknown as CanvasImageSource, 1080, 1920)
+  const full = regions.full()
+  assert.deepEqual([full.width, full.height], [720, 1280], 'a 1080x1920 frame is scaled down by 1280/1920')
+  assert.equal(full.data.length, full.width * full.height * 4, 'four bytes (RGBA) per pixel: the greyscale conversion belongs to the worker')
+  assert.ok(full.data.buffer instanceof ArrayBuffer, 'a plain ArrayBuffer, which postMessage can transfer instead of copying')
+  const guide = regions.centre()
+  assert.equal(guide.data.length, guide.width * guide.height * 4)
+  assert.ok(Math.max(guide.width, guide.height) <= 1280)
+  assert.notEqual(guide.data.buffer, full.data.buffer, 'two regions never share a buffer, or the second transfer would fail')
+})
+
 runTest('the overlay is drawn from the same box the grabber decodes', () => {
   const modal = fs.readFileSync(new URL('../src/components/products/scanning/BarcodeScannerModal.tsx', import.meta.url), 'utf8')
-  assert.match(modal, /createFrameGrabber\(SCAN_GUIDE_BOX\)/, 'the live grabber decodes the shared guide box')
+  const camera = fs.readFileSync(new URL('../src/components/products/scanning/useBarcodeCamera.ts', import.meta.url), 'utf8')
+  assert.match(camera, /createFrameGrabber\(SCAN_GUIDE_BOX\)/, 'the live grabber decodes the shared guide box')
   assert.match(modal, /const GUIDE_STYLE = \{ width: `\$\{SCAN_GUIDE_BOX\.widthPercent\}%`, height: `\$\{SCAN_GUIDE_BOX\.heightPercent\}%` \}/, 'the overlay size comes from the shared guide box')
   assert.equal((modal.match(/style=\{GUIDE_STYLE\}/g) || []).length, 2, 'both the outline and the corner frame use it')
   assert.doesNotMatch(modal, /h-\[70%\] w-\[86%\]/, 'no second, hand-copied guide size may remain in the overlay classes')

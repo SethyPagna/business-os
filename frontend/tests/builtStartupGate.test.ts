@@ -38,8 +38,8 @@ try {
   assert.match(missing.stdout + missing.stderr, /ENOENT/)
   const assets = path.join(fixtureFrontend, 'dist/assets')
   fs.mkdirSync(assets, { recursive: true })
-  // The till, sales and report pages and the scanner vendor are closure-checked too (6.0.880).
-  const staticChecked = ['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales', 'vendor-zxing']
+  // The till, sales and report pages are closure-checked too (6.0.880), and the barcode decode worker must exist (6.0.935).
+  const staticChecked = ['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales', 'barcodeDecode.worker']
   for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...staticChecked]) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
@@ -65,6 +65,18 @@ try {
   assert.match(xlsxOnTill.stdout + xlsxOnTill.stderr, /POS statically pulls vendor-xlsx/)
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'export const value = 1;')
   fs.rmSync(path.join(assets, 'vendor-xlsx-12345678.js'))
+  // A decode worker that imports another chunk is no longer self-contained.
+  fs.writeFileSync(path.join(assets, 'barcodeDecode.worker-12345678.js'), 'import "./vendor-12345678.js"; export const value = 1;')
+  const workerImport = verify()
+  assert.notEqual(workerImport.status, 0)
+  assert.match(workerImport.stdout + workerImport.stderr, /decode worker must be self-contained/)
+  fs.writeFileSync(path.join(assets, 'barcodeDecode.worker-12345678.js'), 'export const value = 1;')
+  // The worker asset is required: without it the scanner has no decoder.
+  fs.rmSync(path.join(assets, 'barcodeDecode.worker-12345678.js'))
+  const noWorker = verify()
+  assert.notEqual(noWorker.status, 0)
+  assert.match(noWorker.stdout + noWorker.stderr, /missing the barcode decode worker asset/)
+  fs.writeFileSync(path.join(assets, 'barcodeDecode.worker-12345678.js'), 'export const value = 1;')
   fs.writeFileSync(path.join(assets, 'cycle-a.js'), 'export { value } from "./cycle-b.js";')
   fs.writeFileSync(path.join(assets, 'cycle-b.js'), 'export { value } from "./cycle-a.js";')
   const cyclic = verify()

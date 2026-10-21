@@ -217,7 +217,6 @@ if (process.argv.includes('--bundle')) {
   for (const [entryName, forbidden] of [
     ...['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales']
       .map((name) => [name, ['vendor-xlsx', 'dashboard-export']] as const),
-    ['vendor-zxing', ['vendor']] as const,
   ]) {
     const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
     const entry = files.find(file => match(entryName).test(file))
@@ -225,7 +224,13 @@ if (process.argv.includes('--bundle')) {
     const closure = closureOf([entry])
     for (const name of forbidden) assert.equal([...closure].some(file => match(name).test(file)), false, `${entryName} statically pulls ${name}`)
   }
-  console.log('PASS till, sales and report pages load no SheetJS/export code statically; the scanner loads no receipt libraries')
+  console.log('PASS till, sales and report pages load no SheetJS/export code statically')
+  // 6.0.935: ZXing is inside the barcode decode worker's own script (it was the vendor-zxing chunk). A worker
+  // cannot import another chunk, so the scanner cannot pull the receipt libraries either: it imports nothing.
+  const decodeWorker = files.find(file => /^barcodeDecode\.worker-[\w-]{8}\.js$/.test(file))
+  assert.ok(decodeWorker, 'missing the barcode decode worker asset')
+  assert.doesNotMatch(fs.readFileSync(path.join(assets, decodeWorker), 'utf8'), /(?:^|[;}])\s*import\s*[\w{*"']|\bimport\s*\(/, 'the barcode decode worker must be self-contained')
+  console.log('PASS the scanner decodes in a self-contained worker script, so it loads no receipt libraries')
   const html = fs.readFileSync(path.join(frontend, 'dist/index.html'), 'utf8')
   const preloadJson = html.match(/var preloads = (\{[^\n]+\});/)
   assert.ok(preloadJson, 'built HTML must contain the actual route preload lists')
