@@ -30,7 +30,9 @@ function indexOrFail(text, needle) {
 }
 
 test('fresh frontend install has a compatible ZXing peer pair', () => {
-  const browserSpec = frontendPackage.dependencies?.['@zxing/browser']
+  // 6.0.922: @zxing/browser is used by tests only, so it is a devDependency; the shipped scanner imports @zxing/library.
+  const browserSpec = frontendPackage.devDependencies?.['@zxing/browser']
+  assert(frontendPackage.dependencies?.['@zxing/browser'] === undefined, '@zxing/browser must not be a runtime dependency')
   const librarySpec = frontendPackage.dependencies?.['@zxing/library']
   const lockedBrowser = frontendLock.packages?.['node_modules/@zxing/browser']
   const lockedLibrary = frontendLock.packages?.['node_modules/@zxing/library']
