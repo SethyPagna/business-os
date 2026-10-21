@@ -103,7 +103,8 @@ function makeDb(settings) {
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT);
     CREATE TABLE returns (id INTEGER PRIMARY KEY, return_number TEXT, status TEXT, return_scope TEXT, receipt_number TEXT,
-      customer_name TEXT, supplier_name TEXT, branch_id INTEGER, total_refund_usd REAL, total_refund_khr REAL, branch_name TEXT);
+      customer_name TEXT, supplier_name TEXT, branch_id INTEGER, total_refund_usd REAL, total_refund_khr REAL, branch_name TEXT,
+      owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
     CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, branch_id INTEGER, batch_id INTEGER,
       product_name TEXT, quantity REAL, total_usd REAL, stock_action TEXT);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, lot_code TEXT, received_at TEXT);
@@ -111,9 +112,12 @@ function makeDb(settings) {
     CREATE TABLE products (id INTEGER PRIMARY KEY, stock_quantity REAL);
     CREATE TABLE return_replacement_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_name TEXT, quantity REAL);
     INSERT INTO branches VALUES (1, 'Store');
-    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0, NULL);
-    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0, NULL);
-    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0, NULL);
+    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0, NULL, 0, NULL);
+    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0, NULL, 0, NULL);
+    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0, NULL, 0, NULL);
+    INSERT INTO returns VALUES (8, 'RET-0008', 'cancelled', 'customer', '20261021-090000', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'USD');
+    INSERT INTO returns VALUES (9, 'RET-0009', 'cancelled', 'customer', '20261021-091500', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'KHR');
+    INSERT INTO returns VALUES (10, 'RET-0010', 'cancelled', 'customer', '20261021-093000', 'Mony', NULL, 1, 4, 16000, NULL, 4, 'USD');
     INSERT INTO products VALUES (1, 9);
     INSERT INTO branch_stock VALUES (1, 1, 1, 9);
     INSERT INTO return_items VALUES (1, 6, 1, 1, NULL, 'Face cream', 1, 4, 'restock');
@@ -424,6 +428,23 @@ globalThis.fetch = async (url, init) => {
     dbHolder.db = makeDb({ ...routed, telegram_language: 'km' }); sent = []
     await telegram.sendReturnStatusTelegramEvents(env, [5], 'za')
     assert.equal(sent[0].text.split('\n')[0], '🚫 បានបោះបង់ការប្រគល់មកវិញ')
+
+    // Review B defect 11 (6.0.905): a return on a Not Paid sale lowered the debt first; only the rest was cash.
+    // Its cancel/restore alert names each part -- never the whole value as the refund.
+    const statusLines = (ids, language) => { dbHolder.db = makeDb({ ...routed, telegram_language: language }); sent = []
+      return telegram.sendReturnStatusTelegramEvents(env, ids, 'za').then(() => sent[0].text.split('\n')) }
+    const usdSplit = await statusLines([8], 'en')
+    assert.ok(usdSplit.some(line => line.endsWith('Refund: $1.00')) && usdSplit.some(line => line.endsWith('Debt lowered: $3.00')), usdSplit.join('\n'))
+    assert.ok(!usdSplit.some(line => line.includes('$4.00')), `the whole $4 is not called a refund:\n${usdSplit.join('\n')}`)
+    const rielSplit = await statusLines([9], 'en')
+    assert.ok(rielSplit.some(line => /Refund: 4,?000/.test(line)) && rielSplit.some(line => line.endsWith('Debt lowered: $3.00')), rielSplit.join('\n'))
+    const debtOnly = await statusLines([10], 'en')
+    assert.ok(!debtOnly.some(line => line.includes('Refund')) && debtOnly.some(line => line.endsWith('Debt lowered: $4.00')), debtOnly.join('\n'))
+    const khmer = await statusLines([8], 'km')
+    assert.ok(khmer.some(line => line.includes('បានបន្ថយប្រាក់ជំពាក់') && line.includes('$3.00')), khmer.join('\n'))
+    const group = await statusLines([5, 8, 9], 'en')
+    assert.ok(group.some(line => line.endsWith('Debt lowered: $6.00')) && group.some(line => line.includes('$12.50')), group.join('\n'))
+    pass('return cancel/restore: the debt-lowered part and the cash part are labelled apart (USD, riel, debt only, Khmer, group)')
 
     // CUTOVER-LD: old records are never relabelled. The return carries the branch name it was recorded under
     // (returns.branch_name); after Shop -> "Old Shop" / Warehouse -> "LC Store" the directory says something else, and

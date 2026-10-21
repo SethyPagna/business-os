@@ -262,16 +262,17 @@ async function main() {
         assert.ok(readsAsNotPaid(afterFourthRestore))
       })
       const restoreUndo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'undo', 0, 'D undo the restore')
-      const afterRestoreUndo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
+      // 6.0.905: a return is a tag (return_state), never a sale_status word; status_before_return is no longer written.
+      const afterRestoreUndo = await h.one('SELECT sale_status,return_state,status_before_return FROM sales WHERE id=?', fourthId)
       money(`undoing the restore cancels it again and the sale owes $3 Not Paid (got ${restoreUndo.status}; ${JSON.stringify(afterRestoreUndo)})`, () => {
         assert.equal(restoreUndo.status, 200, JSON.stringify(restoreUndo.body).slice(0, 200))
-        assert.deepEqual(afterRestoreUndo, { sale_status: 'awaiting_payment', status_before_return: 'awaiting_payment' })
+        assert.deepEqual(afterRestoreUndo, { sale_status: 'awaiting_payment', return_state: null, status_before_return: null })
       })
       const restoreRedo = await H.historyStep(h, Number(fourthRestore.body.actionHistoryId), 'redo', 1, 'D redo the restore')
-      const afterRestoreRedo = await h.one('SELECT sale_status,status_before_return FROM sales WHERE id=?', fourthId)
+      const afterRestoreRedo = await h.one('SELECT sale_status,return_state,status_before_return FROM sales WHERE id=?', fourthId)
       money(`redoing the restore clears the debt again and the sale stays Not Paid (got ${restoreRedo.status}; ${JSON.stringify(afterRestoreRedo)})`, () => {
         assert.equal(restoreRedo.status, 200, JSON.stringify(restoreRedo.body).slice(0, 200))
-        assert.deepEqual(afterRestoreRedo, { sale_status: 'partial_return', status_before_return: 'awaiting_payment' })
+        assert.deepEqual(afterRestoreRedo, { sale_status: 'awaiting_payment', return_state: 'partial', status_before_return: null })
       })
 
       // Riel tender (owner, 29 Sep 2026): $10 with $7 paid, $4 returned and

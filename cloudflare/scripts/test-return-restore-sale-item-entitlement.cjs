@@ -3,6 +3,13 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+// 6.0.905 (owner, 20 Oct 2026): a return is the tag beside the payment state (sales.return_state) and never a
+// sale_status word; the word it used to write is read off the tag.
+function returnWord(f, id) {
+  const row = f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=?').get(id)
+  assert.ok(!['partial_return', 'returned'].includes(row.sale_status), `sale ${id} carries a retired word: ${row.sale_status}`)
+  return row.return_state === 'full' ? 'returned' : row.return_state === 'partial' ? 'partial_return' : row.sale_status
+}
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 
@@ -189,7 +196,7 @@ const cases = [
     assert.equal(applied.wrote, true)
     assert.equal(stock(f), 11)
     assert.equal(refund(f), 10)
-    assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.equal(returnWord(f, 1), 'partial_return')
     const after = state(f)
     const retry = await kernel.applyReturnBulkActionOutcome(f.env, employee, req)
     assert.deepEqual(retry.receipt, applied.receipt)
@@ -210,7 +217,7 @@ const cases = [
     assert.equal(refund(f), 30)
     assert.equal(stock(f), 11)
     assert.equal(stock(f, 2), 11)
-    assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.equal(returnWord(f, 1), 'returned')
   }],
   ['cancelled-orphan-excluded', async f => {
     await cancelA(f)

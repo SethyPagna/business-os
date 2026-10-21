@@ -35,6 +35,13 @@ function seedRows(raw,seed) {
   return raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get() ? seedStockFixture(raw,seed) : seed()
 }
 let rawDb = openDb(loadAll())
+// 6.0.905 (owner, 20 Oct 2026): a return is the tag beside the payment state (sales.return_state) and never a
+// sale_status word; the word it used to write is read off the tag, and the column may hold no return word.
+function returnWord(id) {
+  const row = rawDb.prepare('SELECT sale_status,return_state FROM sales WHERE id=?').get([id])
+  assert.ok(!['partial_return', 'returned'].includes(row.sale_status), `sale ${id} carries a retired word: ${row.sale_status}`)
+  return row.return_state === 'full' ? 'returned' : row.return_state === 'partial' ? 'partial_return' : row.sale_status
+}
 assert.throws(()=>rawDb.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(),/stock_transaction_required/)
 function deactivatePre0154LegacyLot(batchId) {
   const deactivate = () => seedRows(rawDb,()=>rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId]))
@@ -534,7 +541,7 @@ async function main() {
       sale_id: 1, reason: 'Fractional remainder', expected_quote: expectedQuote,
       items: [{ sale_item_id: 1, quantity: 0.2, stock_action: 'none', branch_id: 1 }] })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE sale_id=1').get().n, 2)
   })
 
@@ -807,7 +814,7 @@ async function main() {
       items: [{ sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 5, return_to_stock: true }],
     })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     const before = rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: created.json.id })
     const frozen = {
       client_request_id: 'return-edit-frozen-status', expected_updated_at: before.updated_at,
@@ -817,7 +824,7 @@ async function main() {
     const edited = await req('PATCH', `/${created.json.id}`, frozen)
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
     assert.strictEqual(edited.json.updated_at, rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: created.json.id }).updated_at)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
     const event = rawDb.prepare("SELECT source_id,changes_json FROM sale_record_events WHERE source_kind='return_edit'").get()
     const receipt = rawDb.prepare("SELECT id,request_json,response_json FROM return_mutation_receipts WHERE request_id='return-edit-frozen-status'").get()
     assert.strictEqual(event.source_id, receipt.id)
@@ -880,7 +887,7 @@ async function main() {
     seedRows(rawDb,()=>rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run())
     seedRows(rawDb,()=>rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,3)").run())
     const linked = await req('POST', '/', { sale_id: 1, reason: 'One of three', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }] })
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
     const linkedEdit = await req('PATCH', `/${linked.json.id}`, {
       client_request_id: 'return-edit-status-unchanged', reason: 'Still one of three',
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }],
@@ -946,7 +953,7 @@ async function main() {
     })
     assert.strictEqual(eventFailure.status, 500)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM return_items WHERE return_id=@id').get({ id: linked.json.id }).quantity, 2)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-bad-event'").get().n, 0)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_edit'").get().n, 0)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_bulk_guards').get().n, 0)
@@ -2074,14 +2081,14 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_create'").get().n, 1)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+    assert.strictEqual(returnWord(1), 'partial_return')
 
     const retry = await reqExact('POST', '/', loserPayload)
     assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 2)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 2)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
-    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(returnWord(1), 'returned')
   })
 
   await check('status-unchanged and manual creates keep receipts without inventing sale events', async () => {

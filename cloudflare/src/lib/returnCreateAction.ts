@@ -1,6 +1,7 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
+import type { SaleReturnState } from './saleStatusResolution'
 
 // A riel refund is part of the request; a dollar refund (the default) leaves
 // the digest bytes of every request sent before the currency existed.
@@ -303,12 +304,13 @@ export function returnQuantityExceeds(requested: number, remaining: number): boo
   return exactGreater(storedQuantity(requested), storedQuantity(remaining))
 }
 
-export function projectedSaleStatusForReturnCreate(
+// The return tag (sales.return_state) a create or edit leaves, exactly: the rule and its
+// in-batch twin are in lib/returnRefundSplit.ts ("The return tag").
+export function projectedReturnStateForReturnCreate(
   saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
   committedReturnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
   requestLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
-  statusBeforeReturn: string | null,
-): string {
+): SaleReturnState | null {
   const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
   const returnedByItem = new Map<number, ExactQuantity[]>()
   const fallbackByProduct = new Map<number, ExactQuantity[]>()
@@ -338,15 +340,14 @@ export function projectedSaleStatusForReturnCreate(
   }
   const fullyReturned = hasAny && saleItems.every((item) =>
     !exactGreater(storedQuantity(item.quantity), exactSum(returnedByItem.get(item.id) || [])))
-  return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+  return fullyReturned ? 'full' : hasAny ? 'partial' : null
 }
 
-export function projectedSaleStatusForReturnCreateV1(
+export function projectedReturnStateForReturnCreateV1(
   saleItems: Array<{ id: number; quantity: number }>,
   committedReturnLines: Array<{ sale_item_id?: number | null; quantity: number }>,
   requestLines: Array<{ sale_item_id?: number | null; quantity: number }>,
-  statusBeforeReturn: string | null,
-): string {
+): SaleReturnState | null {
   const saleItemIds = new Set(saleItems.map(item => Number(item.id)))
   const quantitiesByItem = new Map<number, number[]>()
   const allLines = [...committedReturnLines, ...requestLines]
@@ -365,7 +366,7 @@ export function projectedSaleStatusForReturnCreateV1(
     if (remainder.startsWith('-')) throw new Error('The return quantity exceeds the captured sale quantity')
     if (remainder !== '0') fullyReturned = false
   }
-  return fullyReturned ? 'returned' : allLines.length ? 'partial_return' : (statusBeforeReturn || 'completed')
+  return fullyReturned ? 'full' : allLines.length ? 'partial' : null
 }
 
 /** What an over-capacity refusal names: the product, the units that would

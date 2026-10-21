@@ -246,10 +246,11 @@ async function run() {
   const centResidual = await helper.applyReturnBulkAction(f.env, user,
     request(f, [11], 'status', 'cancelled', 'completed', 'cent-residual-restore-001'))
   assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  // 6.0.905: the tag moves, the retired label becomes the payment state it stood for
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'full' })
   await replay(f, centResidual.actionHistoryId, 'undo', 0)
   await replay(f, centResidual.actionHistoryId, 'redo', 1)
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'full' })
   console.log('PASS selected-member validation preserves a valid later return carrying the cohort cent residual')
 
   f = fixture(); seed(f)
@@ -261,7 +262,7 @@ async function run() {
   const fourPlaceResidual = await helper.applyReturnBulkAction(f.env, user,
     request(f, [11], 'status', 'cancelled', 'completed', 'four-place-residual-restore-001'))
   assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'partial' })
   await replay(f, fourPlaceResidual.actionHistoryId, 'undo', 0)
   await replay(f, fourPlaceResidual.actionHistoryId, 'redo', 1)
   assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
@@ -291,13 +292,13 @@ async function run() {
   insertV1Return(f, { id: 11, status: 'cancelled', before: 0.1, quantity: 0.7, calculated: 8.75, sold: 0.8 })
   const fractional = await helper.applyReturnBulkAction(f.env, user,
     request(f, [11], 'status', 'cancelled', 'completed', 'fractional-restore-001'))
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'full' })
   assert.deepEqual(saleRecordEvents(f, fractional.operationId).map(event => [event.generation, event.via,
     event.changes[0].before.value, event.changes[0].after.value]), [[0, 'apply', 'partial_return', 'returned']])
   await replay(f, fractional.actionHistoryId, 'undo', 0)
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'partial' })
   await replay(f, fractional.actionHistoryId, 'redo', 1)
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state FROM sales WHERE id=1').get() }, { sale_status: 'completed', return_state: 'full' })
   assert.deepEqual(saleRecordEvents(f, fractional.operationId).map(event => [event.generation, event.via,
     event.changes[0].before.value, event.changes[0].after.value]), [
     [0, 'apply', 'partial_return', 'returned'], [1, 'undo', 'returned', 'partial_return'],
@@ -420,10 +421,29 @@ async function run() {
   f = fixture(); seed(f)
   f.sql.prepare("UPDATE sales SET sale_status='partial_return',status_before_return='awaiting_delivery' WHERE id=1").run()
   const awaiting = await helper.applyReturnBulkAction(f.env, user, request(f, [1], 'status', 'completed', 'cancelled', 'awaiting-parent-001'))
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_delivery')
+  // 6.0.905: awaiting_delivery is Completed + the delivery tag (0263); the payment state and the tag survive both ways.
+  const deliveryState = "SELECT sale_status,return_state,delivery_pending FROM sales WHERE id=1"
+  assert.deepEqual({ ...f.sql.prepare(deliveryState).get() }, { sale_status: 'completed', return_state: null, delivery_pending: 1 })
   await replay(f, awaiting.actionHistoryId, 'undo', 0)
-  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
-  console.log('PASS final return cancellation restores the exact pre-return sale status')
+  assert.deepEqual({ ...f.sql.prepare(deliveryState).get() }, { sale_status: 'completed', return_state: 'full', delivery_pending: 1 })
+  console.log('PASS final return cancellation keeps the exact pre-return payment state and delivery tag')
+
+  // 6.0.905: a group the previous Worker saved (no `tagged` marker) may meet a retired return word on its sale -- that
+  // Worker wrote one on every return. Its replay reads the sale and rewrites the word to the payment state it stood
+  // for; without that the word would outrank the tag the replay just wrote (control: the marked replay skips the read).
+  f = fixture(); seed(f)
+  const legacyGroup = await helper.applyReturnBulkAction(f.env, user, request(f, [1], 'status', 'completed', 'cancelled', 'legacy-snapshot-001'))
+  const legacySnapshot = f.sql.prepare('SELECT s.id,s.payload_json FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=?').get(legacyGroup.operationId)
+  const legacyPayload = JSON.parse(legacySnapshot.payload_json)
+  assert.equal(legacyPayload.tagged, true, 'a snapshot written now carries the marker')
+  delete legacyPayload.tagged
+  f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(legacyPayload), legacySnapshot.id)
+  f.sql.prepare("UPDATE sales SET sale_status='returned',status_before_return='awaiting_payment',return_state=NULL WHERE id=1").run()
+  f.sql.prepare('UPDATE return_bulk_members SET sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=1),0) WHERE operation_id=?').run(legacyGroup.operationId)
+  await replay(f, legacyGroup.actionHistoryId, 'undo', 0)
+  assert.deepEqual({ ...f.sql.prepare('SELECT sale_status,return_state,return_review_state FROM sales WHERE id=1').get() },
+    { sale_status: 'awaiting_payment', return_state: 'full', return_review_state: null })
+  console.log('PASS an Undo saved before the tags rewrites a retired word to its payment state and tags the sale (no new flag: it was full)')
 
   f = fixture(); seed(f)
   f.sql.prepare('UPDATE sales SET stock_skipped=1 WHERE id=1').run()

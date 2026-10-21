@@ -78,24 +78,24 @@ assert.deepEqual(taggedV1.items, [{ sale_item_id: 8, quantity: 1, stock_action: 
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x', items: [] }), /items required/i)
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x'.repeat(501), items: [{ quantity: 1 }] }), /500 UTF-8 bytes/)
 
-assert.equal(subject.projectedSaleStatusForReturnCreate(
+// 6.0.905: the projection is the return TAG (owner, 20 Oct 2026); the payment state is not its business.
+assert.equal(subject.projectedReturnStateForReturnCreate(
   [{ id: 1, product_id: 5, quantity: 2 }, { id: 2, product_id: 5, quantity: 1 }],
   [{ sale_item_id: 1, product_id: 5, quantity: 2 }],
   [{ product_id: 5, quantity: 1 }],
-  'completed',
-), 'returned', 'legacy product fallback fills only remaining item capacity')
-assert.equal(subject.projectedSaleStatusForReturnCreate(
-  [{ id: 1, product_id: 5, quantity: 2 }], [], [{ sale_item_id: 1, quantity: 1 }], 'completed',
-), 'partial_return')
-assert.equal(subject.projectedSaleStatusForReturnCreate([], [], [], 'awaiting_payment'), 'awaiting_payment')
-assert.equal(subject.projectedSaleStatusForReturnCreateV1(
-  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.1 }], [{ sale_item_id: 1, quantity: 0.2 }], 'completed',
-), 'returned', 'v1 status uses exact decimal coverage instead of a binary-float epsilon')
-assert.equal(subject.projectedSaleStatusForReturnCreateV1(
-  [{ id: 1, quantity: 0.3 }], [], [{ sale_item_id: 1, quantity: 0.2 }], 'completed',
-), 'partial_return')
-assert.throws(() => subject.projectedSaleStatusForReturnCreateV1(
-  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 1e-20 }], 'completed',
+), 'full', 'legacy product fallback fills only remaining item capacity')
+assert.equal(subject.projectedReturnStateForReturnCreate(
+  [{ id: 1, product_id: 5, quantity: 2 }], [], [{ sale_item_id: 1, quantity: 1 }],
+), 'partial')
+assert.equal(subject.projectedReturnStateForReturnCreate([], [], []), null)
+assert.equal(subject.projectedReturnStateForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.1 }], [{ sale_item_id: 1, quantity: 0.2 }],
+), 'full', 'v1 tag uses exact decimal coverage instead of a binary-float epsilon')
+assert.equal(subject.projectedReturnStateForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [], [{ sale_item_id: 1, quantity: 0.2 }],
+), 'partial')
+assert.throws(() => subject.projectedReturnStateForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 1e-20 }],
 ), /exceeds/i, 'a positive exact excess cannot disappear in Number addition')
 assert.doesNotThrow(() => subject.assertReturnCreateCapacity(
   [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }, { id: 2, product_id: 5, product_name: 'A', quantity: 1 }],
