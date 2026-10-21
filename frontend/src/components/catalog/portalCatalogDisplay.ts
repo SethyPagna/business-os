@@ -260,9 +260,12 @@ export function buildPortalPricePresentation(
   const priceCut = promotion.active && !promotion.isQuantityHint
   const activeUsd = priceCut ? discounted.applied_price_usd : Number(product?.selling_price_usd || 0)
   const activeKhr = priceCut ? discounted.applied_price_khr : Number(product?.selling_price_khr || 0)
+  // A product the server sent without any price (the store hides prices; an editor draft can still switch them
+  // on) has nothing to show: blank, not "$0.00".
+  const priced = product?.selling_price_usd !== undefined || product?.selling_price_khr !== undefined
   return {
-    primaryText: formatPortalPrice(activeUsd, activeKhr, config),
-    originalText: priceCut
+    primaryText: priced ? formatPortalPrice(activeUsd, activeKhr, config) : '',
+    originalText: priceCut && priced
       ? formatPortalPrice(product?.selling_price_usd, product?.selling_price_khr, config)
       : '',
     promotion,

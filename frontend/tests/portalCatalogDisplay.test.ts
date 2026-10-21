@@ -101,6 +101,17 @@ runTest('promotion helpers use explicit product discount, not internal special p
   assert.equal(presentation.originalText, '$12.00')
 })
 
+runTest('a product served without a price (prices hidden by the store) shows no price, not $0.00', () => {
+  const { selling_price_usd: _usd, selling_price_khr: _khr, discount_amount_usd: _amountUsd, discount_amount_khr: _amountKhr, ...served } = {
+    selling_price_usd: 12, selling_price_khr: 49200, discount_amount_usd: 0, discount_amount_khr: 0,
+    discount_enabled: 1, discount_type: 'percent', discount_percent: 25, discount_label: 'Promo',
+  }
+  const presentation = buildPortalPricePresentation(served, { priceDisplay: 'USD' }, formatPortalPrice)
+  assert.equal(presentation.primaryText, '')
+  assert.equal(presentation.originalText, '')
+  assert.equal(buildPortalPricePresentation({ selling_price_usd: 0, selling_price_khr: 0 }, { priceDisplay: 'USD' }, formatPortalPrice).primaryText, '$0.00', 'a real zero price still shows')
+})
+
 runTest('highlight badges stay compact and follow ranking priority', () => {
   const product = {
     portal_recommended: true,

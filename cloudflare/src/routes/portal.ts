@@ -506,7 +506,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     promotionsTitle: settings.customer_portal_promotions_title || '',
     promotionsIntro: settings.customer_portal_promotions_intro || '',
     promoItems: normalizePortalPromoItems(settings.customer_portal_promo_items),
-    showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
+    showPrices: portalShowsPrices(settings),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     // Master switch for the In Stock/Low Stock/Out of Stock badge on each
     // product card AND the stock-status filter pills above the grid --
@@ -924,7 +924,7 @@ async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
+async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean, showPrices: boolean) {
   const db = getDb(env)
   const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
   const page = 1
@@ -1005,7 +1005,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // 6.0.889: the page leaves here WITHOUT stock -- it is the cacheable body;
   // withLivePortalStock attaches statuses per response (see Public read caching).
   const [itemsWithoutStock, initials] = await Promise.all([
-    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>),
+    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>, showPrices),
     // Wrapped in Promise.resolve() before .catch() so this settles
     // independently of the fixture's exact return shape (a real D1
     // PreparedStatement.all() is already a Promise, but this must not
@@ -1355,10 +1355,19 @@ async function portalCacheVersion(c: { env: Env }, scope: { stock: boolean; prom
   }
 }
 
+// The numbers a card's price can be read from: the selling price and the per-product amount off it.
+const PORTAL_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'discount_amount_usd', 'discount_amount_khr'] as const
+
 // Removes the raw stock columns the paging queries select; the cached body
 // never carries them (withLivePortalStock attaches statuses per response).
-function withoutPortalStockFields(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  return items.map(({ stock_quantity: _quantity, low_stock_threshold: _low, out_of_stock_threshold: _out, branch_stock: _ledger, ...publicFields }) => publicFields)
+// With "show prices" off it also removes the price columns, so hiding prices is
+// the server's rule and not only the page's; the setting keys the cached body
+// through the settings version (portalCacheVersion).
+function withoutPortalStockFields(items: Array<Record<string, unknown>>, showPrices: boolean): Array<Record<string, unknown>> {
+  return items.map(({ stock_quantity: _quantity, low_stock_threshold: _low, out_of_stock_threshold: _out, branch_stock: _ledger, ...publicFields }) => {
+    if (!showPrices) for (const field of PORTAL_PRICE_FIELDS) delete publicFields[field]
+    return publicFields
+  })
 }
 
 type PortalStockState = { stock_status: PortalStockStatus; branch_availability: Array<{ branch_id: number; status: PortalStockStatus }> }
@@ -1536,9 +1545,20 @@ app.use('*', async (c, next) => {
 // ai_provider_configs row backs the chat). No visitor feature reads either,
 // and /config + /bootstrap used to publish both to anyone. The website
 // editor reads them from the staff settings map (GET /api/settings) instead.
+//
+// While the points programme is off customers see no points (owner ruling), so
+// the earning and redeeming rates are not sent either; the page learns only
+// that the programme is off (loyaltyPointsEnabled). Staff read the rates from
+// the settings map, and server-side points maths uses buildPortalConfig.
 export function buildPublicPortalConfig(settings: SettingsMap, env: Env) {
   const { aiPrompt: _aiPrompt, aiProviderId: _aiProviderId, ...publicConfig } = buildPortalConfig(settings, env)
-  return publicConfig
+  if (publicConfig.loyaltyPointsEnabled) return publicConfig
+  const {
+    pointsBasis: _basis, pointsPerUsd: _perUsd, pointsPerKhr: _perKhr, redeemPoints: _redeem,
+    redeemValueUsd: _valueUsd, redeemValueKhr: _valueKhr, submissionRewardPoints: _reward,
+    ...withoutRates
+  } = publicConfig
+  return withoutRates
 }
 
 async function keepActiveProductIds(env: Env, ids: readonly number[]): Promise<number[]> {
@@ -1561,6 +1581,10 @@ function portalShowsOutOfStock(settings: SettingsMap): boolean {
   return normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
 }
 
+function portalShowsPrices(settings: SettingsMap): boolean {
+  return normalizeBoolean(settings.customer_portal_show_prices, true)
+}
+
 // Membership of meta/catalog depends on stock only when out-of-stock products are hidden.
 function portalCatalogTtl(showOutOfStockProducts: boolean): number {
   return showOutOfStockProducts ? PORTAL_BODY_TTL_SECONDS : PORTAL_STOCK_TTL_SECONDS
@@ -1577,7 +1601,7 @@ app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () =>
   const [config, meta, catalog, promotionEdgeSeconds] = await Promise.all([
     withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
     buildPortalMeta(c.env, showOutOfStockProducts),
-    buildPortalCatalog(c.env, showOutOfStockProducts),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
     portalPromotionEdgeSeconds(c.env),
   ])
   return {
@@ -1603,9 +1627,10 @@ app.get('/catalog/meta', (c) => servePortalPublic(c, 'meta', false, async () => 
 }, null))
 
 app.get('/catalog/products', (c) => servePortalPublic(c, 'products', true, async () => {
-  const showOutOfStockProducts = portalShowsOutOfStock(await loadSettingsMap(c.env))
+  const settings = await loadSettingsMap(c.env)
+  const showOutOfStockProducts = portalShowsOutOfStock(settings)
   const [catalog, promotionEdgeSeconds] = await Promise.all([
-    buildPortalCatalog(c.env, showOutOfStockProducts),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
     portalPromotionEdgeSeconds(c.env),
   ])
   return { value: catalog, ttl: cappedTtl(portalCatalogTtl(showOutOfStockProducts), promotionEdgeSeconds) }
@@ -1621,10 +1646,10 @@ app.get('/catalog/products', (c) => servePortalPublic(c, 'products', true, async
 // budget instead of a live one is an honest simplification, not a silent
 // gap, since nothing currently reads those numbers to throttle client
 // requests either way.
-app.get('/ai/status', async (c) => {
-  const settings = await loadSettingsMap(c.env)
-  const config = buildPortalConfig(settings, c.env)
-  const db = getDb(c.env)
+async function buildPortalAiStatus(env: Env): Promise<Record<string, unknown>> {
+  const settings = await loadSettingsMap(env)
+  const config = buildPortalConfig(settings, env)
+  const db = getDb(env)
   const provider = config.aiProviderId
     ? await db.prepare(`
         SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
@@ -1640,7 +1665,7 @@ app.get('/ai/status', async (c) => {
   // are internal and never exposed here -- the shopper only needs to know the
   // assistant is available. `usage` stays as an empty, non-identifying shape
   // for response-shape stability with the client's existing handling.
-  return c.json({
+  return {
     success: true,
     enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
@@ -1648,12 +1673,31 @@ app.get('/ai/status', async (c) => {
     provider: provider?.provider || '',
     // Every enabled chat provider a question can reach (the chat fails over
     // between them), as id + display name only. Empty when the assistant is off.
-    providers: config.aiEnabled ? await listPortalAiProviderDisclosures(c.env, config.aiProviderId) : [],
+    providers: config.aiEnabled ? await listPortalAiProviderDisclosures(env, config.aiProviderId) : [],
     dataUseNotice: provider
       ? 'Your question and optional shopping preferences are sent to this AI provider and may be processed outside Cambodia.'
       : '',
     usage: { providers: [] },
-  })
+  }
+}
+
+// Anonymous and identical for every visitor, so one short edge entry answers a
+// flood instead of three D1 reads each (the key ignores the query string, so a
+// varied URL cannot bypass it). The settings version re-keys it on an edit;
+// an edit to a provider row alone is seen within the TTL.
+export const PORTAL_AI_STATUS_TTL_SECONDS = 30
+
+app.get('/ai/status', async (c) => {
+  const versions = await readPortalCacheVersion(c, { stock: false, promotions: false })
+  const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'body', 'ai-status', '', versions.body)
+  const cached = key ? await readPortalEdge<Record<string, unknown>>(key) : null
+  if (cached) return c.json(cached)
+  const build = async () => {
+    const [status, maintenanceHeld] = await Promise.all([buildPortalAiStatus(c.env), key ? portalMaintenanceHeld(c.env) : true])
+    if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
+    return status
+  }
+  return c.json(key ? await coalescePortalBuild(key.url, build) : await build())
 })
 
 // Sanitizes the free-form shopper profile object from the request body.
@@ -1930,14 +1974,18 @@ app.post('/ai/chat', async (c) => {
 // syntax in the original here, so this is a direct, unmodified port.
 // Banner edits bump 'promotions' (routes/promotions.ts); linked product names
 // and images follow 'products'. TTL never crosses a banner's start or end.
+// A banner whose linked product is deactivated stays (its words are the
+// merchant's own) but names, pictures and identifies no product: pr is only
+// joined while active, and the id goes with it.
 app.get('/promotions', (c) => servePortalPublic(c, 'promotions', false, async () => {
   const db = getDb(c.env)
   const nowIso = new Date().toISOString()
   const rows = await db.prepare(`
     SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color,
-           p.link_product_id, pr.name AS link_product_name, pr.image_path AS link_product_image
+           CASE WHEN pr.id IS NULL THEN NULL ELSE p.link_product_id END AS link_product_id,
+           pr.name AS link_product_name, pr.image_path AS link_product_image
     FROM promotions p
-    LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product'
+    LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product' AND pr.is_active = 1
     WHERE p.is_active = 1
       AND (p.starts_at IS NULL OR p.starts_at <= @now)
       AND (p.ends_at IS NULL OR p.ends_at >= @now)
@@ -2884,7 +2932,8 @@ async function runPortalProductSearch(env: Env, query: Record<string, string>): 
   for (const row of stockSettingsRows || []) stockSettings[row.key] = row.value
   const allowStockStateFilter = normalizeBoolean(stockSettings.customer_portal_show_stock_status, true)
   const showOutOfStockProducts = normalizeBoolean(stockSettings.customer_portal_show_out_of_stock_products, true)
-  const browse = parsePortalBrowse(query, normalizeBoolean(stockSettings.customer_portal_show_prices, true))
+  const showPrices = normalizeBoolean(stockSettings.customer_portal_show_prices, true)
+  const browse = parsePortalBrowse(query, showPrices)
   const browseOrder = buildPortalBrowseOrder(browse.view, browse.sort)
 
   const filters = buildPortalProductFilters(query, allowStockStateFilter, showOutOfStockProducts)
@@ -3099,7 +3148,7 @@ async function runPortalProductSearch(env: Env, query: Record<string, string>): 
   // whole-request 500. Settle it independently and fall back to an empty
   // rail.
   const [itemsWithoutStock, initials, promotionEdgeSeconds] = await Promise.all([
-    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>),
+    withoutPortalStockFields((items || []) as Array<Record<string, unknown>>, showPrices),
     // See buildPortalCatalog's rail above for why this is wrapped in
     // Promise.resolve() before .catch().
     Promise.resolve(db.prepare(`

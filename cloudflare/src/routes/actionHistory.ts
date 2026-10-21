@@ -25,6 +25,7 @@ import { STOCK_LOT_SET_KIND, notifyStockLotSet } from '../lib/stockLotAdjustment
 import { STOCK_IN_LINE_EDIT_KIND, notifyStockInLineEdit } from '../lib/stockInLineEdit'
 import { productMergeGroupPrefixFingerprint } from '../lib/undoAppliers'
 import { parseMergeCostOutcome } from '../lib/productCostReview'
+import { ACTION_REPLAY_FAILED_CODE, authoredFailureMessage } from '../lib/failureText'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -329,7 +330,10 @@ app.get('/movements/:id/revert-preview', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const status = error instanceof StockMovementReplayError ? error.status : 500
-    return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
+    const authored = authoredFailureMessage(error)
+    if (authored === null) console.error('[action-history] revert preview failed', error)
+    return c.json({ success: false, error: authored ?? 'Unable to preview this stock action.',
+      ...(authored === null ? { code: ACTION_REPLAY_FAILED_CODE } : {}),
       ...(status === 409 ? { code: replayRefusalCode(error) } : {}) }, status)
   }
 })
@@ -588,8 +592,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        // The operator's sentence, or fixed text with the detail in the log: last_error is read back by the history list.
+        const authored = authoredFailureMessage(error)
+        if (authored === null) console.error(`[action-history] ${direction} failed (action ${existing.id})`, error)
+        const failureMessage = authored ?? `Failed to ${direction} this action`
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
-          .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
+          .run({ last_error: failureMessage, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
         const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
@@ -604,7 +612,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // The numbers a coded refusal's sentence names ("only 3 left, 27 needed").
         const refusalParams = status === 409 ? (error as { params?: unknown })?.params : null
         const paramFields = refusalParams && typeof refusalParams === 'object' && !Array.isArray(refusalParams) ? { params: refusalParams } : {}
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        return c.json({ success: false, error: failureMessage, ...(authored === null ? { code: ACTION_REPLAY_FAILED_CODE } : {}), ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

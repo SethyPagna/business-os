@@ -712,6 +712,10 @@ app.delete('/:id', async (c) => {
     if (forceRequested && (usageBreakdown.products > 0 || usageBreakdown.gallery > 0) && !canChangeProductImages(user)) {
       return c.json({ error: 'You do not have permission to change product images.' }, 403)
     }
+    // A user's avatar is account data: only an admin deletes a file that is one (rewire's rule, above).
+    if (forceRequested && usageBreakdown.avatars > 0 && !isAdminControlUser(user)) {
+      return c.json({ error: 'Only an administrator can delete a file that is a user avatar.' }, 403)
+    }
     if (!forceRequested) {
       return c.json({
         error: 'This file is still in use and cannot be deleted.',

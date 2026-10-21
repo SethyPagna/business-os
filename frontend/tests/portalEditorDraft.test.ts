@@ -100,6 +100,14 @@ const UNPUBLISHED = [
   'customer_portal_out_of_stock_threshold',
   'customer_portal_show_point_value',
   'customer_portal_show_membership',
+  // Withheld from the public config while the points programme is off (routes/portal.ts buildPublicPortalConfig).
+  'customer_portal_points_basis',
+  'customer_portal_points_per_usd',
+  'customer_portal_points_per_khr',
+  'customer_portal_redeem_points',
+  'customer_portal_redeem_value_usd',
+  'customer_portal_redeem_value_khr',
+  'customer_portal_submission_reward_points',
 ]
 const sendable = (payload: Record<string, string>, staff: Record<string, unknown> | null, edited: ReadonlySet<string>) => (
   Object.fromEntries(Object.entries(payload).filter(([key]) => need().isLoadedOrEditedKey(key, staff, edited)))

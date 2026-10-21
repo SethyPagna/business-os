@@ -64,6 +64,7 @@ const stockTransaction = loadLibrary('stockTransaction')
 function loadHistoryRoute(db, undoAppliers) {
   const stubs = {
     '../lib/stockTransaction': stockTransaction,
+    '../lib/failureText': loadLibrary('failureText'),
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/productSupplierGate': loadLibrary('productSupplierGate'),
     '../lib/productCostReview': loadLibrary('productCostReview', { './catalogCostRecompute': loadLibrary('catalogCostRecompute', { './moneyPrecision': loadLibrary('moneyPrecision') }) }),
@@ -395,7 +396,11 @@ async function main() {
   await check('a 409 whose own code is not a stable machine code falls back to the generic refusal code', async () => {
     const world = returnBulkWorld(Object.assign(new Error('D1_ERROR: constraint failed'), { statusCode: 409, code: 'SQLITE_CONSTRAINT' }))
     const h = recordedHistory(world, RETURN_BULK_PAYLOAD)
-    assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), GENERIC_REFUSAL, /constraint failed/)
+    // The code still falls back to the generic refusal; the driver's own sentence (a platform code marks it as a driver
+    // failure) no longer rides in the body -- the operator gets fixed text and the detail stays in the server log.
+    const refused = await replay(world, h, 'undo', { expected_generation: 0 })
+    assertCoded(refused, GENERIC_REFUSAL, /Failed to undo this action/)
+    assert.doesNotMatch(JSON.stringify(refused.body), /D1_ERROR|constraint failed|SQLITE/)
   })
 
   for (const boundary of ['applier', 'transition']) {

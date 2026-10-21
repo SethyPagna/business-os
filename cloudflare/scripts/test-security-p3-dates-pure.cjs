@@ -105,9 +105,14 @@ async function main() {
     assert.equal(state.deleted, true)
   })
 
-  await check('force-delete of an avatar-only file stays a Library action', async () => {
-    const res = await call(filesApp({ cover: false }), 'DELETE', '/1', FORCE, staff({ library: true, products: true, 'products:image': false }))
-    assert.equal(res.status, 200)
+  await check('force-delete of a file that is a user avatar needs an administrator (the rewire rule)', async () => {
+    const state = { cover: false }
+    const res = await call(filesApp(state), 'DELETE', '/1', FORCE, staff({ library: true, products: true, 'products:image': false }))
+    assert.equal(res.status, 403)
+    assert.equal(state.deleted, undefined, 'nothing was deleted')
+    const adm = { cover: false }
+    assert.equal((await call(filesApp(adm), 'DELETE', '/1', FORCE, admin)).status, 200)
+    assert.equal(adm.deleted, true)
   })
 
   await check('rewire repoints other users avatars for an admin only', async () => {

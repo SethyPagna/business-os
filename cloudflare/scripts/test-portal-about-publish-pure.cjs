@@ -505,8 +505,16 @@ async function main() {
     'customer_portal_show_point_value',
     // Fixed false: membership history lives in the signed-in account only.
     'customer_portal_show_membership',
+    // Loyalty rates: withheld from the public config while the points programme is off.
+    'customer_portal_points_basis',
+    'customer_portal_points_per_usd',
+    'customer_portal_points_per_khr',
+    'customer_portal_redeem_points',
+    'customer_portal_redeem_value_usd',
+    'customer_portal_redeem_value_khr',
+    'customer_portal_submission_reward_points',
   ]
-  const MAX_KNOWN_UNPUBLISHED = 6
+  const MAX_KNOWN_UNPUBLISHED = 13
 
   function buildDraftEntries() {
     const src = fs.readFileSync(path.join(REPO, 'frontend', 'src', 'components', 'catalog', 'CatalogPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
