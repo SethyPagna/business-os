@@ -42,11 +42,18 @@ function adapter(db) {
   } }
 }
 function product(db, id, name, quantity, extra = {}) {
-  db.prepare('INSERT INTO products(id,name,stock_quantity,parent_id,is_group,brand,category) VALUES(?,?,?,?,?,?,?)').run(id, name, quantity, extra.parent_id ?? null, extra.is_group ?? 0, extra.brand ?? 'Synthetic brand', extra.category ?? 'Synthetic category')
+  db.prepare('INSERT INTO products(id,name,stock_quantity,parent_id,is_group,brand,category,barcode,sku) VALUES(?,?,?,?,?,?,?,?,?)').run(id, name, quantity, extra.parent_id ?? null, extra.is_group ?? 0, extra.brand ?? 'Synthetic brand', extra.category ?? 'Synthetic category', extra.barcode ?? null, extra.sku ?? null)
   db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run(id, quantity)
   db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) VALUES(?,?,?,?)').run(id, id, `fixture-${id}`, extra.received_at ?? '2026-10-19')
   db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').run(id, quantity)
 }
+// An extra lot for a product; the caller keeps the ordinary stock at least as large as its lots.
+function lot(db, id, productId, branchId, quantity, expiry) {
+  db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,expiry_date) VALUES(?,?,?,?,?)').run(id, productId, `fixture-lot-${id}`, '2026-10-19', expiry)
+  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(id, branchId, quantity)
+}
+const keysOf = row => Object.keys(row).filter(key => key === 'barcode' || key === 'sku' || key.startsWith('__code'))
+const blindViewer = permissions => ({ id: 7, role_code: 'staff', role_permissions: JSON.stringify({ inventory_checks: true, ...permissions }) })
 function sale(db, id, customerId, lines, createdAt = '2026-10-18T17:00:00.000Z', status = 'completed') {
   const total = lines.reduce((sum, line) => sum + line.quantity, 0)
   db.prepare('INSERT INTO sales(id,receipt_number,customer_id,customer_name,created_at,sale_status,subtotal_usd,total_usd) VALUES(?,?,?,?,?,?,?,?)')
@@ -290,6 +297,125 @@ async function main() {
     assert.equal(proxy.statements, 5, 'bounded reuse does not add request statements')
     console.log(`MEASURE computed stock: ${evaluations} evaluations for ${size} products across five statements`)
     db.close()
+  })
+  await check('search matches a barcode or SKU substring for a viewer who sees barcodes, and names still match', async () => {
+    const db = fixture()
+    product(db, 990001, 'Alpha cream', 2, { barcode: '8850001112223', sku: 'SKU-AL-77' })
+    product(db, 990002, 'Beta soap', 3, { barcode: '9990001110000', sku: 'SKU-BE-12' })
+    product(db, 990003, 'Zeta lotion', 4)
+    const visible = blindViewer({ inventory_check_show_barcode: true })
+    for (const [viewer, label] of [[admin, 'admin'], [visible, 'barcode-visible employee']]) {
+      for (const [query, expected] of [['8850001112223', [990001]], ['0001112', [990001]], ['sku-al', [990001]], ['SKU-BE-12', [990002]],
+        ['000111', [990001, 990002]], ['beta', [990002]], ['no such text', []]]) {
+        const { result } = await read(db, { query, pageSize: 100 }, viewer)
+        assert.deepEqual(result.items.filter(row => row.checkable).map(row => row.id).sort(), expected, `${label}: ${query}`)
+        assert.equal(result.stats.total_variants, expected.length, `${label}: ${query} summary agrees with the rows`)
+      }
+    }
+    const { result } = await read(db, { query: '8850001112223' }, visible)
+    assert.equal(result.items[0].barcode, '8850001112223', 'a visible barcode is still returned')
+    assert.equal(result.items[0].sku, 'SKU-AL-77')
+    assert.deepEqual(keysOf(result.items[0]).sort(), ['barcode', 'sku'], 'the matching helper columns never reach the row')
+    const membership = api.buildInventoryCheckProductMembershipQuery({ query: '8850001112223' }, [990001, 990002, 990003], api.getInventoryCheckProductsAccess(admin), lowStock)
+    const statement = db.prepare(membership.rowsSql); statement.setAllowUnknownNamedParameters(true)
+    assert.deepEqual(statement.all(membership.params).map(row => row.id), [990001], 'a session created from a scanned list admits the product its code selects')
+    db.close()
+  })
+  await check('a viewer who cannot see barcodes finds a product by its exact barcode or SKU only, and never receives a code', async () => {
+    const db = fixture()
+    product(db, 990001, 'Alpha cream', 2, { barcode: '8850001112223', sku: 'SKU-AL-77' })
+    product(db, 990002, 'Beta soap', 3, { barcode: '8850001119999', sku: 'SKU-BE-12' })
+    const blind = blindViewer({})
+    const access = api.getInventoryCheckProductsAccess(blind)
+    assert.equal(access.fields.barcode, false)
+    for (const [query, expected] of [['8850001112223', [990001]], ['SKU-AL-77', [990001]], ['8850001119999', [990002]], ['Alpha', [990001]],
+      ['885000', []], ['8850001', []], ['1112223', []], ['SKU-AL', []], ['AL-77', []], ['88500011122230', []]]) {
+      const { result } = await read(db, { query, pageSize: 100 }, blind)
+      assert.deepEqual(result.items.filter(row => row.checkable).map(row => row.id), expected, query)
+      assert.equal(result.stats.total_variants, expected.length, `${query}: the summary counts the same rows`)
+      for (const row of result.items) assert.deepEqual(keysOf(row), [], `${query}: no barcode, sku or helper column in row ${row.id}`)
+      assert.ok(!/8850001|SKU-/.test(JSON.stringify(result)), `${query}: no code anywhere in the response`)
+    }
+    for (const [query, expected] of [['8850001112223', [990001]], ['885000', []], ['SKU-BE', []]]) {
+      const membership = api.buildInventoryCheckProductMembershipQuery({ query }, [990001, 990002], access, lowStock)
+      const statement = db.prepare(membership.rowsSql); statement.setAllowUnknownNamedParameters(true)
+      assert.deepEqual(statement.all(membership.params).map(row => row.id), expected, `membership ${query}`)
+    }
+    await assert.rejects(() => read(db, { searchFields: 'barcode' }, blind), error => error.status === 403)
+    db.close()
+  })
+  await check('next expiry is the earliest dated lot holding stock in the branch scope, and only for viewers who see received dates and stock', async () => {
+    const db = fixture()
+    product(db, 991001, 'Expiry cream', 20)
+    db.exec('UPDATE branch_batch_stock SET quantity=10 WHERE batch_id=991001')
+    db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(991001,2,5)').run()
+    db.exec('UPDATE products SET stock_quantity=25 WHERE id=991001')
+    lot(db, 991101, 991001, 1, 4, '2027-03-01')
+    lot(db, 991102, 991001, 1, 0, '2026-12-01')
+    lot(db, 991103, 991001, 1, 2, '')
+    lot(db, 991104, 991001, 2, 5, '2026-11-15')
+    product(db, 991002, 'No expiry soap', 5)
+    const expiry = async (query, viewer = admin) => {
+      const { result, proxy } = await read(db, { ...query, pageSize: 100 }, viewer)
+      return { byName: Object.fromEntries(result.items.filter(row => row.checkable).map(row => [row.name, row.next_expiry_date])), result, proxy }
+    }
+    assert.equal((await expiry({ branchId: 1 })).byName['Expiry cream'], '2027-03-01', 'branch 1: the emptied earlier lot, the branch 2 lot, the undated lot and the blank date are all ignored')
+    assert.equal((await expiry({ branchId: 2 })).byName['Expiry cream'], '2026-11-15')
+    assert.equal((await expiry({})).byName['Expiry cream'], '2026-11-15', 'no branch scope considers every branch')
+    assert.equal((await expiry({ branchId: 1 })).byName['No expiry soap'], null, 'a product without a dated lot reports null')
+    db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=991101')
+    assert.equal((await expiry({ branchId: 1 })).byName['Expiry cream'], null, 'once the dated lot is empty nothing is left to expire in that branch')
+    db.exec('UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=991101')
+
+    const full = blindViewer({ inventory_check_show_stock: true, inventory_check_show_received: true })
+    assert.equal((await expiry({ branchId: 1 }, full)).byName['Expiry cream'], '2027-03-01', 'a non-admin viewer with both fields gets it')
+    for (const [permissions, why] of [[{ inventory_check_show_stock: true }, 'received hidden'], [{ inventory_check_show_received: true }, 'stock hidden: a dated lot with stock would reveal that stock exists'], [{}, 'both hidden']]) {
+      const { result, proxy } = await expiry({ branchId: 1 }, blindViewer(permissions))
+      for (const row of result.items) assert.ok(!Object.hasOwn(row, 'next_expiry_date'), `${why}: row ${row.id}`)
+      assert.ok(proxy.sql.every(sql => !sql.includes('next_expiry_date')), `${why}: the lot lookup is not even issued`)
+    }
+    const { proxy } = await expiry({ branchId: 1 })
+    const plans = proxy.plans.flat().map(row => row.detail)
+    assert.ok(plans.some(detail => /SEARCH pb USING (?:COVERING )?INDEX idx_product_batches_variant_expiry \(variant_product_id=\?\)/.test(detail)), 'the lot lookup seeks the variant index')
+    assert.ok(plans.some(detail => /SEARCH bs USING (?:COVERING )?INDEX idx_branch_batch_stock_(?:batch_branch_unique|positive_batch_0155) \(batch_id=\?\)/.test(detail)), 'the stock lookup seeks a batch-keyed index')
+    db.close()
+  })
+  await check('next expiry is looked up for the returned page rows only, whatever the sort, and keeps every page order', async () => {
+    const db = fixture(), size = 160, pageSize = 20, lotsPer = 3
+    for (let i = 0; i < size; i++) {
+      const id = 992001 + i
+      product(db, id, `Expiry work ${String(i).padStart(3, '0')}`, 3)
+      db.exec(`UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=${id}`)
+      lot(db, 993000 + i * 2, id, 1, 1, `2027-0${1 + i % 9}-01`)
+      lot(db, 993001 + i * 2, id, 1, 1, `2027-0${1 + (i + 3) % 9}-15`)
+    }
+    let evaluations = 0
+    db.function('inventory_expiry_work_probe', { deterministic: true }, value => { evaluations++; return value })
+    for (const query of [{}, { sortBy: 'stock', sortDirection: 'desc' }, { stockState: 'in_stock' }]) {
+      const original = await read(db, { ...query, pageSize })
+      evaluations = 0
+      const proxy = adapter(db), actualBatch = proxy.batch.bind(proxy)
+      proxy.batch = statements => actualBatch(statements.map(statement => ({ ...statement,
+        sql: statement.sql.replaceAll('MIN(pb.expiry_date)', 'MIN(inventory_expiry_work_probe(pb.expiry_date))') })))
+      const measured = await api.readInventoryCheckProducts(proxy, admin, { ...query, pageSize }, { lowStock })
+      assert.deepEqual(measured, original.result, 'the transparent probe preserves the full result')
+      assert.ok(evaluations > 0, `${JSON.stringify(query)}: the lookup must pass through the probe`)
+      assert.ok(evaluations <= pageSize * lotsPer, `${JSON.stringify(query)}: ${evaluations} lot reads for a ${pageSize}-row page of ${size} products`)
+      assert.equal(proxy.statements, 5, 'the lookup adds no request statement')
+      assert.equal(measured.items.filter(row => row.checkable).length, pageSize)
+      console.log(`MEASURE next expiry ${JSON.stringify(query)}: ${evaluations} lot reads for ${pageSize} page rows of ${size} products`)
+    }
+    db.close()
+
+    const order = fixture()
+    for (const [id, name, quantity] of [[994001, 'Page order e', 3], [994002, 'Page order b', 9], [994003, 'Page order d', 6], [994004, 'Page order a', 1], [994005, 'Page order c', 7]]) product(order, id, name, quantity)
+    for (const [query, expected] of [[{ sortBy: 'stock', sortDirection: 'desc' }, [994002, 994005, 994003, 994001, 994004]], [{ sortBy: 'stock' }, [994004, 994001, 994003, 994005, 994002]],
+      [{ sortDirection: 'desc' }, [994001, 994003, 994005, 994002, 994004]], [{}, [994004, 994002, 994005, 994003, 994001]]]) {
+      const walked = []
+      for (let page = 1; page <= 3; page++) walked.push(...(await read(order, { ...query, page, pageSize: 2 })).result.items.filter(row => row.checkable).map(row => row.id))
+      assert.deepEqual(walked, expected, JSON.stringify(query))
+    }
+    order.close()
   })
   console.log(`PASS ${passed} real SQLite Inventory product-read groups; statement/query plans measured, no scale certificate`)
 }

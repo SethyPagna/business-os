@@ -37,7 +37,7 @@ const PRODUCT_FIELDS: Record<InventoryCheckField, readonly string[]> = {
   category: ['category', 'categories'],
   brand: ['brand', 'brands'],
   stock: ['quantity', 'damaged_quantity', 'stock_consistent', 'stock_diagnostics', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity', 'stock_quantity', 'display_quantity', 'low_stock_threshold', 'out_of_stock_threshold', 'stock_state', 'is_low_stock', 'is_out_of_stock'],
-  received: ['received_date', 'received_at', 'latest_received_at', 'earliest_received_at', 'batch_count'],
+  received: ['received_date', 'received_at', 'latest_received_at', 'earliest_received_at', 'batch_count', 'next_expiry_date'],
   sales: ['qty_sold', 'net_sold_qty'],
   customers: ['customer_count', 'unique_customer_count'],
   cost: ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'cost_needs_review'],
