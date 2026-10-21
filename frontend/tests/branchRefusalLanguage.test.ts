@@ -55,6 +55,27 @@ const STOCK_ALIASES = { stock_schema_unavailable: 'stock_receipt_unavailable', s
 // A step-up refusal of a destructive system route (cloudflare/src/lib/destructiveStepUp.ts), restated like the branch rules.
 CODES.push('repair_integrity_restore_permission_required')
 CODES.push('loyalty_points_disabled')
+// Return money and product supplier refusals (6.0.930): each pack's English is the Worker's own sentence, word for word.
+const WORKER_SENTENCE_CODES: Record<string, [string, string]> = {
+  customer_return_owed_unreadable: ['lib/returnRefundSplit.ts', 'customer_return_owed_unreadable'],
+  return_refund_khr_unavailable: ['routes/returns.ts', 'return_refund_khr_unavailable'],
+  return_reopens_paid_sale_debt: ['lib/returnRefundSplit.ts', 'return_reopens_paid_sale_debt'],
+  product_supplier_edit_required: ['lib/productSupplierGate.ts', 'product_supplier_edit_required'],
+}
+CODES.push(...Object.keys(WORKER_SENTENCE_CODES))
+
+await runTest('return money and supplier refusals carry the Worker sentence as English and a real Khmer pair', async () => {
+  for (const [code, [file]] of Object.entries(WORKER_SENTENCE_CODES)) {
+    const source = read(WORKER, ...file.split('/'))
+    assert.ok(source.includes(code), code + ' is still a Worker code in ' + file)
+    assert.ok(source.includes(EN[code]), code + ': the English pack text is the Worker sentence in ' + file)
+    uiLanguage = 'km'; packServed = KM
+    const error = refusal(code, EN[code], 409)
+    await lang.restateBranchRefusal(error)
+    assert.equal(error.message, KM[code]); assert.equal(error.code, code)
+  }
+  uiLanguage = 'en'
+})
 
 await runTest('loyalty refusal is localized without promising retroactive points or changing its status', async () => {
   uiLanguage = 'km'; packServed = KM

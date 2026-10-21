@@ -138,4 +138,17 @@ check('the unruled list only shrinks (base-era 19; none blocked on a trigger car
   assert.ok(Object.keys(UNRULED).length <= 19, 'do not park new tables in UNRULED -- decide')
 })
 
+// A full restore deletes every backed-up table (plus one products update) in ONE atomic stock transaction, which
+// lib/backup.ts refuses above 100 statements (stockTransactionStatementCount adds its own overhead). Past that, every
+// full restore refuses at run time, so the budget is checked here: chunk the restore plan before adding more tables.
+check('a full restore stays inside the 100-statement atomic limit', () => {
+  const txSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'stockTransaction.ts'), 'utf8')
+  const overhead = Number((txSource.match(/return businessStatements \+ (\d+)/) || [])[1])
+  assert.ok(Number.isInteger(overhead), 'stockTransactionStatementCount overhead not found')
+  assert.ok(backupSource.includes('if (stockTransactionStatementCount(deletes.length) > 100) throw'), 'the restore guard moved; re-check this budget')
+  const statements = BACKUP_TABLES.length + 1 + overhead
+  assert.ok(statements <= 100, `a full restore needs ${statements} statements; chunk the restore plan before adding tables`)
+  console.log(`  restore statements ${statements}/100`)
+})
+
 console.log(`\n${passed} check(s) passed.`)

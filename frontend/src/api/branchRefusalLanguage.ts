@@ -29,6 +29,11 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   product_replacement_incomplete: 'product_replacement_incomplete',
   // PUT /products/:id that would fold the row into another product, by an editor whose merge switch is off.
   product_merge_permission_required: 'product_merge_permission_required',
+  // Return money and product supplier refusals (6.0.930): the Worker sends these codes with an English sentence that is the pack key's, word for word.
+  customer_return_owed_unreadable: 'customer_return_owed_unreadable',
+  return_refund_khr_unavailable: 'return_refund_khr_unavailable',
+  return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
+  product_supplier_edit_required: 'product_supplier_edit_required',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',
