@@ -1370,10 +1370,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
           ) : branchSummary ? (
             // A count of one active branch says nothing, so the tile goes with it.
-            <div className={`grid grid-cols-2 gap-2 ${showBranchCountTile ? 'sm:grid-cols-3' : ''}`}>
+            <div className={`grid grid-cols-2 gap-2 ${showBranchCountTile && canViewCosts ? 'sm:grid-cols-3' : ''}`}>
               {showBranchCountTile ? <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} /> : null}
               <BranchStatTile label={tr('products', 'Products')} value={branchSummary.total_products ?? 0} />
-              <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} />
+              {canViewCosts ? <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} /> : null}
             </div>
           ) : null}
         </section>
@@ -1500,7 +1500,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                       {isExpanded ? (
                         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
                           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="grid w-full min-w-0 grid-cols-3 gap-1.5 sm:max-w-3xl sm:gap-2 lg:grid-cols-6">
+                            <div className={`grid w-full min-w-0 grid-cols-3 gap-1.5 sm:max-w-3xl sm:gap-2 ${canViewCosts ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
                               {[
                                 { key: 'total', label: tr('total_short', 'Total'), value: totalProducts, color: 'text-gray-900 dark:text-white', detail: tr('branch_stock_total_detail', 'All products returned by this branch stock view (one per product group, matching the listing).') },
                                 // `stockCount` is already the combined healthy+low figure
@@ -1510,7 +1510,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                 { key: 'healthy', label: tr('healthy_stock_short', 'Healthy'), value: healthyCount, color: 'text-teal-600 dark:text-teal-300', detail: tr('branch_stock_healthy_detail', 'Products in this branch above their low stock threshold (a strict subset of In Stock).') },
                                 { key: 'low', label: tr('low_stock_short', 'Low'), value: lowStockCount, color: 'text-amber-600 dark:text-amber-300', detail: tr('branch_stock_low_detail', 'Products in this branch at or below low stock threshold.') },
                                 { key: 'out', label: tr('out_of_stock_short', 'Out'), value: outStockCount, color: 'text-red-600 dark:text-red-300', detail: tr('branch_stock_out_detail', 'Products in this branch at or below out of stock threshold.') },
-                                { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(totalValue), color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stock_value_detail', 'Estimated value for positive branch stock.') },
+                                // Quantity x cost: shown only to a viewer the server sends it to (product_cost_view).
+                                ...(canViewCosts ? [{ key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(totalValue), color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stock_value_detail', 'Estimated value for positive branch stock.') }] : []),
                               ].map(({ key, label, value, color, detail }) => (
                                 <BranchStatTile
                                   key={`${branch.id}-${key}`}

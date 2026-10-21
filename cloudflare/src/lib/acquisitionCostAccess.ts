@@ -18,6 +18,7 @@ export function canEditAcquisitionCosts(user: PermissionUser): boolean {
 export const ACQUISITION_COST_TEXT_PATTERNS: readonly string[] = [
   '%cost%', '%cogs%', '%profit%', '%margin%', '%purchase%price%', '%stock%value%', '%removal%loss%', '%revenue%after%loss%',
   '%credit%open%', '%compensation%', '%loss%usd%', '%loss%khr%', '%scope%supplier%',
+  '%positive_value%', '%positivevalue%', '%total_value%', '%totalvalue%',
 ]
 
 // These import formats materialize acquisition costs, including normalized
@@ -31,7 +32,8 @@ export function isAcquisitionCostKey(key: string): boolean {
   const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
   if (/(^|_)(delivery|courier)(_|$)/.test(normalized)) return false
   if (['actual_cost_usd', 'actual_cost_khr', 'actual_cost_count', 'actual_cost_before', 'actual_cost_after'].includes(normalized)) return false
-  return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)/.test(normalized)
+  // positive_value / total_value: a branch's stock total (quantity x cost); divided by one product's quantity it is that cost.
+  return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss|positive_value|total_value)(_|$)/.test(normalized)
     || normalized === 'revenue_after_losses_usd' || normalized === 'credit_open_usd'
     // Supplier loss + compensation reconstructs acquisition cost. These
     // aliases also occur in aggregate/audit envelopes without return_scope.

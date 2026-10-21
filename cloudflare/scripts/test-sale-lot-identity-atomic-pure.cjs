@@ -491,7 +491,10 @@ function counts(db) {
     const before = counts(db)
     const result = await postSale(db, [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }], 'forced-failure')
     assert.equal(result.status, 500, JSON.stringify(result.body))
-    assert.match(result.body.error, /forced allocation failure/i)
+    // The driver text stays in the server log; the caller gets fixed text and a code (security review a77883c78, should-fix 5).
+    assert.equal(result.body.error, 'Failed to record sale items.')
+    assert.equal(result.body.code, 'sale_items_write_failed')
+    assert.doesNotMatch(JSON.stringify(result.body), /forced allocation failure/i)
     assert.deepEqual(counts(db), before)
   }
   console.log('PASS 4 -- allocation failure rolls back item, stock, movement, and header')

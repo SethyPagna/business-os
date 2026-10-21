@@ -15,6 +15,14 @@ export const DRAFT_KEYS_NOT_IN_PUBLIC_CONFIG: ReadonlySet<string> = new Set([
   'customer_portal_out_of_stock_threshold',
   'customer_portal_show_point_value',
   'customer_portal_show_membership',
+  // Loyalty rates, withheld from the public config while the points programme is off (buildPublicPortalConfig).
+  'customer_portal_points_basis',
+  'customer_portal_points_per_usd',
+  'customer_portal_points_per_khr',
+  'customer_portal_redeem_points',
+  'customer_portal_redeem_value_usd',
+  'customer_portal_redeem_value_khr',
+  'customer_portal_submission_reward_points',
 ])
 
 const DRAFT_KEYS_WITH_FIXED_VALUES: ReadonlySet<string> = new Set(['customer_portal_show_membership'])
