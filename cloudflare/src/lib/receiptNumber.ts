@@ -121,16 +121,13 @@ export function isBusinessReceiptNumber(value: unknown): boolean {
   return typeof value === 'string' && BUSINESS_RECEIPT_NUMBER_RE.test(value.trim())
 }
 
-// What POST /api/sales does with a client-supplied receipt_number.
+// What POST /api/sales and the sales import do with a client-supplied
+// receipt_number.
 //
-// NORMALISE, never 400. An offline POS sale mints its own receipt id at
-// QUEUE time (frontend/src/api/saleWriteTransport.ts) and the customer may
-// already hold that printed number, so the value is honored when it is a
-// real business id. But a 400 on replay is unrecoverable: failQueuedSale
-// only sets retry_at for a *retryable* error, so a non-retryable rejection
-// parks the queued sale as `failed` with no retry -- a sale that really
-// happened would never reach the server. Dropping a malformed label and
-// minting a correct one server-side loses nothing; rejecting loses money.
+// NORMALISE, never 400: a real business id is honored; a malformed label (for
+// example the old system's invoice label) is dropped and a correct one is
+// minted server-side. Nothing is lost, whereas rejecting would refuse a sale
+// that really happened.
 export function normalizeClientReceiptNumber(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
   const value = raw.trim()

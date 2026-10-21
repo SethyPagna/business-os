@@ -1,4 +1,4 @@
-import { productStockGuardStatement, assertProductsActive } from './productStockGuard'
+import { productStockGuardStatement } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
 // this implements (progress.md "Returns/replacements" + "Damaged stock"):
@@ -27,7 +27,7 @@ import { productStockGuardStatement, assertProductsActive } from './productStock
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import { planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 import {
   DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
   TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
@@ -266,22 +266,6 @@ export function createDamagedLotStatement(input: {
   }
 }
 
-export async function createDamagedLot(db: D1Compat, input: {
-  productId: number
-  productName: string | null
-  branchId: number | null
-  batchId: number | null
-  returnId: number | string
-  quantity: number
-  reason: string | null
-  userId: number | string | null
-  userName: string | null
-}): Promise<void> {
-  await assertProductsActive(db, [input.productId])
-  const statement = createDamagedLotStatement({ ...input, returnIdSql: '@return_id' })
-  await db.prepare(statement.sql).run({ ...(statement.params as Record<string, unknown>), return_id: input.returnId })
-}
-
 export class ConsumedDamagedStockError extends Error {
   constructor(productName: string, consumed: number) {
     super(`${consumed} unit(s) of "${productName}" from this return's damaged stock ${consumed === 1 ? 'has' : 'have'} already been drawn (sold or written off) -- the return can no longer be edited. Record a separate adjustment instead.`)
@@ -419,15 +403,8 @@ export async function reverseDamagedLots(
   // reads it for the reversal movement's attribution). reason/created_by
   // ride along so a failed EDIT can re-create these rows faithfully -- the
   // validation above guarantees quantity_remaining === quantity, so a
-  // re-creation via createDamagedLot loses nothing.
+  // re-creation loses nothing.
   return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), unit_cost_usd: lot.unit_cost_usd ?? null, reason: lot.reason ?? null, created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null }))
-}
-
-export class InsufficientReplacementStockError extends Error {
-  constructor(productName: string, requested: number, available: number) {
-    super(`Insufficient stock to hand out ${requested} of ${productName} as a replacement: ${available} available in the selected branch`)
-    this.name = 'InsufficientReplacementStockError'
-  }
 }
 
 export function planReplacementStock(input: {
@@ -485,117 +462,7 @@ export function planReplacementStock(input: {
   return { statements, usedBatch: input.batchId != null }
 }
 
-// Drain the stock a replacement line hands to the customer -- the POS way:
-// an explicit batch drains that exact lot (validated by
-// removeStockFromBatch, which also keeps branch_stock/stock_quantity in
-// step); no batch means a validated plain branch_stock decrement. Writes
-// its own movement row; the caller re-derives products.stock_quantity for
-// the plain path (same division of labor as the existing restock path).
-export async function applyReplacementStock(db: D1Compat, input: {
-  productId: number
-  productName: string
-  branchId: number
-  batchId: number | null
-  quantity: number
-  unitCostUsd: number | null
-  unitCostKhr: number | null
-  returnId: number | string
-  returnNumber: string | null
-  userId: number | string | null
-  userName: string | null
-}): Promise<{ usedBatch: boolean }> {
-  if (input.batchId != null) {
-    const batch = await db.prepare(`SELECT COALESCE(bbs.quantity,0) AS available
-      FROM product_batches pb
-      LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
-      WHERE pb.id=@batchId AND pb.variant_product_id=@productId`).get<{ available: number }>({
-      batchId: input.batchId, productId: input.productId, branchId: input.branchId,
-    })
-    if (!batch) throw new Error('Selected received date does not belong to this product')
-    const available = Number(batch.available) || 0
-    if (input.quantity > available) throw new InsufficientBatchStockError(available)
-  } else {
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
-      .get<{ quantity: number }>({ product_id: input.productId, branch_id: input.branchId })
-    const available = Number(stockRow?.quantity) || 0
-    if (input.quantity > available) {
-      throw new InsufficientReplacementStockError(input.productName, input.quantity, available)
-    }
-  }
-  const plan = planReplacementStock({ ...input, returnIdSql: '@return_id' })
-  await db.batch(plan.statements.map((statement) => ({
-    ...statement,
-    params: { ...(statement.params as Record<string, unknown>), return_id: input.returnId },
-  })))
-  return { usedBatch: plan.usedBatch }
-}
-
 export const DAMAGE_OUT_MOVEMENT = 'damage_out'
-
-export class DamagedLotShortfallError extends Error {
-  available: number
-  constructor(productName: string, requested: number, available: number) {
-    super(`Only ${available} left in the damaged lot for ${productName} (requested ${requested})`)
-    this.name = 'DamagedLotShortfallError'
-    this.available = available
-  }
-}
-
-// d1compat's run() reports changes as {changes} (typed) or {meta:{changes}}
-// (what D1 actually returns) -- read both, same lesson renameCascade.ts
-// already encodes.
-function changesOf(result: unknown): number {
-  const record = result as { changes?: number; meta?: { changes?: number } } | null
-  return Number(record?.changes ?? record?.meta?.changes ?? 0)
-}
-
-// 11.9: POS's damage source -- draw units out of ONE damaged lot. The
-// UPDATE's own WHERE clause is the race guard (damaged_stock_lots has no
-// CHECK constraint): a concurrent draw that empties the lot makes this
-// statement match zero rows, and the zero-changes read throws WITHOUT
-// having written anything. quantity_remaining only ever shrinks here.
-export async function consumeDamagedLot(db: D1Compat, input: {
-  lotId: number
-  productId: number
-  quantity: number
-}): Promise<{ productName: string | null; branchId: number | null; returnId: number | null }> {
-  const lot = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, return_id, quantity_remaining
-    FROM damaged_stock_lots WHERE id = @id
-  `).get<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; return_id: number | null; quantity_remaining: number }>({ id: input.lotId })
-  if (!lot || Number(lot.product_id) !== Number(input.productId)) {
-    throw new Error('Selected damaged stock does not belong to this product')
-  }
-  const result = await db.prepare(`
-    UPDATE damaged_stock_lots
-    SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
-    WHERE id = @id AND quantity_remaining >= @quantity
-  `).run({ id: input.lotId, quantity: input.quantity })
-  if (!changesOf(result)) {
-    throw new DamagedLotShortfallError(String(lot.product_name || `product #${input.productId}`), input.quantity, Number(lot.quantity_remaining) || 0)
-  }
-  return { productName: lot.product_name, branchId: lot.branch_id, returnId: lot.return_id }
-}
-
-// The reverse (a cancelled sale hands its units back to the lot; also the
-// compensation path when a checkout fails after its draw). Clamped to the
-// lot's original quantity -- restoring can never mint damaged stock.
-export async function restoreDamagedLot(db: D1Compat, input: {
-  lotId: number
-  quantity: number
-}): Promise<boolean> {
-  if (input.quantity > 0) {
-    const lot = await db.prepare('SELECT product_id,quantity,quantity_remaining FROM damaged_stock_lots WHERE id=@id')
-      .get<{ product_id: number; quantity: number; quantity_remaining: number }>({ id: input.lotId })
-    if (lot && Number(lot.quantity_remaining) < Number(lot.quantity)) await assertProductsActive(db, [Number(lot.product_id)])
-  }
-  const result = await db.prepare(`
-    UPDATE damaged_stock_lots
-    SET quantity_remaining = MIN(quantity, quantity_remaining + @quantity), updated_at = datetime('now')
-    WHERE id = @id
-  `).run({ id: input.lotId, quantity: input.quantity })
-  return changesOf(result) > 0
-}
 
 // Open damaged lots for one product (optionally one branch) -- the product
 // detail's damage entries (D3) and, next part, POS's damage source option.

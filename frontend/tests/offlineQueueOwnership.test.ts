@@ -70,7 +70,7 @@ const transport = load(transportSource, {
   '../utils/timestampId.ts': { businessDateTimeId: () => '20260920-120000', isBusinessReceiptNumber: () => true },
   './http.ts': http, './lazyLocalDb.ts': { getLocalDb: async () => db }, './actorReadScope.ts': scope,
   './offlineQueueOwnership.ts': ownership,
-  './syncRuntime.ts': { OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [], dispatchSyncUpdates() {}, emitSyncQueueChanged() {}, registerOutboxBackgroundSync() {}, requestPersistentAppStorage() {} },
+  './syncRuntime.ts': { OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [], dispatchSyncUpdates() {}, requestPersistentAppStorage() {} },
 }, '\nexport { runPendingSalesQueueSync, updateQueuedRow, completeQueuedSale };')
 function row(owner: unknown = ownerA): Row {
   return { _seq: 1, id: 'sale-A', channel: 'sales:create', status: 'pending', updated_at: '2026-01-01', created_at: '2026-01-01', entity_id: -10, payload: { client_request_id: 'sale-A', money_precision_version: 1, offline_owner: owner } }

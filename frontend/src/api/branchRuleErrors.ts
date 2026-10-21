@@ -5,8 +5,8 @@
 // on POST /sales, /sales/:id/items, /sales/:id/amendments, /returns,
 // /branches/transfer, /branches/transfer-bulk and /inventory/transfer. Each
 // of those returns a 400 whose `error` is the EXACT English of a pack key --
-// deliberately, so a rejection that outruns the UI (an offline sale replayed
-// later, a stale tab, an amendment posted from a modal, an API caller) can be
+// deliberately, so a rejection that outruns the UI (a stale tab, an
+// amendment posted from a modal, an API caller) can be
 // shown to the operator in their own language instead of surfacing as an
 // English sentence in the middle of a Khmer screen.
 //

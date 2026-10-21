@@ -1,11 +1,8 @@
 import { apiFetch } from './http.ts'
 
 // Admin device-approval endpoints (cloudflare/src/routes/devices.ts,
-// mounted at /api/auth/devices). Always online/admin-only -- unlike most
-// of api/*, this deliberately does NOT go through route()'s
-// offline-outbox dispatcher: approving a device from a phone with no
-// connectivity isn't a meaningful offline action, and queuing it would
-// just let a stale approval silently replay later.
+// mounted at /api/auth/devices). Always online/admin-only: every call goes
+// straight to apiFetch, so a stale approval can never be replayed later.
 
 export type TrustedDeviceRecord = {
   id: number

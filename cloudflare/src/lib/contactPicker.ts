@@ -5,7 +5,7 @@
 // Why this exists: the only "give me a usable copy of the contacts" shape
 // this endpoint had was the unpaged default -- SELECT * over every row,
 // and for customers a per-row loyalty aggregation on top (routes/
-// contacts.ts's withPoints). The offline device snapshot took exactly that
+// contacts.ts's withPoints). The retired offline device snapshot took exactly that
 // shape every time it ran, so a device downloaded the whole customers
 // table, columns and computed balances included, to back a picker that
 // shows a name, a phone and a membership number.

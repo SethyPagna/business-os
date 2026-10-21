@@ -1,6 +1,6 @@
 import type { SessionUser } from './auth'
 
-/** A replay consistency fence, not an authentication credential. Deliberately
+/** A sale-ownership consistency fence, not an authentication credential. Deliberately
  * stable across sessions/devices. This does not identify a replaced database
  * at the same origin if its actor/organization IDs are reused. */
 export type OfflineSaleOwner = {

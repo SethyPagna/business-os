@@ -13,7 +13,6 @@
 
 import Dexie from 'dexie'
 import type { Table } from 'dexie'
-import { parseCsvRows } from '../utils/csvImport.ts'
 import { buildCSVTemplate as buildCSVTemplateFile } from '../utils/csvTemplate.ts'
 
 type LocalRow = Record<string, unknown>
@@ -262,10 +261,6 @@ export async function clearLocalMirrorTables(tableNames: unknown[] = []): Promis
 }
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
-export function parseCSV(text: string) {
-  return parseCsvRows(text)
-}
-
 export function buildCSVTemplate(headers: string[], filename: string, exampleRow?: Record<string, unknown>): void {
   buildCSVTemplateFile(headers, filename, exampleRow)
 }
