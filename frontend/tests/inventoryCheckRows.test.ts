@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { act } from 'react'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
-import { createHarness, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
+import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { offsetDate } from '../src/utils/dateHelpers.ts'
 import type { InventoryCheckProduct, InventoryCheckObservation, InventoryCheckPatch } from '../src/types/inventoryChecks.ts'
 
 const products: InventoryCheckProduct[] = [
@@ -25,8 +27,291 @@ const base = {
 const opened: Array<number | string> = []
 const row = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
 const state = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-check-status') === String(id), `status ${id}`).textContent
-const mount = (props: Record<string, unknown> = {}) => harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', props: { ...base, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } })
+// Every surface is remembered so a case that fails half way cannot leave its rows in the shared document for the next case to find.
+const live: MountedSurface[] = []
+const track = async (surface: Promise<MountedSurface>) => { const mounted = await surface; live.push(mounted); return mounted }
+const mount = (props: Record<string, unknown> = {}) => track(harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', props: { ...base, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } }))
 try {
+  // ---- Lane 6.0.920: the count sheet, the count editor and the scan request. Each case stands alone so a red run names every one that fails. ----
+  const key = (surface: MountedSurface, node: MemoryNode, name: string) => surface.call(node, 'onKeyDown', [{ key: name, preventDefault() {}, nativeEvent: {}, currentTarget: node, target: node }])
+  const active = (surface: MountedSurface) => surface.body.ownerDocument.activeElement
+  const countInputs = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('data-check-count') !== null)
+  const countInput = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-check-count') !== null && row(surface, id).contains(node), `Count input of ${id}`)
+  const submitOf = (surface: MountedSurface) => surface.find(node => node.getAttribute('data-check-submit') !== null, 'editor primary button')
+  const headerOf = (surface: MountedSurface) => surface.find(node => node.getAttribute('data-inventory-check-sheet-header') !== null, 'sheet header')
+  const titlesOf = (surface: MountedSurface) => headerOf(surface).children.map(child => child.textContent)
+  const metaOf = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-meta') !== null && row(surface, id).contains(node), `facts of ${id}`).textContent.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
+  const differences = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('role') === 'img' && (node.getAttribute('aria-label') || '').startsWith('Difference')).map(node => node.getAttribute('aria-label'))
+  const sheetProducts: InventoryCheckProduct[] = [
+    { id: 301, name: 'Count one', quantity: 10, unit: 'pcs', damaged_quantity: 1, qty_sold: 4, customer_count: 3, selling_price_usd: 2.5, cost_price_usd: 1.2 },
+    { id: 302, name: 'Count two', quantity: 12 },
+    { id: 303, name: 'Count three', quantity: 5 },
+  ]
+  const started = (id: number, over: Partial<InventoryCheckObservation> = {}): InventoryCheckObservation => ({ product_id: id, state: 'unstarted', counted_quantity: null, reason: null, revision: 0, baseline_quantity: sheetProducts.find(product => product.id === id)?.quantity, ...over })
+  const inSession = Object.fromEntries(sheetProducts.map(product => [product.id, started(Number(product.id))])) as Record<string, InventoryCheckObservation>
+  const refusal = (code: string) => Object.assign(new Error('refused'), { code, status: 409 })
+  const cases: Array<[string, () => Promise<void>]> = [
+    ['the phone line counts first: Now with its unit, Start, Counted, Damaged, then price, cost, Sold, Cust', async () => {
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301, { state: 'done', counted_quantity: 9, revision: 2, stock_changed: true, baseline_quantity: 12 }) }, canViewPrice: true, canViewCost: true, fmtUSD: (value: number) => `$${value}`, canCheck: false })
+      assert.equal(metaOf(s, 301), 'Now 10 pcs · Start 12 (−2) · Counted 9 · Damaged 1 · Price $2.5 · Cost $1.2 · Sold 4 · Cust 3')
+      await s.unmount()
+    }],
+    ['the state icon of a read-only row sits with the actions, not in the facts; the left edge carries the state', async () => {
+      const s = await mount({ canCheck: false, products: sheetProducts, observations: { ...inSession, 301: started(301, { state: 'done', revision: 1 }), 302: started(302, { state: 'issue', reason: 'Torn', revision: 1 }) } })
+      const actions = s.find(node => node.getAttribute('data-check-actions') !== null && row(s, 301).contains(node), 'actions of 301')
+      assert.equal(s.findAll(node => actions.contains(node) && node.tagName.toLowerCase() === 'svg').length, 1, 'the done glyph is in the actions cell')
+      assert.ok(!metaOf(s, 301).includes('Done'), 'and not in the facts line')
+      assert.ok(row(s, 301).className.includes('border-l-emerald-500') && row(s, 302).className.includes('border-l-amber-500') && row(s, 303).className.includes('border-l-transparent'), 'done, issue and not started have their own left edge')
+      assert.equal(row(s, 302).getAttribute('data-check-state'), 'issue')
+      await s.unmount()
+    }],
+    ['row buttons are 44px under 1024px with a 4px gap', async () => {
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) } })
+      const buttons = s.findAll(node => node.tagName === 'BUTTON' && row(s, 301).contains(node))
+      assert.equal(buttons.length, 3, 'image, tick and issue')
+      for (const button of buttons) assert.ok(button.className.includes('h-11') && button.className.includes('w-11') && button.className.includes('lg:h-10'), `${button.getAttribute('aria-label')}: 44px, 40px from the sheet up`)
+      assert.ok(s.find(node => node.getAttribute('data-check-actions') !== null, 'actions').className.split(' ').includes('gap-1'), 'a 4px gap between ✓ and !')
+      await s.unmount()
+    }],
+    ['the unit follows Now; disagreeing stock records get a hint; an expiry date is a badge that says how close it is', async () => {
+      const soon = offsetDate(10), late = offsetDate(-3)
+      const pack = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+      const s = await mount({ canCheck: false, t: (name: string) => pack[name] || name, products: [
+        { id: 401, name: 'Agreeing', quantity: 3, unit: 'btl', stock_consistent: true },
+        { id: 402, name: 'Disagreeing', quantity: 3, stock_consistent: false, next_expiry_date: late },
+        { id: 403, name: 'Soon', quantity: 3, next_expiry_date: soon },
+        { id: 404, name: 'Far', quantity: 3, next_expiry_date: '2099-03-15' },
+        { id: 405, name: 'Unit without stock', unit: 'btl' },
+      ] })
+      assert.ok(metaOf(s, 401).startsWith('Now 3 btl'), 'unit after Now')
+      assert.ok(!metaOf(s, 405).includes('btl'), 'a unit never hangs on an unknown stock')
+      const hints = (id: number) => s.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.inventory_check_stock_inconsistent_hint && row(s, id).contains(node))
+      assert.equal(hints(402).length, 1, 'the hint is an InfoHint beside Now')
+      assert.equal(hints(401).length + hints(403).length, 0, 'and only on disagreement')
+      const badge = (id: number) => s.find(node => node.getAttribute('data-expiry') !== null && row(s, id).contains(node), `expiry of ${id}`)
+      assert.deepEqual([402, 403, 404].map(id => badge(id).getAttribute('data-expiry')), ['expired', 'soon', 'ok'])
+      assert.equal(badge(402).textContent, `${pack.inventory_check_expired} ${late.slice(5, 7)}/${late.slice(0, 4)}`)
+      assert.equal(badge(403).textContent, `${pack.inventory_check_expires_soon} ${soon.slice(5, 7)}/${soon.slice(0, 4)}`)
+      assert.equal(badge(404).textContent, `${pack.expiry} 03/2099`)
+      assert.equal(s.findAll(node => node.getAttribute('data-expiry') !== null && row(s, 401).contains(node)).length, 0, 'no expiry date, no badge')
+      await s.unmount()
+    }],
+    ['the Count input exists only for someone who can check and see stock', async () => {
+      const s = await mount({ products: sheetProducts, observations: inSession })
+      assert.equal(countInputs(s).length, 3)
+      assert.equal(propsOf(countInput(s, 301)).placeholder, '10', 'Now is the placeholder')
+      assert.equal(propsOf(countInput(s, 301)).inputMode, 'numeric')
+      await s.render({ ...base, products: sheetProducts, observations: inSession, canCheck: false })
+      assert.equal(countInputs(s).length, 0, 'read-only: no input')
+      await s.render({ ...base, products: sheetProducts, observations: inSession, canViewStock: false })
+      assert.equal(countInputs(s).length, 0, 'blind counting keeps no Count input')
+      assert.ok(s.button('Report issue', row(s, 301)), 'but still its editor')
+      await s.render({ ...base, products, observations: {}, canCheck: false })
+      assert.equal(countInputs(s).length, 0, 'outside a session there is nothing to count')
+      await s.unmount()
+      const family = await mount({ products, observations: Object.fromEntries(products.slice(1).map(product => [product.id, started(Number(product.id), { baseline_quantity: product.quantity })])) })
+      assert.equal(countInputs(family).length, 2, 'a family header has no Count input, its variants do')
+      await family.unmount()
+    }],
+    ['Enter in the Count input: equal to Now saves Done with the count and moves to the next row', async () => {
+      const s = await mount({ products: sheetProducts, observations: inSession })
+      const before = calls.length
+      await s.type(countInput(s, 301), '10')
+      await key(s, countInput(s, 301), 'Enter')
+      assert.equal(calls.length, before + 1)
+      assert.deepEqual(calls.at(-1), { productId: 301, patch: { state: 'done', counted_quantity: 10, reason: null }, revision: 0 })
+      assert.equal(active(s), countInput(s, 302), 'focus moves to the next row Count input')
+      await s.unmount()
+    }],
+    ['Enter in the Count input: a different count saves nothing, opens the editor with it and focuses Reason', async () => {
+      const s = await mount({ products: sheetProducts, observations: inSession })
+      const before = calls.length
+      await s.type(countInput(s, 302), '9')
+      await key(s, countInput(s, 302), 'Enter')
+      assert.equal(calls.length, before, 'nothing is saved by a count that differs')
+      assert.equal(propsOf(s.field('inventory-check-count-302')).value, '9')
+      assert.equal(active(s), s.field('inventory-check-reason-302'), 'Reason has focus')
+      assert.equal(propsOf(countInput(s, 302)).readOnly, true, 'the sheet field mirrors the editor')
+      await s.type(s.field('inventory-check-reason-302'), 'Short on shelf')
+      await key(s, s.field('inventory-check-reason-302'), 'Enter')
+      assert.deepEqual(calls.at(-1), { productId: 302, patch: { state: 'issue', counted_quantity: 9, reason: 'Short on shelf' }, revision: 0 }, 'Enter in Reason saves the issue')
+      await s.unmount()
+    }],
+    ['Enter in the Count input: empty is Done without a count, the saved count again is no request, junk is refused, Escape and the arrows', async () => {
+      const s = await mount({ products: sheetProducts, observations: { ...inSession, 303: started(303, { state: 'done', counted_quantity: 5, revision: 1 }) } })
+      const input = countInput(s, 301)
+      await key(s, input, 'Enter')
+      assert.deepEqual(calls.at(-1), { productId: 301, patch: { state: 'done', counted_quantity: null, reason: null }, revision: 0 }, 'empty means Done, no count')
+      const before = calls.length
+      assert.equal(propsOf(countInput(s, 303)).value, '5', 'a saved count fills the field')
+      await key(s, countInput(s, 303), 'Enter')
+      assert.equal(calls.length, before, 'the same count on a done row is not a new request')
+      await s.type(input, 'abc')
+      await key(s, input, 'Enter')
+      assert.equal(calls.length, before)
+      assert.ok(row(s, 301).textContent.includes('Enter a valid non-negative quantity'))
+      await key(s, input, 'Escape')
+      assert.equal(propsOf(input).value, '', 'Escape drops what was typed')
+      const other = countInput(s, 302)
+      await key(s, other, 'ArrowDown')
+      assert.equal(propsOf(other).value, '11', 'ArrowDown steps down from Now (12)')
+      await key(s, other, 'ArrowUp'); await key(s, other, 'ArrowUp')
+      assert.equal(propsOf(other).value, '13')
+      await s.type(other, '0')
+      await key(s, other, 'ArrowDown')
+      assert.equal(propsOf(other).value, '0', 'never below zero')
+      await s.unmount()
+    }],
+    ['a count the server refuses as equal to stock opens the editor with that count', async () => {
+      const s = await mount({ products: sheetProducts, observations: inSession, onSave: async (productId: number | string, patch: InventoryCheckPatch, revision: number) => { calls.push({ productId, patch, revision }); throw refusal('inventory_check_count_requires_issue') } })
+      await s.type(countInput(s, 301), '10')
+      await key(s, countInput(s, 301), 'Enter')
+      assert.equal(propsOf(s.field('inventory-check-count-301')).value, '10')
+      assert.equal(active(s), s.field('inventory-check-reason-301'))
+      await s.unmount()
+    }],
+    ['the editor: the count starts at Now, stepper, difference, Done or Save, reason chips', async () => {
+      const chips = ['Damaged', 'Missing', 'Expired', 'damaged', ' Wrong barcode ', 'Leaking', 'Torn box', 'Short dated', 'Other', 'Ninth', '']
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) }, reasonSuggestions: chips })
+      await s.click(s.button('Report issue', row(s, 301)))
+      assert.equal(propsOf(s.field('inventory-check-count-301')).value, '10', 'starts at Now')
+      assert.equal(propsOf(s.field('inventory-check-count-301')).placeholder, 'Count', 'the label sits inside the field')
+      assert.equal(propsOf(s.field('inventory-check-reason-301')).placeholder, 'Reason')
+      assert.equal(submitOf(s).getAttribute('data-check-submit'), 'done', 'equal to Now is Done')
+      assert.deepEqual(differences(s), ['Difference: 0'])
+      await s.click(s.button('Decrease quantity', row(s, 301)))
+      assert.equal(propsOf(s.field('inventory-check-count-301')).value, '9')
+      assert.deepEqual(differences(s), ['Difference: −1'])
+      assert.equal(submitOf(s).getAttribute('data-check-submit'), 'issue', 'a different count is an issue')
+      await s.click(s.button('Increase quantity', row(s, 301)))
+      await s.click(s.button('Increase quantity', row(s, 301)))
+      assert.deepEqual(differences(s), ['Difference: +1'])
+      await s.click(s.button('Decrease quantity', row(s, 301)))
+      assert.equal(submitOf(s).getAttribute('data-check-submit'), 'done')
+      const group = s.find(node => node.getAttribute('aria-label') === 'Recent reasons', 'reason chips')
+      assert.deepEqual(s.findAll(node => node.tagName === 'BUTTON' && group.contains(node)).map(node => node.textContent), ['Damaged', 'Missing', 'Expired', 'Wrong barcode', 'Leaking', 'Torn box', 'Short dated', 'Other'], 'eight at most, case-insensitive repeats and blanks dropped')
+      await s.click(s.button('Missing', group))
+      assert.equal(propsOf(s.field('inventory-check-reason-301')).value, 'Missing', 'a chip fills the reason')
+      await s.click(s.button('Other', group))
+      assert.equal(propsOf(s.field('inventory-check-reason-301')).value, 'Other', 'and the next one replaces it')
+      assert.equal(submitOf(s).getAttribute('data-check-submit'), 'issue', 'a reason makes it an issue even when the count matches')
+      await s.type(s.field('inventory-check-reason-301'), '')
+      const before = calls.length
+      await s.click(submitOf(s))
+      assert.deepEqual(calls.at(-1), { productId: 301, patch: { state: 'done', counted_quantity: 10, reason: null }, revision: 0 }, 'Done saves the count with it')
+      assert.equal(calls.length, before + 1)
+      await s.unmount()
+    }],
+    ['a blind counter starts from nothing, sees no difference and always saves an issue', async () => {
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) }, canViewStock: false })
+      await s.click(s.button('Report issue', row(s, 301)))
+      assert.equal(propsOf(s.field('inventory-check-count-301')).value, '')
+      assert.equal(differences(s).length, 0)
+      assert.equal(submitOf(s).getAttribute('data-check-submit'), 'issue')
+      await s.unmount()
+    }],
+    ['the editor takes keyboard focus on a mouse device only', async () => {
+      const original = globalThis.matchMedia
+      try {
+        globalThis.matchMedia = (() => ({ matches: false })) as unknown as typeof matchMedia
+        const touch = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) } })
+        await touch.click(touch.button('Report issue', row(touch, 301)))
+        assert.notEqual(active(touch), touch.field('inventory-check-count-301'), 'no keyboard pop-up on a phone')
+        await touch.unmount()
+        globalThis.matchMedia = (() => ({ matches: true })) as unknown as typeof matchMedia
+        const mouse = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) } })
+        await mouse.click(mouse.button('Report issue', row(mouse, 301)))
+        assert.equal(active(mouse), mouse.field('inventory-check-count-301'), 'a mouse opens the editor on the count')
+        await mouse.unmount()
+      } finally { globalThis.matchMedia = original }
+    }],
+    ['a focus request rings one row, scrolls it to the middle and focuses its Count or tick; the same request is not repeated', async () => {
+      const s = await mount({ products: sheetProducts, observations: inSession })
+      const scrolled: unknown[] = []
+      for (const id of [301, 302, 303]) (row(s, id) as unknown as { scrollIntoView: (arg: unknown) => void }).scrollIntoView = arg => { scrolled.push([id, arg]) }
+      const request = (id: number, token: string, target: string) => s.render({ ...base, products: sheetProducts, observations: inSession, focusRequest: { id, token, target } })
+      await request(303, 'a', 'count')
+      assert.equal(active(s), countInput(s, 303))
+      assert.ok(row(s, 303).hasAttribute('data-scan-hit') && !row(s, 301).hasAttribute('data-scan-hit'))
+      assert.deepEqual(scrolled, [[303, { block: 'center' }]])
+      await request(303, 'a', 'count')
+      assert.deepEqual(scrolled.map(entry => (entry as [number, unknown])[0]), [303], 'the same token is not a new request')
+      await request(302, 'b', 'action')
+      assert.equal(active(s), s.find(node => node.getAttribute('data-check-action') === 'done' && row(s, 302).contains(node), 'tick of 302'))
+      countInput(s, 303).focus()
+      await request(301, 'c', 'none')
+      assert.equal(active(s), countInput(s, 303), 'target none moves no focus')
+      assert.ok(row(s, 301).hasAttribute('data-scan-hit'), 'but rings the row')
+      assert.deepEqual(scrolled.map(entry => (entry as [number, unknown])[0]), [303, 302, 301], 'and scrolls it')
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 1700)) })
+      await s.settle()
+      assert.ok(!row(s, 301).hasAttribute('data-scan-hit'), 'the ring fades after about 1.6s')
+      await request(302, 'e', 'none')
+      assert.ok(row(s, 302).hasAttribute('data-scan-hit'))
+      await request(999, 'f', 'count')
+      assert.equal(s.findAll(node => node.hasAttribute('data-scan-hit')).length, 0, 'a request for a row that is not listed clears the old ring instead of leaving it on')
+      await s.unmount()
+    }],
+    ['onCommitted hears each confirmed save, and a handled one keeps focus where the page wants it', async () => {
+      const heard: unknown[][] = []
+      let handled = false
+      const s = await mount({ products: sheetProducts, observations: inSession, onCommitted: (id: number, via: string) => { heard.push([id, via]); return handled } })
+      await s.click(s.button('Mark done', row(s, 301)))
+      await s.type(countInput(s, 302), '12')
+      await key(s, countInput(s, 302), 'Enter')
+      assert.deepEqual(heard, [[301, 'tick'], [302, 'count']])
+      assert.equal(active(s), countInput(s, 303), 'unhandled: the sheet moves on')
+      handled = true
+      countInput(s, 301).focus()
+      await s.type(countInput(s, 301), '10')
+      await key(s, countInput(s, 301), 'Enter')
+      assert.deepEqual(heard.at(-1), [301, 'count'])
+      assert.equal(active(s), countInput(s, 301), 'handled: the sheet keeps its hands off focus')
+      await s.unmount()
+    }],
+    ['the sheet header names the columns this viewer has, and the list draws one only above several products', async () => {
+      const flags = { canCheck: true, inSession: true, canViewStock: true, canViewCounts: true, canViewPrice: true, canViewCost: true, canViewSales: true, canViewCustomers: true, t: base.t }
+      const header = (props: Record<string, unknown>) => track(harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', exportName: 'InventoryCheckSheetHeader', props: { ...flags, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } }))
+      let h = await header({})
+      assert.deepEqual(titlesOf(h), ['Product', 'Now', 'Start', 'Damaged', 'Price', 'Cost', 'Sold', 'Cust', 'Count', ''])
+      assert.equal(headerOf(h).getAttribute('aria-hidden'), 'true')
+      assert.ok(headerOf(h).className.includes('lg:flex'), 'a sheet header exists from 1024px up')
+      await h.unmount()
+      h = await header({ canViewCost: false })
+      assert.ok(!titlesOf(h).includes('Cost'), 'no Cost title without the cost right')
+      await h.unmount()
+      h = await header({ canViewStock: false, canCheck: false })
+      assert.deepEqual(titlesOf(h), ['Product', 'Price', 'Cost', 'Sold', 'Cust', 'Count', ''], 'blind: no stock columns')
+      await h.unmount()
+      h = await header({ inSession: false, canCheck: false })
+      assert.deepEqual(titlesOf(h), ['Product', 'Now', 'Damaged', 'Price', 'Cost', 'Sold', 'Cust'], 'outside a session there is no Start, Count or actions column')
+      await h.unmount()
+      const headers = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('data-inventory-check-sheet-header') !== null).length
+      const list = await mount({ products: sheetProducts, observations: inSession })
+      assert.equal(headers(list), 1)
+      await list.render({ ...base, products: sheetProducts, observations: inSession, sheetHeader: 'external' })
+      assert.equal(headers(list), 0, 'an external header is the page’s to mount')
+      await list.render({ ...base, products: [sheetProducts[0]], observations: inSession })
+      assert.equal(headers(list), 0, 'a list of one has nothing to line up with')
+      await list.unmount()
+    }],
+    ['without the cost right there is no Cost cell, title or figure; an empty value keeps its cell on the sheet', async () => {
+      const s = await mount({ products: [sheetProducts[0], sheetProducts[1]], observations: inSession, canViewPrice: true, canViewCost: false, fmtUSD: (value: number) => `$${value}` })
+      assert.ok(!s.text().includes('Cost') && !s.text().includes('1.2'), 'no cost anywhere')
+      assert.equal(s.findAll(node => node.getAttribute('data-cell') === 'cost').length, 0)
+      const placeholder = s.find(node => node.getAttribute('data-cell') === 'damaged' && row(s, 302).contains(node), 'damaged cell of a row without damage')
+      assert.equal(placeholder.getAttribute('aria-hidden'), 'true')
+      assert.ok(placeholder.className.includes('hidden') && placeholder.className.includes('xl:block'), 'it is there for the sheet, not on a phone')
+      assert.ok(!metaOf(s, 302).includes('Damaged'))
+      await s.unmount()
+    }],
+  ]
+  const failures: string[] = []
+  for (const [name, run] of cases) {
+    try { await run() } catch (cause) { failures.push(`${name}\n    ${(cause instanceof Error ? cause.message : String(cause)).split('\n')[0]}`) } finally { for (const surface of live.splice(0)) await surface.unmount() }
+  }
+  if (failures.length) throw new Error(`${failures.length} of ${cases.length} count-sheet cases failed:\n  - ${failures.join('\n  - ')}`)
+
   for (const language of ['en', 'km']) {
     const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>
     for (const canCheck of [true, false]) for (const savedState of ['unstarted', 'done', 'issue'] as const) {
@@ -115,6 +400,7 @@ try {
   }
   const reason = await mount()
   await reason.click(reason.button('Report issue', row(reason, 12)))
+  await reason.type(reason.field('inventory-check-count-12'), '2')
   await reason.type(reason.field('inventory-check-reason-12'), '   ')
   const beforeReason = calls.length
   await reason.click(reason.button('Save issue', row(reason, 12)))
@@ -225,7 +511,7 @@ try {
     canViewPrice: true, canViewCost: true, fmtUSD: (value: number) => `$${value}`,
     observations: { 301: { product_id: 301, state: 'done', counted_quantity: 9, reason: null, revision: 2, baseline_quantity: 12, stock_changed: true } } })
   const meta = full.find(node => node.getAttribute('data-inventory-check-meta') !== null, 'metric line').textContent
-  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').replace(/Done$/, '').trim(), 'Now 10 · Start 12 (−2) · Damaged 1 · Sold 4 · Cust 3 · Price $2.5 · Cost $1.2 · Counted 9','Now, Start with drift size, Damaged, Sold, Cust, price, cost and count read in one line')
+  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim(), 'Now 10 · Start 12 (−2) · Counted 9 · Damaged 1 · Price $2.5 · Cost $1.2 · Sold 4 · Cust 3','Now, Start with drift size, the count, Damaged, price, cost, Sold and Cust read in one line')
   assert.equal(full.find(node => node.getAttribute('role') === 'img', 'drift marker').getAttribute('aria-label'), 'Stock changed −2')
   const copyValues = full.findAll(node => node.getAttribute('data-copy-value') !== null).map(node => node.getAttribute('data-copy-value'))
   assert.deepEqual(copyValues, ['Full line product', '885000111', 'Brand B'], 'name, barcode and brand open the shared copy float')
