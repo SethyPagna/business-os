@@ -405,6 +405,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './productBatches') {
     return productBatchesModuleObj.exports // real module -- sales-import apply path actually calls into it
   }
+  if (request === './businessDateWindow') {
+    return loadPureSibling('businessDateWindow') // real module -- importEngine.ts's default received_date is the business day
+  }
   if (request === './batchCode') {
     return batchCodeModuleObj.exports // real module -- importEngine.ts's own lot_code derivation calls into it
   }
@@ -1387,6 +1390,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyProducts(db, [row({ name: 'No Date At All', selling_price_usd: '10' }, 1)], 'job-no-date', null, noImages)
     assert.ok(results[0].data.received_date, 'a row with no date column at all should still default received_date to today, not blank')
     assert.ok(results[0].data.lot_code, 'lot_code should still be derived from the defaulted received_date')
+  }
+
+  // The default is the Cambodia business day (UTC+7), not the UTC date: 17:30 UTC on the 20th is 00:30 on the 21st
+  // in Phnom Penh (security audit P2 dates). On the base the row read 2026-10-20.
+  {
+    const RealDate = Date
+    const frozen = RealDate.UTC(2026, 9, 20, 17, 30, 0)
+    globalThis.Date = class extends RealDate { constructor(...args) { if (args.length) super(...args); else super(frozen) } static now() { return frozen } }
+    try {
+      const db = makeFakeProductsDb([])
+      const results = await classifyProducts(db, [row({ name: 'Cambodia Midnight', selling_price_usd: '10' }, 1)], 'job-business-day', null, noImages)
+      assert.strictEqual(results[0].data.received_date, '2026-10-21', 'a row without a date is received on the business day')
+      assert.strictEqual(results[0].data.lot_code, dateToBatchCode('2026-10-21'), 'and its lot code names that day')
+    } finally { globalThis.Date = RealDate }
   }
 
   // Which product receives a receipt must be decided by evidence or by age,

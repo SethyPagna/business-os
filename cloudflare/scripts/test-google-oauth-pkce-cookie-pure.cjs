@@ -262,6 +262,18 @@ async function check(name, fn) {
     assert.equal(googlePayload(done.html).user.must_change_password, 0)
   })
 
+  await check('an unexpected failure renders a generic page, never the raw error text', async () => {
+    const started = await start('login')
+    db.exec('DROP TABLE users')
+    const logged = console.error
+    console.error = () => {}
+    let done
+    try { done = await callback(started.state, { pkce: started.cookieValue }) } finally { console.error = logged }
+    assert.equal(done.status, 500, done.html)
+    assert.doesNotMatch(done.html, /no such table|users|SQLITE/i)
+    assert.match(done.html, /Google sign-in failed/)
+  })
+
   await check('a callback WITHOUT the cookie is refused and the code is never redeemed', async () => {
     const started = await start('login')
     const done = await callback(started.state, {})

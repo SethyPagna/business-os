@@ -124,8 +124,9 @@ async function main() {
       await refused(t, 'no password', () => world.api('POST', '/api/system/reset-section', sectionBody('customers'), { as: 'restorer' }), 'current_password_required')
     })
 
-    await check('reset-section audit_log: a wrong password is refused and the audit trail survives', async (t) => {
-      await refused(t, 'wrong password', () => world.api('POST', '/api/system/reset-section', sectionBody('audit_log', { currentPassword: 'not-the-password' }), { as: 'restorer' }), 'incorrect_password')
+    await check('reset-section audit_log: removed (audit P2-d) -- refused even with the phrase and the right password, and the audit trail survives', async (t) => {
+      await refused(t, 'right password', () => world.api('POST', '/api/system/reset-section', sectionBody('audit_log', { currentPassword: adminPassword }), { as: 'restorer' }), 'audit_log_reset_removed', 410)
+      t.eq('the marker audit rows survive', (await world.first("SELECT COUNT(*) AS n FROM audit_logs WHERE entity = 'step_up_marker'")).n > 0, true)
     })
 
     await check('reset-section: a password that is not text is refused', async (t) => {
@@ -167,9 +168,8 @@ async function main() {
     const emptied = {
       customers: 'SELECT COUNT(*) AS n FROM customers',
       delivery_contacts: 'SELECT COUNT(*) AS n FROM delivery_contacts',
-      audit_log: "SELECT COUNT(*) AS n FROM audit_logs WHERE entity = 'step_up_marker'",
     }
-    for (const section of ['customers', 'delivery_contacts', 'audit_log']) {
+    for (const section of ['customers', 'delivery_contacts']) {
       await check(`reset-section ${section}: its own phrase with the right password clears that section`, async (t) => {
         await seed()
         await world.run("INSERT INTO delivery_contacts (name) VALUES ('Step-up contact')")

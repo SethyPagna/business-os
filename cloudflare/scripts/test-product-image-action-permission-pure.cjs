@@ -61,6 +61,7 @@ const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './stockMutationReceipt': { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } },
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
+  './businessDateWindow': loadTs('lib/businessDateWindow.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   './schemaProbe': loadTs('lib/schemaProbe.ts'),

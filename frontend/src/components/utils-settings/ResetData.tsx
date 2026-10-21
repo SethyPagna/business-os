@@ -53,7 +53,7 @@ type ProductsResetToggles = {
 
 type ResetApi = {
   resetData?: (mode: ResetMode, options: ProductsResetToggles & ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
-  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log', confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
+  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts', confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
   factoryReset?: (confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
 }
 
@@ -491,7 +491,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
   )
 }
 
-type SectionMode = 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log'
+type SectionMode = 'customers' | 'suppliers' | 'delivery_contacts'
 
 // A page reset clears the data behind ONE page and leaves every other page
 // alone. Products belongs here: it clears the Products page's own data
@@ -578,16 +578,6 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       deleted: T('reset_delivery_contacts_deleted', 'All delivery contacts'),
       kept: T('reset_delivery_contacts_kept', 'Sales, returns, products, customers, suppliers, everything else'),
       word: 'RESET DELIVERY CONTACTS',
-      icon: RotateCcw,
-    },
-    {
-      id: 'audit_log',
-      kind: 'section',
-      label: T('reset_audit_log_label', 'Audit Log'),
-      desc: T('reset_audit_log_desc', 'Deletes the audit log history. Nothing else reads or depends on it. Takes a fresh backup first.'),
-      deleted: T('reset_audit_log_deleted', 'All audit log entries'),
-      kept: T('reset_audit_log_kept', 'Everything else'),
-      word: 'RESET AUDIT LOG',
       icon: RotateCcw,
     },
   ]

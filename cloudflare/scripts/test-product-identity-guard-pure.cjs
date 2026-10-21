@@ -248,7 +248,7 @@ assert.match(source, /foldCreateIntoExisting\(c\.env, user, duplicate, name, bod
 // The helper moved to lib/createFold.ts (13 Oct 2026) so the review applier folds a queued create the same way.
 const createFoldSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'createFold.ts'), 'utf8')
 assert.ok(createFoldSource.includes('export async function foldCreateIntoExisting('), 'create: the fold helper exists')
-assert.match(source, /import \{ foldCreateIntoExisting, foldCreateWithStockInResponse, startingStockFingerprint \} from '\.\.\/lib\/createFold'/,
+assert.match(source, /import \{ foldCreateIntoExisting, foldCreateWithStockInResponse, foldStockInPermissionRefusal, startingStockFingerprint \} from '\.\.\/lib\/createFold'/,
   'create: the route folds through the shared helper')
 assert.ok(!/return c\.json\(\{[\s\S]{0,400}code: 'duplicate_product'/.test(source.slice(createAt, createQueueAt)),
   'create: the identity branch no longer returns a duplicate_product refusal')

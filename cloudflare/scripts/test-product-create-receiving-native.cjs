@@ -45,6 +45,7 @@ const DB = {
 const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
 real.add('reviewApprovalPermission')
+real.add('businessDateWindow')
 real.add('productDiscountGate')
 // 13 Oct 2026 (owner ruling 16): the create-fold helper and the stock-receipt table module are part of the create path.
 for (const name of ['createFold', 'stockMutationReceipt', 'productBatches', 'catalogCostRecompute']) real.add(name)

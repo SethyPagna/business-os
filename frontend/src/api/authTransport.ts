@@ -44,10 +44,6 @@ export function logout(): Promise<unknown> {
   return apiFetch('POST', '/api/auth/logout', {})
 }
 
-export function resetPasswordWithOtp(payload: AuthPayload = {}): Promise<unknown> {
-  return apiFetch('POST', '/api/auth/password-reset/otp', payload || {})
-}
-
 export function requestPasswordResetEmail(payload: AuthPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/password-reset/email', payload || {})
 }

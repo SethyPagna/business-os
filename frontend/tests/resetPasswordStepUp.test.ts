@@ -139,11 +139,14 @@ await runTest('reset-data and reset-section share one phrase-and-acknowledgement
   assert.ok(helper.indexOf("code: 'reset_confirm_required'") > 0)
   assert.ok(helper.indexOf("code: 'reset_confirm_required'") < helper.indexOf("code: 'reset_acknowledgement_required'"))
   for (const code of ['reset_confirm_required', 'reset_acknowledgement_required']) assert.ok(en[code] && km[code], `${code} needs text in both packs`)
-  for (const [section, phrase] of [['customers', 'RESET CUSTOMERS'], ['suppliers', 'RESET SUPPLIERS'], ['delivery_contacts', 'RESET DELIVERY CONTACTS'], ['audit_log', 'RESET AUDIT LOG']]) {
+  for (const [section, phrase] of [['customers', 'RESET CUSTOMERS'], ['suppliers', 'RESET SUPPLIERS'], ['delivery_contacts', 'RESET DELIVERY CONTACTS']]) {
     const entry = system.split('\n').find((line) => line.trim().startsWith(`${section}: { tables:`)) || ''
     assert.ok(entry.includes(`phrase: '${phrase}'`), `${section} must ask for ${phrase}`)
     assert.ok(resetData.includes(`word: '${phrase}'`), `the dialog must ask for the same ${phrase}`)
   }
+  // The audit log is no longer a resettable section (security audit P2-d): the Worker answers 410 instead of wiping it.
+  assert.ok(!system.includes('audit_log: { tables:'), 'audit_log is not a reset section')
+  assert.match(system, /code: AUDIT_LOG_RESET_REMOVED_CODE[^\n]*410/)
 })
 
 await runTest('the Worker asks for the password after the cheap checks and before any backup or delete', () => {

@@ -138,21 +138,6 @@ async function main() {
     assert.ok(verified.body.token || verified.body.user || verified.body.success !== false)
   })
 
-  await check('/password-reset/otp failures do not lock the owner\'s sign-in from another network', async () => {
-    const h = createAuthHarness()
-    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
-    h.addUser({ id: 708, username: 'owner', name: 'Owner', email: 'owner@shop.test', password: 'right-password', otpSecret: secret })
-    // Five reset failures (its own per-account bucket stops at five) and one
-    // sign-in failure: six on the account, all from the attacker's network.
-    await h.request('/login', 'POST', { username: 'owner', password: 'wrong' }, { ip: ATTACKER })
-    for (let i = 0; i < 5; i++) {
-      await h.request('/password-reset/otp', 'POST', { identifier: 'owner', otp: '000000', newPassword: 'another-password-9' }, { ip: ATTACKER })
-    }
-    const owner = await h.request('/login', 'POST', { username: 'owner', password: 'right-password' }, { ip: OWNER })
-    assert.equal(owner.status, 200)
-    assert.equal(owner.body.otpRequired, true)
-  })
-
   console.log(`test-login-lockout-per-network-pure.cjs: ${passed} checks passed`)
 }
 

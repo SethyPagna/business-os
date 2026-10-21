@@ -342,18 +342,12 @@ async function main() {
     assert.equal((await wrongPassword('ghost-other', '2001:db8:c:e::1')).status, 401, 'another /64 is unaffected')
   })
 
-  await check('S3b: the authenticator and reset ceilings count a /64 as one network', async () => {
+  await check('S3b: the authenticator ceiling counts a /64 as one network', async () => {
     const otp = []
     for (let i = 0; i < 26; i += 1) otp.push(await request('/api/auth/otp/verify', { method: 'POST', ip: inNetwork('2001:db8:e:f:0:0:0', i + 1), body: { userId: 987654, token: '000000' } }))
     assert.ok(otp.slice(0, 25).every((res) => res.status === 401), 'the first 25 are answered')
     assert.equal(otp[25].status, 429)
     assert.equal(otp[25].body.code, 'otp_rate_limited_network')
-    const reset = []
-    for (let i = 0; i < 26; i += 1) {
-      reset.push(await request('/api/auth/password-reset/otp', { method: 'POST', ip: inNetwork('2001:db8:1:2:0:0:0', i + 1), body: { identifier: `nobody-${i}`, otp: '000000', newPassword: 'a-long-new-password-1' } }))
-    }
-    assert.ok(reset.slice(0, 25).every((res) => res.status === 401), 'the first 25 are answered')
-    assert.equal(reset[25].status, 429)
   })
 
   await check('SR-2: parallel duration changes from one cookie give exactly one new session', async () => {

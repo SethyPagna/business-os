@@ -39,11 +39,11 @@ function sliceConst(source: string, name: string): string {
 await runTest('sign-in and recovery forms pair for password managers; the reveal is reachable by keyboard', () => {
   assert.match(loginSource, /id="login-username"\s+name="username"[\s\S]*?autoComplete="username"/)
   assert.match(loginSource, /name="password"[\s\S]*?autoComplete="current-password"/)
-  assert.match(loginSource, /id="reset-identifier" name="username" autoComplete="username"/)
+  assert.match(loginSource, /id="email-reset-identifier" name="email_reset_identifier" autoComplete="username"/)
+  assert.match(loginSource, /id="admin-reset-identifier" name="admin_reset_identifier" autoComplete="username"/)
   const reveal = /<button\b[^>]*?onClick=\{\(\) => setShowPassword\(\(visible\) => !visible\)\}[\s\S]*?<\/button>/.exec(loginSource)?.[0] || ''
   assert.ok(reveal, 'the reveal toggle exists')
   assert.doesNotMatch(reveal, /tabIndex=\{-1\}/)
-  assert.match(loginSource, /<NewPasswordFields\s[^>]*idPrefix="reset-password"/)
   assert.match(loginSource, /<NewPasswordFields\s[^>]*idPrefix="recovery-password"/)
   assert.doesNotMatch(loginSource, /placeholder="(?:username \/ name \/ phone \/ email|6-digit code)"/, 'no English placeholders')
 })
@@ -62,7 +62,7 @@ await runTest('the browser is asked to save only after a verified password, neve
 })
 
 await runTest('a finished reset ends on the pre-filled sign-in form: link and code cleared whatever the browser does (F-SPENT)', () => {
-  for (const handler of ['handleResetWithOtp', 'handleCompleteEmailReset']) {
+  for (const handler of ['handleCompleteEmailReset']) {
     const body = sliceConst(loginSource, handler)
     assert.match(body, /showSignInWithNewPassword\(String\(result\?\.username/, `${handler} uses the account username the Worker answered`)
     assert.match(body, /newPasswordProblem\(resetNewPassword\)/, `${handler} checks the shared rule`)
@@ -75,7 +75,7 @@ await runTest('a finished reset ends on the pre-filled sign-in form: link and co
   assert.match(finish, /setSignInNotice\(tr\('password_changed_sign_in_to_save'/)
   const close = sliceConst(loginSource, 'closeAuxMode')
   assert.match(close, /setRecoveryAccessToken\(''\)/)
-  assert.match(close, /setResetOtp\(''\)/)
+  assert.doesNotMatch(loginSource, /resetPasswordWithOtp|handleResetWithOtp|password-reset[/]otp/, 'the authenticator-code reset path is retired (audit P2-a)')
 })
 
 function inputBefore(source: string, id: string): string {
@@ -150,7 +150,7 @@ await runTest('profile and recovery security surfaces remain compact without wea
   assert.match(profileSource, /grid gap-2 lg:grid-cols-3[\s\S]{0,1800}name="current_password"[\s\S]{0,600}lg:col-span-2[\s\S]{0,200}<NewPasswordFields[\s\S]{0,600}layout="columns"/)
   assert.match(profileSource, /sm:grid-cols-\[auto_minmax\(0,1fr\)_auto\][\s\S]{0,500}setOtpMode\(otpEnabled \? 'disable' : 'setup'\)/)
   assert.match(profileSource, /<InfoHint label=\{tr\('current_password'/)
-  assert.match(loginSource, /id="reset-identifier"[\s\S]{0,700}id="reset-otp"/)
+  assert.doesNotMatch(loginSource, /id="reset-identifier"|id="reset-otp"/, 'the authenticator-code reset form is gone (audit P2-a)')
   assert.doesNotMatch(profileSource, /onClick=\{[^}]*logout|onClick=\{[^}]*refresh/i)
 })
 

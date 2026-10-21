@@ -136,17 +136,6 @@ async function check(name, fn) {
     assert.equal(compared.length, 0)
   })
 
-  await check('password reset by OTP writes the current format', async () => {
-    const h = createAuthHarness({ overrides: { bcryptjs: countingBcrypt } })
-    h.addUser({ id: 804, username: 'resetme', name: 'Reset Me', password: 'old-password', otpSecret: SECRET })
-    const res = await h.request('/password-reset/otp', 'POST', { identifier: 'resetme', otp: await h.codeAt(SECRET), newPassword: 'brand-new-pass-1' }, { ip: freshIp() })
-    assert.equal(res.status, 200, JSON.stringify(res.body))
-    assert.ok(isCurrentRowFor(h.userRow(804).password, 'brand-new-pass-1'), h.userRow(804).password)
-    compared.length = 0
-    assert.equal((await login(h, 'resetme', 'brand-new-pass-1')).status, 200)
-    assert.equal(compared.length, 0, 'the new password is never checked with bcrypt')
-  })
-
   await check('self-service OTP disable checks the current password through the module', async () => {
     const h = createAuthHarness({ overrides: { bcryptjs: countingBcrypt } })
     h.addUser({ id: 805, username: 'selfoff', name: 'Self Off', password: 'self-pass-1', otpSecret: SECRET })

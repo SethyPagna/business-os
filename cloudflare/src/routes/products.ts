@@ -27,7 +27,7 @@ import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, move
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
-import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
+import { businessToday, localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
@@ -1601,7 +1601,7 @@ app.get('/:id/detail-report', async (c) => {
   const productId = Number(c.req.param('id')) || 0
   if (!productId) return c.json({ error: 'Product not found' }, 404)
   const query = c.req.query()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = businessToday()
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.startDate || '')) ? String(query.startDate) : '2000-01-01'
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.endDate || '')) ? String(query.endDate) : today
 
@@ -2237,7 +2237,11 @@ async function findSameProductIdentityProduct(
 // The Sep 16 2026 create-fold (a create that identifies as the SAME product as an existing active row folds into
 // it) lives in lib/createFold.ts so the review applier folds a queued create the same way. Owner ruling 16 (13 Oct
 // 2026): a starting quantity typed on a fold is recorded as a normal stock-in, never dropped.
-import { foldCreateIntoExisting, foldCreateWithStockInResponse, startingStockFingerprint } from '../lib/createFold'
+import { foldCreateIntoExisting, foldCreateWithStockInResponse, foldStockInPermissionRefusal, startingStockFingerprint } from '../lib/createFold'
+
+// Opening stock on a new product is a stock-in, so it takes the inventory:adjust grant a fold's starting quantity takes.
+const openingStockRefusal = (user: SessionUser, body: Record<string, unknown>) =>
+  Number(body.stock_quantity) > 0 ? foldStockInPermissionRefusal(user) : null
 
 function productStatusInputRefusal(c: any, body: Record<string, unknown>) {
   try { assertProductStatusInput(body) } catch (error) {
@@ -2359,10 +2363,13 @@ app.post('/', async (c) => {
   const normalizedBrands = normalizeMultiValue(body.brand, body.brands)
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
+  const stockRefusal = openingStockRefusal(user, body)
+  if (stockRefusal) return c.json(stockRefusal.body, stockRefusal.status)
+
   let created
   try {
     created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c),
-      { actorId: user.id, fingerprint: startingStockFingerprint(body, destination) })
+      { actorId: user.id, fingerprint: startingStockFingerprint(body, destination) }, { id: actorId(user), name: actorSnapshot(user) })
   } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
@@ -3183,8 +3190,10 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   if (!changesImages) omitUnchangedProductImageFields(body)
+  const stockRefusal = openingStockRefusal(user, body)
+  if (stockRefusal) return c.json(stockRefusal.body, stockRefusal.status)
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c), undefined, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
