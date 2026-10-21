@@ -3,7 +3,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { optimizeImage, IMAGE_MAX_BYTES } from '../lib/imagePipeline'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier, isAdminControlUser } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
@@ -53,6 +53,9 @@ app.use('*', requireAuth)
 // stays the single owner of the rule; sync.ts imports it rather than re-deriving.
 export function hasFullLibraryAccess(user: SessionUser): boolean {
   return getPermissionTier(user, 'library') === 'full' || hasPermission(user, 'settings')
+}
+function canChangeProductImages(user: SessionUser): boolean {
+  return getActionTier(user, 'products', 'image') === 'full' || hasPermission(user, 'products_image_only')
 }
 export function canWireProductImages(user: SessionUser): boolean {
   return getPermissionTier(user, 'products') !== 'none' || hasPermission(user, 'products_image_only')
@@ -584,16 +587,15 @@ app.post('/:id/rewire', async (c) => {
       EXISTS(SELECT 1 FROM product_images WHERE image_path = @path) AS has_gallery
   `).get<{ has_cover: number; has_gallery: number }>({ path: fromPath })
   const rewiresProductImages = Boolean(productReferences?.has_cover || productReferences?.has_gallery)
-  const canChangeProductImages = getActionTier(user, 'products', 'image') === 'full'
-    || hasPermission(user, 'products_image_only')
-  if (rewiresProductImages && !canChangeProductImages) {
+  const canChangeProducts = canChangeProductImages(user)
+  if (rewiresProductImages && !canChangeProducts) {
     return c.json({ error: 'You do not have permission to change product images.' }, 403)
   }
 
   // A product whose gallery ALREADY holds the target image must not end up
   // with two identical rows -- drop the would-be duplicates first, then
   // repoint the rest. Covers are a single column, no such hazard.
-  const statements = canChangeProductImages ? [
+  const statements = canChangeProducts ? [
     {
       sql: `DELETE FROM product_images WHERE image_path = @from AND product_id IN (
               SELECT product_id FROM product_images WHERE image_path = @to)`,
@@ -602,15 +604,17 @@ app.post('/:id/rewire', async (c) => {
     { sql: 'UPDATE product_images SET image_path = @to WHERE image_path = @from', params: { from: fromPath, to: toPath } },
     { sql: 'UPDATE products SET image_path = @to, updated_at = CURRENT_TIMESTAMP WHERE image_path = @from', params: { from: fromPath, to: toPath } },
   ] : []
+  // Other people's avatars are account data: only an admin repoints them from the Library.
+  const rewiresAvatars = isAdminControlUser(user)
   const avatarStatementIndex = statements.length
-  statements.push({ sql: 'UPDATE users SET avatar_path = @to WHERE avatar_path = @from', params: { from: fromPath, to: toPath } })
-  const results = await db.batch(statements)
+  if (rewiresAvatars) statements.push({ sql: 'UPDATE users SET avatar_path = @to WHERE avatar_path = @from', params: { from: fromPath, to: toPath } })
+  const results = statements.length ? await db.batch(statements) : []
   const changesAt = (index: number) => Number((results[index] as { changes?: number; meta?: { changes?: number } })?.changes ?? (results[index] as { meta?: { changes?: number } })?.meta?.changes ?? 0)
   const rewired = {
-    gallery_duplicates_removed: canChangeProductImages ? changesAt(0) : 0,
-    gallery: canChangeProductImages ? changesAt(1) : 0,
-    products: canChangeProductImages ? changesAt(2) : 0,
-    avatars: changesAt(avatarStatementIndex),
+    gallery_duplicates_removed: canChangeProducts ? changesAt(0) : 0,
+    gallery: canChangeProducts ? changesAt(1) : 0,
+    products: canChangeProducts ? changesAt(2) : 0,
+    avatars: rewiresAvatars ? changesAt(avatarStatementIndex) : 0,
   }
 
   const settingRows = await db.prepare('SELECT value FROM settings').all<{ value: string }>()
@@ -704,6 +708,10 @@ app.delete('/:id', async (c) => {
   const { total: usageCount, ...usageBreakdown } = references
   if (usageCount > 0) {
     const forceRequested = body.force === true && String(body.confirmText || '').trim().toUpperCase() === 'CONFIRM DELETE'
+    // Force-deleting a product's image is a product image change, same gate as rewire.
+    if (forceRequested && (usageBreakdown.products > 0 || usageBreakdown.gallery > 0) && !canChangeProductImages(user)) {
+      return c.json({ error: 'You do not have permission to change product images.' }, 403)
+    }
     if (!forceRequested) {
       return c.json({
         error: 'This file is still in use and cannot be deleted.',

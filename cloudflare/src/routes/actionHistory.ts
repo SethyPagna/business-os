@@ -300,7 +300,8 @@ app.get('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
+    console.error('[action-history] load failed', error)
+    return c.json({ success: false, error: 'Failed to load action history' }, 500)
   }
 })
 
@@ -436,7 +437,8 @@ app.post('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to record action history' }, 500)
+    console.error('[action-history] record failed', error)
+    return c.json({ success: false, error: 'Failed to record action history' }, 500)
   }
 })
 
@@ -470,7 +472,8 @@ app.patch('/:id', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to update action history' }, 500)
+    console.error('[action-history] update failed', error)
+    return c.json({ success: false, error: 'Failed to update action history' }, 500)
   }
 })
 
@@ -691,7 +694,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const transactionRefusal = stockTransactionRefusal(error)
     if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
-    return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)
+    console.error(`[action-history] ${direction} failed`, error)
+    return c.json({ success: false, error: `Failed to ${direction} action history` }, 500)
   }
 }
 

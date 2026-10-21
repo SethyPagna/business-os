@@ -593,8 +593,8 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
     // A db error is a 500, never an empty 200 that reads as "no logs": the
     // client falls back to its local mirror (and says so) instead of
     // presenting an error as an empty trail.
-    const message = error instanceof Error ? error.message : 'Failed to load audit logs'
-    return c.json({ error: message }, 500)
+    console.error('[audit-logs] load failed', error)
+    return c.json({ error: 'Failed to load audit logs', code: 'audit_logs_failed' }, 500)
   }
 })
 app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
@@ -740,12 +740,16 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   } catch (error) {
     // Same fail-loud rule as /system/audit-logs above: a db error must not
     // render as an empty ledger.
-    const message = error instanceof Error ? error.message : 'Failed to load the deleted-sale ledger'
-    return c.json({ error: message }, 500)
+    console.error('[deleted-sale-ledger] load failed', error)
+    return c.json({ error: 'Failed to load the deleted-sale ledger', code: 'deleted_sale_ledger_failed' }, 500)
   }
 })
 
-app.get('/system/integration-doctor', requireAuth, async (c) => {
+// GET is read-only; the R2 write/delete probe is POST (a GET must not write).
+app.get('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c, false))
+app.post('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c, true))
+
+async function runIntegrationDoctor(c: any, deep: boolean) {
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
   let ok = true
@@ -757,11 +761,12 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     ok = false
     database.ok = false
     database.status = 'needs_attention'
-    database.message = error instanceof Error ? error.message : 'D1 query failed'
+    console.error('[integration-doctor] D1 query failed', error)
+    database.message = 'D1 query failed'
   }
 
   const objectStorage: Record<string, unknown> = { driver: 'r2', ok: true, status: 'ok', message: 'R2 (ASSETS) bucket is bound.' }
-  if (c.req.query('deep')) {
+  if (deep) {
     try {
       const key = `system/doctor-${crypto.randomUUID()}.txt`
       await c.env.ASSETS.put(key, 'ok')
@@ -771,7 +776,8 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
       ok = false
       objectStorage.ok = false
       objectStorage.status = 'needs_attention'
-      objectStorage.message = error instanceof Error ? error.message : 'R2 write/delete failed'
+      console.error('[integration-doctor] R2 write/delete failed', error)
+      objectStorage.message = 'R2 write/delete failed'
       objectStorage.writeReadDelete = { ok: false }
     }
   }
@@ -782,7 +788,8 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     backupCheck = { ok: true, status: 'ok', message: `${backups.length} backup(s) stored in R2.`, count: backups.length, keep: 2, intervalHours: 6 }
   } catch (error) {
     ok = false
-    backupCheck = { ok: false, status: 'needs_attention', message: error instanceof Error ? error.message : 'R2 backup listing failed' }
+    console.error('[integration-doctor] R2 backup listing failed', error)
+    backupCheck = { ok: false, status: 'needs_attention', message: 'R2 backup listing failed' }
   }
 
   // This was hard-coded `ok: true, 'configured'` -- it reported a healthy
@@ -851,7 +858,7 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   // expect, and "which plan is this deployment on" is the first question.
   const runtime = { objectStorageDriver: 'r2', tier: resolvePlanTier(c.env), quotas: await readAllQuotas(c.env) }
   return c.json({ item: { checks, runtime }, checks, ok })
-})
+}
 
 // -----------------------------------------------------------------------
 // Filesystem / Postgres-only diagnostics from the Docker-era backend.

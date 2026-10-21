@@ -105,7 +105,7 @@ const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTra
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const receivingBranch = loadReal('lib/receivingBranch.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding, './receivingBranch': receivingBranch })
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding, './receivingBranch': receivingBranch })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
@@ -224,6 +224,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/receivingBranch': receivingBranch,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': businessDateWindow,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
   '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
@@ -321,6 +322,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/receivingBranch': receivingBranch,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': businessDateWindow,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
   '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
@@ -678,7 +680,7 @@ async function main() {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 2, reason: 'Ordinary receipt', branchId: 1, batchId: 'new',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
-    const todayIso = new Date().toISOString().slice(0, 10)
+    const todayIso = businessDateWindow.businessToday()
     const rows = batchRows()
     assert.strictEqual(rows.length, 1)
     assert.strictEqual(rows[0].received_at, todayIso, 'absent date still means "received today", unchanged behavior')

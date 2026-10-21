@@ -107,6 +107,7 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './receivingBranch': receivingBranch,
   './db': { getDb: () => db },
   './batchCode': batchCode,
+  './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './sqlBinding': sqlBinding,
   './moneyPrecision': moneyPrecision,
 })

@@ -962,10 +962,6 @@ export const removeUserAvatar = async (id) => {
   const { removeUserAvatar: removeUserAvatarRequest } = await loadUserAdminTransport()
   return removeUserAvatarRequest(id)
 }
-export const disconnectUserAuthProvider = async (id, d) => {
-  const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadUserAdminTransport()
-  return disconnectUserAuthProviderRequest(id, d)
-}
 export const changeUserPassword = async (id, d) => {
   const { changeUserPassword: changeUserPasswordRequest } = await loadUserAdminTransport()
   return changeUserPasswordRequest(id, d)

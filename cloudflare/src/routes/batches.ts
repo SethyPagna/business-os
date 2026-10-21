@@ -13,6 +13,7 @@ import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, 
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
+import { businessToday } from '../lib/businessDateWindow'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { effectiveUnitCost } from '../lib/stockSessionMath'
@@ -506,9 +507,9 @@ app.patch('/:id', async (c) => {
     // This value comes from the operator-facing editor, whose display/input
     // convention is day-first. Ambiguous 03/09/2026 must therefore remain
     // September 3, matching the frontend lineage date shown to the user.
-    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
+    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : businessToday())
     if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
-    const resolvedIso = iso || new Date().toISOString().slice(0, 10)
+    const resolvedIso = iso || businessToday()
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'lot_code = @lot_code')
     params.received_at = resolvedIso
