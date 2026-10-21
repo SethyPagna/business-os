@@ -7717,5 +7717,10 @@
   "role_defaults_loaded": "Defaults loaded into the editor. Review and save to apply them.",
   "role_review_title": "Review role changes",
   "perm_value_on": "On",
-  "perm_value_not_set": "Not set"
+  "perm_value_not_set": "Not set",
+  "increase_quantity": "Increase quantity",
+  "decrease_quantity": "Decrease quantity",
+  "remove_divider": "Remove divider",
+  "payment_method_new_name": "New name",
+  "receipt_aba_payment_qr_alt": "ABA payment QR"
 }

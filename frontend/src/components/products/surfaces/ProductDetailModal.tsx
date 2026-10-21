@@ -362,7 +362,7 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
-                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
+                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')} aria-label={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
                     {purchaseKhr !== null ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                     {p.cost_needs_review === true ? <span className="mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400">{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}
                   </PriceCell> : null}

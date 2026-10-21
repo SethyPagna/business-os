@@ -24,6 +24,8 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
+import { isPromotionEnded } from '../../utils/promotionWindow.ts'
 import {
   getPromotionRules,
   createPromotionRule,
@@ -160,16 +162,10 @@ const PROMO_STATUS_DOT: Record<PromoStatusKey, string> = {
   live: 'bg-emerald-500', scheduled: 'bg-blue-500', ended: 'bg-gray-400', paused: 'bg-amber-500',
 }
 
-function computePromoStatus(isActive: boolean, currentlyActive: boolean, startsAt?: unknown, endsAt?: unknown): PromoStatusKey {
+function computePromoStatus(isActive: boolean, currentlyActive: boolean, endsAt?: unknown): PromoStatusKey {
   if (!isActive) return 'paused'
   if (currentlyActive) return 'live'
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const startStr = dateInputValue(startsAt)
-  const endStr = dateInputValue(endsAt)
-  if (endStr && new Date(`${endStr}T00:00:00`).getTime() < today.getTime()) return 'ended'
-  if (startStr && new Date(`${startStr}T00:00:00`).getTime() > today.getTime()) return 'scheduled'
-  return 'scheduled'
+  return isPromotionEnded(todayStr(), dateInputValue(endsAt)) ? 'ended' : 'scheduled'
 }
 
 function ruleTypeIcon(ruleType: string): ComponentType<SVGProps<SVGSVGElement>> {
@@ -452,7 +448,7 @@ export default function PromotionsPage() {
   // the stat strip read from one computation.
   const ruleViews = useMemo(() => rules.map((row) => ({
     row,
-    status: computePromoStatus(row.normalized?.is_active ?? true, row.currently_active, row.normalized?.starts_at, row.normalized?.ends_at),
+    status: computePromoStatus(row.normalized?.is_active ?? true, row.currently_active, row.normalized?.ends_at),
   })), [rules])
   const liveRules = useMemo(() => ruleViews.filter((v) => v.status === 'live').length, [ruleViews])
   const scheduledRules = useMemo(() => ruleViews.filter((v) => v.status === 'scheduled').length, [ruleViews])
@@ -712,7 +708,7 @@ export default function PromotionsPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {discountViews.map(({ product, promo, live }) => {
-                        const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_starts_at, product.discount_ends_at)
+                        const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_ends_at)
                         return <tr key={`desktop-${String(product.id)}`} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => openDiscountEditor(product)}>
                           <td className="max-w-[7rem] px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PD-${product.id}`}><span className="detail-scroll-text">PD-{String(product.id)}</span></td>
                           <td className="max-w-[16rem] px-3 py-1.5 font-semibold text-slate-800 dark:text-slate-100" title={String(product.name || `#${product.id}`)}><span className="detail-scroll-text">{String(product.name || `#${product.id}`)}</span></td>
@@ -727,7 +723,7 @@ export default function PromotionsPage() {
                 </div>
                 <div className="space-y-2 md:hidden">
                 {discountViews.map(({ product, promo, live }) => {
-                  const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_starts_at, product.discount_ends_at)
+                  const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_ends_at)
                   const color = String(product.discount_badge_color || '#e11d48')
                   return (
                     <div
@@ -932,6 +928,8 @@ export default function PromotionsPage() {
                         <span key={String(product.id)} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-800">
                           {String(product.name || `#${product.id}`)}
                           <button type="button" className="text-gray-400 hover:text-red-600"
+                            title={t('remove') || 'Remove'}
+                            aria-label={`${t('remove') || 'Remove'}: ${String(product.name || `#${product.id}`)}`}
                             onClick={() => setDraft({ ...draft, products: draft.products.filter((p) => p.id !== product.id) })}>
                             ×
                           </button>

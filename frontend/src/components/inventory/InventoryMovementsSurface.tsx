@@ -315,6 +315,7 @@ export default function InventoryMovementsSurface({
                       className="min-w-0 max-w-[16rem] text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
                       onClick={() => openMovementDetail(movement)}
                       title={movement.product_name || ''}
+                      aria-label={movement.product_name || undefined}
                     >
                       <ProductNameRail name={movement.product_name || (t('product') || 'Product')} />
                     </button>

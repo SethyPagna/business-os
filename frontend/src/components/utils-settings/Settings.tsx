@@ -35,6 +35,7 @@ import AuditRetentionSetting from './AuditRetentionSetting.tsx'
 import TelegramSummarySections from './TelegramSummarySections.tsx'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -542,6 +543,7 @@ export default function Settings() {
   const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
+  const [renameDraft, setRenameDraft] = useState<{ from: string; to: string } | null>(null)
   // Methods the shop has taken money through that are not in the list above.
   // Held as state rather than derived, because only the server can know it --
   // it is a DISTINCT over the sales table, not anything the browser has.
@@ -884,9 +886,13 @@ export default function Settings() {
     }
   }
 
-  const renamePaymentMethod = async (from: string) => {
-    const to = window.prompt(t('rename_payment_method') || 'Rename payment method', from)?.trim()
-    if (!to || to === from) return
+  // The new name is typed in the shared dialog (before/after shown), not a native prompt.
+  const renamedTo = renameDraft?.to.trim() || ''
+  const submitPaymentMethodRename = async () => {
+    if (!renameDraft || !renamedTo || renamedTo === renameDraft.from) return
+    const from = renameDraft.from
+    const to = renamedTo
+    setRenameDraft(null)
     try {
       const impact = await getPaymentMethodImpact(from, to)
       const linked = Number(impact.linked_records || 0)
@@ -2038,9 +2044,10 @@ export default function Settings() {
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{paymentMethod}</span>
                 <button
                   type="button"
-                  onClick={() => void renamePaymentMethod(paymentMethod)}
+                  onClick={() => setRenameDraft({ from: paymentMethod, to: paymentMethod })}
                   className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                  title="Preview and rename"
+                  title={t('rename_payment_method') || 'Rename payment method'}
+                  aria-label={t('rename_payment_method') || 'Rename payment method'}
                 >
                   {t('rename') || 'Rename'}
                 </button>
@@ -2407,6 +2414,34 @@ export default function Settings() {
         </p>
       </div>
       {confirmDialog}
+      {renameDraft ? (
+        <ConfirmDialog
+          t={t}
+          title={t('rename_payment_method') || 'Rename payment method'}
+          items={[
+            { label: t('before') || 'Before', value: renameDraft.from },
+            { label: t('after') || 'After', value: renamedTo || '—' },
+          ]}
+          confirmLabel={t('rename') || 'Rename'}
+          confirmDisabled={!renamedTo || renamedTo === renameDraft.from}
+          onConfirm={() => { void submitPaymentMethodRename() }}
+          onClose={() => setRenameDraft(null)}
+        >
+          <div>
+            <label htmlFor="settings-rename-payment-method" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{t('payment_method_new_name') || 'New name'}</label>
+            <input
+              id="settings-rename-payment-method"
+              name="rename_payment_method"
+              autoComplete="off"
+              autoFocus
+              className="input text-sm"
+              value={renameDraft.to}
+              onChange={(event) => setRenameDraft((current) => (current ? { ...current, to: event.target.value } : current))}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitPaymentMethodRename() } }}
+            />
+          </div>
+        </ConfirmDialog>
+      ) : null}
     </div>
   )
 }

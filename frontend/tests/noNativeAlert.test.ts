@@ -54,11 +54,7 @@ function sourceFiles(dir: string): string[] {
 // Remaining native alert() calls by file (relative to frontend/src). Each
 // already shows translated text; lower the number when you move one onto
 // notify().
-const REMAINING: Record<string, number> = {
-  'components/products/forms/ProductForm.tsx': 5,
-  'components/receipt-settings/PrintSettings.tsx': 2,
-  'components/receipt/Receipt.tsx': 1,
-}
+const REMAINING: Record<string, number> = {}
 
 runTest('positive control: every native form is counted, comments and a local alert are not', () => {
   assert.equal(nativeAlertCalls('a.tsx', `alert('x'); window.alert('y'); globalThis.alert('z')`), 3)

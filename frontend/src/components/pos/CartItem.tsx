@@ -269,7 +269,7 @@ export default function CartItem({
 
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
-          <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity - 1)}>-</button>
+          <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" title={translate(t, 'decrease_quantity', 'Decrease quantity')} aria-label={translate(t, 'decrease_quantity', 'Decrease quantity')} onClick={() => onQtyChange(lineId, item.quantity - 1)}>-</button>
           <input
             className="w-10 border-x border-gray-200 bg-transparent py-1 text-center text-xs text-gray-900 dark:border-gray-600 dark:text-white"
             type="number"
@@ -278,7 +278,7 @@ export default function CartItem({
             value={item.quantity}
             onChange={(event) => onQtyChange(lineId, moneyPrecisionVersion === 1 ? Number(event.target.value) : Number.parseInt(event.target.value, 10) || 1)}
           />
-          <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
+          <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" title={translate(t, 'increase_quantity', 'Increase quantity')} aria-label={translate(t, 'increase_quantity', 'Increase quantity')} onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
         </div>
         {/* Z2: the price input shows the line's SELLING/base price and stays
             put when a discount is applied -- the discount reduces the line

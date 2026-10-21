@@ -258,7 +258,7 @@ function ThreeDot({ onDetails, onEdit, onResetPw, canManage }: ThreeDotProps) {
 
   return (
     <PortalMenu
-      trigger={<button className="three-dot-btn" type="button">...</button>}
+      trigger={<button className="three-dot-btn" type="button" title={t('more_actions') || 'More actions'} aria-label={t('more_actions') || 'More actions'}>...</button>}
       items={items}
     />
   )

@@ -418,13 +418,13 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
                           <div className="text-xs text-gray-400">{fmtUSD(item.applied_price_usd || 0)} {T('each','each')}</div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          <button onClick={() => updateQty(idx, (item.returnQty || 0) - 1)}
+                          <button onClick={() => updateQty(idx, (item.returnQty || 0) - 1)} title={T('decrease_quantity', 'Decrease quantity')} aria-label={T('decrease_quantity', 'Decrease quantity')}
                             className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">−</button>
                           <input type="number" min="0" max={toNumber(item.quantity)} step="1"
                             className="input w-14 text-center text-sm py-1"
                             value={item.returnQty}
                             onChange={(event: ChangeEvent<HTMLInputElement>) => updateQty(idx, event.target.value)} />
-                          <button onClick={() => updateQty(idx, (item.returnQty || 0) + 1)}
+                          <button onClick={() => updateQty(idx, (item.returnQty || 0) + 1)} title={T('increase_quantity', 'Increase quantity')} aria-label={T('increase_quantity', 'Increase quantity')}
                             className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">+</button>
                           <span className="text-[10px] text-gray-400 ml-1 w-10">/ {item.quantity}</span>
                         </div>

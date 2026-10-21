@@ -161,13 +161,13 @@ export default function FieldOrderManager({ order, onChange, t: tProp }: FieldOr
                   {item.label}
                 </div>
                 <div className="flex items-center gap-1">
-                  <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-white hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" onClick={() => moveItem(realIndex, realIndex - 1)} disabled={realIndex === 0}>
+                  <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-white hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveUp', 'Up')} aria-label={t('moveUp', 'Up')} onClick={() => moveItem(realIndex, realIndex - 1)} disabled={realIndex === 0}>
                     <ChevronUp className="h-4 w-4" />
                   </button>
-                  <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-white hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" onClick={() => moveItem(realIndex, realIndex + 1)} disabled={realIndex === enriched.length - 1}>
+                  <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-white hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveDown', 'Down')} aria-label={t('moveDown', 'Down')} onClick={() => moveItem(realIndex, realIndex + 1)} disabled={realIndex === enriched.length - 1}>
                     <ChevronDown className="h-4 w-4" />
                   </button>
-                  <button type="button" className="rounded-lg p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" onClick={() => removeDivider(realIndex)}>
+                  <button type="button" className="rounded-lg p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" title={t('remove_divider', 'Remove divider')} aria-label={t('remove_divider', 'Remove divider')} onClick={() => removeDivider(realIndex)}>
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
@@ -190,13 +190,13 @@ export default function FieldOrderManager({ order, onChange, t: tProp }: FieldOr
                 <div className="text-xs text-gray-400">{item.desc}</div>
               </div>
               <div className="flex items-center gap-1">
-                <button type="button" className="rounded-lg p-1 text-gray-300 transition hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20" title={t('insert_divider_below', 'Insert divider below')} onClick={() => addDivider(realIndex)}>
+                <button type="button" className="rounded-lg p-1 text-gray-300 transition hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20" title={t('insert_divider_below', 'Insert divider below')} aria-label={t('insert_divider_below', 'Insert divider below')} onClick={() => addDivider(realIndex)}>
                   <Minus className="h-4 w-4" />
                 </button>
-                <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveUp', 'Up')} onClick={() => moveItem(realIndex, realIndex - 1)} disabled={realIndex === 0}>
+                <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveUp', 'Up')} aria-label={t('moveUp', 'Up')} onClick={() => moveItem(realIndex, realIndex - 1)} disabled={realIndex === 0}>
                   <ChevronUp className="h-4 w-4" />
                 </button>
-                <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveDown', 'Down')} onClick={() => moveItem(realIndex, realIndex + 1)} disabled={realIndex === enriched.length - 1}>
+                <button type="button" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200" title={t('moveDown', 'Down')} aria-label={t('moveDown', 'Down')} onClick={() => moveItem(realIndex, realIndex + 1)} disabled={realIndex === enriched.length - 1}>
                   <ChevronDown className="h-4 w-4" />
                 </button>
                 <span className="w-6 text-center text-xs font-mono text-gray-300 dark:text-gray-600">{visibleIndex + 1}</span>

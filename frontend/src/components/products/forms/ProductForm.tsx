@@ -1273,7 +1273,7 @@ function ProductFormContent({
     if (!canContinueSave()) return
     if (refuseWhileAPhotoFailed()) return
     if (!String(form.name || '').trim()) {
-      alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
+      notify(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'), 'error')
       return
     }
     // P7-b: a barcode reading as scientific notation is an Excel export
@@ -1282,15 +1282,15 @@ function ProductFormContent({
     // barcode_scientific_notation), so the catalog can't take one in
     // through manual create/edit either. The server enforces it too.
     if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(String(form.barcode || '').trim())) {
-      alert(tr(
+      notify(tr(
         'barcode_scientific_notation_alert',
         'This barcode looks like scientific notation (an Excel export artifact). Edit it or clear it — it cannot be saved as-is.',
         'បាកូដនេះមើលទៅដូចជាទម្រង់វិទ្យាសាស្ត្រ (កំហុសពីការនាំចេញ Excel)។ កែ ឬលុបវាចេញ — មិនអាចរក្សាទុកបែបនេះបានទេ។',
-      ))
+      ), 'error')
       return
     }
     if (createSessionDuplicate) {
-      alert(tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។'))
+      notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។'), 'error')
       return
     }
     // F1: the page-by-page confirm -- a matching name/barcode stops the
@@ -1323,7 +1323,7 @@ function ProductFormContent({
       }
     }
     if (isCreateMode && branches.length > 0 && !form.branch_id) {
-      alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
+      notify(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'), 'error')
       return
     }
     if (canEditCosts && [canViewCosts ? form.cost_price_usd : blindCostInputs.usd, canViewCosts ? form.cost_price_khr : blindCostInputs.khr].some(value => !isValidCostInput(value))) {
@@ -1450,7 +1450,7 @@ function ProductFormContent({
         () => { if (savedAuthorityCurrent) onClose() },
       )
     } catch (error) {
-      if (isSaveAuthorityCurrent()) alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
+      if (isSaveAuthorityCurrent()) notify(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')), 'error')
     } finally {
       if (aliveRef.current && currentFormDraftKeyRef.current === draftKey) {
         saveInFlightRef.current = false
@@ -1669,6 +1669,7 @@ function ProductFormContent({
                             onClick={() => moveImage(index, -1)}
                             disabled={index === 0}
                             title={tr('move_left', 'Move left', 'ផ្លាស់ទីទៅឆ្វេង')}
+                            aria-label={tr('move_left', 'Move left', 'ផ្លាស់ទីទៅឆ្វេង')}
                           >
                             <ChevronLeft className="h-3 w-3" />
                           </button>
@@ -1678,6 +1679,7 @@ function ProductFormContent({
                             onClick={() => moveImage(index, 1)}
                             disabled={index === imageList.length - 1}
                             title={tr('move_right', 'Move right', 'ផ្លាស់ទីទៅស្តាំ')}
+                            aria-label={tr('move_right', 'Move right', 'ផ្លាស់ទីទៅស្តាំ')}
                           >
                             <ChevronRight className="h-3 w-3" />
                           </button>

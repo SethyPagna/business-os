@@ -73,7 +73,6 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
       if (range.startTime && range.endTime) {
         params.startTime = range.startTime
         params.endTime = range.endTime
-        params.tzOffsetMinutes = -new Date().getTimezoneOffset()
       }
       const result = await getDeliveryContactReport(params) as { contacts?: DeliveryContactReportRow[] } | null
       if (requestRef.current !== requestId) return

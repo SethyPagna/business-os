@@ -132,13 +132,13 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     } catch (error) {
       if (isReceiptQrError(error)) {
         if (error.code === 'cancelled') return
-        alert(error.code === 'generation-timeout'
+        notify?.(error.code === 'generation-timeout'
           ? T('receipt_qr_still_generating', 'The QR codes are still being generated. Try printing again.')
-          : T('receipt_qr_generation_failed', 'A QR code could not be generated, so nothing was printed. Tap Retry on the QR code, then print again.'))
+          : T('receipt_qr_generation_failed', 'A QR code could not be generated, so nothing was printed. Tap Retry on the QR code, then print again.'), 'error')
         return
       }
       console.error(`[PrintSettings] ${kind} failed:`, error)
-      alert(`${failurePrefix}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
+      notify?.(`${failurePrefix}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`, 'error')
     } finally {
       if (testAbortRef.current === controller) testAbortRef.current = null
       setWaitingForQr(false)
