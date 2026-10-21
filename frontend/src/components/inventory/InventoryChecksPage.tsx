@@ -59,6 +59,10 @@ function knownRefusal(cause: unknown) {
   const code = (cause as { code?: unknown } | null)?.code
   return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined
 }
+function isStaleConflict(cause: unknown) {
+  const { status, code } = (cause ?? {}) as { status?: unknown; code?: unknown }
+  return status === 409 && code !== 'inventory_check_owner_required'
+}
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', state: '', reason: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
 
 function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
@@ -285,11 +289,15 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         attempts.current.delete(id)
         setSession(result.session)
         setItems(previous => previous.map(item => Number(item.product_id) === id ? result.item : item))
-        setRefresh(value => value + 1)
+        // The PATCH already answered with the saved item and session. Stats and rankings are stock-based, so only a
+        // list filtered by count state or reason can change membership.
+        if (section === 'issues' || filters.state || filters.reason) setRefresh(value => value + 1)
       }
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
       if (refusal) attempts.current.delete(id)
+      // A definite conflict means the page is behind the server (revision, baseline or stock moved): reload it.
+      if (current() && isStaleConflict(cause)) setRefresh(value => value + 1)
       if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
       throw cause
     } finally { inFlight.current = false; if (current()) { setBusy(false); setSavingId(null) } }
