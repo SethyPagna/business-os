@@ -1522,7 +1522,7 @@ export default function Dashboard() {
   const estProfitLabel = translateOr('profit', 'Est. Profit', 'ប្រាក់ចំណេញ')
   const stockValueFormulaText = translateOr('dashboard_formula_stock_value', 'Stock value = quantity on hand x unit cost')
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
-  const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
+  const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = paid sales with tax and delivery + amounts paid on Not Paid sales − cash refunds')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
   const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')

@@ -1827,7 +1827,7 @@
   "dashboard": "Dashboard",
   "dashboard_formula_avg_order": "Average order = Net revenue / transaction count",
   "dashboard_formula_cogs": "COGS excludes quantities restored by restocked returns",
-  "dashboard_formula_collected_total": "Collected total = Net revenue + tax + delivery fees",
+  "dashboard_formula_collected_total": "Collected total = paid sales with tax and delivery + amounts paid on Not Paid sales − cash refunds",
   "dashboard_formula_profit": "Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost",
   "stats_profit_hint": "Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales.",
   "dashboard_formula_returns": "Returns decrease net revenue and loyalty points",
