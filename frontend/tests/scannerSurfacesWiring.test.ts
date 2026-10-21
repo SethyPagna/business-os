@@ -169,8 +169,9 @@ const SURFACES: Surface[] = [
     name: 'Image-only Products view',
     file: '../src/components/products/ProductsImageOnlyControls.tsx',
     hooks: 1,
-    scans: [/enabled: true,\s*searchRef: searchInputRef,\s*onScan: \(code: string, origin: ScanOrigin\) => \{\s*onSearchChange\(code\)/],
-    same: [/inputRef=\{searchInputRef\}/, /onChange=\{onSearchChange\}/, /<ScanSearchButton onDetected=\{onSearchChange\}/],
+    // onScan is the view's applyScan: it sets the search exactly as onSearchChange does and also marks the text as scanned.
+    scans: [/enabled: true,\s*searchRef: searchInputRef,\s*onScan: \(code: string, origin: ScanOrigin\) => \{\s*onScan\(code\)/],
+    same: [/inputRef=\{searchInputRef\}/, /onChange=\{onSearchChange\}/, /<ScanSearchButton onDetected=\{onScan\}/],
   },
   {
     name: 'Product import conflicts search',

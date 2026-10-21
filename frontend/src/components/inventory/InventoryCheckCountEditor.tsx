@@ -6,6 +6,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import { SCAN_GUARD_PROPS } from '../../utils/scannerWedge.ts'
 
 export type CountEntry = { kind: 'empty' } | { kind: 'invalid' } | { kind: 'valid'; value: number }
 
@@ -135,7 +136,7 @@ export default function InventoryCheckCountEditor({ productName, groupLabel, cou
     </div> : null}
     <div className="flex min-w-0 flex-1 basis-64 items-center gap-1">
       <input ref={reasonRef} id={reasonId} type="text" autoComplete="off" value={reason} readOnly={busy} placeholder={reasonLabel} aria-label={`${reasonLabel}: ${productName}`}
-        className={`${fieldClass} flex-1`} onChange={event => onReason(event.target.value)} onKeyDown={event => onKeyDown(event, 'reason')} />
+        className={`${fieldClass} flex-1`} onChange={event => onReason(event.target.value)} onKeyDown={event => onKeyDown(event, 'reason')} {...SCAN_GUARD_PROPS} />
       <button type="button" disabled={busy} aria-label={cancel} title={cancel} className={boxButton} onClick={onCancel}><X className="h-4 w-4" aria-hidden="true" /></button>
       <button type="button" data-check-submit={failed ? 'retry' : done ? 'done' : 'issue'} disabled={busy} aria-label={submitName} title={submitName}
         className="btn-primary inline-flex h-11 min-h-11 shrink-0 items-center gap-1 px-3 text-xs lg:h-10 lg:min-h-10" onClick={onSubmit}>

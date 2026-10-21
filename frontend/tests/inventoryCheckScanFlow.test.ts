@@ -8,7 +8,8 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 //     (a desktop focuses its Count box, a tablet its tick, a phone only highlights and scrolls);
 //   - a code that is not in the open session says so; a saved scan row clears Search again on a desktop;
 //   - a saved tick reads neither the products nor the session again; a query change reads products only;
-//   - a gun burst into a Count box puts that box back and fills Search (blocked, and said so, while a row holds unsaved work).
+//   - a gun burst into a Count box puts that box back and fills Search (blocked, and said so, while a row holds unsaved work);
+//   - the same for the open editor's Reason box (6.0.940): it saves the issue on Enter, so a burst there must not become a reason.
 const fixture = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
@@ -261,6 +262,24 @@ await browser.run('PASS Inventory scan flow: debounce, Enter, one-hit focus by s
   assert.equal(await count('products'), readsBeforeBlocked, 'the unsaved row holds the list still')
   assert.ok((await browser.evaluate<string>(`Array.from(document.querySelectorAll('[role="alert"]'), node => node.textContent).join('|')`)).includes(en.inventory_check_count_blocked_busy), 'and the page says why')
   assert.equal(await count('patch'), 0)
+  // 6b. The open editor's Reason box (saves the issue on Enter): the burst is not typed into the reason and saves nothing.
+  await openSession(1280)
+  await browser.mouseClick('[data-inventory-check-row="14"] [data-check-action="issue"]')
+  await browser.waitFor('editor open', async () => await browser.evaluate(`document.querySelector('#inventory-check-reason-14') !== null`) ? true : null)
+  await browser.evaluate(`document.querySelector('#inventory-check-reason-14').focus()`)
+  await browser.send('Input.insertText', { text: 'Shelf' })
+  const readsBeforeReason = await count('products')
+  await gunBurst('8850001119999')
+  await browser.pause(400)
+  assert.equal(await browser.evaluate(`document.querySelector('#inventory-check-reason-14').value`), 'Shelf', 'the Reason box gets exactly its text back: no digit of the code stayed in it')
+  assert.equal(await count('patch'), 0, 'the burst\'s Enter did not save the issue')
+  assert.equal(await count('products'), readsBeforeReason, 'the open editor holds the list still')
+  assert.ok((await browser.evaluate<string>(`Array.from(document.querySelectorAll('[role="alert"]'), node => node.textContent).join('|')`)).includes(en.inventory_check_count_blocked_busy), 'and the page says why')
+  // A person typing a reason and pressing Enter still saves the issue.
+  await browser.evaluate(`document.querySelector('#inventory-check-reason-14').focus()`)
+  await browser.press('Enter')
+  await browser.waitFor('issue saved', async () => (await count('patch')) === 1 ? true : null)
+  assert.equal(((await calls()).find(call => call.kind === 'patch')?.body as { reason?: string }).reason, 'Shelf', 'the saved reason is what the person typed')
   // A burst with nothing focused goes to Search as well.
   await openProducts(1280)
   await browser.evaluate(`document.activeElement && document.activeElement.blur()`)

@@ -44,7 +44,6 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
   const labels = useMemo(() => ({
     scanReady: tr('scan_ready', 'Point the camera at a barcode.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ។'),
     scanUnsupported: tr('scan_unsupported', 'This browser cannot scan with the camera. Type the barcode instead.', 'កម្មវិធីរុករកនេះមិនអាចស្កេនដោយកាមេរ៉ាបានទេ។ សូមវាយបាកូដជំនួសវិញ។'),
-    scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it, or type the barcode instead.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬវាយបាកូដជំនួសវិញ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
     // Shown only after a start already happened and the stream was released
     // (page backgrounded, the photo picker took over, or the scan sat idle).
@@ -100,7 +99,6 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
       scanUnsupported: labels.scanUnsupported,
       cameraDocumentBlocked: labels.cameraDocumentBlocked,
       cameraPermissionBlocked: labels.cameraPermissionBlocked,
-      scanPermissionDenied: labels.scanPermissionDenied,
       scanFailed: labels.scanFailed,
       scanPromptDismissed: labels.promptDismissed,
     },

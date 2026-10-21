@@ -33,6 +33,8 @@ type Props = {
   onRangeChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
   search: string
   onSearchChange: (value: string) => void
+  // A scan (camera or gun) fills the search like typing does, and the view remembers it was a scan.
+  onScan: (code: string) => void
   scope: ImageOnlyScope
   onScopeChange: (patch: Partial<ImageOnlyScope>) => void
   categories: string[]
@@ -47,17 +49,17 @@ function withChosen(values: string[], chosen: string): string[] {
 }
 
 export default function ProductsImageOnlyControls({
-  showBatches, showStock, showCategory, showBrand, range, onRangeChange, search, onSearchChange,
+  showBatches, showStock, showCategory, showBrand, range, onRangeChange, search, onSearchChange, onScan,
   scope, onScopeChange, categories, brands, t,
 }: Props) {
   const { notify } = useApp() as unknown as { notify: (message: string, tone?: string) => void }
-  // The scanner gun fills the search the camera and the keyboard fill (onSearchChange).
+  // The scanner gun fills the search the camera fills (onScan), the way the keyboard does (onSearchChange).
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   useScannerWedge({
     enabled: true,
     searchRef: searchInputRef,
     onScan: (code: string, origin: ScanOrigin) => {
-      onSearchChange(code)
+      onScan(code)
       if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
     },
   })
@@ -75,7 +77,7 @@ export default function ProductsImageOnlyControls({
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
         <SearchInput id="products-image-only-search" inputRef={searchInputRef} value={search} onChange={onSearchChange}
           ariaLabel={t('search')} placeholder={t('search')} className="block min-w-0 flex-1" inputClassName="h-11" />
-        <ScanSearchButton onDetected={onSearchChange} t={t} />
+        <ScanSearchButton onDetected={onScan} t={t} />
       </div>
       <div className="stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1" data-products-image-only-filters>
         {showStock ? select('stockState', t('stock_status'), Boxes, scope.stockState, [

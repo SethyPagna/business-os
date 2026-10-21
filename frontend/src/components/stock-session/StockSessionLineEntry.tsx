@@ -278,6 +278,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
             placeholder={reasonLabel}
             inputClassName="input h-10 w-full min-w-0 pl-8 text-sm"
             onChange={(next) => onReason(next.slice(0, REASON_MAX_LENGTH))}
+            guardScans
           />
         </div>
         {onManageReasons ? (

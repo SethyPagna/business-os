@@ -44,6 +44,8 @@ import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
+import { useScannedQuery } from '../shared/useScannedQuery.ts'
+import ScanMissNotice from '../shared/ScanMissNotice'
 import InfoHint from '../shared/InfoHint'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -90,7 +92,8 @@ import {
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
-import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
+import { classifyScanMiss } from '../../utils/scanMiss.ts'
+import { catalogHasBarcode, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
@@ -781,6 +784,9 @@ export default function POS() {
   // index: the server returned exactly the match set, typos included, so
   // the page re-filter below must not re-match it with the older rules.
   const [catalogRanked,    setCatalogRanked]    = useState(false)
+  // The search-params key (productSearchParamsKey) the loaded page was answered for. A scan's "no such
+  // barcode" is only said once the page on screen answers that scan, not the query before it.
+  const [catalogAnsweredKey, setCatalogAnsweredKey] = useState('')
   // G1: active promotion rules, refreshed with every catalog payload (the
   // search/bootstrap responses carry them) -- POS offline inherits the
   // last cached payload's rules the same way it inherits its products.
@@ -865,9 +871,9 @@ export default function POS() {
   // -- and nothing else here re-validates them against the live catalog. This
   // resets every filter dimension in one action so a cashier isn't stuck
   // hunting for which one is the culprit.
-  const clearAllPosFilters = () => {
-    setSearch('')
-    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => removePosStorage('session', key))
+  // Every filter but the search text, so a scan the filters hide keeps its code in the box and then shows.
+  const clearPosFilterSelections = () => {
+    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial'].forEach((key) => removePosStorage('session', key))
     setCategoryFilter('all')
     setBrandFilter('all')
     setBranchFilter('all')
@@ -875,6 +881,12 @@ export default function POS() {
     setGroupFilter('all')
     setSupplierFilter('all')
     setInitialFilter('all')
+  }
+  // The empty-grid reset: the filters and the search text.
+  const clearAllPosFilters = () => {
+    setSearch('')
+    removePosStorage('session', 'pos_search')
+    clearPosFilterSelections()
   }
 // Multi-order state
   // Restore orders from sessionStorage so navigating away and back preserves
@@ -1536,6 +1548,7 @@ export default function POS() {
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
         setCatalogRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
+        setCatalogAnsweredKey(productSearchParamsKey)
         applyCatalogProducts(prods)
         if (Array.isArray(payloadRecord.promotion_rules)) {
           setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
@@ -2502,16 +2515,16 @@ export default function POS() {
     supplierFilter,
   ])
 
-  const hasActivePosFilters = useMemo(() => (
-    Boolean(search.trim())
-    || categoryFilter !== 'all'
+  const hasPosFilterSelection = useMemo(() => (
+    categoryFilter !== 'all'
     || brandFilter !== 'all'
     || branchFilter !== 'all'
     || stockFilter !== 'all'
     || groupFilter !== 'all'
     || supplierFilter !== 'all'
     || initialFilter !== 'all'
-  ), [search, categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, supplierFilter, initialFilter])
+  ), [categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, supplierFilter, initialFilter])
+  const hasActivePosFilters = Boolean(search.trim()) || hasPosFilterSelection
 
   const productsById = useMemo(() => buildProductsById(products) as unknown as Map<number, ProductRecord>, [products])
   const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [Number(branch?.id), branch])), [branches])
@@ -2562,10 +2575,12 @@ export default function POS() {
     writePosStorage('session', 'pos_search', next)
     setSearch(next)
   }, [])
+  const { scannedCode, markScanned } = useScannedQuery(search)
   const applyScan = useCallback((code: string) => {
     pendingScanRef.current = code
+    markScanned(code)
     changeSearch(code)
-  }, [changeSearch])
+  }, [changeSearch, markScanned])
   const posOverlayOpen = Boolean(detailProduct || imageLightbox || receiptQueue.length || showStatusPicker || showAddCustomer || showAddDelivery)
   useScannerWedge({
     enabled: isActive && !posOverlayOpen,
@@ -2591,6 +2606,16 @@ export default function POS() {
     card?.scrollIntoView({ block: 'nearest' })
     if (isDesktopViewport) card?.focus({ preventScroll: true })
   }, [debouncedProductSearch, isDesktopViewport, scanHitId])
+  // An empty list after a scan says why: no product has the barcode, or the filters hide it. The index (not the
+  // filtered page) tells those apart; typed text never gets this (scannedCode is null for it). The index
+  // generation is a dependency only: catalogHasBarcode reads module state that changes with it.
+  const scanMiss = useMemo(() => classifyScanMiss({
+    scannedCode,
+    answered: !catalogRefreshing && catalogAnsweredKey === productSearchParamsKey && debouncedProductSearch === scannedCode,
+    listEmpty: visibleProductCards.length === 0,
+    filtersActive: hasPosFilterSelection,
+    inCatalog: scannedCode && hasPosFilterSelection ? catalogHasBarcode(scannedCode) : null,
+  }), [catalogAnsweredKey, catalogRefreshing, debouncedProductSearch, hasPosFilterSelection, productSearchParamsKey, scannedCode, searchIndexGeneration, visibleProductCards.length])
 
   const getVariantChoices = useCallback((product: ProductRecord) => {
     return getVariantChoicesForProduct(product, variantChildrenByParentId) as unknown as ProductRecord[]
@@ -3854,6 +3879,8 @@ export default function POS() {
                         {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
                       </button>
                     </div>
+                  ) : scanMiss ? (
+                    <ScanMissNotice miss={scanMiss} t={t} onClearFilters={clearPosFilterSelections} />
                   ) : hasActivePosFilters ? (
                     <div className="flex flex-col items-center gap-2">
                       <p>{posCopy('No products match your filters', 'គ្មានទំនិញត្រូវនឹងការត្រងទេ')}</p>

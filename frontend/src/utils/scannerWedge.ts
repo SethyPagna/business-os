@@ -107,13 +107,23 @@ export function createWedgeDetector(): WedgeDetector {
 //            code to search instead.
 //   text     any other text field or free-text box: the person is typing
 //            there on purpose, so leave the burst alone.
+//
+// One exception inside 'text': a field that spreads SCAN_GUARD_PROPS opts in to
+// 'restore'. It is a free-text box where a barcode is never what the person means
+// to write (the stock-session and count Reason boxes, whose Enter adds a line or
+// saves an issue), so a burst there is put back and sent to search like a quantity.
 export type WedgeFocus = 'idle' | 'search' | 'restore' | 'text'
+
+/** Spread onto a text <input> to make a scanner burst there move to search (see the table above). */
+export const SCAN_GUARD_PROPS = { 'data-scan-guard': 'true' } as const
 
 export interface WedgeFocusLike {
   tagName?: string
   type?: string
   inputMode?: string
   isContentEditable?: boolean
+  /** The element's data-* attributes (HTMLElement.dataset). */
+  dataset?: { scanGuard?: string }
 }
 
 const RESTORE_INPUT_TYPES = new Set(['number', 'date', 'time', 'datetime-local', 'month', 'week', 'range'])
@@ -130,5 +140,6 @@ export function classifyWedgeFocus(element: WedgeFocusLike | null | undefined, i
   if (RESTORE_INPUT_TYPES.has(type)) return 'restore'
   if (!TEXT_INPUT_TYPES.has(type)) return 'idle'
   const mode = String(element.inputMode || '').toLowerCase()
-  return mode === 'numeric' || mode === 'decimal' ? 'restore' : 'text'
+  if (mode === 'numeric' || mode === 'decimal') return 'restore'
+  return element.dataset?.scanGuard === 'true' ? 'restore' : 'text'
 }
