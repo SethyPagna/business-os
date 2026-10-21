@@ -883,7 +883,7 @@ await runTest('users and roles security mutations use shared guards and bounded 
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveRoleInFlightRef\)[\s\S]*setSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(deleteRoleInFlightRef\)[\s\S]*setDeletingRoleId\(null\)/)
   assert.match(source, /disabled=\{passwordSaving\}/)
-  assert.match(source, /disabled=\{deletingRoleId === role\.id\}/)
+  assert.match(source, /disabled=\{deletingRoleId === role\.id( \|\| assignedCount > 0)?\}/)
   assert.ok(mutationLines.length >= 12, 'users page should still cover user/role normal and undo/redo mutation paths')
   assert.ok(
     mutationLines.every(isGuarded),

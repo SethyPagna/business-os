@@ -546,10 +546,6 @@ const DELIBERATELY_CLIPPED: Record<string, Array<[string, Mechanism, string]>> =
   'components/users/UserProfileModal.tsx': [
     ["tr('session_duration', 'Default login duration')", 'language-pack', 'A field caption from the language pack.'],
   ],
-  'components/users/Users.tsx': [
-    ["t('add_user') || 'Add user'", 'language-pack', 'A toolbar button label from the language pack.'],
-    ["t('create_role') || 'Create role'", 'language-pack', 'A toolbar button label from the language pack.'],
-  ],
 }
 
 runTest('no touched surface clips a per-record value, and no exception is stale', () => {
