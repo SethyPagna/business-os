@@ -1,13 +1,15 @@
 // What the scanner can settle before its camera is ready. The press that opens
 // it starts all of this (warmScanner), so it finishes while getUserMedia is
 // still waiting on the camera or the permission prompt: what the native
-// BarcodeDetector reads (asked once per page load) and the ZXing chunk.
+// BarcodeDetector reads (asked once per page load) and the decode worker, which
+// loads ZXing off the main thread.
 // Kept free of decoder imports so the buttons that call it stay small.
 
 import type { NativeDetection } from './barcodeFrameDecoder.ts'
 
 export interface NativeBarcodeDetector {
-  detect: (source: HTMLVideoElement) => Promise<NativeDetection[]>
+  // A video frame in the live loop, a decoded image for a photo.
+  detect: (source: ImageBitmapSource) => Promise<NativeDetection[]>
 }
 
 export interface NativeBarcodeDetectorConstructor {
@@ -57,14 +59,11 @@ export function markScanner(step: ScannerMark): void {
   performance.mark(name)
 }
 
-let engineFetchStarted = false
-
 /** Called on the press that opens the scanner. Idempotent, and never throws:
  * it is a head start, and the scan that follows reports any real failure. */
 export function warmScanner(): void {
   markScanner('tap')
-  if (engineFetchStarted) return
-  engineFetchStarted = true
   void nativeSupportedFormats()
-  import('./barcodeFrameDecoder.ts').then((decoder) => decoder.prefetchZxing()).catch(() => {})
+  // The worker's client stays out of the chunk every page loads; the press fetches it.
+  import('./decodeWorkerClient.ts').then((client) => client.warmDecodeClient()).catch(() => {})
 }

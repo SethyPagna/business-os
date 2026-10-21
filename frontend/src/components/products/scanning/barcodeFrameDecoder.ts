@@ -1,14 +1,9 @@
-// Shared decode ladder for the live camera loop and the photo path. ZXing's
-// own loop decodes one whole grayscale frame and thresholds each scanned row
-// on that row's histogram, so a pale foil label on a dark box reads as blank,
-// and a code standing on its end is never seen. This file owns the frame
-// instead: the area the on-screen guide outlines (a still photo has no guide, so
-// its centre), then the whole frame; plain grayscale, then a locally
-// normalised and thresholded copy; each upright and turned 90 degrees.
-
-import type BitArray from '@zxing/library/esm/core/common/BitArray'
-import type HintType from '@zxing/library/esm/core/DecodeHintType'
-import type Result from '@zxing/library/esm/core/Result'
+// What the main thread and the decode worker agree on: which formats count, what
+// makes a read acceptable, how a native result is chosen, where the on-screen
+// guide sits in the camera frame, and the messages the two threads exchange.
+// Pure and free of ZXing, so the scanner modal can import it without pulling
+// the decoder: the ladder (barcodeLadder.ts) and the ZXing readers
+// (barcodeZxing.ts) belong to the worker alone.
 
 /** Retail and stock symbologies, in BarcodeDetector naming. QR is left out on
  * purpose: no caller scans one, and boxes often carry a marketing QR beside
@@ -29,18 +24,10 @@ export function zxingHeadStartOver(nativeStartedAt: number, now: number): boolea
   return now - nativeStartedAt >= NATIVE_ONLY_MS
 }
 
-export interface LumaFrame {
-  data: Uint8ClampedArray
-  width: number
-  height: number
-}
-
 export interface BarcodeRead {
   text: string
   format: string
 }
-
-export type LumaDecoder = (frame: LumaFrame, tryHarder: boolean) => BarcodeRead | null
 
 function gtinChecksumOk(digits: string): boolean {
   if (!/^\d+$/.test(digits)) return false
@@ -134,185 +121,31 @@ export function pickNativeRead(results: readonly NativeDetection[], guide: Rect)
   return outside
 }
 
-function rgbaToLuma(rgba: Uint8ClampedArray, width: number, height: number): LumaFrame {
-  const data = new Uint8ClampedArray(width * height)
-  for (let source = 0, target = 0; target < data.length; source += 4, target += 1) {
-    data[target] = (306 * rgba[source] + 601 * rgba[source + 1] + 117 * rgba[source + 2] + 512) >> 10
-  }
-  return { data, width, height }
+/** One grabbed region as the camera's own RGBA pixels. The main thread only
+ * reads them out and transfers the buffer; the worker turns them into grayscale. */
+export interface PixelFrame {
+  data: Uint8ClampedArray
+  width: number
+  height: number
 }
 
-// Neighbourhood for the local passes: several bar widths, well under a label.
-const localRadius = (width: number, height: number) => Math.max(8, Math.round(Math.min(width, height) / 16))
-
-/** Re-centres every pixel on its neighbourhood mean and scales by the local
- * spread. ZXing thresholds each scanned row on that row's own histogram, so a
- * pale foil label on a dark box reads as all-white; after this the label's
- * bars and spaces straddle mid-grey wherever they sit and however much glare
- * lies across them. Edges stay grey, not snapped, so bar widths survive. */
-function normalizeLocalContrast(frame: LumaFrame): LumaFrame {
-  const { width, height } = frame
-  const stride = width + 1
-  const sums = new Float64Array(stride * (height + 1))
-  const squares = new Float64Array(stride * (height + 1))
-  for (let y = 0; y < height; y += 1) {
-    let rowSum = 0
-    let rowSquares = 0
-    for (let x = 0; x < width; x += 1) {
-      const value = frame.data[y * width + x]
-      rowSum += value
-      rowSquares += value * value
-      sums[(y + 1) * stride + x + 1] = sums[y * stride + x + 1] + rowSum
-      squares[(y + 1) * stride + x + 1] = squares[y * stride + x + 1] + rowSquares
-    }
-  }
-  const radius = localRadius(width, height)
-  const data = new Uint8ClampedArray(width * height)
-  for (let y = 0; y < height; y += 1) {
-    const top = Math.max(0, y - radius)
-    const bottom = Math.min(height, y + radius + 1)
-    for (let x = 0; x < width; x += 1) {
-      const left = Math.max(0, x - radius)
-      const right = Math.min(width, x + radius + 1)
-      const area = (bottom - top) * (right - left)
-      const corner = (table: Float64Array) => table[bottom * stride + right] - table[top * stride + right]
-        - table[bottom * stride + left] + table[top * stride + left]
-      const mean = corner(sums) / area
-      const spread = Math.sqrt(Math.max(0, corner(squares) / area - mean * mean))
-      data[y * width + x] = 128 + (64 * (frame.data[y * width + x] - mean)) / Math.max(spread, 6)
-    }
-  }
-  return { data, width, height }
+/** A frame for the worker to decode: the guide area (the centre of a photo),
+ * and, when sent, the whole picture. */
+export interface DecodeRequest {
+  id: number
+  centre: PixelFrame
+  full?: PixelFrame
+  /** The photo path's last resort; the live loop never asks for it. */
+  tryHarder: boolean
 }
 
-/** Black where a pixel is darker than its neighbourhood mean, white
- * elsewhere: the sign of the normalisation above without its cost, which is
- * what the live loop can afford per frame. */
-function thresholdLocalMean(frame: LumaFrame): LumaFrame {
-  const { width, height } = frame
-  const stride = width + 1
-  const sums = new Uint32Array(stride * (height + 1))
-  for (let y = 0; y < height; y += 1) {
-    let rowSum = 0
-    for (let x = 0; x < width; x += 1) {
-      rowSum += frame.data[y * width + x]
-      sums[(y + 1) * stride + x + 1] = sums[y * stride + x + 1] + rowSum
-    }
-  }
-  const radius = localRadius(width, height)
-  const data = new Uint8ClampedArray(width * height)
-  for (let y = 0; y < height; y += 1) {
-    const top = Math.max(0, y - radius)
-    const bottom = Math.min(height, y + radius + 1)
-    for (let x = 0; x < width; x += 1) {
-      const left = Math.max(0, x - radius)
-      const right = Math.min(width, x + radius + 1)
-      const sum = sums[bottom * stride + right] - sums[top * stride + right] - sums[bottom * stride + left] + sums[top * stride + left]
-      data[y * width + x] = frame.data[y * width + x] * (bottom - top) * (right - left) < sum ? 0 : 255
-    }
-  }
-  return { data, width, height }
-}
+export type DecodeReply =
+  | { type: 'ready' }
+  | { type: 'read'; id: number; read: BarcodeRead | null }
+  /** Without an id the worker could not start; with one, that frame failed. */
+  | { type: 'failed'; id?: number; message: string }
 
-/** Averages each pixel with the rows above and below it. Once a 1D code's bars
- * run vertically this removes sensor noise without blurring the bars, which is
- * what a single-row reader needs on a dim, low-contrast label. */
-function smoothAlongBars(frame: LumaFrame, radius = 3): LumaFrame {
-  const { width, height } = frame
-  const data = new Uint8ClampedArray(width * height)
-  for (let x = 0; x < width; x += 1) {
-    let sum = 0
-    let count = 0
-    for (let y = 0; y < Math.min(height, radius); y += 1) { sum += frame.data[y * width + x]; count += 1 }
-    for (let y = 0; y < height; y += 1) {
-      const enter = y + radius
-      const leave = y - radius - 1
-      if (enter < height) { sum += frame.data[enter * width + x]; count += 1 }
-      if (leave >= 0) { sum -= frame.data[leave * width + x]; count -= 1 }
-      data[y * width + x] = sum / count
-    }
-  }
-  return { data, width, height }
-}
-
-/** Quarter turn clockwise, so 1D readers (which scan rows) see vertical bars. */
-export function rotateQuarter(frame: LumaFrame): LumaFrame {
-  const { width, height } = frame
-  const data = new Uint8ClampedArray(width * height)
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) data[x * height + (height - 1 - y)] = frame.data[y * width + x]
-  }
-  return { data, width: height, height: width }
-}
-
-type Region = 'centre' | 'full'
-type Variant = 'gray' | 'smooth' | 'contrast' | 'threshold'
-
-/** Lazily produced views of one frame: the guide area (the centre of a photo)
- * and the whole picture, each already capped in size. */
-export interface FrameRegions {
-  centre: () => LumaFrame
-  full: () => LumaFrame
-}
-
-interface LadderStep { region: Region; variant: Variant; rotate: boolean; tryHarder: boolean }
-
-// The fast tier lets ZXing sample ~15 rows per view (12-80 ms each, measured);
-// TRY_HARDER samples ~256 rows and costs 0.4-1.2 s per miss on the same
-// machine, so it is the photo path's last resort and never blocks the live
-// camera loop.
-const FAST_LADDER: LadderStep[] = []
-for (const region of ['centre', 'full'] as Region[]) {
-  for (const variant of ['gray', 'threshold'] as Variant[]) {
-    for (const rotate of [false, true]) FAST_LADDER.push({ region, variant, rotate, tryHarder: false })
-  }
-}
-const FULL_LADDER: LadderStep[] = [...FAST_LADDER]
-for (const region of ['centre', 'full'] as Region[]) {
-  for (const rotate of [false, true]) FULL_LADDER.push({ region, variant: 'contrast', rotate, tryHarder: true })
-}
-
-/** Runs ladder steps from `startStep` until one decodes or `deadline` passes
- * (checked between steps, so the first step always runs). Returns the read, or
- * the step the next frame should resume from. */
-export function runDecodeLadder(
-  regions: FrameRegions,
-  decode: LumaDecoder,
-  {
-    startStep = 0,
-    deadline = Infinity,
-    tryHarder = false,
-    now = () => Date.now(),
-  }: { startStep?: number; deadline?: number; tryHarder?: boolean; now?: () => number } = {},
-): { read: BarcodeRead | null; nextStep: number; attempts: number } {
-  const ladder = tryHarder ? FULL_LADDER : FAST_LADDER
-  const views = new Map<string, LumaFrame>()
-  const view = (region: Region, variant: Variant, rotate: boolean): LumaFrame => {
-    const key = `${region}:${variant}:${rotate}`
-    let frame = views.get(key)
-    if (!frame) {
-      frame = variant === 'gray'
-        ? (rotate ? rotateQuarter(view(region, 'gray', false)) : regions[region]())
-        : variant === 'smooth' ? smoothAlongBars(view(region, 'gray', rotate))
-          : variant === 'contrast' ? normalizeLocalContrast(view(region, 'smooth', rotate))
-            : thresholdLocalMean(view(region, 'smooth', rotate))
-      views.set(key, frame)
-    }
-    return frame
-  }
-
-  let attempts = 0
-  for (let offset = 0; offset < ladder.length; offset += 1) {
-    const step = (startStep + offset) % ladder.length
-    if (attempts > 0 && now() >= deadline) return { read: null, nextStep: step, attempts }
-    const { region, variant, rotate, tryHarder: hard } = ladder[step]
-    attempts += 1
-    const read = decode(view(region, variant, rotate), hard)
-    if (isAcceptableBarcodeRead(read)) return { read, nextStep: step, attempts }
-  }
-  return { read: null, nextStep: startStep % ladder.length, attempts }
-}
-
+// Longest side of a grabbed region; a larger source is scaled down by the canvas.
 const MAX_SIDE = 1280
 
 /** The on-screen scan box: its size as a percentage of the visible video area,
@@ -360,6 +193,12 @@ function photoCentre(width: number, height: number): Rect {
   return { x: (width - centreWidth) >> 1, y: (height - centreHeight) >> 1, width: centreWidth, height: centreHeight }
 }
 
+/** The two regions of a source, each read out only when asked for. */
+export interface PixelRegions {
+  centre: () => PixelFrame
+  full: () => PixelFrame
+}
+
 /** Grabs regions from a video or image through one reusable canvas: the area
  * `guide` outlines on screen (the centre 60% x 60% for a photo, which has no
  * guide) at up to native resolution, and the whole picture, each capped at
@@ -367,7 +206,7 @@ function photoCentre(width: number, height: number): Rect {
 export function createFrameGrabber(guide?: GuideBox) {
   let canvas: HTMLCanvasElement | null = null
   let context: CanvasRenderingContext2D | null = null
-  const grab = (source: CanvasImageSource, sx: number, sy: number, sw: number, sh: number): LumaFrame => {
+  const grab = (source: CanvasImageSource, sx: number, sy: number, sw: number, sh: number): PixelFrame => {
     const scale = Math.min(1, MAX_SIDE / Math.max(sw, sh))
     const width = Math.max(1, Math.round(sw * scale))
     const height = Math.max(1, Math.round(sh * scale))
@@ -379,130 +218,15 @@ export function createFrameGrabber(guide?: GuideBox) {
     if (canvas.width !== width) canvas.width = width
     if (canvas.height !== height) canvas.height = height
     context.drawImage(source, sx, sy, sw, sh, 0, 0, width, height)
-    return rgbaToLuma(context.getImageData(0, 0, width, height).data, width, height)
+    return { data: context.getImageData(0, 0, width, height).data, width, height }
   }
-  return (source: CanvasImageSource, sourceWidth: number, sourceHeight: number): FrameRegions => {
+  return (source: CanvasImageSource, sourceWidth: number, sourceHeight: number): PixelRegions => {
     const centre = guide
       ? guideRectInFrame(sourceWidth, sourceHeight, viewOf(source as { clientWidth?: number; clientHeight?: number }), guide)
       : photoCentre(sourceWidth, sourceHeight)
     return {
       centre: () => grab(source, centre.x, centre.y, centre.width, centre.height),
       full: () => grab(source, 0, 0, sourceWidth, sourceHeight),
-    }
-  }
-}
-
-// Only the retail readers, by deep path. The package root also pulls in the QR,
-// DataMatrix, PDF417, Aztec and RSS decoders through MultiFormatReader: about
-// 330 KB of what used to be a 448 KB chunk, none of it reachable from a caller.
-async function importZxing() {
-  const [
-    { default: BarcodeFormat },
-    { default: DecodeHintType },
-    { default: BinaryBitmap },
-    { default: RGBLuminanceSource },
-    { default: HybridBinarizer },
-    { default: NotFoundException },
-    { default: ChecksumException },
-    { default: FormatException },
-    { default: OneDReader },
-    { default: MultiFormatUPCEANReader },
-    { default: Code39Reader },
-    { default: Code128Reader },
-    { default: ITFReader },
-  ] = await Promise.all([
-    import('@zxing/library/esm/core/BarcodeFormat'),
-    import('@zxing/library/esm/core/DecodeHintType'),
-    import('@zxing/library/esm/core/BinaryBitmap'),
-    import('@zxing/library/esm/core/RGBLuminanceSource'),
-    import('@zxing/library/esm/core/common/HybridBinarizer'),
-    import('@zxing/library/esm/core/NotFoundException'),
-    import('@zxing/library/esm/core/ChecksumException'),
-    import('@zxing/library/esm/core/FormatException'),
-    import('@zxing/library/esm/core/oned/OneDReader'),
-    import('@zxing/library/esm/core/oned/MultiFormatUPCEANReader'),
-    import('@zxing/library/esm/core/oned/Code39Reader'),
-    import('@zxing/library/esm/core/oned/Code128Reader'),
-    import('@zxing/library/esm/core/oned/ITFReader'),
-  ])
-  return {
-    BarcodeFormat, DecodeHintType, BinaryBitmap, RGBLuminanceSource, HybridBinarizer,
-    NotFoundException, ChecksumException, FormatException,
-    OneDReader, MultiFormatUPCEANReader, Code39Reader, Code128Reader, ITFReader,
-  }
-}
-
-type Zxing = Awaited<ReturnType<typeof importZxing>>
-
-let zxingLoad: Promise<Zxing> | null = null
-function loadZxing(): Promise<Zxing> {
-  // A failed fetch is not kept: the scan that follows a speculative warm-up
-  // has to be able to try again.
-  zxingLoad ??= importZxing().catch((error) => {
-    zxingLoad = null
-    throw error
-  })
-  return zxingLoad
-}
-
-/** Starts fetching the retail ZXing chunk without building a decoder. */
-export async function prefetchZxing(): Promise<void> {
-  await loadZxing()
-}
-
-/** What ZXing's MultiFormatOneDReader does for the retail formats, minus its
- * imports of Code 93, Codabar and RSS: every row goes to each reader in turn,
- * UPC/EAN first. */
-function createRetailReader({ OneDReader, NotFoundException, MultiFormatUPCEANReader, Code39Reader, Code128Reader, ITFReader }: Zxing, hints: Map<HintType, unknown>) {
-  const readers = [new MultiFormatUPCEANReader(hints), new Code39Reader(), new Code128Reader(), new ITFReader()]
-  class RetailReader extends OneDReader {
-    decodeRow(rowNumber: number, row: BitArray, rowHints?: Map<HintType, unknown>): Result {
-      for (const reader of readers) {
-        try {
-          return reader.decodeRow(rowNumber, row, rowHints)
-        } catch (_) {
-          // This reader sees no code in this row; the next one may.
-        }
-      }
-      throw new NotFoundException()
-    }
-  }
-  return new RetailReader()
-}
-
-/** Two readers per session, both limited to the retail formats: a fast one and
- * a TRY_HARDER one. Only "nothing here" exceptions count as a miss; anything
- * else is a real fault and propagates. */
-export async function loadLumaDecoder(): Promise<LumaDecoder> {
-  const zxing = await loadZxing()
-  const { BarcodeFormat, DecodeHintType, BinaryBitmap, RGBLuminanceSource, HybridBinarizer, NotFoundException, ChecksumException, FormatException } = zxing
-  const formatByName: Record<string, number> = {
-    ean_13: BarcodeFormat.EAN_13,
-    ean_8: BarcodeFormat.EAN_8,
-    upc_a: BarcodeFormat.UPC_A,
-    upc_e: BarcodeFormat.UPC_E,
-    code_128: BarcodeFormat.CODE_128,
-    code_39: BarcodeFormat.CODE_39,
-    itf: BarcodeFormat.ITF,
-  }
-  const nameByFormat = new Map(Object.entries(formatByName).map(([name, format]) => [format, name]))
-  const possibleFormats = RETAIL_BARCODE_FORMATS.map((name) => formatByName[name])
-  const createReader = (tryHarder: boolean) => {
-    const hints = new Map<HintType, unknown>([[DecodeHintType.POSSIBLE_FORMATS, possibleFormats]])
-    if (tryHarder) hints.set(DecodeHintType.TRY_HARDER, true)
-    return { reader: createRetailReader(zxing, hints), hints }
-  }
-  const fast = createReader(false)
-  const hard = createReader(true)
-  return (frame, tryHarder) => {
-    const { reader, hints } = tryHarder ? hard : fast
-    try {
-      const source = new RGBLuminanceSource(frame.data, frame.width, frame.height)
-      const result = reader.decode(new BinaryBitmap(new HybridBinarizer(source)), hints)
-      return { text: String(result.getText() || '').trim(), format: nameByFormat.get(result.getBarcodeFormat()) || '' }
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ChecksumException || error instanceof FormatException) return null
-      throw error
     }
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
@@ -10,57 +10,12 @@ import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import Modal from '../../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.ts'
-import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
 import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
-import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
-import {
-  NATIVE_TICK_INTERVAL_MS,
-  SCAN_GUIDE_BOX,
-  createFrameGrabber,
-  createReadConfirmer,
-  guideRectInFrame,
-  loadLumaDecoder,
-  pickNativeRead,
-  planNativeFormats,
-  runDecodeLadder,
-  viewOf,
-  zxingHeadStartOver,
-  type LumaDecoder,
-} from './barcodeFrameDecoder.ts'
-import {
-  getNativeBarcodeDetector,
-  markScanner,
-  nativeSupportedFormats,
-  type NativeBarcodeDetector,
-} from './scannerWarmup.ts'
-
-// Per-tick CPU for the ZXing ladder. The first step always runs; later steps
-// only while under budget, and the next tick waits at least as long as this
-// one took, so decoding never holds more than about half the main thread.
-const ZXING_TICK_BUDGET_MS = 40
+import { SCAN_GUIDE_BOX } from './barcodeFrameDecoder.ts'
+import { useBarcodeCamera } from './useBarcodeCamera.ts'
 
 // The overlay outlines exactly the area the frame grabber decodes.
 const GUIDE_STYLE = { width: `${SCAN_GUIDE_BOX.widthPercent}%`, height: `${SCAN_GUIDE_BOX.heightPercent}%` }
-
-// One constraints object for both decoders. The native BarcodeDetector loop and
-// the ZXing fallback open the SAME camera from the SAME single getUserMedia
-// call, so hoisting this keeps that one acquisition obvious at a glance.
-const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
-  audio: false,
-  video: {
-    facingMode: { ideal: 'environment' },
-    // Thin bars on a small box need pixels; `ideal` lets a camera that cannot
-    // do 1080p fall back to its best mode instead of failing.
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    // 30 fps is all either decoder can use; a camera left at 60 only heats up.
-    // Ideal only: a hard max would make a camera that cannot go down to 30 fps refuse to open.
-    frameRate: { ideal: 30 },
-  },
-}
-
-type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
-type ScannerPermissionState = CameraPermissionState
 
 interface BarcodeScannerModalProps {
   open: boolean
@@ -76,10 +31,6 @@ interface BarcodeScannerModalProps {
    * barcode. */
   hideManualEntry?: boolean
 }
-
-// Torch and focus are not in the DOM lib's track types yet.
-type CameraTrackCapabilities = MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] }
-type CameraConstraintSet = MediaTrackConstraintSet & { torch?: boolean; focusMode?: string }
 
 interface ScannerLabels {
   scanReady: string
@@ -114,23 +65,6 @@ interface ScannerStateBadge {
   icon: ReactNode
 }
 
-function getScanErrorText(error: unknown): string {
-  const source = error as { message?: unknown; name?: unknown } | null | undefined
-  return `${String(source?.name || '')} ${String(source?.message || error || '')}`
-}
-
-function stopStream(stream: MediaStream | null | undefined): void {
-  try {
-    // Skip tracks that already ended. ZXing's controls.stop() disposes the
-    // stream it was handed (BrowserCodeReader's finalize callback calls
-    // disposeMediaStream), so cleanup() can reach the same tracks twice.
-    // track.stop() on an ended track is a no-op per spec, but skipping makes
-    // "each track is stopped exactly once" a property a test can assert
-    // instead of a hope.
-    stream?.getTracks?.().forEach((track) => { if (track.readyState !== 'ended') track.stop() })
-  } catch (_) {}
-}
-
 export default function BarcodeScannerModal({
   open,
   title,
@@ -139,37 +73,9 @@ export default function BarcodeScannerModal({
   t,
   hideManualEntry = false,
 }: BarcodeScannerModalProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const frameRef = useRef<number | null>(null)
-  const detectorRef = useRef<NativeBarcodeDetector | null>(null)
-  const lumaDecoderRef = useRef<LumaDecoder | null>(null)
-  const lumaDecoderLoadingRef = useRef(false)
-  const ladderStepRef = useRef(0)
-  const nativeStartedAtRef = useRef(0)
-  const confirmReadRef = useRef(createReadConfirmer())
-  const [grabFrame] = useState(() => createFrameGrabber(SCAN_GUIDE_BOX))
-  const trackRef = useRef<MediaStreamTrack | null>(null)
-  const permissionCleanupRef = useRef<() => void>(() => {})
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const startTokenRef = useRef(0)
-  const startSequenceRef = useRef(0)
-  const detectionHandledRef = useRef(false)
-  const nextScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
-  // Seeded from `open` rather than 'idle': the modal is only ever mounted by
-  // the tap on a scanner button, and that tap already starts the camera (see
-  // the open effect). An 'idle' first frame would flash the "Request camera
-  // access" empty state for one paint before the effect flips it to
-  // 'starting' -- exactly the two-step screen the owner asked to remove.
-  const [status, setStatus] = useState<ScannerStatus>(open ? 'starting' : 'idle')
-  const statusRef = useRef<ScannerStatus>('idle')
-  const [error, setError] = useState('')
-  const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
   const [photoBusy, setPhotoBusy] = useState(false)
-  const [torchAvailable, setTorchAvailable] = useState(false)
-  const [torchOn, setTorchOn] = useState(false)
-  const [torchFailed, setTorchFailed] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -214,420 +120,62 @@ export default function BarcodeScannerModal({
 
   const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
 
-  useEffect(() => { statusRef.current = status }, [status])
-
-  const waitForVideoElement = useCallback(async (startToken: number): Promise<HTMLVideoElement | null> => {
-    // `setStatus('starting')` causes React to mount the <video>. On iOS the
-    // permission request can resolve before that render commits, so capturing
-    // videoRef synchronously leaves ZXing with null and the native path with a
-    // stream that is never attached. Wait for the committed element instead.
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      if (startTokenRef.current !== startToken) return null
-      if (videoRef.current) return videoRef.current
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    }
-    return null
-  }, [])
-
-  const cleanup = useCallback((): void => {
-    startTokenRef.current = 0
-    if (frameRef.current) {
-      cancelAnimationFrame(frameRef.current)
-      frameRef.current = null
-    }
-    stopStream(streamRef.current)
-    streamRef.current = null
-    trackRef.current = null
-    detectorRef.current = null
-    lumaDecoderRef.current = null
-    lumaDecoderLoadingRef.current = false
-    ladderStepRef.current = 0
-    nativeStartedAtRef.current = 0
-    confirmReadRef.current = createReadConfirmer()
-    setTorchAvailable(false)
-    setTorchOn(false)
-    setTorchFailed(false)
-    const video = videoRef.current
-    if (video) {
-      try { video.pause() } catch (_) {}
-      try { video.srcObject = null } catch (_) {}
-    }
-  }, [])
-
-  // Native BarcodeDetector, ZXing, photo decode, and manual entry can finish
-  // at different times. Make successful detection one guarded terminal path
-  // so a stale callback cannot publish twice or survive a newer camera run.
-  const completeDetection = useCallback((value: unknown, expectedStartToken?: number): void => {
-    const nextValue = String(value || '').trim()
-    if (!nextValue || detectionHandledRef.current) return
-    if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
-    detectionHandledRef.current = true
-    markScanner('read')
-    setManualValue(nextValue)
-    cleanup()
-    try {
-      onDetected(nextValue)
-    } finally {
-      onClose()
-    }
-  }, [cleanup, onClose, onDetected])
-
-  // One loop for both decoders. Native BarcodeDetector reads are trusted on
-  // their own (the one inside the guide wins over another code on the box);
-  // ZXing reads must agree twice in a row (createReadConfirmer) and EAN/UPC
-  // must pass the check digit, so a smudged frame cannot pick the wrong
-  // product. ZXing works on frames this loop grabs from our own video
-  // element, never on a camera of its own. Both emit the code exactly as read:
-  // search folds leading zeros and UPC-A/EAN-13, so folding here would fold twice.
-  const scanFrame = useCallback(async (): Promise<void> => {
-    const detector = detectorRef.current
-    const video = videoRef.current
-    const scanToken = startTokenRef.current
-    if (!video || !scanToken || detectionHandledRef.current) return
-
-    const now = Date.now()
-    if (video.readyState >= 2 && video.videoWidth > 0 && now >= nextScanAtRef.current) {
-      nextScanAtRef.current = now + NATIVE_TICK_INTERVAL_MS
-      let accepted: string | null = null
-      if (detector) {
-        try {
-          const results = await detector.detect(video)
-          if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-          const guide = guideRectInFrame(video.videoWidth, video.videoHeight, viewOf(video), SCAN_GUIDE_BOX)
-          accepted = confirmReadRef.current(pickNativeRead(results || [], guide), 'native')
-        } catch (_) {
-          // A frame the detector cannot read yet (still decoding, resized)
-          // is a miss like any other; the next tick tries again.
-        }
-        // Some Android BarcodeDetector builds never see a low-contrast foil
-        // code; after a fixed head start the ZXing ladder joins in.
-        if (!accepted && zxingHeadStartOver(nativeStartedAtRef.current, Date.now()) && !lumaDecoderLoadingRef.current) {
-          lumaDecoderLoadingRef.current = true
-          loadLumaDecoder().then(
-            (decode) => { if (startTokenRef.current === scanToken) lumaDecoderRef.current = decode },
-            (loadError) => console.error('[scanner] ZXing fallback failed to load; native detection continues.', loadError),
-          )
-        }
-      }
-      const decode = lumaDecoderRef.current
-      if (!accepted && decode) {
-        const started = Date.now()
-        try {
-          const { read, nextStep } = runDecodeLadder(grabFrame(video, video.videoWidth, video.videoHeight), decode, {
-            startStep: ladderStepRef.current,
-            deadline: started + ZXING_TICK_BUDGET_MS,
-          })
-          ladderStepRef.current = nextStep
-          accepted = confirmReadRef.current(read, 'zxing')
-        } catch (decodeError) {
-          console.error('[scanner] ZXing frame decode failed.', decodeError)
-        }
-        const spent = Date.now() - started
-        nextScanAtRef.current = Date.now() + Math.max(detector ? NATIVE_TICK_INTERVAL_MS : 0, spent)
-      }
-      if (accepted) {
-        completeDetection(accepted, scanToken)
-        return
-      }
-    }
-
-    if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-    frameRef.current = requestAnimationFrame(scanFrame)
-  }, [completeDetection, grabFrame])
-
-  const toggleTorch = useCallback(async (): Promise<void> => {
-    const track = trackRef.current
-    if (!track) return
-    const next = !torchOn
-    setTorchFailed(false)
-    try {
-      await track.applyConstraints({ advanced: [{ torch: next } as CameraConstraintSet] })
-      if (trackRef.current === track) setTorchOn(next)
-    } catch (_) {
-      if (trackRef.current === track) setTorchFailed(true)
-    }
-  }, [torchOn])
-
-  const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
-    const startToken = ++startSequenceRef.current
-    cleanup()
-    startTokenRef.current = startToken
-    setStatus('starting')
-    setError('')
-    if (!preserveManualValue) setManualValue('')
-    nextScanAtRef.current = 0
-
-    if (
-      typeof window === 'undefined' ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      setPermissionState('unsupported')
-      setStatus('manual')
-      setError(labels.scanUnsupported)
-      return
-    }
-
-    if (isCameraBlockedByDocumentPolicy()) {
-      setPermissionState('blocked')
-      setStatus('blocked')
-      setError(labels.cameraDocumentBlocked)
-      return
-    }
-
-    const nextPermissionState = await readCameraPermissionState()
-    setPermissionState(nextPermissionState)
-    const permissionWasDenied = nextPermissionState === 'denied'
-
-    // Re-requesting cannot repair a saved browser denial. Stay blocked until
-    // the user changes the site setting, avoiding a getUserMedia retry loop.
-    if (permissionWasDenied) {
-      cleanup()
-      setStatus('blocked')
-      setError(labels.cameraPermissionBlocked)
-      return
-    }
-
-    try {
-      const video = await waitForVideoElement(startToken)
-      if (!video || startTokenRef.current !== startToken) return
-      video.setAttribute('playsinline', 'true')
-
-      // The camera is acquired FIRST, before either decoder is chosen. WebKit
-      // ships no BarcodeDetector, so on iOS this used to fall through to
-      // decodeFromConstraints, which reaches getUserMedia only AFTER awaiting
-      // the 446 KB ZXing chunk -- the prompt arrived a download later than the
-      // tap that asked for it. One acquisition, immediately after the tap, on
-      // every browser.
-      const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
-      if (startTokenRef.current !== startToken) {
-        stopStream(stream)
-        return
-      }
-      markScanner('stream')
-      // Owned from here on: every later bail-out is a token change, and a token
-      // only changes through cleanup() (or a newer startCamera, which calls
-      // cleanup() first), which stops this stream. A throw lands in the catch
-      // below, whose first statement is cleanup() -- so a decoder that fails to
-      // load can never leave the camera light on.
-      streamRef.current = stream
-      setPermissionState('granted')
-      const [track] = stream.getVideoTracks?.() || []
-      trackRef.current = track || null
-      const capabilities = (track?.getCapabilities?.() || {}) as CameraTrackCapabilities
-      setTorchAvailable(capabilities.torch === true)
-      if (capabilities.focusMode?.includes('continuous')) {
-        // Best effort: a camera that refuses keeps its default focus, which is
-        // how every scan worked before this hint existed.
-        track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as CameraConstraintSet] }).catch(() => {})
-      }
-      video.srcObject = stream
-      await video.play()
-      if (startTokenRef.current !== startToken) return
-
-      // The warm-up the opening press started (scannerWarmup) has usually
-      // settled this already; otherwise this is the first and only ask.
-      const NativeBarcodeDetector = getNativeBarcodeDetector()
-      const nativeFormats = NativeBarcodeDetector ? planNativeFormats(await nativeSupportedFormats()) : []
-      if (startTokenRef.current !== startToken) return
-      if (NativeBarcodeDetector && nativeFormats.length) {
-        detectorRef.current = new NativeBarcodeDetector({ formats: nativeFormats })
-        nativeStartedAtRef.current = Date.now()
-        markScanner('decoder-ready')
-        setStatus('scanning')
-        frameRef.current = requestAnimationFrame(scanFrame)
-        return
-      }
-
-      // No native detector, or one that reads none of our formats: load the
-      // compatibility decoder now that the camera is already live. It reads
-      // frames the scan loop grabs from this video element, so it never opens
-      // a camera of its own (decodeFromConstraints would put the permission
-      // prompt behind this chunk download).
-      const decode = await loadLumaDecoder()
-      if (startTokenRef.current !== startToken) return
-      lumaDecoderRef.current = decode
-      lumaDecoderLoadingRef.current = true
-      markScanner('decoder-ready')
-      // permissionState was already set to 'granted' by the single acquisition
-      // above -- both decoders share it now, so it is not repeated per branch.
-      setStatus('scanning')
-      setError(labels.scanFallbackActive)
-      frameRef.current = requestAnimationFrame(scanFrame)
-    } catch (scanError) {
-      const scanErrorText = getScanErrorText(scanError)
-      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
-      const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && permissionWasDenied)
-      const dismissed = denied && !blocked
-      cleanup()
-      setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
-      setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
-      setError(
-        documentBlocked
-          ? labels.cameraDocumentBlocked
-          : blocked
-            ? labels.cameraPermissionBlocked
-          : dismissed
-            ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
-            : (denied ? labels.scanPermissionDenied : labels.scanFailed),
-      )
-    }
-  }, [
-    cleanup,
-    labels.cameraDocumentBlocked,
-    labels.cameraPermissionBlocked,
-    labels.scanFailed,
-    labels.scanPermissionDenied,
-    labels.scanFallbackActive,
-    labels.scanUnsupported,
-    scanFrame,
-    tr,
-    waitForVideoElement,
-  ])
-
-  const prepareScanner = useCallback(async (): Promise<void> => {
-    cleanup()
-    setError('')
-    setStatus('idle')
-
-    if (
-      typeof window === 'undefined' ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      setPermissionState('unsupported')
-      setStatus('manual')
-      setError(labels.scanUnsupported)
-      return
-    }
-
-    if (isCameraBlockedByDocumentPolicy()) {
-      setPermissionState('blocked')
-      setStatus('blocked')
-      setError(labels.cameraDocumentBlocked)
-      return
-    }
-
-    const nextPermissionState = await readCameraPermissionState()
-    setPermissionState(nextPermissionState)
-    // Permission is durable browser state; a MediaStream is not. This is the
-    // RESUME path only (the page came back to the foreground), which is not a
-    // user gesture -- so it re-reads permission and parks on the Start camera
-    // button instead of calling getUserMedia. Opening the modal is a gesture
-    // and goes straight to startCamera; see the open effect below.
-    setStatus('manual')
-  }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
-
-  const closeScanner = useCallback((): void => {
-    detectionHandledRef.current = true
-    cleanup()
-    onClose()
-  }, [cleanup, onClose])
+  const {
+    videoRef,
+    status,
+    error,
+    permissionState,
+    torchAvailable,
+    torchOn,
+    torchFailed,
+    startCamera,
+    toggleTorch,
+    closeScanner,
+    parkCamera,
+    completeDetection,
+    showManualError,
+    clearError,
+  } = useBarcodeCamera({
+    open,
+    messages: {
+      scanUnsupported: labels.scanUnsupported,
+      cameraDocumentBlocked: labels.cameraDocumentBlocked,
+      cameraPermissionBlocked: labels.cameraPermissionBlocked,
+      scanPermissionDenied: labels.scanPermissionDenied,
+      scanFailed: labels.scanFailed,
+      scanFallbackActive: labels.scanFallbackActive,
+      scanPromptDismissed: promptDismissedMessage,
+    },
+    onDetected: (value) => {
+      setManualValue(value)
+      onDetected(value)
+    },
+    onClose,
+  })
 
   const openPhotoPicker = useCallback((): void => {
     if (photoBusy) return
-    cleanup()
-    setStatus('manual')
+    parkCamera()
     photoInputRef.current?.click?.()
-  }, [cleanup, photoBusy])
+  }, [parkCamera, photoBusy])
 
   const handlePhotoSelection = useCallback(async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event?.target?.files?.[0]
     if (!file) return
     setPhotoBusy(true)
-    setError('')
+    clearError()
     try {
       const value = await scanBarcodeFromImageFile(file)
       const nextValue = String(value || '').trim()
       if (!nextValue) throw new Error(labels.scanPhotoFailed)
       completeDetection(nextValue)
     } catch (scanError) {
-      setStatus('manual')
-      setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
+      showManualError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
     } finally {
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
     }
-  }, [completeDetection, labels.scanPhotoFailed])
-
-  // `startCamera` takes a new identity whenever the parent re-renders, because
-  // its labels close over the caller's `t`. Read it through a ref so `open` is
-  // the ONLY thing that can trigger a start: a parent re-render must never
-  // restart a live stream mid-scan, which with a one-tap start would read as a
-  // camera that keeps re-prompting.
-  const startCameraRef = useRef(startCamera)
-  useEffect(() => { startCameraRef.current = startCamera }, [startCamera])
-
-  useEffect(() => {
-    if (!open) return undefined
-    detectionHandledRef.current = false
-    // Owner rule (2026-09-14): pressing the scanner button opens the camera
-    // directly. The click that mounted this modal IS the user gesture, so the
-    // request happens here instead of behind a second "Start camera" tap; the
-    // guards inside startCamera (unsupported, document policy, saved denial)
-    // still decide whether getUserMedia is reached at all.
-    void startCameraRef.current()
-    return () => {
-      detectionHandledRef.current = true
-      cleanup()
-      setStatus('idle')
-      setError('')
-      setPermissionState('unknown')
-    }
-  }, [cleanup, open])
-
-  // iOS can keep a PWA page mounted while it is backgrounded. Stop every
-  // camera track immediately, but never auto-resume it on foreground: coming
-  // back to the page is not a user gesture, so the user taps Start camera.
-  useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        cleanup()
-        setStatus('manual')
-      } else {
-        void prepareScanner()
-      }
-    }
-    const handlePageHide = () => cleanup()
-    document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('pagehide', handlePageHide)
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('pagehide', handlePageHide)
-    }
-  }, [cleanup, open, prepareScanner])
-
-  useEffect(() => {
-    if (!open) return undefined
-    let cancelled = false
-    void watchCameraPermission((nextState) => {
-      if (cancelled) return
-      if (isCameraBlockedByDocumentPolicy()) {
-        cleanup()
-        setPermissionState('blocked')
-        setStatus('blocked')
-        setError(labels.cameraDocumentBlocked)
-        return
-      }
-      setPermissionState(nextState)
-      if (nextState === 'denied' && (statusRef.current === 'scanning' || statusRef.current === 'starting')) {
-        cleanup()
-        setStatus('blocked')
-        setError(labels.cameraPermissionBlocked)
-      }
-    }).then((dispose: (() => void) | undefined) => {
-      if (cancelled) {
-        dispose?.()
-        return
-      }
-      permissionCleanupRef.current = dispose || (() => {})
-    })
-    return () => {
-      cancelled = true
-      permissionCleanupRef.current?.()
-      permissionCleanupRef.current = () => {}
-    }
-  }, [cleanup, labels.cameraDocumentBlocked, labels.cameraPermissionBlocked, open])
+  }, [clearError, completeDetection, labels.scanPhotoFailed, showManualError])
 
   if (!open) return null
 
@@ -746,7 +294,7 @@ export default function BarcodeScannerModal({
                       type="button"
                       className="btn-secondary w-full border-white/25 bg-white text-black hover:bg-white/90"
                       disabled={false}
-                      onClick={() => startCamera({ preserveManualValue: true })}
+                      onClick={() => startCamera()}
                     >
                       {requestCameraLabel}
                     </button>

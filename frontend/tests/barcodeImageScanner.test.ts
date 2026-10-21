@@ -1,34 +1,15 @@
 import assert from 'node:assert/strict'
-import { scanBarcodeFromImageFile } from '../src/components/products/scanning/barcodeImageScanner.ts'
-import { createReadConfirmer, isAcceptableBarcodeRead, rotateQuarter, runDecodeLadder } from '../src/components/products/scanning/barcodeFrameDecoder.ts'
+import { scanBarcodeFromImageFile, type PhotoImage } from '../src/components/products/scanning/barcodeImageScanner.ts'
+import { createReadConfirmer, isAcceptableBarcodeRead, type PixelFrame } from '../src/components/products/scanning/barcodeFrameDecoder.ts'
+import { rotateQuarter, runDecodeLadder } from '../src/components/products/scanning/barcodeLadder.ts'
+import type { DecodeClient, DecodeFrames } from '../src/components/products/scanning/decodeWorkerClient.ts'
 
 let failed = 0
 
 type AsyncTestCallback = () => void | Promise<void>
-type TestBarcodeImageElement = {
-  onload: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
-  onerror: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
-  src: string
-}
 
-function grayFrame(value: number) {
-  return { data: new Uint8ClampedArray(16).fill(value), width: 4, height: 4 }
-}
-
-function createLoadedImage(): TestBarcodeImageElement {
-  let currentSrc = ''
-  const image: TestBarcodeImageElement = {
-    onload: null,
-    onerror: null,
-    set src(value: string) {
-      currentSrc = value
-      queueMicrotask(() => image.onload?.call(globalThis as unknown as GlobalEventHandlers, new Event('load')))
-    },
-    get src() {
-      return currentSrc
-    },
-  }
-  return image
+function pixelFrame(value: number): PixelFrame {
+  return { data: new Uint8ClampedArray(16).fill(value), width: 2, height: 2 }
 }
 
 async function runTest(name: string, fn: AsyncTestCallback) {
@@ -42,76 +23,104 @@ async function runTest(name: string, fn: AsyncTestCallback) {
   }
 }
 
-await runTest('scanBarcodeFromImageFile returns the decoded image value', async () => {
-  const value = await scanBarcodeFromImageFile(
-    { name: 'photo.png' },
-    {
-      readDataUrl: async () => 'data:image/png;base64,abc123',
-      loadDecoder: async () => (frame) => {
-        assert.equal(frame.data[0], 7, 'the decoder must read the pixels grabbed from the loaded photo')
-        return { text: 'SKU-001', format: 'code_128' }
-      },
-      grabRegions: (image) => {
-        assert.equal(image.src, 'data:image/png;base64,abc123')
-        return { centre: () => grayFrame(7), full: () => grayFrame(7) }
-      },
-      createImage: createLoadedImage,
-    },
-  )
+// A decoded photo and the worker, both recording what happens to them.
+function fakePhoto() {
+  const source = { name: 'decoded photo' } as unknown as PhotoImage['source']
+  const photo = { released: 0 }
+  const image: PhotoImage = { source, width: 40, height: 30, release: () => { photo.released += 1 } }
+  return { source, photo, openImage: async () => image }
+}
+
+function fakeClient(decode: (frames: DecodeFrames, tryHarder: boolean) => Promise<{ text: string; format: string } | null>, ready: Promise<void> = Promise.resolve()) {
+  const record = { decodes: 0, terminated: 0 }
+  ready.catch(() => {})
+  const client: DecodeClient = {
+    ready,
+    isReady: true,
+    busy: false,
+    broken: null,
+    decode: (frames, tryHarder) => { record.decodes += 1; return decode(frames, tryHarder) },
+    terminate: () => { record.terminated += 1 },
+  }
+  return { record, acquireClient: () => client }
+}
+
+const noNative = { getNativeBarcodeDetector: () => null }
+const grabRegions = () => ({ centre: () => pixelFrame(7), full: () => pixelFrame(9) })
+
+await runTest('scanBarcodeFromImageFile hands the photo to the worker with TRY_HARDER and returns what it decodes', async () => {
+  const { photo, openImage } = fakePhoto()
+  const { record, acquireClient } = fakeClient(async (frames, tryHarder) => {
+    assert.equal(tryHarder, true, 'a photo gets the whole ladder, TRY_HARDER included')
+    assert.equal(frames.centre.data[0], 7, 'the worker must get the pixels grabbed from the decoded photo')
+    assert.equal(frames.full?.data[0], 9, 'and the whole picture beside the centre')
+    return { text: 'SKU-001', format: 'code_128' }
+  })
+  const value = await scanBarcodeFromImageFile({ name: 'photo.png' }, { ...noNative, openImage, grabRegions, acquireClient })
 
   assert.equal(value, 'SKU-001')
+  assert.equal(record.decodes, 1)
+  assert.equal(record.terminated, 1, 'the worker is stopped when the photo is read')
+  assert.equal(photo.released, 1, 'the decoded photo is released')
 })
 
-await runTest('scanBarcodeFromImageFile uses native BarcodeDetector before loading zxing', async () => {
-  let zxingLoaded = false
+await runTest('scanBarcodeFromImageFile uses native BarcodeDetector on the decoded photo before starting a worker', async () => {
+  const { source, photo, openImage } = fakePhoto()
+  let workerStarted = false
   const value = await scanBarcodeFromImageFile(
     { name: 'native-photo.png' },
     {
-      readDataUrl: async () => 'data:image/png;base64,native123',
-      loadDecoder: async () => {
-        zxingLoaded = true
-        throw new Error('zxing should not load when native detector succeeds')
-      },
+      openImage,
+      acquireClient: () => { workerStarted = true; throw new Error('the worker should not start when the native detector succeeds') },
       getNativeBarcodeDetector: () => class {
         static async getSupportedFormats() {
           return ['qr_code', 'ean_13']
         }
 
-        async detect(image: { src: string }) {
-          assert.equal(image.src, 'data:image/png;base64,native123')
+        async detect(image: unknown) {
+          assert.equal(image, source, 'the detector reads the decoded photo itself, not a data URL')
           return [{ rawValue: 'NATIVE-001' }]
         }
       },
-      createImage: createLoadedImage,
     },
   )
 
   assert.equal(value, 'NATIVE-001')
-  assert.equal(zxingLoaded, false)
+  assert.equal(workerStarted, false)
+  assert.equal(photo.released, 1)
 })
 
-await runTest('scanBarcodeFromImageFile rejects empty image results', async () => {
+await runTest('scanBarcodeFromImageFile rejects a photo the worker finds nothing in, and still stops it', async () => {
+  const { photo, openImage } = fakePhoto()
+  const { record, acquireClient } = fakeClient(async () => null)
   await assert.rejects(
-    () => scanBarcodeFromImageFile(
-      { name: 'photo.png' },
-      {
-        readDataUrl: async () => 'data:image/png;base64,abc123',
-        loadDecoder: async () => () => null,
-        grabRegions: () => ({ centre: () => grayFrame(0), full: () => grayFrame(0) }),
-        createImage: createLoadedImage,
-      },
-    ),
+    () => scanBarcodeFromImageFile({ name: 'photo.png' }, { ...noNative, openImage, grabRegions, acquireClient }),
     /could not find a barcode/i,
   )
+  assert.equal(record.terminated, 1)
+  assert.equal(photo.released, 1)
+})
+
+await runTest('a worker that cannot start fails the scan with its own message, and the photo is still released', async () => {
+  const { photo, openImage } = fakePhoto()
+  const { record, acquireClient } = fakeClient(async () => null, Promise.reject(new Error('decoder failed to start')))
+  await assert.rejects(
+    () => scanBarcodeFromImageFile({ name: 'photo.png' }, { ...noNative, openImage, grabRegions, acquireClient }),
+    /decoder failed to start/,
+  )
+  assert.equal(record.decodes, 0, 'nothing is sent to a worker that never became ready')
+  assert.equal(record.terminated, 1)
+  assert.equal(photo.released, 1)
 })
 
 await runTest('a native photo read skips a marketing QR and asks only for retail formats', async () => {
   let requestedFormats: string[] = []
+  const { openImage } = fakePhoto()
   const value = await scanBarcodeFromImageFile(
     { name: 'box.png' },
     {
-      readDataUrl: async () => 'data:image/png;base64,box',
-      loadDecoder: async () => { throw new Error('zxing should not load when the native read is good') },
+      openImage,
+      acquireClient: () => { throw new Error('the worker should not start when the native read is good') },
       getNativeBarcodeDetector: () => class {
         static async getSupportedFormats() { return ['qr_code', 'ean_13', 'data_matrix'] }
         constructor(options: { formats: string[] }) { requestedFormats = options.formats }
@@ -123,11 +132,123 @@ await runTest('a native photo read skips a marketing QR and asks only for retail
           ]
         }
       },
-      createImage: createLoadedImage,
     },
   )
   assert.deepEqual(requestedFormats, ['ean_13'])
   assert.equal(value, '3348901729222', 'the QR and the bad check digit must both be passed over')
+})
+
+await runTest('a native detector that reads none of our formats is never built: the worker reads the photo', async () => {
+  const { openImage } = fakePhoto()
+  let constructed = 0
+  const { record, acquireClient } = fakeClient(async () => ({ text: '3348901729222', format: 'ean_13' }))
+  const value = await scanBarcodeFromImageFile(
+    { name: 'qr-only.png' },
+    {
+      openImage,
+      grabRegions,
+      acquireClient,
+      getNativeBarcodeDetector: () => class {
+        static async getSupportedFormats() { return ['qr_code'] }
+        constructor() { constructed += 1 }
+        async detect(): Promise<unknown[]> { return [] }
+      },
+    },
+  )
+  assert.equal(value, '3348901729222')
+  assert.equal(constructed, 0, 'a detector with no retail format must not be built with the retail list anyway')
+  assert.equal(record.decodes, 1)
+})
+
+await runTest('a native detector that throws is logged and the worker still reads the photo', async () => {
+  const { openImage } = fakePhoto()
+  const { acquireClient } = fakeClient(async () => ({ text: 'SKU-001', format: 'code_128' }))
+  const logged: unknown[][] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => { logged.push(args) }
+  try {
+    const value = await scanBarcodeFromImageFile({ name: 'photo.png' }, {
+      openImage,
+      grabRegions,
+      acquireClient,
+      getNativeBarcodeDetector: () => class {
+        static async getSupportedFormats() { return ['ean_13'] }
+        async detect(): Promise<unknown[]> { throw new Error('detector service down') }
+      },
+    })
+    assert.equal(value, 'SKU-001')
+  } finally {
+    console.error = original
+  }
+  assert.equal(logged.length, 1, 'the native failure is reported, not swallowed')
+  assert.match(String(logged[0][0]), /native detector could not read the photo/)
+})
+
+await runTest('the default photo open is createImageBitmap(file): no data URL, and the bitmap is closed', async () => {
+  const file = { name: 'photo.webp' }
+  const bitmap = { width: 64, height: 48, closed: 0, close() { this.closed += 1 } }
+  const opened: unknown[] = []
+  const globals = globalThis as unknown as { createImageBitmap?: unknown }
+  const original = globals.createImageBitmap
+  globals.createImageBitmap = async (input: unknown) => { opened.push(input); return bitmap }
+  try {
+    const { acquireClient } = fakeClient(async () => ({ text: 'SKU-001', format: 'code_128' }))
+    const value = await scanBarcodeFromImageFile(file, {
+      ...noNative,
+      grabRegions: (source, width, height) => {
+        assert.equal(source as unknown, bitmap, 'the grabber reads the bitmap')
+        assert.deepEqual([width, height], [64, 48])
+        return grabRegions()
+      },
+      acquireClient,
+    })
+    assert.equal(value, 'SKU-001')
+  } finally {
+    globals.createImageBitmap = original
+  }
+  assert.deepEqual(opened, [file])
+  assert.equal(bitmap.closed, 1)
+})
+
+await runTest('when createImageBitmap rejects the photo, the DOM image decoder reads it from an object URL that is then revoked', async () => {
+  const globals = globalThis as unknown as { createImageBitmap?: unknown; Image?: unknown }
+  const originalBitmap = globals.createImageBitmap
+  const originalImage = globals.Image
+  const originalCreate = URL.createObjectURL
+  const originalRevoke = URL.revokeObjectURL
+  const urls = { created: [] as unknown[], revoked: [] as string[] }
+  globals.createImageBitmap = async () => { throw new Error('HEIC not supported') }
+  class FakeImage {
+    naturalWidth = 80
+    naturalHeight = 60
+    onload: (() => void) | null = null
+    onerror: (() => void) | null = null
+    set src(_value: string) { queueMicrotask(() => this.onload?.()) }
+  }
+  globals.Image = FakeImage
+  URL.createObjectURL = (blob) => { urls.created.push(blob); return 'blob:photo' }
+  URL.revokeObjectURL = (url) => { urls.revoked.push(url) }
+  try {
+    const { acquireClient } = fakeClient(async () => ({ text: 'SKU-001', format: 'code_128' }))
+    const file = new Blob(['x'])
+    const value = await scanBarcodeFromImageFile(file, {
+      ...noNative,
+      grabRegions: (source, width, height) => {
+        assert.ok(source instanceof FakeImage)
+        assert.deepEqual([width, height], [80, 60])
+        return grabRegions()
+      },
+      acquireClient,
+    })
+    assert.equal(value, 'SKU-001')
+    assert.deepEqual(urls.created, [file])
+    assert.deepEqual(urls.revoked, ['blob:photo'])
+  } finally {
+    globals.createImageBitmap = originalBitmap
+    globals.Image = originalImage
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
+  }
 })
 
 await runTest('EAN/UPC reads are accepted only with a valid check digit', () => {
@@ -187,6 +308,21 @@ await runTest('the live ladder stops at its time budget and the next frame resum
   seen.length = 0
   runDecodeLadder(regions, decode, { tryHarder: true })
   assert.deepEqual(seen.slice(8), ['6x4!', '4x6!', '10x8!', '8x10!'], 'TRY_HARDER only after the whole fast tier, and only when asked')
+})
+
+await runTest('a frame sent without the whole picture skips the steps that need it', () => {
+  const seen: string[] = []
+  const decode = (frame: { width: number; height: number }) => {
+    seen.push(`${frame.width}x${frame.height}`)
+    return null
+  }
+  const guideOnly = { centre: () => ({ data: new Uint8ClampedArray(6 * 4).fill(90), width: 6, height: 4 }) }
+  const { attempts } = runDecodeLadder(guideOnly, decode)
+  assert.equal(attempts, 4, 'only the four guide-area steps run')
+  assert.deepEqual(seen, ['6x4', '4x6', '6x4', '4x6'])
+  seen.length = 0
+  runDecodeLadder(guideOnly, decode, { tryHarder: true })
+  assert.deepEqual(seen.slice(4), ['6x4', '4x6'], 'the TRY_HARDER guide steps still run; the full-picture ones do not')
 })
 
 await runTest('a quarter turn moves the left column to the top row', () => {

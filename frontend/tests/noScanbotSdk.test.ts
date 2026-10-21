@@ -45,21 +45,26 @@ const files = [
 const hits = files.filter((file) => /scanbot/i.test(fs.readFileSync(file, 'utf8'))).map(rel)
 assert.deepEqual(hits, [], `no file may still mention the Scanbot SDK: ${hits.join(', ')}`)
 
-// The scanner that does work must stay: native BarcodeDetector first, ZXing second,
-// and the camera policy check now lives in cameraPolicy.ts.
-const modal = fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/BarcodeScannerModal.tsx'), 'utf8')
-assert.ok(modal.includes('BarcodeDetector'), 'modal keeps the native BarcodeDetector path')
-assert.ok(modal.includes('loadLumaDecoder'), 'modal keeps the ZXing fallback')
+// The scanner that does work must stay: native BarcodeDetector first, ZXing second
+// (in the decode worker since 6.0.935), and the camera policy check now lives in
+// cameraPolicy.ts.
+const scanning = path.join(ROOT, 'src/components/products/scanning')
+const camera = fs.readFileSync(path.join(scanning, 'useBarcodeCamera.ts'), 'utf8')
+assert.ok(camera.includes('BarcodeDetector'), 'the camera hook keeps the native BarcodeDetector path')
+assert.ok(
+  fs.readFileSync(path.join(scanning, 'barcodeDecode.worker.ts'), 'utf8').includes('createLumaDecoder'),
+  'the decode worker keeps the ZXing fallback',
+)
 // S1a (6.0.922): the fallback no longer goes through MultiFormatReader (which
 // drags every 2D decoder into the chunk); it runs the retail 1D readers itself.
-const decoderSource = fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/barcodeFrameDecoder.ts'), 'utf8')
+const decoderSource = fs.readFileSync(path.join(scanning, 'barcodeZxing.ts'), 'utf8')
 assert.ok(
   decoderSource.includes('class RetailReader extends OneDReader') && decoderSource.includes('@zxing/library/esm/core/oned/Code128Reader'),
   'the ZXing fallback decodes with the retail 1D readers',
 )
-assert.ok(modal.includes("from './cameraPolicy.ts'"), 'modal imports the camera policy check from cameraPolicy.ts')
+assert.ok(camera.includes("from './cameraPolicy.ts'"), 'the camera hook imports the camera policy check from cameraPolicy.ts')
 assert.ok(
-  fs.readFileSync(path.join(ROOT, 'src/components/products/scanning/cameraPolicy.ts'), 'utf8').includes('export function isCameraBlockedByDocumentPolicy'),
+  fs.readFileSync(path.join(scanning, 'cameraPolicy.ts'), 'utf8').includes('export function isCameraBlockedByDocumentPolicy'),
   'cameraPolicy.ts exports isCameraBlockedByDocumentPolicy',
 )
 
