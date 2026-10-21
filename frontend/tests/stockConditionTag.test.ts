@@ -171,7 +171,8 @@ runTest('held units are excluded from sellable stock, structurally', () => {
   const grouping = readSource('frontend/src/utils/productGrouping.ts')
   assert.doesNotMatch(grouping, /condition_tag|damaged_stock_lots|taggedLots/)
   const products = readSource('frontend/src/components/products/Products.tsx')
-  assert.match(products, /getTaggedLots\(ids\)/)
+  assert.match(products, /getTaggedLots\(uncovered\)/)
+  assert.match(products, /setFoldedTagged\(Array\.isArray\(productPayloadObject\?\.tagged_lots\)/, 'the list read folds the held rows into their own state')
   // The held rows feed the render slots only -- never the product arrays the
   // totals are computed from.
   assert.doesNotMatch(products, /setProducts\([^)]*tagged/i)

@@ -414,11 +414,19 @@ export function previewMergeDuplicateProducts(options: { signal?: AbortSignal; s
 // same real barcode with differing details, or same display name with
 // different barcodes). The sweep and dismiss mirror the contacts
 // Possible Duplicates panel; the merge is a one-pair fold where the
-// REVIEWER picked the keeper, so both ids ride in the payload. GET stays
-// a plain apiFetch (read-only, retryable); the two writes go through
-// route() like every other real mutation.
-export function getPossiblySameProducts(): Promise<unknown> {
-  return apiFetch('GET', '/api/products/possible-duplicates')
+// REVIEWER picked the keeper, so both ids ride in the payload. The GET is a
+// route() read: the Products list flags and the review tab share one 20 s
+// cached, in-flight de-duplicated whole-catalog sweep, and any products sync or
+// products write drops it (channel prefix 'products'). The review tab passes
+// `fresh` so what it shows is always read from the server; the two writes go
+// through route() like every other real mutation.
+export function getPossiblySameProducts(options: { fresh?: boolean } = {}): Promise<unknown> {
+  return route(
+    'products:possibleDuplicates',
+    (signal?: AbortSignal) => apiFetch('GET', '/api/products/possible-duplicates', undefined, undefined, signal ? { signal } : undefined),
+    null,
+    { raceLocalFallback: false, bypassCache: options.fresh === true },
+  )
 }
 
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
