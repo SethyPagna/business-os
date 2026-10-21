@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useState } from 'react'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import { lazyRetry, preloadLazy } from '../../utils/lazyImport.ts'
+import { warmScanner } from '../products/scanning/scannerWarmup.ts'
 
 // Lazy-loaded so the camera/zxing scanning code (already used by the
 // product-form barcode scanner) isn't pulled into the initial bundle for
@@ -58,7 +59,7 @@ export default function ScanSearchButton({ onDetected, t, title, className = '',
       <button
         type="button"
         onClick={() => setOpen(true)}
-        onPointerDown={preloadBarcodeScannerModal}
+        onPointerDown={() => { preloadBarcodeScannerModal(); warmScanner() }}
         onTouchStart={preloadBarcodeScannerModal}
         onMouseEnter={preloadBarcodeScannerModal}
         onFocus={preloadBarcodeScannerModal}

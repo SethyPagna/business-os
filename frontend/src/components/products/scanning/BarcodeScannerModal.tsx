@@ -14,22 +14,33 @@ import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
 import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
 import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
 import {
-  RETAIL_BARCODE_FORMATS,
+  NATIVE_TICK_INTERVAL_MS,
+  SCAN_GUIDE_BOX,
   createFrameGrabber,
   createReadConfirmer,
+  guideRectInFrame,
   loadLumaDecoder,
+  pickNativeRead,
+  planNativeFormats,
   runDecodeLadder,
+  viewOf,
+  zxingHeadStartOver,
   type LumaDecoder,
 } from './barcodeFrameDecoder.ts'
+import {
+  getNativeBarcodeDetector,
+  markScanner,
+  nativeSupportedFormats,
+  type NativeBarcodeDetector,
+} from './scannerWarmup.ts'
 
 // Per-tick CPU for the ZXing ladder. The first step always runs; later steps
 // only while under budget, and the next tick waits at least as long as this
 // one took, so decoding never holds more than about half the main thread.
 const ZXING_TICK_BUDGET_MS = 40
-const NATIVE_TICK_INTERVAL_MS = 250
-// Some Android BarcodeDetector builds never see a low-contrast foil code;
-// after this many empty native frames the ZXing ladder joins in.
-const NATIVE_MISSES_BEFORE_ZXING = 6
+
+// The overlay outlines exactly the area the frame grabber decodes.
+const GUIDE_STYLE = { width: `${SCAN_GUIDE_BOX.widthPercent}%`, height: `${SCAN_GUIDE_BOX.heightPercent}%` }
 
 // One constraints object for both decoders. The native BarcodeDetector loop and
 // the ZXing fallback open the SAME camera from the SAME single getUserMedia
@@ -42,6 +53,9 @@ const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
     // do 1080p fall back to its best mode instead of failing.
     width: { ideal: 1920 },
     height: { ideal: 1080 },
+    // 30 fps is all either decoder can use; a camera left at 60 only heats up.
+    // Ideal only: a hard max would make a camera that cannot go down to 30 fps refuse to open.
+    frameRate: { ideal: 30 },
   },
 }
 
@@ -61,20 +75,6 @@ interface BarcodeScannerModalProps {
    * false, since there the scanner modal IS the primary place to type a
    * barcode. */
   hideManualEntry?: boolean
-}
-
-interface BarcodeDetectionResult {
-  rawValue?: unknown
-  format?: unknown
-}
-
-interface NativeBarcodeDetector {
-  detect: (source: HTMLVideoElement) => Promise<BarcodeDetectionResult[]>
-}
-
-interface NativeBarcodeDetectorConstructor {
-  new(options: { formats: string[] }): NativeBarcodeDetector
-  getSupportedFormats?: () => Promise<unknown[]>
 }
 
 // Torch and focus are not in the DOM lib's track types yet.
@@ -114,13 +114,6 @@ interface ScannerStateBadge {
   icon: ReactNode
 }
 
-function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
-  const detector = (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector
-  return typeof detector === 'function'
-    ? detector as NativeBarcodeDetectorConstructor
-    : null
-}
-
 function getScanErrorText(error: unknown): string {
   const source = error as { message?: unknown; name?: unknown } | null | undefined
   return `${String(source?.name || '')} ${String(source?.message || error || '')}`
@@ -153,9 +146,9 @@ export default function BarcodeScannerModal({
   const lumaDecoderRef = useRef<LumaDecoder | null>(null)
   const lumaDecoderLoadingRef = useRef(false)
   const ladderStepRef = useRef(0)
-  const nativeMissesRef = useRef(0)
+  const nativeStartedAtRef = useRef(0)
   const confirmReadRef = useRef(createReadConfirmer())
-  const [grabFrame] = useState(() => createFrameGrabber())
+  const [grabFrame] = useState(() => createFrameGrabber(SCAN_GUIDE_BOX))
   const trackRef = useRef<MediaStreamTrack | null>(null)
   const permissionCleanupRef = useRef<() => void>(() => {})
   const photoInputRef = useRef<HTMLInputElement | null>(null)
@@ -249,7 +242,7 @@ export default function BarcodeScannerModal({
     lumaDecoderRef.current = null
     lumaDecoderLoadingRef.current = false
     ladderStepRef.current = 0
-    nativeMissesRef.current = 0
+    nativeStartedAtRef.current = 0
     confirmReadRef.current = createReadConfirmer()
     setTorchAvailable(false)
     setTorchOn(false)
@@ -269,6 +262,7 @@ export default function BarcodeScannerModal({
     if (!nextValue || detectionHandledRef.current) return
     if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
     detectionHandledRef.current = true
+    markScanner('read')
     setManualValue(nextValue)
     cleanup()
     try {
@@ -279,10 +273,12 @@ export default function BarcodeScannerModal({
   }, [cleanup, onClose, onDetected])
 
   // One loop for both decoders. Native BarcodeDetector reads are trusted on
-  // their own; ZXing reads must agree twice in a row (createReadConfirmer) and
-  // EAN/UPC must pass the check digit, so a smudged frame cannot pick the
-  // wrong product. ZXing works on frames this loop grabs from our own video
-  // element, never on a camera of its own.
+  // their own (the one inside the guide wins over another code on the box);
+  // ZXing reads must agree twice in a row (createReadConfirmer) and EAN/UPC
+  // must pass the check digit, so a smudged frame cannot pick the wrong
+  // product. ZXing works on frames this loop grabs from our own video
+  // element, never on a camera of its own. Both emit the code exactly as read:
+  // search folds leading zeros and UPC-A/EAN-13, so folding here would fold twice.
   const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
@@ -297,16 +293,15 @@ export default function BarcodeScannerModal({
         try {
           const results = await detector.detect(video)
           if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-          for (const result of results || []) {
-            accepted = confirmReadRef.current({ text: String(result?.rawValue || '').trim(), format: String(result?.format || '') }, 'native')
-            if (accepted) break
-          }
+          const guide = guideRectInFrame(video.videoWidth, video.videoHeight, viewOf(video), SCAN_GUIDE_BOX)
+          accepted = confirmReadRef.current(pickNativeRead(results || [], guide), 'native')
         } catch (_) {
           // A frame the detector cannot read yet (still decoding, resized)
           // is a miss like any other; the next tick tries again.
         }
-        nativeMissesRef.current = accepted ? 0 : nativeMissesRef.current + 1
-        if (!accepted && nativeMissesRef.current >= NATIVE_MISSES_BEFORE_ZXING && !lumaDecoderLoadingRef.current) {
+        // Some Android BarcodeDetector builds never see a low-contrast foil
+        // code; after a fixed head start the ZXing ladder joins in.
+        if (!accepted && zxingHeadStartOver(nativeStartedAtRef.current, Date.now()) && !lumaDecoderLoadingRef.current) {
           lumaDecoderLoadingRef.current = true
           loadLumaDecoder().then(
             (decode) => { if (startTokenRef.current === scanToken) lumaDecoderRef.current = decode },
@@ -408,6 +403,7 @@ export default function BarcodeScannerModal({
         stopStream(stream)
         return
       }
+      markScanner('stream')
       // Owned from here on: every later bail-out is a token change, and a token
       // only changes through cleanup() (or a newer startCamera, which calls
       // cleanup() first), which stops this stream. A throw lands in the catch
@@ -428,29 +424,30 @@ export default function BarcodeScannerModal({
       await video.play()
       if (startTokenRef.current !== startToken) return
 
+      // The warm-up the opening press started (scannerWarmup) has usually
+      // settled this already; otherwise this is the first and only ask.
       const NativeBarcodeDetector = getNativeBarcodeDetector()
-      if (NativeBarcodeDetector) {
-        const supported = typeof NativeBarcodeDetector.getSupportedFormats === 'function'
-          ? await NativeBarcodeDetector.getSupportedFormats()
-          : RETAIL_BARCODE_FORMATS
-        if (startTokenRef.current !== startToken) return
-        const formats = (supported || [])
-          .map((item) => String(item || ''))
-          .filter((item) => RETAIL_BARCODE_FORMATS.includes(item))
-        detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : RETAIL_BARCODE_FORMATS })
+      const nativeFormats = NativeBarcodeDetector ? planNativeFormats(await nativeSupportedFormats()) : []
+      if (startTokenRef.current !== startToken) return
+      if (NativeBarcodeDetector && nativeFormats.length) {
+        detectorRef.current = new NativeBarcodeDetector({ formats: nativeFormats })
+        nativeStartedAtRef.current = Date.now()
+        markScanner('decoder-ready')
         setStatus('scanning')
         frameRef.current = requestAnimationFrame(scanFrame)
         return
       }
 
-      // No native detector: load the compatibility decoder now that the camera
-      // is already live. It reads frames the scan loop grabs from this video
-      // element, so it never opens a camera of its own (decodeFromConstraints
-      // would put the permission prompt behind this chunk download).
+      // No native detector, or one that reads none of our formats: load the
+      // compatibility decoder now that the camera is already live. It reads
+      // frames the scan loop grabs from this video element, so it never opens
+      // a camera of its own (decodeFromConstraints would put the permission
+      // prompt behind this chunk download).
       const decode = await loadLumaDecoder()
       if (startTokenRef.current !== startToken) return
       lumaDecoderRef.current = decode
       lumaDecoderLoadingRef.current = true
+      markScanner('decoder-ready')
       // permissionState was already set to 'granted' by the single acquisition
       // above -- both decoders share it now, so it is not repeated per branch.
       setStatus('scanning')
@@ -709,8 +706,8 @@ export default function BarcodeScannerModal({
                       </div>
                     </div>
                   ) : null}
-                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/45 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
-                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2">
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/45 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" style={GUIDE_STYLE} />
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={GUIDE_STYLE}>
                     <div className="absolute left-0 top-0 h-8 w-8 rounded-tl-[24px] border-l-[3px] border-t-[3px] border-white" />
                     <div className="absolute right-0 top-0 h-8 w-8 rounded-tr-[24px] border-r-[3px] border-t-[3px] border-white" />
                     <div className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-[24px] border-b-[3px] border-l-[3px] border-white" />
