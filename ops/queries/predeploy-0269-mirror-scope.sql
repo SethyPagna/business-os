@@ -9,6 +9,10 @@
 --   undoable_merge_exposure    undoable single-pair product merges (applier product.merge) whose keeper or merged-away
 --                              row is in scope: after 0269 their Undo answers 409 undo_record_changed (owner ruling if > 0)
 --   undoable_merges_total      every undoable product.merge (context for the line above)
+--   group_merge_exposure       undoable product.merge.bulk actions whose snapshot names an in-scope id under an id-like key
+--                              (conservative: an id of another table with the same number also counts)
+--   open_review_edits_in_scope open pending product updates on in-scope products (applied after 0269 they may answer
+--                              product_money_state_conflict and need re-approval)
 -- ops:min-rows 1
 -- ops:max-rows 1
 WITH scope AS MATERIALIZED (
@@ -32,4 +36,11 @@ SELECT
   (SELECT COUNT(*) FROM scope WHERE khr_off) AS scope_khr,
   (SELECT COUNT(*) FROM merges m WHERE m.keeper_id IN (SELECT id FROM scope) OR m.dup_id IN (SELECT id FROM scope)) AS undoable_merge_exposure,
   (SELECT COUNT(*) FROM merges) AS undoable_merges_total,
+  (SELECT COUNT(DISTINCT ah.id) FROM action_history ah
+     JOIN undo_snapshots s ON s.id = json_extract(ah.undo_payload, '$.snapshot_id'), json_tree(s.payload_json) t
+     WHERE ah.status = 'undoable' AND ah.reversible = 1
+       AND json_extract(ah.undo_payload, '$.applier') = 'product.merge.bulk'
+       AND t.key IN ('id', 'keeperId', 'dupId', 'product_id') AND t.atom IN (SELECT id FROM scope)) AS group_merge_exposure,
+  (SELECT COUNT(*) FROM pending_actions pa WHERE pa.status = 'open' AND pa.section = 'products' AND pa.action_type = 'update'
+     AND pa.entity_type = 'product' AND pa.entity_id IN (SELECT id FROM scope)) AS open_review_edits_in_scope,
   datetime('now') AS checked_at_utc
