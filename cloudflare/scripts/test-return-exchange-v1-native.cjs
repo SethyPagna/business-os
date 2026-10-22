@@ -13,7 +13,8 @@
 //   5. a Not Paid original: the refund lowers the debt, nothing is netted, the replacement is Not Paid;
 //   6. the same request replayed: the recorded answer, nothing written twice;
 //   4c. one product on two sale lines at different prices: each returned unit is floored at the line it came from, never at the pooled lowest (6.0.960);
-//   7. refusals leave nothing behind: a short payment, a stale replacement quote, a price under the floor, more units than the shelf holds.
+//   7. refusals leave nothing behind: a short payment, a stale replacement quote, a price under the floor, more units than the shelf holds;
+//   8. (P3-B) extras posted with NO price are the Worker's to price: today's catalog price, whatever the original sale's snapshot says.
 // MUTANT=<name> bundles ONE deliberate defect; BASE_COMMIT=<sha> bundles the Worker as that commit had it (red on a702ea0e7).
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
@@ -29,6 +30,8 @@ const MUTANTS = {
   // 6.0.960 (release review P1-1): covered units pair with their own recorded lines; pooling them at the lowest price lets 11 dollars of units go out for 3.
   'pooled-floor': { file: 'src/lib/returnExchangeQuote.ts', from: 'returned: recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate),',
     to: 'returned: (() => { const own = recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate); return own.length ? [{ quantity: own.reduce((s, l) => s + l.quantity, 0), usd: Math.min(...own.map(l => l.usd ?? Infinity)), khr: Math.min(...own.map(l => l.khr ?? Infinity)) }] : [] })(),' },
+  // 6.0.958 (P3-B): an unposted replacement line is priced from the catalog read NOW; a mutant that prices it from a remembered figure is the stale-snapshot defect.
+  'unposted-uses-stale-price': { file: 'src/lib/returnExchange.ts', from: "    const catalog = sellingPriceCeilCent(money(line.product.selling_price_usd ?? 0, 'return_exchange_price_invalid'))", to: '    const catalog = 10' },
   'credit-is-whole-refund': { file: 'src/lib/returnExchange.ts', from: 'credit_usd: credit,', to: 'credit_usd: input.refundUsd,' },
 }
 
@@ -334,6 +337,62 @@ async function main() {
       r.check(`a caller with the POS price grant may sell at a price of their own ($14 for a $16 item; ${priced.created?.status})`, () => {
         assert.equal(priced.created.status, 200, JSON.stringify(priced.created?.body))
         assert.equal(priced.quoted.total_usd, 14)
+      })
+    }
+
+    // ---- 8. extras posted with no price are the Worker's to price (6.0.958, coordinator P3-B) ----------------------------------------------------------------
+    // The Returns screen posts the unit a returned unit covers at the price the sale recorded and every other unit with NO price. When the "Same item"
+    // shortcut could not read the catalog (a role with Returns alone has no Products view) the screen must not guess a price for those extras from the sale:
+    // the Worker charges today's catalog price whatever the original sale's snapshot says, so a catalog that rose or fell since the sale is neither
+    // undercharged nor overcharged, and the quote the review shows is the amount the create is compared against.
+    {
+      await H.seedProduct(h, 9507, 'EX1 Moved', 10, 200, 4)
+      const setCatalog = usd => h.db.prepare('UPDATE products SET selling_price_usd=?, selling_price_khr=? WHERE id=?').bind(usd, usd * 4000, 9507).run()
+      const sale = await makeSale([{ productId: 9507, quantity: 8, price: 10 }])
+      const snapshot = await h.one('SELECT applied_price_usd, base_price_usd FROM sale_items WHERE sale_id=?', sale.id)
+      const screenLines = [{ product_id: 9507, quantity: 1, applied_price_usd: 10 }, { product_id: 9507, quantity: 2 }]
+      const quoteFor = out => h.call('POST', '/api/returns/quote', { sale_id: sale.id, items: [{ sale_item_id: sale.items[0].id, quantity: 1 }],
+        replacement_items: out.map(line => ({ branch_id: 1, ...line })) }, 'exchange quote', { cookie: returnsOnly })
+      const aba = usd => ({ details: [{ method: 'ABA', amount_usd: usd, amount_khr: 0 }], change_currency: 'USD' })
+      await setCatalog(12)
+      const rose = await exchange(sale, [{ item: 0, quantity: 1 }], screenLines, { cookie: returnsOnly, payment: aba(24) })
+      const roseRows = rose.created?.status === 200 ? await rowsOf(rose.created.body.id) : null
+      r.check(`catalog rose to $12 since the sale (it recorded $${snapshot.applied_price_usd}): the unit a returned unit covers stays at $10, the two extras with no price are $12 each -- quote total ${rose.quoted?.total_usd}, net ${rose.quoted?.net_usd}`, () => {
+        assert.equal(rose.created.status, 200, JSON.stringify(rose.created?.body))
+        assert.deepEqual([rose.quoted.refund_usd, rose.quoted.total_usd, rose.quoted.net_usd], [10, 34, 24])
+        assert.deepEqual(roseRows.items.map(row => [row.quantity, row.applied_price_usd, row.total_usd]), [[1, 10, 10], [2, 12, 24]])
+        assert.equal(Number(roseRows.sale.total_usd), 34)
+      })
+      await setCatalog(7)
+      const fell = await exchange(sale, [{ item: 0, quantity: 1 }], screenLines, { cookie: returnsOnly, payment: aba(14) })
+      const fellRows = fell.created?.status === 200 ? await rowsOf(fell.created.body.id) : null
+      r.check(`catalog fell to $7: the covered unit is still the $10 it was paid at, the two extras are $7 each, not the sale's $10 -- quote total ${fell.quoted?.total_usd}, net ${fell.quoted?.net_usd}`, () => {
+        assert.equal(fell.created.status, 200, JSON.stringify(fell.created?.body))
+        assert.deepEqual([fell.quoted.refund_usd, fell.quoted.total_usd, fell.quoted.net_usd], [10, 24, 14])
+        assert.deepEqual(fellRows.items.map(row => [row.quantity, row.applied_price_usd, row.total_usd]), [[1, 10, 10], [2, 7, 14]])
+      })
+      // The contrast that makes the rule: a price POSTED for the extras is taken at face value (above the floor it is never refused), so a stale figure
+      // sent as if it were the catalog is charged. The screen therefore sends nothing for a price it could not read.
+      const stalePosted = await quoteFor([{ product_id: 9507, quantity: 1, applied_price_usd: 10 }, { product_id: 9507, quantity: 2, applied_price_usd: 10 }])
+      r.check(`contrast: the stale $10 posted for the extras is charged as posted (quote total ${stalePosted.body.exchange?.total_usd}, not $24)`, () => {
+        assert.equal(stalePosted.status, 200, JSON.stringify(stalePosted.body))
+        assert.equal(stalePosted.body.exchange.total_usd, 30)
+      })
+      // The quote is exactly what the create then charges, and an unposted line never shows a different amount in the review than it is charged.
+      const unposted = await quoteFor([{ product_id: 9507, quantity: 3 }])
+      r.check(`a row with no price at all is quoted at today's catalog price: 3 x $7 (quote total ${unposted.body.exchange?.total_usd})`, () => {
+        assert.equal(unposted.status, 200, JSON.stringify(unposted.body))
+        assert.deepEqual(unposted.body.exchange.lines.map(line => [line.quantity, line.unit_price_usd ?? line.applied_price_usd, line.total_usd]), [[3, 7, 21]])
+      })
+      // An active promotion does not change what an unposted line is charged: the Worker prices a replacement at the catalog price or the price the till
+      // posted (lib/returnExchange.ts), and a promotion only lowers the price a caller without the POS grant may post. The review shows the quote either way.
+      await h.db.prepare("INSERT INTO promotion_rules(title,show_title,rule_type,min_quantity,percent_off,scope_type,product_ids,is_active) VALUES('EX1 20% off',1,'percent_off',0,20,'products','[9507]',1)").run()
+      await new Promise(resolve => setTimeout(resolve, 1100))
+      const withRule = await quoteFor([{ product_id: 9507, quantity: 3 }])
+      await h.db.prepare("DELETE FROM promotion_rules WHERE title='EX1 20% off'").run()
+      r.check(`with a 20% promotion active an unposted line is still the catalog price (quote total ${withRule.body.exchange?.total_usd})`, () => {
+        assert.equal(withRule.status, 200, JSON.stringify(withRule.body))
+        assert.equal(withRule.body.exchange.total_usd, 21)
       })
     }
 

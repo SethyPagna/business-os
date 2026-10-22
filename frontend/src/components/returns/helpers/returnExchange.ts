@@ -8,7 +8,7 @@ import type { ReplacementPart } from './replacementPricing.ts'
 
 export type ExchangeChangeCurrency = 'USD' | 'KHR'
 
-type ReplacementRowInput = { product_id: number | string; branch_id: number | string | null; batch_id: number | null; catalog_usd: number }
+type ReplacementRowInput = { product_id: number | string; branch_id: number | string | null; batch_id: number | null; catalog_usd: number | null }
 
 const positiveId = (value: unknown): number | null => {
   const id = Number(value)
@@ -17,16 +17,20 @@ const positiveId = (value: unknown): number | null => {
 
 /**
  * The replacement lines the Worker prices, one per part (a row of units a returned unit covers at the sold price, and a row of the rest at
- * the catalog price). A part at the catalog price carries no price at all: the server's own catalog price applies, so a till never posts a
- * price of its own that it did not need to. A part at any other price is posted, and the Worker refuses it when the caller may not set it.
+ * the catalog price). A part at the catalog price carries no price at all: the server's own catalog price applies, so a till never
+ * posts a price of its own that it did not need to -- and never one it could not read (a part whose catalog price is unknown is never given
+ * one). A part at any other price is posted, and the Worker refuses it when the caller may not set it.
  */
 export function exchangeReplacementItems<Row extends ReplacementRowInput>(rows: readonly Row[], partsOf: (row: Row) => readonly ReplacementPart[]): ReplacementItemV1[] {
   return rows.flatMap((row) => partsOf(row).flatMap((part): ReplacementItemV1[] => {
     const productId = positiveId(row.product_id)
     if (!productId || !(part.quantity > 0)) return []
+    // A part carries a price only when it differs from a catalog price this screen actually read (a covered unit at the sold price); a purchase
+    // part is at the catalog price or at none (unknown), and is left for the Worker to price either way.
+    const price = part.priceUsd != null && (row.catalog_usd == null || Math.abs(part.priceUsd - row.catalog_usd) > 0.000001) ? part.priceUsd : null
     return [{
       product_id: productId, branch_id: positiveId(row.branch_id), batch_id: positiveId(row.batch_id), quantity: part.quantity,
-      ...(Math.abs(part.priceUsd - row.catalog_usd) > 0.000001 ? { applied_price_usd: part.priceUsd } : {}),
+      ...(price != null ? { applied_price_usd: price } : {}),
     }]
   }))
 }

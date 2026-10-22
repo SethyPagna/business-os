@@ -111,13 +111,17 @@ assert.match(newReturn, /catalog_usd: input\.catalogUsd/, 'a replacement row sta
 console.log('PASS the replacement quantity is uncapped and only returned units default to the sold price')
 
 // 3c. 6.0.960 (release review c2f27dce6, P3-4): the "Same item" shortcut read /api/products for the catalog price, which needs the Products view,
-//     so a role with Returns alone was refused (403) and the shortcut was dead. The read goes through resolveSameItemCatalog, which falls back to
-//     the sale's own catalog snapshot when it is refused (the behaviour is pinned in replacementPricing.test.ts); nothing may read it bare again.
+//     so a role with Returns alone was refused (403) and the shortcut was dead. The read goes through resolveSameItemCatalog, which leaves the extras'
+//     price unknown when it is refused (pinned in replacementPricing.test.ts) -- they post no price and the Worker prices them (6.0.958, P3-B); nothing may
+//     read it bare again, and nothing on the screen may name a figure the Worker has not charged.
 const sameItem = newReturn.slice(newReturn.indexOf('const addReplacementSameItem'), newReturn.indexOf('const updateReplacement'))
 assert.match(sameItem, /await resolveSameItemCatalog\(/, 'the shortcut resolves its catalog price through the fallback helper')
-assert.match(sameItem, /\}, selectedItems, item\.product_id\)/, 'the fallback reads the lines of the sale being returned')
-assert.doesNotMatch(sameItem.replace(/await resolveSameItemCatalog\([\s\S]*?\}, selectedItems, item\.product_id\)/, ''), /getProductsByIds/, 'the catalog read exists only inside the fallback helper call')
-assert.match(newReturn, /base_price_usd\?: number \| string \| null/, 'the sale line type carries the catalog snapshot the fallback reads')
+assert.doesNotMatch(sameItem.replace(/await resolveSameItemCatalog\(async \(\) => \{[\s\S]*?\n      \}\)/, ''), /getProductsByIds/, 'the catalog read exists only inside the fallback helper call')
+assert.match(sameItem, /catalogUsd: catalog\.usd,\s*catalogKhr: catalog\.khr,/, 'the extras start from exactly what the catalog read returned (null when it failed), never a figure taken from the sale')
+assert.doesNotMatch(newReturn, /base_price_(usd|khr)/, 'the sale line snapshot is no longer a catalog price: a stale one would be shown, and posted, as if the Worker charged it')
+assert.match(newReturn, /\.\.\.\(part\.priceUsd != null \? \{ applied_price_usd: part\.priceUsd \} : \{\}\)/, 'the legacy payload leaves an unknown price out so the Worker fills the catalog price')
+assert.doesNotMatch(newReturn, /fmtUSD\((?:replacementTotalUsd|part\.priceUsd|replacementPartsTotalUsd)/, 'an amount that may be unknown is shown through usdOrCatalog, never fmtUSD directly')
+assert.match(newReturn, /exchangeQuote \? fmtUSD\(exchangeQuote\.total_usd\) : usdOrCatalog\(replacementTotalUsd\)/, 'the review shows the Worker quote once there is one, the catalog label until then')
 console.log('PASS the Same item shortcut survives a refused catalog read')
 
 // ---------------------------------------------------------------------------

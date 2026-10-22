@@ -6407,6 +6407,7 @@
   "lot_untracked_out": "No received dates — drawn from the branch count",
   "return_lot_from_sale": "Back into the received date this line was sold from",
   "return_lot_pick": "Back into received date",
+  "replacement_price_catalog": "Catalog price",
   "replacement_sale_new": "New sale for these items",
   "replacement_sale_total": "New sale total",
   "replacement_sale_hint": "It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.",

@@ -70,5 +70,28 @@ assert.deepEqual(exchangePaymentBody([row('Cash', '6')], exchange(16, { not_paid
     [{ productId: 9301, quantity: 1, soldUsd: 3, soldKhr: 12000 }], 4000)
   assert.deepEqual(exchangeReplacementItems(rows, (r) => plan.get(r.key) ?? []), [{ product_id: 9302, branch_id: 1, batch_id: 14500, quantity: 2 }], 'another product is a new purchase: catalog price, the lot the operator picked')
 }
+{
+  // 6.0.958 (coordinator P3-B): a "Same item" shortcut whose catalog read was refused has no catalog price (null). 1 of the product sold at $5 comes back,
+  // 3 go out: the covered unit posts the sold price it was paid at -- even though it equals what a stale guess would have been -- and the two extras post
+  // NO price at all, so the Worker prices them at today's catalog price.
+  const rows = [{ key: 'u', product_id: 7, branch_id: 1, batch_id: null, quantity: 3, catalog_usd: null, catalog_khr: null }]
+  const plan = planReplacementParts(rows.map((r) => ({ key: r.key, productId: r.product_id, quantity: r.quantity, catalogUsd: r.catalog_usd, catalogKhr: r.catalog_khr })),
+    [{ productId: 7, quantity: 1, soldUsd: 5, soldKhr: 20000 }], 4000)
+  const lines = exchangeReplacementItems(rows, (r) => plan.get(r.key) ?? [])
+  assert.deepEqual(lines, [
+    { product_id: 7, branch_id: 1, batch_id: null, quantity: 1, applied_price_usd: 5 },
+    { product_id: 7, branch_id: 1, batch_id: null, quantity: 2 },
+  ], 'the covered unit posts its sold price; the extras of an unreadable catalog post none')
+  assert.ok(lines.every((line) => !('applied_price_khr' in line)), 'no riel price is posted either')
+  // Nothing returned of it: the whole row is the Worker's to price.
+  const bare = [{ key: 'v', product_id: 8, branch_id: 1, batch_id: 9, quantity: 4, catalog_usd: null, catalog_khr: null }]
+  const barePlan = planReplacementParts(bare.map((r) => ({ key: r.key, productId: r.product_id, quantity: r.quantity, catalogUsd: r.catalog_usd, catalogKhr: r.catalog_khr })), [], 4000)
+  assert.deepEqual(exchangeReplacementItems(bare, (r) => barePlan.get(r.key) ?? []), [{ product_id: 8, branch_id: 1, batch_id: 9, quantity: 4 }])
+  // A readable catalog is unchanged: sold $5 against a catalog of $5 posts nothing for the covered unit either (the Worker's catalog price is the same).
+  const known = [{ key: 'k', product_id: 7, branch_id: 1, batch_id: null, quantity: 3, catalog_usd: 5, catalog_khr: 20000 }]
+  const knownPlan = planReplacementParts(known.map((r) => ({ key: r.key, productId: r.product_id, quantity: r.quantity, catalogUsd: r.catalog_usd, catalogKhr: r.catalog_khr })),
+    [{ productId: 7, quantity: 1, soldUsd: 5, soldKhr: 20000 }], 4000)
+  assert.deepEqual(exchangeReplacementItems(known, (r) => knownPlan.get(r.key) ?? []).map((line) => 'applied_price_usd' in line), [false, false])
+}
 assert.deepEqual(exchangeReplacementItems([{ product_id: 'x', branch_id: 1, batch_id: null, catalog_usd: 1 }], () => [{ quantity: 1, priceUsd: 1, priceKhr: null, swapped: false }]), [], 'a line without a real product id is never sent')
 console.log('PASS return exchange helpers: amount due, payment rows, short/covered, riel change rounds down, frozen payment body, replacement lines')

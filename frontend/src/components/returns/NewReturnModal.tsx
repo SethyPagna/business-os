@@ -40,7 +40,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
-import { planReplacementParts, replacementPartsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
+import { planReplacementParts, replacementPartsTotalUsd, replacementRowsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
@@ -93,10 +93,6 @@ interface SaleItemRow {
   quantity?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
-  // The catalog snapshot the sale line carries (the price before any manual cut): what the "Same item" shortcut prices the extra units at when
-  // the catalog itself cannot be read (a Returns-only role has no Products view).
-  base_price_usd?: number | string | null
-  base_price_khr?: number | string | null
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
@@ -164,8 +160,10 @@ interface ReplacementLine {
   batches: ProductBatch[]
   quantity: number
   // The catalog price of one unit. What each unit actually goes out at is planned from this and the returned lines
-  // (planReplacementParts): the units a returned unit covers at the sold price, every other unit at this.
-  catalog_usd: number
+  // (planReplacementParts): the units a returned unit covers at the sold price, every other unit at this. Null when the
+  // catalog could not be read here (a "Same item" shortcut for a role without the Products view): those units post no
+  // price and the Worker prices them, so nothing on this screen names a figure for them before the Worker's quote.
+  catalog_usd: number | null
   catalog_khr: number | null
 }
 
@@ -524,8 +522,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     productName: string
     branchId: number | string | null
     quantity: number
-    catalogUsd: number
-    catalogKhr: number
+    catalogUsd: number | null
+    catalogKhr: number | null
     batchId?: number | null
   }) => {
     const branchId = input.branchId || foundSale?.branch_id || null
@@ -539,7 +537,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       batches: [],
       quantity: Math.max(1, Math.floor(input.quantity) || 1),
       catalog_usd: input.catalogUsd,
-      catalog_khr: input.catalogKhr > 0 ? input.catalogKhr : null,
+      catalog_khr: input.catalogKhr != null && input.catalogKhr > 0 ? input.catalogKhr : null,
     }])
     void loadReplacementBatches(key, input.productId, branchId)
   }
@@ -566,7 +564,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // returned rows), so the section stays the one place a replacement is chosen. The row starts at the returned quantity, and the
   // returned units go out at the price the sale recorded; any units added beyond them are priced at the catalog price, which is
   // read here. That read needs the Products view, which a role with Returns alone does not have (403), so it can never be what the
-  // shortcut depends on: when it is refused or fails, the extras fall back to the sale's own catalog snapshot (resolveSameItemCatalog).
+  // shortcut depends on: when it is refused or fails, the price of the extras is unknown here -- they are posted with no price, the Worker
+  // prices them at the catalog price, and the review shows its quote (resolveSameItemCatalog).
   const addReplacementSameItem = async (item: SaleReturnItem) => {
     if (!item.product_id || sameItemBusy) return
     setSameItemBusy(true)
@@ -575,7 +574,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         const { getProductsByIds } = await import('../../api/productReadTransport.ts')
         const payload = await getProductsByIds([item.product_id]) as { items?: ReplacementCandidate[] }
         return Array.isArray(payload?.items) ? payload.items[0] : null
-      }, selectedItems, item.product_id)
+      })
       if (!catalog) throw new Error(T('no_products_found', 'No products found. Try another name, SKU or barcode.'))
       addReplacementLine({
         productId: item.product_id as number | string,
@@ -867,7 +866,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     toNumber(foundSale?.exchange_rate),
   )
   const partsOf = (line: ReplacementLine) => replacementPlan.get(line.key) ?? []
-  const replacementTotalUsd = replacements.reduce((s, line) => s + replacementPartsTotalUsd(partsOf(line)), 0)
+  const replacementTotalUsd = replacementRowsTotalUsd(replacements.map((line) => replacementPartsTotalUsd(partsOf(line))))
+  // A price this screen does not know is never shown as a figure: the row says "Catalog price" and the Worker's quote names the amount.
+  const catalogPriceLabel = T('replacement_price_catalog', 'Catalog price')
+  const usdOrCatalog = (value: number | null) => value == null ? catalogPriceLabel : fmtUSD(value)
   // A money-v1 sale carries its replacement in the same call as the return: the Worker prices these lines, nets them against the refund and
   // takes the customer's payment (or hands the difference back) in one step. A part at the catalog price posts no price of its own.
   const configuredMethods = configuredSettlementMethods(settings?.pos_payment_methods)
@@ -954,9 +956,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               branch_id: line.branch_id,
               batch_id: line.batch_id,
               quantity: part.quantity,
-              applied_price_usd: part.priceUsd,
+              // No price known (the catalog could not be read for a "Same item" extra): none is posted and the Worker uses the catalog price.
+              ...(part.priceUsd != null ? { applied_price_usd: part.priceUsd } : {}),
               // No riel price known (the sale line or the catalog has none): left out, and the Worker uses the catalog riel price.
-              ...(part.priceKhr != null ? { applied_price_khr: part.priceKhr } : {}),
+              ...(part.priceUsd != null && part.priceKhr != null ? { applied_price_khr: part.priceKhr } : {}),
             }))),
             replacement_payment_method: replacementPaymentMethod,
           } : {}),
@@ -1587,11 +1590,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             aria-label={T('quantity', 'Quantity')}
                             value={line.quantity}
                             onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-                          <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
+                          <span className={`${replacementPartsTotalUsd(partsOf(line)) == null ? 'max-w-[6rem] leading-tight' : 'w-16'} flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400`} data-replacement-total={replacementPartsTotalUsd(partsOf(line)) == null ? 'catalog' : 'amount'}>{usdOrCatalog(replacementPartsTotalUsd(partsOf(line)))}</span>
                         </div>
                         {partsOf(line).length > 1 ? (
                           <div className="text-right text-xs leading-relaxed text-gray-400" data-replacement-parts="split">
-                            {partsOf(line).map((part) => `${part.quantity} × ${fmtUSD(part.priceUsd)}`).join(' + ')}
+                            {partsOf(line).map((part) => `${part.quantity} × ${usdOrCatalog(part.priceUsd)}`).join(' + ')}
                           </div>
                         ) : null}
                       </div>
@@ -1604,7 +1607,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1"><Receipt className="h-4 w-4 shrink-0" aria-hidden="true" />{T('replacement_sale_new', 'New sale for these items')}</span>
-                      <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
+                      <span className="font-semibold">{usdOrCatalog(replacementTotalUsd)}</span>
                     </div>
                     {isV1Sale ? (
                       <div className="flex items-center justify-end">
@@ -1679,7 +1682,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div className="flex items-center gap-1"><Trash2 className="h-3 w-3 shrink-0" aria-hidden="true" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short', 'destroyed immediately (booked loss)')}</div>
                 )}
                 {replacements.length > 0 && (
-                  <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short', 'item(s) on the replacement sale receipt')} — {fmtUSD(exchangeQuote ? exchangeQuote.total_usd : replacementTotalUsd)}{exchangeQuote ? '' : ` · ${replacementPaymentMethod}`}</div>
+                  <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short', 'item(s) on the replacement sale receipt')} — {exchangeQuote ? fmtUSD(exchangeQuote.total_usd) : usdOrCatalog(replacementTotalUsd)}{exchangeQuote ? '' : ` · ${replacementPaymentMethod}`}</div>
                 )}
               </div>
             </div>
@@ -1727,12 +1730,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 )) : replacements.map((line) => (
                   <div key={line.key} className="flex justify-between py-1 text-sm">
                     <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
-                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{usdOrCatalog(replacementPartsTotalUsd(partsOf(line)))}</span>
                   </div>
                 ))}
                 <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
                   <span>{T('replacement_sale_total', 'New sale total')}{exchangeQuote ? '' : ` · ${replacementPaymentMethod}`}</span>
-                  <span>{fmtUSD(exchangeQuote ? exchangeQuote.total_usd : replacementTotalUsd)}</span>
+                  <span>{exchangeQuote ? fmtUSD(exchangeQuote.total_usd) : usdOrCatalog(replacementTotalUsd)}</span>
                 </div>
               </div>
             )}

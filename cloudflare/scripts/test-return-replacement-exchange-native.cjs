@@ -21,7 +21,9 @@
 //      that was already under its floor are not refused;
 //   7. (6.0.960, release review c2f27dce6) the same guard on a sale that carries the product on two lines at different prices: the floor pairs
 //      each covered unit with its own recorded line, highest price first, so taking the dearer line's units out of the return is refused and an
-//      unrelated edit of the very same units is not.
+//      unrelated edit of the very same units is not;
+//   8. (6.0.958, P3-B) a legacy replacement line posted with NO price is the Worker's to price: today's catalog price, dollars and riel, whatever the
+//      original sale recorded -- the Returns screen posts none for a price it could not read (a catalog that rose or fell since the sale).
 // Checks marked "base:" are red on the commit before this change (BASE_COMMIT=95dd89f15). MUTANT=<name> bundles ONE deliberate defect.
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
@@ -29,6 +31,8 @@ const H = require('./harness/al_money_native.cjs')
 const MUTANTS = {
   'edit-guard-off': { file: 'src/routes/returns.ts', from: 'if (Array.isArray(body.items) && !canSetSalePrice(user)) {', to: 'if (false) {' },
   'edit-refuses-already-under': { file: 'src/routes/returns.ts', from: 'if (await firstDisallowedReplacementPrice(db, linesFor(input.before), input.exchangeRate)) return null', to: '' },
+  // 6.0.958 (P3-B): an unposted legacy line takes the catalog price read now; a mutant that takes a remembered figure is the stale-snapshot defect.
+  'v0-unposted-stale': { file: 'src/routes/returns.ts', from: 'const priceUsd = input.applied_price_usd != null ? toNumber(input.applied_price_usd) : toNumber(meta.selling_price_usd)', to: 'const priceUsd = input.applied_price_usd != null ? toNumber(input.applied_price_usd) : 3' },
   'edit-uses-price-code': { file: 'src/routes/returns.ts', from: '...RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, product_id: offending', to: '...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offending' },
   'edit-guard-ignores-after': { file: 'src/routes/returns.ts', from: 'return (await firstDisallowedReplacementPrice(db, linesFor(input.after), input.exchangeRate))?.productId ?? null', to: 'return null' },
 }
@@ -42,6 +46,7 @@ async function main() {
     await H.seedProduct(h, 9301, 'EX Lipstick', 5, 100, 1)
     await H.seedProduct(h, 9302, 'EX Gloss', 4, 100, 1)
     await H.seedProduct(h, 9311, 'EX TwoPrice', 5, 400, 1)
+    await H.seedProduct(h, 9321, 'EX Moved', 5, 100, 1)
     const returnsOnly = await h.addEmployee(1941, 'ex-returns-only', { returns: true })
     const sold = await H.importSale(h, 901, 'completed', [{ productId: 9301, name: 'EX Lipstick', quantity: 20, price: 3 }], { jobId: 'ex-job' })
     const line = sold.items[0]
@@ -264,6 +269,37 @@ async function main() {
     r.check(`the advice works: the extra unit recorded as a return of its own is accepted (${extraBack.status})`, () => assert.equal(extraBack.status, 200, JSON.stringify(extraBack.body)))
     const adminDearOnly = await edit(created.body.id, { ...back([[dear, 2]]), reason: 'EX two prices, admin' }, 'two prices edit: admin keeps only the two $5 units', {})
     r.check(`control: a grant holder makes the same edit (${adminDearOnly.status})`, () => assert.equal(adminDearOnly.status, 200, JSON.stringify(adminDearOnly.body)))
+
+    // ---- 8. a line posted with no price is priced by the Worker at today's catalog price (6.0.958, P3-B) -------------------------------------------------------
+    // The Returns screen's "Same item" shortcut posts the unit a returned unit covers at the price the sale recorded and every other unit with no price at all
+    // when it could not read the catalog. The catalog may have moved since the sale: the extras are charged what the catalog says now, dollars and riel.
+    {
+      const movedSale = await H.importSale(h, 904, 'completed', [{ productId: 9321, name: 'EX Moved', quantity: 10, price: 3 }], { jobId: 'ex-job' })
+      await h.db.prepare('UPDATE sale_items SET applied_price_khr=12000 WHERE id=?').bind(movedSale.items[0].id).run()
+      const setCatalog = usd => h.db.prepare('UPDATE products SET selling_price_usd=?, selling_price_khr=? WHERE id=?').bind(usd, usd * 4000, 9321).run()
+      const screen = [{ product_id: 9321, quantity: 1, applied_price_usd: 3, applied_price_khr: 12000 }, { product_id: 9321, quantity: 2 }]
+      const swap = (key, label) => h.call('POST', '/api/returns', { client_request_id: `ex-${key}`, sale_id: movedSale.sale.id, reason: 'EX moved catalog', return_type: 'restock',
+        items: [{ sale_item_id: movedSale.items[0].id, product_id: 9321, quantity: 1, stock_action: 'restock', branch_id: 1 }],
+        replacement_items: screen.map(item => ({ branch_id: 1, ...item })) }, label, { cookie: returnsOnly })
+      await setCatalog(6)
+      const rose = await swap('moved-rose', 'catalog rose to $6: one unit at the sold $3, two with no price')
+      const roseRows = rose.status === 200 ? await rowsOf(rose.body.id) : null
+      r.check(`catalog rose to $6: the covered unit is the sold $3, the two unposted units are $6 and 24000 riel each -- sale ${roseRows && JSON.stringify([roseRows.sale.total_usd, roseRows.sale.total_khr])}`, () => {
+        assert.equal(rose.status, 200, JSON.stringify(rose.body))
+        assert.deepEqual(roseRows.saleItems.map(row => [row.quantity, row.applied_price_usd, row.applied_price_khr]), [[1, 3, 12000], [2, 6, 24000]])
+        assert.equal(Number(roseRows.sale.total_usd), 15)
+        assert.equal(Number(roseRows.sale.total_khr), 60000)
+      })
+      await setCatalog(4)
+      const fell = await swap('moved-fell', 'catalog fell to $4: one unit at the sold $3, two with no price')
+      const fellRows = fell.status === 200 ? await rowsOf(fell.body.id) : null
+      r.check(`catalog fell to $4: the two unposted units are $4 and 16000 riel each, not the sale's $3 or the old $6 -- sale ${fellRows && JSON.stringify([fellRows.sale.total_usd, fellRows.sale.total_khr])}`, () => {
+        assert.equal(fell.status, 200, JSON.stringify(fell.body))
+        assert.deepEqual(fellRows.saleItems.map(row => [row.quantity, row.applied_price_usd, row.applied_price_khr]), [[1, 3, 12000], [2, 4, 16000]])
+        assert.equal(Number(fellRows.sale.total_usd), 11)
+        assert.equal(Number(fellRows.sale.total_khr), 44000)
+      })
+    }
   } finally {
     await h.mf.dispose()
   }
