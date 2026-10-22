@@ -46,7 +46,8 @@ const results: Array<[string, () => void]> = [
       assert.ok(own.length >= 1, `${file} still guards its writes`)
       assert.ok(own.every((read) => /confirmServerReachable/.test(read.line)), `${file}: every read asks the server`)
     }
-    assert.equal(reads.filter((read) => read.file === 'api/returnsTransport.ts').length, 3)
+    // 6.0.958: the exchange quote (getReturnExchangeQuoteV1) is the fourth guarded read, and asks the server like the other three.
+    assert.equal(reads.filter((read) => read.file === 'api/returnsTransport.ts').length, 4)
     assert.equal(reads.filter((read) => read.file === 'api/salesTransport.ts').length, 2)
   }],
   ['the UI no longer decides on the browser flag: ActionHistoryBar and ResolveModal read nothing from navigator', () => {

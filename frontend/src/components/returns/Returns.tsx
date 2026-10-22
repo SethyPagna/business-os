@@ -1349,7 +1349,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       const transport = await loadReturnsWriteTransport()
       return await takeBackReplacement({
         userId: user?.id,
-        reason: tr('return_cancel_replacement_reason', 'Replacement items cancelled with the return', 'ទំនិញជំនួសត្រូវបានបោះបង់ជាមួយការត្រឡប់'),
+        reason: tr('return_cancel_replacement_reason', 'Replacement items cancelled with the return', 'ទំនិញជំនួសត្រូវបានបោះបង់ជាមួយការប្រគល់មកវិញ'),
         getReturnQuoteV1: transport.getReturnQuoteV1,
         prepareReturnCreateV1: transport.prepareReturnCreateV1 as never,
         submitReturnCreateV1: transport.submitReturnCreateV1 as never,

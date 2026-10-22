@@ -89,7 +89,7 @@ export default function ReplacementChoiceList({ items, loading, failed, canTakeB
               </ul>
             ) : null}
             {!canTakeBack ? (
-              <p className="text-xs text-emerald-800 dark:text-emerald-200">{tr('return_cancel_replacement_need_add', 'Taking replacement items back needs permission to add returns. They stay with the customer.', 'ការយកទំនិញជំនួសមកវិញត្រូវការសិទ្ធិបន្ថែមការត្រឡប់។ ទំនិញនៅជាមួយអតិថិជន។')}</p>
+              <p className="text-xs text-emerald-800 dark:text-emerald-200">{tr('return_cancel_replacement_need_add', 'Taking replacement items back needs permission to add returns. They stay with the customer.', 'ការយកទំនិញជំនួសមកវិញត្រូវការសិទ្ធិបន្ថែមការប្រគល់មកវិញ។ ទំនិញនៅជាមួយអតិថិជន។')}</p>
             ) : null}
             {answer.cancel && !ready ? (
               <p role="alert" className="text-xs text-red-600 dark:text-red-300">{tr('return_cancel_replacement_pick_one', 'Tick at least one replacement item, or untick the box to keep them all.', 'សូមធីកទំនិញជំនួសយ៉ាងហោចណាស់មួយ ឬដោះធីកប្រអប់ដើម្បីទុកទាំងអស់។')}</p>
