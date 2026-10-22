@@ -103,6 +103,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   supplier_return_failed: 'supplier_return_failed',
   return_edit_failed: 'return_edit_failed',
   product_import_stock_adjust_required: 'product_import_stock_adjust_required',
+  product_price_edit_required: 'product_price_edit_required',
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',

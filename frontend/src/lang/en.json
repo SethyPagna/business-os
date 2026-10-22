@@ -4802,6 +4802,7 @@
   "supplier_return_failed": "The supplier return could not be recorded. Nothing was saved. Try again.",
   "return_edit_failed": "The return could not be updated. Nothing was saved. Try again.",
   "product_import_stock_adjust_required": "You do not have permission to adjust stock, so this import cannot add or change stock",
+  "product_price_edit_required": "You do not have permission to change product prices",
   "customer_return_owed_unreadable": "The sale money cannot be read, so the debt this return lowers is unknown.",
   "return_refund_khr_unavailable": "This return has no riel price to refund in riel. Refund it in dollars.",
   "return_reopens_paid_sale_debt": "This return lowered what the customer owed, and the sale has been paid since. Taking it back would leave a paid sale owing money. Reopen the sale for payment first.",
