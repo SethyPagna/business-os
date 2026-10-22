@@ -28,7 +28,7 @@ import {
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
-import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { applyReturnBulkActionOutcome, notifyReturnBulkAction, readReplacementOutstanding, ReturnBulkError } from '../lib/returnBulkAction'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -1055,7 +1055,10 @@ app.post('/bulk', async (c) => {
     // slow original, or that original itself -- gets the stored receipt with
     // wrote=false, so one write is announced once (R-telegram E1). A read made
     // here before the write could not tell; see applyReturnBulkActionOutcome.
-    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c))
+    // The grouped action is one atomic batch: it is sized against what this invocation has left (Free runs 50 D1 queries) before it is sent.
+    const bulkMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c),
+      bulkMetrics ? { statementsUsed: () => bulkMetrics.attemptedStatements + 1, reserveStatements: 8 } : undefined)
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
@@ -1098,7 +1101,11 @@ app.get('/:id', async (c) => {
   if (!row) return c.json({ error: 'Return not found' }, 404)
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
   const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
-  return c.json({ ...row, items, replacement_items: replacementItems })
+  // A one-step exchange's replacement units still with the customer (6.0.958): what the cancel screen asks about before a return that opened
+  // a replacement sale is cancelled. Null for a return with no replacement sale, a cancelled one, or one whose replacement is all back.
+  const outstanding = Number(row.replacement_sale_id) > 0 && String(row.status || 'completed') !== 'cancelled'
+    ? (await readReplacementOutstanding(db, [Number(row.id)]))[0] ?? null : null
+  return c.json({ ...row, items, replacement_items: replacementItems, replacement_outstanding: outstanding })
 })
 
 // ---------------------------------------------------------------------------

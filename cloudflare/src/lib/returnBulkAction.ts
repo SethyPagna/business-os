@@ -4,13 +4,15 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
+import { getPlanLimits } from './planTier'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
-import { subtractDecimalSum } from './moneyPrecision'
+import { multiplyMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
+import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_REPLACEMENT_PRICE_REFUSAL, type ReplacementPriceLine } from './returnReplacementPrice'
 import {
   assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams,
 } from './returnCreateAction'
@@ -27,6 +29,13 @@ import {
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
+
+// The plan's D1 queries per invocation (50 on Free) is shared by the whole request. A grouped return action runs one atomic batch whose size grows
+// with the stock lines it moves, so the batch is checked against what the request has already spent BEFORE it is sent: a selection that cannot fit
+// is refused whole with a sentence, never cut off part-way through the invocation. reserveStatements is what the route still needs after the batch.
+// An undo or redo is a request of its own and is sized the same way. Measured on Free (test-return-exchange-cancel-free-native.cjs) a cancel's own
+// bookkeeping is the larger of the two, so a cancel that fits can be undone; the replay check keeps that true if the bookkeeping ever shifts.
+export type ReturnBulkQueryBudget = { statementsUsed(): number; reserveStatements: number }
 const RETURN_BULK_MOVEMENT_LIMIT = 256
 
 type Row = Record<string, unknown>
@@ -44,6 +53,9 @@ type BulkRequest = {
     expected_status: string
     expected_method: string
     expected_updated_at: string | null
+    // Cancelling a return that has replacement units still with the customer (6.0.958): the returns the till made to take those units back,
+    // [] when the replacement stays. Sorted and unique. Absent on every other request.
+    replacement?: { return_ids: number[] }
   }>
 }
 
@@ -132,6 +144,10 @@ type Member = {
   // again against the sale as it stands. Absent on older snapshots and on
   // every other member, which then leave both columns alone.
   money?: { before: ReturnMoneyState; after: ReturnMoneyState }
+  // A return the till made to take replacement units of a cancelled exchange back (a normal return of the replacement sale). It is already
+  // completed when the cancel is applied, so applying writes nothing for it; UNDO cancels it again (the units leave the shelf), REDO restores it.
+  // Absent on snapshots written before 6.0.958, whose members are all the returns the operator selected.
+  linked?: true
 }
 
 type ReturnMoneyState = { owed_reduction_usd: number; refund_currency: string | null }
@@ -173,6 +189,19 @@ function methodValue(row: Row): string {
     : normalize(row.return_type, 'manual')
 }
 
+const REPLACEMENT_RETURNS_PER_ITEM = 10
+
+function parseReplacementChoice(value: unknown, field: ReturnField, target: string): { return_ids: number[] } | undefined {
+  if (value === undefined) return undefined
+  if (field !== 'status' || target !== 'cancelled') fail('A replacement choice only applies when cancelling a return.', 400)
+  const choice = value as Row
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice) || Object.keys(choice).some((key) => key !== 'return_ids')
+    || !Array.isArray(choice.return_ids) || choice.return_ids.length > REPLACEMENT_RETURNS_PER_ITEM) fail('The replacement choice is invalid.', 400)
+  const ids = (choice.return_ids as unknown[]).map(Number)
+  if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) fail('The replacement choice is invalid.', 400)
+  return { return_ids: ids.sort((a, b) => a - b) }
+}
+
 function parseRequest(raw: Row): BulkRequest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('A bulk return action is required.', 400)
   const allowed = ['client_request_id', 'field', 'source', 'target', 'items']
@@ -194,21 +223,29 @@ function parseRequest(raw: Row): BulkRequest {
     const item = candidate as Row
     const keys = Object.keys(item || {})
     const id = Number(item?.id)
-    if (!item || typeof item !== 'object' || keys.some((key) => !['id', 'expected_status', 'expected_method', 'expected_updated_at'].includes(key))
+    if (!item || typeof item !== 'object' || keys.some((key) => !['id', 'expected_status', 'expected_method', 'expected_updated_at', 'replacement'].includes(key))
       || !Number.isSafeInteger(id) || id <= 0 || ids.has(id)
       || typeof item.expected_status !== 'string' || typeof item.expected_method !== 'string'
       || !(typeof item.expected_updated_at === 'string' || item.expected_updated_at === null)) {
       fail('Unique return ids and expected states are required.', 400)
     }
     ids.add(id)
+    const replacement = parseReplacementChoice(item.replacement, field, target)
     return {
       id,
       expected_status: normalize(item.expected_status, 'completed'),
       expected_method: normalize(item.expected_method),
       expected_updated_at: item.expected_updated_at as string | null,
+      ...(replacement ? { replacement } : {}),
     }
   }).sort((left, right) => left.id - right.id)
   return { client_request_id: raw.client_request_id, field, source, target, items }
+}
+
+function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
+  if (used + planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {
+    fail('This selection is too large for the current plan. Select fewer returns or replacement items, then try again.', 400, 'return_bulk_over_plan_budget')
+  }
 }
 
 function guard(predicate: string, params: Row = {}): Statement {
@@ -302,8 +339,9 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
   return out
 }
 
-function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
-  if (!member.changed) return []
+function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, applying = false): Statement[] {
+  // A linked replacement return is already completed when the cancel is applied: nothing to write on the way in, everything on undo and redo.
+  if (!member.changed || (applying && member.linked)) return []
   const target = direction > 0 ? member.after : member.before
   const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
   return [
@@ -323,7 +361,7 @@ function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, 
  * again is refused instead.
  */
 async function planStatusMoney(db: D1Compat, members: Member[]): Promise<void> {
-  const touched = members.filter(member => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
+  const touched = members.filter(member => member.changed && member.updateSale && member.saleId && member.scope === 'customer' && !member.linked)
   for (const [saleId, money] of await readSalesReturnMoney(db, [...new Set(touched.map(member => member.saleId!))])) {
     const own = touched.filter(member => member.saleId === saleId)
     const status = new Map(own.map(member => [member.id, member.after.status]))
@@ -557,16 +595,152 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     exactTags }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[] }> {
+// ---- the replacement left with the customer (6.0.958) ------------------------------------------------------------------------------------------
+
+/** A line of a one-step exchange's replacement sale: what was sold, and how many units of it are still with the customer. */
+export type ReplacementOutstandingLine = {
+  id: number
+  sale_item_id: number | null
+  product_id: number | null
+  product_name: string | null
+  branch_id: number | null
+  batch_id: number | null
+  /** Units still with the customer: what the replacement sale sold less what active returns of that sale took back. */
+  quantity: number
+  applied_price_usd: number
+  applied_price_khr: number
+}
+export type ReplacementOutstanding = {
+  return_id: number
+  sale_id: number
+  receipt_number: string | null
+  money_precision_version: number
+  exchange_rate: number
+  lines: ReplacementOutstandingLine[]
+}
+// Every line of the replacement sale, taken back or not (`quantity` is what is left, 0 for a line that is fully back), with the catalog
+// price the price floor holds the units that stay to.
+type ReplacementInfo = Omit<ReplacementOutstanding, 'lines'> & { lines: Array<ReplacementOutstandingLine & { catalog_usd: number | null }> }
+
+async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<Map<number, ReplacementInfo>> {
+  const infos = new Map<number, ReplacementInfo>()
+  if (!returnIds.length) return infos
+  const rows = await rowsForIds<Row>(db, returnIds, (marks) => `
+    SELECT rri.return_id,rri.id,rri.sale_item_id,rri.product_id,rri.product_name,rri.branch_id,rri.batch_id,
+      COALESCE(si.quantity,0) AS sale_quantity,
+      COALESCE(si.applied_price_usd,rri.applied_price_usd) AS applied_price_usd,COALESCE(si.applied_price_khr,rri.applied_price_khr) AS applied_price_khr,
+      MAX(COALESCE(si.returned_quantity,0),0)+COALESCE((SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r2 ON r2.id=ri.return_id
+        WHERE ri.sale_item_id=rri.sale_item_id AND COALESCE(r2.status,'completed')<>'cancelled'),0) AS returned_quantity,
+      s.id AS sale_id,s.sale_status,s.receipt_number,s.exchange_rate,s.money_precision_version,p.selling_price_usd
+    FROM return_replacement_items rri
+    JOIN returns r ON r.id=rri.return_id
+    LEFT JOIN sales s ON s.id=r.replacement_sale_id
+    LEFT JOIN sale_items si ON si.id=rri.sale_item_id AND si.sale_id=r.replacement_sale_id
+    LEFT JOIN products p ON p.id=rri.product_id
+    WHERE rri.return_id IN (${marks}) ORDER BY rri.return_id,rri.id LIMIT 301`)
+  if (rows.length > 300) fail('Select fewer returns with replacement lines.', 400)
+  for (const row of rows) {
+    const returnId = Number(row.return_id)
+    const info = infos.get(returnId) ?? {
+      return_id: returnId, sale_id: Number(row.sale_id) || 0, receipt_number: (row.receipt_number as string | null) ?? null,
+      money_precision_version: Number(row.money_precision_version) || 0, exchange_rate: Number(row.exchange_rate) || 0, lines: [],
+    }
+    // A cancelled replacement sale (or a line the sale no longer has) has nothing left with the customer.
+    const gone = normalize(row.sale_status) === 'cancelled' || row.sale_item_id == null || !(Number(row.sale_quantity) > 0)
+    const left = gone ? 0 : Math.max(0, Number(subtractDecimalSum(Number(row.sale_quantity) || 0, [Number(row.returned_quantity) || 0])))
+    info.lines.push({
+      id: Number(row.id), sale_item_id: row.sale_item_id == null ? null : Number(row.sale_item_id), product_id: row.product_id == null ? null : Number(row.product_id),
+      product_name: (row.product_name as string | null) ?? null, branch_id: row.branch_id == null ? null : Number(row.branch_id),
+      batch_id: row.batch_id == null ? null : Number(row.batch_id), quantity: left,
+      applied_price_usd: Number(row.applied_price_usd) || 0, applied_price_khr: Number(row.applied_price_khr) || 0,
+      catalog_usd: row.selling_price_usd == null ? null : Number(row.selling_price_usd),
+    })
+    infos.set(returnId, info)
+  }
+  return infos
+}
+
+/**
+ * What each exchange return still has with the customer: the replacement lines whose units no active return took back (the Returns screen
+ * asks about exactly these before cancelling the return). Returns with nothing left, or no replacement sale, are absent.
+ */
+export async function readReplacementOutstanding(db: D1Compat, returnIds: number[]): Promise<ReplacementOutstanding[]> {
+  const infos = await readReplacementInfo(db, returnIds)
+  return [...infos.values()].flatMap(({ lines, ...info }) => {
+    const left = lines.filter((line) => line.quantity > 0).map(({ catalog_usd: _catalog, ...line }) => line)
+    return left.length ? [{ ...info, lines: left }] : []
+  })
+}
+
+/**
+ * The answer every request that CANCELS an exchange return must give (owner, 22 Oct 2026: "if cancel, ask if replacement also cancel, if so,
+ * choose some or all"). A line's outstanding units are what the replacement sale sold less what active returns took back from it; when any are
+ * left the request must SAY what happens to them -- replacement.return_ids: the returns the till made to take units back, [] to keep them all --
+ * or it is refused with every line to choose from. A request never silently leaves a replacement behind. The units that stay are priced as they
+ * would be for a sale with no return behind them (nothing returned), so a caller without the POS price grant cannot cancel the return out from
+ * under a replacement that was only discounted because of it (release review, P3-3).
+ */
+async function planReplacementChoices(db: D1Compat, request: BulkRequest, returns: Row[], user: SessionUser | undefined): Promise<Map<number, ReplacementInfo>> {
+  const cancelling = request.items.filter((item) => {
+    const row = returns.find((candidate) => Number(candidate.id) === item.id)
+    return !!row && normalize(row.status, 'completed') === request.source && normalize(row.return_scope, 'customer') !== 'supplier' && Number(row.replacement_sale_id) > 0
+  })
+  const infos = await readReplacementInfo(db, cancelling.map((item) => item.id))
+  const undecided = request.items.flatMap((item) => {
+    const info = infos.get(item.id)
+    const kept = info ? info.lines.filter((line) => line.quantity > 0) : []
+    if (item.replacement?.return_ids.length && !info) fail(`Return ${item.id} has no replacement items to cancel.`, 400, 'return_cancel_replacement_invalid')
+    return kept.length && !item.replacement ? [{ info: info!, kept }] : []
+  })
+  if (undecided.length) {
+    fail('A return being cancelled has replacement items still with the customer. Say whether they are cancelled too.', 409, 'return_cancel_replacement_choice_required', undefined, {
+      replacements: undecided.map(({ info, kept }) => ({
+        return_id: info.return_id, sale_id: info.sale_id, receipt_number: info.receipt_number, money_precision_version: info.money_precision_version, exchange_rate: info.exchange_rate,
+        lines: kept.map(({ catalog_usd: _catalog, ...line }) => line),
+      })),
+    })
+  }
+  // The units that stay behind a cancelled return: priced like a sale of their own for a caller who may not set prices.
+  if (user && !canSetSalePrice(user)) {
+    for (const item of request.items) {
+      const info = infos.get(item.id)
+      const stay = info ? info.lines.filter((line) => line.quantity > 0 && line.product_id != null) : []
+      if (!info || !stay.length || !(info.exchange_rate > 0)) continue
+      const lines: ReplacementPriceLine[] = stay.map((line) => {
+        const catalogUsd = sellingPriceCeilCent(line.catalog_usd ?? line.applied_price_usd)
+        return {
+          productId: line.product_id!, quantity: line.quantity, priceUsd: line.applied_price_usd, priceKhr: line.applied_price_khr,
+          catalogUsd, catalogKhr: multiplyMoney4(catalogUsd, info.exchange_rate), returned: [],
+        }
+      })
+      const offender = await firstDisallowedReplacementPrice(db, lines, info.exchange_rate)
+      if (offender) fail(RETURN_REPLACEMENT_PRICE_REFUSAL.error, 403, RETURN_REPLACEMENT_PRICE_REFUSAL.code, undefined, { product_id: offender.productId })
+    }
+  }
+  return infos
+}
+
+async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[] }> {
   const ids = request.items.map((item) => item.id)
-  const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
-  const matchingIds = request.items.flatMap((expected) => {
+  // The returns the till made to take replacement units back are read, guarded and stocked together with the selected ones.
+  const linkedIds = [...new Set(request.items.flatMap((item) => item.replacement?.return_ids ?? []))].sort((a, b) => a - b)
+  if (linkedIds.some((id) => ids.includes(id))) fail('A replacement return cannot also be one of the selected returns.', 400, 'return_cancel_replacement_invalid')
+  if (ids.length + linkedIds.length > RETURN_BULK_LIMIT) fail(`Select between 1 and ${RETURN_BULK_LIMIT} returns including their replacement returns.`, 400)
+  const returns = await rowsForIds<Row>(db, [...ids, ...linkedIds], (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
+  const replacement = request.field === 'status' && request.target === 'cancelled'
+    ? await planReplacementChoices(db, request, returns, user)
+    : new Map<number, ReplacementInfo>()
+  for (const id of linkedIds) {
+    if (!returns.some((candidate) => Number(candidate.id) === id)) fail(`Return ${id} changed. The entire group was rejected; refresh before retrying.`)
+  }
+  const requestedMatching = request.items.flatMap((expected) => {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) fail(`Return ${expected.id} changed. The entire group was rejected; refresh before retrying.`)
     const scope = normalize(row.return_scope, 'customer') === 'supplier' ? 'supplier' : 'customer'
     const current = request.field === 'status' ? normalize(row.status, 'completed') : normalize(row[request.field], request.field === 'supplier_settlement' ? 'refund' : 'manual')
     return (request.field === 'status' || request.field === methodField(scope)) && current === request.source ? [expected.id] : []
   })
+  const matchingIds = [...requestedMatching, ...linkedIds]
   if (returns.some((row) => matchingIds.includes(Number(row.id)) && row.movement_fingerprint === null)) fail(`A matching return exceeds ${RETURN_BULK_MOVEMENT_LIMIT} stock movements.`, 400)
   const items = await rowsForIds<ReturnItem>(db, matchingIds, (marks) => `SELECT ri.* FROM return_items ri WHERE ri.return_id IN (${marks}) ORDER BY ri.id LIMIT 301`)
   if (items.length > 300) fail('Select fewer return lines (maximum 300).', 400)
@@ -591,20 +765,38 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
   // there now; the return keeps its own branch and label. While every branch is active nothing is redirected and
   // nothing below changes.
   const resolver = new BranchEffectResolver(await readBranchDirectory(db), redirectTarget)
-  for (const expected of request.items) {
+  const work = [
+    ...request.items.map((expected) => ({ expected, parent: null as number | null })),
+    ...request.items.flatMap((item) => (item.replacement?.return_ids ?? []).map((id) => ({
+      expected: { id, expected_status: 'completed', expected_method: '', expected_updated_at: null as string | null }, parent: item.id as number | null,
+    }))),
+  ]
+  for (const { expected, parent } of work) {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) {
       fail(`Return ${expected.id} changed. The entire group was rejected; refresh before retrying.`)
     }
     const scope: Member['scope'] = normalize(row.return_scope, 'customer') === 'supplier' ? 'supplier' : 'customer'
-    const before = valueSnapshot(row)
+    const linked = parent !== null
+    const linkedTo = parent !== null ? replacement.get(parent) : undefined
+    if (parent !== null) {
+      // Only a completed customer return of THIS exchange's replacement sale, taking back only units that sale sold as this exchange's lines.
+      const lineIds = new Set((linkedTo?.lines ?? []).map((line) => line.sale_item_id))
+      const own = items.filter((item) => item.return_id === expected.id)
+      if (scope !== 'customer' || !linkedTo || normalize(row.status, 'completed') !== 'completed' || Number(row.sale_id) !== linkedTo.sale_id || expected.id < parent
+        || !own.length || own.some((item) => !lineIds.has(Number(item.sale_item_id)))) {
+        fail(`Return ${expected.id} is not a return of the replacement items of return ${parent}.`, 409, 'return_cancel_replacement_invalid')
+      }
+    }
+    // A linked return is the cancelled side of this action's undo: before the action it did not exist as completed, after it is (see Member.linked).
+    const before = linked ? { ...valueSnapshot(row), status: 'cancelled' } : valueSnapshot(row)
     const current = request.field === 'status' ? before.status : before[request.field]
     const fieldMatchesScope = request.field === 'status' || request.field === methodField(scope)
-    const changed = fieldMatchesScope && current === request.source
-    if (changed && (before.status !== expected.expected_status || methodValue(row) !== expected.expected_method || (row.updated_at ?? null) !== expected.expected_updated_at)) {
+    const changed = linked || (fieldMatchesScope && current === request.source)
+    if (!linked && changed && (before.status !== expected.expected_status || methodValue(row) !== expected.expected_method || (row.updated_at ?? null) !== expected.expected_updated_at)) {
       fail(`Return ${expected.id} changed. The entire group was rejected; refresh before retrying.`)
     }
-    const after = { ...before, ...(changed ? { [request.field]: request.target } : {}) }
+    const after = linked ? { ...before, status: 'completed' } : { ...before, ...(changed ? { [request.field]: request.target } : {}) }
     const member: Member = {
       id: expected.id,
       returnNumber: String(row.return_number || expected.id),
@@ -618,6 +810,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       reason: changed ? 'changed' : fieldMatchesScope ? 'source_mismatch' : 'scope_mismatch',
       updateSale: false,
       stock: [],
+      ...(linked ? { linked: true as const } : {}),
     }
     if (changed) {
       guards.push(guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision", { id: expected.id, revision: Number(row.write_revision) || 0 }))
@@ -684,8 +877,8 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           const costUsd = groupedRecordedCost(groupedItems, 'cost_price_usd', itemQuantity)
           const costKhr = groupedRecordedCost(groupedItems, 'cost_price_khr', itemQuantity)
           for (const lot of lots) {
-            if (cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
-            if (restoring && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
+            if ((cancelling || linked) && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
+            if (restoring && !linked && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: lot.batch_id, damagedLotId: lot.id, quantity: cancelling ? -Number(lot.quantity) : Number(lot.quantity), costUsd, costKhr, movementType: '' })
           }
           continue
@@ -730,8 +923,8 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
   ])
 }
 
-export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<Row> {
-  return (await applyReturnBulkActionOutcome(env, user, raw, redirectTarget)).receipt
+export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<Row> {
+  return (await applyReturnBulkActionOutcome(env, user, raw, redirectTarget, queryBudget)).receipt
 }
 
 /**
@@ -746,7 +939,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
  */
 export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 
-export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<ReturnBulkOutcome> {
+export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -756,12 +949,14 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards } = await buildMembers(db, request, redirectTarget)
+  const { members, guards } = await buildMembers(db, request, redirectTarget, user)
+  // What the operator selected is what the receipt, the counts and the Telegram alert speak of; the linked replacement returns ride in the snapshot.
+  const selected = members.filter((member) => !member.linked)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
-  const saleRows = request.field === 'status' ? await saleTagRows(db, members, 'after') : []
+  const saleRows = request.field === 'status' ? await saleTagRows(db, selected, 'after') : []
   if (request.field === 'status') await planStatusMoney(db, members)
   const snapshot: Snapshot = { version: 1, operationId, field: request.field, members, tagged: true,
     saleStatuses: saleRows.map(row => {
@@ -769,8 +964,8 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
       const tag = entitlement.exactTags.has(row.saleId) ? entitlement.exactTags.get(row.saleId)! : row.tagAfter
       return { saleId: row.saleId, before: saleReturnRecordWord(stored), after: saleReturnRecordWord({ ...stored, returnState: tag }) }
     }) }
-  const changedIds = members.filter((member) => member.changed).map((member) => member.id)
-  const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
+  const changedIds = selected.filter((member) => member.changed).map((member) => member.id)
+  const unchangedIds = selected.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
     operationId,
     changedIds,
@@ -778,7 +973,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     changedCount: changedIds.length,
     unchangedCount: unchangedIds.length,
     currentReplayGeneration: 0,
-    items: members.map((member) => ({
+    items: selected.map((member) => ({
       id: member.id,
       return_number: member.returnNumber,
       before: request.field === 'status' ? member.before.status : member.before[request.field],
@@ -791,7 +986,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     ...guards,
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
-  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
+  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp, true))
   for (const row of saleRows) statements.push(saleTagStatement(row, stamp, entitlement.exactTags))
   const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
@@ -804,7 +999,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             @actor,@name FROM return_bulk_operations WHERE id=@id`,
-    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
+    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged${members.some(member => member.linked) ? `; ${members.filter(member => member.linked).length} replacement return(s) taken back with it` : ''}`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE return_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {
@@ -813,6 +1008,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
     const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
     return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
@@ -834,7 +1030,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   }
 }
 
-export async function replayReturnBulkAction(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row): Promise<void> {
+export async function replayReturnBulkAction(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row, queryBudget?: ReturnBulkQueryBudget): Promise<void> {
   permission(user)
   if (!Number.isSafeInteger(generation) || Number(generation) < 0) fail('Refresh history before replaying this group.')
   const db = getDb(env)
@@ -871,6 +1067,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   statements.push(auditStatement(user, String(operation.id), `action_${direction}`, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
     await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
   } catch (error) {

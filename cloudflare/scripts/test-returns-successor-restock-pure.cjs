@@ -264,7 +264,7 @@ const returnsRouteOverrides = {
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
-  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), applyReturnBulkActionOutcome: async () => ({ receipt: {}, wrote: false }), notifyReturnBulkAction: async () => {}, ReturnBulkError: class ReturnBulkError extends Error {} },
+  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), applyReturnBulkActionOutcome: async () => ({ receipt: {}, wrote: false }), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,

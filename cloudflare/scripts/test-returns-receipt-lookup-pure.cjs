@@ -179,7 +179,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, ReturnBulkError: class ReturnBulkError extends Error {} },
+  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
   '../lib/saleBulkStatus': { bulkAssertion: () => ({ sql: 'SELECT 1', params: {} }), saleRevisionGuard: () => ({ sql: 'SELECT 1', params: {} }) },
   '../lib/saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }), SaleRecordEventError: class SaleRecordEventError extends Error {}, sha256Hex: async () => '' },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
