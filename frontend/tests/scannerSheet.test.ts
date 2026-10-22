@@ -4,7 +4,8 @@
 //   * no text while the camera is live; a screen reader hears "Barcode read"
 //   * one accepted read per open: vibrate once, flash, close ~150 ms later (never by hand-delayed X)
 //   * no manual-entry panel: the search box behind the sheet is the manual fallback
-//   * blocked / unsupported / dismissed are ONE panel: icon, a sentence, one button, a reset hint per platform
+//   * blocked / unsupported / dismissed are ONE panel: icon, ONE line, one button. A block's line is the steps for the
+//     platform in hand (22 Oct 2026: one short line, one action; red only for a true block, see scannerCameraScenarios)
 //   * the front camera is mirrored; the camera choice is remembered per device
 //   * the photo path shows translated errors, not the scanner's English
 //
@@ -367,12 +368,13 @@ try {
     assert.equal(findAll(sheet.container, (node) => node.tagName === 'INPUT' && node.getAttribute('type') !== 'file').length, 0, 'no text field')
   }
 
-  await runTest('blocked: one sentence, one button, and the reset hint for the platform the person is on, only', async () => {
-    const hints = { iphone: /Settings › Safari › Camera › Allow/, android: /Tap the lock icon by the address/, desktop: /Use the lock icon in the browser address bar/ }
+  await runTest('blocked: ONE line (the steps for the platform the person is on, only) and one button', async () => {
+    const hints = { iphone: /Settings › Safari › Camera › Allow/, android: /Tap the lock icon \(or App info\)/, desktop: /Click the lock icon in the address bar/ }
     for (const [platform, userAgent] of [['iphone', IPHONE], ['android', ANDROID], ['desktop', DESKTOP]] as const) {
       const sheet = await mountSheet('denied', { userAgent })
       try {
-        await assertPanel(sheet, { sentence: /Camera access is blocked\. Allow it in your browser settings, or type the barcode instead\./, button: 'Try camera again' })
+        await assertPanel(sheet, { sentence: hints[platform], button: 'Try camera again' })
+        assert.doesNotMatch(sheet.container.textContent, /Camera access is blocked/, 'the generic sentence is gone: the steps are the line')
         for (const [hintFor, hint] of Object.entries(hints)) {
           if (hintFor === platform) assert.match(sheet.container.textContent, hint, `${platform} sees its own hint`)
           else assert.doesNotMatch(sheet.container.textContent, hint, `${platform} does not see the ${hintFor} hint`)
@@ -388,7 +390,7 @@ try {
   await runTest('unsupported: one sentence and the photo as the one button (there is no camera to retry)', async () => {
     const sheet = await mountSheet('granted', { unsupported: true })
     try {
-      await assertPanel(sheet, { sentence: /This browser cannot scan with the camera\. Type the barcode instead\./, button: 'Scan from photo' })
+      await assertPanel(sheet, { sentence: /Camera scanning is not available here\. Type the barcode instead\./, button: 'Scan from photo' })
       assert.equal(byLabel(sheet.container, 'Scan from photo').length, 0, 'the corner icon is not drawn beside the one button')
       assert.doesNotMatch(sheet.container.textContent, /Settings|lock icon/, 'a missing camera is not a permission problem: no reset hint')
     } finally {
@@ -399,7 +401,7 @@ try {
   await runTest('blocked by the view (in-app browser): the photo is the one button', async () => {
     const sheet = await mountSheet('granted', { documentBlocked: true })
     try {
-      await assertPanel(sheet, { sentence: /does not allow camera access\. Open this page in your regular browser to scan, or type the barcode instead\./, button: 'Scan from photo' })
+      await assertPanel(sheet, { sentence: /This view blocks the camera\. Open the page in your browser, or type the barcode\./, button: 'Scan from photo' })
       assert.equal(sheet.probe.getUserMediaCalls, 0)
     } finally {
       await sheet.unmount()
@@ -409,7 +411,7 @@ try {
   await runTest('dismissed prompt: one sentence, one button to try again', async () => {
     const sheet = await mountSheet('prompt', { rejectCamera: 'NotAllowedError' })
     try {
-      await assertPanel(sheet, { sentence: /The camera prompt was dismissed\. Try again, or type the barcode instead\./, button: 'Try camera again' })
+      await assertPanel(sheet, { sentence: /Camera not allowed yet\. Try again, or type the barcode\./, button: 'Try camera again' })
       assert.doesNotMatch(sheet.container.textContent, /Settings|lock icon/, 'a dismissed prompt is not a blocked camera: no reset hint')
     } finally {
       await sheet.unmount()
@@ -492,9 +494,9 @@ try {
   // ---- copy and packs ---------------------------------------------------------------
 
   const OWNED_KEYS = [
-    'scan_ready', 'scan_unsupported', 'scan_prompt_dismissed', 'camera_permission_blocked',
+    'scan_ready', 'scan_unsupported', 'scan_prompt_dismissed', 'scan_camera_busy',
     'camera_document_blocked', 'scan_photo_failed', 'scan_photo_unreadable', 'scanner_read_ok', 'scanner_switch_camera',
-    'camera_permission_reset_hint_ios', 'camera_permission_reset_hint_android',
+    'camera_permission_reset_hint_ios', 'camera_permission_reset_hint_android', 'camera_permission_reset_hint',
   ]
 
   // Kept in the packs for the owner's unused-key list: the camera hook's last error branch could never choose it
@@ -528,7 +530,7 @@ try {
   await runTest('retired keys are gone from both packs (the nested copy of manual_entry stays), and nothing on the owner\'s unused list was deleted', () => {
     for (const pack of ['en', 'km']) {
       const top = readPack(pack)
-      for (const key of ['scan_fallback_active', 'detected_value', 'use_value', 'scanner_state_manual', 'camera_permission_blocked_no_manual', 'camera_document_blocked_no_manual', 'scanner_live_hint', 'manual_entry', 'scanner_sound']) {
+      for (const key of ['camera_permission_needed', 'request_camera_access', 'camera_permission_blocked', 'scan_fallback_active', 'detected_value', 'use_value', 'scanner_state_manual', 'camera_permission_blocked_no_manual', 'camera_document_blocked_no_manual', 'scanner_live_hint', 'manual_entry', 'scanner_sound']) {
         assert.equal(top[key], undefined, `${pack}.json no longer has top-level ${key}`)
       }
       assert.ok((top.common as Tree).manual_entry, `${pack}.json keeps the nested common.manual_entry`)

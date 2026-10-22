@@ -5,12 +5,9 @@ type ScannerStateKind = 'scanning' | 'starting' | 'blocked' | 'dismissed' | 'man
 interface ScannerPresentationLabels {
   scanReady?: string
   requestingCamera?: string
-  scanUnsupported?: string
-  cameraPermissionNeeded?: string
   cameraPaused?: string
   cameraPermissionBlocked?: string
   startCamera?: string
-  requestCameraAccess?: string
   tryCameraAgain?: string
   error?: string
 }
@@ -27,7 +24,6 @@ interface ScannerPresentation {
   requestCameraLabel?: string
   statusMessage?: string
   emptyStateMessage?: string
-  showResetHint: boolean
   stateKind: ScannerStateKind
 }
 
@@ -40,51 +36,37 @@ export function cameraResetPlatform(userAgent: string, maxTouchPoints = 0): Came
   return /Android/.test(userAgent) ? 'android' : 'desktop'
 }
 
+// The sheet asks for nothing before the camera has been tried: opening it starts
+// the camera, and a camera that ran and was released (idle pause, photo picker)
+// is "paused", whatever the permissions API says. The app's own ask -- a Try
+// camera again button, with the reason above it -- exists only after a start
+// failed: dismissed, denied, or any other error.
 export function deriveScannerPresentation({
   status = 'idle',
   permissionState = 'unknown',
   labels = {},
   promptDismissedMessage = '',
 }: ScannerPresentationInput = {}): ScannerPresentation {
-  const requestCameraLabel = permissionState === 'granted'
-    ? labels.startCamera
-    : permissionState === 'denied' || status === 'dismissed'
-      ? labels.tryCameraAgain
-      : labels.requestCameraAccess
+  const blocked = permissionState === 'denied' || permissionState === 'blocked' || status === 'blocked'
+  const startFailed = blocked || status === 'dismissed' || Boolean(labels.error)
+  const requestCameraLabel = startFailed ? labels.tryCameraAgain : labels.startCamera
 
-  const statusMessage = status === 'scanning'
-    ? labels.scanReady
-    : status === 'starting'
-      ? labels.requestingCamera
-      : (
-          labels.error
-          || (
-            permissionState === 'unsupported'
-              ? labels.scanUnsupported
-              : permissionState === 'granted'
-                ? labels.requestingCamera
-                : labels.cameraPermissionNeeded
-          )
-        )
+  // The words a screen reader gives the live view; the other states are told by emptyStateMessage.
+  const statusMessage = status === 'scanning' ? labels.scanReady : labels.requestingCamera
 
   const emptyStateMessage = labels.error || (
-    permissionState === 'denied' || permissionState === 'blocked' || status === 'blocked'
+    blocked
       ? labels.cameraPermissionBlocked
       : status === 'dismissed'
         ? promptDismissedMessage
-        // Granted + not scanning can only mean a stream that already ran and
-        // was released (backgrounded page, photo picker). Opening the scanner
-        // goes straight to 'starting', so this is never a first-paint state.
-        : permissionState === 'granted'
-          ? labels.cameraPaused
-          : labels.cameraPermissionNeeded
+        : labels.cameraPaused
   )
 
   const stateKind = status === 'scanning'
     ? 'scanning'
     : status === 'starting'
       ? 'starting'
-      : permissionState === 'denied' || permissionState === 'blocked' || status === 'blocked'
+      : blocked
         ? 'blocked'
         : status === 'dismissed'
           ? 'dismissed'
@@ -95,7 +77,6 @@ export function deriveScannerPresentation({
     requestCameraLabel,
     statusMessage,
     emptyStateMessage,
-    showResetHint: permissionState === 'denied',
     stateKind,
   }
 }

@@ -30,47 +30,42 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 
 const SCAN_BUTTON = 'button[aria-label="Scan Barcode"]'
 const SCANNER_VIDEO = 'video'
-// barcodeScannerState.ts deriveScannerPresentation(): which of the three
-// labels appears IS the state, so they are listed together deliberately.
-const CAMERA_ACTION = 'button:text-is("Start camera"), button:text-is("Request camera access"), button:text-is("Try camera again")'
+// barcodeScannerState.ts deriveScannerPresentation(): which of the two
+// labels appears IS the state (Start camera: a camera that ran and was paused;
+// Try camera again: a start that failed), so they are listed together deliberately.
+// There is no "Request camera access" any more (22 Oct 2026): the sheet never
+// asks before a start has failed.
+const CAMERA_ACTION = 'button:text-is("Start camera"), button:text-is("Try camera again")'
 
 /**
- * Every message deriveScannerPresentation() can put under the state label.
+ * Every message the scanner sheet can put on screen.
  *
- * These are the SHIPPED strings from frontend/src/lang/en.json, not the English
- * fallbacks written inline in BarcodeScannerModal.tsx -- the two have drifted
- * apart and the pack wins at runtime. Measured: the modal renders en.json:1004
- * "We need camera access to scan barcodes. Tap below and allow camera
- * permission when your browser asks.", while BarcodeScannerModal.tsx:164 still
- * carries the shorter fallback "Camera access is needed to scan barcodes.".
- * A spec written from the .tsx fallback passes only on the states whose two
- * strings happen to agree, which is how this file was wrong before.
+ * These are the SHIPPED strings from frontend/src/lang/en.json (the pack wins at
+ * runtime over the English fallbacks written inline in BarcodeScannerModal.tsx,
+ * and a test pins the two equal). Each is ONE short line (22 Oct 2026):
  *
- *   camera_permission_needed        en.json:1004
- *   camera_permission_ready         en.json:5606
- *   camera_permission_blocked       en.json:1003
- *   camera_document_blocked         en.json:1002
- *   scan_unsupported                en.json:4596
- *   scan_ready                      en.json:4594
- *   requesting_camera               en.json:4154
- *   scan_prompt_dismissed           en.json:4593
- *   scan_permission_denied          en.json:4588
- *   scan_failed                     en.json:4584
+ *   camera_paused_resume                   a camera that ran and was released
+ *   scan_prompt_dismissed                  the browser prompt was closed
+ *   camera_permission_reset_hint(_ios|_android)  a true block: the steps for this device
+ *   camera_document_blocked                an in-app view that forbids the camera
+ *   scan_unsupported                       no camera API, or no camera
+ *   scan_camera_busy                       another app holds the camera
+ *   scan_failed                            any other failed start
  */
 const SCANNER_MESSAGE = new RegExp([
   // The LIVE view (status 'scanning' / 'starting') shows no text at all: the
   // camera sheet is the video, the guide band and icon buttons (lane 6.0.937).
   // Its tests accept the video itself where they would otherwise ask for a
   // message; only the states that are not live carry one of these.
-  'We need camera access to scan barcodes',
-  'Camera permission is saved',
-  'Camera access is blocked',
-  'does not allow camera access',
-  'cannot scan with the camera',
+  'Camera paused',
+  'Camera not allowed yet',
+  'lock icon',
+  'Settings › Safari › Camera',
+  'This view blocks the camera',
+  'Camera scanning is not available here',
+  'Another app is using the camera',
   'Point the camera at a barcode',
   'Requesting camera access',
-  'The camera prompt was dismissed',
-  'Camera access was denied',
   'Unable to start camera scanning',
 ].join('|'))
 
@@ -211,7 +206,7 @@ test.describe('POS barcode scanner', () => {
     if (browserName === 'webkit') {
       // Record what WebKit actually does here, so a future change of behaviour
       // shows up as a diff in this file rather than as a silent shift.
-      expect(panelText).toMatch(/cannot scan with the camera\. Type the barcode instead\./)
+      expect(panelText).toMatch(/Camera scanning is not available here\. Type the barcode instead\./)
     }
 
     expectNoRuntimeErrors(health)
