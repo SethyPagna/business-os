@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Lint for .github/workflows/ops.yml and the ops scripts it runs.
+// Lint for .github/workflows/ops.yml and the ops scripts it runs, and for the
+// client choice that all four workflows (Deploy, Deploy rollback, Metrics, Ops)
+// share: one codebase, several clients, each in its own Cloudflare account.
 //
 // This repository is PUBLIC, and so are its Actions logs, job summaries and
 // artifacts. The lint holds the workflow to:
@@ -7,8 +9,12 @@
 //     name exactly: the confirm checks are EXECUTED under PowerShell, the way
 //     GitHub runs a `shell: pwsh` step, including look-alike words that
 //     PowerShell's own -cne lets through;
-//   - sharing the production-deploy concurrency group with Deploy and Deploy
-//     rollback;
+//   - running for ONE client, chosen as the name of a GitHub environment
+//     (its reviewer, its secrets, its variables), checked against the
+//     environment's own CLIENT_SLUG before anything else, rendering the Worker
+//     config from that environment and proving the target before it acts, and
+//     sharing the per-client deploy-<client> concurrency group with Deploy and
+//     Deploy rollback;
 //   - giving the Cloudflare secrets only to the ops script steps, through env,
 //     and interpolating nothing into a shell script;
 //   - uploading only ${{ runner.temp }}/ops-out/*.enc.json, kept 3 days;
@@ -247,12 +253,40 @@ const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
 // branch-cutover moves stock, so both run only from refs/heads/main (their job `if`, repeated by the script).
 const MAIN_ONLY = new Set(['branch-cutover', 'd1-physical-export'])
-const jobCondition = (task) => (MAIN_ONLY.has(task) ? `inputs.task == '${task}' && github.ref == 'refs/heads/main'` : `inputs.task == '${task}'`)
+// r2-apac-copy and branch-cutover are one-off moves of the client that still had them; no other client may start them.
+const LEANG_ONLY = new Set(['r2-apac-copy', 'branch-cutover'])
+const jobCondition = (task) => [
+  `inputs.task == '${task}'`,
+  ...(LEANG_ONLY.has(task) ? ["inputs.client == 'leang'"] : []),
+  ...(MAIN_ONLY.has(task) ? ["github.ref == 'refs/heads/main'"] : []),
+].join(' && ')
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
 const SECRET_ENV = {
   CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}',
   CLOUDFLARE_ACCOUNT_ID: '${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
 }
+// The client choice: one GitHub environment per client. Its variables render the Worker config and state what the run
+// must be aimed at; its secrets are that client's own Cloudflare token and account.
+const CLIENTS = ['leang', 'bm']
+const CLIENT_GROUP = 'deploy-${{ inputs.client }}'
+const CLIENT_ENV = { CLIENT: '${{ inputs.client }}', CLIENT_SLUG: '${{ vars.CLIENT_SLUG }}' }
+const CLIENT_VARS_ENV = { CLIENT_VARS: '${{ toJSON(vars) }}' }
+const TARGET_ENV = {
+  ...SECRET_ENV,
+  CF_ACCOUNT_ID: '${{ vars.CF_ACCOUNT_ID }}',
+  D1_MAIN_ID: '${{ vars.D1_MAIN_ID }}',
+  ADMIN_URL: '${{ vars.ADMIN_URL }}',
+}
+const R2_SOURCE_ENV = { OPS_R2_SOURCE_BUCKET: '${{ vars.R2_SOURCE_BUCKET }}' }
+const CLIENT_SCRIPT = [
+  'if ([string]::IsNullOrEmpty($env:CLIENT_SLUG) -or -not [string]::Equals($env:CLIENT, $env:CLIENT_SLUG, [System.StringComparison]::Ordinal)) {',
+  "  Write-Output '::error::This environment is not set up for the client chosen: its CLIENT_SLUG variable is missing or names another client.'",
+  '  exit 1',
+  '}',
+  '',
+].join('\n')
+const RENDER_RUN = 'node ops/scripts/client/render-wrangler.mjs --vars-json-env CLIENT_VARS'
+const TARGET_RUN = 'node ops/scripts/client/assert-target.mjs'
 const JOB_KEYS = new Set(['name', 'needs', 'if', 'runs-on', 'environment', 'timeout-minutes', 'defaults', 'steps'])
 
 const GATE_SCRIPT = [
@@ -272,7 +306,9 @@ const confirmScript = (task) => [
 ].join('\n')
 
 const scriptStep = (run, env = {}, extra = {}) => ({ kind: 'script', run, env: { ...SECRET_ENV, OPS_OUT_DIR: OUT_DIR, ...env }, ...extra })
-const PRELUDE = [{ kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' }, { kind: 'npm-ci' }]
+// The client check comes first (before even the confirm word); the config is rendered and the target proven
+// before any step that reads or writes anything.
+const PRELUDE = [{ kind: 'client' }, { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' }, { kind: 'npm-ci' }, { kind: 'render' }, { kind: 'target' }]
 
 // Each task job, step by step. The delete step and the uploads carry
 // AFTER_CHECKOUT; everything else has no `if`, so it runs only while every
@@ -286,14 +322,14 @@ const TASK_STEPS = {
   'r2-apac-copy': [
     ...PRELUDE,
     // The mode decides whether a missing destination is created (copy only).
-    scriptStep('node ops/scripts/ops-r2.mjs buckets', { OPS_R2_MODE: '${{ inputs.mode }}' }),
-    scriptStep('node ops/scripts/ops-r2.mjs run', { OPS_R2_MODE: '${{ inputs.mode }}' }, { stepTimeout: true }),
+    scriptStep('node ops/scripts/ops-r2.mjs buckets', { OPS_R2_MODE: '${{ inputs.mode }}', ...R2_SOURCE_ENV }),
+    scriptStep('node ops/scripts/ops-r2.mjs run', { OPS_R2_MODE: '${{ inputs.mode }}', ...R2_SOURCE_ENV }, { stepTimeout: true }),
     scriptStep('node ops/scripts/ops-r2.mjs delete-worker', {}, { if: AFTER_CHECKOUT }),
     { kind: 'upload' },
   ],
   // REST only (no wrangler), so no package install.
   'secret-names': [
-    { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
+    { kind: 'client' }, { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' }, { kind: 'render' }, { kind: 'target' },
     scriptStep('node ops/scripts/ops-secret-names.mjs'),
     { kind: 'upload' },
   ],
@@ -325,6 +361,7 @@ const TASK_STEPS = {
 // The scripts the workflow runs, and everything they import.
 const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
 const RUNNER_SCRIPTS = [
+  'ops/scripts/client/assert-target.mjs',
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
   'ops/scripts/ops-sql-guard.mjs',
@@ -339,11 +376,23 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/branch-cutover-loop.mjs',
 ]
 const WORKER_SCRIPTS = ['ops/r2-copy-worker/src/index.mjs', 'ops/r2-copy-worker/src/core.mjs']
-const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url'])
+const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url', 'node:module'])
 
 function checkStep(task, job, step, spec, where) {
   const keys = Object.keys(step).sort()
-  if (spec.kind === 'confirm') {
+  if (spec.kind === 'client') {
+    assert.deepStrictEqual(keys, ['env', 'name', 'run'], `${where}: keys`)
+    assert.deepStrictEqual(step.env, CLIENT_ENV, `${where}: env (no secret reaches the client check)`)
+    assert.strictEqual(step.run, CLIENT_SCRIPT, `${where}: must be exactly the ordinal compare of the client chosen with the environment's CLIENT_SLUG`)
+  } else if (spec.kind === 'render') {
+    assert.deepStrictEqual(keys, ['env', 'name', 'run'], `${where}: keys`)
+    assert.deepStrictEqual(step.env, CLIENT_VARS_ENV, `${where}: env (the variables only, never a secret)`)
+    assert.strictEqual(step.run, RENDER_RUN, `${where}: run`)
+  } else if (spec.kind === 'target') {
+    assert.deepStrictEqual(keys, ['env', 'name', 'run'], `${where}: keys`)
+    assert.deepStrictEqual(step.env, TARGET_ENV, `${where}: env must be the token, the account and the three expectations`)
+    assert.strictEqual(step.run, TARGET_RUN, `${where}: run`)
+  } else if (spec.kind === 'confirm') {
     assert.deepStrictEqual(keys, ['env', 'name', 'run'], `${where}: keys`)
     assert.deepStrictEqual(step.env, { CONFIRM: '${{ inputs.confirm }}' }, `${where}: env`)
     assert.strictEqual(step.run, confirmScript(task), `${where}: must be exactly the ordinal compare against '${task}'`)
@@ -410,7 +459,7 @@ function runStepScript(shell, script, env) {
   if (process.platform === 'win32') args.push('-ExecutionPolicy', 'Bypass')
   args.push('-Command', `. '${file.replace(/'/g, "''")}'`)
   const childEnv = {}
-  for (const [k, v] of Object.entries(process.env)) if (!/^(CONFIRM|TASK)$/i.test(k)) childEnv[k] = v
+  for (const [k, v] of Object.entries(process.env)) if (!/^(CONFIRM|TASK|CLIENT|CLIENT_SLUG)$/i.test(k)) childEnv[k] = v
   for (const [k, v] of Object.entries(env)) if (v !== undefined) childEnv[k] = v
   return new Promise((resolve) => {
     const done = (result) => {
@@ -443,13 +492,27 @@ async function pool(items, limit, fn) {
 
 // ------------------------------------------------------------------ tests
 
+// The client check of a workflow file, read the way GitHub hands it to pwsh (the first step of the
+// first environment job). Works for the files the strict reader below also reads.
+function clientStepOf(text, file) {
+  const m = /\n( +)- name: Check the client\n\1 {2}env:\n\1 {4}CLIENT: \$\{\{ inputs\.client \}\}\n\1 {4}CLIENT_SLUG: \$\{\{ vars\.CLIENT_SLUG \}\}\n\1 {2}run: \|\n((?:\1 {4}.*\n)+)/.exec(text)
+  assert.ok(m, `${file}: no client check step`)
+  return m[2].split('\n').map((l) => l.slice(m[1].length + 4)).join('\n')
+}
+
 async function main() {
+  const rendered = require('./harness/rendered_wrangler.cjs')
+  // The scripts act on the client whose rendered config OPS_WRANGLER_CONFIG names: here, the fixture client.
+  process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+  process.env.OPS_R2_SOURCE_BUCKET = 'example-old-assets'
+  delete process.env.CLOUDFLARE_ACCOUNT_ID
   const common = await load('ops', 'scripts', 'ops-common.mjs')
   const d1 = await load('ops', 'scripts', 'ops-d1-export.mjs')
   const driver = await load('ops', 'scripts', 'ops-r2.mjs')
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
   const secretNames = await load('ops', 'scripts', 'ops-secret-names.mjs')
   const cutover = await load('ops', 'scripts', 'ops-branch-cutover.mjs')
+  const NAMES = lib.r2Names()
 
   const WF_TEXT = read('.github', 'workflows', 'ops.yml')
   let WF = null
@@ -479,18 +542,24 @@ async function main() {
     assert.ok(!/continue-on-error/.test(WF_TEXT), 'no step or job may continue on error')
   })
 
-  await check('ops.yml: shares the production-deploy concurrency group with Deploy and Deploy rollback', () => {
-    assert.deepStrictEqual(WF.concurrency, { group: 'production-deploy', 'cancel-in-progress': 'false' })
+  await check('ops.yml: shares the per-client deploy group with Deploy and Deploy rollback, so one client never blocks or cancels another', () => {
+    assert.deepStrictEqual(WF.concurrency, { group: CLIENT_GROUP, 'cancel-in-progress': 'false' })
     for (const file of ['deploy.yml', 'deploy-rollback.yml']) {
-      const m = /^concurrency:\n {2}group: (\S+)\n/m.exec(read('.github', 'workflows', file))
+      const m = /^concurrency:\n {2}group: (.+)\n {2}cancel-in-progress: false\n/m.exec(read('.github', 'workflows', file))
       assert.ok(m, `${file} has no workflow-level concurrency group`)
       assert.strictEqual(m[1], WF.concurrency.group, `${file} must share the group`)
     }
+    assert.ok(!/production-deploy/.test(WF_TEXT), 'the single global group is gone')
   })
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'client', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.strictEqual(inputs.client.type, 'choice')
+    assert.strictEqual(inputs.client.required, 'true')
+    assert.deepStrictEqual(inputs.client.options, CLIENTS, 'the clients on offer')
+    assert.ok(!('default' in inputs.client), 'a default client would release to somebody by itself')
+    assert.strictEqual(Object.keys(inputs)[0], 'client', 'the client is the first question')
     assert.strictEqual(inputs.cutover_mode.type, 'choice')
     assert.deepStrictEqual(inputs.cutover_mode.options, cutover.MODES, 'the workflow offers exactly the modes the script runs, in runbook order')
     assert.strictEqual(inputs.cutover_mode.default, 'inspect', 'the default mode only reads')
@@ -529,11 +598,12 @@ async function main() {
       assert.strictEqual(job.needs, 'gate', `${task}: needs gate`)
       // No status function in the `if`, so GitHub adds success(): a failed gate skips the job.
       assert.strictEqual(job.if, jobCondition(task), `${task}: if`)
-      assert.strictEqual(job.environment, 'production', `${task}: environment`)
+      assert.strictEqual(job.environment, '${{ inputs.client }}', `${task}: environment is the client's own`)
       assert.deepStrictEqual(job.defaults, { run: { shell: 'pwsh' } }, `${task}: shell`)
       assert.ok(Array.isArray(job.steps) && job.steps.length, `${task}: steps`)
-      checkStep(task, job, job.steps[0], { kind: 'confirm' }, `${task} step 1`)
-      const checkout = job.steps[1]
+      checkStep(task, job, job.steps[0], { kind: 'client' }, `${task} step 1`)
+      checkStep(task, job, job.steps[1], { kind: 'confirm' }, `${task} step 2`)
+      const checkout = job.steps[2]
       assert.ok(checkout && checkout.id === 'checkout' && !('if' in checkout), `${task}: the checkout must directly follow the confirm check, unconditionally`)
       for (const step of job.steps.slice(1)) {
         if ('if' in step) assert.strictEqual(step.if, AFTER_CHECKOUT, `${task} step "${step.name}": an if may only be ${AFTER_CHECKOUT}`)
@@ -551,11 +621,19 @@ async function main() {
     const cases = []
     for (const task of TASKS) {
       const other = TASKS.find((t) => t !== task)
-      const script = WF.jobs[task].steps[0].run
+      const script = WF.jobs[task].steps[1].run
       for (const [confirm, want] of [
         [task, 0], [task.toUpperCase(), 1], [` ${task}`, 1], [`${task} `, 1], [`${task}${SOFT_HYPHEN}`, 1],
         [`${task}${ZERO_WIDTH_JOINER}`, 1], [other, 1], ['', 1], [undefined, 1],
       ]) cases.push({ label: `${task} job, confirm ${JSON.stringify(confirm)}`, script, env: { CONFIRM: confirm }, want })
+    }
+    // The client check, run for real: only the environment whose CLIENT_SLUG is exactly the client chosen passes.
+    for (const task of TASKS) {
+      const script = WF.jobs[task].steps[0].run
+      for (const [client, slug, want] of [
+        ['leang', 'leang', 0], ['bm', 'bm', 0], ['leang', 'bm', 1], ['bm', 'leang', 1], ['leang', '', 1], ['leang', undefined, 1],
+        ['leang', 'LEANG', 1], ['leang', ` leang`, 1], ['leang', `leang${SOFT_HYPHEN}`, 1], ['leang', 'leang\u0435', 1], ['', '', 1],
+      ]) cases.push({ label: `${task} job, client ${JSON.stringify(client)} in an environment of ${JSON.stringify(slug)}`, script, env: { CLIENT: client, CLIENT_SLUG: slug }, want })
     }
     const gate = WF.jobs.gate.steps[0].run
     for (const task of TASKS) {
@@ -630,7 +708,7 @@ async function main() {
       for (const bad of lookAlikes(word)) cases.push({ label: `${file}, confirm ${JSON.stringify(bad)}`, script, env: { CONFIRM: bad }, want: 1 })
     }
     for (const task of TASKS) {
-      const script = WF.jobs[task].steps[0].run
+      const script = WF.jobs[task].steps[1].run
       for (const bad of lookAlikes(task)) cases.push({ label: `ops.yml ${task} job, confirm ${JSON.stringify(bad)}`, script, env: { CONFIRM: bad }, want: 1 })
       for (const bad of lookAlikes(task)) cases.push({ label: `ops.yml gate, task ${task}, confirm ${JSON.stringify(bad)}`, script: WF.jobs.gate.steps[0].run, env: { TASK: task, CONFIRM: bad }, want: 1 })
     }
@@ -667,19 +745,22 @@ async function main() {
     }
   })
 
-  await check('ops.yml: only the ops script steps get the Cloudflare secrets, through env, under their own names', () => {
+  await check('ops.yml: only the target check and the ops script steps get the Cloudflare secrets, through env, under their own names', () => {
     for (const [n, line] of WF_TEXT.split('\n').entries()) {
       if (/^\s*#/.test(line)) continue
       if (/secrets/.test(line)) {
         assert.ok(/^\s+(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|BRANCH_CUTOVER_OPERATOR_TOKEN): \$\{\{ secrets\.\1 \}\}$/.test(line), `line ${n + 1}: secrets only as env, named after themselves: ${line.trim()}`)
       }
-      assert.ok(!/github\.token|GITHUB_TOKEN|ACTIONS_(STEP|RUNNER)_DEBUG|Set-PSDebug|set -x|DebugPreference|VerbosePreference|add-mask|GITHUB_ENV|GITHUB_OUTPUT|GITHUB_PATH|toJSON/i.test(line), `line ${n + 1}: ${line.trim()}`)
+      assert.ok(!/github\.token|GITHUB_TOKEN|ACTIONS_(STEP|RUNNER)_DEBUG|Set-PSDebug|set -x|DebugPreference|VerbosePreference|add-mask|GITHUB_ENV|GITHUB_OUTPUT|GITHUB_PATH/i.test(line), `line ${n + 1}: ${line.trim()}`)
+      // The one place the variables are handed over whole: the render step (variables are not secrets, but they are not secrets' neighbours either).
+      if (/toJSON/i.test(line)) assert.strictEqual(line.trim(), 'CLIENT_VARS: ${{ toJSON(vars) }}', `line ${n + 1}: toJSON only to hand the variables to the render step`)
     }
     const found = strings(WF).filter(([, v]) => v.includes('secrets')).map(([where]) => where).sort()
     const expected = []
     for (const task of TASKS) {
       WF.jobs[task].steps.forEach((step, n) => {
-        if (TASK_STEPS[task][n].kind === 'script') for (const name of [...Object.keys(SECRET_ENV), ...(TASK_STEPS[task][n].secrets || [])]) expected.push(`jobs.${task}.steps.${n}.env.${name}`)
+        const spec = TASK_STEPS[task][n]
+        if (spec.kind === 'script' || spec.kind === 'target') for (const name of [...Object.keys(SECRET_ENV), ...(spec.secrets || [])]) expected.push(`jobs.${task}.steps.${n}.env.${name}`)
       })
     }
     assert.deepStrictEqual(found, expected.sort())
@@ -687,18 +768,23 @@ async function main() {
 
   await check('ops.yml: nothing is interpolated into a shell script, and every expression is on the allowlist', () => {
     const allowed = new Set([
-      '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}',
+      '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}', '${{ inputs.client }}', CLIENT_GROUP,
+      CLIENT_ENV.CLIENT_SLUG, CLIENT_VARS_ENV.CLIENT_VARS, TARGET_ENV.CF_ACCOUNT_ID, TARGET_ENV.D1_MAIN_ID, TARGET_ENV.ADMIN_URL, R2_SOURCE_ENV.OPS_R2_SOURCE_BUCKET,
       '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', '${{ inputs.approved_folds }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
       SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH,
     ])
     for (const [where, value] of strings(WF)) {
       if (!value.includes('${{')) continue
       assert.ok(!/\.run$/.test(where), `${where}: no expression inside a run script`)
-      assert.ok(/\.env\.[A-Z0-9_]+$/.test(where) || /\.with\.path$/.test(where), `${where}: an expression outside env/with.path`)
+      assert.ok(/\.env\.[A-Z0-9_]+$/.test(where) || /\.with\.path$/.test(where) || /^jobs\.[a-z0-9-]+\.environment$/.test(where) || where === 'concurrency.group', `${where}: an expression outside env/with.path/environment/concurrency`)
       assert.ok(allowed.has(value), `${where}: ${value} is not on the allowlist`)
     }
     const where = (value) => strings(WF).filter(([, v]) => v === value).map(([w]) => w.replace(/\.steps\.\d+\./, '.steps.N.'))
     assert.deepStrictEqual(where('${{ inputs.task }}'), ['jobs.gate.steps.N.env.TASK'])
+    assert.deepStrictEqual(where('${{ inputs.client }}').sort(), [...TASKS.map((t) => `jobs.${t}.environment`), ...TASKS.map((t) => `jobs.${t}.steps.N.env.CLIENT`)].sort(), 'the client reaches each job environment and each client check, nothing else')
+    assert.deepStrictEqual(where('${{ vars.CLIENT_SLUG }}'), TASKS.map((t) => `jobs.${t}.steps.N.env.CLIENT_SLUG`))
+    assert.deepStrictEqual(where('${{ toJSON(vars) }}'), TASKS.map((t) => `jobs.${t}.steps.N.env.CLIENT_VARS`))
+    assert.deepStrictEqual(where(R2_SOURCE_ENV.OPS_R2_SOURCE_BUCKET), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_SOURCE_BUCKET', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_SOURCE_BUCKET'])
     assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.map((t) => `jobs.${t}.steps.N.env.CONFIRM`)])
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
     assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
@@ -714,7 +800,7 @@ async function main() {
     const r2 = code['ops/scripts/ops-r2.mjs']
     assert.ok(r2.includes("  if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {\n    const r = await create()") && count(r2, /\bcreate\(\)/g) === 1, 'only copy mode may create the destination bucket')
     assert.strictEqual(count(r2, /const mode = String\(process\.env\.OPS_R2_MODE \|\| 'copy'\)\.trim\(\)/g), 2, 'buckets and run both take the mode from the workflow input')
-    assert.ok(r2.includes('const b = await checkBuckets({ api, accountId, mode, create })'), 'the bucket step passes on the mode it was given')
+    assert.ok(r2.includes('const b = await checkBuckets({ api, accountId, mode, create, names })'), 'the bucket step passes on the mode it was given, and on the names of this client')
   })
 
   await check('prune is mirror-only and says so: one /prune call, gated on copy mode before the switch; the old bucket is never deleted', () => {
@@ -736,10 +822,12 @@ async function main() {
     const WRITES = /\b(writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|copyFileSync|copyFile|cpSync|renameSync|symlinkSync|linkSync|openSync|writeSync|truncateSync|ftruncateSync)\s*\(/g
     for (const [file, text] of Object.entries(code)) {
       const calls = [...text.matchAll(WRITES)].map((m) => m[1]).sort()
-      const want = file === 'ops/scripts/ops-common.mjs' ? ['appendFileSync', 'writeFileSync'] : []
+      const want = file === 'ops/scripts/ops-common.mjs' ? ['appendFileSync', 'writeFileSync'] : file === 'ops/scripts/ops-r2.mjs' ? ['writeFileSync'] : []
       assert.deepStrictEqual(calls, want, `${file} writes files: ${calls.join(', ')}`)
       assert.ok(!/fs\/promises|fs\.promises/.test(text), `${file}: no fs/promises`)
     }
+    // ops-r2's one write besides the report: the copy Worker's own config, rendered from its template for this run (gitignored).
+    assert.ok(code['ops/scripts/ops-r2.mjs'].includes('fs.writeFileSync(WORKER_TOML, renderWorkerToml(fs.readFileSync(WORKER_TEMPLATE, \'utf8\'), accountId, names))'), 'ops-r2 writes only the rendered copy Worker config')
     const c = code['ops/scripts/ops-common.mjs']
     assert.ok(c.includes("fs.appendFileSync(file, `- ${line}\\n`)") && /const line = formatPublic\(template, values\)/.test(c), 'the summary gets only formatted lines')
     assert.ok(c.includes('const envelope = encryptEnvelope(') && c.includes("const file = path.join(outDir, `${baseName}.enc.json`)") && c.includes('fs.writeFileSync(file, `${JSON.stringify(envelope)}\\n`)'), 'the one written file is the envelope, named *.enc.json')
@@ -795,6 +883,7 @@ async function main() {
     const tokens = []
     for (const [file, text] of Object.entries(code)) for (const m of text.matchAll(/publicToken\(((?:[^()]|\([^()]*\))*)\)/g)) tokens.push(`${file}: ${m[1]}`)
     assert.deepStrictEqual(tokens.sort(), [
+      'ops/scripts/client/assert-target.mjs: codesText(live.errors)',
       'ops/scripts/ops-branch-cutover.mjs: text',
       'ops/scripts/ops-common.mjs: value',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
@@ -849,11 +938,11 @@ async function main() {
     }
     assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /export function runWrangler\(args, /g), 1)
     assert.deepStrictEqual(calls.sort(), [
-      "ops/scripts/ops-branch-cutover.mjs: ['d1', 'time-travel', 'info', DATABASE, '--json']",
+      "ops/scripts/ops-branch-cutover.mjs: ['d1', 'time-travel', 'info', mainDatabase(), '--json']",
       'ops/scripts/ops-d1-export.mjs: wranglerArgs(query.sql)',
       'ops/scripts/ops-d1-physical-export.mjs: wranglerArgs(canonical)',
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",
-      "ops/scripts/ops-r2.mjs: ['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION]",
+      "ops/scripts/ops-r2.mjs: ['r2', 'bucket', 'create', names.dest, '--location', DEST_LOCATION]",
       "ops/scripts/ops-r2.mjs: ['secret', 'put', 'COPY_TOKEN', ...config]",
       'ops/scripts/ops-settings-upsert.mjs: wranglerArgs(sql)',
     ].sort())
@@ -861,10 +950,21 @@ async function main() {
     assert.strictEqual(count(r2, /const config = \['--config', WORKER_TOML\]/g), 1)
     assert.strictEqual(driver.WORKER_DIR, path.join(ROOT, 'ops', 'r2-copy-worker'))
     assert.strictEqual(driver.WORKER_TOML, path.join(ROOT, 'ops', 'r2-copy-worker', 'wrangler.toml'))
+    assert.strictEqual(driver.WORKER_TEMPLATE, path.join(ROOT, 'ops', 'r2-copy-worker', 'wrangler.template.toml'))
     assert.ok(!/CLOUDFLARE_DIR|cloudflare\/wrangler|wrangler\.free/.test(r2), 'ops-r2 never touches the production Worker config')
     assert.strictEqual(lib.DEST_LOCATION, 'apac')
-    assert.deepStrictEqual(d1.wranglerArgs('SELECT 1'), ['d1', 'execute', 'business-os', '--remote', '--json', '--command', 'SELECT 1'])
-    assert.ok(/database_name = "business-os"/.test(read('cloudflare', 'wrangler.toml')), 'the exported database is the production one')
+    // Every command names the client's rendered config (a wrangler.toml in the folder beats CLOUDFLARE_ACCOUNT_ID), unless the caller names its own.
+    const cfg = common.clientConfigPath()
+    assert.strictEqual(cfg, path.resolve(process.env.OPS_WRANGLER_CONFIG))
+    assert.deepStrictEqual(common.withClientConfig(d1.wranglerArgs('SELECT 1')).slice(-2), ['--config', cfg])
+    assert.deepStrictEqual(common.withClientConfig(['deploy', '--config', 'x.toml']), ['deploy', '--config', 'x.toml'])
+    assert.deepStrictEqual(common.withClientConfig(['deploy', '--config=x.toml']), ['deploy', '--config=x.toml'])
+    assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /\[WRANGLER_JS, \.\.\.withClientConfig\(args\)\]/g), 1, 'the one spawn site adds the config')
+    // The database is the main one of the client's rendered config -- never a constant.
+    assert.deepStrictEqual(d1.wranglerArgs('SELECT 1'), ['d1', 'execute', rendered.values.D1_MAIN_NAME, '--remote', '--json', '--command', 'SELECT 1'])
+    assert.ok(/\nbinding = "DB"\ndatabase_name = "\{\{D1_MAIN_NAME\}\}"\n/.test(read('cloudflare', 'wrangler.template.toml')), 'the exported database is the main one of the template')
+    assert.deepStrictEqual(d1.wranglerArgs('SELECT 1', 'other-db').slice(0, 3), ['d1', 'execute', 'other-db'])
+    assert.ok(!/'business-os'|"business-os"/.test(code['ops/scripts/ops-d1-export.mjs']), 'no database name in the script')
     const d = code['ops/scripts/ops-d1-export.mjs']
     assert.strictEqual(count(d, /requireEnv\('OPS_QUERY'\)/g), 1)
     assert.ok(/const query = loadQuery\(name\)/.test(d) && /runWrangler\(wranglerArgs\(query\.sql\)/.test(d), 'the SQL comes only from the guarded query file')
@@ -880,8 +980,9 @@ async function main() {
     assert.ok(kinds.every((k) => /\('GET'$|\('DELETE'$|\(method$/.test(k)), `REST methods: ${kinds}`)
     assert.deepStrictEqual(methods.filter((m) => /DELETE/.test(m)), ["ops/scripts/ops-r2.mjs: apiImpl('DELETE'"])
     const r2 = code['ops/scripts/ops-r2.mjs']
-    assert.ok(r2.includes('const base = `/accounts/${accountId}/workers/scripts/${COPY_WORKER}`') && r2.includes("await apiImpl('DELETE', `${base}?force=true`)"), 'the DELETE targets the copy Worker only')
-    assert.notStrictEqual(lib.COPY_WORKER, lib.PRODUCTION_WORKER)
+    assert.ok(r2.includes('const base = `/accounts/${accountId}/workers/scripts/${copyWorker}`') && r2.includes("await apiImpl('DELETE', `${base}?force=true`)"), 'the DELETE targets the copy Worker only')
+    assert.notStrictEqual(NAMES.copyWorker, NAMES.worker)
+    assert.ok(NAMES.copyWorker.endsWith('-r2-copy') && NAMES.copyWorker.startsWith(NAMES.worker), 'the copy Worker is named after the client Worker, so two clients never delete each other')
     assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /\bfetch\(/g), 1, 'ops-common fetches only in cfApi')
     assert.ok(code['ops/scripts/ops-common.mjs'].includes("export const API_BASE = 'https://api.cloudflare.com/client/v4'"))
     assert.ok(code['ops/r2-copy-worker/src/index.mjs'].includes('fetch(request, env) {'), 'the Worker fetch is its own handler, not an outbound call')
@@ -934,7 +1035,7 @@ async function main() {
         const spec = m[1]
         if (spec.startsWith('node:')) {
           assert.ok(BUILTINS.has(spec), `${file}: ${spec}`)
-          if (spec === 'node:child_process') assert.strictEqual(file, 'ops/scripts/ops-common.mjs', `${file}: child_process`)
+          if (spec === 'node:child_process' || spec === 'node:module') assert.strictEqual(file, 'ops/scripts/ops-common.mjs', `${file}: ${spec}`)
         } else {
           const target = path.posix.join(path.posix.dirname(file), spec)
           assert.ok(RUNNER_SCRIPTS.includes(target) || WORKER_SCRIPTS.includes(target), `${file} imports ${spec}, which this lint does not read`)
@@ -955,7 +1056,7 @@ async function main() {
         required.set(file, [...(required.get(file) || []), m[1].slice(1, -1)])
       }
     }
-    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_CUTOVER_BASE_URL', 'OPS_R2_MODE'])
+    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_CUTOVER_BASE_URL', 'OPS_R2_MODE', 'OPS_WRANGLER_CONFIG'])
     assert.strictEqual(indexed, 1, 'process.env[name] only in requireEnv')
     assert.strictEqual(spread, 1, 'the environment is passed on only to wrangler')
     // Every step gives its script what the script requires.
@@ -969,23 +1070,23 @@ async function main() {
     }
   })
 
-  await check('copy Worker: its own config, two buckets, workers.dev only, the production account; SOURCE only read-only', () => {
-    const toml = parseSimpleToml(read('ops', 'r2-copy-worker', 'wrangler.toml'))
+  await check('copy Worker: rendered from its template for the client, two buckets, workers.dev only, the client account; SOURCE only read-only', () => {
+    const template = read('ops', 'r2-copy-worker', 'wrangler.template.toml')
+    assert.ok(!/[0-9a-f]{32}|business-os|leang/i.test(template), 'the template holds no client value')
+    const target = rendered.target()
+    const toml = parseSimpleToml(driver.renderWorkerToml(template, target.accountId, NAMES))
     assert.deepStrictEqual(Object.keys(toml).sort(), ['account_id', 'compatibility_date', 'main', 'name', 'preview_urls', 'r2_buckets', 'workers_dev'])
-    assert.strictEqual(toml.name, lib.COPY_WORKER)
+    assert.strictEqual(toml.name, NAMES.copyWorker)
     assert.strictEqual(toml.main, 'src/index.mjs')
     assert.strictEqual(toml.workers_dev, true)
     assert.strictEqual(toml.preview_urls, false)
     assert.deepStrictEqual(toml.r2_buckets, [
-      { binding: 'SOURCE', bucket_name: lib.SOURCE_BUCKET },
-      { binding: 'DESTINATION', bucket_name: lib.DEST_BUCKET },
+      { binding: 'SOURCE', bucket_name: NAMES.source },
+      { binding: 'DESTINATION', bucket_name: NAMES.dest },
     ])
-    const prod = read('cloudflare', 'wrangler.toml')
-    const head = prod.slice(0, prod.search(/^\[/m))
-    assert.strictEqual(toml.account_id, /^account_id = "([0-9a-f]{32})"$/m.exec(head)[1], 'the same account as production')
-    assert.strictEqual(lib.PRODUCTION_WORKER, /^name = "([^"]+)"$/m.exec(head)[1])
-    assert.notStrictEqual(toml.name, lib.PRODUCTION_WORKER)
-    assert.deepStrictEqual([lib.SOURCE_BUCKET, lib.DEST_BUCKET], ['business-os-assets', 'business-os-assets-apac'])
+    assert.strictEqual(toml.account_id, target.accountId, 'the same account as the client\'s Worker')
+    assert.notStrictEqual(toml.name, NAMES.worker)
+    assert.strictEqual(NAMES.dest, rendered.values.R2_BUCKET, 'the destination is the bucket the client Worker binds')
     for (const bad of ['routes = ["x"]', '[triggers]', 'route = 1', '[vars]', 'workers_dev = yes']) {
       assert.throws(() => parseSimpleToml(`name = "x"\n${bad}\n`), /toml line/, `the TOML reader must refuse ${bad}`)
     }
@@ -994,17 +1095,69 @@ async function main() {
     assert.ok(uses.length === 2 && uses.every((u) => /!env\.SOURCE /.test(`${u} `) || /readOnlyBucket\(env\.SOURCE\)$/.test(u)), `SOURCE uses: ${uses}`)
   })
 
-  await check('production config: ASSETS points at one of the two buckets, the same in wrangler.toml and wrangler.free.toml', () => {
-    const assets = (file) => {
-      const text = read('cloudflare', file)
-      assert.strictEqual(count(text, /^binding = "ASSETS"$/gm), 1, `${file}: one ASSETS binding`)
+  await check('client config: ASSETS points at the client bucket, once, the same in the paid and the free render; the generated configs are not tracked', () => {
+    const assets = (text, label) => {
+      assert.strictEqual(count(text, /^binding = "ASSETS"$/gm), 1, `${label}: one ASSETS binding`)
       const m = /^\[\[r2_buckets\]\]\nbinding = "ASSETS"\nbucket_name = "([a-z0-9-]+)"$/m.exec(text)
-      assert.ok(m, `${file}: ASSETS is not a plain r2 binding`)
+      assert.ok(m, `${label}: ASSETS is not a plain r2 binding`)
       return m[1]
     }
-    const main = assets('wrangler.toml')
-    assert.strictEqual(assets('wrangler.free.toml'), main)
-    assert.ok([lib.SOURCE_BUCKET, lib.DEST_BUCKET].includes(main), `ASSETS is ${main}`)
+    const tpl = read('cloudflare', 'wrangler.template.toml')
+    assert.ok(/\[\[r2_buckets\]\]\nbinding = "ASSETS"\nbucket_name = "\{\{R2_BUCKET\}\}"\n/.test(tpl), 'the template takes the ASSETS bucket from R2_BUCKET')
+    const paid = assets(rendered.paid().replace(/\r\n/g, '\n'), 'paid')
+    assert.strictEqual(assets(rendered.free().replace(/\r\n/g, '\n'), 'free'), paid)
+    assert.strictEqual(paid, NAMES.dest)
+    const ignored = read('.gitignore')
+    for (const file of ['/cloudflare/wrangler.toml', '/cloudflare/wrangler.free.toml', '/ops/r2-copy-worker/wrangler.toml']) assert.ok(ignored.split('\n').includes(file), `${file} is gitignored`)
+  })
+
+  await check('all four workflows choose a client the same way: its environment, its group, its check first, the target proven before any write', () => {
+    const FILES = { 'deploy.yml': 'deploy', 'deploy-rollback.yml': 'deploy', 'metrics.yml': 'metrics', 'ops.yml': 'deploy' }
+    const CLIENT_CHECK = new RegExp(CLIENT_SCRIPT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\n/g, '\\n'))
+    for (const [file, family] of Object.entries(FILES)) {
+      const text = read('.github', 'workflows', file)
+      const wf = file === 'ops.yml' ? WF : parseYaml(text)
+      const inputs = wf.on.workflow_dispatch.inputs
+      assert.strictEqual(Object.keys(inputs)[0], 'client', `${file}: the client is the first question`)
+      assert.deepStrictEqual([inputs.client.type, inputs.client.required, inputs.client.options], ['choice', 'true', CLIENTS], `${file}: client input`)
+      assert.ok(!('default' in inputs.client), `${file}: no default client`)
+      assert.strictEqual(wf.concurrency.group, `${family}-${'$'}{{ inputs.client }}`, `${file}: group`)
+      assert.ok(!/environment: production|\bproduction-deploy\b/.test(text), `${file}: the single shared environment/group is gone`)
+      assert.ok(!/continue-on-error/.test(text), `${file}: no step may continue on error`)
+      const withEnv = Object.entries(wf.jobs).filter(([, job]) => 'environment' in job)
+      assert.ok(withEnv.length >= 1, `${file}: a job with an environment`)
+      for (const [id, job] of withEnv) {
+        assert.strictEqual(job.environment, '${{ inputs.client }}', `${file} ${id}: environment`)
+        const names = job.steps.map((step) => step.name)
+        assert.strictEqual(names[0], 'Check the client', `${file} ${id}: the client check is the first step`)
+        assert.strictEqual(job.steps[0].run, CLIENT_SCRIPT, `${file} ${id}: client check`)
+        assert.deepStrictEqual(job.steps[0].env, CLIENT_ENV, `${file} ${id}: client check env`)
+        assert.ok(CLIENT_CHECK.test(clientStepOf(text, file)), `${file}: the client check text`)
+        // The config is rendered from the environment's variables before anything uses it, then the target is proven.
+        const render = job.steps.findIndex((step) => /render-wrangler\.mjs --vars-json-env CLIENT_VARS/.test(step.run || ''))
+        assert.ok(render > 0, `${file} ${id}: renders the Worker config from the environment variables`)
+        assert.deepStrictEqual(job.steps[render].env, CLIENT_VARS_ENV, `${file} ${id}: render env`)
+        const target = job.steps.findIndex((step) => /assert-target\.mjs|release\.cjs target /.test(step.run || ''))
+        assert.ok(target > render, `${file} ${id}: the target is proven after the render`)
+        // From the first use of the Cloudflare secrets on, nothing that reads or writes may come before the target check.
+        const firstSecret = job.steps.findIndex((step) => step.env && 'CLOUDFLARE_API_TOKEN' in step.env)
+        assert.strictEqual(firstSecret, target, `${file} ${id}: the first step with the Cloudflare token is the target check`)
+        assert.ok(!job.steps.slice(0, target).some((step) => step.env && ('CLOUDFLARE_API_TOKEN' in step.env || 'CLOUDFLARE_ACCOUNT_ID' in step.env)), `${file} ${id}: no Cloudflare secret before the target check`)
+      }
+      // Every environment variable the clients/example.env documents is named by the workflow only as vars.*, never a literal.
+      assert.ok(!/(account_id|database_id)\s*[:=]\s*"?[0-9a-f]{8,}/i.test(text), `${file}: no account or database id`)
+    }
+    // the same client list everywhere, and the same list clients/example.env documents as an example client
+    const options = Object.keys(FILES).map((f) => (f === 'ops.yml' ? WF : parseYaml(read('.github', 'workflows', f))).on.workflow_dispatch.inputs.client.options.join(','))
+    assert.strictEqual(new Set(options).size, 1)
+    // Deploy and Deploy rollback: the kit repeats the expectations on every step that reaches Cloudflare
+    for (const file of ['deploy.yml', 'deploy-rollback.yml']) {
+      const job = Object.values(parseYaml(read('.github', 'workflows', file)).jobs)[0]
+      for (const step of job.steps.filter((x) => x.env && 'CLOUDFLARE_API_TOKEN' in x.env)) {
+        assert.deepStrictEqual(Object.keys(step.env).filter((k) => k in TARGET_ENV).sort(), Object.keys(TARGET_ENV).sort(), `${file} "${step.name}": token, account and the three expectations together`)
+        assert.deepStrictEqual([step.env.CLOUDFLARE_API_TOKEN, step.env.CLOUDFLARE_ACCOUNT_ID], [SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID])
+      }
+    }
   })
 
   await check('no private key is referenced, and ops/keys holds only the public key', () => {

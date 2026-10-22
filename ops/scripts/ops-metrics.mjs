@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  API_BASE, OpsError, commitId, isMain, publicToken, runId, runMain, say, sleep, summary,
+  API_BASE, OpsError, clientTarget, commitId, isMain, publicToken, runId, runMain, say, sleep, summary,
   truncate, writeEncryptedReport,
 } from './ops-common.mjs'
 
@@ -19,6 +19,8 @@ export const MAX_DAYS = 7
 export const TRADING_HOURS_UTC = Object.freeze({ start: 1, end: 13 })
 const REVISION = /^[A-Za-z0-9._-]{1,64}$/
 const ACCOUNT_ID = /^[0-9a-f]{32}$/
+// The client's own Analytics Engine dataset (its rendered Worker config names it); it is spliced into the SQL.
+const DATASET = /^[A-Za-z][A-Za-z0-9_]{0,62}$/
 
 // The owner's flows, plus one route no release should move: if it moves, the shift is platform-wide.
 export const FLOW_ROUTES = Object.freeze([
@@ -80,11 +82,13 @@ export function loadTemplate(name, dir = METRICS_DIR) {
   return fs.readFileSync(path.join(dir, `${name}.sql`), 'utf8')
 }
 
-export function buildQuery(template, { windows, revision }) {
+export function buildQuery(template, { windows, revision, dataset }) {
   const body = String(template).split(/\r?\n/).filter((line) => !/^\s*--/.test(line)).join('\n').trim()
   if (body.split('{{WINDOW}}').length !== 2) throw new OpsError('metrics-bad-template', 'A metrics query must hold {{WINDOW}} exactly once.')
+  if (body.split('{{DATASET}}').length !== 2) throw new OpsError('metrics-bad-template', 'A metrics query must hold {{DATASET}} exactly once.')
+  if (typeof dataset !== 'string' || !DATASET.test(dataset)) throw new OpsError('metrics-bad-dataset', 'The client\'s dataset is not a plain dataset name.')
   if (body.split('{{REVISION}}').length > 2) throw new OpsError('metrics-bad-template', 'A metrics query holds {{REVISION}} more than once.')
-  const sql = body.replace('{{WINDOW}}', () => windowClause(windows)).replace('{{REVISION}}', () => revisionClause(revision))
+  const sql = body.replace('{{DATASET}}', () => dataset).replace('{{WINDOW}}', () => windowClause(windows)).replace('{{REVISION}}', () => revisionClause(revision))
   if (/\{\{|--|;/.test(sql)) throw new OpsError('metrics-bad-template', 'A metrics query kept a placeholder, a comment or a semicolon.')
   return sql
 }
@@ -150,13 +154,13 @@ export async function queryAnalytics({ fetchImpl = fetch, accountId, token, sql,
   return last
 }
 
-export async function readMetrics({ fetchImpl, accountId, token, from, days, revision, dir = METRICS_DIR }) {
+export async function readMetrics({ fetchImpl, accountId, token, from, days, revision, dataset, dir = METRICS_DIR }) {
   const windows = tradingWindows(from, days)
   const problems = []
   const queries = {}
   const rows = {}
   for (const name of QUERY_NAMES) {
-    const sql = buildQuery(loadTemplate(name, dir), { windows, revision })
+    const sql = buildQuery(loadTemplate(name, dir), { windows, revision, dataset })
     const result = await queryAnalytics({ fetchImpl, accountId, token, sql })
     queries[name] = { status: result.status, ok: result.ok, error: result.error, sql }
     rows[name] = result.rows || []
@@ -201,8 +205,12 @@ export async function runMetrics({ env, fetchImpl = fetch }) {
   }
   const outDir = get('OPS_OUT_DIR')
   const startedAt = new Date().toISOString()
+  // The dataset is the one the client's rendered config binds; the account of the token must be that config's.
+  const dataset = clientTarget({ env }).analyticsDataset
+  // A client whose account has no Analytics Engine (its config leaves the binding out) has no request metrics to read.
+  if (!dataset) throw new OpsError('metrics-no-dataset', 'The Worker config of this client binds no Analytics Engine dataset.')
   const result = await readMetrics({
-    fetchImpl, accountId: get('CLOUDFLARE_ACCOUNT_ID'), token: get('CLOUDFLARE_API_TOKEN'),
+    fetchImpl, accountId: get('CLOUDFLARE_ACCOUNT_ID'), token: get('CLOUDFLARE_API_TOKEN'), dataset,
     from: get('OPS_METRICS_FROM'), days: env.OPS_METRICS_DAYS || '1', revision: env.OPS_METRICS_REVISION || undefined,
   })
   const commit = commitId()

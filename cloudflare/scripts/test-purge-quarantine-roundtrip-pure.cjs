@@ -45,6 +45,10 @@ const { pathToFileURL } = require('node:url')
 const { DatabaseSync } = require('node:sqlite')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const F = require('./harness/upload_fixtures.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
+// The Worker the script reads is the client's own, named by its rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.resolve(__dirname, '../../ops/scripts/purge-non-media-uploads.mjs')
 // A made-up token: it must reach the Authorization header and nothing else.
@@ -194,7 +198,7 @@ async function handle(world, url, init = {}) {
   if (headers.get('authorization') !== `Bearer ${TOKEN}`) return reply(403, { success: false, errors: [{ code: 10000, message: 'Authentication error' }] })
   const account = `/client/v4/accounts/${ACCOUNT}`
   const objects = `${account}/r2/buckets/${script.BUCKET}/objects`
-  const worker = `${account}/workers/scripts/business-os`
+  const worker = `${account}/workers/scripts/${rendered.values.WORKER_NAME}`
   let request
   if (parsed.origin !== 'https://api.cloudflare.com') return reply(400, { success: false, errors: [{ code: 1, message: 'wrong host' }] })
   // The production Worker's live binding: every version on BUCKET.

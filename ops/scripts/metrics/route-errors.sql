@@ -3,7 +3,7 @@
 SELECT blob2 AS route, blob3 AS method, blob4 AS status,
        SUM(_sample_interval * double6) AS requests,
        count() AS stored_rows
-FROM Business_OS_Analytics
+FROM {{DATASET}}
 WHERE index1 = 'req_metrics' AND blob1 = 'api'
   AND ({{WINDOW}}){{REVISION}}
   AND NOT (blob4 >= '200' AND blob4 < '400')

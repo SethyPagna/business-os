@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  CLOUDFLARE_DIR, OpsError, cloudflareErrorCodes, commitId, errorRecord, isMain, publicToken, requireEnv, runId, runMain, runWrangler,
+  CLOUDFLARE_DIR, OpsError, clientTarget, cloudflareErrorCodes, commitId, errorRecord, isMain, mainDatabase, publicToken, requireEnv, runId, runMain, runWrangler,
   say, summary, truncate, writeEncryptedReport,
 } from './ops-common.mjs'
 import {
@@ -34,17 +34,20 @@ import {
 export const MODES = Object.freeze(['inspect', 'bookmark', 'repair-sk2-check', 'repair-sk2', 'start', 'resume-until-ready', 'status', 'abort', 'finalize'])
 // The repair's states (lib/sk2CleanserRepair.ts): pre and ab can be applied, done is the end state, stale refuses.
 export const SK2_STATES = Object.freeze(['pre', 'ab', 'done', 'stale'])
-export const DEFAULT_BASE_URL = 'https://admin.leangbeauty.com'
-export const ALLOWED_HOSTS = Object.freeze(['admin.leangbeauty.com', 'leangbeauty.com'])
-export const DATABASE = 'business-os'
+// The operator endpoint is only ever called on the client's own production hosts: its admin URL
+// (the default) and its public URL, both from the rendered Worker config.
+export const defaultBaseUrl = (target = clientTarget()) => String(target.vars.BUSINESS_OS_ADMIN_URL || '').replace(/\/+$/, '')
+export const allowedHosts = (target = clientTarget()) => Object.freeze(
+  [target.vars.BUSINESS_OS_ADMIN_URL, target.vars.BUSINESS_OS_PUBLIC_URL].filter(Boolean).map((url) => new URL(url).hostname),
+)
 const REQUEST_TIMEOUT_MS = 60000
 const BOOKMARK = /\b[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{32}\b/
 
-export function baseUrl(raw) {
-  const text = String(raw || DEFAULT_BASE_URL).trim().replace(/\/+$/, '')
+export function baseUrl(raw, target = clientTarget()) {
+  const text = String(raw || defaultBaseUrl(target)).trim().replace(/\/+$/, '')
   let url
   try { url = new URL(text) } catch { throw new OpsError('bad-base-url', 'The base URL is not a URL.') }
-  if (url.protocol !== 'https:' || !ALLOWED_HOSTS.includes(url.hostname) || url.port || url.pathname !== '/' || url.search || url.hash || url.username) {
+  if (url.protocol !== 'https:' || !allowedHosts(target).includes(url.hostname) || url.port || url.pathname !== '/' || url.search || url.hash || url.username) {
     throw new OpsError('bad-base-url', 'The base URL must be the plain https origin of a production host.')
   }
   return url.origin
@@ -86,7 +89,7 @@ export function parseBookmark(stdout) {
 }
 
 export async function captureBookmark() {
-  const result = await runWrangler(['d1', 'time-travel', 'info', DATABASE, '--json'], {
+  const result = await runWrangler(['d1', 'time-travel', 'info', mainDatabase(), '--json'], {
     cwd: CLOUDFLARE_DIR, timeoutMs: 3 * 60 * 1000,
     env: { WRANGLER_WRITE_LOGS: 'false', WRANGLER_LOG_PATH: path.join(os.tmpdir(), `ops-cutover-wrangler-${process.pid}`) },
   })

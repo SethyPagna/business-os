@@ -7,7 +7,7 @@
 //   run\release.bat                      menu
 //   run\release.bat release              the whole release, in order
 //   run\release.bat network | prepare | gates | login | snapshot |
-//                   migrations | deploy | live | rollback |
+//                   target | migrations | deploy | live | rollback |
 //                   export-names | r2-steps | verify-local | full-automation
 //
 // Options (PowerShell or GNU spelling):
@@ -19,7 +19,11 @@
 //   -Records <dir>        where deploy records go (default <home>\Records)
 //   -Worktree <dir>       the release folder (default <home>\Worktrees\release)
 //   -AuthFrom <checkout>  the checkout whose saved Cloudflare token to use
-//   -Site <url>           default https://admin.leangbeauty.com
+//   -Site <url>           the client's admin site for the live checks (default: ADMIN_URL, else the
+//                         admin url in the rendered config; it must equal that url)
+//   -EnvFile <path>       the client's dotenv file (see clients/example.env): the Worker config is
+//                         rendered from it into the release folder, and its account, main database
+//                         and admin url are what the release must be aimed at
 //   -Jobs <n>             test files run in parallel (default 3)
 //   -Retries <n>          extra tries for a red test file (default 2)
 //   rollback: -Target worker|database  -VersionId <id>  -Db <name>  -Bookmark <b>
@@ -32,13 +36,15 @@ const path = require('path')
 const crypto = require('crypto')
 const lib = require('./lib.cjs')
 const ex = require('./exec.cjs')
+const renderLib = require('../client/render-lib.cjs')
+const targetLib = require('../client/target-lib.cjs')
 
 const { log } = ex
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const R2_PLAN_REL = path.join('Performance', '2026-09-25', 'claude', 'R2-apac-plan.md')
 const R2_SCRIPTS_REL = path.join('Performance', '2026-09-25', 'claude', 'r2-apac')
 const WINDOW_ADVICE = 'This window is going through the VPN. Open Windows Terminal from the Start menu (not from Claude) and run run\\release.bat again.'
-const VPN_ADVICE = `${WINDOW_ADVICE} If it still happens, turn the VPN off (or exclude cloudflare.com and leangbeauty.com from it) and try again.`
+const VPN_ADVICE = `${WINDOW_ADVICE} If it still happens, turn the VPN off (or exclude cloudflare.com and the shop's own domain from it) and try again.`
 
 // ------------------------------------------------------------------ setup
 
@@ -68,7 +74,14 @@ function buildContext(args) {
     ciConfirmWord: 'DEPLOY',
     plan: args.plan || '',
     ref: args.ref || '',
-    site: String(args.site || lib.DEFAULT_SITE).replace(/\/+$/, ''),
+    // The admin site of the client being released. Set from -Site, else the environment's ADMIN_URL,
+    // else (once the rendered config is read) the config's own admin url.
+    site: String(args.site || '').replace(/\/+$/, ''),
+    // What the environment says this release must be aimed at (CF_ACCOUNT_ID, D1_MAIN_ID, ADMIN_URL), and the
+    // target read from the rendered config once a step needs it (see needTarget).
+    expect: targetLib.expectationsFromEnv(process.env),
+    target: null,
+    catalog: null,
     jobs: Math.max(1, Number(args.jobs) || 3),
     retries: Math.max(0, args.retries == null ? 2 : Number(args.retries) || 0),
     records: path.resolve(args.records || process.env.BUSINESS_OS_RECORDS || path.join(home, 'Records')),
@@ -81,6 +94,7 @@ function buildContext(args) {
     state: {},
   }
   if (ctx.ci && !ctx.fixedRelease) throw new Error('-CI needs -ReleaseDir <checkout>')
+  if (!ctx.site && ctx.expect.adminUrl) ctx.site = ctx.expect.adminUrl
   // Which with-wrangler-auth.cjs to go through. The kit only checks that a
   // saved-token file EXISTS; the wrapper is what reads it.
   const candidates = ctx.ci ? [ctx.releaseDir] : [args.authFrom, REPO_ROOT, mainWorktree].filter(Boolean).map((p) => path.resolve(p))
@@ -180,6 +194,60 @@ function needSha(ctx) {
   return false
 }
 
+// The client this release is for: its rendered Worker config, read into a target and
+// checked against what the environment expects. Everything the kit runs against
+// production is built from it, so a release can only reach the account, the Worker and
+// the databases that config names. With -EnvFile the config is rendered first.
+function renderClientConfig(ctx) {
+  if (!ctx.args.envFile) return true
+  const dir = path.join(ctx.releaseDir, 'cloudflare')
+  const templateFile = path.join(dir, 'wrangler.template.toml')
+  if (!fs.existsSync(templateFile)) { log.say(`STOP: ${templateFile} does not exist, so the config cannot be rendered.`); return false }
+  try {
+    const map = renderLib.readEnvFile(ctx.args.envFile)
+    const values = renderLib.resolveValues(map, { strict: true })
+    // The client file is also the statement of what this release must hit.
+    ctx.expect = { accountId: values.CF_ACCOUNT_ID, d1MainId: values.D1_MAIN_ID, adminUrl: values.ADMIN_URL }
+    if (ctx.dryRun) { log.say('[dry-run] would render the Worker config from the client file'); return true }
+    const files = renderLib.renderFiles(fs.readFileSync(templateFile, 'utf8'), values, {})
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text)
+    log.say(`Rendered ${Object.keys(files).join(' and ')} from the client file.`)
+    return true
+  } catch (err) {
+    log.say(`STOP: ${err.problems ? err.problems.join('; ') : err.message}`)
+    return false
+  }
+}
+
+function needTarget(ctx) {
+  if (ctx.catalog) return true
+  if (!renderClientConfig(ctx)) return false
+  const file = path.join(ctx.releaseDir, 'cloudflare', 'wrangler.toml')
+  if (!fs.existsSync(file)) {
+    if (ctx.dryRun) {
+      ctx.target = lib.placeholderTarget()
+      ctx.catalog = lib.catalogFor(ctx.target)
+      log.say('[dry-run] no rendered Worker config here; showing the commands with <placeholders> for the account, Worker and databases')
+      return true
+    }
+    log.say(`STOP: ${file} does not exist. It is generated per client: pass -EnvFile <the client's file>, or run node ops/scripts/client/render-wrangler.mjs --env-file <the client's file> first.`)
+    return false
+  }
+  try {
+    ctx.target = lib.targetFromConfig(fs.readFileSync(file, 'utf8'), ctx.expect, { require: ctx.ci, accountSecret: process.env.CLOUDFLARE_ACCOUNT_ID || '' })
+  } catch (err) {
+    log.say(`STOP: this release is not aimed at the client it was asked for: ${err.message}`)
+    return false
+  }
+  if (ctx.site && ctx.target.site && ctx.site !== ctx.target.site) {
+    log.say('STOP: the site given (-Site) is not the admin url in the rendered Worker config, so the live checks would look at another site.')
+    return false
+  }
+  if (!ctx.site) ctx.site = ctx.target.site
+  ctx.catalog = lib.catalogFor(ctx.target)
+  return true
+}
+
 async function checkClean(ctx) {
   if (ctx.dryRun && !releaseExists(ctx)) {
     log.say(`[dry-run] would check that ${ctx.releaseDir} is clean and at ${ctx.sha.slice(0, 12)}`)
@@ -219,10 +287,10 @@ async function checkClean(ctx) {
 
 async function stepNetwork(ctx) {
   heading('Network check: does Cloudflare let this computer through?')
-  const probes = [
-    { label: 'Cloudflare API', url: 'https://api.cloudflare.com/client/v4/ips' },
-    { label: 'Business OS site', url: `${ctx.site}/health` },
-  ]
+  const probes = [{ label: 'Cloudflare API', url: 'https://api.cloudflare.com/client/v4/ips' }]
+  // The client's own site is only known once its config is rendered (ADMIN_URL, -Site or the config).
+  if (ctx.site) probes.push({ label: 'Business OS site', url: `${ctx.site}/health` })
+  else log.say('  (no site known yet, so only the Cloudflare API is checked; give -Site or -EnvFile to check the shop too)')
   let challenged = false
   let failed = false
   const results = []
@@ -437,7 +505,7 @@ async function stepLogin(ctx) {
   heading('Cloudflare login check')
   if (!needSha(ctx)) return false
   log.say(`Credentials: ${ctx.authNote}`)
-  const r = await ex.runSpec(lib.commandCatalog.whoami(), ctx, null, { capture: true })
+  const r = await ex.runSpec(lib.whoamiSpec(), ctx, null, { capture: true })
   if (r.dry) return true
   const loggedIn = r.code === 0 && !/not authenticated|not logged in|You are not logged/i.test(r.out)
   if (loggedIn) {
@@ -453,6 +521,38 @@ async function stepLogin(ctx) {
   return false
 }
 
+// Nothing reaches production before this passes: the account the token can act in must
+// be the account in the rendered config, and the config must be the one the environment
+// expects (account, main database, admin url). CI also refuses to run without all three
+// expectations. It prints the target for a person; in CI only verdicts, never an id.
+async function stepTarget(ctx) {
+  heading('Target check: which client, account and databases is this release for?')
+  if (!needSha(ctx) || !needTarget(ctx)) return false
+  const t = ctx.target
+  if (ctx.plan && ctx.expect.planTier && ctx.plan !== ctx.expect.planTier) {
+    log.say(`STOP: this client is on the ${ctx.expect.planTier} plan (PLAN_TIER), not ${ctx.plan}.`)
+    return false
+  }
+  const show =(label, value) => log.say(`  ${label.padEnd(15)} ${ctx.ci ? 'matches the expected target' : value}`)
+  if (!ctx.ci) {
+    show('Worker:', t.workerName)
+    show('Account:', t.accountId)
+    show('Databases:', t.databases.map((d) => `${d.name} (${d.id})`).join(', '))
+    show('Site:', ctx.site || '(none)')
+  } else {
+    log.say(`  Rendered config: account, Worker and databases read${ctx.expect.accountId && ctx.expect.d1MainId && ctx.expect.adminUrl ? ' and equal to the expected CF_ACCOUNT_ID, D1_MAIN_ID, ADMIN_URL' : ''}.`)
+  }
+  const r = await ex.runSpec(ctx.catalog.whoamiJson(), ctx, null, { capture: true })
+  if (r.dry) return true
+  if (r.code !== 0 || !targetLib.whoamiHasAccount(r.out, t.accountId)) {
+    log.say('STOP: the Cloudflare login cannot act in the account this release is aimed at (wrangler whoami does not list it). Nothing was changed.')
+    return false
+  }
+  log.say('  Cloudflare login: the account of this client is among the accounts the token can act in.')
+  summary(ctx, '### Target\n\n- Rendered config equals the expected account, main database and admin url; the Cloudflare token can act in that account.')
+  return true
+}
+
 async function readProduction(ctx, spec, approval) {
   const r = await ex.runSpec(spec, ctx, approval, { capture: true })
   if (r.dry) return { ok: true, dry: true, json: null }
@@ -461,7 +561,7 @@ async function readProduction(ctx, spec, approval) {
 }
 
 async function readCounts(ctx, approval) {
-  const r = await readProduction(ctx, lib.commandCatalog.counts(), approval)
+  const r = await readProduction(ctx, ctx.catalog.counts(), approval)
   if (r.dry) return { ok: true, counts: null }
   const counts = lib.parseCounts(r.json)
   return { ok: r.ok && !!counts, counts }
@@ -469,19 +569,19 @@ async function readCounts(ctx, approval) {
 
 async function stepSnapshot(ctx) {
   heading('Safety snapshot (restore point + row counts)')
-  if (!needSha(ctx)) return false
+  if (!needSha(ctx) || !needTarget(ctx)) return false
   const approval = await ex.confirm(ctx, 'confirm', 'Read production to save a restore point and row counts? (This changes nothing.)')
   if (!approval.ok) { log.say('Stopped.'); return false }
   const bookmarks = {}
-  for (const db of lib.DATABASES) {
-    const r = await readProduction(ctx, lib.commandCatalog.timeTravelInfo(db.name), approval)
+  for (const db of ctx.target.databases) {
+    const r = await readProduction(ctx, ctx.catalog.timeTravelInfo(db.name), approval)
     if (r.dry) continue
     const bm = lib.findKey(r.json, 'bookmark')
     if (!r.ok || !bm) { log.say(`STOP: could not read the restore point of ${db.name}.`); if (!ctx.ci) log.say(r.out); return false }
     bookmarks[db.name] = bm
     log.say(`  restore point ${db.name}: ${bm}`)
   }
-  const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+  const dep = await readProduction(ctx, ctx.catalog.deploymentStatus(), approval)
   let previousVersionId = ''
   if (!dep.dry) {
     previousVersionId = lib.liveVersionId(dep.json)
@@ -497,15 +597,15 @@ async function stepSnapshot(ctx) {
   writeRecord(ctx, 'snapshot.json', ctx.state.snapshot)
   log.say('')
   log.say('If the release goes wrong, the database can be put back to this moment with (menu: Undo a release):')
-  for (const db of lib.DATABASES) {
-    const spec = lib.commandCatalog.restoreDatabase(db.name, bookmarks[db.name] || '<bookmark>')
+  for (const db of ctx.target.databases) {
+    const spec = ctx.catalog.restoreDatabase(db.name, bookmarks[db.name] || '<bookmark>')
     const inv = ex.specInvocation(spec, ctx)
     log.say(`    ${ex.displayCommand(inv.cmd, inv.args)}`)
   }
   log.say('  WARNING: a restore also removes every sale and change made after this moment.')
   summary(ctx, [
     '### Safety snapshot', '',
-    ...lib.DATABASES.map((d) => `- Restore point \`${d.name}\`: \`${bookmarks[d.name] || '-'}\``),
+    ...ctx.target.databases.map((d) => `- Restore point \`${d.name}\`: \`${bookmarks[d.name] || '-'}\``),
     `- Worker version before: \`${previousVersionId || '-'}\``, '',
     ...(ctx.ci
       ? [`Row counts read for ${lib.KEY_TABLES.length} tables (numbers kept out of this public summary).`]
@@ -516,14 +616,15 @@ async function stepSnapshot(ctx) {
 
 async function stepMigrations(ctx) {
   heading('Database updates (migrations)')
-  if (!needSha(ctx)) return false
+  if (!needSha(ctx) || !needTarget(ctx)) return false
   if (!await checkClean(ctx)) return false
   const approval = await ex.confirm(ctx, 'confirm', 'Read the list of database updates that production has not had yet? (This changes nothing.)')
   if (!approval.ok) { log.say('Stopped.'); return false }
   const pending = {}
   const touched = new Set()
-  for (const db of lib.DATABASES.filter(db => db.name !== 'business-os')) {
-    const result = await readProduction(ctx, lib.commandCatalog.importMigrationLedger(), approval)
+  const mainName = ctx.target.main.name
+  for (const db of ctx.target.databases.filter(db => db.binding !== 'DB')) {
+    const result = await readProduction(ctx, ctx.catalog.importMigrationLedger(), approval)
     if (result.dry) { pending[db.name] = null; continue }
     try {
       if (!result.ok) throw Error('Could not read import migration ledger')
@@ -533,8 +634,8 @@ async function stepMigrations(ctx) {
       pending[db.name] = []
     } catch (error) { log.say(`STOP: ${error.message}`); return false }
   }
-  for (const db of lib.DATABASES.filter(db => db.name === 'business-os')) {
-    const r = await ex.runSpec(lib.commandCatalog.migrationsList(db.name), ctx, approval, { capture: true })
+  for (const db of ctx.target.databases.filter(db => db.binding === 'DB')) {
+    const r = await ex.runSpec(ctx.catalog.migrationsList(db.name), ctx, approval, { capture: true })
     if (r.dry) { pending[db.name] = null; continue }
     if (r.code !== 0) { log.say(`STOP: could not list the updates for ${db.name}.`); if (!ctx.ci) log.say(r.out); return false }
     try {
@@ -553,25 +654,25 @@ async function stepMigrations(ctx) {
   let guardFiles, guardExpected, config
   try {
     config = fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'wrangler.toml'), 'utf8')
-    lib.guardStageConfig(config, '.guard-stage-validation')
+    lib.guardStageConfig(config, '.guard-stage-validation', ctx.target)
     const lock = JSON.parse(fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'package-lock.json'), 'utf8'))
     const installed = JSON.parse(fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'node_modules', 'wrangler', 'package.json'), 'utf8'))
     if (lock.packages?.['node_modules/wrangler']?.version !== '4.116.0' || installed.version !== '4.116.0') throw Error('Guard stage requires pinned Wrangler4.116.0')
     guardFiles = lib.GUARD_MIGRATIONS.map(file => ({ name: file.name, bytes: fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations', file.name)) }))
     guardExpected = lib.validateGuardFiles(guardFiles)
     if (!ctx.dryRun) {
-      for (const name of pending['business-os']) {
+      for (const name of pending[mainName]) {
         if (!fs.existsSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations', name))) throw Error('Pending migration absent from candidate')
         if (name < lib.GUARD_MIGRATIONS[0].name) throw Error('Pending preguard baseline migration; establish prerequisites before guard staging')
       }
       const state = await readGuardState(ctx, approval, guardExpected)
       const candidate = fs.readdirSync(path.join(ctx.releaseDir, 'cloudflare', 'migrations')).filter(name => name.endsWith('.sql')).sort()
       const actualPending = candidate.filter(name => !state.applied.includes(name))
-      if (JSON.stringify(actualPending) !== JSON.stringify([...pending['business-os']].sort())) throw Error('Pending migration list does not match exact candidate/ledger')
+      if (JSON.stringify(actualPending) !== JSON.stringify([...pending[mainName]].sort())) throw Error('Pending migration list does not match exact candidate/ledger')
     }
   } catch (error) { log.say(`STOP: ${error.message}`); return false }
   const total = Object.values(pending).reduce((n, list) => n + (list ? list.length : 0), 0)
-  summary(ctx, `### Database updates waiting\n\n${lib.DATABASES.map((d) => `- ${d.name}: ${pending[d.name] ? (pending[d.name].join(', ') || 'none') : 'not read'}`).join('\n')}`)
+  summary(ctx, `### Database updates waiting\n\n${ctx.target.databases.map((d) => `- ${d.name}: ${pending[d.name] ? (pending[d.name].join(', ') || 'none') : 'not read'}`).join('\n')}`)
   if (!ctx.dryRun && total === 0) { log.say('Production already has every database update.'); return true }
   if (ctx.args.noApply) {
     log.say(`NOT applying ${total} waiting update(s) (-NoApply). The new code may need them.`)
@@ -589,9 +690,9 @@ async function stepMigrations(ctx) {
     log.say(`STOP: guard stage failed: ${error.message}`)
     return false
   }
-  for (const db of lib.DATABASES) {
+  for (const db of ctx.target.databases) {
     if (pending[db.name] && pending[db.name].length === 0) continue
-    const r = await ex.runSpec(lib.commandCatalog.migrationsApply(db.name), ctx, write)
+    const r = await ex.runSpec(ctx.catalog.migrationsApply(db.name), ctx, write)
     if (r.code !== 0) {
       const note = [
         `Database update FAILED on ${db.name} at ${new Date().toISOString()}.`,
@@ -614,7 +715,7 @@ async function stepMigrations(ctx) {
 }
 
 async function readGuardState(ctx, approval, expected, complete = false) {
-  const result = await readProduction(ctx, lib.commandCatalog.guardState(lib.guardStateSql()), approval)
+  const result = await readProduction(ctx, ctx.catalog.guardState(lib.guardStateSql()), approval)
   if (result.dry) return null
   const raw = lib.findKey(result.json, 'guard_state')
   if (!result.ok || typeof raw !== 'string') throw Error('Could not read exact migration ledger/guard state')
@@ -631,11 +732,11 @@ async function applyGuardStage(ctx, write, read, config, files, expected) {
   const configFile = path.join(cf, `${name}.toml`)
   if (ctx.dryRun) {
     log.say('[dry-run] verify ledger/epoch/triggers/no-permit, stage exact0243 then0258, verify both before normal migrations')
-    await ex.runSpec(lib.commandCatalog.guardStageApply(configFile), ctx, write)
+    await ex.runSpec(ctx.catalog.guardStageApply(configFile), ctx, write)
     return
   }
   await readGuardState(ctx, read, expected)
-  const stageConfig = lib.guardStageConfig(config, name)
+  const stageConfig = lib.guardStageConfig(config, name, ctx.target)
   try {
     fs.mkdirSync(directory)
     for (const file of files) fs.writeFileSync(path.join(directory, file.name), file.bytes, { flag: 'wx' })
@@ -644,8 +745,8 @@ async function applyGuardStage(ctx, write, read, config, files, expected) {
     lib.validateGuardFiles(staged)
     if (fs.readFileSync(configFile, 'utf8') !== stageConfig) throw Error('Stage config changed before invocation')
     writeRecord(ctx, 'guard-stage.json', { sha: ctx.sha, wrangler: '4.116.0', migrations: lib.GUARD_MIGRATIONS,
-      configSha256: crypto.createHash('sha256').update(stageConfig).digest('hex'), ledger: 'd1_migrations', database: 'business-os' })
-    const result = await ex.runSpec(lib.commandCatalog.guardStageApply(configFile), ctx, write)
+      configSha256: crypto.createHash('sha256').update(stageConfig).digest('hex'), ledger: 'd1_migrations', database: ctx.target.main.name })
+    const result = await ex.runSpec(ctx.catalog.guardStageApply(configFile), ctx, write)
     if (result.code !== 0) throw Error('Wrangler guard migration apply failed; retain installed fences and inspect ledger before resume')
     await readGuardState(ctx, read, expected, true)
   } finally {
@@ -661,7 +762,7 @@ async function applyGuardStage(ctx, write, read, config, files, expected) {
 
 async function stepDeploy(ctx) {
   heading('Publish the new version (deploy)')
-  if (!needSha(ctx)) return false
+  if (!needSha(ctx) || !needTarget(ctx)) return false
   if (!(await checkClean(ctx))) return false
   const fe = path.join(ctx.releaseDir, 'frontend')
   if (ctx.state.frontendBuiltFor !== ctx.sha || !fs.existsSync(path.join(fe, 'dist'))) {
@@ -673,11 +774,15 @@ async function stepDeploy(ctx) {
   if (!(await checkClean(ctx))) return false
   const plan = ctx.plan || await ex.askDefault(ctx, 'Cloudflare plan, paid or free? ', lib.DEFAULT_PLAN)
   if (!['paid', 'free'].includes(plan)) { log.say('STOP: type paid or free.'); return false }
+  if (ctx.expect.planTier && plan !== ctx.expect.planTier) {
+    log.say(`STOP: this client is on the ${ctx.expect.planTier} plan (PLAN_TIER), not ${plan}. A ${plan} config on a ${ctx.expect.planTier} account would change what production can do.`)
+    return false
+  }
   const approval = await ex.confirm(ctx, 'typeYES', `Publish ${ctx.sha.slice(0, 12)} "${ctx.subject}" to PRODUCTION on the ${plan} plan?`)
   if (!approval.ok) { log.say('Stopped. Nothing was published.'); return false }
   // tee, not plain: the version id below is parsed from this output, and an
   // uncaptured run returns none, so no release ever recorded what it published.
-  const r = await ex.runSpec(lib.commandCatalog.deploy(plan), ctx, approval, { tee: true })
+  const r = await ex.runSpec(ctx.catalog.deploy(plan), ctx, approval, { tee: true })
   ctx.state.deploy = { at: new Date().toISOString(), plan, exitCode: r.code, dryRun: ctx.dryRun }
   const version = /Current Version ID:\s*([0-9a-f-]{36})/i.exec(r.out || '')
   if (version) ctx.state.deploy.versionId = version[1]
@@ -689,7 +794,7 @@ async function stepDeploy(ctx) {
 
 async function stepLive(ctx) {
   heading('Live checks')
-  if (!needSha(ctx)) return false
+  if (!needSha(ctx) || !needTarget(ctx)) return false
   const plan = ctx.plan || (ctx.state.deploy && ctx.state.deploy.plan) || lib.DEFAULT_PLAN
   const problems = []
   const warnings = []
@@ -735,7 +840,7 @@ async function stepLive(ctx) {
   if (approval.ok) {
     // The Cloudflare API is not behind the site's bot challenge, so this works
     // from GitHub's runner too. Compare with the version this release published.
-    const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+    const dep = await readProduction(ctx, ctx.catalog.deploymentStatus(), approval)
     if (!dep.dry) {
       apiVersion = lib.liveVersionId(dep.json)
       const published = (ctx.state.deploy && ctx.state.deploy.versionId) || ''
@@ -790,6 +895,7 @@ async function stepRollback(ctx) {
   ctx.ciConfirmWord = 'ROLLBACK'
   if (!releaseExists(ctx) && !ctx.fixedRelease) ctx.releaseDir = REPO_ROOT
   if (releaseExists(ctx) || ctx.dryRun) needSha(ctx)
+  if (!needTarget(ctx)) return false
   const snap = ctx.state.snapshot || {}
   let target = ctx.args.target
   if (!target && !ctx.dryRun && !ctx.ci) {
@@ -808,20 +914,24 @@ async function stepRollback(ctx) {
       log.say(versionId ? `The version that was live before the release: ${versionId}` : 'No saved version; Cloudflare will go back to the previous version.')
       const approval = await ex.confirm(ctx, 'double', 'Put the website back to the version before this release?', 'ROLLBACK')
       if (!approval.ok) { log.say('Stopped. Nothing was changed.'); ok = false; continue }
-      const r = await ex.runSpec(lib.commandCatalog.rollbackWorker(versionId, ctx.ci), ctx, approval)
+      const r = await ex.runSpec(ctx.catalog.rollbackWorker(versionId, ctx.ci), ctx, approval)
       ok = ok && r.code === 0
       if (r.code === 0) done(ctx, 'Website rolled back.'); else log.say('Rollback FAILED. Send the log to Claude.')
     } else if (t === 'database') {
-      const db = ctx.args.db || (ctx.dryRun || ctx.ci ? 'business-os' : await ex.askDefault(ctx, 'Which database (business-os or business-os-import)? ', 'business-os'))
+      const dbNames = ctx.target.databases.map((d) => d.name)
+      // A workflow cannot list a client's database names, so it says main or import.
+      const alias = { main: ctx.target.main.name, import: ctx.target.importDb ? ctx.target.importDb.name : '' }
+      const asked = ctx.args.db || (ctx.dryRun || ctx.ci ? ctx.target.main.name : await ex.askDefault(ctx, `Which database (${dbNames.join(' or ')})? `, ctx.target.main.name))
+      const db = Object.prototype.hasOwnProperty.call(alias, asked) && alias[asked] ? alias[asked] : asked
       const bookmark = ctx.args.bookmark || (snap.bookmarks && snap.bookmarks[db]) || (ctx.dryRun ? '<bookmark from snapshot.json>' : '')
       if (!bookmark) { log.say(`STOP: no saved restore point for ${db}. Give one with -Bookmark.`); ok = false; continue }
-      if (!lib.DATABASES.some((d) => d.name === db)) { log.say(`STOP: unknown database ${db}.`); ok = false; continue }
+      if (!dbNames.includes(db)) { log.say(`STOP: ${db} is not one of this client's databases.`); ok = false; continue }
       if (!ctx.dryRun && !/^[0-9a-f-]{16,}$/i.test(bookmark)) { log.say(`STOP: ${bookmark} does not look like a restore point.`); ok = false; continue }
       log.say(`Restore point: ${bookmark}${snap.at ? ` (saved ${snap.at})` : ''}`)
       log.say('WARNING: every sale, stock change and edit made after that moment will be LOST.')
       const approval = await ex.confirm(ctx, 'double', `Put the ${db} database back to the restore point?`, db)
       if (!approval.ok) { log.say('Stopped. Nothing was changed.'); ok = false; continue }
-      const r = await ex.runSpec(lib.commandCatalog.restoreDatabase(db, bookmark), ctx, approval)
+      const r = await ex.runSpec(ctx.catalog.restoreDatabase(db, bookmark), ctx, approval)
       ok = ok && r.code === 0
       if (r.code === 0) done(ctx, 'Database restored.'); else log.say('Restore FAILED. Send the log to Claude.')
     } else if (t) {
@@ -836,6 +946,7 @@ async function stepRollback(ctx) {
 async function stepExportNames(ctx) {
   heading('Export product list for official names')
   if (!ctx.recordDir) log.attach(path.join(ctx.records, 'Deploys', `${lib.todayStamp()}-session${ctx.dryRun ? '-dryrun' : ''}`), `release-${RUN_STAMP}.log`)
+  if (!ctx.site && !needTarget(ctx)) return false
   const approval = await ex.confirm(ctx, 'confirm', `Download the public product list from ${ctx.site}? (Read-only; saved on this computer only.)`)
   if (!approval.ok) return false
   const items = []
@@ -891,13 +1002,13 @@ async function stepBat(ctx, name) {
   if (!approval.ok) { log.say('Stopped.'); return false }
   const saved = ctx.releaseDir
   ctx.releaseDir = REPO_ROOT
-  const r = await ex.runSpec(lib.commandCatalog.fullAutomationBat(), ctx, approval)
+  const r = await ex.runSpec(lib.fullAutomationSpec(), ctx, approval)
   ctx.releaseDir = saved
   return r.code === 0
 }
 
 async function fullRelease(ctx) {
-  const order = [stepNetwork, stepPrepare, stepGates, stepLogin, stepSnapshot, stepMigrations, stepDeploy, stepLive]
+  const order = [stepNetwork, stepPrepare, stepGates, stepLogin, stepTarget, stepSnapshot, stepMigrations, stepDeploy, stepLive]
   for (const step of order) {
     const ok = await step(ctx)
     if (!ok) {
@@ -926,10 +1037,11 @@ const MENU = [
   ['12', 'R2 image move to Asia (show the steps)', stepR2Steps],
   ['13', 'Local check only (verify-local.bat)', (ctx) => stepBat(ctx, 'verify-local.bat')],
   ['14', 'Old one-click release (full-automation.bat, not recommended)', (ctx) => stepBat(ctx, 'full-automation.bat')],
+  ['15', 'Check the target (which client, account, Worker and databases this release acts on)', stepTarget],
 ]
 
 const COMMANDS = {
-  network: stepNetwork, release: fullRelease, prepare: stepPrepare, gates: stepGates, login: stepLogin,
+  network: stepNetwork, release: fullRelease, prepare: stepPrepare, gates: stepGates, login: stepLogin, target: stepTarget,
   snapshot: stepSnapshot, migrations: stepMigrations, deploy: stepDeploy, live: stepLive,
   rollback: stepRollback, 'export-names': stepExportNames, 'r2-steps': stepR2Steps,
   'verify-local': (ctx) => stepBat(ctx, 'verify-local.bat'), 'full-automation': (ctx) => stepBat(ctx, 'full-automation.bat'),
@@ -1012,4 +1124,4 @@ if (require.main === module) {
   main().then((code) => { process.exitCode = code })
 }
 
-module.exports = { buildContext, MENU, COMMANDS }
+module.exports = { buildContext, needTarget, MENU, COMMANDS }

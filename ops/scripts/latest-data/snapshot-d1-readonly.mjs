@@ -3,7 +3,8 @@
 //
 // RUN IT ONLY WITH THE OWNER'S EXPLICIT AUTHORIZATION: it reads production.
 //
-// Dumps every non-FTS table in the `business-os` D1 database to
+// Dumps every non-FTS table in the client's main D1 database (the one its rendered
+// cloudflare/wrangler.toml names; render it first) to
 // <table>.jsonl files under an output directory OUTSIDE the repository, plus
 // a manifest.json, a rebuilt snapshot.sqlite, and a SHA256SUMS file.
 //
@@ -34,13 +35,15 @@ import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { clientConfigPath, mainDatabase } from '../ops-common.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const CLOUDFLARE_DIR = path.join(REPO_ROOT, 'cloudflare')
-// Must equal the [[d1_databases]] binding "DB" database_name in
-// cloudflare/wrangler.toml (pinned by the test).
-export const DATABASE_NAME = 'business-os'
+// The [[d1_databases]] binding "DB" database_name of the client's rendered cloudflare/wrangler.toml
+// (generated per client: node ops/scripts/client/render-wrangler.mjs --env-file <the client's env file>).
+// Read when a run needs it, so importing this module (the test does) needs no config.
+export const databaseName = () => mainDatabase()
 const PAGE_SIZE = 1000
 const MIN_DELAY_MS = 260 // keeps us well under the "<=4 requests/second" gentleness rule
 
@@ -105,7 +108,7 @@ const MAX_D1_ATTEMPTS = 4
 function wranglerRemoteRunner(sql, attempt = 1) {
   const result = spawnSync(
     process.execPath,
-    ['scripts/with-wrangler-auth.cjs', 'wrangler', 'd1', 'execute', DATABASE_NAME, '--remote', '--json', '--command', sql],
+    ['scripts/with-wrangler-auth.cjs', 'wrangler', 'd1', 'execute', databaseName(), '--remote', '--json', '--command', sql, '--config', clientConfigPath()],
     { cwd: CLOUDFLARE_DIR, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
   )
   sleep(MIN_DELAY_MS)
@@ -597,7 +600,7 @@ export function main(argv = process.argv.slice(2), deps = {}) {
   const redactor = createRedactor({ includePii: opts.includePii, salt: deps.salt })
   fs.mkdirSync(outDir, { recursive: true })
 
-  log.log(`[snapshot] database=${DATABASE_NAME} outDir=${outDir} pii=${redactor.mode}`)
+  log.log(`[snapshot] database=${databaseName()} outDir=${outDir} pii=${redactor.mode}`)
   log.log('[snapshot] harmless probe: SELECT 1')
   const probe = d1(SQL.probe())
   if (probe[0]?.ok !== 1) throw new Error('Probe query did not return expected result')
@@ -622,7 +625,7 @@ export function main(argv = process.argv.slice(2), deps = {}) {
     captured_at_utc: new Date().toISOString(),
     captured_at_ict: null, // filled in below once captured_at_utc is fixed, in Asia/Phnom_Penh (UTC+7, no DST)
     wrangler_version: wranglerVersion,
-    database_name: DATABASE_NAME,
+    database_name: databaseName(),
     pii: redactor.mode,
     redaction: {
       method: 'HMAC-SHA256 with a random per-run salt (not stored), first 80 bits, prefix "pii_"',

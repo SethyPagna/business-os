@@ -62,6 +62,40 @@ if (commandArgs.length === 0) {
 const env = { ...process.env, ...loaded }
 let [cmd, ...args] = commandArgs
 
+// The Worker config is generated for ONE client (ops/scripts/client/render-wrangler.mjs)
+// and names that client's Cloudflare account. The account the token runs with
+// must be that account. A saved token file of one client next to the rendered
+// config of another would otherwise let `wrangler deploy` or a migration act in
+// the wrong account: wrangler prefers CLOUDFLARE_ACCOUNT_ID over the config's
+// account_id. Nothing is run on a mismatch, and no id is printed.
+function refuseWrongAccount() {
+  // `wrangler ...` from an npm script, or node running wrangler's own bin (what the release kit does).
+  const isWrangler = cmd === 'wrangler' || cmd === 'wrangler.cmd' || (/node(?:\.exe)?$/i.test(cmd) && /wrangler[\\/]bin[\\/]wrangler\.js$/.test(String(args[0] || '')))
+  if (!isWrangler) return
+  const given = args.findIndex((a) => a === '--config' || a === '-c')
+  const inline = args.find((a) => a.startsWith('--config='))
+  // Every wrangler command names the client's rendered config. Without --config wrangler takes whatever
+  // wrangler.toml is in the working folder, and that file (another client's, or a stale one) then wins over
+  // CLOUDFLARE_ACCOUNT_ID: a BM command once reached Leang's account that way. Commands that read no config
+  // are the only ones allowed without it.
+  const sub = String((/node(?:\.exe)?$/i.test(cmd) ? args[1] : args[0]) || '')
+  const READS_NO_CONFIG = new Set(['--version', '-v', '--help', '-h', 'help', 'whoami', 'login', 'logout', 'docs', 'telemetry'])
+  if (given < 0 && !inline && !READS_NO_CONFIG.has(sub)) {
+    console.error('[with-wrangler-auth] REFUSED: no --config. Name the client\'s rendered config on every wrangler command (for example --config wrangler.toml); a wrangler.toml found in the working folder is never picked up silently. Nothing was run.')
+    process.exit(1)
+  }
+  const configPath = path.resolve(process.cwd(), given >= 0 && args[given + 1] ? args[given + 1] : inline ? inline.slice('--config='.length) : 'wrangler.toml')
+  const wanted = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim()
+  if (!wanted || !fs.existsSync(configPath)) return
+  const configured = /^account_id\s*=\s*"([^"]+)"\s*$/m.exec(fs.readFileSync(configPath, 'utf8'))
+  if (configured && configured[1] !== wanted) {
+    console.error(`[with-wrangler-auth] REFUSED: the Worker config ${path.basename(configPath)} is for a different Cloudflare account than CLOUDFLARE_ACCOUNT_ID (${AUTH_FILE_NOTE}). Nothing was run. Render the config for the client you mean, or use that client's token.`)
+    process.exit(1)
+  }
+}
+const AUTH_FILE_NOTE = missing ? 'from the environment' : 'from .wrangler-auth.local or the environment'
+refuseWrongAccount()
+
 // Resolve `wrangler` to the project-installed CLI and run it through THIS
 // node, instead of trusting the shell to find it on PATH. Under `npm run`,
 // node_modules/.bin is on PATH so the bare name works -- but nested child

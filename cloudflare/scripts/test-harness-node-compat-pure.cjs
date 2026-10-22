@@ -32,8 +32,9 @@ function scripts(dir, out = []) {
   return out
 }
 
-for (const name of ['wrangler.toml', 'wrangler.free.toml']) {
-  assert.ok(hasCompatFlag(fs.readFileSync(path.join(cloudflare, name), 'utf8')), `${name} no longer sets compatibility_flags "nodejs_compat"`)
+const renderedWrangler = require('./harness/rendered_wrangler.cjs')
+for (const [name, text] of [['wrangler.toml', renderedWrangler.paid()], ['wrangler.free.toml', renderedWrangler.free()]]) {
+  assert.ok(hasCompatFlag(text), `${name} no longer sets compatibility_flags "nodejs_compat"`)
 }
 
 const checked = [...scripts(path.join(cloudflare, 'scripts')), ...scripts(path.join(repo, 'ops', 'scripts'))]

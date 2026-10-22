@@ -3,14 +3,35 @@
 This folder runs Business OS on Cloudflare Workers, D1, R2, Queues, KV, and
 Worker static assets.
 
-The Worker serves both the API and the built React frontend:
+The Worker serves both the API and the built React frontend, on the shop
+address and the staff (admin) address of whichever client it is deployed for.
 
-- `https://admin.leangbeauty.com`
-- `https://leangbeauty.com`
+One codebase serves several clients, each in its own Cloudflare account with
+its own data. **No client's configuration is in this repository**: the Worker
+config (`wrangler.toml`, and `wrangler.free.toml` for a Workers Free client)
+is generated from `wrangler.template.toml` and one client's values, and is
+gitignored. How to add a client and how a release finds its client:
+[`docs/setup/multi-client.md`](../docs/setup/multi-client.md).
 
-`leangcosmetics.dpdns.org` was retired completely on Sep 26 2026; do not
-add a route for it back (the deploy token is scoped to the leangbeauty.com
-zone, so a route on any other zone fails the deploy).
+Render the config of the client you mean before anything else:
+
+```sh
+node ../ops/scripts/client/render-wrangler.mjs --env-file <path to that client's .env file>
+# or: npm run render:config -- --env-file <path>
+```
+
+`clients/example.env` (repository root) documents every variable with fake
+values; a real client's file is kept outside the repository (or in the
+GitHub environment of that client, where the same names are its variables).
+The renderer names every missing, unknown or invalid variable and never
+prints a value.
+
+Every `wrangler` command names the rendered file with `--config` (the npm
+scripts, `deploy.cjs`, the release kit and the ops jobs all do), and
+`scripts/with-wrangler-auth.cjs` refuses a command that names none or a
+config for another account than `CLOUDFLARE_ACCOUNT_ID`: a `wrangler.toml`
+left in this folder by another client otherwise wins over the account in the
+environment.
 
 API, upload, and health routes run Worker code first. All other paths fall
 back to the single-page frontend app from `../frontend/dist`.
@@ -23,6 +44,7 @@ been removed. See `../PORTING_STATUS.md` for the historical migration log.
 ```sh
 cd cloudflare
 npm install
+node ../ops/scripts/client/render-wrangler.mjs --env-file ../clients/example.env   # or your own client's file
 npm run build:frontend
 npm run migrate:local
 npm run dev
@@ -46,8 +68,12 @@ wrangler queues create business-os-import
 wrangler queues create business-os-media
 ```
 
-Copy the returned D1 `database_id` and KV namespace `id` into
-`wrangler.toml`.
+Copy the returned D1 `database_id` values and the KV namespace `id` into the
+client's `.env` file (`D1_MAIN_ID`, `D1_IMPORT_ID`, `KV_CACHE_ID`), not into
+a Worker config: the Worker config is generated from them. The names above are
+Leang's; each client uses its own (`D1_MAIN_NAME`, `R2_BUCKET`, ...). The
+queue names are the ones the code expects (`business-os-import`,
+`business-os-import-dlq`, `business-os-media`, `business-os-backup-assets`).
 
 ## Deploy
 
@@ -90,7 +116,11 @@ values in these two files -- nothing else in the repo needs to change.
 
 ## Layout
 
-- `wrangler.toml`: Worker routes and bindings.
+- `wrangler.template.toml`: the only committed Worker config (routes, bindings and
+  vars as placeholders). `wrangler.toml` / `wrangler.free.toml` /
+  `admin-forwarder/wrangler.toml` are generated from it and gitignored.
+- `admin-forwarder/`: the optional tiny Worker that gives a workers.dev client its
+  own staff address (`FORWARDER_NAME` in the client's file).
 - `migrations/`: D1 schema migrations.
 - `src/index.ts`: Hono Worker entry point and queue consumer dispatch.
 - `src/lib/`: D1, R2, cache, upload, auth, audit, and conflict helpers.

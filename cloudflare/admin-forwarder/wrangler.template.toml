@@ -1,0 +1,21 @@
+{{! The optional admin forwarder of a client served on workers.dev. Rendered to wrangler.toml next to this file by }}
+{{! node ops/scripts/client/render-wrangler.mjs, only when the client sets FORWARDER_NAME (clients/example.env). }}
+# A tiny Worker that hands every request, unchanged, to this client's Business OS
+# Worker over a service binding. The URL keeps its own host, which is what makes
+# Business OS show the staff app on an address of its own (<client>-admin) while
+# the shop answers on the Worker's address (<client>) -- workers.dev names are one
+# label, so one Worker cannot answer on both.
+#
+# Deploy the client's main Worker first: this binding needs it to exist. Deploy this
+# one by hand, always naming this file and the client's account:
+#   wrangler deploy --config cloudflare/admin-forwarder/wrangler.toml
+name = "{{FORWARDER_NAME}}"
+main = "index.ts"
+compatibility_date = "2026-07-01"
+account_id = "{{CF_ACCOUNT_ID}}"
+workers_dev = true
+preview_urls = false
+
+[[services]]
+binding = "TARGET"
+service = "{{WORKER_NAME}}"

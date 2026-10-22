@@ -7,22 +7,24 @@
 //   OPS_OUT_DIR  where <kind>-<name>-<run>.enc.json is written
 //   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID  (wrangler reads them)
 //
-// Runs: wrangler d1 execute business-os --remote --json --command "<sql>"
+// Runs: wrangler d1 execute <the client's main database> --remote --json --command "<sql>"
+// (the name comes from the rendered Worker config, see ops-common clientTarget)
 // with the canonical SQL from ops-sql-guard.mjs. Public log: the query name,
 // PASS/FAIL, the expect-zero result, the encrypted file size and Cloudflare
 // error codes. Never the row count: that is a table size, and it stays in
 // the encrypted file for every query.
 
 import {
-  CLOUDFLARE_DIR, OpsError, codesText, cloudflareErrorCodes, commitId, isMain,
+  CLOUDFLARE_DIR, OpsError, codesText, cloudflareErrorCodes, commitId, isMain, mainDatabase,
   publicToken, requireEnv, runId, runMain, runWrangler, say, summary, truncate, writeEncryptedReport,
 } from './ops-common.mjs'
 import { loadQuery } from './ops-sql-guard.mjs'
 
-export const DATABASE = 'business-os'
+// The client's main database, from its rendered config.
+export const databaseName = () => mainDatabase()
 
-export function wranglerArgs(sql) {
-  return ['d1', 'execute', DATABASE, '--remote', '--json', '--command', sql]
+export function wranglerArgs(sql, database = databaseName()) {
+  return ['d1', 'execute', database, '--remote', '--json', '--command', sql]
 }
 
 export function parseJsonOutput(stdout) {
@@ -123,7 +125,7 @@ async function main() {
   const payload = {
     kind: 'd1-export',
     query: name,
-    database: DATABASE,
+    database: databaseName(),
     commit,
     runId: run,
     startedAt,

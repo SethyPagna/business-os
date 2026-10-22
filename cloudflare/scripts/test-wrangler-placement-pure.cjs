@@ -6,12 +6,15 @@
 // [limits]-style Paid-only gate), so both wrangler.toml and
 // wrangler.free.toml must carry it identically -- this is a source-assertion
 // test on the TOML text itself, mirroring the existing wrangler-config-drift
-// test's own style for these two hand-maintained files.
+// test's own style. Both files are generated per client from
+// wrangler.template.toml, so it reads the template rendered with
+// clients/example.env.
 //
 // Run: node scripts/test-wrangler-placement-pure.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const wrangler = require('./harness/rendered_wrangler.cjs')
 
 let passed = 0
 function check(name, fn) {
@@ -27,8 +30,8 @@ function read(relPath) {
 const PLACEMENT_BLOCK = /\[placement\]\s*\r?\nmode\s*=\s*"targeted"\s*\r?\nregion\s*=\s*"aws:ap-southeast-1"/
 
 function main() {
-  const paidSrc = read('wrangler.toml')
-  const freeSrc = read('wrangler.free.toml')
+  const paidSrc = wrangler.paid()
+  const freeSrc = wrangler.free()
 
   check('wrangler.toml (paid) declares [placement] mode = "targeted" + region aws:ap-southeast-1', () => {
     assert.ok(PLACEMENT_BLOCK.test(paidSrc), 'expected a [placement]\\nmode = "targeted" + region aws:ap-southeast-1 block in wrangler.toml')
@@ -41,7 +44,7 @@ function main() {
   check('[placement] is not listed as one of the documented free-vs-paid differences', () => {
     // wrangler.free.toml's own header enumerates "EXACTLY FOUR differences"
     // from wrangler.toml; placement must not need to become a fifth one.
-    const diffList = freeSrc.slice(0, freeSrc.indexOf('name = "business-os"'))
+    const diffList = freeSrc.slice(0, freeSrc.indexOf('\nname = '))
     assert.ok(!/placement/i.test(diffList), 'placement should not appear in the documented free/paid diff list -- it is identical on both plans')
   })
 

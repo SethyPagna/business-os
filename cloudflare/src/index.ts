@@ -45,6 +45,7 @@ import branchCutoverOperatorRoute from './routes/branchCutoverOperator'
 import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
+import { queueRole } from './lib/queueRoles'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
 import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
@@ -623,15 +624,17 @@ export default {
   // Cloudflare routes a queue message batch here based on which queue it
   // came from (wrangler.toml's [[queues.consumers]] entries), not by name
   // collision -- both consumers are declared, so we dispatch on the queue's
-  // own name off the batch itself.
+  // own name off the batch itself. The name is the client's own prefix plus a
+  // fixed ending (lib/queueRoles.ts), so it is matched by that ending.
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    if (batch.queue === 'business-os-import') {
+    const role = queueRole(batch.queue)
+    if (role === 'import') {
       await handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
-    } else if (batch.queue === 'business-os-import-dlq') {
+    } else if (role === 'import-dlq') {
       await handleImportDeadLetterQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
-    } else if (batch.queue === 'business-os-media') {
+    } else if (role === 'media') {
       await handleMediaQueue(batch as MessageBatch<{ assetKey: string; kind: 'optimize-video' | 'optimize-image' }>, env)
-    } else if (batch.queue === 'business-os-backup-assets') {
+    } else if (role === 'backup-assets') {
       // T10's delayed shift overview rides the backup queue (bound on both
       // plans, so no new queue has to exist before a deploy). Its messages
       // are taken out here; everything else goes to handleBackupQueue as

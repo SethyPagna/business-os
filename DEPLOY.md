@@ -18,9 +18,11 @@ There's nothing else to deploy — no Docker image, no separate server process.
 - `npx wrangler login` (or a Cloudflare API token with Workers/D1/R2/KV/Queues
   edit permissions + zone permission for the two Worker routes) — done once
   per machine/CI runner.
-- The resources already exist for this project (see `cloudflare/wrangler.toml`
-  for the current `account_id`, `database_id`, KV `id`, R2 bucket, and queue
-  names). If you're standing this up somewhere new, create them first:
+- The resources already exist for each client (a client's `account_id`,
+  `database_id`s, KV `id`, R2 bucket and queue names are its variables, see
+  [docs/setup/multi-client.md](docs/setup/multi-client.md); the Worker config is
+  rendered from them, see below). If you're standing a client up somewhere new,
+  create them first:
 
   ```sh
   wrangler d1 create business-os
@@ -33,7 +35,8 @@ There's nothing else to deploy — no Docker image, no separate server process.
   wrangler queues create business-os-backup-assets
   ```
 
-  then copy the returned IDs into `cloudflare/wrangler.toml`. All four queues
+  then copy the returned IDs into the client's values file (`D1_MAIN_ID`,
+  `D1_IMPORT_ID`, `KV_CACHE_ID`; `clients/example.env`). All four queues
   must exist **before** `wrangler deploy` — the config binds consumers to every
   one of them and deploy fails with "queue not found" otherwise. (Verified
   Aug 31 2026: all four exist on this account, so the current setup deploys.)
@@ -203,8 +206,13 @@ into the deploy record folder, and prints the path at the end.
 
 ### The GitHub button: `.github/workflows/deploy.yml`
 
-Manual only (`workflow_dispatch`), with `environment: production` (required
-reviewer), `concurrency: production-deploy` and `contents: read`. The
+Manual only (`workflow_dispatch`). It first asks **which client**; that is the name of
+the client's own GitHub environment (`environment: ${{ inputs.client }}`: its required
+reviewer, its secrets, its variables), with `concurrency: deploy-<client>` and
+`contents: read`. The first step checks the environment's `CLIENT_SLUG` against the
+choice, then the Worker config is rendered from the environment's variables and the
+target (account, main database, address, plan, token) is proven before anything is
+read or written. The
 `confirm` input must be `DEPLOY`. It runs the same kit with `-CI`: the same
 tests (with no Cloudflare secret in that step), the snapshot, the migrations
 (unless `run_migrations` is off), the deploy and the live checks. The
@@ -218,12 +226,15 @@ environment token through. To undo, use `.github/workflows/deploy-rollback.yml`
 
 ## Free vs paid deploy
 
-This repo ships **two** wrangler configs for the **same** Worker:
+This repo ships **one** committed Worker config, `cloudflare/wrangler.template.toml`, from
+which a client's two files are generated (`node ops/scripts/client/render-wrangler.mjs
+--env-file <the client's file>`; both are gitignored). A Free client gets both; a Paid
+client only the first. They are two configs for the **same** Worker:
 
 | | config | deploy command | one-command release |
 | --- | --- | --- | --- |
-| Workers **Paid** (current) | `cloudflare/wrangler.toml` | `npm run deploy` / `npm run deploy:full` | `run\full-automation.bat` |
-| Workers **Free** | `cloudflare/wrangler.free.toml` | `npm run deploy:free` / `npm run deploy:full:free` | `run\full-automation.bat -Plan free` |
+| Workers **Paid** | `cloudflare/wrangler.toml` (rendered) | `npm run deploy` / `npm run deploy:full` | `run\full-automation.bat` |
+| Workers **Free** | `cloudflare/wrangler.free.toml` (rendered) | `npm run deploy:free` / `npm run deploy:full:free` | `run\full-automation.bat -Plan free` |
 
 They are not two environments and not two Workers: same Worker name, same D1
 database ids, same R2 bucket, same KV namespace, same queues, same Durable
@@ -245,9 +256,10 @@ Four things, each marked `DIFF n of 4` at its site in `wrangler.free.toml`:
 4. **`[vars] PLAN_TIER` `"paid"` -> `"free"`.**
 
 `cloudflare/scripts/test-wrangler-config-drift-pure.cjs` fails if any other
-key drifts between the two files, in either direction. Edit `wrangler.toml`
-and you edit `wrangler.free.toml` in the same commit; that test is how you
-find out you did not.
+key drifts between the two files, in either direction. Both come from the one
+template (`{{#paid}}` / `{{#free}}` blocks mark the four differences), so editing the
+template edits both; that test is how you find out a block was put in the wrong
+place.
 
 ### What `PLAN_TIER` changes inside the app
 

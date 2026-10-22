@@ -9,9 +9,13 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { pathToFileURL } = require('url')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const QUERIES = path.join(ROOT, 'ops', 'queries')
+// The exported database is the main one of the client's rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 
 let passed = 0
 async function check(name, fn) {
@@ -220,7 +224,7 @@ async function main() {
 
   await check('the wrangler invocation is the fixed read command with the canonical SQL as one argument', () => {
     const q = guard.loadQuery('r2-url-audit')
-    assert.deepStrictEqual(d1.wranglerArgs(q.sql), ['d1', 'execute', 'business-os', '--remote', '--json', '--command', q.sql])
+    assert.deepStrictEqual(d1.wranglerArgs(q.sql), ['d1', 'execute', rendered.values.D1_MAIN_NAME, '--remote', '--json', '--command', q.sql])
   })
 
   // ------------------------------------------------ interpretD1Output

@@ -1,16 +1,21 @@
 // wrangler.toml vs wrangler.free.toml -- the two configs must stay one
 // config with three known differences.
 //
+// Both files are generated per client from cloudflare/wrangler.template.toml
+// (ops/scripts/client/render-wrangler.mjs) and are no longer tracked, so this
+// reads the template rendered with the fake client in clients/example.env. The
+// free file is the paid one plus its {{#free}} blocks; this proves the template
+// still yields exactly the three documented differences.
+//
 // WHY THIS TEST IS THE WHOLE SAFETY NET FOR THE FREE FILE
 //
-// wrangler.free.toml is hand-maintained. Nothing generates it, nothing
-// regenerates it, and it is only exercised when someone actually deploys
+// The free variant is only exercised when someone actually deploys
 // free -- which, by construction, is the moment the account is already on
 // the free plan and production is already down. A binding silently missing
 // from it is not a config nit: `[[d1_databases]] database_id` missing means
 // the free deploy points at NO database, `[[kv_namespaces]] id` missing
 // means a different cache, a missing `routes` entry means the shop's domain
-// serves nothing. Those are exactly the mistakes a hand-maintained copy
+// serves nothing. Those are exactly the mistakes a hand-edited template
 // makes, and they are invisible in review.
 //
 // So this checks the direction that matters: every VALUE-BEARING key in
@@ -28,18 +33,15 @@
 //
 // Run: node scripts/test-wrangler-config-drift-pure.cjs
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const path = require('node:path')
+const wrangler = require('./harness/rendered_wrangler.cjs')
 
-const cloudflareRoot = path.join(__dirname, '..')
 let passed = 0
 const tests = []
 function check(name, fn) { tests.push({ name, fn }) }
 
-const PAID_PATH = path.join(cloudflareRoot, 'wrangler.toml')
-const FREE_PATH = path.join(cloudflareRoot, 'wrangler.free.toml')
-const paidText = fs.readFileSync(PAID_PATH, 'utf8')
-const freeText = fs.readFileSync(FREE_PATH, 'utf8')
+const paidText = wrangler.paid()
+const freeText = wrangler.free()
+const fixture = wrangler.values
 
 // A config line is anything that is not blank and not a comment. Section
 // headers are kept: a missing [images] or [[queues.producers]] is exactly
@@ -111,7 +113,7 @@ const freeById = new Map(freePairs.map((p) => [p.id, p]))
 const paidById = new Map(paidPairs.map((p) => [p.id, p]))
 
 check('each import delivery has its own invocation query budget on both plans', async () => {
-  const key = '[[queues.consumers]] "business-os-import" :: max_batch_size'
+  const key = `[[queues.consumers]] "${fixture.QUEUE_PREFIX}-import" :: max_batch_size`
   for (const [tier, pairs] of [['paid', paidById], ['free', freeById]]) {
     assert.equal(pairs.get(key)?.value, '1', `${tier} must not combine independently budgeted import chunks`)
   }
@@ -123,7 +125,7 @@ const ALLOWED_DIFFS = [
   { id: '[limits] :: [limits]', paid: '[limits]', free: null, why: 'DIFF 1: the whole block is Paid-only (error 100328 on Free)' },
   { id: '[limits] :: cpu_ms', paid: '300000', free: null, why: 'DIFF 1' },
   { id: '[limits] :: subrequests', paid: '10_000', free: null, why: 'DIFF 1' },
-  { id: '[[queues.consumers]] "business-os-media" :: max_batch_size', paid: '5', free: '1', why: 'DIFF 2: real per-message CPU, not one D1 write' },
+  { id: `[[queues.consumers]] "${fixture.QUEUE_PREFIX}-media" :: max_batch_size`, paid: '5', free: '1', why: 'DIFF 2: real per-message CPU, not one D1 write' },
   { id: '[vars] :: PLAN_TIER', paid: '"paid"', free: '"free"', why: 'DIFF 3: the switch lib/planTier.ts reads' },
 ]
 
@@ -202,18 +204,25 @@ check('the load-bearing identities are byte-identical, not merely present', asyn
   assert.equal(routesBlock(freeText), routesBlock(paidText), 'the free config must serve the same hostnames')
 })
 
-check('every route is on the leangbeauty.com zone (the deploy token cannot reach any other)', async () => {
-  // Owner decision Sep 26 2026: leangcosmetics.dpdns.org is retired. The
-  // deploy API token is scoped to the leangbeauty.com zone only, so a route
-  // on ANY other zone fails the whole deploy -- not just that route.
+check('every route is a custom domain the client names, and nothing else (the deploy token cannot reach any other zone)', async () => {
+  // A client's deploy API token is scoped to the zone(s) of its own domains,
+  // so a route on ANY other zone fails the whole deploy -- not just that
+  // route. The routes therefore come only from the ROUTES variable, one
+  // custom-domain entry each, never a zone_name route and never a pattern
+  // the template invents.
+  const hosts = fixture.ROUTES.split(',')
   for (const [label, text] of [['wrangler.toml', paidText], ['wrangler.free.toml', freeText]]) {
     const body = text.replace(/^\s*#.*$/gm, '')
     const block = body.slice(body.indexOf('routes = ['), body.indexOf(']', body.indexOf('routes = [')) + 1)
     const patterns = [...block.matchAll(/pattern\s*=\s*"([^"]+)"/g)].map((m) => m[1])
-    assert.deepEqual(patterns.sort(), ['admin.leangbeauty.com', 'leangbeauty.com'], `${label} routes`)
-    const zones = [...block.matchAll(/zone_name\s*=\s*"([^"]+)"/g)].map((m) => m[1])
-    for (const z of zones) assert.equal(z, 'leangbeauty.com', `${label} has a route on foreign zone ${z}`)
-    assert.ok(!/dpdns|leangcosmetics/i.test(block), `${label} still routes the retired domain`)
+    assert.deepEqual(patterns, hosts, `${label} routes`)
+    assert.equal([...block.matchAll(/custom_domain\s*=\s*true/g)].length, hosts.length, `${label}: every route is a custom domain`)
+    assert.ok(!/zone_name|zone_id/.test(block), `${label} has a zone route`)
+  }
+  // ...and a client served from workers.dev only has no routes at all in both files (and no preview URLs).
+  for (const text of [wrangler.paid({ ROUTES: 'none', WORKERS_DEV: 'true' }), wrangler.free({ ROUTES: 'none', WORKERS_DEV: 'true' })]) {
+    assert.ok(!/^routes = \[/m.test(text), 'no routes entry, not even an empty one')
+    assert.match(text, /^workers_dev = true\npreview_urls = false$/m)
   }
 })
 
@@ -234,7 +243,7 @@ check('the free config carries no Paid-only key at all', async () => {
 // that is indistinguishable from a broken one, so these feed it known
 // drift and assert it is seen.
 check('POSITIVE CONTROL: an injected drift is detected', async () => {
-  const tampered = paidText.replace('database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"', 'database_id = "0000"')
+  const tampered = paidText.replace(`database_id = "${fixture.D1_MAIN_ID}"`, 'database_id = "0000"')
   assert.notEqual(tampered, paidText, 'the control must actually change something')
   const tamperedById = new Map(keyedPairs(tampered).map((p) => [p.id, p]))
   assert.notEqual(

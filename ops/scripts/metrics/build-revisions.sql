@@ -5,7 +5,7 @@ SELECT blob8 AS revision,
        count() AS stored_rows,
        min(timestamp) AS first_seen,
        max(timestamp) AS last_seen
-FROM Business_OS_Analytics
+FROM {{DATASET}}
 WHERE index1 = 'req_metrics'
   AND ({{WINDOW}})
 GROUP BY revision

@@ -25,8 +25,23 @@ check('confirmation precedes initialization and encryption protects every produc
   assert.ok(workflow.indexOf('Check the confirm word') < workflow.indexOf('Initialize release record paths'))
   assert.ok(workflow.indexOf('Initialize release record paths') < workflow.indexOf('Check out the release kit'))
   assert.ok(workflow.indexOf('Verify encrypted record protection') < workflow.indexOf('Record the release'))
-  const originalSteps = original.slice(original.indexOf('      - name: Check out the release kit'))
-  assert.equal(workflow.slice(workflow.indexOf('      - name: Check out the release kit')), originalSteps)
+  // The release steps were client-aware afterwards (a client check, a render and a target check, the client's expectations on
+  // each step that reaches Cloudflare). What protects the records must still be the original text, step by step.
+  const stepText = (source, name) => {
+    const lines = source.split('\n')
+    const at = lines.findIndex((line) => line === `      - name: ${name}`)
+    assert.ok(at >= 0, `step "${name}" exists`)
+    const end = lines.findIndex((line, i) => i > at && /^      (- name:|#)/.test(line))
+    return lines.slice(at, end < 0 ? lines.length : end).join('\n').replace(/\n+$/, '')
+  }
+  for (const name of ['Show the commit', 'Verify encrypted record protection', 'Record the release', 'Preserve release evidence and history', 'Encrypt release records', 'Retain encrypted release records']) {
+    assert.equal(stepText(workflow, name), stepText(original, name), `step "${name}" is the original text`)
+  }
+  assert.equal(
+    stepText(workflow, 'Check out the release kit').replace('            /ops/scripts/client/\n', ''),
+    stepText(original, 'Check out the release kit'),
+    'the kit checkout only gained the client renderer folder',
+  )
 })
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-record paths-'))
 const files = []

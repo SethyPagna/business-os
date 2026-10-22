@@ -22,6 +22,13 @@ const { spawnSync } = require('child_process')
 const ROOT = path.resolve(__dirname, '..', '..')
 const KIT = path.join(ROOT, 'ops', 'scripts', 'deploy-kit')
 const lib = require(path.join(KIT, 'lib.cjs'))
+// The Worker config is generated per client and untracked: the kit is tested against the
+// template rendered with the fake client of clients/example.env.
+const wrangler = require('./harness/rendered_wrangler.cjs')
+const TARGET = lib.targetFromConfig(wrangler.paid())
+const catalog = lib.catalogFor(TARGET)
+const MAIN = TARGET.main.name
+const IMPORT = TARGET.importDb.name
 
 let passed = 0
 function check(name, fn) {
@@ -64,14 +71,109 @@ check('guard preflight allows clean and0243-only resume but refuses formula expo
 })
 
 check('stage configuration changes only main migration directory and rejects DB/account/ledger mismatch', () => {
-  const original = read('cloudflare', 'wrangler.toml')
-  const stage = lib.guardStageConfig(original, '.guard-stage-fixture')
+  const original = wrangler.paid()
+  const stage = lib.guardStageConfig(original, '.guard-stage-fixture', TARGET)
   assert.equal(stage.replace('migrations_dir = ".guard-stage-fixture"', 'migrations_dir = "migrations"'), original)
   assert.ok(stage.includes('migrations_dir = "migrations-import"'))
-  for (const changed of [original.replace('49795be9-eabe-43f1-8e16-b86faed60cb1', 'wrong'), original.replace('743e5b727d139e85ed11679097f6f99e', 'wrong'), original.replace('migrations_dir = "migrations"', 'migrations_dir = "migrations"\nmigrations_table = "other"')]) assert.throws(() => lib.guardStageConfig(changed, '.guard-stage-fixture'), /mismatch/)
-  assert.throws(() => lib.guardStageConfig(original, '../escape'), /directory/)
-  assert.equal(lib.commandCatalog.guardStageApply('/safe/config.toml').gate, 'typeYES')
-  assert.throws(() => lib.assertApproved(lib.commandCatalog.guardStageApply('/safe/config.toml'), { ok: true, gate: 'confirm' }), /confirmation/)
+  for (const changed of [original.replace(TARGET.main.id, 'wrong'), original.replace(TARGET.accountId, 'wrong'), original.replace(`database_name = "${MAIN}"`, 'database_name = "other"'), original.replace('migrations_dir = "migrations"', 'migrations_dir = "migrations"\nmigrations_table = "other"')]) assert.throws(() => lib.guardStageConfig(changed, '.guard-stage-fixture', TARGET), /mismatch/)
+  assert.throws(() => lib.guardStageConfig(original, '../escape', TARGET), /directory/)
+  assert.equal(catalog.guardStageApply('/safe/config.toml').gate, 'typeYES')
+  assert.throws(() => lib.assertApproved(catalog.guardStageApply('/safe/config.toml'), { ok: true, gate: 'confirm' }), /confirmation/)
+})
+
+check('the guard stage only ever stages the client the release is aimed at: another client\'s config is refused, and so is no target', () => {
+  const other = wrangler.paid({ CF_ACCOUNT_ID: '1'.repeat(32), D1_MAIN_ID: '11111111-1111-4111-8111-111111111111' })
+  assert.throws(() => lib.guardStageConfig(other, '.guard-stage-fixture', TARGET), /mismatch/)
+  assert.ok(lib.guardStageConfig(other, '.guard-stage-fixture', lib.targetFromConfig(other)), 'POSITIVE CONTROL: the same config passes for its own target')
+  assert.throws(() => lib.guardStageConfig(wrangler.paid(), '.guard-stage-fixture'), /mismatch/, 'a stage with nothing to compare against must not be built')
+  assert.throws(() => lib.guardStageConfig(wrangler.paid().replace('binding = "DB"', 'binding = "OTHER"'), '.guard-stage-fixture', TARGET), /mismatch/, 'exactly one database bound as DB')
+})
+
+check('the kit holds no client: no account, database, Worker, bucket or site constant in lib, release or exec', () => {
+  const src = ['lib.cjs', 'release.cjs', 'exec.cjs'].map((f) => read('ops', 'scripts', 'deploy-kit', f)).join('\n')
+  for (const [re, what] of [[/leang/i, 'a client name'], [/\b[0-9a-f]{32}\b/, 'an account or KV id'], [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/, 'a database id'],
+    [/['"`]business-os(?:-[a-z-]+)?['"`]/, 'a hard-coded database or Worker name'], [/https:\/\/[a-z0-9.-]+\.(?:com|org|dev)/i, 'a site']]) {
+    // the all-zero UUID is the kit's own sample Worker version id, not a database
+    const hit = re.exec(src.replace(/business-os-release-kit/g, '').replace(/https:\/\/api\.cloudflare\.com/g, '').replace(/0{8}-0{4}-0{4}-0{4}-0{12}/g, ''))
+    assert.ok(!hit, `the kit contains ${what}: ${hit && hit[0]}`)
+  }
+})
+
+check('a target is read from the rendered config and checked against the environment; a config of another client is refused', () => {
+  const v = wrangler.values
+  const other = wrangler.paid({ CF_ACCOUNT_ID: '2'.repeat(32) })
+  assert.equal(lib.targetFromConfig(wrangler.paid()).main.name, MAIN)
+  assert.equal(TARGET.site, v.ADMIN_URL)
+  assert.deepEqual(TARGET.databases.map((d) => [d.binding, d.applyScript]), [['DB', 'migrate:remote'], ['IMPORT_DB', 'migrate:import:remote']])
+  const expect = { accountId: v.CF_ACCOUNT_ID, d1MainId: v.D1_MAIN_ID, adminUrl: v.ADMIN_URL }
+  assert.ok(lib.targetFromConfig(wrangler.paid(), expect, { require: true, accountSecret: v.CF_ACCOUNT_ID }))
+  assert.throws(() => lib.targetFromConfig(other, expect), /account id differs/)
+  assert.throws(() => lib.targetFromConfig(wrangler.paid(), expect, { accountSecret: '3'.repeat(32) }), /secret differs/)
+  assert.throws(() => lib.targetFromConfig(wrangler.paid(), {}, { require: true }), /not all provided/, 'CI must not run without the expectations')
+  assert.throws(() => lib.targetFromConfig('name = "x"'), /no account, Worker name or main database/)
+  assert.throws(() => lib.targetFromConfig(wrangler.paid().replace(/\[\[d1_databases\]\]\nbinding = "IMPORT_DB"[\s\S]*?migrations_dir = "migrations-import"\n/, '')), /no IMPORT_DB/)
+  assert.ok(!lib.targetFromConfig(wrangler.paid({ ADMIN_URL: 'https://admin.example.org' }), { adminUrl: 'https://admin.example.org/' }).site.endsWith('/'))
+})
+
+check('the catalogue is built for one target: a database or Worker of another client cannot be named', () => {
+  const second = lib.targetFromConfig(wrangler.paid({ WORKER_NAME: 'second-shop', D1_MAIN_NAME: 'second-db', D1_IMPORT_NAME: 'second-import' }))
+  const c2 = lib.catalogFor(second)
+  assert.deepEqual(c2.counts().args.slice(0, 3), ['d1', 'execute', 'second-db'])
+  assert.deepEqual(catalog.counts().args.slice(0, 3), ['d1', 'execute', MAIN])
+  assert.ok(c2.rollbackWorker('').args.includes('second-shop') && !c2.rollbackWorker('').args.includes(TARGET.workerName))
+  assert.throws(() => c2.restoreDatabase(MAIN, 'b'), /Unknown database/)
+  assert.throws(() => c2.migrationsApply(MAIN), /Unknown database/)
+  assert.equal(c2.importMigrationLedger().args[2], 'second-import')
+  assert.throws(() => lib.catalogFor(null), /needs a target/)
+})
+
+check('every wrangler command names the client\'s rendered config: a wrangler.toml left in the folder never decides the account', () => {
+  const specs = [
+    catalog.guardState('SELECT 1'), catalog.whoamiJson(), catalog.timeTravelInfo(MAIN), catalog.deploymentStatus(), catalog.counts(),
+    catalog.importMigrationLedger(), catalog.migrationsList(MAIN), catalog.rollbackWorker(''), catalog.rollbackWorker('aaaaaaaa-0000-4000-8000-000000000001', true),
+    catalog.restoreDatabase(MAIN, 'bookmark'), catalog.guardStageApply('/tmp/guard-stage/wrangler.toml'),
+  ]
+  for (const spec of specs) {
+    if (spec.args[0] === 'whoami') { assert.ok(!spec.args.includes('--config'), 'the login check reads no config'); continue }
+    const at = spec.args.indexOf('--config')
+    assert.ok(at >= 0 && spec.args[at + 1], `${spec.id} names no config`)
+  }
+  assert.equal(catalog.counts().args.slice(-2).join(' '), '--config wrangler.toml', 'the kit runs in cloudflare/ and names the file rendered there')
+  assert.equal(catalog.guardStageApply('/tmp/stage/wrangler.toml').args.filter((a) => a === '--config').length, 1, 'the staged guard config is not given a second one')
+  // The npm scripts the kit and the developers run say it too, and so does the deploy script by default.
+  const scripts = pkg('cloudflare')
+  for (const [name, command] of Object.entries(scripts)) {
+    if (!/with-wrangler-auth\.cjs wrangler /.test(command)) continue
+    assert.ok(/--config [A-Za-z.]+/.test(command), `npm run ${name} names no --config`)
+  }
+  const deployScript = require(path.join(ROOT, 'cloudflare', 'scripts', 'deploy.cjs'))
+  assert.deepEqual(deployScript.withConfig(['--dry-run']), ['--dry-run', '--config', 'wrangler.toml'])
+  assert.deepEqual(deployScript.withConfig(['--config', 'wrangler.free.toml']), ['--config', 'wrangler.free.toml'])
+  assert.equal(deployScript.configNamed(['--config=x.toml']), 'x.toml')
+})
+
+check('with-wrangler-auth.cjs refuses a wrangler command that names no config, and runs one that does', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wrangler-config-guard-'))
+  try {
+    fs.mkdirSync(path.join(tmp, 'scripts'))
+    fs.copyFileSync(path.join(ROOT, 'cloudflare', 'scripts', 'with-wrangler-auth.cjs'), path.join(tmp, 'scripts', 'with-wrangler-auth.cjs'))
+    const run = (args, env = {}) => spawnSync(process.execPath, [path.join(tmp, 'scripts', 'with-wrangler-auth.cjs'), ...args], {
+      cwd: tmp, encoding: 'utf8', env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, CLOUDFLARE_API_TOKEN: 'x', ...env },
+    })
+    const bare = run(['wrangler', 'd1', 'execute', 'db', '--remote', '--command', 'SELECT 1'])
+    assert.equal(bare.status, 1)
+    assert.match(bare.stderr, /REFUSED: no --config/)
+    // commands that read no config are not asked for one
+    for (const free of [['wrangler', '--version'], ['wrangler', 'whoami']]) assert.doesNotMatch(run(free).stderr, /REFUSED: no --config/, free.join(' '))
+    // a wrangler.toml in the folder of another account is not picked up silently either
+    fs.writeFileSync(path.join(tmp, 'wrangler.toml'), 'account_id = "' + '1'.repeat(32) + '"\n')
+    const other = run(['wrangler', 'd1', 'execute', 'db', '--remote', '--config', 'wrangler.toml'], { CLOUDFLARE_ACCOUNT_ID: '2'.repeat(32) })
+    assert.equal(other.status, 1)
+    assert.match(other.stderr, /different Cloudflare account/)
+    assert.ok(!other.stderr.includes('1'.repeat(32)) && !other.stderr.includes('2'.repeat(32)), 'no account id is printed')
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
 })
 
 // ------------------------------------------------------------- 1. exists
@@ -90,7 +192,7 @@ check('every npm script the kit source calls is declared and exists', () => {
   for (const s of called) {
     assert.ok(pkg('frontend')[s] || pkg('cloudflare')[s], `npm script ${s} exists in neither package`)
   }
-  for (const spec of lib.sampleCatalog()) {
+  for (const spec of lib.sampleCatalog(TARGET)) {
     if (spec.kind === 'npm') assert.ok(pkg(spec.pkg)[spec.script], `${spec.pkg} has no ${spec.script}`)
   }
 })
@@ -113,13 +215,14 @@ check('the npm scripts run\\*.bat call through PowerShell exist', () => {
 check('the files the kit relies on exist', () => {
   for (const p of [
     'cloudflare/scripts/with-wrangler-auth.cjs', 'cloudflare/scripts/deploy.cjs',
-    'cloudflare/wrangler.toml', 'cloudflare/wrangler.free.toml', 'run/verify-local.bat', 'run/full-automation.bat',
+    'cloudflare/wrangler.template.toml', 'clients/example.env', 'ops/scripts/client/render-wrangler.mjs', 'run/verify-local.bat', 'run/full-automation.bat',
   ]) assert.ok(fs.existsSync(path.join(ROOT, p)), `${p} missing`)
-  const toml = read('cloudflare', 'wrangler.toml')
-  for (const db of lib.DATABASES) {
-    assert.ok(toml.includes(`database_name = "${db.name}"`), `wrangler.toml has no ${db.name}`)
-    assert.ok(toml.includes(`migrations_dir = "${db.migrationsDir}"`), `wrangler.toml has no ${db.migrationsDir}`)
-    assert.ok(pkg('cloudflare')[db.applyScript].includes(`apply ${db.name} --remote`), `${db.applyScript} does not apply ${db.name}`)
+  const toml = wrangler.paid()
+  for (const db of TARGET.databases) {
+    assert.ok(toml.includes(`database_name = "${db.name}"`), `the rendered config has no ${db.name}`)
+    assert.ok(toml.includes(`migrations_dir = "${db.migrationsDir}"`), `the rendered config has no ${db.migrationsDir}`)
+    // package.json names each database by its BINDING, which the rendered config resolves to the client's own id.
+    assert.ok(pkg('cloudflare')[db.applyScript].includes(`apply ${db.binding} --remote`), `${db.applyScript} does not apply ${db.binding}`)
   }
 })
 
@@ -141,7 +244,7 @@ check('every wrangler sub-command the kit calls exists (local --help, offline)',
 // -------------------------------------------------------------- 2. gates
 
 check('every production command in the catalogue has a confirmation gate', () => {
-  const specs = lib.sampleCatalog()
+  const specs = lib.sampleCatalog(TARGET)
   const prod = specs.filter(lib.isProductionSpec)
   assert.ok(prod.length >= 12, `expected the production commands to be recognised, got ${prod.length}`)
   for (const s of prod) assert.ok(lib.GATE_RANK[s.gate] >= 1, `${s.id} has gate ${s.gate}`)
@@ -150,23 +253,25 @@ check('every production command in the catalogue has a confirmation gate', () =>
   }
   const byId = Object.fromEntries(specs.map((s) => [s.id, s]))
   assert.strictEqual(byId['deploy:paid'].gate, 'typeYES')
-  assert.strictEqual(byId['migrations-apply:business-os'].gate, 'typeYES')
-  assert.strictEqual(byId['migrations-apply:business-os-import'].gate, 'typeYES')
+  assert.strictEqual(byId[`migrations-apply:${MAIN}`].gate, 'typeYES')
+  assert.strictEqual(byId[`migrations-apply:${IMPORT}`].gate, 'typeYES')
   assert.strictEqual(byId['rollback-worker'].gate, 'double')
-  assert.strictEqual(byId['restore:business-os'].gate, 'double')
+  assert.strictEqual(byId[`restore:${MAIN}`].gate, 'double')
   assert.ok(!lib.isProductionSpec(byId.whoami), 'whoami reads nothing from production')
+  assert.ok(!lib.isProductionSpec(byId['whoami-json']), 'the account check reads nothing from production')
 })
 
 check('the runtime guard refuses unconfirmed or under-confirmed production commands', () => {
-  const deploy = lib.commandCatalog.deploy('paid')
+  const deploy = catalog.deploy('paid')
   assert.throws(() => lib.assertApproved(deploy, null), /not confirmed/)
   assert.throws(() => lib.assertApproved(deploy, { ok: false, gate: 'typeYES' }), /not confirmed/)
   assert.throws(() => lib.assertApproved(deploy, { ok: true, gate: 'confirm' }), /needs a "typeYES"/)
   assert.ok(lib.assertApproved(deploy, { ok: true, gate: 'typeYES' }))
-  const restore = lib.commandCatalog.restoreDatabase('business-os', 'b')
+  const restore = catalog.restoreDatabase(MAIN, 'b')
   assert.throws(() => lib.assertApproved(restore, { ok: true, gate: 'typeYES' }), /needs a "double"/)
   assert.throws(() => lib.assertApproved({ id: 'x', kind: 'wrangler', args: ['deploy'], gate: 'none' }, { ok: true, gate: 'double' }), /no confirmation gate/)
-  assert.ok(lib.assertApproved(lib.commandCatalog.whoami(), null))
+  assert.ok(lib.assertApproved(catalog.whoami(), null))
+  assert.ok(lib.assertApproved(lib.whoamiSpec(), null))
 })
 
 check('only exec.cjs starts processes, and production commands only come from the catalogue', () => {
@@ -270,16 +375,18 @@ check('normal fixtures are not classified as challenge', () => {
 // ----------------------------------------------------------- 5. workflows
 
 for (const [file, word] of [['deploy.yml', 'DEPLOY'], ['deploy-rollback.yml', 'ROLLBACK']]) {
-  check(`${file}: manual only, production environment, confirm gate, secrets never echoed`, () => {
+  check(`${file}: manual only, one environment per client, confirm gate, secrets never echoed`, () => {
     const y = read('.github', 'workflows', file)
     const on = /^on:\n([\s\S]*?)^\S/m.exec(y)
     assert.ok(on, 'no on: block')
     const triggers = [...on[1].matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1])
     assert.deepStrictEqual(triggers, ['workflow_dispatch'], `triggers: ${triggers}`)
     assert.ok(!/pull_request_target|pull_request|^\s*push:|schedule:|workflow_run|repository_dispatch/m.test(y), 'extra trigger')
-    assert.ok(/^\s+environment: production$/m.test(y), 'environment: production')
+    assert.ok(/^\s+environment: \$\{\{ inputs\.client \}\}$/m.test(y), 'environment: the chosen client')
+    assert.ok(!/environment: production/.test(y), 'no job may use the shared production environment any more')
     assert.ok(/^permissions:\n {2}contents: read\n/m.test(y), 'permissions: contents: read')
-    assert.ok(/^concurrency:\n {2}group: production-deploy\n/m.test(y), 'concurrency group')
+    assert.ok(/^concurrency:\n {2}group: deploy-\$\{\{ inputs\.client \}\}\n/m.test(y), 'one concurrency group per client')
+    assert.ok(/ client:\n {8}description: [^\n]+\n {8}required: true\n {8}type: choice\n {8}options:\n {10}- leang\n {10}- bm\n/.test(y), 'a required client choice')
     assert.ok(/ confirm:\n[\s\S]*?type: string/.test(y), 'confirm input')
     // Ordinal, byte for byte: PowerShell's -cne compares by culture and admits look-alikes
     // (test-ops-workflow-pure.cjs runs these checks under PowerShell with such words).
@@ -290,6 +397,9 @@ for (const [file, word] of [['deploy.yml', 'DEPLOY'], ['deploy-rollback.yml', 'R
     for (const [i, line] of y.split('\n').entries()) {
       if (/secrets\./.test(line)) {
         assert.ok(/^\s+[A-Z_]+: \$\{\{ secrets\.(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID) \}\}$/.test(line), `line ${i + 1}: secrets only via env: (${line.trim()})`)
+      }
+      if (/\bvars\./.test(line) && !/^\s*#/.test(line)) {
+        assert.ok(/^\s+[A-Z_0-9]+: \$\{\{ (?:vars\.[A-Z_0-9]+|toJSON\(vars\)) \}\}$/.test(line), `line ${i + 1}: variables only via env: (${line.trim()})`)
       }
       assert.ok(!/(echo|Write-(Output|Host)|\bprint)\b.*(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|secrets\.)/i.test(line), `line ${i + 1} echoes a secret`)
     }
@@ -477,7 +587,8 @@ check('the release runs every test file the package runners discover, frontend .
 // ------------------------- 7. the live step, with the network and Cloudflare stubbed
 
 const ex = require(path.join(KIT, 'exec.cjs'))
-const { COMMANDS } = require(path.join(KIT, 'release.cjs'))
+const release = require(path.join(KIT, 'release.cjs'))
+const { COMMANDS } = release
 
 async function checkAsync(name, fn) {
   try {
@@ -526,6 +637,7 @@ const CHALLENGE = { status: 403, headers: { 'cf-mitigated': 'challenge', 'conten
 function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED }) {
   const counts = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 10 + i]))
   const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan: 'paid', ciConfirmWord: 'DEPLOY', recordDir: '', args: {},
+    target: TARGET, catalog,
     state: { deploy: published ? { versionId: published } : {}, snapshot: { previousVersionId: V_BEFORE, preCounts: counts } } }
   const stubs = {
     httpGet: async (url) => {
@@ -556,7 +668,7 @@ async function runGuardMigrationProbe(options = {}) {
   fs.mkdirSync(path.join(cf, 'migrations-import'))
   fs.writeFileSync(path.join(cf, 'migrations-import', '0001_import_staging.sql'), '-- fixture\n')
   fs.mkdirSync(path.join(cf, 'node_modules', 'wrangler'), { recursive: true })
-  fs.writeFileSync(path.join(cf, 'wrangler.toml'), options.config || read('cloudflare', 'wrangler.toml'))
+  fs.writeFileSync(path.join(cf, 'wrangler.toml'), options.config || wrangler.paid())
   fs.writeFileSync(path.join(cf, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/wrangler': { version: '4.116.0' } } }))
   fs.writeFileSync(path.join(cf, 'node_modules', 'wrangler', 'package.json'), '{"version":"4.116.0"}')
   for (const file of guardFiles) fs.writeFileSync(path.join(cf, 'migrations', file.name), file.bytes)
@@ -565,8 +677,10 @@ async function runGuardMigrationProbe(options = {}) {
   const calls = []
   let installed = false
   const before = options.allApplied ? guardState([...guardFiles.map(file => file.name), ...later]) : options.before || guardState([])
+  const v = wrangler.values
   const ctx = { sha: SHA, args: { noApply: !!options.noApply }, ci: true, dryRun: false,
-    releaseDir: tmp, recordDir: tmp, state: {} }
+    releaseDir: tmp, recordDir: tmp, state: {}, site: '',
+    expect: options.expect || { accountId: v.CF_ACCOUNT_ID, d1MainId: v.D1_MAIN_ID, adminUrl: v.ADMIN_URL } }
   try {
     const result = await withStubs({
       gitRead: args => args[0] === 'rev-parse' ? SHA : '',
@@ -574,12 +688,12 @@ async function runGuardMigrationProbe(options = {}) {
       runSpec: async (spec, _ctx, approval) => {
         lib.assertApproved(spec, approval)
         calls.push(spec.id)
-        if (spec.id === 'migrations-list:business-os') {
+        if (spec.id === `migrations-list:${MAIN}`) {
           const remaining = [...guardFiles.map(file => file.name), ...later].filter(name => !before.applied.includes(name))
           return { code: 0, out: remaining.length ? 'Migrations to be applied:\n' + remaining.map(name => `│ ${name} │`).join('\n') : '✅ No migrations to apply!' }
         }
         if (spec.id === 'import-migration-ledger') {
-          assert.deepEqual(spec.args, ['d1', 'execute', 'business-os-import', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'])
+          assert.deepEqual(spec.args, ['d1', 'execute', IMPORT, '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name', '--config', 'wrangler.toml'])
           return options.importResult || { code: 0, out: JSON.stringify([{ success: true, results: [{ name: '0001_import_staging.sql' }], meta: { rows_written: 0, changes: 0, changed_db: false } }]) }
         }
         if (spec.id === 'stock-guard-state') return { code: 0, out: JSON.stringify([{ success: true, results: [{ guard_state: JSON.stringify(installed ? (options.after || guardState()) : before) }] }]) }
@@ -589,7 +703,7 @@ async function runGuardMigrationProbe(options = {}) {
           const directory = /^migrations_dir = "(\.guard-stage-[^"]+)"/m.exec(config)?.[1]
           assert.ok(directory)
           assert.equal(path.dirname(configFile), cf)
-          assert.equal(config, lib.guardStageConfig(options.config || read('cloudflare', 'wrangler.toml'), directory))
+          assert.equal(config, lib.guardStageConfig(options.config || wrangler.paid(), directory, TARGET))
           const names = fs.readdirSync(path.join(cf, directory)).sort()
           assert.deepEqual(names, guardFiles.map(file => file.name))
           for (const file of guardFiles) assert.deepEqual(fs.readFileSync(path.join(cf, directory, file.name)), file.bytes)
@@ -597,7 +711,7 @@ async function runGuardMigrationProbe(options = {}) {
           installed = true
           return { code: 0, out: '' }
         }
-        if (spec.id === 'migrations-apply:business-os') {
+        if (spec.id === `migrations-apply:${MAIN}`) {
           assert.equal(installed, true)
           assert.ok(calls.lastIndexOf('stock-guard-state') > calls.indexOf('stock-guard-stage'))
           const unapplied = [...guardFiles.map(file => file.name), ...later].filter(name => !guardState().applied.includes(name))
@@ -616,8 +730,8 @@ function assertImportRefused(result) {
   assert.equal(result.result, false, result.text)
   assert.ok(!result.calls.includes('stock-guard-stage'), 'import admission precedes every fence')
   assert.ok(!result.calls.some(id => id.startsWith('migrations-apply:')), 'no database may be applied')
-  assert.ok(!result.calls.includes('migrations-list:business-os-import'), 'import ledger must never be initialized by migrations list')
-  assert.ok(!result.calls.includes('migrations-list:business-os'), 'import admission precedes main ledger initialization')
+  assert.ok(!result.calls.includes(`migrations-list:${IMPORT}`), 'import ledger must never be initialized by migrations list')
+  assert.ok(!result.calls.includes(`migrations-list:${MAIN}`), 'import admission precedes main ledger initialization')
 }
 
 ;(async () => {
@@ -653,7 +767,7 @@ function assertImportRefused(result) {
     const source = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
     const early = 'const applied = lib.validateImportMigrationLedger(result.json, candidate)'
     assert.equal(source.split(early).length, 2)
-    const anchor = '  for (const db of lib.DATABASES) {\n    if (pending[db.name]'
+    const anchor = '  for (const db of ctx.target.databases) {\n    if (pending[db.name]'
     assert.equal(source.split(anchor).length, 2)
     const late = source.replace(early, 'const applied = candidate; ctx.deferredImportCheck = () => lib.validateImportMigrationLedger(result.json, candidate)')
       .replace(anchor, '  try { ctx.deferredImportCheck() } catch { return false }\n' + anchor)
@@ -677,19 +791,99 @@ function assertImportRefused(result) {
       const result = await runGuardMigrationProbe({ before })
       assert.equal(result.result, true, result.text)
       assert.equal(result.calls.filter(id => id === 'stock-guard-stage').length, 1)
-      assert.equal(result.calls.filter(id => id === 'migrations-apply:business-os').length, 1)
+      assert.equal(result.calls.filter(id => id === `migrations-apply:${MAIN}`).length, 1)
       assert.equal(result.calls.filter(id => id === 'import-migration-ledger').length, 1)
-      assert.ok(result.calls.indexOf('import-migration-ledger') < result.calls.indexOf('migrations-list:business-os'))
-      assert.ok(!result.calls.includes('migrations-list:business-os-import'))
-      assert.ok(!result.calls.includes('migrations-apply:business-os-import'))
+      assert.ok(result.calls.indexOf('import-migration-ledger') < result.calls.indexOf(`migrations-list:${MAIN}`))
+      assert.ok(!result.calls.includes(`migrations-list:${IMPORT}`))
+      assert.ok(!result.calls.includes(`migrations-apply:${IMPORT}`))
     }
   })
   await checkAsync('guard stage failures and ambiguous verification never fall through to normal apply', async () => {
-    for (const options of [{ stageFails: true }, { after: guardState([guardFiles[0].name]) }, { before: guardState([guardFiles[1].name]) }, { before: guardState(['0256_validated_cost.sql']) }, { config: read('cloudflare', 'wrangler.toml').replace('49795be9-eabe-43f1-8e16-b86faed60cb1', 'wrong') }]) {
+    for (const options of [{ stageFails: true }, { after: guardState([guardFiles[0].name]) }, { before: guardState([guardFiles[1].name]) }, { before: guardState(['0256_validated_cost.sql']) }]) {
       const result = await runGuardMigrationProbe(options)
       assert.equal(result.result, false, result.text)
-      assert.ok(!result.calls.includes('migrations-apply:business-os'))
+      assert.ok(!result.calls.includes(`migrations-apply:${MAIN}`))
     }
+    // A release aimed at the wrong target stops before it reads or writes anything at all.
+    for (const options of [{ config: wrangler.paid().replace(TARGET.main.id, 'wrong') }, { config: wrangler.paid({ CF_ACCOUNT_ID: '4'.repeat(32) }) }, { expect: { accountId: TARGET.accountId } }]) {
+      const result = await runGuardMigrationProbe(options)
+      assert.equal(result.result, false, result.text)
+      assert.deepEqual(result.calls, [], 'a release aimed at the wrong target touches nothing')
+    }
+  })
+  await checkAsync('the release folder\'s rendered config decides the target; -EnvFile renders it first, and a release refuses a site that is not the client\'s', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-target-'))
+    try {
+      const cf = path.join(tmp, 'cloudflare')
+      fs.mkdirSync(cf)
+      fs.copyFileSync(path.join(ROOT, 'cloudflare', 'wrangler.template.toml'), path.join(cf, 'wrangler.template.toml'))
+      const base = () => ({ releaseDir: tmp, dryRun: false, ci: false, args: {}, site: '', expect: {}, target: null, catalog: null })
+      const said = []
+      // The environment of the machine running the test must not decide the outcome.
+      const run = async (ctx) => {
+        const saved = Object.fromEntries(['CLOUDFLARE_ACCOUNT_ID', 'CF_ACCOUNT_ID', 'D1_MAIN_ID', 'ADMIN_URL'].map((k) => [k, process.env[k]]))
+        for (const k of Object.keys(saved)) delete process.env[k]
+        try { return (await withStubs({}, async () => release.needTarget(ctx))).result } finally {
+          for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v
+        }
+      }
+      // no config yet, no env file: stop, and say how to make one
+      let ctx = base()
+      assert.equal(await run(ctx), false)
+      // -EnvFile renders it and takes the expectations from the same file
+      ctx = { ...base(), args: { envFile: wrangler.EXAMPLE_ENV } }
+      assert.equal(await run(ctx), true)
+      assert.equal(ctx.target.main.name, MAIN)
+      assert.equal(ctx.site, wrangler.values.ADMIN_URL)
+      assert.ok(fs.existsSync(path.join(cf, 'wrangler.toml')) && !fs.existsSync(path.join(cf, 'wrangler.free.toml')), 'a paid client gets no free file')
+      // the rendered file is then read by every later step, with nothing else to say
+      ctx = base()
+      assert.equal(await run(ctx), true)
+      assert.equal(ctx.catalog.counts().args[2], MAIN)
+      // the environment expects another client than the one rendered: refused, nothing built
+      ctx = { ...base(), expect: { accountId: '5'.repeat(32) } }
+      assert.equal(await run(ctx), false)
+      assert.equal(ctx.catalog, null)
+      // CI must hold all three expectations
+      ctx = { ...base(), ci: true }
+      assert.equal(await run(ctx), false)
+      ctx = { ...base(), ci: true, expect: { accountId: TARGET.accountId, d1MainId: TARGET.main.id, adminUrl: TARGET.site } }
+      assert.equal(await run(ctx), true)
+      // the live checks may only look at the client's own site
+      ctx = { ...base(), site: 'https://somewhere-else.example.org' }
+      assert.equal(await run(ctx), false)
+      ctx = { ...base(), site: TARGET.site }
+      assert.equal(await run(ctx), true)
+      // a dry run with nothing rendered walks placeholders and reads nothing
+      fs.rmSync(path.join(cf, 'wrangler.toml'))
+      ctx = { ...base(), dryRun: true }
+      assert.equal(await run(ctx), true)
+      assert.equal(ctx.target.placeholder, true)
+      void said
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+  await checkAsync('the target step needs the login to reach the rendered account, says nothing identifying in CI, and never writes', async () => {
+    const run = async ({ ci, accounts, code = 0 }) => {
+      const calls = []
+      const ctx = { ci, dryRun: false, sha: SHA, subject: 't', site: TARGET.site, plan: 'paid', recordDir: '', args: {}, state: {}, target: TARGET, catalog,
+        expect: { accountId: TARGET.accountId, d1MainId: TARGET.main.id, adminUrl: TARGET.site } }
+      const out = await withStubs({ runSpec: async (spec, _c, approval) => { lib.assertApproved(spec, approval); calls.push(spec.id)
+        return { code, out: `[with-wrangler-auth] note\n${JSON.stringify({ loggedIn: true, authType: 'Account API Token', accounts })}` } } }, () => COMMANDS.target(ctx))
+      return { ...out, calls }
+    }
+    const ok = await run({ ci: true, accounts: [{ id: TARGET.accountId, name: 'n' }] })
+    assert.equal(ok.result, true, ok.text)
+    assert.deepEqual(ok.calls, ['whoami-json'])
+    for (const secret of [TARGET.accountId, TARGET.main.id, MAIN, TARGET.workerName]) assert.ok(!ok.text.includes(secret) && !ok.summary.includes(secret), 'CI output must not carry the target')
+    const local = await run({ ci: false, accounts: [{ id: TARGET.accountId, name: 'n' }] })
+    assert.ok(local.text.includes(TARGET.accountId) && local.text.includes(MAIN) && local.text.includes(TARGET.workerName), 'a person at a keyboard sees the target')
+    for (const bad of [await run({ ci: true, accounts: [{ id: '6'.repeat(32), name: 'someone else' }] }), await run({ ci: true, accounts: [] }), await run({ ci: true, accounts: [{ id: TARGET.accountId }], code: 1 })]) {
+      assert.equal(bad.result, false)
+      assert.match(bad.text, /cannot act in the account/)
+    }
+    assert.ok(read('ops', 'scripts', 'deploy-kit', 'release.cjs').includes('stepLogin, stepTarget, stepSnapshot'), 'a full release checks the target before it reads production')
   })
   await checkAsync('NoApply reads safe guard state without staging or applying any migration', async () => {
     const result = await runGuardMigrationProbe({ noApply: true })
@@ -760,7 +954,7 @@ function assertImportRefused(result) {
       assert.strictEqual(plain.out, '', 'a plain run returns no output: why no release ever recorded the version it published')
       assert.ok(tee.out.includes(`Current Version ID: ${V_PUBLISHED}`), 'tee returns the output')
       const src = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
-      assert.ok(/ex\.runSpec\(lib\.commandCatalog\.deploy\(plan\), ctx, approval, \{ tee: true \}\)/.test(src), 'the deploy step must tee its output')
+      assert.ok(/ex\.runSpec\(ctx\.catalog\.deploy\(plan\), ctx, approval, \{ tee: true \}\)/.test(src), 'the deploy step must tee its output')
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true })
     }

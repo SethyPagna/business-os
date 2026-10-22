@@ -1,4 +1,4 @@
-// Per-object logic of the temporary R2 copy Worker (business-os-r2-copy).
+// Per-object logic of the temporary R2 copy Worker (<the client's Worker>-r2-copy).
 //
 // Runtime-only pieces (crypto.DigestStream, FixedLengthStream) arrive through
 // `deps`, so test-ops-r2-copy-pure.cjs drives this exact code against an

@@ -18,9 +18,13 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { DatabaseSync } = require('node:sqlite')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const load = (...p) => import(pathToFileURL(path.join(ROOT, ...p)).href)
+// The exported database is the main one of the client's rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 
 let passed = 0
 async function check(name, fn) {
@@ -595,6 +599,7 @@ async function main() {
   await check('round trip: export -> encrypt -> decrypt -> load -> identical, type for type, with triggers off during the load and FTS rebuilt', async () => {
     const source = fixtureDatabase()
     const { dir, manifest } = await exportFixture(source)
+    assert.equal(manifest.database, rendered.values.D1_MAIN_NAME, 'the manifest names the database of the client\'s rendered config')
     const out = path.join(tmpdir('out'), 'rebuilt.sqlite')
     const key = keys.privateKey
     assert.deepEqual(loader.verifyArtifact(dir, key, loader.readManifest(dir, key)), [])

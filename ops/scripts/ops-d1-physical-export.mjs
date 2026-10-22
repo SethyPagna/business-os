@@ -17,7 +17,7 @@ import {
   requireEnv, runId, runMain, runWrangler, say, summary, writeEncryptedReport,
 } from './ops-common.mjs'
 import { guardSql } from './ops-sql-guard.mjs'
-import { parseJsonOutput, wranglerArgs } from './ops-d1-export.mjs'
+import { databaseName, parseJsonOutput, wranglerArgs } from './ops-d1-export.mjs'
 import { CHUNK_KIND, LIMITS, MANIFEST_KIND, exportAll, manifestVerdict } from './ops-d1-physical-lib.mjs'
 
 const CPU_RESET = /exceeded its CPU time limit|\[code: 7429\]/i
@@ -97,6 +97,7 @@ export function publicLines({ verdict, manifest, errorCodes = [] }) {
 // (writeEncryptedReport; a test passes one with its own key).
 export async function exportToDir({ outDir, run, commit, query, write = writeEncryptedReport, concurrency = 3, pause }) {
   const manifest = await exportAll({
+    database: databaseName(),
     runId: run,
     commit,
     concurrency,

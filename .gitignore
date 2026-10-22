@@ -23,6 +23,17 @@ temp-vite-build.mjs
 /package.json
 *.db
 
+# Per-client deploy config. cloudflare/wrangler.template.toml is the only committed
+# Worker config; these two are GENERATED from it by ops/scripts/client/render-wrangler.mjs
+# for one client at a time, and a real client's values (clients/<name>.env) are never
+# committed. clients/example.env, with fake values, is the one tracked file there.
+/cloudflare/wrangler.toml
+/cloudflare/wrangler.free.toml
+/ops/r2-copy-worker/wrangler.toml
+/cloudflare/admin-forwarder/wrangler.toml
+/clients/*.env
+!/clients/example.env
+
 # Environment and secrets
 backend/.env
 frontend/.env

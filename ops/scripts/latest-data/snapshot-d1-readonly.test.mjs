@@ -22,10 +22,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const TOOL_PATH = path.join(__dirname, 'snapshot-d1-readonly.mjs')
 const SOURCE = fs.readFileSync(TOOL_PATH, 'utf8')
 
+// The database is the main one of the client's rendered config (cloudflare/wrangler.toml is generated per client and
+// untracked): the fixture client (clients/example.env) stands in.
+const rendered = createRequire(import.meta.url)('../../../cloudflare/scripts/harness/rendered_wrangler.cjs')
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
+
 const exitCodeBeforeImport = process.exitCode
 const tool = await import('./snapshot-d1-readonly.mjs')
 const {
-  REPO_ROOT, DATABASE_NAME, SQL, assertSelect, createD1, assertOutsideRepo, protectedRoots,
+  REPO_ROOT, databaseName, SQL, assertSelect, createD1, assertOutsideRepo, protectedRoots,
   PII_COLUMNS, SECRET_COLUMNS, REVIEWED_NOT_PII, classifyKey, createRedactor, parseArgs, main,
 } = tool
 
@@ -73,11 +79,12 @@ check('importing the tool does not run main() (import.meta.url guard)', () => {
   assert.equal(process.exitCode, exitCodeBeforeImport)
   assert.match(SOURCE, /import\.meta\.url === pathToFileURL\(/)
 })
-check('DATABASE_NAME matches cloudflare/wrangler.toml DB binding database_name', () => {
-  const toml = fs.readFileSync(path.join(REPO_ROOT, 'cloudflare', 'wrangler.toml'), 'utf8')
-  const m = toml.match(/binding\s*=\s*"DB"\s*\n\s*database_name\s*=\s*"([^"]+)"/)
-  assert.ok(m, 'DB binding block not found in wrangler.toml')
-  assert.equal(m[1], DATABASE_NAME)
+check('the database is the DB binding database_name of the rendered config, never a constant', () => {
+  const m = rendered.paid().match(/binding\s*=\s*"DB"\s*\n\s*database_name\s*=\s*"([^"]+)"/)
+  assert.ok(m, 'DB binding block not found in the rendered config')
+  assert.equal(databaseName(), m[1])
+  assert.equal(databaseName(), rendered.values.D1_MAIN_NAME)
+  assert.doesNotMatch(SOURCE, /['"]business-os['"]/)
 })
 
 // ===========================================================================

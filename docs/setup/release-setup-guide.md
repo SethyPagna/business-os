@@ -71,6 +71,11 @@ token is missing a permission. Send Claude the run link (not the token).
 
 ## Part B. GitHub: the "Deploy" button
 
+> Several clients: the workflows now ask **which client** first, and each client has its own GitHub environment (its
+> reviewer, its two secrets and its variables) instead of one shared `production` environment. Where this part says
+> `production`, read the environment of the client you release. Adding a client and the full list of variables:
+> [multi-client.md](multi-client.md).
+
 ### B1. Save the two secrets (once)
 
 1. In **Microsoft Edge**, open the Business OS repository on GitHub.

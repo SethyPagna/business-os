@@ -21,6 +21,7 @@ const { load } = require('./test-request-body-guard-pure.cjs')
 const CF = path.join(__dirname, '..')
 const REPO = path.join(CF, '..')
 const read = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
+const renderedWrangler = require('./harness/rendered_wrangler.cjs')
 
 // The real host list: the split is only as good as ADMIN_DOCUMENT_HOSTS.
 const identity = load('lib/adminDocumentIdentity.ts')
@@ -86,8 +87,7 @@ check('the handlers are registered above the D1 middleware and never touch the d
 })
 
 check('both wrangler configs route the two paths to the Worker', () => {
-  for (const file of ['wrangler.toml', 'wrangler.free.toml']) {
-    const toml = read(path.join(CF, file))
+  for (const [file, toml] of [['wrangler.toml', renderedWrangler.paid()], ['wrangler.free.toml', renderedWrangler.free()]]) {
     const start = toml.indexOf('run_worker_first = [')
     const list = toml.slice(start, toml.indexOf('\n]', start))
     for (const route of ['/robots.txt', '/sitemap.xml']) {

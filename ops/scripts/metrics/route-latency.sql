@@ -9,7 +9,7 @@ SELECT blob2 AS route, blob3 AS method, blob5 AS cache,
        SUM(_sample_interval * double6 * double9) / SUM(_sample_interval * double6) AS d1_calls_avg,
        SUM(_sample_interval * double6 * double5) / SUM(_sample_interval * double6) AS statements_avg,
        SUM(_sample_interval * double6 * double3) / SUM(_sample_interval * double6) AS rows_read_avg
-FROM Business_OS_Analytics
+FROM {{DATASET}}
 WHERE index1 = 'req_metrics' AND blob1 = 'api'
   AND ({{WINDOW}}){{REVISION}}
   AND blob4 >= '200' AND blob4 < '400'

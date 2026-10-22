@@ -16,8 +16,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { encryptEnvelope } from './ops-crypto.mjs'
+
+// The parser of the rendered Worker config (a CommonJS module the release kit and the tests load too).
+export const targetLib = createRequire(import.meta.url)('./client/target-lib.cjs')
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const CLOUDFLARE_DIR = path.join(REPO_ROOT, 'cloudflare')
@@ -170,13 +174,22 @@ export function wranglerEnv(extra = {}) {
   }
 }
 
+// The rendered config every wrangler command of a run names (OPS_WRANGLER_CONFIG, else cloudflare/wrangler.toml).
+export const clientConfigPath = () => path.resolve(process.env.OPS_WRANGLER_CONFIG || RENDERED_CONFIG)
+
+// A command that names no config gets the client's: wrangler would otherwise take a wrangler.toml from the working
+// folder, and that file's account wins over CLOUDFLARE_ACCOUNT_ID.
+export function withClientConfig(args) {
+  return args.some((a) => a === '--config' || a === '-c' || String(a).startsWith('--config=')) ? args : [...args, '--config', clientConfigPath()]
+}
+
 export function runWrangler(args, { cwd, input, timeoutMs = 10 * 60 * 1000, env = {} } = {}) {
   return new Promise((resolve) => {
     const finish = (result) => {
       fs.rmSync(WRANGLER_LOG_DIR, { recursive: true, force: true })
       resolve(result)
     }
-    const child = spawn(process.execPath, [WRANGLER_JS, ...args], {
+    const child = spawn(process.execPath, [WRANGLER_JS, ...withClientConfig(args)], {
       cwd,
       env: wranglerEnv(env),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -255,9 +268,31 @@ export function apiErrorCodes(response) {
   return errors.map((e) => Number(e && e.code)).filter((n) => Number.isFinite(n)).slice(0, 5)
 }
 
-// ------------------------------------------------- the production Worker
+// ------------------------------------------- the client this run is aimed at
 
-export const PRODUCTION_WORKER = 'business-os'
+// The rendered Worker config of ONE client (ops/scripts/client/render-wrangler.mjs
+// writes cloudflare/wrangler.toml from that client's GitHub environment). Its
+// account, Worker, databases, bucket and dataset are what every script below acts
+// on: none of them is a constant here. OPS_WRANGLER_CONFIG points at another file
+// (a test, or a copy kept elsewhere).
+export const RENDERED_CONFIG = path.join(CLOUDFLARE_DIR, 'wrangler.toml')
+
+// Throws a fixed-code OpsError when the config is missing or unreadable, or when
+// the token's account (CLOUDFLARE_ACCOUNT_ID, when set) is not the rendered one:
+// a script never runs against a config of another client than its token's.
+export function clientTarget({ file = process.env.OPS_WRANGLER_CONFIG || RENDERED_CONFIG, env = process.env } = {}) {
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { throw new OpsError('rendered-config-missing', 'The Worker config has not been rendered for this client.') }
+  let target
+  try { target = targetLib.parseTarget(text) } catch { throw new OpsError('rendered-config-unreadable', 'The rendered Worker config has no account, Worker name or main database.') }
+  const secret = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim()
+  if (secret && secret !== target.accountId) throw new OpsError('secret-account-differs-from-rendered', 'CLOUDFLARE_ACCOUNT_ID is not the account of the rendered config.')
+  return target
+}
+
+// The client's Worker, and its main D1 database.
+export const productionWorker = (options) => clientTarget(options).workerName
+export const mainDatabase = (options) => clientTarget(options).main.name
 
 // The bindings of every version carrying traffic in a Worker's newest
 // deployment, as the API reports them (it never returns a secret's value).

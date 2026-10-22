@@ -250,10 +250,10 @@ function errorCode(err) {
 // query(sql) -> { ok, rows, meta, retryable, errorCodes }   (one guarded read-only statement)
 // emit({ seq, text, rows }) -> { file, bytes }             (writes one encrypted chunk, returns its name and size)
 // Never throws for a D1 refusal: the manifest's `issues` carries fixed codes, the table's `failed` flag its state.
-export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3, now = () => new Date().toISOString(), runId = 'local', commit = 'unknown' }) {
+export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3, now = () => new Date().toISOString(), runId = 'local', commit = 'unknown', database = 'unknown' }) {
   const startedAt = now()
   const manifest = {
-    format: FORMAT, kind: MANIFEST_KIND, database: 'business-os', runId, commit, startedAt, finishedAt: null, chunkPaddedBytes: LIMITS.chunkBytes,
+    format: FORMAT, kind: MANIFEST_KIND, database, runId, commit, startedAt, finishedAt: null, chunkPaddedBytes: LIMITS.chunkBytes,
     tables: [], omitted: [], redactions: [], excluded: [], skipped: [], schema: [], sequence: null, issues: [], changedDuringExport: [],
     totals: { tables: 0, rows: 0, plainBytes: 0, encryptedBytes: 0, files: 0, statements: 0, rowsRead: 0, retries: 0, cpuResets: 0, slowestStatementMs: 0 },
   }

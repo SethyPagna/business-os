@@ -1,21 +1,35 @@
-# Undo a production release from GitHub. Runs only when someone presses
-# "Run workflow", waits for the `production` environment's required
-# reviewer, and refuses to start unless the confirm box says ROLLBACK,
-# compared ordinally (byte for byte: no soft hyphen, zero-width or
-# look-alike letter passes).
+# Undo ONE client's production release from GitHub. Runs only when someone
+# presses "Run workflow", waits for the chosen client's environment reviewer,
+# and refuses to start unless the confirm box says ROLLBACK, compared ordinally
+# (byte for byte: no soft hyphen, zero-width or look-alike letter passes).
+#
+# The client chosen is the name of a GitHub environment: its reviewer, its
+# Cloudflare token and account (secrets) and the variables the Worker config is
+# rendered from all come from there. Before anything is changed the run proves
+# it is aimed at that client, exactly as Deploy does: CLIENT_SLUG equals the
+# choice, and the rendered account and main database equal CF_ACCOUNT_ID and
+# D1_MAIN_ID.
 #
 #   worker   - put the website back to an earlier Worker version
 #              (empty version id = the version before the current one)
-#   database - put a D1 database back to a Time Travel restore point
-#              (from the Deploy run's summary). Every write made after that
-#              point is lost.
+#   database - put one of the client's D1 databases back to a Time Travel
+#              restore point (from the Deploy run's summary): main or import.
+#              Every write made after that point is lost.
 #
-# Guide: docs/setup/release-setup-guide.md, "Undo a release".
+# Guide: docs/setup/release-setup-guide.md, "Undo a release", and
+# docs/setup/multi-client.md.
 name: Deploy rollback
 
 on:
   workflow_dispatch:
     inputs:
+      client:
+        description: Which client to roll back (its own GitHub environment, Cloudflare account and approval)
+        required: true
+        type: choice
+        options:
+          - leang
+          - bm
       target:
         description: What to put back
         required: true
@@ -30,13 +44,13 @@ on:
         default: ''
         type: string
       database:
-        description: Database (database only)
+        description: Which of the client's databases (database only)
         required: true
-        default: business-os
+        default: main
         type: choice
         options:
-          - business-os
-          - business-os-import
+          - main
+          - import
       bookmark:
         description: Restore point from the Deploy summary (database only)
         required: false
@@ -51,19 +65,29 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-deploy
+  group: deploy-${{ inputs.client }}
   cancel-in-progress: false
 
 jobs:
   rollback:
-    name: Roll back production
+    name: Roll back ${{ inputs.client }}
     runs-on: windows-latest
-    environment: production
+    environment: ${{ inputs.client }}
     timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Check the client
+        env:
+          CLIENT: ${{ inputs.client }}
+          CLIENT_SLUG: ${{ vars.CLIENT_SLUG }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CLIENT_SLUG) -or -not [string]::Equals($env:CLIENT, $env:CLIENT_SLUG, [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::This environment is not set up for the client chosen: its CLIENT_SLUG variable is missing or names another client.'
+            exit 1
+          }
+
       - name: Check the confirm word
         env:
           CONFIRM: ${{ inputs.confirm }}
@@ -86,14 +110,31 @@ jobs:
           cache: npm
           cache-dependency-path: release/cloudflare/package-lock.json
 
+      - name: Render the Worker config for this client
+        env:
+          CLIENT_VARS: ${{ toJSON(vars) }}
+        run: node release/ops/scripts/client/render-wrangler.mjs --vars-json-env CLIENT_VARS --template release/cloudflare/wrangler.template.toml --out-dir release/cloudflare
+
       - name: Install packages (cloudflare)
         working-directory: release/cloudflare
         run: npm ci --no-audit --no-fund
+
+      - name: Check the target (client, account, databases)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+        run: node release/ops/scripts/deploy-kit/release.cjs target -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
 
       - name: Roll back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
           RELEASE_CONFIRM: ${{ inputs.confirm }}
           TARGET: ${{ inputs.target }}
           VERSION_ID: ${{ inputs.version_id }}
