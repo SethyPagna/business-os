@@ -9,9 +9,13 @@ import { selectInChunks } from './sqlBinding'
 // POST /api/sales: the server prices a line from the catalog, with the active promotions and the product's own
 // discount (routes/sales.ts, evaluateCapturedPricingPool over source 'promotion'), and the only thing that lets a
 // caller sell at any other price is the grant POST /api/sales itself asks for -- `pos` or `sales` (the till's per-sale
-// price edit has no separate permission). A caller without that grant may therefore not price a replacement line
-// below the lowest of: the catalog price, the promotion price, and the price the same product was sold at on the sale
-// being returned (the straight swap, which the refund already pays at that price). A price above that is not refused.
+// price edit has no separate permission). A caller without that grant may therefore not sell a replacement under:
+//   - for the units a returned unit of the same product covers (the straight swap, which the refund already pays at
+//     the price on the sale being returned): the lowest of the catalog price, the promotion price and that sold price;
+//   - for every other unit, whether a further unit of the same product or any other product: the lowest of the
+//     catalog price and the promotion price. That is a new purchase, priced like any POS sale.
+// There is no cap on how many units a replacement may hand out (owner, 22 Oct 2026: a replacement may change and add
+// both); only the price of the units beyond the returned ones is held. A price above the floor is never refused.
 export const RETURN_REPLACEMENT_PRICE_REFUSAL = {
   error: 'You do not have permission to change the price of a replacement item. It is sold at the catalog price, its promotion price, or the price on the original sale.',
   code: 'return_replacement_price_forbidden',
@@ -33,11 +37,46 @@ export type ReplacementPriceLine = {
   /** The unit price the same product was RECORDED at on the sale being returned (the sale line's own row, never a posted or refund figure). */
   soldUsd: number | null
   soldKhr: number | null
+  /** Units of this product the return hands back against the sale being returned (returnedUnitsForReplacement); 0 when it returns none of it. */
+  returnedQuantity: number
 }
 
+type Leg = 'usd' | 'khr'
+type Entry = { line: ReplacementPriceLine; index: number; promo: { usd: number; khr: number } | null }
+const LEGS: readonly Leg[] = ['usd', 'khr']
+
 // Money is kept to four places, so a price within half a place of the floor is the floor. Plain numbers, never a throw on odd input.
-const below = (posted: number, floor: number): boolean => posted < floor - 0.00005
+const TOLERANCE_PER_UNIT = 0.00005
 const lowest = (...values: Array<number | null>): number => Math.min(...values.filter((value): value is number => value != null))
+const postedPrice = (line: ReplacementPriceLine, leg: Leg): number => leg === 'usd' ? line.priceUsd : line.priceKhr
+const catalogPrice = (line: ReplacementPriceLine, leg: Leg): number => leg === 'usd' ? line.catalogUsd : line.catalogKhr
+const soldPrice = (line: ReplacementPriceLine, leg: Leg): number | null => leg === 'usd' ? line.soldUsd : line.soldKhr
+
+/**
+ * The lowest total the lines of ONE product may sell for: `covered` units at the lower of their base price and the sold
+ * price, every other unit at its base price. Covered units go to the lines with the highest base price first, the most
+ * generous split, so neither the order of the lines nor splitting one line in two can change the verdict.
+ */
+function floorTotal(lines: ReadonlyArray<{ quantity: number; base: number }>, sold: number | null, covered: number): number {
+  let left = covered
+  return [...lines].sort((a, b) => b.base - a.base).reduce((total, { quantity, base }) => {
+    const swapped = Math.min(quantity, left)
+    left -= swapped
+    return total + swapped * lowest(base, sold) + (quantity - swapped) * base
+  }, 0)
+}
+
+/** Is this product's group posted under its floor in one currency? Base = the catalog price, or the lower promotion price once `usePromo`. */
+function groupUnder(group: readonly Entry[], leg: Leg, usePromo: boolean): boolean {
+  const first = group[0].line
+  const units = group.reduce((sum, { line }) => sum + line.quantity, 0)
+  const covered = Math.min(units, Math.max(0, Number(first.returnedQuantity) || 0))
+  const posted = group.reduce((sum, { line }) => sum + postedPrice(line, leg) * line.quantity, 0)
+  const floor = floorTotal(group.map(({ line, promo }) => ({
+    quantity: line.quantity, base: lowest(catalogPrice(line, leg), usePromo ? promo?.[leg] ?? null : null),
+  })), soldPrice(first, leg), covered)
+  return posted < floor - TOLERANCE_PER_UNIT * units
+}
 
 /** The promotion-evaluated unit price of every line, priced as one basket the way the till prices a cart; null when it cannot be proven. */
 async function promotionUnitPrices(db: D1Compat, lines: readonly ReplacementPriceLine[], exchangeRate: number): Promise<Array<{ usd: number; khr: number }> | null> {
@@ -78,24 +117,27 @@ async function promotionUnitPrices(db: D1Compat, lines: readonly ReplacementPric
 }
 
 /**
- * The first line priced under what the server allows a caller without the POS price grant, or null. Costs no read
- * unless a line is posted under both its catalog price and its sold price: the common cases (the catalog price, the
- * original sale's price) are decided in memory, and only a lower price pays for the promotion evaluation.
+ * The first line of a product whose lines, taken together, are posted under what the server allows a caller without the
+ * POS price grant (dollars or riel), or null. The floor is per product, not per line: the units the return hands back
+ * (`returnedQuantity`) may sell down to the sold price and every unit beyond them, with every unit of any other product,
+ * down to the catalog / promotion price (see the header). Costs no read unless a product is posted under its
+ * catalog-based floor: the common cases (the catalog price, the swap at the original sale's price) are decided in
+ * memory, and only a lower price pays for the promotion evaluation.
  */
 export async function firstDisallowedReplacementPrice(
   db: D1Compat,
   lines: readonly ReplacementPriceLine[],
   exchangeRate: number,
 ): Promise<ReplacementPriceLine | null> {
-  const floor = (line: ReplacementPriceLine) => ({ usd: lowest(line.catalogUsd, line.soldUsd), khr: lowest(line.catalogKhr, line.soldKhr) })
-  const under = (line: ReplacementPriceLine, usd: number, khr: number) => below(line.priceUsd, usd) || below(line.priceKhr, khr)
-  const suspects = lines.map((line, index) => ({ line, index })).filter(({ line }) => under(line, floor(line).usd, floor(line).khr))
+  const groups = new Map<number, Entry[]>()
+  lines.forEach((line, index) => groups.set(line.productId, [...(groups.get(line.productId) ?? []), { line, index, promo: null }]))
+  const under = (group: readonly Entry[], usePromo: boolean) => LEGS.some((leg) => groupUnder(group, leg, usePromo))
+  const suspects = [...groups.values()].filter((group) => under(group, false))
   if (!suspects.length) return null
   const promoted = await promotionUnitPrices(db, lines, exchangeRate)
-  for (const { line, index } of suspects) {
-    const base = floor(line)
-    const promo = promoted?.[index] ?? null
-    if (under(line, lowest(base.usd, promo?.usd ?? null), lowest(base.khr, promo?.khr ?? null))) return line
+  for (const group of suspects) {
+    for (const entry of group) entry.promo = promoted?.[entry.index] ?? null
+    if (under(group, true)) return group[0].line
   }
   return null
 }
