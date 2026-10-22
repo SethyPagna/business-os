@@ -280,13 +280,33 @@ function escapedLike(value: string): string {
   return `%${value.replace(/([\\%_])/g, '\\$1')}%`
 }
 
+const KHMER_ZERO_CODE = 0x17e0
+
+// A scanner on the Windows Khmer layout types ០-៩ for 0-9. This is the ASCII
+// form of a lone code-shaped search that carries Khmer digits, or '' when no
+// fold applies (no Khmer digit, several words, or Khmer letters left after the
+// fold, so a Khmer name search stays a name search). Callers match it against
+// barcode/sku text only, besides the literal search. Local on purpose: this
+// module is compiled alone by its test loaders, and importReviewQuery.ts keeps
+// the same copy.
+export function asciiCodeSearch(search: string): string {
+  if (/\s/.test(search)) return ''
+  const folded = search.replace(/[\u17E0-\u17E9]/g, (digit) => String(digit.charCodeAt(0) - KHMER_ZERO_CODE))
+  return folded !== search && /^[!-~]+$/.test(folded) ? folded : ''
+}
+
 export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: string; params: Record<string, unknown> } {
   const search = String(searchValue || '').trim().slice(0, 120).toLowerCase()
   const params: Record<string, unknown> = search ? { search: escapedLike(search) } : {}
+  const codeSearch = asciiCodeSearch(search)
+  if (codeSearch) params.codeSearch = escapedLike(codeSearch)
+  const barcodeOnlyMatch = codeSearch
+    ? ` OR lower(COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @codeSearch ESCAPE '\\'`
+    : ''
   const having = search
     ? `HAVING lower(COALESCE(MAX(s.supplier_name), '') || ' ' || COALESCE(MAX(s.branch_name), '') || ' ' ||
              COALESCE(MAX(s.user_name), '') || ' ' || COALESCE(GROUP_CONCAT(s.product_name, ' '), '') || ' ' ||
-             COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @search ESCAPE '\\'`
+             COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @search ESCAPE '\\'${barcodeOnlyMatch}`
     : ''
   // The list reads every receipt line -- a reverted one kept as history, but
   // out of the session's units and cost -- plus every zero-quantity session

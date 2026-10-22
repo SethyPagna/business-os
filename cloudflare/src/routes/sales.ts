@@ -168,6 +168,7 @@ import { COURIER_COST_KEYS, costViewProfit } from '../lib/reportProfitView'
 import { canViewCourierCost, courierCostResponses, redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
+import { authoredFailureMessage, unexpectedFailureBody } from '../lib/failureText'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -1897,7 +1898,7 @@ app.post('/', async (c) => {
       if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
         return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
       }
-      return c.json({ error: `Failed to record sale items: ${message}` }, 500)
+      return c.json(unexpectedFailureBody('sales', error, 'Failed to record sale items.', 'sale_items_write_failed'), 500)
     }
   }
 
@@ -2014,6 +2015,15 @@ type SaleItemRow = {
   batch_id: number | null
 }
 
+// A refusal the bulk library worded for the operator travels as is; a malformed body is a 400; anything else keeps
+// its detail in the log and answers with fixed text.
+function saleBulkFailure(c: Context, error: unknown, fallback: string, code: string): Response {
+  if (error instanceof SaleBulkError) return c.json({ error: error.message, ...error.details }, error.statusCode)
+  if (error instanceof SyntaxError) return c.json({ error: 'The request body must be valid JSON.', code: 'invalid_json_body' }, 400)
+  const authored = authoredFailureMessage(error)
+  return authored === null ? c.json(unexpectedFailureBody('sales', error, fallback, code), 500) : c.json({ error: authored }, 500)
+}
+
 app.post('/bulk-status', async (c) => {
   try {
     const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c))
@@ -2022,7 +2032,7 @@ app.post('/bulk-status', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return saleBulkFailure(c, error, 'Failed to change the sale status.', 'sale_bulk_status_failed')
   }
 })
 
@@ -2035,7 +2045,7 @@ app.post('/bulk-update', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
-    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return saleBulkFailure(c, error, 'Failed to update the sales.', 'sale_bulk_update_failed')
   }
 })
 
@@ -3904,7 +3914,7 @@ app.post('/:id/items', async (c) => {
     if (/CHECK constraint|constraint failed/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
     }
-    return c.json({ error: `Failed to add sale items: ${message}` }, 500)
+    return c.json(unexpectedFailureBody('sales', error, 'Failed to add sale items.', 'sale_add_items_failed'), 500)
   }
 
   c.executionCtx.waitUntil(Promise.all([
@@ -4511,7 +4521,7 @@ app.post('/:id/amendments', async (c) => {
       if (/constraint/i.test(String(error))) {
         return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       }
-      return c.json({ error: `Failed to add delivery: ${(error as Error).message || ''}` }, 500)
+      return c.json(unexpectedFailureBody('sales', error, 'Failed to add delivery.', 'sale_delivery_failed'), 500)
     }
     await auditAmendment(c, user, saleId, sale, {
       kind,
@@ -4618,7 +4628,7 @@ app.post('/:id/amendments', async (c) => {
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
-      return c.json({ error: `Failed to amend the actual delivery cost: ${(error as Error).message || ''}` }, 500)
+      return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the actual delivery cost.', 'sale_delivery_cost_failed'), 500)
     }
     await auditAmendment(c, user, saleId, sale, {
       kind, actual_cost_before: costPlan.costBeforeUsd, actual_cost_after: costPlan.costAfterUsd,
@@ -4755,7 +4765,7 @@ app.post('/:id/amendments', async (c) => {
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
-      return c.json({ error: `Failed to amend the delivery fee: ${(error as Error).message || ''}` }, 500)
+      return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the delivery fee.', 'sale_delivery_fee_failed'), 500)
     }
     await auditAmendment(c, user, saleId, sale, {
       kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
@@ -5285,7 +5295,7 @@ app.post('/:id/amendments', async (c) => {
     if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
-    return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
+    return c.json(unexpectedFailureBody('sales', error, 'Failed to amend this sale.', 'sale_amend_failed'), 500)
   }
 
   await auditAmendment(c, user, saleId, sale, {

@@ -1,5 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
-import type { InputHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, Ref } from 'react'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 
 // Same cast Modal.tsx uses next to this file: every admin search field sits
@@ -21,6 +21,8 @@ type SearchInputProps = NativeInputProps & {
   className?: string
   inputClassName?: string
   showClear?: boolean
+  /** The <input> itself (function components cannot take `ref`): lets a page anchor the scanner-gun hook on its search. */
+  inputRef?: Ref<HTMLInputElement>
 }
 
 /**
@@ -43,6 +45,7 @@ export default function SearchInput({
   className = 'min-w-0 flex-1',
   inputClassName = '',
   showClear = true,
+  inputRef,
   autoComplete = 'off',
   ...rest
 }: SearchInputProps) {
@@ -51,11 +54,17 @@ export default function SearchInput({
   const clearLabel = t('clear_search') || 'Clear search'
   return (
     <label htmlFor={id} className={`relative ${className}`.trim()}>
+      {/* Codes and names, not prose: autocorrect, auto-capitals and the spell-check
+          underline would alter a typed or scanned barcode on its way into the search. */}
       <input
+        ref={inputRef}
         id={id}
         name={name}
         type="text"
         autoComplete={autoComplete}
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         className={`input min-w-0 w-full ${showClear && value ? 'pr-10' : ''} ${inputClassName}`.trim()}
         placeholder={placeholder}
         aria-label={label}

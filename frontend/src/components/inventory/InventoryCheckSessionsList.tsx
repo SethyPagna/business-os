@@ -1,6 +1,5 @@
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
-import Circle from 'lucide-react/dist/esm/icons/circle.js'
 import FilterMenu, { type FilterOption, type FilterSection } from '../shared/FilterMenu.tsx'
 import type { InventoryCheckSession } from '../../api/inventoryChecksTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
@@ -23,13 +22,32 @@ export function SessionStatusChip({ status, t }: { status: InventoryCheckSession
   </span>
 }
 
-/** ✓done  !issue  ○unstarted/total, each figure named for tooltips and screen readers. */
-export function SessionCounts({ progress, t }: { progress: NonNullable<InventoryCheckSession['progress']>; t: Translator }) {
-  const done = label(t, 'inventory_check_done', 'Done'), issue = label(t, 'inventory_check_issue', 'Issue'), unstarted = label(t, 'inventory_check_unstarted', 'Not started')
+type Progress = NonNullable<InventoryCheckSession['progress']>
+
+/** Checked / total as a ring: emerald for done, amber for issues, a grey track for what is left. */
+export function ProgressRing({ progress, t }: { progress: Progress; t: Translator }) {
+  const total = Math.max(0, progress.total)
+  const checked = Math.min(total, progress.done + progress.issue)
+  const radius = 9, circumference = 2 * Math.PI * radius
+  const share = (count: number) => total > 0 ? Math.min(count, total) / total * circumference : 0
+  const done = share(progress.done), issue = share(progress.issue)
+  const named = `${label(t, 'inventory_check_progress', 'Checked')} ${checked}/${total}`
+  return <span data-session-progress className="inline-flex shrink-0 items-center gap-1 tabular-nums">
+    <svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label={named} className="shrink-0 -rotate-90">
+      <circle cx="12" cy="12" r={radius} fill="none" strokeWidth="3" className="stroke-gray-200 dark:stroke-zinc-700" />
+      {done > 0 ? <circle data-ring-arc="done" cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeDasharray={`${done} ${circumference}`} className="stroke-emerald-500" /> : null}
+      {issue > 0 ? <circle data-ring-arc="issue" cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeDasharray={`${issue} ${circumference}`} strokeDashoffset={-done} className="stroke-amber-500" /> : null}
+    </svg>
+    <span aria-hidden="true">{checked}/{total}</span>
+  </span>
+}
+
+/** ✓done  !issue, each figure named for tooltips and screen readers; what is left is the ring's grey. */
+export function SessionCounts({ progress, t }: { progress: Progress; t: Translator }) {
+  const done = label(t, 'inventory_check_done', 'Done'), issue = label(t, 'inventory_check_issue', 'Issue')
   return <span data-session-counts className="inline-flex shrink-0 items-center gap-2 tabular-nums">
     <span className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-300" title={done} aria-label={`${done}: ${progress.done}`}><Check className="h-3.5 w-3.5" aria-hidden="true" />{progress.done}</span>
     <span className="inline-flex items-center gap-0.5 text-amber-700 dark:text-amber-300" title={issue} aria-label={`${issue}: ${progress.issue}`}><AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />{progress.issue}</span>
-    <span className="inline-flex items-center gap-0.5 text-gray-600 dark:text-gray-300" title={unstarted} aria-label={`${unstarted}: ${progress.unstarted} / ${progress.total}`}><Circle className="h-3.5 w-3.5" aria-hidden="true" />{progress.unstarted}/{progress.total}</span>
   </span>
 }
 
@@ -41,7 +59,7 @@ export default function InventoryCheckSessionsList({ items, onOpen, t }: { items
         <span className="font-semibold">{fmtDateTime24(item.started_at)}</span>
         {item.branch_name ? <span className="detail-scroll-text min-w-0 leading-relaxed">{item.branch_name}</span> : null}
         {item.creator_name ? <span className="text-gray-500" title={label(t, 'inventory_check_created_by', 'Created by')}>@{item.creator_name}</span> : null}
-        {item.progress ? <SessionCounts progress={item.progress} t={t} /> : null}
+        {item.progress ? <><ProgressRing progress={item.progress} t={t} /><SessionCounts progress={item.progress} t={t} /></> : null}
         {item.status === 'closed' && item.closed_at ? <span className="text-gray-500">{label(t, 'shift_status_closed', 'Closed')} {fmtDateTime24(item.closed_at)}</span> : null}
       </button>
     </li>)}

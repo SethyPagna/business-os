@@ -15,6 +15,7 @@ import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -412,6 +413,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const salesRef = useRef<SaleRecord[]>([])
   useEffect(() => { salesRef.current = sales }, [sales])
   const [search, setSearch] = useState('')
+  // The scanner gun fills the search the camera and the keyboard fill (setSearch).
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: isActive,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setSearch(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
@@ -2748,6 +2759,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             id="sales-search"
+            inputRef={searchInputRef}
             name="sales_search"
             value={search}
             onChange={setSearch}

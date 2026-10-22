@@ -194,9 +194,14 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
+  // 6.0.926: the supplier return's request-id lookup left the route for lib/supplierReturnReceipt.ts and is scoped to the actor.
+  // The bare lookup (any user's id, body ignored) is gone from the route; the indexed occupied-id lookup keeps its partial-index predicate beside the receipt.
   const legacyReturnDedupeQuery = /SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
-  const legacyReturnDedupeMatches = returnsRoute.match(legacyReturnDedupeQuery) || []
-  assert.equal(legacyReturnDedupeMatches.length, 1, 'supplier returns retain the indexed legacy request lookup')
+  assert.equal((returnsRoute.match(legacyReturnDedupeQuery) || []).length, 0, 'no bare cross-user supplier request lookup is left in the route')
+  const supplierReceipt = readRepo('cloudflare/src/lib/supplierReturnReceipt.ts')
+  assert.equal((supplierReceipt.match(/LEFT JOIN returns o ON o\.client_request_id=\? AND o\.client_request_id<>'' LIMIT 1/g) || []).length, 1, 'supplier returns retain the indexed legacy request lookup')
+  assert.match(supplierReceipt, /LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/, 'the supplier lookup is scoped to the actor')
+  assert.match(returnsRoute, /readSupplierReturnReceipt\(db, receipt\.actorId, receipt\.requestId, receipt\.digest\)/, 'the supplier route reads through the actor-scoped receipt')
   assert.match(returnsRoute, /const readReceipt = async \(\) => \{[\s\S]*SELECT r\.return_id,r\.sale_id,r\.request_digest,r\.response_json,o\.id AS occupied_id[\s\S]*LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/)
   assert.match(returnsRoute, /\[authenticatedActorId, clientRequestId, clientRequestId\]/, 'the combined lookup retains authenticated actor scope')
   assert.match(returnsRoute, /if \(priorReceipt\) \{[\s\S]*priorReceipt\.request_digest !== requestDigest[\s\S]*idempotency_conflict[\s\S]*JSON\.parse\(priorReceipt\.response_json\)/)
@@ -883,7 +888,7 @@ await runTest('users and roles security mutations use shared guards and bounded 
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveRoleInFlightRef\)[\s\S]*setSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(deleteRoleInFlightRef\)[\s\S]*setDeletingRoleId\(null\)/)
   assert.match(source, /disabled=\{passwordSaving\}/)
-  assert.match(source, /disabled=\{deletingRoleId === role\.id\}/)
+  assert.match(source, /disabled=\{deletingRoleId === role\.id( \|\| assignedCount > 0)?\}/)
   assert.ok(mutationLines.length >= 12, 'users page should still cover user/role normal and undo/redo mutation paths')
   assert.ok(
     mutationLines.every(isGuarded),

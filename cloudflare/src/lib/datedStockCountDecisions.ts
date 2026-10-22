@@ -1,4 +1,5 @@
 import { executeStockTransaction } from './stockTransaction'
+import { foldNativeDigits } from './searchMatch'
 // Executes a human's per-row decisions against Part 288/289/290's
 // analysis-only resolve output (lib/datedStockCountResolve.ts). That
 // layer never writes a product or a price -- it only reports what it
@@ -123,6 +124,10 @@ export interface ApplyDatedStockCountDecisionsResult {
   productsCreated: ProductCreatedFromDecision[]
 }
 
+// The client echoes /resolve's rows back, so the barcode of a product created here folds again (Khmer-layout scanner
+// digits -> ASCII) rather than trusting the echo.
+const createdBarcode = (row: UnresolvedDatedCountRow['raw']): string | null => row.barcode == null ? null : foldNativeDigits(row.barcode)
+
 function pickPrice(row: UnresolvedDatedCountRow['raw']): { usd: number; khr: number } {
   return {
     usd: row.sellingPriceUsd != null && Number.isFinite(row.sellingPriceUsd) ? Number(row.sellingPriceUsd) : 0,
@@ -222,7 +227,7 @@ export async function applyDatedStockCountDecisions(
       const price = pickPrice(row.raw)
       const [inserted] = await executeStockTransaction(guardedDb, [{
         sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`,
-        params: { name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr },
+        params: { name, sku: row.raw.sku ?? null, barcode: createdBarcode(row.raw), usd: price.usd, khr: price.khr },
       }], 'retry')
       const productId = Number(inserted.meta?.last_row_id)
       productsCreated.push({ rowNumber: row.rowNumber, productId, name, action: 'create_new' })
@@ -273,7 +278,7 @@ export async function applyDatedStockCountDecisions(
     const price = pickPrice(row.raw)
     const [inserted] = await executeStockTransaction(guardedDb, [{
       sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`,
-      params: { name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr },
+      params: { name: finalName, sku: row.raw.sku ?? null, barcode: createdBarcode(row.raw), usd: price.usd, khr: price.khr },
     }], 'retry')
     const productId = Number(inserted.meta?.last_row_id)
     productsCreated.push({ rowNumber: row.rowNumber, productId, name: finalName, action: 'create_child', ...(nameUnlocked ? { nameUnlocked: true } : {}) })

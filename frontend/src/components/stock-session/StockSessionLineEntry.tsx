@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from 'react'
+import { useMemo, useRef, type RefObject } from 'react'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
@@ -11,6 +11,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
@@ -46,6 +47,12 @@ type LineEntryProps = {
   createText: string | null
   onCreate: () => void
   onScan: (value: string) => void
+  /** A scanner-gun burst landed in Qty / Cost / Price / Expiry, was put back and moved to the search. */
+  onScanMoved?: () => void
+  /** The picked item holds typed values (lineEntryHasTypedValues): a scan must not clear it. */
+  hasTypedValues: boolean
+  /** A scan arrived while the picked item holds typed values: it was kept and the code was not used. */
+  onScanKept?: () => void
   picked: StockSessionProduct | null
   pickedStock: number
   pickedIsNew: boolean
@@ -85,13 +92,39 @@ type LineEntryProps = {
 /** Rows E1-E4 of the Items step (spec 3.4). */
 export default function StockSessionLineEntry(props: LineEntryProps) {
   const {
-    tr, packLookup, mode, busy, searchInputRef, query, onQuery, groups, total = 0, onMore = null, moreBusy = false, onOpenGroup, createText, onCreate, onScan,
+    tr, packLookup, mode, busy, searchInputRef, query, onQuery, groups, total = 0, onMore = null, moreBusy = false, onOpenGroup, createText, onCreate, onScan, onScanMoved, hasTypedValues, onScanKept,
     picked, pickedStock, pickedIsNew, onClearPick, quantity, onQuantity,
     unitCost, onUnitCost, canViewCosts, canEditCosts, canReceive, sellingPrice, onSellingPrice, canEditPrice,
     expiryDate, onExpiryDate, lotOptions, lotValue, onLot, conditionTag, onConditionTag, tagDisabled,
     reason, onReason, savedReasons, onManageReasons, onAdd, editing, refusal, invalidField,
   } = props
   const ring = (field: LineEntryField): boolean => invalidField === field
+  // The scanner gun. Qty, Cost and Price add the line on Enter, so a burst into one
+  // of them (the usual place to be after picking a product) used to add a line whose
+  // quantity was the barcode. The hook now puts the field back and sends the code to
+  // the search. That search box is not rendered while a product is picked, so the
+  // entry row anchors the hook then, and a scan reopens the search as the chip's X does.
+  const entryRef = useRef<HTMLDivElement | null>(null)
+  const wedgeSearchRef = useMemo<RefObject<HTMLElement | null>>(
+    () => ({ get current() { return searchInputRef.current ?? entryRef.current } }),
+    [searchInputRef],
+  )
+  // A scan clears a picked item, and with it every quantity, cost, price and date typed on it. When something was
+  // typed, the item stays: the person finishes it (Add) or drops it (the X) first, and scans again. The flag is read
+  // through a ref because the hook calls the handler it held before it put a burst back into its field; the render
+  // that followed the put-back has refreshed the ref, so a burst typed into Qty does not make a clean item look typed.
+  const typedRef = useRef(hasTypedValues)
+  typedRef.current = hasTypedValues
+  useScannerWedge({
+    enabled: !busy,
+    searchRef: wedgeSearchRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      if (picked && typedRef.current) { onScanKept?.(); return }
+      if (picked) onClearPick()
+      onScan(code)
+      if (origin === 'field') onScanMoved?.()
+    },
+  })
   const reasonLabel = tr('reason', 'Reason')
   const reasonOptions = useMemo(() => savedReasons.map((entry) => ({ value: entry.label, key: entry.id, selected: entry.label === reason })), [savedReasons, reason])
   const lotLabel = tr('received_date', 'Received date')
@@ -123,7 +156,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
   )
 
   return (
-    <div className="space-y-1.5" data-stock-session-entry={mode}>
+    <div ref={entryRef} className="space-y-1.5" data-stock-session-entry={mode}>
       {/* E1 */}
       {picked ? (
         <div className="flex min-h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 py-1 pl-2.5 pr-1 text-sm dark:border-blue-800 dark:bg-blue-900/20">
@@ -256,6 +289,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
             placeholder={reasonLabel}
             inputClassName="input h-10 w-full min-w-0 pl-8 text-sm"
             onChange={(next) => onReason(next.slice(0, REASON_MAX_LENGTH))}
+            guardScans
           />
         </div>
         {onManageReasons ? (

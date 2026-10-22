@@ -377,7 +377,7 @@ export function isAcquisitionCostField(field: string): boolean {
     const normalized = segment.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
     if (/(^|_)(delivery|courier)(_|$)/.test(normalized)) return false
     if (['actual_cost_usd', 'actual_cost_khr', 'actual_cost_count', 'actual_cost_before', 'actual_cost_after'].includes(normalized)) return false
-    return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)/.test(normalized)
+    return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss|positive_value|total_value)(_|$)/.test(normalized)
       || normalized === 'revenue_after_losses_usd' || normalized === 'credit_open_usd'
       || /^(supplier_)?(compensation|loss)_(usd|khr)$/.test(normalized)
   })

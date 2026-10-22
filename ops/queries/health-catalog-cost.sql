@@ -9,13 +9,17 @@
 -- yields a figure (NULL keeps the stored value by design).
 --   active_cost_drift     rows the formula would move (ZERO: the triggers stand down
 --                         only during a backup restore)
---   active_mirror_drift   purchase_price_usd <> cost_price_usd on active rows
+--   active_mirror_drift   active rows whose purchase_price_usd twin is not aligned with cost_price_usd: the
+--                         same value, or an unknown (NULL) cost with a twin of 0 or NULL (the mirror rule,
+--                         COST_MIRROR_COLUMNS in lib/catalogCostRecompute.ts; ZERO after 0269). Drilled down by
+--                         forensics-catalog-mirror-drift-rows
+--   active_mirror_drift_khr  the same rule for the KHR pair (no drill-down; 0269 repairs both)
 --   active_with_formula   rows the formula has a figure for (context)
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
 WITH d AS MATERIALIZED (
-  SELECT products.id, products.cost_price_usd, products.purchase_price_usd, COALESCE(
+  SELECT products.id, products.cost_price_usd, products.purchase_price_usd, products.cost_price_khr, products.purchase_price_khr, COALESCE(
       (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
         FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
           WHERE pb.variant_product_id = products.id AND pb.is_active = 1
@@ -37,5 +41,6 @@ WITH d AS MATERIALIZED (
 )
 SELECT
   (SELECT COUNT(*) FROM d WHERE derived IS NOT NULL AND (cost_price_usd IS NOT derived OR purchase_price_usd IS NOT derived)) AS active_cost_drift,
-  (SELECT COUNT(*) FROM d WHERE cost_price_usd IS NOT purchase_price_usd) AS active_mirror_drift,
+  (SELECT COUNT(*) FROM d WHERE NOT (cost_price_usd IS purchase_price_usd OR (cost_price_usd IS NULL AND COALESCE(purchase_price_usd, 0) = 0))) AS active_mirror_drift,
+  (SELECT COUNT(*) FROM d WHERE NOT (cost_price_khr IS purchase_price_khr OR (cost_price_khr IS NULL AND COALESCE(purchase_price_khr, 0) = 0))) AS active_mirror_drift_khr,
   (SELECT COUNT(*) FROM d WHERE derived IS NOT NULL) AS active_with_formula

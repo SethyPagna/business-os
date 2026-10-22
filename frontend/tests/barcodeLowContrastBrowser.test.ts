@@ -11,7 +11,12 @@
 //    difference, turned 90 degrees, under a glare gradient, blurred and
 //    noisy. Each case first asserts the default reader MISSES it, so a fixture
 //    that became too easy fails instead of passing vacuously.
-// Prints per-frame decode times, default reader vs ladder tick.
+// Each case also runs the live loop on the on-screen guide area the modal decodes (S1a), not just the photo centre.
+// Since S1b the photo path really runs in a Worker (the page serves the worker script), and the live loop is
+// the frame handler the worker runs, fed the way the camera hook feeds it: the guide area every frame and the
+// whole picture every third, through one handler that keeps its arrays between frames.
+// Prints per-frame decode times, default reader vs ladder tick, and what the main thread paid to hand a frame
+// over versus what the worker spent decoding it.
 //
 // Run: node tests/barcodeLowContrastBrowser.test.ts
 import assert from 'node:assert/strict'
@@ -26,11 +31,20 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const ownerPhoto = process.env.SCANNER_OWNER_PHOTO
   || 'C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Consolidation/2026-10-20/scanner-fixtures/dior-silver-vertical-3348901729222.webp'
 const hasOwnerPhoto = existsSync(ownerPhoto)
+// The decoder imports the retail readers by deep path; pre-bundling them up
+// front keeps a mid-run dependency discovery from reloading the page.
+const ZXING_DEEP_IMPORTS = [
+  'core/BarcodeFormat', 'core/DecodeHintType', 'core/BinaryBitmap', 'core/RGBLuminanceSource', 'core/common/HybridBinarizer',
+  'core/NotFoundException', 'core/ChecksumException', 'core/FormatException',
+  'core/oned/OneDReader', 'core/oned/MultiFormatUPCEANReader', 'core/oned/Code39Reader', 'core/oned/Code128Reader', 'core/oned/ITFReader',
+].map((name) => `@zxing/library/esm/${name}`)
 
 const fixture = String.raw`
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import { scanBarcodeFromImageFile } from '/src/components/products/scanning/barcodeImageScanner.ts'
-import { createFrameGrabber, createReadConfirmer, loadLumaDecoder, runDecodeLadder } from '/src/components/products/scanning/barcodeFrameDecoder.ts'
+import { SCAN_GUIDE_BOX, createFrameGrabber, createReadConfirmer } from '/src/components/products/scanning/barcodeFrameDecoder.ts'
+import { createDecodeHandler } from '/src/components/products/scanning/barcodeDecodeHandler.ts'
+import { createLumaDecoder } from '/src/components/products/scanning/barcodeZxing.ts'
 
 const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011']
 const G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111']
@@ -85,22 +99,32 @@ function defaultReaderMs(source) {
   return { text, ms: performance.now() - started }
 }
 
-// The live loop: one 40 ms ladder tick per frame, two agreeing reads to win.
-async function liveTicks(source, maxTicks = 40) {
-  const decode = await loadLumaDecoder()
-  const grab = createFrameGrabber()
+// The live loop as the camera hook runs it: a frame handler like the worker's, the guide area every
+// frame and the whole picture every third, two agreeing reads to win. guide is the on-screen scan box
+// the modal decodes (none: a photo's centre). grabMs is what the main thread pays to read the pixels
+// out; decodeMs is what the worker spends on them.
+async function liveTicks(source, maxTicks = 40, guide) {
+  const handler = createDecodeHandler(createLumaDecoder())
+  const grab = createFrameGrabber(guide)
   const confirm = createReadConfirmer()
-  let step = 0
   const tickMs = []
+  const grabMs = []
+  const decodeMs = []
   for (let tick = 1; tick <= maxTicks; tick += 1) {
     const started = performance.now()
-    const { read, nextStep } = runDecodeLadder(grab(source, source.width, source.height), decode, { startStep: step, deadline: Date.now() + 40 })
-    step = nextStep
-    const won = confirm(read, 'zxing')
-    tickMs.push(performance.now() - started)
-    if (won) return { text: won, ticks: tick, tickMs }
+    const regions = grab(source, source.width, source.height)
+    const centre = regions.centre()
+    const full = (tick - 1) % 3 === 0 ? regions.full() : undefined
+    const grabbed = performance.now()
+    const reply = handler.handle({ id: tick, centre, full, tryHarder: false })
+    const finished = performance.now()
+    const won = confirm(reply.type === 'read' ? reply.read : null, 'zxing')
+    tickMs.push(finished - started)
+    grabMs.push(grabbed - started)
+    decodeMs.push(finished - grabbed)
+    if (won) return { text: won, ticks: tick, tickMs, grabMs, decodeMs }
   }
-  return { text: '', ticks: maxTicks, tickMs }
+  return { text: '', ticks: maxTicks, tickMs, grabMs, decodeMs }
 }
 
 const canvasFile = (canvas, name) => new Promise((resolve) => canvas.toBlob((blob) => resolve(new File([blob], name, { type: 'image/png' })), 'image/png'))
@@ -122,7 +146,8 @@ window.runScannerCases = async (withPhoto) => {
     try { photo = await scanBarcodeFromImageFile(new File([blob], 'dior.webp', { type: blob.type }), noNative) } catch (error) { photo = 'ERROR ' + error.message }
     const photoMs = performance.now() - started
     const live = await liveTicks(canvas)
-    results.push({ name: 'owner photo (Dior, silver foil, vertical)', expected: '3348901729222', before, photo, photoMs, live })
+    const guided = await liveTicks(canvas, 40, SCAN_GUIDE_BOX)
+    results.push({ name: 'owner photo (Dior, silver foil, vertical)', expected: '3348901729222', before, photo, photoMs, live, guided })
   }
   const cases = [
     { name: 'EAN-13 turned 90deg, 17% contrast, glare, 1280x720', code: '5901234123457' },
@@ -138,7 +163,8 @@ window.runScannerCases = async (withPhoto) => {
     try { photo = await scanBarcodeFromImageFile(await canvasFile(canvas, 'fixture.png'), noNative) } catch (error) { photo = 'ERROR ' + error.message }
     const photoMs = performance.now() - started
     const live = await liveTicks(canvas)
-    results.push({ name: options.name, expected: options.code, before, photo, photoMs, live })
+    const guided = await liveTicks(canvas, 40, SCAN_GUIDE_BOX)
+    results.push({ name: options.name, expected: options.code, before, photo, photoMs, live, guided })
   }
   return results
 }
@@ -151,7 +177,7 @@ const server = await createServer({
   // other test shares, stops a mid-run re-optimisation from invalidating the
   // page's module URLs.
   cacheDir: join(tmpdir(), 'business-os-scanner-low-contrast-vite'),
-  optimizeDeps: { include: ['@zxing/library', '@zxing/browser'] },
+  optimizeDeps: { include: ['@zxing/library', '@zxing/browser', ...ZXING_DEEP_IMPORTS] },
   server: { host: '127.0.0.1', port: 0, fs: { allow: [root, realpathSync(join(root, 'node_modules'))] } },
   plugins: [{
     name: 'scanner-low-contrast', enforce: 'pre',
@@ -190,7 +216,8 @@ try {
     before: { text: string; ms: number }
     photo: string
     photoMs: number
-    live: { text: string; ticks: number; tickMs: number[] }
+    live: { text: string; ticks: number; tickMs: number[]; grabMs: number[]; decodeMs: number[] }
+    guided: { text: string; ticks: number; tickMs: number[]; grabMs: number[]; decodeMs: number[] }
   }>
   const ms = (value: number) => `${Math.round(value)} ms`
   for (const result of results) {
@@ -198,8 +225,10 @@ try {
       assert.notEqual(result.before.text, result.expected, `${result.name}: the default ZXing reader must miss this fixture, or it no longer proves anything`)
       assert.equal(result.photo, result.expected, `${result.name}: the photo path must read the barcode`)
       assert.equal(result.live.text, result.expected, `${result.name}: the live loop must confirm the barcode`)
+      assert.equal(result.guided.text, result.expected, `${result.name}: the live loop decoding the on-screen guide area must confirm the barcode`)
       const worstTick = Math.max(...result.live.tickMs)
-      console.log(`PASS ${result.name}: default reader ${result.before.text ? `read ${result.before.text}` : 'missed'} in ${ms(result.before.ms)}/frame; photo path ${ms(result.photoMs)}; live loop confirmed in ${result.live.ticks} ticks (avg ${ms(result.live.tickMs.reduce((a, b) => a + b, 0) / result.live.tickMs.length)}, worst ${ms(worstTick)}/tick)`)
+      const average = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length
+      console.log(`PASS ${result.name}: default reader ${result.before.text ? `read ${result.before.text}` : 'missed'} in ${ms(result.before.ms)}/frame; photo path ${ms(result.photoMs)} (in the worker); live loop confirmed in ${result.live.ticks} frames, guide area in ${result.guided.ticks}; per frame the main thread paid ${ms(average(result.live.grabMs))} to hand it over, the worker spent avg ${ms(average(result.live.decodeMs))}, slowest whole frame ${ms(worstTick)}`)
     } catch (error) {
       failed += 1
       console.error(`FAIL ${result.name}`)

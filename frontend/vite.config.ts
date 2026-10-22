@@ -1087,9 +1087,6 @@ function manualChunks(id: string): string | undefined {
   }
   if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
-  // ts-custom-error is @zxing/library's own dependency; in the generic 'vendor'
-  // bucket it made opening the scanner fetch html2canvas and qrcode too.
-  if (/[\\/]node_modules[\\/](?:@zxing|ts-custom-error)[\\/]/.test(id)) return 'vendor-zxing'
   if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return undefined
   // P9-perf (Sep 16 2026): xlsx (SheetJS) was falling into the generic
   // catch-all 'vendor' bucket alongside qrcode and html2canvas. All three

@@ -34,6 +34,12 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   return_refund_khr_unavailable: 'return_refund_khr_unavailable',
   return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
   product_supplier_edit_required: 'product_supplier_edit_required',
+  // Return and supplier-return refusals (6.0.926 follow-up). The last three are the Worker's own sentence word for word; idempotency_conflict is shared by every request-id
+  // refusal (about fifteen Worker sentences), so its pack text is one operator-language sentence for the whole class, not any one of them.
+  idempotency_conflict: 'idempotency_conflict',
+  return_replacement_price_forbidden: 'return_replacement_price_forbidden',
+  supplier_return_failed: 'supplier_return_failed',
+  return_edit_failed: 'return_edit_failed',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',

@@ -35,10 +35,10 @@ test('a plain section key reads translated, and an unknown fine-grained key is h
   assert.equal(rolePermissionLabel('no_such_section', translator(km)), null)
 })
 
-test('the Roles list card tags and summary use the label helper, never a raw key', () => {
-  assert.match(usersSource, /rolePermissionLabel\(/)
-  assert.doesNotMatch(usersSource, /PERMISSION_DEFS\.find\(\(item\) => item\.key === key\)\?\.label \|\| key/, 'the tag no longer falls back to the key')
-  assert.doesNotMatch(usersSource, /tr\(perm\?\.tKey \|\| key, perm\?\.label \|\| key\)/, 'the summary no longer falls back to the key')
+test('the Roles list card shows a level strip, never key tags or a summary sentence, so no raw key can reach a card', () => {
+  assert.match(usersSource, /<RoleTierStrip permissions=\{role\.permissions\}/, 'the card reads the role as counts per level')
+  assert.doesNotMatch(usersSource, /getPermissionSummary|getRolePermissions|rolePermissionLabel\(/, 'the key-tag chips and the summary sentence are gone')
+  assert.doesNotMatch(usersSource, /PERMISSION_DEFS\.find\(\(item\) => item\.key === key\)\?\.label \|\| key/, 'and nothing falls back to the key')
 })
 
 test('the per-row Conflicts footer hint stays retired: Resolve decides in one grid, so no Keep / Remove or Keep / Merge row hint exists', () => {

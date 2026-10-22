@@ -134,10 +134,10 @@ check('cost: the inline table obeys the same gate as the float', () => {
 })
 
 check('cost rule is the Worker rule: same key test, and a delivery cost is not an acquisition cost', () => {
-  for (const key of ['cost_price_usd', 'purchase_price_khr', 'profit_usd', 'margin', 'stock_value_usd', 'total_cost', 'supplier_loss_usd', 'items.cost_price_usd']) {
+  for (const key of ['cost_price_usd', 'purchase_price_khr', 'profit_usd', 'margin', 'stock_value_usd', 'positive_value_usd', 'total_value_usd', 'positiveValueUsd', 'total_cost', 'supplier_loss_usd', 'items.cost_price_usd']) {
     assert.ok(isAcquisitionCostField(key), `${key} must be a cost field`)
   }
-  for (const key of ['selling_price_usd', 'delivery_actual_cost', 'actual_delivery_cost_usd', 'courier_cost_usd', 'name', 'barcode', 'amount_usd']) {
+  for (const key of ['selling_price_usd', 'delivery_actual_cost', 'actual_delivery_cost_usd', 'courier_cost_usd', 'redeem_value_usd', 'name', 'barcode', 'amount_usd']) {
     assert.ok(!isAcquisitionCostField(key), `${key} must NOT be a cost field`)
   }
   // The client rule is a copy; the Worker file is the authority. Both carry the
@@ -145,7 +145,7 @@ check('cost rule is the Worker rule: same key test, and a delivery cost is not a
   const worker = readFileSync(new URL('../../cloudflare/src/lib/acquisitionCostAccess.ts', import.meta.url), 'utf8')
   const client = read('../src/utils/entityRecords.ts')
   for (const fragment of [
-    '(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)',
+    '(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss|positive_value|total_value)(_|$)',
     '(^|_)(delivery|courier)(_|$)',
     '^(supplier_)?(compensation|loss)_(usd|khr)$',
   ]) {

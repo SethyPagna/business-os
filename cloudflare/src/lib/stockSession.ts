@@ -13,7 +13,7 @@ import { identityBarcodeMatchSql } from './productIdentity'
 import { barcodeKeysMatch } from './searchMatch'
 import { planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate, type ReceiptLotTarget, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
-import { normalizeMultiValue, planInsertRow, validateProductImageGallery } from './productWrites'
+import { foldBarcodeInput, normalizeMultiValue, planInsertRow, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
@@ -396,6 +396,11 @@ function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionReq
     let product = line.product
     if (product) {
       product = { ...product }
+      // Khmer-layout scanner digits become ASCII here, after the legacy first lookup (a session committed with the typed
+      // digits still replays exactly) and before the duplicate guard, the create-fold and the insert read the barcode.
+      foldBarcodeInput(product)
+      const foldedBarcode = String(product.barcode ?? '').trim()
+      if (SCIENTIFIC_BARCODE.test(foldedBarcode)) fail(`Barcode "${foldedBarcode}" looks like scientific notation.`, 400, 'barcode_scientific_notation')
       for (const field of ['cost_price_usd', 'cost_price_khr'] as const) {
         if (!(field in product)) continue
         try { product[field] = roundMoney4(product[field] as number) }

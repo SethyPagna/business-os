@@ -63,6 +63,9 @@ const EXCLUDED = {
   sale_incident_recovery_guards: 'transient single-writer guard',
   sale_not_paid_stock_recovery_guards: 'transient single-writer guard',
   stock_session_guards: 'transient single-writer guard',
+  // One-time repair ledgers of a migration that rewrote business rows: before/after values for a reversal by hand; a restore
+  // replaces the rows themselves with the backup's own copy, so it must not bring the ledger back.
+  product_cost_mirror_0269: '0269 purchase_price twin backfill ledger (before/after per product); reversal aid, not business data',
 }
 
 // NOT backed up at c5b28762 and no recorded decision either way. Listed so

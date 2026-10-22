@@ -129,7 +129,7 @@ const actual = new Set([
   // the sales bulk-update stack (as test-sale-bulk-update-pure.cjs loads it)
   'businessMaintenanceGuard', 'acquisitionCostAccess','courierCostAccess', 'saleCustomerAssignmentGuard','customerPointsReturn', 'actorSnapshot', 'anonymousCustomer',
   'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions',
-  'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites',
+  'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'failureText', 'branchWrites',
   'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions',
   // the shift route and its drawer arithmetic, all real
   'shiftReconciliation', 'salesAnalytics', 'nativeSaleChange', 'businessDateWindow', 'continuousReadWindow', 'clientTimestamp',

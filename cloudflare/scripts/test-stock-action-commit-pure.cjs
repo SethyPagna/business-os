@@ -353,9 +353,17 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   assert.strictEqual(createRetry.productId, created.productId)
   assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM products WHERE client_request_id LIKE 'stock-import:%'`).get().n, 1)
   assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM branch_stock WHERE product_id = @id AND quantity = 0`).get({ id: created.productId }).n, 2)
-  assert.deepStrictEqual(createdDb.sqlite.prepare(`SELECT selling_price_usd, wholesale_price_usd, cost_price_usd FROM products WHERE id = @id`).get({ id: created.productId }), {
-    selling_price_usd: 10, wholesale_price_usd: 8, cost_price_usd: 4,
-  }, 'a retry resolves the original product instead of overwriting it with retry payload prices')
+  assert.deepStrictEqual(createdDb.sqlite.prepare(`SELECT selling_price_usd, wholesale_price_usd, cost_price_usd, purchase_price_usd FROM products WHERE id = @id`).get({ id: created.productId }), {
+    selling_price_usd: 10, wholesale_price_usd: 8, cost_price_usd: 4, purchase_price_usd: 4,
+  }, 'a retry resolves the original product instead of overwriting it with retry payload prices; the purchase twin is the cost (lane 6.0.944)')
+  const unknownCostDb = setup()
+  const unknownCost = await subject.ensureUnifiedStockProduct(unknownCostDb.db, {
+    jobId: 'job-unknown', identityKey: 'new:unknown|UNK', productName: 'Unknown Cost Serum', barcode: 'UNK',
+    sellingPriceUsd: 3, wholesalePriceUsd: 2, costPriceUsd: null,
+  })
+  assert.deepStrictEqual(unknownCostDb.sqlite.prepare(`SELECT cost_price_usd, purchase_price_usd FROM products WHERE id = @id`).get({ id: unknownCost.productId }), {
+    cost_price_usd: null, purchase_price_usd: 0,
+  }, 'an unknown cost stays NULL and its twin is 0')
   console.log('PASS unified stock add commits batch/branch/product/movement/ledger atomically and is retry-idempotent')
 })().catch((error) => {
   console.error(error)

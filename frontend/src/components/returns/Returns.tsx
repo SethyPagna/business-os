@@ -10,6 +10,7 @@ import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import Modal from '../shared/Modal.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
@@ -398,6 +399,16 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [scope, setScope] = useState<ReturnScope>(CUSTOMER_SCOPE)
   const [rows, setRows] = useState<ReturnRow[]>([])
   const [search, setSearch] = useState('')
+  // The scanner gun fills the search the camera and the keyboard fill (setSearch).
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  useScannerWedge({
+    enabled: isActive,
+    searchRef: searchInputRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      setSearch(code)
+      if (origin === 'field') notify(t('scan_moved_to_search') || 'Barcode moved to search', 'info')
+    },
+  })
   // ONE date scope for the whole page (user, Aug 31: "drive list + stats
   // together"): the Start→End range row above the search bar drives BOTH the
   // stats strip AND the returns list — no separate year/month period control.
@@ -1610,6 +1621,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <SearchInput
             id="returns-search"
+            inputRef={searchInputRef}
             name="returns_search"
             value={search}
             onChange={setSearch}

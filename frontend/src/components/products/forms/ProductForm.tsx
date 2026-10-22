@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
 import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
+import { warmScanner } from '../scanning/scannerWarmup.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
@@ -27,6 +28,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import { foldNativeDigits } from '../../../utils/searchMatch.ts'
 import {
   PRODUCT_MATCH_DEBOUNCE_MS,
   buildProductNameSuggestions,
@@ -312,6 +314,14 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 function canManageProductImages(user?: ProductUser | null): boolean {
   return effectivePermissions(user).can('products', 'image')
+}
+
+// A starting quantity on a new product is a stock-in. The Worker (routes/products.ts openingStockRefusal ->
+// lib/createFold.ts foldStockInPermissionRefusal) refuses it with a 403 unless the caller holds Inventory >
+// Adjust / receive at Full -- the same answer the role editor gives the "Opening stock" control -- so the box is
+// locked for everyone else instead of letting them type a number the save will refuse.
+function canSetOpeningStock(user?: ProductUser | null): boolean {
+  return effectivePermissions(user).can('inventory', 'adjust')
 }
 
 function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT_GALLERY_IMAGES): string[] {
@@ -692,6 +702,8 @@ function ProductFormContent({
   }
   const priceReadOnlyTip = canEditPrices ? undefined : tr('product_price_read_only', 'You do not have permission to change product prices. Adjust the price per sale in the cart instead.', 'អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។')
   const supplierLockTip = supplierLocked ? tr('product_supplier_read_only', 'You do not have permission to change the supplier.', 'អ្នកគ្មានសិទ្ធិប្ដូរអ្នកផ្គត់ផ្គង់ទេ។') : undefined
+  const openingStockLocked = isCreateMode && !canSetOpeningStock(user)
+  const openingStockLockTip = openingStockLocked ? tr('product_opening_stock_needs_adjust', 'Opening stock needs the Inventory permission Adjust / receive. Ask someone who has it.', 'ស្តុកដើមត្រូវការសិទ្ធិស្តុក កែតម្រូវ / ទទួល។ សូមសុំអ្នកដែលមានសិទ្ធិនេះ។') : undefined
 
   // Category/Unit arrive from GET /api/categories and /api/units, which now
   // return the lookup table UNION the values products actually carry (see
@@ -958,7 +970,8 @@ function ProductFormContent({
     if (!isCreateMode) return
     const seq = ++createMatchSeqRef.current
     const name = String(form.name || '').trim()
-    const barcode = String(form.barcode || '').trim()
+    // The lookup asks for the barcode the server will store (Khmer digits folded), like the verdict that reads its answer.
+    const barcode = foldNativeDigits(form.barcode).trim()
     // The min-length and debounce live in helpers/productNameSuggestions.ts
     // because the Name field's suggestion list is fed by THIS lookup: one
     // gate, so the dropdown and the identity hint can never disagree about
@@ -1472,7 +1485,6 @@ function ProductFormContent({
     const nextValue = String(value || '').trim()
     if (!nextValue || !scannerField) return
     setField(scannerField, nextValue)
-    closeScanner()
   }
 
   const scanningLabel = tr('scanner_state_starting', 'Opening camera...', 'កំពុងបើកកាមេរ៉ា...')
@@ -1893,7 +1905,7 @@ function ProductFormContent({
                   type="button"
                   className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('barcode')}
-                  onPointerDown={preloadBarcodeScannerModal}
+                  onPointerDown={() => { preloadBarcodeScannerModal(); warmScanner() }}
                   onTouchStart={preloadBarcodeScannerModal}
                   onMouseEnter={preloadBarcodeScannerModal}
                   onFocus={preloadBarcodeScannerModal}
@@ -2116,15 +2128,20 @@ function ProductFormContent({
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
-                className={`input min-h-11 min-w-0${isEditMode ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
+                className={`input min-h-11 min-w-0${isEditMode || openingStockLocked ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                readOnly={isEditMode}
-                aria-readonly={isEditMode}
+                readOnly={isEditMode || openingStockLocked}
+                aria-readonly={isEditMode || openingStockLocked}
+                aria-describedby={openingStockLocked ? 'product-stock-quantity-lock' : undefined}
+                title={openingStockLockTip}
                 value={form.stock_quantity ?? ''}
-                onChange={(event) => { if (isCreateMode) setNumericField('stock_quantity', event.target.value) }}
+                onChange={(event) => { if (isCreateMode && !openingStockLocked) setNumericField('stock_quantity', event.target.value) }}
               />
+              {openingStockLocked ? (
+                <p id="product-stock-quantity-lock" className="mt-1 text-xs text-gray-500 dark:text-gray-400">{openingStockLockTip}</p>
+              ) : null}
               {isEditMode ? (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {tr(

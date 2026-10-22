@@ -1,52 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
-import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Flashlight from 'lucide-react/dist/esm/icons/flashlight.js'
 import FlashlightOff from 'lucide-react/dist/esm/icons/flashlight-off.js'
-import Keyboard from 'lucide-react/dist/esm/icons/keyboard.js'
-import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
+import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
+import SwitchCamera from 'lucide-react/dist/esm/icons/switch-camera.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../../shared/Modal'
-import { deriveScannerPresentation } from './barcodeScannerState.ts'
-import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
-import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
-import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
-import {
-  RETAIL_BARCODE_FORMATS,
-  createFrameGrabber,
-  createReadConfirmer,
-  loadLumaDecoder,
-  runDecodeLadder,
-  type LumaDecoder,
-} from './barcodeFrameDecoder.ts'
+import { cameraResetPlatform, deriveScannerPresentation } from './barcodeScannerState.ts'
+import { PhotoScanError, scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
+import { SCAN_GUIDE_BOX } from './barcodeFrameDecoder.ts'
+import { SCAN_CLOSE_DELAY_MS, signalScanSuccess } from './scanFeedback.ts'
+import { useBarcodeCamera } from './useBarcodeCamera.ts'
 
-// Per-tick CPU for the ZXing ladder. The first step always runs; later steps
-// only while under budget, and the next tick waits at least as long as this
-// one took, so decoding never holds more than about half the main thread.
-const ZXING_TICK_BUDGET_MS = 40
-const NATIVE_TICK_INTERVAL_MS = 250
-// Some Android BarcodeDetector builds never see a low-contrast foil code;
-// after this many empty native frames the ZXing ladder joins in.
-const NATIVE_MISSES_BEFORE_ZXING = 6
+// The overlay outlines exactly the area the frame grabber decodes.
+const GUIDE_STYLE = { width: `${SCAN_GUIDE_BOX.widthPercent}%`, height: `${SCAN_GUIDE_BOX.heightPercent}%` }
 
-// One constraints object for both decoders. The native BarcodeDetector loop and
-// the ZXing fallback open the SAME camera from the SAME single getUserMedia
-// call, so hoisting this keeps that one acquisition obvious at a glance.
-const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
-  audio: false,
-  video: {
-    facingMode: { ideal: 'environment' },
-    // Thin bars on a small box need pixels; `ideal` lets a camera that cannot
-    // do 1080p fall back to its best mode instead of failing.
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-  },
-}
-
-type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
-type ScannerPermissionState = CameraPermissionState
+// Round, 44 px (a thumb), readable on any picture the camera shows.
+const ICON_BUTTON = 'inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white backdrop-blur-sm hover:bg-black/65 disabled:opacity-60'
 
 interface BarcodeScannerModalProps {
   open: boolean
@@ -54,765 +28,223 @@ interface BarcodeScannerModalProps {
   onClose: () => void
   onDetected: (value: string) => void
   t: (key: string) => string
-  /** Hide the manual-entry text field/panel. Used when this modal is opened
-   * from a search bar (ScanSearchButton) -- the search box right behind the
-   * modal is already a manual-entry field, so showing a second one here is
-   * redundant. ProductForm's usage (the only other caller) leaves this
-   * false, since there the scanner modal IS the primary place to type a
-   * barcode. */
-  hideManualEntry?: boolean
 }
 
-interface BarcodeDetectionResult {
-  rawValue?: unknown
-  format?: unknown
-}
-
-interface NativeBarcodeDetector {
-  detect: (source: HTMLVideoElement) => Promise<BarcodeDetectionResult[]>
-}
-
-interface NativeBarcodeDetectorConstructor {
-  new(options: { formats: string[] }): NativeBarcodeDetector
-  getSupportedFormats?: () => Promise<unknown[]>
-}
-
-// Torch and focus are not in the DOM lib's track types yet.
-type CameraTrackCapabilities = MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] }
-type CameraConstraintSet = MediaTrackConstraintSet & { torch?: boolean; focusMode?: string }
-
-interface ScannerLabels {
-  scanReady: string
-  scanUnsupported: string
-  scanPermissionDenied: string
-  cameraPermissionNeeded: string
-  cameraPaused: string
-  cameraPermissionBlocked: string
-  cameraPermissionResetHint: string
-  requestCameraAccess: string
-  startCamera: string
-  tryCameraAgain: string
-  scanFromPhoto: string
-  scanFromPhotoBusy: string
-  requestingCamera: string
-  scanFailed: string
-  scanPhotoFailed: string
-  scanFallbackActive: string
-  manualEntry: string
-  detectedValue: string
-  useValue: string
-  scanning: string
-  cameraDocumentBlocked: string
-  torchOn: string
-  torchOff: string
-  torchFailed: string
-}
-
-interface ScannerStateBadge {
-  label: string
-  className: string
-  icon: ReactNode
-}
-
-function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
-  const detector = (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector
-  return typeof detector === 'function'
-    ? detector as NativeBarcodeDetectorConstructor
-    : null
-}
-
-function getScanErrorText(error: unknown): string {
-  const source = error as { message?: unknown; name?: unknown } | null | undefined
-  return `${String(source?.name || '')} ${String(source?.message || error || '')}`
-}
-
-function stopStream(stream: MediaStream | null | undefined): void {
-  try {
-    // Skip tracks that already ended. ZXing's controls.stop() disposes the
-    // stream it was handed (BrowserCodeReader's finalize callback calls
-    // disposeMediaStream), so cleanup() can reach the same tracks twice.
-    // track.stop() on an ended track is a no-op per spec, but skipping makes
-    // "each track is stopped exactly once" a property a test can assert
-    // instead of a hope.
-    stream?.getTracks?.().forEach((track) => { if (track.readyState !== 'ended') track.stop() })
-  } catch (_) {}
-}
-
-export default function BarcodeScannerModal({
-  open,
-  title,
-  onClose,
-  onDetected,
-  t,
-  hideManualEntry = false,
-}: BarcodeScannerModalProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const frameRef = useRef<number | null>(null)
-  const detectorRef = useRef<NativeBarcodeDetector | null>(null)
-  const lumaDecoderRef = useRef<LumaDecoder | null>(null)
-  const lumaDecoderLoadingRef = useRef(false)
-  const ladderStepRef = useRef(0)
-  const nativeMissesRef = useRef(0)
-  const confirmReadRef = useRef(createReadConfirmer())
-  const [grabFrame] = useState(() => createFrameGrabber())
-  const trackRef = useRef<MediaStreamTrack | null>(null)
-  const permissionCleanupRef = useRef<() => void>(() => {})
+export default function BarcodeScannerModal({ open, title, onClose, onDetected, t }: BarcodeScannerModalProps) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const startTokenRef = useRef(0)
-  const startSequenceRef = useRef(0)
-  const detectionHandledRef = useRef(false)
-  const nextScanAtRef = useRef(0)
-  const [manualValue, setManualValue] = useState('')
-  // Seeded from `open` rather than 'idle': the modal is only ever mounted by
-  // the tap on a scanner button, and that tap already starts the camera (see
-  // the open effect). An 'idle' first frame would flash the "Request camera
-  // access" empty state for one paint before the effect flips it to
-  // 'starting' -- exactly the two-step screen the owner asked to remove.
-  const [status, setStatus] = useState<ScannerStatus>(open ? 'starting' : 'idle')
-  const statusRef = useRef<ScannerStatus>('idle')
-  const [error, setError] = useState('')
-  const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
+  const shellRef = useRef<HTMLDivElement | null>(null)
   const [photoBusy, setPhotoBusy] = useState(false)
-  const [torchAvailable, setTorchAvailable] = useState(false)
-  const [torchOn, setTorchOn] = useState(false)
-  const [torchFailed, setTorchFailed] = useState(false)
-  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const isKhmer = /[ក-៿]/.test(t('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
 
-  const labels = useMemo<ScannerLabels>(() => ({
-    scanReady: tr('scan_ready', 'Point the camera at a barcode or SKU label.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ ឬស្លាក SKU។'),
-    scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
-    scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
+  const labels = useMemo(() => ({
+    scanReady: tr('scan_ready', 'Point the camera at a barcode.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ។'),
+    scanUnsupported: tr('scan_unsupported', 'This browser cannot scan with the camera. Type the barcode instead.', 'កម្មវិធីរុករកនេះមិនអាចស្កេនដោយកាមេរ៉ាបានទេ។ សូមវាយបាកូដជំនួសវិញ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
     // Shown only after a start already happened and the stream was released
-    // (page backgrounded, or the photo picker took over). Opening the modal
-    // never lands here, so this copy no longer tells anyone to "start the
-    // camera when you are ready" -- it explains a camera that was paused.
+    // (page backgrounded, the photo picker took over, or the scan sat idle).
+    // Opening the scanner never lands here.
     cameraPaused: tr('camera_paused_resume', 'Camera paused. Tap Start camera to resume scanning.', 'កាមេរ៉ាត្រូវបានផ្អាក។ ចុច «ចាប់ផ្តើមកាមេរ៉ា» ដើម្បីបន្តស្កេន។'),
-    cameraPermissionBlocked: hideManualEntry
-      ? tr('camera_permission_blocked_no_manual', 'Camera access is blocked. Allow it in your browser settings, then try again.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត។')
-      : tr('camera_permission_blocked', 'Camera access is blocked. Allow it in browser settings, or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
-    cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
+    cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked. Allow it in your browser settings, or type the barcode instead.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬវាយបាកូដជំនួសវិញ។'),
+    cameraDocumentBlocked: tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular browser to scan, or type the barcode instead.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតា ដើម្បីស្កេន ឬវាយបាកូដជំនួសវិញ។'),
+    promptDismissed: tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Try again, or type the barcode instead.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ សាកម្តងទៀត ឬវាយបាកូដជំនួសវិញ។'),
     requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
     startCamera: tr('start_camera', 'Start camera', 'ចាប់ផ្តើមកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
-    scanFromPhoto: tr('scan_from_photo', 'Scan from photo', 'ស្កេនពីរូបថត'),
-    scanFromPhotoBusy: tr('scan_from_photo_busy', 'Reading photo...', 'កំពុងអានរូបថត...'),
     requestingCamera: tr('requesting_camera', 'Requesting camera access...', 'កំពុងស្នើសុំការអនុញ្ញាតកាមេរ៉ា...'),
     scanFailed: tr('scan_failed', 'Unable to start camera scanning right now.', 'មិនអាចចាប់ផ្តើមការស្កេនកាមេរ៉ាបានទេនៅពេលនេះ។'),
-    scanPhotoFailed: tr('scan_photo_failed', 'We could not read a barcode from that photo. Try another photo or type the code manually.', 'យើងមិនអាចអានបារកូដពីរូបថតនោះបានទេ។ សាករូបថ្មី ឬបញ្ចូលកូដដោយដៃ។'),
-    scanFallbackActive: tr('scan_fallback_active', 'Using compatibility scan mode for this browser.', 'កំពុងប្រើរបៀបស្កេនដែលអាចប្រើជាមួយកម្មវិធីរុករកនេះ។'),
-    manualEntry: tr('manual_entry', 'Manual entry', 'បញ្ចូលដោយដៃ'),
-    detectedValue: tr('detected_value', 'Detected value', 'តម្លៃដែលបានរកឃើញ'),
-    useValue: tr('use_value', 'Use value', 'ប្រើតម្លៃនេះ'),
-    scanning: tr('scanning', 'Scanning...', 'កំពុងស្កេន...'),
+    scanFromPhoto: tr('scan_from_photo', 'Scan from photo', 'ស្កេនពីរូបថត'),
+    scanFromPhotoBusy: tr('scan_from_photo_busy', 'Reading photo...', 'កំពុងអានរូបថត...'),
+    scanPhotoFailed: tr('scan_photo_failed', 'We could not read a barcode from that photo. Try another photo or type the barcode instead.', 'យើងមិនអាចអានបាកូដពីរូបថតនោះបានទេ។ សាករូបថតផ្សេង ឬវាយបាកូដជំនួសវិញ។'),
+    scanPhotoUnreadable: tr('scan_photo_unreadable', 'That photo could not be opened. Try another photo.', 'មិនអាចបើករូបថតនោះបានទេ។ សាករូបថតផ្សេង។'),
+    readOk: tr('scanner_read_ok', 'Barcode read', 'បានអានបាកូដ'),
+    switchCamera: tr('scanner_switch_camera', 'Switch camera', 'ប្ដូរកាមេរ៉ា'),
+    close: tr('close', 'Close', 'បិទ'),
     torchOn: tr('scanner_torch_on', 'Turn on flashlight', 'បើកភ្លើងពិល'),
     torchOff: tr('scanner_torch_off', 'Turn off flashlight', 'បិទភ្លើងពិល'),
     torchFailed: tr('scanner_torch_failed', 'The flashlight could not be switched.', 'មិនអាចប្ដូរភ្លើងពិលបានទេ។'),
-    cameraDocumentBlocked: hideManualEntry
-      ? tr('camera_document_blocked_no_manual', 'This view does not allow camera access. Open this page in your regular browser to scan.', 'ទិដ្ឋភាពនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតា ដើម្បីស្កេន។')
-      : tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular phone browser to scan, or use manual entry below.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតានៅលើទូរស័ព្ទរបស់អ្នក ដើម្បីស្កេន ឬបញ្ចូលដោយដៃខាងក្រោម។'),
-  }), [tr, hideManualEntry])
+    resetHints: {
+      ios: tr('camera_permission_reset_hint_ios', 'On iPhone: Settings › Safari › Camera › Allow, then try again.', 'នៅលើ iPhone៖ ការកំណត់ › Safari › កាមេរ៉ា › អនុញ្ញាត រួចសាកម្តងទៀត។'),
+      android: tr('camera_permission_reset_hint_android', 'Tap the lock icon by the address, then Permissions › Camera › Allow.', 'ចុចរូបសោនៅជាប់អាសយដ្ឋាន រួចចូល សិទ្ធិ › កាមេរ៉ា › អនុញ្ញាត។'),
+      desktop: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
+    },
+  }), [tr])
 
-  const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
-
-  useEffect(() => { statusRef.current = status }, [status])
-
-  const waitForVideoElement = useCallback(async (startToken: number): Promise<HTMLVideoElement | null> => {
-    // `setStatus('starting')` causes React to mount the <video>. On iOS the
-    // permission request can resolve before that render commits, so capturing
-    // videoRef synchronously leaves ZXing with null and the native path with a
-    // stream that is never attached. Wait for the committed element instead.
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      if (startTokenRef.current !== startToken) return null
-      if (videoRef.current) return videoRef.current
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    }
-    return null
-  }, [])
-
-  const cleanup = useCallback((): void => {
-    startTokenRef.current = 0
-    if (frameRef.current) {
-      cancelAnimationFrame(frameRef.current)
-      frameRef.current = null
-    }
-    stopStream(streamRef.current)
-    streamRef.current = null
-    trackRef.current = null
-    detectorRef.current = null
-    lumaDecoderRef.current = null
-    lumaDecoderLoadingRef.current = false
-    ladderStepRef.current = 0
-    nativeMissesRef.current = 0
-    confirmReadRef.current = createReadConfirmer()
-    setTorchAvailable(false)
-    setTorchOn(false)
-    setTorchFailed(false)
-    const video = videoRef.current
-    if (video) {
-      try { video.pause() } catch (_) {}
-      try { video.srcObject = null } catch (_) {}
-    }
-  }, [])
-
-  // Native BarcodeDetector, ZXing, photo decode, and manual entry can finish
-  // at different times. Make successful detection one guarded terminal path
-  // so a stale callback cannot publish twice or survive a newer camera run.
-  const completeDetection = useCallback((value: unknown, expectedStartToken?: number): void => {
-    const nextValue = String(value || '').trim()
-    if (!nextValue || detectionHandledRef.current) return
-    if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
-    detectionHandledRef.current = true
-    setManualValue(nextValue)
-    cleanup()
-    try {
-      onDetected(nextValue)
-    } finally {
-      onClose()
-    }
-  }, [cleanup, onClose, onDetected])
-
-  // One loop for both decoders. Native BarcodeDetector reads are trusted on
-  // their own; ZXing reads must agree twice in a row (createReadConfirmer) and
-  // EAN/UPC must pass the check digit, so a smudged frame cannot pick the
-  // wrong product. ZXing works on frames this loop grabs from our own video
-  // element, never on a camera of its own.
-  const scanFrame = useCallback(async (): Promise<void> => {
-    const detector = detectorRef.current
-    const video = videoRef.current
-    const scanToken = startTokenRef.current
-    if (!video || !scanToken || detectionHandledRef.current) return
-
-    const now = Date.now()
-    if (video.readyState >= 2 && video.videoWidth > 0 && now >= nextScanAtRef.current) {
-      nextScanAtRef.current = now + NATIVE_TICK_INTERVAL_MS
-      let accepted: string | null = null
-      if (detector) {
-        try {
-          const results = await detector.detect(video)
-          if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-          for (const result of results || []) {
-            accepted = confirmReadRef.current({ text: String(result?.rawValue || '').trim(), format: String(result?.format || '') }, 'native')
-            if (accepted) break
-          }
-        } catch (_) {
-          // A frame the detector cannot read yet (still decoding, resized)
-          // is a miss like any other; the next tick tries again.
-        }
-        nativeMissesRef.current = accepted ? 0 : nativeMissesRef.current + 1
-        if (!accepted && nativeMissesRef.current >= NATIVE_MISSES_BEFORE_ZXING && !lumaDecoderLoadingRef.current) {
-          lumaDecoderLoadingRef.current = true
-          loadLumaDecoder().then(
-            (decode) => { if (startTokenRef.current === scanToken) lumaDecoderRef.current = decode },
-            (loadError) => console.error('[scanner] ZXing fallback failed to load; native detection continues.', loadError),
-          )
-        }
-      }
-      const decode = lumaDecoderRef.current
-      if (!accepted && decode) {
-        const started = Date.now()
-        try {
-          const { read, nextStep } = runDecodeLadder(grabFrame(video, video.videoWidth, video.videoHeight), decode, {
-            startStep: ladderStepRef.current,
-            deadline: started + ZXING_TICK_BUDGET_MS,
-          })
-          ladderStepRef.current = nextStep
-          accepted = confirmReadRef.current(read, 'zxing')
-        } catch (decodeError) {
-          console.error('[scanner] ZXing frame decode failed.', decodeError)
-        }
-        const spent = Date.now() - started
-        nextScanAtRef.current = Date.now() + Math.max(detector ? NATIVE_TICK_INTERVAL_MS : 0, spent)
-      }
-      if (accepted) {
-        completeDetection(accepted, scanToken)
-        return
-      }
-    }
-
-    if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
-    frameRef.current = requestAnimationFrame(scanFrame)
-  }, [completeDetection, grabFrame])
-
-  const toggleTorch = useCallback(async (): Promise<void> => {
-    const track = trackRef.current
-    if (!track) return
-    const next = !torchOn
-    setTorchFailed(false)
-    try {
-      await track.applyConstraints({ advanced: [{ torch: next } as CameraConstraintSet] })
-      if (trackRef.current === track) setTorchOn(next)
-    } catch (_) {
-      if (trackRef.current === track) setTorchFailed(true)
-    }
-  }, [torchOn])
-
-  const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
-    const startToken = ++startSequenceRef.current
-    cleanup()
-    startTokenRef.current = startToken
-    setStatus('starting')
-    setError('')
-    if (!preserveManualValue) setManualValue('')
-    nextScanAtRef.current = 0
-
-    if (
-      typeof window === 'undefined' ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      setPermissionState('unsupported')
-      setStatus('manual')
-      setError(labels.scanUnsupported)
-      return
-    }
-
-    if (isCameraBlockedByDocumentPolicy()) {
-      setPermissionState('blocked')
-      setStatus('blocked')
-      setError(labels.cameraDocumentBlocked)
-      return
-    }
-
-    const nextPermissionState = await readCameraPermissionState()
-    setPermissionState(nextPermissionState)
-    const permissionWasDenied = nextPermissionState === 'denied'
-
-    // Re-requesting cannot repair a saved browser denial. Stay blocked until
-    // the user changes the site setting, avoiding a getUserMedia retry loop.
-    if (permissionWasDenied) {
-      cleanup()
-      setStatus('blocked')
-      setError(labels.cameraPermissionBlocked)
-      return
-    }
-
-    try {
-      const video = await waitForVideoElement(startToken)
-      if (!video || startTokenRef.current !== startToken) return
-      video.setAttribute('playsinline', 'true')
-
-      // The camera is acquired FIRST, before either decoder is chosen. WebKit
-      // ships no BarcodeDetector, so on iOS this used to fall through to
-      // decodeFromConstraints, which reaches getUserMedia only AFTER awaiting
-      // the 446 KB ZXing chunk -- the prompt arrived a download later than the
-      // tap that asked for it. One acquisition, immediately after the tap, on
-      // every browser.
-      const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
-      if (startTokenRef.current !== startToken) {
-        stopStream(stream)
-        return
-      }
-      // Owned from here on: every later bail-out is a token change, and a token
-      // only changes through cleanup() (or a newer startCamera, which calls
-      // cleanup() first), which stops this stream. A throw lands in the catch
-      // below, whose first statement is cleanup() -- so a decoder that fails to
-      // load can never leave the camera light on.
-      streamRef.current = stream
-      setPermissionState('granted')
-      const [track] = stream.getVideoTracks?.() || []
-      trackRef.current = track || null
-      const capabilities = (track?.getCapabilities?.() || {}) as CameraTrackCapabilities
-      setTorchAvailable(capabilities.torch === true)
-      if (capabilities.focusMode?.includes('continuous')) {
-        // Best effort: a camera that refuses keeps its default focus, which is
-        // how every scan worked before this hint existed.
-        track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as CameraConstraintSet] }).catch(() => {})
-      }
-      video.srcObject = stream
-      await video.play()
-      if (startTokenRef.current !== startToken) return
-
-      const NativeBarcodeDetector = getNativeBarcodeDetector()
-      if (NativeBarcodeDetector) {
-        const supported = typeof NativeBarcodeDetector.getSupportedFormats === 'function'
-          ? await NativeBarcodeDetector.getSupportedFormats()
-          : RETAIL_BARCODE_FORMATS
-        if (startTokenRef.current !== startToken) return
-        const formats = (supported || [])
-          .map((item) => String(item || ''))
-          .filter((item) => RETAIL_BARCODE_FORMATS.includes(item))
-        detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : RETAIL_BARCODE_FORMATS })
-        setStatus('scanning')
-        frameRef.current = requestAnimationFrame(scanFrame)
-        return
-      }
-
-      // No native detector: load the compatibility decoder now that the camera
-      // is already live. It reads frames the scan loop grabs from this video
-      // element, so it never opens a camera of its own (decodeFromConstraints
-      // would put the permission prompt behind this chunk download).
-      const decode = await loadLumaDecoder()
-      if (startTokenRef.current !== startToken) return
-      lumaDecoderRef.current = decode
-      lumaDecoderLoadingRef.current = true
-      // permissionState was already set to 'granted' by the single acquisition
-      // above -- both decoders share it now, so it is not repeated per branch.
-      setStatus('scanning')
-      setError(labels.scanFallbackActive)
-      frameRef.current = requestAnimationFrame(scanFrame)
-    } catch (scanError) {
-      const scanErrorText = getScanErrorText(scanError)
-      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
-      const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && permissionWasDenied)
-      const dismissed = denied && !blocked
-      cleanup()
-      setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
-      setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
-      setError(
-        documentBlocked
-          ? labels.cameraDocumentBlocked
-          : blocked
-            ? labels.cameraPermissionBlocked
-          : dismissed
-            ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
-            : (denied ? labels.scanPermissionDenied : labels.scanFailed),
-      )
-    }
-  }, [
-    cleanup,
-    labels.cameraDocumentBlocked,
-    labels.cameraPermissionBlocked,
-    labels.scanFailed,
-    labels.scanPermissionDenied,
-    labels.scanFallbackActive,
-    labels.scanUnsupported,
-    scanFrame,
-    tr,
-    waitForVideoElement,
-  ])
-
-  const prepareScanner = useCallback(async (): Promise<void> => {
-    cleanup()
-    setError('')
-    setStatus('idle')
-
-    if (
-      typeof window === 'undefined' ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      setPermissionState('unsupported')
-      setStatus('manual')
-      setError(labels.scanUnsupported)
-      return
-    }
-
-    if (isCameraBlockedByDocumentPolicy()) {
-      setPermissionState('blocked')
-      setStatus('blocked')
-      setError(labels.cameraDocumentBlocked)
-      return
-    }
-
-    const nextPermissionState = await readCameraPermissionState()
-    setPermissionState(nextPermissionState)
-    // Permission is durable browser state; a MediaStream is not. This is the
-    // RESUME path only (the page came back to the foreground), which is not a
-    // user gesture -- so it re-reads permission and parks on the Start camera
-    // button instead of calling getUserMedia. Opening the modal is a gesture
-    // and goes straight to startCamera; see the open effect below.
-    setStatus('manual')
-  }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
-
-  const closeScanner = useCallback((): void => {
-    detectionHandledRef.current = true
-    cleanup()
-    onClose()
-  }, [cleanup, onClose])
+  const {
+    videoRef,
+    status,
+    error,
+    permissionState,
+    torchAvailable,
+    torchOn,
+    torchFailed,
+    readOk,
+    cameraCount,
+    mirrored,
+    startCamera,
+    switchCamera,
+    toggleTorch,
+    closeScanner,
+    parkCamera,
+    completeDetection,
+    showManualError,
+    clearError,
+  } = useBarcodeCamera({
+    open,
+    messages: {
+      scanUnsupported: labels.scanUnsupported,
+      cameraDocumentBlocked: labels.cameraDocumentBlocked,
+      cameraPermissionBlocked: labels.cameraPermissionBlocked,
+      scanFailed: labels.scanFailed,
+      scanPromptDismissed: labels.promptDismissed,
+    },
+    onDetected: (value) => {
+      signalScanSuccess(shellRef.current)
+      onDetected(value)
+    },
+    onClose,
+    closeDelayMs: SCAN_CLOSE_DELAY_MS,
+  })
 
   const openPhotoPicker = useCallback((): void => {
     if (photoBusy) return
-    cleanup()
-    setStatus('manual')
+    parkCamera()
     photoInputRef.current?.click?.()
-  }, [cleanup, photoBusy])
+  }, [parkCamera, photoBusy])
 
   const handlePhotoSelection = useCallback(async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event?.target?.files?.[0]
     if (!file) return
     setPhotoBusy(true)
-    setError('')
+    clearError()
     try {
       const value = await scanBarcodeFromImageFile(file)
       const nextValue = String(value || '').trim()
-      if (!nextValue) throw new Error(labels.scanPhotoFailed)
+      if (!nextValue) throw new PhotoScanError('no-barcode', 'The photo gave an empty barcode.')
       completeDetection(nextValue)
     } catch (scanError) {
-      setStatus('manual')
-      setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
+      showManualError(scanError instanceof PhotoScanError && scanError.failure === 'unreadable' ? labels.scanPhotoUnreadable : labels.scanPhotoFailed)
     } finally {
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
     }
-  }, [completeDetection, labels.scanPhotoFailed])
-
-  // `startCamera` takes a new identity whenever the parent re-renders, because
-  // its labels close over the caller's `t`. Read it through a ref so `open` is
-  // the ONLY thing that can trigger a start: a parent re-render must never
-  // restart a live stream mid-scan, which with a one-tap start would read as a
-  // camera that keeps re-prompting.
-  const startCameraRef = useRef(startCamera)
-  useEffect(() => { startCameraRef.current = startCamera }, [startCamera])
-
-  useEffect(() => {
-    if (!open) return undefined
-    detectionHandledRef.current = false
-    // Owner rule (2026-09-14): pressing the scanner button opens the camera
-    // directly. The click that mounted this modal IS the user gesture, so the
-    // request happens here instead of behind a second "Start camera" tap; the
-    // guards inside startCamera (unsupported, document policy, saved denial)
-    // still decide whether getUserMedia is reached at all.
-    void startCameraRef.current()
-    return () => {
-      detectionHandledRef.current = true
-      cleanup()
-      setStatus('idle')
-      setError('')
-      setPermissionState('unknown')
-    }
-  }, [cleanup, open])
-
-  // iOS can keep a PWA page mounted while it is backgrounded. Stop every
-  // camera track immediately, but never auto-resume it on foreground: coming
-  // back to the page is not a user gesture, so the user taps Start camera.
-  useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        cleanup()
-        setStatus('manual')
-      } else {
-        void prepareScanner()
-      }
-    }
-    const handlePageHide = () => cleanup()
-    document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('pagehide', handlePageHide)
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('pagehide', handlePageHide)
-    }
-  }, [cleanup, open, prepareScanner])
-
-  useEffect(() => {
-    if (!open) return undefined
-    let cancelled = false
-    void watchCameraPermission((nextState) => {
-      if (cancelled) return
-      if (isCameraBlockedByDocumentPolicy()) {
-        cleanup()
-        setPermissionState('blocked')
-        setStatus('blocked')
-        setError(labels.cameraDocumentBlocked)
-        return
-      }
-      setPermissionState(nextState)
-      if (nextState === 'denied' && (statusRef.current === 'scanning' || statusRef.current === 'starting')) {
-        cleanup()
-        setStatus('blocked')
-        setError(labels.cameraPermissionBlocked)
-      }
-    }).then((dispose: (() => void) | undefined) => {
-      if (cancelled) {
-        dispose?.()
-        return
-      }
-      permissionCleanupRef.current = dispose || (() => {})
-    })
-    return () => {
-      cancelled = true
-      permissionCleanupRef.current?.()
-      permissionCleanupRef.current = () => {}
-    }
-  }, [cleanup, labels.cameraDocumentBlocked, labels.cameraPermissionBlocked, open])
+  }, [clearError, completeDetection, labels.scanPhotoFailed, labels.scanPhotoUnreadable, showManualError])
 
   if (!open) return null
 
   const {
     showCameraAction,
     requestCameraLabel,
+    statusMessage,
     emptyStateMessage,
+    showResetHint,
     stateKind,
   } = deriveScannerPresentation({
     status,
     permissionState,
     labels: { ...labels, error },
-    promptDismissedMessage,
+    promptDismissedMessage: labels.promptDismissed,
   })
-  const stateBadge: ScannerStateBadge = stateKind === 'scanning'
-    ? {
-        label: tr('scanner_state_live', 'Live camera', 'កាមេរ៉ាកំពុងដំណើរការ'),
-        className: 'border-white/40 bg-white text-black',
-        icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-      }
-    : stateKind === 'starting'
-      ? {
-          label: tr('scanner_state_starting', 'Requesting camera', 'កំពុងស្នើសុំកាមេរ៉ា'),
-          className: 'border-white/30 bg-white/15 text-white',
-          icon: <ScanLine className="h-3.5 w-3.5" />,
-        }
-      : stateKind === 'blocked'
-        ? {
-            label: tr('scanner_state_blocked', 'Permission blocked', 'សិទ្ធិកាមេរ៉ាត្រូវបានបិទ'),
-            className: 'border-white/40 bg-black text-white',
-            icon: <ShieldAlert className="h-3.5 w-3.5" />,
-          }
-        : stateKind === 'dismissed'
-          ? {
-              label: tr('scanner_state_retry', 'Prompt dismissed', 'សំណើសុំត្រូវបានបិទចោល'),
-              className: 'border-white/30 bg-white/10 text-white',
-              icon: <AlertCircle className="h-3.5 w-3.5" />,
-            }
-          : {
-              label: tr('scanner_state_manual', 'Manual entry ready', 'ត្រៀមបញ្ចូលដោយដៃ'),
-              className: 'border-white/20 bg-white/10 text-white',
-              icon: <Keyboard className="h-3.5 w-3.5" />,
-            }
+  const live = status === 'scanning' || status === 'starting'
+  // With no camera to retry (this browser has none, or the view forbids it) the photo is the panel's one button.
+  const photoIsPanelButton = !live && !showCameraAction
+  const photoLabel = photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto
+  const PanelIcon = stateKind === 'blocked' ? ShieldAlert : stateKind === 'dismissed' ? AlertCircle : Camera
+  const resetHint = showResetHint ? labels.resetHints[cameraResetPlatform(navigator.userAgent || '', navigator.maxTouchPoints || 0)] : ''
 
   return (
-    <Modal title={title} onClose={closeScanner} size="lg" layer="nested" unsavedChanges="read-only">
-      <div className="space-y-3">
-        {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
-            bigger guide box relative to the frame -- the old fixed ratio
-            left a lot of dead black margin around a comparatively small
-            scan target, and on a short mobile viewport pushed the modal's
-            total height past what fit on screen, forcing a scroll. Also
-            down to ONE instruction line while actively scanning: the
-            overlay hint here and the black status bar that used to sit
-            below the video both said essentially "point the camera at the
-            code" at the same time -- the bar is gone now, and the "Live
-            camera" badge (redundant with the live video feed itself) only
-            shows while still starting up, not once actually scanning. */}
-        <div className="overflow-hidden rounded-2xl border border-black bg-black dark:border-white/20">
-          <div className={`w-full bg-black ${status === 'scanning' || status === 'starting' ? 'scanner-video-shell' : ''}`}>
-            {status === 'scanning' || status === 'starting' ? (
-              <div className="relative h-full w-full overflow-hidden">
-                <video
-                  ref={videoRef}
-                  className="h-full w-full object-cover"
-                  muted
-                  autoPlay
-                  playsInline
-                />
-                <div className="pointer-events-none absolute inset-0">
-                  {stateKind !== 'scanning' ? (
-                    <div className="absolute inset-x-4 top-4">
-                      <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm shadow-lg ${stateBadge.className}`}>
-                        {stateBadge.icon}
-                        <span>{stateBadge.label}</span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/45 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
-                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2">
-                    <div className="absolute left-0 top-0 h-8 w-8 rounded-tl-[24px] border-l-[3px] border-t-[3px] border-white" />
-                    <div className="absolute right-0 top-0 h-8 w-8 rounded-tr-[24px] border-r-[3px] border-t-[3px] border-white" />
-                    <div className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-[24px] border-b-[3px] border-l-[3px] border-white" />
-                    <div className="absolute bottom-0 right-0 h-8 w-8 rounded-br-[24px] border-b-[3px] border-r-[3px] border-white" />
-                    <div className="absolute inset-x-[11%] top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-white to-transparent opacity-90 shadow-[0_0_16px_rgba(255,255,255,0.8)]" />
-                  </div>
-                  <div className="absolute inset-x-5 bottom-4 rounded-2xl border border-white/10 bg-slate-950/58 px-3 py-2 text-center text-xs leading-5 text-slate-100 backdrop-blur-sm">
-                    {tr('scanner_live_hint', 'Center the barcode inside the frame. We will scan it automatically.', 'ដាក់បារកូដឱ្យស្ថិតនៅកណ្ដាលស៊ុម។ ប្រព័ន្ធនឹងស្កេនដោយស្វ័យប្រវត្តិ។')}
-                    {torchFailed ? <span role="alert" className="block text-amber-200">{labels.torchFailed}</span> : null}
-                  </div>
+    <Modal title={title} onClose={closeScanner} size="sm" layer="nested" unsavedChanges="read-only" bare>
+      <div ref={shellRef} className="scanner-video-shell relative w-full overflow-hidden bg-black text-white">
+        {live ? (
+          <>
+            <video
+              ref={videoRef}
+              className={`h-full w-full object-cover${mirrored ? ' -scale-x-100' : ''}`}
+              aria-label={statusMessage}
+              muted
+              autoPlay
+              playsInline
+            />
+            {status === 'scanning' ? (
+              <div className="pointer-events-none absolute inset-0">
+                <div className="scanner-guide absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border-2 border-white/80 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" style={GUIDE_STYLE}>
+                  <div className="scanner-scan-line absolute inset-x-[6%] top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-white to-transparent shadow-[0_0_16px_rgba(255,255,255,0.8)]" />
                 </div>
-                {status === 'scanning' && torchAvailable ? (
-                  <button
-                    type="button"
-                    className="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white backdrop-blur-sm hover:bg-black/65"
-                    aria-pressed={torchOn}
-                    aria-label={torchOn ? labels.torchOff : labels.torchOn}
-                    title={torchOn ? labels.torchOff : labels.torchOn}
-                    onClick={() => { void toggleTorch() }}
-                  >
-                    {torchOn ? <FlashlightOff className="h-5 w-5" /> : <Flashlight className="h-5 w-5" />}
-                  </button>
+                {torchFailed ? (
+                  <p role="alert" className="absolute inset-x-3 bottom-3 rounded-xl bg-black/70 px-3 py-2 text-center text-xs leading-5 text-amber-200">{labels.torchFailed}</p>
                 ) : null}
               </div>
             ) : (
-              <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-6 text-center text-white">
-                <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${stateBadge.className}`}>
-                  {stateBadge.icon}
-                  <span>{stateBadge.label}</span>
-                </div>
-                <Camera className="h-9 w-9 text-white" />
-                <p className="max-w-sm text-sm leading-6 text-white/80">{emptyStateMessage}</p>
-                <div className="flex w-full max-w-xs flex-col items-center gap-2 pt-1">
-                  {showCameraAction ? (
-                    <button
-                      type="button"
-                      className="btn-secondary w-full border-white/25 bg-white text-black hover:bg-white/90"
-                      disabled={false}
-                      onClick={() => startCamera({ preserveManualValue: true })}
-                    >
-                      {requestCameraLabel}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn-secondary w-full border-white/25 bg-transparent text-white hover:bg-white/10"
-                    disabled={photoBusy}
-                    onClick={openPhotoPicker}
-                  >
-                    {photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto}
-                  </button>
-                  {permissionState === 'denied' ? (
-                    <p className="text-xs leading-5 text-white/70">{labels.cameraPermissionResetHint}</p>
-                  ) : null}
-                </div>
-              </div>
+              <Camera className="pointer-events-none absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 motion-safe:animate-pulse text-white/70" />
             )}
+          </>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 pb-4 pt-14 text-center">
+            <PanelIcon className="h-9 w-9 flex-shrink-0" />
+            <p className="max-w-sm text-sm leading-6 text-white/85">{emptyStateMessage}</p>
+            {showCameraAction ? (
+              <button
+                type="button"
+                className="btn-secondary border-white/25 bg-white text-black hover:bg-white/90"
+                onClick={() => startCamera()}
+              >
+                {requestCameraLabel}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-secondary border-white/25 bg-white text-black hover:bg-white/90"
+                disabled={photoBusy}
+                onClick={openPhotoPicker}
+              >
+                {photoLabel}
+              </button>
+            )}
+            {resetHint ? <p className="max-w-sm text-xs leading-5 text-white/70">{resetHint}</p> : null}
           </div>
-        </div>
+        )}
 
-        {hideManualEntry ? null : (
-        <div className="border-t border-black/10 pt-3 dark:border-white/10">
-          <label htmlFor="scanner-manual-value" className="block text-sm font-medium text-black dark:text-white">
-            {manualValue ? labels.detectedValue : labels.manualEntry}
-          </label>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <input
-              id="scanner-manual-value"
-              name="scanner_manual_value"
-              className="input flex-1"
-              value={manualValue}
-              onChange={(event) => setManualValue(event.target.value)}
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              inputMode="text"
-            />
+        <button type="button" className={`${ICON_BUTTON} absolute left-3 top-3`} aria-label={labels.close} title={labels.close} onClick={closeScanner}>
+          <X className="h-5 w-5" />
+        </button>
+        <div className="absolute right-3 top-3 flex flex-col gap-2">
+          {status === 'scanning' && torchAvailable ? (
             <button
               type="button"
-              className="btn-primary min-w-[124px]"
-              disabled={!String(manualValue || '').trim()}
-              onClick={() => {
-                const nextValue = String(manualValue || '').trim()
-                if (!nextValue) return
-                completeDetection(nextValue)
-              }}
+              className={ICON_BUTTON}
+              aria-pressed={torchOn}
+              aria-label={torchOn ? labels.torchOff : labels.torchOn}
+              title={torchOn ? labels.torchOff : labels.torchOn}
+              onClick={() => { void toggleTorch() }}
             >
-              {labels.useValue}
+              {torchOn ? <FlashlightOff className="h-5 w-5" /> : <Flashlight className="h-5 w-5" />}
             </button>
-          </div>
+          ) : null}
+          {live && cameraCount > 1 ? (
+            <button type="button" className={ICON_BUTTON} aria-label={labels.switchCamera} title={labels.switchCamera} onClick={() => { void switchCamera() }}>
+              <SwitchCamera className="h-5 w-5" />
+            </button>
+          ) : null}
+          {photoIsPanelButton ? null : (
+            <button type="button" className={ICON_BUTTON} disabled={photoBusy} aria-label={photoLabel} title={photoLabel} onClick={openPhotoPicker}>
+              {photoBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImageIcon className="h-5 w-5" />}
+            </button>
+          )}
         </div>
-        )}
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={handlePhotoSelection}
-        />
       </div>
+      <p role="status" aria-live="polite" className="sr-only">{readOk ? labels.readOk : ''}</p>
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handlePhotoSelection}
+      />
     </Modal>
   )
 }

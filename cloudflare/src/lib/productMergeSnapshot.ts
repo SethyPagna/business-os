@@ -113,7 +113,7 @@ export async function runProductMergeReadBatch(
 }
 
 const PRODUCT_MONEY_COLUMNS = `selling_price_usd, selling_price_khr,
-  wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr`
+  wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr`
 
 // Capture one fold's complete preimage in one consistent D1 read transaction.
 // This is deliberately per case: a later fold in the same identity cluster must

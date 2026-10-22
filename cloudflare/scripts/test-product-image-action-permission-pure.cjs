@@ -155,6 +155,7 @@ function loadProductsRoute(state) {
     tableColumns: async () => [],
     clampNegativeStockQuantity: () => {},
     cleanPayload: (value) => value,
+    foldBarcodeInput: realProductWrites.foldBarcodeInput,
     insertRow: async (_env, _table, body) => { state.inserted.push(persistableBody(body)); return 77 },
     updateRow: async (_env, _table, _id, body) => { state.updated.push(persistableBody(body)); return 1 },
     syncProductImageGallery: async (_env, _id, gallery) => { state.synced.push([...gallery]); return [...gallery] },

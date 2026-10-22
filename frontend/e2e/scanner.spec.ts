@@ -58,17 +58,15 @@ const CAMERA_ACTION = 'button:text-is("Start camera"), button:text-is("Request c
  *   scan_failed                     en.json:4584
  */
 const SCANNER_MESSAGE = new RegExp([
-  // The LIVE view (status 'scanning' / 'starting') renders none of the
-  // deriveScannerPresentation() strings: its one instruction line is the
-  // overlay hint scanner_live_hint (en.json "Center the barcode inside the
-  // frame. We will scan it automatically.") -- BarcodeScannerModal.tsx, the
-  // comment above the video shell explains why the status bar was removed.
-  'Center the barcode inside the frame',
+  // The LIVE view (status 'scanning' / 'starting') shows no text at all: the
+  // camera sheet is the video, the guide band and icon buttons (lane 6.0.937).
+  // Its tests accept the video itself where they would otherwise ask for a
+  // message; only the states that are not live carry one of these.
   'We need camera access to scan barcodes',
   'Camera permission is saved',
   'Camera access is blocked',
   'does not allow camera access',
-  'Camera scanning is not supported',
+  'cannot scan with the camera',
   'Point the camera at a barcode',
   'Requesting camera access',
   'The camera prompt was dismissed',
@@ -159,15 +157,17 @@ test.describe('POS barcode scanner', () => {
     await expect(dialog).toBeVisible({ timeout: 15_000 })
 
     // One of the states deriveScannerPresentation() can produce -- never none.
-    await expect(dialog.getByText(SCANNER_MESSAGE).first()).toBeVisible({ timeout: 15_000 })
-
-    // ...and a control that does something about it. Every non-live state
-    // offers "Scan from photo"; the live view offers the camera itself, whose
-    // <video> is the only thing a cashier needs. Either way the close button
-    // alone can never satisfy this.
-    const photo = dialog.getByRole('button', { name: 'Scan from photo' })
+    // The live camera is the one state that says nothing in words: its
+    // <video> (with the guide band over it) is the message.
     const video = dialog.locator(SCANNER_VIDEO)
-    await expect(photo.or(video).first()).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText(SCANNER_MESSAGE).or(video).first()).toBeVisible({ timeout: 15_000 })
+
+    // ...and a control that does something about it. The photo button is in
+    // every state now (the live view's corner icon, or the panel's one button
+    // when there is no camera to retry), so a lone Close can never satisfy this.
+    const photo = dialog.getByRole('button', { name: 'Scan from photo' })
+    await expect(photo.first()).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByRole('textbox'), 'the search box behind the sheet is the manual fallback; the sheet has none of its own').toHaveCount(0)
 
     expectNoRuntimeErrors(health)
   })
@@ -211,7 +211,7 @@ test.describe('POS barcode scanner', () => {
     if (browserName === 'webkit') {
       // Record what WebKit actually does here, so a future change of behaviour
       // shows up as a diff in this file rather than as a silent shift.
-      expect(panelText).toMatch(/Camera/)
+      expect(panelText).toMatch(/cannot scan with the camera\. Type the barcode instead\./)
     }
 
     expectNoRuntimeErrors(health)

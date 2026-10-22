@@ -21,7 +21,13 @@ export type InventoryCheckProduct = {
   cost_needs_review?: boolean
   stock_consistent?: boolean
   stock_diagnostics?: string | null
+  unit?: string | null
+  latest_received_at?: string | null
+  /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
+  next_expiry_date?: string | null
 }
+
+export type InventoryCheckTranslator = (key: string) => string | null | undefined
 
 export type InventoryCheckObservation = {
   product_id: InventoryCheckId

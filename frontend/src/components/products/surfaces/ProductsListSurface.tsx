@@ -1,9 +1,11 @@
 import ProductNameRail from '../../shared/ProductNameRail'
+import ScanMissNotice from '../../shared/ScanMissNotice'
 import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { chooserHostKey, productTableMinWidthRem, productTableSpans, type ProductColumn } from '../config/productTableColumns.ts'
+import type { ScanMiss } from '../../../utils/scanMiss.ts'
 
 // ---------------------------------------------------------------------------
 // Desktop table geometry: ONE left rail
@@ -129,6 +131,12 @@ type ProductsListSurfaceProps = {
   productTotal?: number
   productTotalLabel?: string
   refreshingProducts: boolean
+  // Set when the empty list follows a scan (camera or gun): the barcode matched no product, or the filters hide it.
+  scanMiss?: ScanMiss | null
+  // Create a product with the scanned barcode: only passed for accounts that may create products.
+  onCreateFromScan?: (code: string) => void
+  // Clears the page's filters (a scanned barcode they hide keeps its code in the search).
+  onClearFilters?: () => void
   renderDesktopProductRow: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
   // 11.3: press-and-hold on a group TITLE row to enter select mode with
   // the whole group selected. Products.tsx supplies the long-press handlers
@@ -177,6 +185,9 @@ export default function ProductsListSurface({
   productTotal,
   productTotalLabel,
   refreshingProducts,
+  scanMiss,
+  onCreateFromScan,
+  onClearFilters,
   renderDesktopProductRow,
   bindGroupHold,
   renderGroupActions,
@@ -196,6 +207,12 @@ export default function ProductsListSurface({
   const spans = productTableSpans(columns)
   const chooserHost = chooserHostKey(columns)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
+  // What an empty list says: the refreshing line, the scan's own answer, or the plain empty state.
+  const emptyMessage = refreshingProducts
+    ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...')
+    : scanMiss
+      ? <ScanMissNotice miss={scanMiss} t={(key) => t(key) ?? key} onCreate={onCreateFromScan ? () => onCreateFromScan(scanMiss.code) : undefined} onClearFilters={onClearFilters} />
+      : t('no_data')
 
   // Excel-style: Name is the one auto column and every data column has a bounded
   // width (config/productTableColumns.ts, sized in Khmer as well as English).
@@ -332,7 +349,7 @@ export default function ProductsListSurface({
                   : (
                     <tr>
                       <td colSpan={spans.row} className="py-10 text-center text-gray-400">
-                        {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                        {emptyMessage}
                       </td>
                     </tr>
                     ))
@@ -506,7 +523,7 @@ export default function ProductsListSurface({
           </div>
         ) : visibleProducts.length === 0 ? (
           <div className="py-10 text-center text-gray-400">
-            {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+            {emptyMessage}
           </div>
         ) : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)

@@ -442,13 +442,50 @@ const FOLLOWED_CONTROLS = {
     file: 'routes/inventory.ts',
     proof: [/app\.post\('\/reasons\/replace'[\s\S]{0,700}?getActionTier\(user, 'inventory', 'edit_reasons'\) === 'none'[\s\S]{0,400}?getPermissionTier\(user, 'inventory'\) !== 'full'[\s\S]{0,300}?full_access_required/],
   },
+  // A starting quantity on a new product is a stock-in: POST / and POST /variant refuse it through openingStockRefusal.
+  'products:opening_stock': {
+    file: 'routes/products.ts',
+    proof: [
+      /const openingStockRefusal = \(user, body\) =>\s*Number\(body\.stock_quantity\) > 0 \? foldStockInPermissionRefusal\(user\) : null/,
+      /app\.post\('\/'[\s\S]{0,12000}?openingStockRefusal\(user, body\)/,
+      /app\.post\('\/variant'[\s\S]{0,4000}?openingStockRefusal\(user, body\)/,
+    ],
+  },
+  // A products import file that adds or changes stock is refused whole unless its author holds Adjust / receive at Full.
+  'products:import_stock': {
+    file: 'lib/importEngine.ts',
+    proof: [
+      /const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/, /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/,
+      /if \(!authority\.allowProductStockWrites\) \{[\s\S]{0,200}?importResultsChangeStock\(db, job\.type, results, job\.policy_json\)[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
+    ],
+  },
 }
 // Second grants a row or followed control names (`requires`), each proved against the Worker code that demands it.
 const SALE_LINK_GRANTS = [
   /app\.post\('\/customers\/link-conflicts\/relink'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
   /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
 ]
+// An entry is one { file, proof } or a list of them when the Worker demands the grant in more than one file.
 const REQUIREMENT_PROOFS = {
+  'contacts:bulk': [
+    {
+      file: 'routes/contacts.ts',
+      proof: [
+        /app\.post\(`\$\{config\.path\}\/merge`[\s\S]{0,1500}?getActionTier\(user, 'contacts', 'bulk'\) === 'none'/,
+        /app\.post\(`\$\{config\.path\}\/bulk-delete-jobs`[\s\S]{0,1500}?getActionTier\(user, 'contacts', 'bulk'\) === 'none'/,
+      ],
+    },
+    { file: 'routes/importJobs.ts', proof: [/overrideSection === 'contacts' && isActionBlocked\(user, 'contacts', 'bulk'\)/] },
+    { file: 'lib/importEngine.ts', proof: [/section === 'contacts' && isActionBlocked\(actor, 'contacts', 'bulk'\)/] },
+  ],
+  'products:add': {
+    file: 'routes/products.ts',
+    proof: [/app\.post\('\/variant'[\s\S]{0,700}?getActionTier\(user, 'products', 'variant'\) !== 'full' \|\| getActionTier\(user, 'products', 'add'\) !== 'full'/],
+  },
+  'inventory:adjust': [
+    { file: 'lib/createFold.ts', proof: [/function foldStockInPermissionRefusal\(user\) \{\s*if \(user && getActionTier\(user, 'inventory', 'adjust'\) === 'full'\)\s*return null/] },
+    { file: 'lib/importEngine.ts', proof: [/const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/, /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/] },
+  ],
   product_cost_edit: { file: 'routes/importJobs.ts', proof: [/const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/, /code: isRead \? 'product_cost_view_required' : 'product_cost_edit_required'/] },
   product_cost_view: { file: 'routes/importJobs.ts', proof: [/const isRead = c\.req\.method === 'GET' \|\| c\.req\.method === 'HEAD'/, /const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/] },
   destructive_delete: { file: 'lib/importEngine.ts', proof: [/!hasPermission\(user, 'destructive_delete'\)\)\s*return 'destructive_delete'/] },
@@ -588,6 +625,143 @@ check('a listed Review refusal is still true', () => {
   assert.deepEqual(problems, [])
 })
 
+// ---------------------------------------------------------------------------
+// What a role that holds Settings Full is granted without holding the key itself
+// ---------------------------------------------------------------------------
+// The role editor says Full opens a module's main access, and shows any other grant as "Included in Full" (the
+// catalog's `coveredBy`) exactly when the Worker answers true for it because Settings is Full. A fallback with no
+// mark leaves the grid saying "off" for access the role really has; a mark with no fallback says "on" for access it
+// lacks. This block reads every place the Worker tests the Settings grant and holds the two to one list.
+//
+// Scanned shapes (comment-free emit of every Worker file that names a permission helper):
+//   - a key helper (hasPermission, getPermissionTier, hasAnyPermission, denyUnless, ...) asked about the literal 'settings'
+//   - lib/permissions.ts hasPermission(): `normalized === 'x' && permissions.settings === true`
+//   - a `const NAME_KEYS = [... 'settings' ...]` list
+// A new site in any of those shapes fails until it is added to SETTINGS_FULL_SITES, which forces the question
+// "does this give Settings Full something the grid shows as a separate switch?" at the moment it is written.
+function settingsGrantSites(file, text) {
+  const sites = []
+  const names = new Map([...Object.keys(KEY_ARGUMENTS).map((name) => [name, name]), ...calleeNames(text), ...keyHelperNames(text)])
+  for (const match of text.matchAll(new RegExp(`\\b(${[...names.keys()].join('|')})\\s*\\(`, 'g'))) {
+    const helper = names.get(match[1])
+    if (HELPERS.includes(helper)) continue
+    const args = topLevelArguments(text, match.index + match[0].length - 1)
+    const keys = KEY_ARGUMENTS[helper](args).flatMap((argument) => (LITERAL_KEY.test(argument) ? [...argument.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : []))
+    if (keys.includes('settings')) sites.push(`${file}: ${helper}(${args.map((arg) => collapse(arg)).join(', ')})`)
+  }
+  for (const m of text.matchAll(/normalized === '([a-z_]+)' && permissions\.settings === true/g)) sites.push(`${file}: ${m[1]} falls back to permissions.settings`)
+  for (const m of text.matchAll(/\bconst\s+([A-Z][A-Z_]*KEYS)\s*=\s*\[([^\]]*)\]/g)) {
+    if (/'settings'/.test(m[2])) sites.push(`${file}: ${m[1]} = [${collapse(m[2])}]`)
+  }
+  return sites
+}
+
+// Each place the Worker tests the Settings grant, and what it gives a role that holds Settings Full:
+//   covers  catalog keys it grants through Settings Full -> each must carry `coveredBy: 'settings'`, and no key may
+//           carry the mark without being listed here
+//   main    Settings' own access (it has no row of its own), in words; `says` is what the Settings description must
+//           name so the grid does not understate it
+const SETTINGS_FULL_SITES = [
+  { site: 'lib/permissions.ts: business_identity falls back to permissions.settings', covers: ['business_identity'] },
+  { site: 'lib/permissions.ts: sales_policy falls back to permissions.settings', covers: ['sales_policy'] },
+  { site: 'lib/permissions.ts: drive_credentials falls back to permissions.settings', covers: ['drive_credentials'] },
+  { site: "routes/ai.ts: hasPermission(user, 'settings')", main: 'AI provider keys (the Settings AI section)', says: 'AI provider keys' },
+  { site: "routes/compat.ts: denyUnless(c, 'settings')", count: 4, covers: ['drive_credentials'], main: 'Drive connect, disconnect, preferences and forget-credentials' },
+  { site: "routes/compat.ts: denyUnless(c, 'backup', 'settings')", count: 6, covers: ['drive_credentials'], main: 'Drive status and sync jobs, system jobs, the integration doctor' },
+  { site: "routes/files.ts: hasPermission(user, 'settings')", covers: ['library'], main: 'hasFullLibraryAccess: upload, download, rename and delete (routes/sync.ts imports it)' },
+  { site: "routes/portal.ts: hasPermission(user, 'settings')", covers: ['customer_portal'], main: 'storefront submission moderation' },
+  { site: "routes/promotions.ts: WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal', 'settings']", covers: ['portal_posts', 'customer_portal'], main: 'announcement-strip writes' },
+  { site: "routes/runtime.ts: hasPermission(user, 'settings')", main: 'GET /runtime/catalog-integrity (no screen calls it)', says: 'system checks' },
+  {
+    site: "routes/settings.ts: hasPermission(user, 'settings')",
+    count: 4,
+    covers: ['sales_policy', 'business_identity', 'receipt_settings', 'portal_posts', 'portal_faq', 'portal_about', 'customer_portal'],
+    main: 'payment-method writes (298), the bucket superset (928), every non-bucket key (929), and the admin-only branch (1355, which needs admin as well)',
+  },
+  { site: "routes/settings.ts: getPermissionTier(user, 'settings')", main: 'payment-method reads: Settings View or Full' },
+  { site: "routes/system.ts: hasPermission(user, 'settings')", main: 'GET /system/verify-integrity (backup or settings; no screen calls it)', says: 'system checks' },
+  { site: "lib/settingsVisibility.ts: getPermissionTier(user, 'settings')", main: 'Settings View or Full reads every setting' },
+]
+
+check('every place the Worker tests the Settings grant is listed with what it gives a Settings Full role', () => {
+  const found = new Map()
+  for (const [file, text] of workerText) for (const site of settingsGrantSites(file, text)) found.set(site, (found.get(site) || 0) + 1)
+  const listed = new Map(SETTINGS_FULL_SITES.map((entry) => [entry.site, entry.count || 1]))
+  assert.ok(found.size >= 10, `only ${found.size} Settings sites found; the scan is broken`)
+  const problems = []
+  for (const [site, count] of found) {
+    if (!listed.has(site)) problems.push(`${site}  <- not in SETTINGS_FULL_SITES. If it grants a role with Settings Full something the grid shows as a separate switch, mark that key \`coveredBy: 'settings'\` in permissionDefinitions.ts and list it here under \`covers\`; if it is Settings' own access, list it under \`main\`.`)
+    else if (listed.get(site) !== count) problems.push(`${site}  <- ${count} call(s), SETTINGS_FULL_SITES says ${listed.get(site)}`)
+  }
+  for (const site of listed.keys()) if (!found.has(site)) problems.push(`${site}  <- listed but no longer in the Worker; if the fallback is gone, delete the entry and the \`coveredBy\` mark it carried`)
+  assert.deepEqual(problems, [])
+})
+
+check('the keys the editor shows as included in Settings Full are exactly the keys the Worker grants through it', () => {
+  const served = [...new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))].sort()
+  const marked = [...definitionByKey.values()].filter((def) => def.coveredBy)
+  assert.deepEqual(marked.filter((def) => def.coveredBy !== 'settings').map((def) => `${def.key}<-${def.coveredBy}`), [], 'only Settings is modelled as a covering module')
+  const unmarked = served.filter((key) => !definitionByKey.get(key)?.coveredBy)
+  const unserved = marked.map((def) => def.key).filter((key) => !served.includes(key)).sort()
+  assert.deepEqual(unmarked, [], `The Worker grants these through Settings Full but permissionDefinitions.ts does not mark them \`coveredBy: 'settings'\`, so the grid shows them off for a role that has them:\n${unmarked.join('\n')}`)
+  assert.deepEqual(unserved, [], `permissionDefinitions.ts marks these \`coveredBy: 'settings'\` but no Worker site grants them through Settings Full, so the grid shows them on for a role that lacks them:\n${unserved.join('\n')}`)
+  const missingRows = served.filter((key) => !definitionByKey.has(key))
+  assert.deepEqual(missingRows, [], `SETTINGS_FULL_SITES covers keys the editor has no row for:\n${missingRows.join('\n')}`)
+})
+
+check('what the Worker names as a Settings bucket or strip key is covered, read from the source rather than the list', () => {
+  const served = new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))
+  const settingsText = textOf('routes/settings.ts')
+  assert.match(settingsText, /!hasPermission\(user, bucket\) && !hasPermission\(user, 'settings'\)/, 'routes/settings.ts no longer lets Settings Full save a bucket key; update SETTINGS_FULL_SITES')
+  const buckets = [...new Set(sectionsReturnedBy(settingsText, 'settingsBucketPermissionFor'))]
+  assert.ok(buckets.length >= 7, `only ${buckets.length} settings buckets found; the scan is broken`)
+  assert.deepEqual(buckets.filter((key) => !served.has(key)), [], 'a settings bucket the Worker lets Settings Full save is not in `covers`')
+  const strip = /const WEBSITE_EDITOR_STRIP_KEYS = \[([^\]]*)\]/.exec(textOf('routes/promotions.ts'))
+  assert.ok(strip, 'routes/promotions.ts no longer lists WEBSITE_EDITOR_STRIP_KEYS')
+  const stripKeys = [...strip[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).filter((key) => key !== 'settings')
+  assert.deepEqual(stripKeys.filter((key) => !served.has(key)), [], 'an announcement-strip key is not in `covers`')
+})
+
+check('the Settings description does not call an included extra a separate switch, and names what has no row', () => {
+  const settingsSection = PERMISSION_SECTIONS.find((section) => section.key === 'settings')
+  const pack = JSON.parse(fs.readFileSync(path.join(ROOT, 'frontend', 'src', 'lang', 'en.json'), 'utf8'))
+  const texts = { 'permissionDefinitions.ts description': settingsSection.description, 'en.json perm_section_settings_desc': pack[`${settingsSection.tKey}_desc`] }
+  // The words come from the keys the Worker serves, not from the catalog's marks, so a missing mark cannot hide a false claim.
+  const served = [...new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))]
+  const included = served.map((key) => definitionByKey.get(key)).filter(Boolean).map((def) => def.short || def.label)
+  assert.ok(included.length >= 8, `only ${included.length} included extras found; the scan is broken`)
+  const problems = []
+  for (const [where, text] of Object.entries(texts)) {
+    assert.equal(typeof text, 'string', `${where} is missing`)
+    for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+      if (!/separate switch/i.test(sentence)) continue
+      for (const word of included) if (sentence.toLowerCase().includes(word.toLowerCase())) problems.push(`${where}: "${sentence}" calls "${word}" a separate switch, but Settings Full includes it`)
+    }
+    for (const says of new Set(SETTINGS_FULL_SITES.map((entry) => entry.says).filter(Boolean))) {
+      if (!text.toLowerCase().includes(says.toLowerCase())) problems.push(`${where} does not mention "${says}", which Settings Full grants and the grid has no row for`)
+    }
+  }
+  assert.deepEqual(problems, [])
+})
+
+check('control: the Settings scan reports each shape, and ignores a Settings word that is not a permission check', () => {
+  const sites = settingsGrantSites('routes/new.ts', [
+    "if (!hasPermission(user, 'settings')) return deny()",
+    "const denied = denyUnless(c, 'backup', 'settings')",
+    "if (normalized === 'ai_providers' && permissions.settings === true) return true",
+    "const STRIP_KEYS = ['portal_posts', 'settings']",
+    "await bumpVersion(c.env, 'settings')",
+    "const NAMESPACES = ['products', 'settings']",
+    "if (!hasPermission(user, 'sales_policy')) return deny()",
+  ].join('\n'))
+  assert.deepEqual(sites.sort(), [
+    "routes/new.ts: STRIP_KEYS = ['portal_posts', 'settings']",
+    'routes/new.ts: ai_providers falls back to permissions.settings',
+    "routes/new.ts: denyUnless(c, 'backup', 'settings')",
+    "routes/new.ts: hasPermission(user, 'settings')",
+  ].sort())
+})
+
 check('every editor action row has a Worker check, or is listed as browser-only', () => {
   const unexplained = [...editorRows].filter((pair) => !workerActions.has(pair) && !BROWSER_ONLY[pair]).sort()
   assert.deepEqual(unexplained, [], `The editor offers these rows but no Worker route checks them (a fake control):\n${unexplained.join('\n')}`)
@@ -675,7 +849,9 @@ check('every second grant a row names is one the Worker demands', () => {
       used.add(requirement.key)
       const entry = REQUIREMENT_PROOFS[requirement.key]
       if (!entry) { problems.push(`${pair} requires ${requirement.key} but REQUIREMENT_PROOFS has no Worker proof for it`); continue }
-      for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair} requires ${requirement.key} but ${entry.file} no longer demands it (${proof})`)
+      for (const part of [entry].flat()) {
+        for (const proof of part.proof) if (!proof.test(textOf(part.file))) problems.push(`${pair} requires ${requirement.key} but ${part.file} no longer demands it (${proof})`)
+      }
     }
   }
   for (const key of Object.keys(REQUIREMENT_PROOFS)) if (!used.has(key)) problems.push(`${key} is in REQUIREMENT_PROOFS but no editor row requires it any more; remove it`)

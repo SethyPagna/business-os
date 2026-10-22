@@ -15,7 +15,7 @@ assert.match(productFormSource, /draftScope\?: string/, 'ProductForm needs an ex
 assert.match(productFormSource, /useStableHydratedState/, 'form hydration must be guarded by a stable entity/session key')
 assert.match(productFormSource, /useStableHydratedState<ProductFormState>\(hydratedInitialForm, draftKey\)/, 'unstable caller seeds must be insulated by the scoped hydration key')
 assert.match(fastStockInSource, /draftScope=\{`fast-stock-in-/, 'scanner creation needs a session/barcode-specific draft')
-assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
+assert.match(productsSource, /draftScope=\{scanCreateBarcode \? `scan-miss-\$\{scanCreateBarcode\}` : 'standalone-create'\}/, 'standalone creation needs its own draft namespace, and a scan-miss Create its own per barcode')
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
 assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
 assert.match(productFormSource, /await Promise\.resolve\(save\(\)\)\s+clear\(\)\s+close\(\)/, 'successful save must mark clean before the form closes')
@@ -40,7 +40,7 @@ assert.match(productFormSource, /import \{ effectivePermissions, isAdminControlU
 assert.match(productFormSource, /function canManageProductImages\(user\?: ProductUser \| null\): boolean \{\s*return effectivePermissions\(user\)\.can\('products', 'image'\)\s*\}/, 'the image gate must merge role and user overrides before applying the same products:image action contract as the permission editor/backend')
 assert.match(productFormSource, /canManageImages \? \([\s\S]*?onClick=\{addImages\}/, 'upload controls must stay hidden when products:image is blocked')
 assert.match(productFormSource, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'header and close-prompt minimize must use the same preservation path')
-assert.match(productsSource, /onMinimize=\{\(label:[\s\S]*?if \(modalProduct\) \{[\s\S]*?kind: 'edit_product'[\s\S]*?draftKey,[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'edit' \}/,
+assert.match(productsSource, /onMinimize=\{(?:scanCreateBarcode \? undefined : )?\(label:[\s\S]*?if \(modalProduct\) \{[\s\S]*?kind: 'edit_product'[\s\S]*?draftKey,[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'edit' \}/,
   'edit minimize must park the exact entity draft behind products:edit')
 assert.match(productsSource, /\} else \{[\s\S]*?kind: 'add_product'[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'add' \}/,
   'the same host callback must keep standalone create behind products:add')

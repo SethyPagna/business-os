@@ -44,7 +44,7 @@ async function checkEnvelopeRoutes(api) {
   function pure(name) {
     if (modules.has(name)) return modules.get(name).exports
     if (['branchWrites', 'canonicalBranchIdentity', 'branchRoles'].includes(name)) assert.ok(name, 'selected real branch dependency')
-    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard', 'productCostReview', 'catalogCostRecompute', 'moneyPrecision', 'stockTransaction', 'productSupplierGate'].includes(name), name)
+    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard', 'productCostReview', 'catalogCostRecompute', 'moneyPrecision', 'stockTransaction', 'productSupplierGate', 'failureText'].includes(name), name)
     const m = { exports: {} }; modules.set(name, m)
     const code = ts.transpileModule(fs.readFileSync(path.join(root, 'lib', name + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
@@ -73,7 +73,7 @@ async function checkEnvelopeRoutes(api) {
     '../lib/branchRedirectWrite': { branchRedirectTarget: () => null },
     '../lib/reviewApply': { productRemovePendingPointer: () => false, applyApprovedPendingAction: unused },
     '../lib/reviewApprovalPermission': { reviewApprovalPermissionError: unused },
-    '../lib/productSupplierGate': pure('productSupplierGate'),
+    '../lib/productSupplierGate': pure('productSupplierGate'), '../lib/failureText': pure('failureText'),
     '../lib/productDiscountGate': { normalizeProductDiscountBody: () => null, ProductDiscountInputError: class ProductDiscountInputError extends Error {} },
     '../lib/productImagePermission': {}, '../lib/productDelete': { PRODUCT_REMOVE_ACTION_KIND: 'product.remove' },
     '../lib/undoAppliers': { SALE_ADD_ITEMS_ACTION_KIND: 'sale.items.add', PRODUCT_MERGE_GROUP_ACTION_KIND: 'product.merge.group', branchCutoverClosureRefusal: () => null, ...undoModule.exports },

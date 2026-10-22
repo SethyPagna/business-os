@@ -34,6 +34,7 @@ import { adjustBranchQuantity, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_
 import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
+import { createFormSeed } from '../../utils/stockSessionCreateSeed.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useDialogKeyboard } from '../shared/useDialogKeyboard.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -47,6 +48,7 @@ import {
   commitSessionBlock,
   defaultLotChoice,
   emptyStockSessionDraft,
+  lineEntryHasTypedValues,
   lineEntryRefusal,
   lineNeedsCreate,
   modeSwitchBlocked,
@@ -599,6 +601,16 @@ export default function FastStockInModal({
   // Ring a control for the receipt gate (it names the control to fix) or after a refused Add.
   const invalidField = refusal && (addAttempted || (picked && refusal.gate)) ? refusal.field : null
 
+  // What clearing the row would throw away: typed values, as opposed to what picking the product (or loading the line
+  // being edited) filled in. A scan asks this before it clears a picked item.
+  const editedLine = editingKey ? received.find((line) => line.key === editingKey) : undefined
+  const entryHasTypedValues = Boolean(picked) && lineEntryHasTypedValues(
+    { quantity, unitCost, sellingPrice, expiryDate, holdsNewProduct: !editedLine && Boolean(createPayload) },
+    editedLine
+      ? { quantity: String(editedLine.quantity), unitCost: canViewCosts ? editedLine.unitCost : '', sellingPrice: editedLine.sellingPrice, expiryDate: editedLine.expiryDate }
+      : picked ? entryFor(picked, mode) : {},
+  )
+
   const resetLine = () => {
     setPicked(null)
     setQuery('')
@@ -784,8 +796,7 @@ export default function FastStockInModal({
     const text = query.trim()
     if (!text) return
     persistSessionDraft()
-    const looksLikeBarcode = /^\d{6,}$/.test(text) || (scannedBarcode && scannedBarcode === text)
-    setCreateForm({ name: looksLikeBarcode ? '' : text, barcode: looksLikeBarcode ? text : '' })
+    setCreateForm(createFormSeed(text, scannedBarcode))
   }
 
   // Another account signed in (or the session is locked): nothing more is sent
@@ -1395,7 +1406,11 @@ export default function FastStockInModal({
                   setQuery(barcode)
                   setPicked(null)
                   setScannedBarcode(barcode)
+                  setCreatePayload(null)
                 }}
+                onScanMoved={() => notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')}
+                hasTypedValues={entryHasTypedValues}
+                onScanKept={() => notify(tr('stock_session_scan_finish_item', 'Add or clear this item first'), 'warning')}
                 picked={picked}
                 pickedStock={branchQuantity}
                 pickedIsNew={Boolean(createPayload) || (picked ? createdProductIds.includes(String(picked.id)) : false)}

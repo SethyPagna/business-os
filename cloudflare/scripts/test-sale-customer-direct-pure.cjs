@@ -16,7 +16,7 @@ const actual = new Set(['loyaltyEligibility',
   'saleCustomerAssignmentGuard','customerPointsReturn',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
-  'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
+  'undoAppliers', 'failureText', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
   'businessMaintenanceGuard',
 ])
 

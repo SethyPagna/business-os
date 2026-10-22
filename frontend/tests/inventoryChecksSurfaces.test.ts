@@ -85,6 +85,10 @@ type Surface = Awaited<ReturnType<typeof mount>>
 const useLanguage = (language: string) => { app.language = language; app.t = (key: string) => packs[language][key] || key; return packs[language] }
 const exact = (surface: Surface, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
 const byLabel = (surface: Surface, label: string) => surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === label, `button ${label}`)
+// The empty state's own button: a short ✕ + "Clear", told apart from the Filters menu's Clear link by where it sits.
+const emptyClear = (surface: Surface, word: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === word && surface.findAll(box => box.getAttribute('data-inventory-check-empty') !== null && box.contains(node)).length === 1)
+// The page's own Count button (in the context bar), named "Count (n)" after the products it would count.
+const pageCount = (surface: Surface, word: string) => surface.find(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${word} (`), 'page Count button')
 const sessionRow = (surface: Surface, id: string) => surface.find(node => node.getAttribute('data-inventory-check-session') === id, `session ${id}`)
 const chooseFilter = async (surface: Surface, filtersLabel: string, section: string, option: string) => {
   if (!surface.findAll(node => node.getAttribute('data-filter-menu-section') !== null).length) await surface.click(byLabel(surface, filtersLabel))
@@ -107,6 +111,11 @@ try {
     ]
     sessionTotal = 45
     const list = await mount()
+    // Lane 6.0.933: the Sessions tab pins ONE row -- Filters, the dates and presets, then Refresh -- instead of a date row plus a row for one icon.
+    const rangeRows = list.findAll(node => node.getAttribute('data-stats-range-controls') !== null)
+    assert.equal(rangeRows.length, 1, `${language}: the Sessions tab has a single pinned row`)
+    const rowButtons = rangeRows[0].querySelectorAll('button').map(node => node.getAttribute('aria-label'))
+    assert.ok(rowButtons.indexOf(pack.filters) === 0 && rowButtons.at(-1) === pack.refresh, `${language}: Filters leads that row and Refresh ends it: ${rowButtons.join(' | ')}`)
     const first = visibleText(sessionRow(list, 's-1')), second = visibleText(sessionRow(list, 's-2'))
     assert.ok(first.includes('19/10/2026 09:30') && second.includes('19/10/2026 09:31'), `${language}: sessions a minute apart show different date and time (${first} | ${second})`)
     assert.notEqual(first, second)
@@ -115,8 +124,11 @@ try {
     assert.ok(second.includes('19/10/2026 17:00'), `${language}: a closed session shows when it closed`)
     assert.ok(!first.includes('Stored fixed title') && !second.includes('Stored fixed title'), `${language}: the stored fixed title is never the display name`)
     const counts = list.findAll(node => node.getAttribute('data-session-counts') !== null && sessionRow(list, 's-1').contains(node))[0]
-    assert.deepEqual(counts.querySelectorAll('span').map(node => node.textContent), ['12', '2', '6/20'], `${language}: done, issue and unstarted/total`)
-    assert.deepEqual(counts.querySelectorAll('span').map(node => node.getAttribute('aria-label')), [`${pack.inventory_check_done}: 12`, `${pack.inventory_check_issue}: 2`, `${pack.inventory_check_unstarted}: 6 / 20`], `${language}: each count names itself`)
+    assert.deepEqual(counts.querySelectorAll('span').map(node => node.textContent), ['12', '2'], `${language}: done and issue; what is left is the ring's grey`)
+    assert.deepEqual(counts.querySelectorAll('span').map(node => node.getAttribute('aria-label')), [`${pack.inventory_check_done}: 12`, `${pack.inventory_check_issue}: 2`], `${language}: each count names itself`)
+    const ring = sessionRow(list, 's-1').querySelectorAll('[role="img"]')
+    assert.deepEqual(ring.map(node => node.getAttribute('aria-label')), [`${pack.inventory_check_progress} 14/20`], `${language}: the ring says how many of the 20 are checked`)
+    assert.deepEqual(ring[0].querySelectorAll('circle').map(node => node.getAttribute('data-ring-arc')), [null, 'done', 'issue'], `${language}: grey track, then the done arc, then the issue arc`)
 
     // Sessions filters: Open / Closed / Mine / dates go to the server and send the pager back to page 1.
     await list.click(list.button(pack.next))
@@ -151,17 +163,17 @@ try {
     goTo('sessions')
     const filteredNone = await mount()
     await chooseFilter(filteredNone, pack.filters, 'status', pack.shift_status_closed)
-    assert.ok(filteredNone.text().includes(pack.inventory_check_sessions_no_match) && exact(filteredNone, pack.clear_filters).length === 1, `${language}: filtered-away sessions offer Clear filters`)
-    await filteredNone.click(exact(filteredNone, pack.clear_filters)[0])
-    assert.equal(sessionReads.at(-1)?.status, undefined, `${language}: Clear filters clears the session filters`)
+    assert.ok(filteredNone.text().includes(pack.inventory_check_sessions_no_match) && emptyClear(filteredNone, pack.clear).length === 1, `${language}: filtered-away sessions offer ✕ Clear`)
+    await filteredNone.click(emptyClear(filteredNone, pack.clear)[0])
+    assert.equal(sessionReads.at(-1)?.status, undefined, `${language}: Clear clears the session filters`)
     await filteredNone.unmount()
     goTo('products')
     products = []
     const noProducts = await mount()
     await chooseFilter(noProducts, pack.filters, 'brand', 'Brand B')
-    assert.ok(noProducts.text().includes(pack.inventory_check_empty) && exact(noProducts, pack.clear_filters).length === 1, `${language}: filtered-away products offer Clear filters`)
-    await noProducts.click(exact(noProducts, pack.clear_filters)[0])
-    assert.equal(productReads.at(-1)?.brand, '', `${language}: Clear filters resets the chosen brand`)
+    assert.ok(noProducts.text().includes(pack.inventory_check_empty) && emptyClear(noProducts, pack.clear).length === 1, `${language}: filtered-away products offer ✕ Clear`)
+    await noProducts.click(emptyClear(noProducts, pack.clear)[0])
+    assert.equal(productReads.at(-1)?.brand, '', `${language}: Clear resets the chosen brand`)
     await noProducts.unmount()
     goTo('issues')
     const noIssues = await mount()
@@ -209,7 +221,9 @@ try {
     branches = [{ id: 1, name: 'Main' }, { id: 2, name: 'Second' }]
     creates.length = 0
     const counting = await mount()
-    const count = exact(counting, pack.inventory_check_start_page)[0]
+    const count = pageCount(counting, pack.inventory_check_start_page)
+    assert.equal(count.getAttribute('aria-label'), `${pack.inventory_check_start_page} (2)`, `${language}: Count is named after the 2 products it would count`)
+    assert.equal(count.querySelector('[data-count-pill]')?.textContent, '2', `${language}: and shows that figure in a small pill`)
     assert.equal(count.getAttribute('aria-disabled'), 'true', `${language}: Count waits for a branch`)
     assert.equal(count.getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
     assert.ok(counting.button(pack.inventory_check_count_blocked_branch), `${language}: the reason is also behind an InfoHint for touch`)
@@ -218,7 +232,7 @@ try {
     assert.equal(counting.findAll(node => node.tagName === 'DL').length, before, `${language}: a blocked Count does nothing`)
     await chooseFilter(counting, pack.filters, 'branchId', 'Second')
     await chooseFilter(counting, pack.filters, 'brand', 'Brand B')
-    const enabled = exact(counting, pack.inventory_check_start_page)[0]
+    const enabled = pageCount(counting, pack.inventory_check_start_page)
     assert.equal(enabled.getAttribute('aria-disabled'), null, `${language}: Count is live once a branch is chosen`)
     assert.equal(enabled.getAttribute('title'), pack.inventory_check_count_tooltip)
     await counting.click(enabled)
@@ -243,15 +257,16 @@ try {
     await bar.click(bar.button(pack.inventory_check_sessions))
     await bar.click(bar.button(/./, sessionRow(bar, 's-1')))
     const barText = visibleText(bar.find(node => node.getAttribute('data-inventory-check-session-bar') !== null, 'session bar'))
-    assert.ok(barText.startsWith('19/10/2026 09:30') && barText.includes('Main') && barText.includes('@alice') && barText.includes(pack.open), `${language}: the bar reads date, branch, creator and state: ${barText}`)
-    assert.ok(!barText.includes(pack.view_only), `${language}: an editable session has no read-only chip`)
+    assert.ok(barText.startsWith('14/20') && barText.includes('19/10/2026 09:30 · Main · @alice'), `${language}: the bar reads the ring, then date, branch and creator: ${barText}`)
+    assert.ok(!barText.includes(pack.open) && !barText.includes(pack.shift_status_closed), `${language}: an open session carries no status chip`)
+    assert.equal(bar.findAll(node => node.getAttribute('role') === 'img' && node.getAttribute('aria-label') === pack.view_only).length, 0, `${language}: an editable session has no read-only marker`)
     const actions = bar.find(node => node.getAttribute('data-inventory-check-actions') !== null, 'action row')
     const barButtons = bar.findAll(node => node.tagName === 'BUTTON' && actions.contains(node))
-    assert.deepEqual(barButtons.map(node => node.getAttribute('aria-label')), [pack.inventory_check_leave_session, pack.history, pack.inventory_check_close_session, pack.refresh], `${language}: back, History, Close and Refresh, in that order`)
-    for (const button of barButtons) assert.ok(button.textContent === '' && button.getAttribute('title') === button.getAttribute('aria-label'), `${language}: ${button.getAttribute('aria-label')} is icon-only with a matching tooltip`)
+    assert.deepEqual(barButtons.map(node => node.getAttribute('aria-label')), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session, pack.refresh], `${language}: back, the session-details hint, History, Close and Refresh, in that order`)
+    for (const button of barButtons) assert.ok(button.textContent === '' && (button.getAttribute('title') === button.getAttribute('aria-label') || button.getAttribute('aria-label') === pack.inventory_check_session_details), `${language}: ${button.getAttribute('aria-label')} is icon-only with a matching tooltip (the hint opens its own panel)`)
     // Every pinned control is an icon with a translated name -- except the date chips and the Sort select, whose words are their value.
     for (const button of bar.findAll(node => node.tagName === 'BUTTON' && pinned(bar).contains(node))) {
-      if (button.closest('[data-date-presets]') || button.getAttribute('data-app-select-button') !== null || button.getAttribute('aria-label') === pack.date_time_range || button.textContent === pack.stats) continue
+      if (button.closest('[data-date-presets]') || button.getAttribute('aria-label') === pack.date_time_range || button.textContent === pack.stats) continue
       assert.ok(button.textContent === '' && (button.getAttribute('aria-label') || '').length > 0 && (button.getAttribute('title') || button.getAttribute('aria-label')), `${language}: pinned button ${button.getAttribute('aria-label')} is icon-only`)
     }
 
@@ -273,7 +288,9 @@ try {
     await bar.click(byLabel(bar, pack.history))
     assert.ok(bar.text().includes(pack.inventory_check_load_failed), `${language}: history load failure is announced`)
     failHistory = false
-    await bar.click(bar.button(pack.retry, bar.find(node => node.getAttribute('role') === 'alert' && node.textContent.includes(pack.inventory_check_load_failed) && node.querySelector('button') !== null, 'history alert')))
+    const historyRetry = bar.button(pack.retry, bar.find(node => node.getAttribute('role') === 'alert' && node.textContent.includes(pack.inventory_check_load_failed) && node.querySelector('button') !== null, 'history alert'))
+    assert.ok(historyRetry.textContent === '' && historyRetry.getAttribute('aria-label') === pack.retry && historyRetry.getAttribute('title') === pack.retry, `${language}: the History Retry is icon-only with a translated tooltip`)
+    await bar.click(historyRetry)
     assert.ok(bar.text().includes(pack.inventory_check_history_empty), `${language}: Retry re-reads the history`)
     await bar.click(byLabel(bar, pack.close))
 
@@ -286,9 +303,10 @@ try {
     await readOnly.click(readOnly.button(pack.inventory_check_sessions))
     await readOnly.click(readOnly.button(/./, sessionRow(readOnly, 's-1')))
     const roBar = visibleText(readOnly.find(node => node.getAttribute('data-inventory-check-session-bar') !== null, 'session bar'))
-    assert.ok(roBar.includes(pack.view_only) && roBar.includes(pack.shift_status_closed), `${language}: a read-only session says so and shows Closed: ${roBar}`)
+    assert.ok(roBar.includes(pack.shift_status_closed), `${language}: a closed session shows its Closed chip: ${roBar}`)
+    assert.equal(readOnly.findAll(node => node.getAttribute('role') === 'img' && node.getAttribute('aria-label') === pack.view_only && node.getAttribute('title') === pack.view_only).length, 1, `${language}: a session the viewer cannot change shows an eye with a translated name`)
     await readOnly.click(readOnly.button(pack.inventory_check_read_only_hint))
-    assert.ok(readOnly.text().includes(pack.inventory_check_read_only_hint), `${language}: the read-only chip explains itself in an InfoHint`)
+    assert.ok(readOnly.text().includes(pack.inventory_check_read_only_hint), `${language}: the read-only eye explains itself in an InfoHint`)
     assert.equal(readOnly.findAll(node => node.tagName === 'BUTTON' && [pack.inventory_check_close_session, pack.inventory_check_resume_session].includes(node.getAttribute('aria-label') || '')).length, 0, `${language}: no Close or Resume for a viewer who cannot edit`)
     assert.equal(readOnly.findAll(node => node.getAttribute('data-check-action') !== null).length, 0)
     await readOnly.unmount()
@@ -304,14 +322,14 @@ try {
     sessionList = [selected]
     const narrowed = await mount()
     await narrowed.click(narrowed.button(/./, sessionRow(narrowed, 's-1')))
-    assert.ok(narrowed.text().includes(pack.view_only), 'the server verdict shows as a read-only chip')
+    assert.equal(narrowed.findAll(node => node.getAttribute('role') === 'img' && node.getAttribute('aria-label') === pack.view_only).length, 1, 'the server verdict shows as a read-only eye')
     assert.equal(narrowed.findAll(node => node.getAttribute('data-check-action') !== null).length, 0, 'and no editor even for the creator')
     assert.equal(narrowed.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.inventory_check_close_session).length, 0)
     await narrowed.unmount()
     selected = session('s-1', '2026-10-19 02:30:00')
   }
 
-  // The pinned order: dates, then search / scan / Filters, then the sort row; chosen filters live only in the menu.
+  // The pinned order: dates, then search / scan / Filters, then the context bar (branch, Count, Refresh); sort and chosen filters live only in the Filters menu.
   {
     const pack = useLanguage('en')
     goTo('products')
@@ -323,14 +341,16 @@ try {
     const search = position(node => node.getAttribute('id') === 'inventory-check-search')
     const scan = position(node => node.getAttribute('aria-label') === pack.scan_barcode)
     const filtersAt = position(node => node.getAttribute('aria-label') === pack.filters)
-    const sort = position(node => node.getAttribute('aria-label') === pack.sort_by)
-    assert.ok(dates >= 0 && dates < search && search < scan && scan < filtersAt && filtersAt < sort, `dates ${dates} < search ${search} < scan ${scan} < filters ${filtersAt} < sort ${sort}`)
-    assert.ok(order.find(node => node.getAttribute('data-sole-branch') !== null, 'sole branch label').textContent.includes('Main'), 'the one active branch is shown as a label, not a picker')
+    const context = position(node => node.getAttribute('data-inventory-check-context') !== null)
+    assert.ok(dates >= 0 && dates < search && search < scan && scan < filtersAt && filtersAt < context, `dates ${dates} < search ${search} < scan ${scan} < filters ${filtersAt} < context ${context}`)
+    assert.equal(order.findAll(node => node.getAttribute('aria-label') === pack.sort_by || node.getAttribute('data-inventory-check-filters') !== null).length, 0, 'there is no Sort row any more: Sort is a section of the Filters menu')
+    const contextBar = order.find(node => node.getAttribute('data-inventory-check-context') !== null, 'context bar')
+    assert.ok(contextBar.querySelector('[data-sole-branch]')?.textContent?.includes('Main'), 'the one active branch is shown as a label, not a picker, in the context bar')
+    assert.ok(!walk(order.find(node => node.getAttribute('data-inventory-check-controls') !== null, 'search row')).some(node => node.getAttribute('data-sole-branch') !== null), 'and not in the search row')
     assert.ok(!order.text().includes(pack.all_branches), 'no Branch choice for a sole branch')
     await chooseFilter(order, pack.filters, 'brand', 'Brand B')
     assert.equal(byLabel(order, pack.filters).getAttribute('title'), `${pack.filters} (1)`, 'the trigger carries the count')
-    const filtersRow = order.find(node => node.getAttribute('data-inventory-check-filters') !== null, 'sort row')
-    assert.ok(!filtersRow.textContent.includes('Brand B') && !root.querySelector('[data-app-select-selected]')?.textContent?.includes('Brand B'), 'the chosen brand shows nowhere outside the menu')
+    assert.ok(!contextBar.textContent.includes('Brand B'), 'the chosen brand shows nowhere outside the menu')
     // A scan only fills Search.
     assert.ok(order.find(node => node.getAttribute('data-sole-branch') !== null, 'branch label'))
     await order.unmount()

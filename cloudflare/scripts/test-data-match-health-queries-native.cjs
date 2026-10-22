@@ -695,9 +695,21 @@ async function main() {
       { batch_id: 11, branch_id: 1, quantity: 2 }, { batch_id: 12, branch_id: 1, quantity: 8 }, { batch_id: 21, branch_id: 1, quantity: 0 }, { batch_id: 31, branch_id: 1, quantity: 4 },
     ])
     assert.equal(db.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 12.4)
-    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 0, active_mirror_drift: 0, active_with_formula: 1 })
+    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 0, active_mirror_drift: 0, active_mirror_drift_khr: 0, active_with_formula: 1 })
     db.exec('UPDATE products SET cost_price_usd = 12.3 WHERE id = 1')
-    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 1, active_mirror_drift: 1, active_with_formula: 1 })
+    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 1, active_mirror_drift: 1, active_mirror_drift_khr: 0, active_with_formula: 1 })
+    // The mirror rule: an unknown (NULL) cost with a twin of 0 or NULL is aligned (not counted), a known cost with a twin of 0 is not;
+    // the KHR pair follows the same rule in its own column; an inactive product never counts.
+    db.exec('UPDATE products SET cost_price_usd = 12.4 WHERE id = 1')
+    db.exec('UPDATE products SET cost_price_usd = NULL, purchase_price_usd = 0, cost_price_khr = NULL, purchase_price_khr = 0 WHERE id = 3')
+    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 0, active_mirror_drift: 0, active_mirror_drift_khr: 0, active_with_formula: 1 }, 'NULL cost with a 0 twin is aligned')
+    db.exec('UPDATE products SET cost_price_usd = NULL, purchase_price_usd = NULL WHERE id = 3')
+    db.exec('UPDATE products SET cost_price_khr = 4000, purchase_price_khr = 0 WHERE id = 3')
+    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 0, active_mirror_drift: 0, active_mirror_drift_khr: 1, active_with_formula: 1 }, 'a known KHR cost with a 0 twin counts, in its own column')
+    db.exec('UPDATE products SET cost_price_khr = NULL, purchase_price_khr = 9 WHERE id = 3')
+    assert.equal(one(db, 'health-catalog-cost').active_mirror_drift_khr, 1, 'an unknown KHR cost with a positive twin counts')
+    db.exec('UPDATE products SET cost_price_khr = NULL, purchase_price_khr = NULL, cost_price_usd = 5, purchase_price_usd = 0 WHERE id = 3')
+    assert.deepEqual(one(db, 'health-catalog-cost'), { active_cost_drift: 0, active_mirror_drift: 1, active_mirror_drift_khr: 0, active_with_formula: 1 }, 'a known cost with a 0 twin counts')
   })
 
   await check('health-supplier-lots counts receipt-field drift but not reverted lots, returns or ambiguous names', () => {

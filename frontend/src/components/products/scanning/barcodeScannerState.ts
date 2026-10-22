@@ -27,7 +27,17 @@ interface ScannerPresentation {
   requestCameraLabel?: string
   statusMessage?: string
   emptyStateMessage?: string
+  showResetHint: boolean
   stateKind: ScannerStateKind
+}
+
+export type CameraResetPlatform = 'ios' | 'android' | 'desktop'
+
+/** Which steps put a denied camera back to Allow: Settings on an iPhone or iPad, the lock icon beside the address on
+ * Android, and the same lock icon in a desktop browser. iPadOS 13+ reports itself as a Mac, told apart by its touch screen. */
+export function cameraResetPlatform(userAgent: string, maxTouchPoints = 0): CameraResetPlatform {
+  if (/iPhone|iPod|iPad/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1)) return 'ios'
+  return /Android/.test(userAgent) ? 'android' : 'desktop'
 }
 
 export function deriveScannerPresentation({
@@ -85,6 +95,7 @@ export function deriveScannerPresentation({
     requestCameraLabel,
     statusMessage,
     emptyStateMessage,
+    showResetHint: permissionState === 'denied',
     stateKind,
   }
 }

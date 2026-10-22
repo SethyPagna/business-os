@@ -138,8 +138,9 @@ async function main() {
       const body = await response.json()
       return { out: body.out, rows: body.log.reduce((sum, entry) => sum + entry.rows, 0), log: body.log }
     }
+    // next_expiry_date is the one field added since the pinned output; it is asserted below, everything else must be identical.
     const pinned = (label, out) => {
-      const digest = sha(JSON.stringify(out))
+      const digest = sha(JSON.stringify(out, (key, value) => key === 'next_expiry_date' ? undefined : value))
       if (process.env.PRINT_GOLDEN) console.log(`GOLDEN '${label}': '${digest}',`)
       else assert.equal(digest, GOLDEN[label], `${label} differs from the pre-change result`)
     }
@@ -159,7 +160,13 @@ async function main() {
       pinned(`list:${label}`, result.out)
       listRows[label] = result
     }
-    pinned('list:counter', (await call('list', { query: { branchId: '1', sortBy: 'qty_sold' } }, actors.counter)).out)
+    const counter = (await call('list', { query: { branchId: '1', sortBy: 'qty_sold' } }, actors.counter)).out
+    pinned('list:counter', counter)
+    const expiries = label => new Set(listRows[label].out.items.filter(item => item.checkable).map(item => item.next_expiry_date))
+    assert.ok(expiries('name').has('2027-06-01') && [...expiries('name')].every(value => value === null || value === '2027-06-01'), 'branch 1 rows report the branch 1 lot expiry')
+    assert.ok(expiries('name_desc_b2').has('2027-07-01') && [...expiries('name_desc_b2')].every(value => value === null || value === '2027-07-01'), 'branch 2 rows report the branch 2 lot expiry')
+    assert.ok(expiries('all_branches').has('2027-07-01') && expiries('all_branches').has('2027-06-01'), 'with no branch the earliest lot of any branch counts')
+    assert.ok(counter.items.every(item => !Object.hasOwn(item, 'next_expiry_date')), 'a counter who cannot see stock gets no expiry (a dated lot with stock would show stock exists)')
     if (process.env.PRINT_GOLDEN) console.log('STATS', JSON.stringify(listRows.name.out.stats))
     else assert.deepEqual(listRows.name.out.stats, STATS, 'summary cards')
     console.log('PASS page rows, totals, facets, rankings and summary equal the pre-change result for every sort and filter')

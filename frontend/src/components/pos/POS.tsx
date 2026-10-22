@@ -43,6 +43,9 @@ import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
+import { useScannedQuery } from '../shared/useScannedQuery.ts'
+import ScanMissNotice from '../shared/ScanMissNotice'
 import InfoHint from '../shared/InfoHint'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -88,7 +91,9 @@ import {
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
-import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
+import { findScanHit } from '../../utils/scanExactHit.ts'
+import { classifyScanMiss } from '../../utils/scanMiss.ts'
+import { catalogHasBarcode, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
@@ -240,6 +245,9 @@ type ProductGroupMeta = {
   hasMultipleItems?: boolean
   maxSellingPriceUsd?: number
   minSellingPriceUsd?: number
+  // The group's child rows with branch-only duplicates merged, as the
+  // Products list shows them: what a scanned barcode is matched against.
+  rows?: ProductRecord[]
   stockTotal?: number
 }
 
@@ -776,6 +784,9 @@ export default function POS() {
   // index: the server returned exactly the match set, typos included, so
   // the page re-filter below must not re-match it with the older rules.
   const [catalogRanked,    setCatalogRanked]    = useState(false)
+  // The search-params key (productSearchParamsKey) the loaded page was answered for. A scan's "no such
+  // barcode" is only said once the page on screen answers that scan, not the query before it.
+  const [catalogAnsweredKey, setCatalogAnsweredKey] = useState('')
   // G1: active promotion rules, refreshed with every catalog payload (the
   // search/bootstrap responses carry them) -- POS offline inherits the
   // last cached payload's rules the same way it inherits its products.
@@ -860,9 +871,9 @@ export default function POS() {
   // -- and nothing else here re-validates them against the live catalog. This
   // resets every filter dimension in one action so a cashier isn't stuck
   // hunting for which one is the culprit.
-  const clearAllPosFilters = () => {
-    setSearch('')
-    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => removePosStorage('session', key))
+  // Every filter but the search text, so a scan the filters hide keeps its code in the box and then shows.
+  const clearPosFilterSelections = () => {
+    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial'].forEach((key) => removePosStorage('session', key))
     setCategoryFilter('all')
     setBrandFilter('all')
     setBranchFilter('all')
@@ -870,6 +881,12 @@ export default function POS() {
     setGroupFilter('all')
     setSupplierFilter('all')
     setInitialFilter('all')
+  }
+  // The empty-grid reset: the filters and the search text.
+  const clearAllPosFilters = () => {
+    setSearch('')
+    removePosStorage('session', 'pos_search')
+    clearPosFilterSelections()
   }
 // Multi-order state
   // Restore orders from sessionStorage so navigating away and back preserves
@@ -1286,6 +1303,11 @@ export default function POS() {
   const [receiptQueue, setReceiptQueue] = useState<Record<string, unknown>[]>([])
 
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const productScrollRef = useRef<HTMLDivElement | null>(null)
+  // The code of a scan whose exact match has not been shown yet. A scan only
+  // fills the search; once its single match is on screen the card is scrolled
+  // to and (desktop) focused, and this is cleared. Typing clears it too.
+  const pendingScanRef = useRef<string | null>(null)
   const catalogRequestRef = useRef(0)
   const catalogLoadPromiseRef = useRef<Promise<{ prods: ProductRecord[] } | null> | null>(null)
   const pendingCatalogLoadRef = useRef<{ label: string, options?: CatalogLoadOptions } | null>(null)
@@ -1526,6 +1548,7 @@ export default function POS() {
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
         setCatalogRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
+        setCatalogAnsweredKey(productSearchParamsKey)
         applyCatalogProducts(prods)
         if (Array.isArray(payloadRecord.promotion_rules)) {
           setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
@@ -2492,16 +2515,16 @@ export default function POS() {
     supplierFilter,
   ])
 
-  const hasActivePosFilters = useMemo(() => (
-    Boolean(search.trim())
-    || categoryFilter !== 'all'
+  const hasPosFilterSelection = useMemo(() => (
+    categoryFilter !== 'all'
     || brandFilter !== 'all'
     || branchFilter !== 'all'
     || stockFilter !== 'all'
     || groupFilter !== 'all'
     || supplierFilter !== 'all'
     || initialFilter !== 'all'
-  ), [search, categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, supplierFilter, initialFilter])
+  ), [categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, supplierFilter, initialFilter])
+  const hasActivePosFilters = Boolean(search.trim()) || hasPosFilterSelection
 
   const productsById = useMemo(() => buildProductsById(products) as unknown as Map<number, ProductRecord>, [products])
   const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [Number(branch?.id), branch])), [branches])
@@ -2544,6 +2567,55 @@ export default function POS() {
   }, [branchFilter, brandFilter, categoryFilter, groupFilter, initialFilter, search, searchMode, stockFilter, supplierFilter])
 
   const pagedProductCards = visibleProductCards
+
+  // Typing, the camera and the scanner gun all end in changeSearch, so a scan is
+  // kept across a reload (pos_search) exactly like typed text. A scan never adds
+  // or picks anything: it fills the search and the list narrows.
+  const changeSearch = useCallback((next: string) => {
+    writePosStorage('session', 'pos_search', next)
+    setSearch(next)
+  }, [])
+  const { scannedCode, markScanned } = useScannedQuery(search)
+  const applyScan = useCallback((code: string) => {
+    pendingScanRef.current = code
+    markScanned(code)
+    changeSearch(code)
+  }, [changeSearch, markScanned])
+  const posOverlayOpen = Boolean(detailProduct || imageLightbox || receiptQueue.length || showStatusPicker || showAddCustomer || showAddDelivery)
+  useScannerWedge({
+    enabled: isActive && !posOverlayOpen,
+    searchRef,
+    onScan: (code: string, origin: ScanOrigin) => {
+      applyScan(code)
+      if (origin === 'field') notify(t('scan_moved_to_search'), 'info')
+    },
+  })
+
+  // The one card whose child row carries exactly the searched barcode (two rows
+  // sharing it single out nothing). Ringed in the grid; for a scan it is also
+  // scrolled to and, on desktop, focused so Enter is a deliberate confirm.
+  const scanHitId = useMemo(
+    () => findScanHit(visibleProductCards, (card) => card.__groupMeta?.rows ?? [card], debouncedProductSearch)?.group.id ?? null,
+    [debouncedProductSearch, visibleProductCards],
+  )
+  useEffect(() => {
+    const code = pendingScanRef.current
+    if (!code || scanHitId === null || debouncedProductSearch !== code) return
+    pendingScanRef.current = null
+    const card = productScrollRef.current?.querySelector<HTMLElement>('[data-scan-hit="true"]')
+    card?.scrollIntoView({ block: 'nearest' })
+    if (isDesktopViewport) card?.focus({ preventScroll: true })
+  }, [debouncedProductSearch, isDesktopViewport, scanHitId])
+  // An empty list after a scan says why: no product has the barcode, or the filters hide it. The index (not the
+  // filtered page) tells those apart; typed text never gets this (scannedCode is null for it). The index
+  // generation is a dependency only: catalogHasBarcode reads module state that changes with it.
+  const scanMiss = useMemo(() => classifyScanMiss({
+    scannedCode,
+    answered: !catalogRefreshing && catalogAnsweredKey === productSearchParamsKey && debouncedProductSearch === scannedCode,
+    listEmpty: visibleProductCards.length === 0,
+    filtersActive: hasPosFilterSelection,
+    inCatalog: scannedCode && hasPosFilterSelection ? catalogHasBarcode(scannedCode) : null,
+  }), [catalogAnsweredKey, catalogRefreshing, debouncedProductSearch, hasPosFilterSelection, productSearchParamsKey, scannedCode, searchIndexGeneration, visibleProductCards.length])
 
   const getVariantChoices = useCallback((product: ProductRecord) => {
     return getVariantChoicesForProduct(product, variantChildrenByParentId) as unknown as ProductRecord[]
@@ -3653,9 +3725,12 @@ export default function POS() {
                   ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
                   : (t('search_mode_or_hint') || 'Matching ANY term - change in Filters to match ALL terms instead')}
                 value={search}
-                onChange={e => { const next = e.target.value; writePosStorage('session', 'pos_search', next); setSearch(next) }}
+                onChange={e => { pendingScanRef.current = null; changeSearch(e.target.value) }}
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
               />
-              <ScanSearchButton onDetected={setSearch} t={t} />
+              <ScanSearchButton onDetected={applyScan} t={t} />
               {/* AND/OR toggle no longer sits here as its own button (Aug
                   19 2026 UI request) -- reachable again from inside the
                   Filter menu (search_mode section, see FilterPanel.tsx). */}
@@ -3695,7 +3770,7 @@ export default function POS() {
               the scroll-position read always fell back to the (never
               moving, since POS scrolls internally) window scrollTop and
               the top bar could never hide, unlike every other page. */}
-          <div className="page-scroll flex-1 overflow-y-auto overflow-x-hidden p-3">
+          <div ref={productScrollRef} className="page-scroll flex-1 overflow-y-auto overflow-x-hidden p-3">
             {/* Batch/expiry tracking could not be looked up. Selling from
                 the wrong lot is a real inventory error (FIFO/expiry), and
                 the old behaviour -- silently treating the failure as "no
@@ -3773,6 +3848,7 @@ export default function POS() {
                     posPresentation
                     key={p.id}
                     product={p}
+                    scanHit={p.id === scanHitId}
                     variants={getVariantChoices(p)}
                     groupMeta={p.__groupMeta || null}
                     getStock={getPosCardStock}
@@ -3803,6 +3879,8 @@ export default function POS() {
                         {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
                       </button>
                     </div>
+                  ) : scanMiss ? (
+                    <ScanMissNotice miss={scanMiss} t={t} onClearFilters={clearPosFilterSelections} />
                   ) : hasActivePosFilters ? (
                     <div className="flex flex-col items-center gap-2">
                       <p>{posCopy('No products match your filters', 'គ្មានទំនិញត្រូវនឹងការត្រងទេ')}</p>
@@ -4606,6 +4684,7 @@ export default function POS() {
           <ProductDetailSheet
             posPresentation
             product={detailProduct}
+            scanQuery={debouncedProductSearch}
             promotionRules={promotionRules}
             exchangeRate={exchangeRate}
             t={t}

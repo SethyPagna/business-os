@@ -191,7 +191,7 @@ async function main() {
       './actorSnapshot': compileTs('actorSnapshot.ts'),
       './saleMoneyPrecision': compileTs('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision }),
     }),
-    './catalogCostRecompute': { recomputeCatalogCost: async () => null, catalogCostRecomputeStatement: () => ({ sql: 'SELECT 1 WHERE 1=1', params: {} }) },
+    './catalogCostRecompute': { recomputeCatalogCost: async () => null, catalogCostRecomputeStatement: () => ({ sql: 'SELECT 1 WHERE 1=1', params: {} }), costMirrorSql: (cost) => `COALESCE(${cost}, 0)` },
   })
 
   await check('imported product create with no cost is NULL (cost_price_usd and _khr), a typed $0 stays 0', async () => {

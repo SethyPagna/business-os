@@ -15,11 +15,11 @@ import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
 import { businessToday } from './businessDateWindow'
-import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { normalizeSearchText, compactSearchText, foldNativeDigits } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
-import { planManualCostChange, catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement } from './catalogCostRecompute'
+import { planManualCostChange, catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement, mirrorCostColumns } from './catalogCostRecompute'
 import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import {
   BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
@@ -214,6 +214,13 @@ export function omitProductUpdateStock(body: Record<string, unknown>): void {
   delete body.stock_quantity
 }
 
+// A scanner gun on the Windows Khmer keyboard layout types ០-៩ for 0-9; the shop prints and stores ASCII digits, so a
+// barcode being WRITTEN folds them. Only that mapping: no trim, case, zero or separator change (the code is kept as
+// typed). Entry points call it before any duplicate check so the check sees the value that will be stored.
+export function foldBarcodeInput(body: Record<string, unknown>): void {
+  if (typeof body.barcode === 'string') body.barcode = foldNativeDigits(body.barcode)
+}
+
 export function cleanPayload(body: Record<string, unknown>, columns: Set<string>) {
   const payload: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(body || {})) {
@@ -221,6 +228,7 @@ export function cleanPayload(body: Record<string, unknown>, columns: Set<string>
     const boolNormalized = typeof value === 'boolean' ? (value ? 1 : 0) : value
     payload[key] = clampNegativeStockQuantity(key, boolNormalized)
   }
+  foldBarcodeInput(payload)
   // OPUS-H-1: every product writer (create, PUT and its fold, variant, review apply, stock-session insert)
   // passes here, so the discount columns are stored exactly as the price gate compared them; a spelling with
   // no canonical form throws ProductDiscountInputError (400) instead of being stored raw.
@@ -268,7 +276,9 @@ function applySearchNormalizedColumns(payload: Record<string, unknown>, body: Re
 }
 
 // products.cost_price_usd/khr are DEFAULT 0, so an INSERT that leaves them out records a cost nobody entered.
-// A product created without a cost has an UNKNOWN cost (NULL); only a typed 0 is a recorded $0.
+// A product created without a cost has an UNKNOWN cost (NULL); only a typed 0 is a recorded $0. A cost the body does
+// carry is mirrored onto purchase_price_* (mirrorCostColumns) before this fills the absent ones: an absent cost leaves
+// the twin at its DEFAULT 0, which is how an unknown cost mirrors.
 const PRODUCT_COST_COLUMNS = ['cost_price_usd', 'cost_price_khr'] as const
 function unknownCostWhenAbsent(payload: Record<string, unknown>, columns: Set<string>): Record<string, unknown> {
   for (const column of PRODUCT_COST_COLUMNS) {
@@ -303,7 +313,7 @@ export function planInsertRow(
   required: Record<string, unknown> = {},
 ): { sql: string; params: Record<string, unknown> } {
   assertProductStatusInput(body)
-  const payload = unknownCostWhenAbsent(buildInsertPayload(body, columns, { ...required, is_active: 1 }), columns)
+  const payload = unknownCostWhenAbsent(mirrorCostColumns(buildInsertPayload(body, columns, { ...required, is_active: 1 })), columns)
   const keys = Object.keys(payload)
   if (!keys.length) throw new Error(`No writable ${table} fields were supplied`)
   const params = Object.fromEntries(keys.map((key, index) => [`value${index}`, payload[key]]))
@@ -317,7 +327,7 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
   const columns = await tableColumns(env, table)
   if (table === 'products') assertProductStatusInput(body)
   const built = buildInsertPayload(body, columns, table === 'products' ? { ...required, is_active: 1 } : required)
-  const payload = table === 'products' ? unknownCostWhenAbsent(built, columns) : built
+  const payload = table === 'products' ? unknownCostWhenAbsent(mirrorCostColumns(built), columns) : built
   const keys = Object.keys(payload)
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
@@ -463,6 +473,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // edit; none may write the stock rollup.
   if (table === 'products') omitProductUpdateStock(payload)
   if (table === 'products') delete payload.is_active
+  // The cost this edit writes is the figure its twin takes: a form that re-sends the stale twin it loaded, or none, ends with
+  // purchase_price_* equal to the cost (the plan's before-image still guards the twin's old value).
+  if (table === 'products') mirrorCostColumns(payload)
   applySearchNormalizedColumns(payload, body, columns, false)
   if (table === 'products' && Object.keys(payload).length === 0) return 0
   if (columns.has('updated_at')) payload.updated_at = nowIso()
