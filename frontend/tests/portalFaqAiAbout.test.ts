@@ -16,6 +16,8 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
 import { faqEntries, filterFaqEntries, faqSearchVisible, nextOpenFaqKey } from '../src/components/catalog/portalFaqLayout.ts'
+import { resolveClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { escapeRegExp, shopClients, writeIdentityBlock } from './clientFixtureIdentity.ts'
 
 const SRC = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src')
 const requireActual = createRequire(import.meta.url)
@@ -37,7 +39,19 @@ function loadModule(relative: string) {
   return module.exports
 }
 
-const tabsModule = loadModule('components/catalog/CatalogSecondaryTabs.tsx')
+// The tabs read the page's client identity as they load: load them as on a client's host. The fixture
+// client's (clients/example.env rendered, see clientFixtureIdentity.ts) runs every check; the About
+// checks run for Leang Cosmetics too where this machine has the private Records/Clients/leang.env.
+const clients = shopClients('portalFaqAiAbout.test', "Leang's About card name and shop icon")
+const tabsFor = (vars: Record<string, string>) => {
+  const undoIdentity = writeIdentityBlock(resolveClientIdentity(vars))
+  try {
+    return loadModule('components/catalog/CatalogSecondaryTabs.tsx')
+  } finally {
+    undoIdentity()
+  }
+}
+const tabsModule = tabsFor(clients[0].vars)
 const Tabs = tabsModule.default as React.ComponentType<Record<string, unknown>>
 const FaqList = tabsModule.FaqList as (props: Record<string, unknown>) => React.ReactElement
 
@@ -285,30 +299,37 @@ runTest('AI: product answers are cards that open the product sheet when the page
 
 // ---- About ---------------------------------------------------------------
 
-const aboutProps = (over: Record<string, unknown> = {}, config: Record<string, unknown> = {}) => ({
+const aboutProps = (over: Record<string, unknown> = {}, config: Record<string, unknown> = {}, shopName = clients[0].record.shopName) => ({
   tab: 'about',
   copy: copyFor('en'),
-  previewConfig: { businessName: 'Leang Cosmetics', title: 'Leang Cosmetics', businessTagline: 'Beauty in Phnom Penh', showLogo: false, aboutTitle: 'About', aboutContent: 'Our story.', ...config },
+  previewConfig: { businessName: shopName, title: shopName, businessTagline: 'Beauty in Phnom Penh', showLogo: false, aboutTitle: 'About', aboutContent: 'Our story.', ...config },
   openPortalImage: () => {},
   businessFacts: [{ key: 'phone', label: 'Phone', value: '+855 12 345 678', href: 'tel:+855 12 345 678' }],
   socialLinks: [],
   ...over,
 })
 
-runTest('About: the shop name is printed once, with no About pill above it', () => {
-  const out = html(aboutProps())
-  const visible = out.replace(/<img[^>]*>/g, '')
-  assert.equal((visible.match(/Leang Cosmetics/g) || []).length, 1, 'the name appears once in visible text')
-  assert.doesNotMatch(out, /uppercase tracking-\[0\.2em\]/, 'the About pill is gone')
-  const different = html(aboutProps({}, { businessName: 'Leang Cosmetics', title: 'Leang Beauty Hub' })).replace(/<img[^>]*>/g, '')
-  assert.equal((different.match(/Leang/g) || []).length, 1, 'a different title never prints a second name')
-})
+// The About card, once per client: its tabs module was loaded with that client's identity block.
+for (const { record, vars } of clients) {
+  const clientTabs = tabsFor(vars).default as React.ComponentType<Record<string, unknown>>
+  const clientHtml = (props: Record<string, unknown>) => renderToStaticMarkup(React.createElement(clientTabs, props))
+  const firstWord = record.shopName.split(' ')[0]
 
-runTest('About: the Leang icon replaces initials when no logo is shown', () => {
-  const out = html(aboutProps())
-  assert.match(out, /src="\/leang-cosmetics-icon-512-v2\.png"/)
-  assert.doesNotMatch(out, />LE</, 'no initials')
-})
+  runTest(`About: the shop name is printed once, with no About pill above it [${record.id}]`, () => {
+    const out = clientHtml(aboutProps({}, {}, record.shopName))
+    const visible = out.replace(/<img[^>]*>/g, '')
+    assert.equal((visible.match(new RegExp(escapeRegExp(record.shopName), 'g')) || []).length, 1, 'the name appears once in visible text')
+    assert.doesNotMatch(out, /uppercase tracking-\[0\.2em\]/, 'the About pill is gone')
+    const different = clientHtml(aboutProps({}, { businessName: record.shopName, title: `${firstWord} Beauty Hub` }, record.shopName)).replace(/<img[^>]*>/g, '')
+    assert.equal((different.match(new RegExp(escapeRegExp(firstWord), 'g')) || []).length, 1, 'a different title never prints a second name')
+  })
+
+  runTest(`About: the shop icon (${record.shopName}'s configured icon) replaces initials when no logo is shown [${record.id}]`, () => {
+    const out = clientHtml(aboutProps({}, {}, record.shopName))
+    assert.match(out, new RegExp(`src="${escapeRegExp(record.iconPrefix)}icon-512-v2\\.png"`))
+    assert.doesNotMatch(out, new RegExp(`>${escapeRegExp(record.shopName.slice(0, 2).toUpperCase())}<`), 'no initials')
+  })
+}
 
 runTest('About: the phone link is a clean tel: link', () => {
   const out = html(aboutProps())

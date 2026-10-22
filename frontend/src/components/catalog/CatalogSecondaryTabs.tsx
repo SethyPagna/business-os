@@ -25,6 +25,7 @@ import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from '
 import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { aiProviderNames, fillAiProviderTemplate } from './legal/aiProviderDisclosure.ts'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 type IdValue = string | number
@@ -206,7 +207,7 @@ function OwnerText({ text }: { text: string }) {
   )
 }
 
-const LEANG_ICON_FALLBACK = '/leang-cosmetics-icon-512-v2.png'
+const SHOP_ICON_FALLBACK = getClientIdentity().shopIcons.icon512
 
 function normalizePortalColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
@@ -342,7 +343,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                 </button>
               ) : (
                 <img
-                  src={LEANG_ICON_FALLBACK}
+                  src={SHOP_ICON_FALLBACK}
                   alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
                   className="h-full w-full rounded-full object-cover"
                 />

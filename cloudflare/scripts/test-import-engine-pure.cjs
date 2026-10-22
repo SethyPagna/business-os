@@ -396,6 +396,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './membershipNumber') {
     return membershipNumberModuleObj.exports // real module -- the one LC- membership minter classifyContacts uses
   }
+  if (request === './clientIdentity') return loadPureSibling('clientIdentity') // real module -- resolves the membership prefix classifyRows passes on
   if (request === './salesStatus') {
     return salesStatusModuleObj.exports // real module -- classifySales actually calls into it
   }
@@ -1747,8 +1748,23 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // phase). The fake routes each query by table name in its SQL so the two
 // reads can be seeded independently.
 {
-  const { classifyContacts } = moduleObj.exports
-  assert.strictEqual(typeof classifyContacts, 'function', 'classifyContacts should be exported from importEngine.ts')
+  const { classifyContacts: classifyContactsWithPrefix } = moduleObj.exports
+  assert.strictEqual(typeof classifyContactsWithPrefix, 'function', 'classifyContacts should be exported from importEngine.ts')
+  // classifyContacts takes the deployment's membership prefix as its last
+  // argument since Oct 22 2026 (classifyRows reads it from the client
+  // identity). Every case below is numbered under the house LC- sequence, so
+  // that is the prefix passed (a literal: it is a parameter of the function
+  // under test). That Leang's own configuration says the same is pinned where
+  // its private render exists; the second client's cases at the end of this
+  // block pass their own.
+  const LC = 'LC-'
+  {
+    const { leangVars, skipLeang } = require('./harness/wrangler_vars.cjs')
+    const leang = leangVars('wrangler.toml')
+    if (leang) assert.strictEqual(leang.BUSINESS_OS_MEMBERSHIP_PREFIX, LC, "Leang's configured prefix is the house prefix these cases are numbered under")
+    else skipLeang('test-import-engine-pure', "Leang's configured membership prefix")
+  }
+  const classifyContacts = (db, table, rows, policyJson) => classifyContactsWithPrefix(db, table, rows, policyJson, LC)
 
   const makeFakeDb = (existingRows, portalRows = []) => ({
     prepare: (sql) => ({ all: async () => (String(sql).includes('portal_accounts') ? portalRows : existingRows) }),
@@ -1786,6 +1802,33 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       'LC-00003',
       'the allocator must skip both the customers row (LC-00001) AND the orphaned portal_accounts row (LC-00002)',
     )
+  }
+
+  // 1c) The prefix is the deployment's. A second client's import numbers from SM- and
+  // neither skips nor is steered by the LC- rows; the prefix also reaches
+  // the portal_accounts query, whose GLOB is the only filter on that read.
+  {
+    const sqls = []
+    const db = {
+      prepare: (sql) => {
+        sqls.push(String(sql))
+        return { all: async () => (String(sql).includes('portal_accounts') ? [{ membership_id: 'sm-00002' }] : [
+          { id: 1, name: 'First customer', membership_number: 'LC-00001' },
+          { id: 2, name: 'Second customer', membership_number: 'SM-00001' },
+        ]) }
+      },
+    }
+    const second = await classifyContactsWithPrefix(db, 'customers', [row({ name: 'Blank' }, 1)], null, 'SM-')
+    assert.strictEqual(second[0].data.membership_number, 'SM-00003', 'SM- skips its own SM-00001 and the portal sm-00002, and ignores LC-00001')
+    const portalSql = sqls.find((sql) => sql.includes('portal_accounts'))
+    assert.ok(portalSql.includes("'sm-[0-9]*'") && !/'lc-/.test(portalSql), 'the second client prefix is what the portal_accounts GLOB filters on: ' + portalSql)
+    const lc = await classifyContactsWithPrefix(db, 'customers', [row({ name: 'Blank' }, 1)], null, 'LC-')
+    assert.strictEqual(lc[0].data.membership_number, 'LC-00002', 'the same rows under LC-: SM- rows do not reserve LC- slots')
+    // A caller that forgets the prefix fails loudly instead of numbering from nothing.
+    await assert.rejects(() => classifyContactsWithPrefix(db, 'customers', [row({ name: 'Blank' }, 1)], null), /Invalid membership prefix/)
+    // Suppliers carry no membership numbers, so they never need one.
+    const suppliers = await classifyContactsWithPrefix(makeFakeDb([]), 'suppliers', [row({ name: 'Acme' }, 1)], null)
+    assert.strictEqual(suppliers[0].action, 'create')
   }
 
   // 2) Matched existing customer whose stored membership_number is
@@ -2327,7 +2370,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // may return either row first, so classification must expose a stable,
   // sorted candidate list and refuse until the reviewer pins one id.
   {
-    const classifyContactsForAmbiguity = moduleObj.exports.classifyContacts
+    // The house LC- prefix again (see the classifyContacts block above): the cases below are numbered under it.
+    const classifyContactsForAmbiguity = (db, table, rows, policyJson) => moduleObj.exports.classifyContacts(db, table, rows, policyJson, 'LC-')
     const makeContactDb = (records) => ({
       prepare: (sql) => ({ all: async () => String(sql).includes('portal_accounts') ? [] : records }),
     })

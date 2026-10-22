@@ -22,6 +22,10 @@
 //      round. TOML tables are unordered, so the entries are compared sorted.
 //   4. The admin forwarder: BM's calls its service binding BMSHOP, the template calls it TARGET (index.ts reads
 //      TARGET). Everything else is equal.
+//   5. The two manifest routes: the template always lists /manifest.json and /portal-manifest.json in run_worker_first
+//      (the code of 6.0.956 and later builds them from the identity; 6.0.962 retired the MANIFEST_ROUTES switch). BM's file
+//      predates that code, so it has no such line. Its next deploy from this line carries both together, which is the only
+//      way a client is deployed from this line; the render minus that one line is BM's file.
 //
 // Run: node scripts/test-client-bm-parity-pure.cjs
 'use strict'
@@ -63,6 +67,14 @@ const read = (...p) => fs.readFileSync(path.join(...p), 'utf8').replace(/\r\n/g,
 const code = (text) => text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'))
 // Difference 1: where BM's file sits.
 const fromBmLocation = (line) => line.replace('../../cloudflare/', '').replace('../../frontend/', '../frontend/')
+// Difference 5: the manifest routes BM's file does not have yet, placed where the template puts them (after the sitemap).
+const MANIFEST_LINE = '  "/manifest.json", "/portal-manifest.json",'
+const intoBm = (lines) => {
+  const at = lines.findIndex((l) => l.endsWith('"/sitemap.xml",'))
+  assert.ok(at > 0 && lines.filter((l) => l.endsWith('"/sitemap.xml",')).length === 1, 'one run_worker_first sitemap line in BM\'s file')
+  assert.ok(!lines.includes(MANIFEST_LINE), 'BM\'s file predates the manifest routes')
+  return [...lines.slice(0, at + 1), MANIFEST_LINE, ...lines.slice(at + 1)]
+}
 // Difference 3: the entries of [vars] in a fixed order.
 const sortVars = (lines) => {
   const from = lines.indexOf('[vars]')
@@ -99,17 +111,19 @@ check('BM is on the Free plan: the free file is its file, with no [limits], medi
   assert.match(bmMain, /^PLAN_TIER = "free"$/m)
 })
 
-check('the free render is BM\'s file line for line, except where its file sits (1), the Analytics Engine block it cannot deploy (2) and the order of [vars] (3)', () => {
+check('the free render is BM\'s file line for line, except where its file sits (1), the Analytics Engine block it cannot deploy (2), the order of [vars] (3) and the manifest routes (5)', () => {
   const rendered = sortVars(code(render()['wrangler.free.toml']))
-  const bm = sortVars(code(bmMain).map(fromBmLocation))
+  const bm = sortVars(intoBm(code(bmMain).map(fromBmLocation)))
   const withoutAnalytics = bm.filter((l) => !ANALYTICS.includes(l))
   assert.equal(bm.length - withoutAnalytics.length, 3, 'BM\'s file declares the dataset')
   assert.deepEqual(rendered, withoutAnalytics)
 })
 
-check('with Analytics Engine switched on the free render is BM\'s file with nothing else different (differences 1 and 3 only)', () => {
+check('with Analytics Engine switched on the free render is BM\'s file with nothing else different (differences 1, 3 and 5 only)', () => {
   const rendered = sortVars(code(render({ ANALYTICS_DATASET: bmDataset })['wrangler.free.toml']))
-  assert.deepEqual(rendered, sortVars(code(bmMain).map(fromBmLocation)))
+  assert.deepEqual(rendered, sortVars(intoBm(code(bmMain).map(fromBmLocation))))
+  // and without the one line of difference 5 it is BM's file as deployed
+  assert.deepEqual(rendered.filter((l) => l !== MANIFEST_LINE), sortVars(code(bmMain).map(fromBmLocation)))
 })
 
 check('every key BM\'s file uses is covered by the template: the only line the template leaves out is the one the code skips without it', () => {
@@ -122,8 +136,9 @@ check('every key BM\'s file uses is covered by the template: the only line the t
     assert.ok(rendered.has(needle), needle)
   }
   assert.ok(![...rendered].some((l) => l.startsWith('SENTRY_DSN') || l.startsWith('GOOGLE_LOGIN')), 'Sentry and Google sign-in are left out, not empty')
-  // the manifests stay static until the code that serves them is deployed
-  assert.ok(![...rendered].some((l) => l.includes('/manifest.json')))
+  // the manifest routes are the one thing the template lists that BM's live file does not (difference 5): both routes, once
+  assert.equal([...code(render({ ANALYTICS_DATASET: bmDataset })['wrangler.free.toml'])].filter((l) => l === MANIFEST_LINE).length, 1)
+  assert.ok(!code(bmMain).some((l) => l.includes('/manifest.json')), 'BM\'s deployed file has no manifest route yet')
 })
 
 check('queue names are exactly the ones the deployed code dispatches on', () => {

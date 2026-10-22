@@ -59,7 +59,9 @@ import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 import { productStockGuardError } from './lib/productStockGuard'
-import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
+import { documentRewrites, shopOriginFrom, shouldRewriteAppDocument } from './lib/documentIdentity'
+import { APP_DOCUMENT_ROUTES } from './lib/documentRoutes'
+import { MANIFEST_ROUTES, resolveClientIdentity, staffHostFrom, type IdentityEnv } from './lib/clientIdentity'
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
@@ -68,7 +70,9 @@ import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
 
-export type Env = {
+// The client identity vars (shop name, icons, membership prefix) live in
+// IdentityEnv (lib/clientIdentity.ts); every one falls back to neutral.
+export type Env = IdentityEnv & {
   DB: D1Database
   // Optional second D1 holding ONLY the bulk import STAGING tables
   // (import_job_rows, import_job_source_rows) -- see lib/db.ts's D1Compat
@@ -148,11 +152,6 @@ export type Env = {
   // preference with a fallback rather than a hard requirement. Optional:
   // unset behaves exactly as before.
   BUSINESS_OS_ORGANIZATION_SLUG?: string
-  // Display name for that same organization. Read by
-  // lib/coreDataInvariants.ts, which used to hardcode 'Business OS' and
-  // rewrite it on every run -- so renaming the org in the database was
-  // silently undone. Optional: unset keeps the historical default.
-  BUSINESS_OS_ORGANIZATION_NAME?: string
   // Secret (wrangler secret put APP_ENCRYPTION_KEY) encrypting AI provider
   // API keys, TOTP secrets and Google Drive tokens at rest. Optional only so
   // reads keep working: without it lib/secretCrypto.ts refuses every write
@@ -302,9 +301,11 @@ app.use('*', async (c, next) => {
 })
 // G38 P0: the public site never shows admin -- on the shop host only the
 // storefront's own API answers; staff endpoints and the live-update socket are
-// 404 there (lib/publicHostGate.ts). Before any body, seeding or DB work.
+// 404 there (lib/publicHostGate.ts). Before any body, seeding or DB work. The
+// staff hosts are admin.*, loopback and the configured BUSINESS_OS_ADMIN_URL
+// host (never the public one: staffHostFrom).
 app.use('*', async (c, next) => {
-  if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: 'Not found' }, 404)
+  if (isBlockedOnStorefrontHost(c.req.url, staffHostFrom(c.env.BUSINESS_OS_ADMIN_URL, c.env.BUSINESS_OS_PUBLIC_URL))) return c.json({ error: 'Not found' }, 404)
   return next()
 })
 app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, seeding or DB work
@@ -312,20 +313,17 @@ app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, 
 // G4: the app document itself, for the SPA routes wrangler.toml's
 // run_worker_first sends here.
 //
-// One built index.html serves both hosts with a storefront-first <head> and
-// an inline script that swaps in the admin identity before first paint. On
-// iOS that script is not always early enough: Add to Home Screen can read the
-// raw HTML, so installing the ADMIN app could produce a home-screen icon
-// called Leang Beauty pointing at the storefront manifest. Rewriting the tags
-// here means the bytes iOS reads are already correct, on every SPA route
-// someone can be sitting on when they install, without touching index.html or
-// the storefront host.
+// One built index.html serves both hosts and names no client. Rewriting its
+// tags here writes this deployment's identity (lib/documentIdentity.ts) into
+// the bytes iOS reads at Add to Home Screen, on every SPA route someone can be
+// sitting on when they install: the staff identity on a staff host (the API
+// gate's rule, lib/publicHostGate.ts), the shop's everywhere else.
 //
 // Registered ABOVE the body-guard/seeding middleware on purpose: a static
 // document must not carry a D1 bootstrap, and Hono runs matched handlers in
 // registration order, so this terminal handler keeps the security headers set
 // above and skips everything below. Anything it cannot rewrite -- a 304, a
-// non-HTML response, the storefront host -- is passed through untouched.
+// HEAD probe, a non-HTML response -- is passed through untouched.
 const APP_DOCUMENT_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
 
 async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response> {
@@ -353,15 +351,14 @@ async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response
       response = await assets.fetch(new Request(target.toString(), c.req.raw))
     }
   }
-  const shouldRewrite = shouldRewriteAdminDocument({
-    hostname: new URL(c.req.url).hostname,
+  const shouldRewrite = shouldRewriteAppDocument({
     method: c.req.method,
     accept: c.req.header('accept'),
     contentType: response.headers.get('content-type'),
     ok: response.ok,
   })
-  // The storefront, a HEAD probe, a 304, an error page: returned exactly as
-  // the asset layer produced it, with no body handling at all.
+  // A HEAD probe, a 304, an error page: returned exactly as the asset layer
+  // produced it, with no body handling at all.
   if (!shouldRewrite) return response
 
   // Everything from here on is best-effort identity polish. The document
@@ -370,13 +367,13 @@ async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response
   // storefront's front page into Hono's JSON 500. So any failure in the
   // rewrite set-up hands back the asset response exactly as produced.
   try {
-    return rewriteAdminDocument(response)
+    return rewriteAppDocument(response, c.req.url, c.env)
   } catch {
     return response
   }
 }
 
-function rewriteAdminDocument(response: Response): Response {
+function rewriteAppDocument(response: Response, requestUrl: string, env: Env): Response {
   const headers = new Headers(response.headers)
   // The rewritten body has a different length, and the asset layer already
   // set one for the original.
@@ -391,10 +388,14 @@ function rewriteAdminDocument(response: Response): Response {
 
   // STREAMED, never buffered: on the free plan this handler has 10 ms of CPU,
   // and HTMLRewriter parses the document as it passes through instead of
-  // materialising it. It also cannot touch the inline bootstrap script, which
-  // names the same URLs inside quoted selectors -- those are text, not tags.
+  // materialising it.
+  const rules = documentRewrites({
+    identity: resolveClientIdentity(env),
+    hostname: new URL(requestUrl).hostname,
+    shopOrigin: shopOriginFrom(env.BUSINESS_OS_PUBLIC_URL, requestUrl),
+  })
   let rewriter = new HTMLRewriter()
-  for (const rule of ADMIN_DOCUMENT_REWRITES) rewriter = rewriter.on(rule.selector, { element: rule.element })
+  for (const rule of rules) rewriter = rewriter.on(rule.selector, { element: rule.element })
   return rewriter.transform(new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -406,6 +407,17 @@ function rewriteAdminDocument(response: Response): Response {
 // paths, and a HEAD that fell through to Hono's 404 would report the app's
 // own pages as missing.
 for (const route of APP_DOCUMENT_ROUTES) app.on(['GET', 'HEAD'], route, serveAppDocument)
+
+// The two install manifests carry the configured names and the shop's icons,
+// so the Worker builds them (lib/clientIdentity.ts) instead of the asset layer
+// serving one client's file. Above the D1 middleware: no database round trip.
+for (const [route, manifest] of Object.entries(MANIFEST_ROUTES)) {
+  app.on(['GET', 'HEAD'], route, (c) => c.body(
+    `${JSON.stringify(manifest(resolveClientIdentity(c.env)), null, 2)}\n`,
+    200,
+    { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': APP_DOCUMENT_CACHE_CONTROL },
+  ))
+}
 
 // Sep 17 outage. [assets] sets not_found_handling = "single-page-application",
 // which is right for app ROUTES and catastrophic for hashed build chunks: a
@@ -443,11 +455,11 @@ app.on(['GET', 'HEAD'], '/assets/*', async (c) => {
 const PUBLIC_SEO_CACHE_CONTROL = 'public, max-age=3600'
 app.on(['GET', 'HEAD'], '/robots.txt', (c) => {
   const url = new URL(c.req.url)
-  return c.text(robotsTxt(url.hostname, url.origin), 200, { 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
+  return c.text(robotsTxt(url.hostname, url.origin, staffHostFrom(c.env.BUSINESS_OS_ADMIN_URL, c.env.BUSINESS_OS_PUBLIC_URL)), 200, { 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
 })
 app.on(['GET', 'HEAD'], '/sitemap.xml', (c) => {
   const url = new URL(c.req.url)
-  const body = sitemapXml(url.hostname, url.origin)
+  const body = sitemapXml(url.hostname, url.origin, staffHostFrom(c.env.BUSINESS_OS_ADMIN_URL, c.env.BUSINESS_OS_PUBLIC_URL))
   if (body === null) return c.notFound()
   return c.body(body, 200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
 })
@@ -621,11 +633,11 @@ export { BroadcastHub } from './durable-objects/broadcastHub'
 
 export default {
   fetch: app.fetch,
-  // Cloudflare routes a queue message batch here based on which queue it
-  // came from (wrangler.toml's [[queues.consumers]] entries), not by name
-  // collision -- both consumers are declared, so we dispatch on the queue's
-  // own name off the batch itself. The name is the client's own prefix plus a
-  // fixed ending (lib/queueRoles.ts), so it is matched by that ending.
+  // Every consumer queue delivers here (wrangler.toml's [[queues.consumers]]
+  // entries); the batch's own queue name says which one it came from. The name
+  // is the client's own prefix plus a fixed ending (lib/queueRoles.ts), so it is
+  // matched by that ending and never by a literal name: each deployment can
+  // name its own queues.
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     const role = queueRole(batch.queue)
     if (role === 'import') {

@@ -29,6 +29,7 @@ import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSe
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
+import { resolveClientIdentity } from '../lib/clientIdentity'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
 
@@ -449,9 +450,10 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
   const languageSetting = portalLanguageCode(settings.customer_portal_language) || AUTOMATIC_PORTAL_LANGUAGE
+  const shopName = resolveClientIdentity(env).shopName
 
   return {
-    businessName: settings.business_name || 'Leang Cosmetics',
+    businessName: settings.business_name || shopName,
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
@@ -622,7 +624,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showContactWhatsapp: normalizeBoolean(settings.customer_portal_show_contact_whatsapp, false),
     showContactPhone: normalizeBoolean(settings.customer_portal_show_contact_phone, false),
     showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, false),
-    title: settings.customer_portal_title || settings.business_name || 'Leang Cosmetics',
+    title: settings.customer_portal_title || settings.business_name || shopName,
     intro: settings.customer_portal_intro || '',
     heroGradientStart: settings.customer_portal_hero_gradient_start || '#0f172a',
     heroGradientMid: settings.customer_portal_hero_gradient_mid || '#14532d',

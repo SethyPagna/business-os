@@ -2,13 +2,23 @@ import assert from 'node:assert/strict'
 import { act } from 'react'
 import { createHarness, installSteppedClock, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import { resolveClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { shopClients, writeIdentityBlock, type ShopClient } from './clientFixtureIdentity.ts'
 
 // The real InstallPromptBand, mounted (React DOM + the real standaloneNavigation module + the real
 // iOS steps modal), on a phone-shaped window. installOffer.test.ts drives the pure module and
 // static markup; this file proves what a shopper actually sees and taps.
+//
+// It runs once as the neutral fixture client (the committed template rendered with
+// clients/example.env, see clientFixtureIdentity.ts) and, where this machine has the
+// private Records/Clients/leang.env, once more as Leang Cosmetics; elsewhere (CI)
+// the Leang run prints one SKIP line.
 
-const SHOP_HOST = 'leangbeauty.com'
-const ADMIN_HOST = 'admin.leangbeauty.com'
+let CLIENT: ShopClient
+let SHOP_HOST = ''
+let ADMIN_HOST = ''
+let SHOP_NAME = ''
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const DAY_MS = 24 * 60 * 60 * 1000
 const UA = {
   android: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
@@ -56,6 +66,9 @@ type Scenario = { win: EventTarget; mountBand(language?: Language): Promise<Moun
 async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Promise<void> {
   const harness = await createHarness()
   const win = configureWindow(device)
+  // The page as the Worker serves it on the client's host: its identity block names
+  // the shop (the rendered config's [vars]), read once per harness.
+  const undoIdentity = writeIdentityBlock(resolveClientIdentity(CLIENT.vars))
   const surfaces: MountedSurface[] = []
   try {
     await run({
@@ -82,6 +95,7 @@ async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Pr
     })
   } finally {
     for (const surface of surfaces) await surface.unmount()
+    undoIdentity()
     await harness.close()
   }
 }
@@ -98,168 +112,177 @@ let failed = 0
 async function check(name: string, fn: () => Promise<void>): Promise<void> {
   try {
     await fn()
-    console.log(`PASS ${name}`)
+    console.log(`PASS [${CLIENT.record.id}] ${name}`)
   } catch (error) {
     failed += 1
-    console.error(`FAIL ${name}`)
+    console.error(`FAIL [${CLIENT.record.id}] ${name}`)
     console.error(error)
   }
 }
 
-await check('nothing shows until the browser fires beforeinstallprompt', async () => {
-  await scenario({ userAgent: UA.android }, async (s) => {
-    await s.arm()
-    const band = await s.mountBand()
-    assert.equal(band.text(), '')
-    await dispatch(s.win, promptEvent('accepted'))
-    await band.settle()
-    assert.match(band.text(), /Install Leang Cosmetics/)
-    assert.ok(hasButtonWithText(band, 'Install'))
-  })
-})
+async function installBand(client: ShopClient): Promise<void> {
+  CLIENT = client
+  SHOP_HOST = client.record.shopHost
+  ADMIN_HOST = client.record.adminHost
+  SHOP_NAME = client.record.shopName
 
-await check('an event fired before React mounted is still offered, in both languages with the shop name', async () => {
-  for (const [language, label, install] of [['en', 'Install Leang Cosmetics', 'Install'], ['km', 'ដំឡើង Leang Cosmetics', 'ដំឡើង']] as const) {
+  await check('nothing shows until the browser fires beforeinstallprompt', async () => {
+    await scenario({ userAgent: UA.android }, async (s) => {
+      await s.arm()
+      const band = await s.mountBand()
+      assert.equal(band.text(), '')
+      await dispatch(s.win, promptEvent('accepted'))
+      await band.settle()
+      assert.match(band.text(), new RegExp(`Install ${escapeRegExp(SHOP_NAME)}`))
+      assert.ok(hasButtonWithText(band, 'Install'))
+    })
+  })
+
+  await check('an event fired before React mounted is still offered, in both languages with the shop name', async () => {
+    for (const [language, label, install] of [['en', `Install ${SHOP_NAME}`, 'Install'], ['km', `ដំឡើង ${SHOP_NAME}`, 'ដំឡើង']] as const) {
+      await scenario({ userAgent: UA.android }, async (s) => {
+        await s.arm()
+        const event = promptEvent('accepted')
+        await dispatch(s.win, event)
+        assert.equal(event.defaultPrevented, true, 'the capture kept it from the browser')
+        const band = await s.mountBand(language)
+        assert.ok(band.text().includes(label), `${language}: the band names the shop (${band.text()})`)
+        assert.ok(hasButtonWithText(band, install), `${language}: the main action is one word`)
+      })
+    }
+  })
+
+  await check('without capture at entry the same early event is lost', async () => {
+    await scenario({ userAgent: UA.android }, async (s) => {
+      const event = promptEvent('accepted')
+      await dispatch(s.win, event)
+      await s.arm()
+      const band = await s.mountBand()
+      assert.equal(event.defaultPrevented, false)
+      assert.equal(band.text(), '', 'nothing to offer: this is the defect the entry-level capture removes')
+    })
+  })
+
+  await check('accepted: the prompt is replayed once, the band goes, the install is remembered', async () => {
     await scenario({ userAgent: UA.android }, async (s) => {
       await s.arm()
       const event = promptEvent('accepted')
       await dispatch(s.win, event)
-      assert.equal(event.defaultPrevented, true, 'the capture kept it from the browser')
-      const band = await s.mountBand(language)
-      assert.ok(band.text().includes(label), `${language}: the band names the shop (${band.text()})`)
-      assert.ok(hasButtonWithText(band, install), `${language}: the main action is one word`)
+      const band = await s.mountBand()
+      await band.click(buttonWithText(band, 'Install'))
+      assert.equal(event.prompted, 1)
+      assert.equal(band.text(), '')
+      assert.ok(Number(globalThis.localStorage.getItem(INSTALLED_KEY)) > 0)
     })
-  }
-})
-
-await check('without capture at entry the same early event is lost', async () => {
-  await scenario({ userAgent: UA.android }, async (s) => {
-    const event = promptEvent('accepted')
-    await dispatch(s.win, event)
-    await s.arm()
-    const band = await s.mountBand()
-    assert.equal(event.defaultPrevented, false)
-    assert.equal(band.text(), '', 'nothing to offer: this is the defect the entry-level capture removes')
   })
-})
 
-await check('accepted: the prompt is replayed once, the band goes, the install is remembered', async () => {
-  await scenario({ userAgent: UA.android }, async (s) => {
-    await s.arm()
-    const event = promptEvent('accepted')
-    await dispatch(s.win, event)
-    const band = await s.mountBand()
-    await band.click(buttonWithText(band, 'Install'))
-    assert.equal(event.prompted, 1)
-    assert.equal(band.text(), '')
-    assert.ok(Number(globalThis.localStorage.getItem(INSTALLED_KEY)) > 0)
+  await check('dismissed: nothing is recorded as installed, and a later browser offer brings the band back', async () => {
+    await scenario({ userAgent: UA.android }, async (s) => {
+      await s.arm()
+      const first = promptEvent('dismissed')
+      await dispatch(s.win, first)
+      const band = await s.mountBand()
+      await band.click(buttonWithText(band, 'Install'))
+      assert.equal(first.prompted, 1)
+      assert.equal(globalThis.localStorage.getItem(INSTALLED_KEY), null, 'cancelling the sheet is not an install')
+      assert.equal(band.text(), '', 'the spent prompt has nothing to replay')
+      const second = promptEvent('accepted')
+      await dispatch(s.win, second)
+      await band.settle()
+      assert.ok(hasButtonWithText(band, 'Install'), 'the browser offering again re-opens the offer')
+      await band.click(buttonWithText(band, 'Install'))
+      assert.equal(second.prompted, 1)
+      assert.equal(first.prompted, 1, 'the spent event is never replayed')
+    })
   })
-})
 
-await check('dismissed: nothing is recorded as installed, and a later browser offer brings the band back', async () => {
-  await scenario({ userAgent: UA.android }, async (s) => {
-    await s.arm()
-    const first = promptEvent('dismissed')
-    await dispatch(s.win, first)
-    const band = await s.mountBand()
-    await band.click(buttonWithText(band, 'Install'))
-    assert.equal(first.prompted, 1)
-    assert.equal(globalThis.localStorage.getItem(INSTALLED_KEY), null, 'cancelling the sheet is not an install')
-    assert.equal(band.text(), '', 'the spent prompt has nothing to replay')
-    const second = promptEvent('accepted')
-    await dispatch(s.win, second)
-    await band.settle()
-    assert.ok(hasButtonWithText(band, 'Install'), 'the browser offering again re-opens the offer')
-    await band.click(buttonWithText(band, 'Install'))
-    assert.equal(second.prompted, 1)
-    assert.equal(first.prompted, 1, 'the spent event is never replayed')
+  await check('the X keeps the band closed across a remount and a reload, and brings it back after 30 days', async () => {
+    const clock = installSteppedClock()
+    const phone = { userAgent: UA.android }
+    const reloaded = { userAgent: UA.android, sameBrowser: true }
+    try {
+      await scenario(phone, async (s) => {
+        await s.arm()
+        await dispatch(s.win, promptEvent('accepted'))
+        const band = await s.mountBand()
+        await band.click(closeButton(band))
+        assert.equal(band.text(), '')
+        assert.ok(globalThis.localStorage.getItem(DISMISSED_KEY))
+        await band.unmount()
+        assert.equal((await s.mountBand()).text(), '', 'remounted: still closed')
+      })
+      for (const [days, offered] of [[1, false], [29, false], [31, true]] as const) {
+        clock.advance((days === 1 ? 1 : days === 29 ? 28 : 2) * DAY_MS)
+        await scenario(reloaded, async (s) => {
+          await s.arm()
+          await dispatch(s.win, promptEvent('accepted'))
+          const text = (await s.mountBand()).text()
+          if (offered) assert.match(text, new RegExp(`Install ${escapeRegExp(SHOP_NAME)}`), `day ${days}: offered again`)
+          else assert.equal(text, '', `day ${days}: still closed after a reload`)
+        })
+      }
+    } finally { clock.restore() }
   })
-})
 
-await check('the X keeps the band closed across a remount and a reload, and brings it back after 30 days', async () => {
-  const clock = installSteppedClock()
-  const phone = { userAgent: UA.android }
-  const reloaded = { userAgent: UA.android, sameBrowser: true }
-  try {
-    await scenario(phone, async (s) => {
+  await check('iOS Safari and iOS Chrome show the steps instruction with no Install button, and tapping it opens the steps', async () => {
+    for (const [name, userAgent] of [['Safari', UA.iosSafari], ['Chrome', UA.iosChrome]] as const) {
+      await scenario({ userAgent }, async (s) => {
+        await s.arm()
+        const band = await s.mountBand()
+        assert.match(band.text(), new RegExp(`Install ${escapeRegExp(SHOP_NAME)}: tap`), `${name}: names the shop`)
+        assert.equal(hasButtonWithText(band, 'Install'), false, `${name}: no native Install button on iOS`)
+        await band.click(band.button(/Add to Home Screen/))
+        assert.match(band.text(), /Install on iPhone or iPad/, `${name}: the steps modal opened from the band text`)
+        assert.match(band.text(), /Keep Open as Web App on/)
+      })
+    }
+  })
+
+  await check('the iOS band text and steps are Khmer in Khmer', async () => {
+    await scenario({ userAgent: UA.iosSafari }, async (s) => {
+      await s.arm()
+      const band = await s.mountBand('km')
+      assert.ok(band.text().includes(`ដំឡើង ${SHOP_NAME}`))
+      await band.click(band.button(/ចែករំលែក/))
+      assert.ok(band.text().includes('ដំឡើងនៅលើ iPhone ឬ iPad'))
+    })
+  })
+
+  await check('the installed app (display-mode and navigator.standalone) shows nothing, event or not', async () => {
+    await scenario({ userAgent: UA.android, displayModeStandalone: true }, async (s) => {
+      await s.arm()
+      await dispatch(s.win, promptEvent('accepted'))
+      assert.equal((await s.mountBand()).text(), '')
+    })
+    await scenario({ userAgent: UA.iosSafari, iosStandalone: true }, async (s) => {
+      await s.arm()
+      assert.equal((await s.mountBand()).text(), '')
+    })
+  })
+
+  await check('appinstalled hides a visible band', async () => {
+    await scenario({ userAgent: UA.android }, async (s) => {
       await s.arm()
       await dispatch(s.win, promptEvent('accepted'))
       const band = await s.mountBand()
-      await band.click(closeButton(band))
+      assert.match(band.text(), new RegExp(`Install ${escapeRegExp(SHOP_NAME)}`))
+      await dispatch(s.win, new Event('appinstalled'))
+      await band.settle()
       assert.equal(band.text(), '')
-      assert.ok(globalThis.localStorage.getItem(DISMISSED_KEY))
-      await band.unmount()
-      assert.equal((await s.mountBand()).text(), '', 'remounted: still closed')
     })
-    for (const [days, offered] of [[1, false], [29, false], [31, true]] as const) {
-      clock.advance((days === 1 ? 1 : days === 29 ? 28 : 2) * DAY_MS)
-      await scenario(reloaded, async (s) => {
-        await s.arm()
-        await dispatch(s.win, promptEvent('accepted'))
-        const text = (await s.mountBand()).text()
-        if (offered) assert.match(text, /Install Leang Cosmetics/, `day ${days}: offered again`)
-        else assert.equal(text, '', `day ${days}: still closed after a reload`)
-      })
-    }
-  } finally { clock.restore() }
-})
+  })
 
-await check('iOS Safari and iOS Chrome show the steps instruction with no Install button, and tapping it opens the steps', async () => {
-  for (const [name, userAgent] of [['Safari', UA.iosSafari], ['Chrome', UA.iosChrome]] as const) {
-    await scenario({ userAgent }, async (s) => {
+  await check('the staff host keeps its own wording and never names the shop app', async () => {
+    await scenario({ userAgent: UA.iosSafari, hostname: ADMIN_HOST }, async (s) => {
       await s.arm()
       const band = await s.mountBand()
-      assert.match(band.text(), /Install Leang Cosmetics: tap/, `${name}: names the shop`)
-      assert.equal(hasButtonWithText(band, 'Install'), false, `${name}: no native Install button on iOS`)
-      await band.click(band.button(/Add to Home Screen/))
-      assert.match(band.text(), /Install on iPhone or iPad/, `${name}: the steps modal opened from the band text`)
-      assert.match(band.text(), /Keep Open as Web App on/)
+      assert.match(band.text(), /Install: tap/)
+      assert.doesNotMatch(band.text(), new RegExp(escapeRegExp(SHOP_NAME)))
     })
-  }
-})
+  })
+}
 
-await check('the iOS band text and steps are Khmer in Khmer', async () => {
-  await scenario({ userAgent: UA.iosSafari }, async (s) => {
-    await s.arm()
-    const band = await s.mountBand('km')
-    assert.ok(band.text().includes('ដំឡើង Leang Cosmetics'))
-    await band.click(band.button(/ចែករំលែក/))
-    assert.ok(band.text().includes('ដំឡើងនៅលើ iPhone ឬ iPad'))
-  })
-})
-
-await check('the installed app (display-mode and navigator.standalone) shows nothing, event or not', async () => {
-  await scenario({ userAgent: UA.android, displayModeStandalone: true }, async (s) => {
-    await s.arm()
-    await dispatch(s.win, promptEvent('accepted'))
-    assert.equal((await s.mountBand()).text(), '')
-  })
-  await scenario({ userAgent: UA.iosSafari, iosStandalone: true }, async (s) => {
-    await s.arm()
-    assert.equal((await s.mountBand()).text(), '')
-  })
-})
-
-await check('appinstalled hides a visible band', async () => {
-  await scenario({ userAgent: UA.android }, async (s) => {
-    await s.arm()
-    await dispatch(s.win, promptEvent('accepted'))
-    const band = await s.mountBand()
-    assert.match(band.text(), /Install Leang Cosmetics/)
-    await dispatch(s.win, new Event('appinstalled'))
-    await band.settle()
-    assert.equal(band.text(), '')
-  })
-})
-
-await check('the staff host keeps its own wording and never names the shop app', async () => {
-  await scenario({ userAgent: UA.iosSafari, hostname: ADMIN_HOST }, async (s) => {
-    await s.arm()
-    const band = await s.mountBand()
-    assert.match(band.text(), /Install: tap/)
-    assert.doesNotMatch(band.text(), /Leang Cosmetics/)
-  })
-})
+for (const client of shopClients('installBandMounted.test', "Leang's install band")) await installBand(client)
 
 if (failed > 0) {
   console.error(`installBandMounted.test.ts: ${failed} failing check(s)`)

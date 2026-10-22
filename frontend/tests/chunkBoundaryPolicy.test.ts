@@ -16,6 +16,7 @@ const chunkFor = output.manualChunks as (id: string) => string | undefined
 // accepting a correct helper that a later directory rule silently overrides.
 const boundaries: Array<[string, string]> = [
   ['constants.ts', 'app-constants'],
+  ['app/clientIdentity.ts', 'app-constants'],
   ['api/actorReadScope.ts', 'actor-read-scope'],
   // Storefront request budget (perf-budget.spec.ts): the sign-out fence rides
   // with actor scope instead of costing its own boot-path request, and the

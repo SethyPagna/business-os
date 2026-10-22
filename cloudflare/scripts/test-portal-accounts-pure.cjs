@@ -15,6 +15,7 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { wranglerVars, leangVars, skipLeang } = require('./harness/wrangler_vars.cjs')
 
 const rawDb = openDb(loadAll())
 const portalAccountSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalAccounts.ts'), 'utf8')
@@ -75,6 +76,7 @@ const contactOptions = loadReal('lib/contactOptions.ts')
 // The ONE membership-number minter (house `LC-#####` format, gap-filling).
 // portalAccounts no longer generates its own id, so this must be the REAL module.
 const membershipNumber = loadReal('lib/membershipNumber.ts')
+const clientIdentity = loadReal('lib/clientIdentity.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
   './contactOptions': contactOptions,
@@ -87,6 +89,7 @@ const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadR
 const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
   './membershipNumber': membershipNumber,
+  './clientIdentity': clientIdentity,
   './phone': phone,
   './passwordPolicy': passwordPolicy,
   './contactDuplicates': contactDuplicates,
@@ -95,7 +98,14 @@ const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loa
   './failedSignInCost': loadRealFailedSignInCost(),
 })
 
-const env = {}
+// The deployment's vars: the house prefix (LC-, a literal: the cases below are
+// numbered under it) and the shop names in the reminder below come from the
+// client identity, which reads them from wrangler [vars]; an empty env would be
+// the neutral M- / Business OS. The fixture client's vars (a neutral identity
+// on clients/example.env's addresses) carry the names; Leang's own are pinned
+// where its private render exists.
+const env = { ...wranglerVars('wrangler.toml'), BUSINESS_OS_MEMBERSHIP_PREFIX: 'LC-' }
+const SECOND_ENV = { BUSINESS_OS_SHOP_NAME: 'Second Shop', BUSINESS_OS_MEMBERSHIP_PREFIX: 'SM-' }
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
@@ -136,6 +146,7 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
   const { signupPortalAccount: signup2 } = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db2 },
     './membershipNumber': membershipOverride,
+    './clientIdentity': clientIdentity,
     './phone': phone,
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
@@ -313,6 +324,35 @@ async function run() {
     assert.strictEqual(res.code, 'verification_failed')
   })
 
+  await check('the not-verified reminder names the deployment\'s shop, exactly as it named Leang before (Oct 22 2026)', async () => {
+    const ghost = (e) => signupPortalAccount(e, { name: 'Ghost', phone: '078 555 112', membershipId: 'LCMN-NOSUCHID2', password: 'secret12345', consent: true, ageConfirmed: true })
+    const reminder = (names) => 'If you have previously bought from ' + names + ', please contact us for your membership ID \u2014 your phone number must match. Just a reminder.'
+    const fixture = await ghost(env)
+    assert.strictEqual(fixture.error, reminder(env.BUSINESS_OS_SHOP_NAME + '/' + env.BUSINESS_OS_SHOP_ALIAS), "the fixture client's vars give the reminder its name/alias")
+    const leangVarsNow = leangVars('wrangler.toml')
+    if (leangVarsNow) {
+      assert.strictEqual((await ghost(leangVarsNow)).error, reminder('Leang Cosmetics/Leang Beauty'), "Leang's vars reproduce the pre-change reminder byte for byte (name/alias)")
+    } else {
+      skipLeang('test-portal-accounts-pure', "Leang's pre-change reminder")
+    }
+    const second = await ghost(SECOND_ENV)
+    assert.match(second.error, /^If you have previously bought from Second Shop, please contact us/, 'no alias configured: just the name')
+    assert.doesNotMatch(second.error, /leang|example shop/i, 'a second client is never told to contact another')
+    assert.match((await ghost({})).error, /previously bought from Business OS,/, 'unconfigured: the neutral name')
+    assert.strictEqual(second.code, 'verification_failed')
+    assert.strictEqual(second.status, 409)
+  })
+
+  await check('a new account is numbered in the deployment\'s own sequence', async () => {
+    const { signup } = makeIsolatedPortal()
+    const second = await signup(SECOND_ENV, { name: 'Bopha', phone: '099 700 701', password: 'secret12345', consent: true, ageConfirmed: true })
+    assert.strictEqual(second.membershipId, 'SM-00001', 'a second client numbers from SM-00001, not LC-')
+    const neutral = await signup({}, { name: 'Neutral', phone: '099 700 702', password: 'secret12345', consent: true, ageConfirmed: true })
+    assert.strictEqual(neutral.membershipId, 'M-00001', 'no prefix configured: the neutral M-')
+    const house = await signup(env, { name: 'House', phone: '099 700 703', password: 'secret12345', consent: true, ageConfirmed: true })
+    assert.strictEqual(house.membershipId, 'LC-00001', 'each prefix has its own sequence: SM-/M- rows do not move LC-')
+  })
+
   await check('signup with a short password is a benign form error (not counted as abuse)', async () => {
     const res = await signupPortalAccount(env, { name: 'Shorty', phone: '070 111 222', password: '123', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
@@ -419,6 +459,32 @@ async function run() {
     assert.ok(accounts.every((row) => Number(row.contact_id) > 0), 'each committed account is linked to its folded contact')
     assert.ok(accounts.every((row) => row.consent_version === PORTAL_CONSENT_VERSION && row.consent_at), 'each atomic account persists current consent')
     assert.strictEqual(concurrentDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 2, 'one folded contact commits per account')
+  })
+
+  await check('the re-mint after a lost race stays in the deployment\'s own prefix (a second client never gets an LC- number)', async () => {
+    // The two-signup race above does not reliably collide (SQLite answers in
+    // order), and under Leang a hard-coded LC- in the retry path would look
+    // right anyway. So force the loss: a competing writer takes the minted
+    // number between the mint and the batch, and the loser must re-mint IN ITS
+    // OWN prefix.
+    for (const [deployment, vars, shape] of [['second client', SECOND_ENV, /^SM-\d{5}$/], ['house prefix', env, /^LC-\d{5}$/]]) {
+      let taken = null
+      const { signup, rawDb: raced, getInsertAttempts } = makeIsolatedPortal(membershipNumber, {
+        beforeBatch: ({ rawDb: hookDb, items }) => {
+          const insert = items.find((item) => /INSERT INTO portal_accounts/i.test(item.sql))
+          if (taken || !insert) return
+          taken = insert.params.membership_id
+          hookDb.prepare("INSERT INTO customers (name, membership_number) VALUES ('Interloper', @n)").run({ n: taken })
+        },
+      })
+      const res = await signup(vars, { name: 'Dara', phone: '099 111 222', password: 'secret12345', consent: true, ageConfirmed: true })
+      assert.match(taken, shape, deployment + ': the first mint is in its own prefix')
+      assert.strictEqual(res.ok, true, deployment + ': the loser retries instead of failing: ' + JSON.stringify(res))
+      assert.match(res.membershipId, shape, deployment + ': the re-mint stays in its own prefix')
+      assert.notStrictEqual(res.membershipId, taken, deployment + ': and takes a different number')
+      assert.ok(getInsertAttempts() >= 2, deployment + ': the lost INSERT really was retried')
+      assert.strictEqual(raced.prepare("SELECT COUNT(*) AS n FROM portal_accounts WHERE membership_id = @id").get({ id: res.membershipId }).n, 1)
+    }
   })
 
   await check('a USER-SUPPLIED membership id that collides on the race still rejects (never re-minted)', async () => {

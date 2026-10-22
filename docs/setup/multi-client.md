@@ -140,15 +140,16 @@ node scripts/with-wrangler-auth.cjs wrangler deploy --config admin-forwarder/wra
 
 | Variable | Needed | Meaning |
 |---|---|---|
-| `SHOP_NAME` | optional, `none` = off | Shop name: page title, install name, two-factor issuer and storefront copy. Also makes the Worker build /manifest.json and /portal-manifest.json from the identity. Optional. |
+| `SHOP_NAME` | optional, `none` = off | Shop name: page title, install name, two-factor issuer and storefront copy. Optional. |
 | `SHOP_NAME_KM` | optional, `none` = off | Shop name in Khmer. Optional. |
 | `SHOP_ALIAS` | optional, `none` = off | Another name customers know the shop by. Optional. |
 | `SHOP_CATEGORY` | optional, `none` = off | Kind of shop, for storefront wording (for example beauty). Left out: general-shop wording. Optional. |
 | `SHOP_ICON_PREFIX` | optional, `none` = off | Path prefix of the shop's own icon files under frontend/public (for example /my-shop-). Left out: the neutral Business OS icons. Optional. |
 | `ADMIN_SHORT_NAME` | optional, `none` = off | Name of the staff app on a phone home screen. Optional. |
 | `MEMBERSHIP_PREFIX` | optional, `none` = off | Prefix of membership numbers, for example LC- gives LC-00001. Optional. |
-| `MANIFEST_ROUTES` | optional, default `false` | true hands /manifest.json and /portal-manifest.json to the Worker (run_worker_first), which builds both from the shop identity. Set it only once the deployed code does (release 6.0.956 or later); before that those two paths are static files and a Worker route would 404 them. Optional. |
 | `FORWARDER_NAME` | optional, `none` = off | Name of a second, tiny Worker that hands every request to this client's Worker over a service binding, so the staff app has an address of its own on workers.dev (<client>-admin.<subdomain>.workers.dev). Rendered to cloudflare/admin-forwarder/wrangler.toml and deployed by hand (docs/setup/multi-client.md). Optional; none or empty: no forwarder. |
+
+The Worker serves `/manifest.json` and `/portal-manifest.json` itself, built from this identity (release 6.0.956 and later), so the template always lists both routes in `run_worker_first`: no variable switches them, and a client that sets no identity variable gets the neutral Business OS manifests. `MANIFEST_ROUTES`, the switch release 6.0.959 had, was retired in 6.0.962; a client file that still sets it is refused with that message, so delete the line.
 
 ### Comment blocks (comments only, never configuration)
 

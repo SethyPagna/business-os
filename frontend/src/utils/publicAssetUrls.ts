@@ -1,4 +1,5 @@
 import { currentUploadAuthority, getCurrentAssetBase, encodeLocalUploadPath } from './uploadUrlKernel.ts'
+import { isServedStaffHostname } from '../app/clientIdentity.ts'
 export { splitLocalUploadPath } from './uploadUrlKernel.ts'
 import { FRONTEND_BUILD_INFO } from '../api/http.ts'
 
@@ -44,7 +45,7 @@ function getSafeCurrentOrigin(): string {
     if (!origin) return ''
     if (isLocalLikeHostname(hostname)) return trimBaseUrl(origin)
     if (String(pathname || '').startsWith('/public')) return trimBaseUrl(origin)
-    if (!/^admin\./i.test(String(hostname || '').trim())) return trimBaseUrl(origin)
+    if (!isServedStaffHostname(hostname)) return trimBaseUrl(origin)
   } catch (_) {}
   return ''
 }

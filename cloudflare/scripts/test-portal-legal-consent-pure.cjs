@@ -96,6 +96,7 @@ function buildAccounts(rawDb) {
   })
   const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
   return loadReal('lib/portalAccounts.ts', {
+  './clientIdentity': loadReal('lib/clientIdentity.ts'),
     './db': dbModule,
     './membershipNumber': membershipNumber,
     './phone': phone,

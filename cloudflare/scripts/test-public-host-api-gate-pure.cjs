@@ -19,6 +19,13 @@
 // malformed escape. 0baa53f2f must FAIL the encoded suite; a raw-path mutant of
 // the current gate, loaded in the same run, must fail it too.
 //
+// 6.0.956 (owner, 22 Oct 2026): a deployment's staff host can be configured
+// (BUSINESS_OS_ADMIN_URL; a second client's second-admin.shops-sub.workers.dev, since a
+// *.workers.dev name cannot start with admin.). It is staff by EXACT hostname
+// only: the public host, look-alikes and an unset var stay the storefront.
+// Controls: a gate blind to the configured host and one that matches it
+// loosely both fail.
+//
 // Run: node scripts/test-public-host-api-gate-pure.cjs
 'use strict'
 const assert = require('node:assert/strict')
@@ -30,6 +37,8 @@ const ts = require('typescript')
 const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const GATE = 'src/lib/publicHostGate.ts'
+const IDENTITY = 'src/lib/clientIdentity.ts'
+const { wranglerVars, leangVars, skipLeang } = require('./harness/wrangler_vars.cjs')
 
 // Line endings depend on the checkout (core.autocrlf, the Windows runner), so
 // every source is compared as LF; the controls also run on a CRLF copy.
@@ -82,7 +91,7 @@ function gateSuite(gate) {
 check('the gate exists and is wired before every other API middleware and route', () => {
   assert.ok(gateSource, `${GATE} exists`)
   assert.ok(indexSource.includes("import { isBlockedOnStorefrontHost } from './lib/publicHostGate'"), 'index.ts imports the gate')
-  const gateAt = indexSource.indexOf('if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: \'Not found\' }, 404)')
+  const gateAt = indexSource.indexOf('if (isBlockedOnStorefrontHost(c.req.url, staffHostFrom(c.env.BUSINESS_OS_ADMIN_URL, c.env.BUSINESS_OS_PUBLIC_URL))) return c.json({ error: \'Not found\' }, 404)')
   assert.ok(gateAt > 0, 'index.ts answers 404 from the gate')
   // E3 (G39 item 3) renamed the invariants middleware call to ensureCoreDataInvariantsForRequest.
   for (const later of ["app.use('/api/*', originGuard)", 'ensureCoreDataInvariantsForRequest(c.env)', "app.get('/ws'", "app.route('/api/auth', authRoute)", "app.route('/api/portal', portalRoute)"]) {
@@ -164,10 +173,80 @@ check('control: a host-blind gate and a deny-list gate both fail the suite, from
   for (const [label, source] of [['LF', gateSource], ['CRLF', gateSource.replace(/\n/g, '\r\n')]]) {
     assert.equal(source.includes('\r\n'), label === 'CRLF', `${label} copy really has ${label} endings`)
     assert.doesNotThrow(() => gateSuite(loadGate(source)), `the unmutated ${label} gate passes`)
-    const hostBlind = inject(source, '  if (isStaffHostname(parsed.hostname)) return false\n', '')
+    const hostBlind = inject(source, '  if (isStaffHostname(parsed.hostname, staffHost)) return false\n', '')
     assert.throws(() => gateSuite(loadGate(hostBlind)), /unchanged on the staff host/, `${label}: a host-blind gate must fail`)
     const denyList = inject(source, "if (lower === '/api' || lower.startsWith('/api/')) return !isStorefrontApiPath(path)", "if (lower.startsWith('/api/auth/')) return true")
     assert.throws(() => gateSuite(loadGate(denyList)), /must be 404 on the shop host/, `${label}: a deny-list gate must fail`)
+  }
+})
+
+// --- the configured staff host -------------------------------------------
+
+const SECOND_STAFF_HOST = 'second-admin.shops-sub.workers.dev'
+const LOOK_ALIKES = ['second.shops-sub.workers.dev', 'second-admin.shops-sub.workers.dev.evil.com', 'xsecond-admin.shops-sub.workers.dev', 'admin-second.shops-sub.workers.dev', 'second-admin.shops-sub.workers.dev.', 'evil.com']
+
+function configuredHostSuite(gate) {
+  for (const p of [...STAFF_ONLY, ...STOREFRONT]) {
+    assert.equal(gate.isBlockedOnStorefrontHost(`https://${SECOND_STAFF_HOST}${p}`, SECOND_STAFF_HOST), false, `${SECOND_STAFF_HOST}${p} is the staff app when configured`)
+    assert.equal(gate.isBlockedOnStorefrontHost(`https://Second-Admin.shops-sub.workers.dev${p}`, SECOND_STAFF_HOST), false, `any letter case of ${SECOND_STAFF_HOST}${p} is the staff app`)
+  }
+  for (const host of LOOK_ALIKES) {
+    for (const p of STAFF_ONLY) assert.equal(gate.isBlockedOnStorefrontHost(`https://${host}${p}`, SECOND_STAFF_HOST), true, `${host}${p} must be 404: not the configured staff host`)
+    for (const p of STOREFRONT) assert.equal(gate.isBlockedOnStorefrontHost(`https://${host}${p}`, SECOND_STAFF_HOST), false, `${host}${p} must stay reachable on the shop host`)
+  }
+  for (const unset of ['', undefined, null]) {
+    for (const p of STAFF_ONLY) assert.equal(gate.isBlockedOnStorefrontHost(`https://${SECOND_STAFF_HOST}${p}`, unset), true, `${SECOND_STAFF_HOST}${p} must be 404 when no staff host is configured (${String(unset)})`)
+  }
+}
+
+check('a configured staff host is staff by exact hostname; the public host, look-alikes and an unset var are not', () => {
+  assert.ok(gate, 'gate loaded')
+  configuredHostSuite(gate)
+  gateSuite({ isBlockedOnStorefrontHost: (url) => gate.isBlockedOnStorefrontHost(url, SECOND_STAFF_HOST) })
+})
+
+check('control: a gate blind to the configured host, and one that matches it loosely, both fail', () => {
+  assert.ok(gateSource, 'gate source loaded')
+  const exact = "    || (configured !== '' && host === configured)\n"
+  const blind = inject(gateSource, exact, '')
+  assert.throws(() => configuredHostSuite(loadGate(blind)), /is the staff app when configured/)
+  for (const loose of ['host.includes(configured)', 'host.startsWith(configured)', 'host.endsWith(configured)']) {
+    const mutant = inject(gateSource, exact, `    || (configured !== '' && ${loose})\n`)
+    assert.throws(() => configuredHostSuite(loadGate(mutant)), /must be 404: not the configured staff host/, loose)
+  }
+})
+
+const identitySource = readAt(`cloudflare/${IDENTITY}`)
+const identity = identitySource ? loadGate(identitySource) : null
+
+check('the staff host comes from BUSINESS_OS_ADMIN_URL and is never the public host', () => {
+  assert.ok(identity && typeof identity.staffHostFrom === 'function', `${IDENTITY} exports staffHostFrom`)
+  const fixture = wranglerVars('wrangler.toml')
+  assert.equal(identity.staffHostFrom(fixture.BUSINESS_OS_ADMIN_URL, fixture.BUSINESS_OS_PUBLIC_URL), 'admin.example.com', "the fixture client's configured staff host")
+  assert.equal(identity.resolveClientIdentity(fixture).staffHost, 'admin.example.com', 'the identity the documents carry')
+  const leang = leangVars('wrangler.toml')
+  if (leang) {
+    assert.equal(identity.staffHostFrom(leang.BUSINESS_OS_ADMIN_URL, leang.BUSINESS_OS_PUBLIC_URL), 'admin.leangbeauty.com', "Leang's configured staff host")
+    assert.equal(identity.resolveClientIdentity(leang).staffHost, 'admin.leangbeauty.com', 'the identity the documents carry')
+  } else {
+    skipLeang('test-public-host-api-gate-pure', "Leang's configured staff host")
+  }
+  assert.equal(identity.staffHostFrom('https://Second-Admin.shops-sub.workers.dev/', 'https://second.shops-sub.workers.dev'), SECOND_STAFF_HOST)
+  for (const [adminUrl, publicUrl] of [
+    ['https://second.shops-sub.workers.dev', 'https://second.shops-sub.workers.dev/'],
+    ['https://Second.shops-sub.workers.dev:443/x', 'https://second.shops-sub.workers.dev'],
+    ['https://www.second.shops-sub.workers.dev', 'https://second.shops-sub.workers.dev'],
+    ['ftp://second-admin.shops-sub.workers.dev', 'https://second.shops-sub.workers.dev'],
+    ['javascript:alert(1)', 'https://second.shops-sub.workers.dev'],
+    ['second-admin.shops-sub.workers.dev', 'https://second.shops-sub.workers.dev'],
+    ['', 'https://second.shops-sub.workers.dev'],
+    [undefined, undefined],
+  ]) {
+    assert.equal(identity.staffHostFrom(adminUrl, publicUrl), '', `${String(adminUrl)} with public ${String(publicUrl)}: no staff host`)
+  }
+  for (const p of STAFF_ONLY) {
+    const sameAsPublic = identity.staffHostFrom('https://second.shops-sub.workers.dev', 'https://second.shops-sub.workers.dev')
+    assert.equal(gate.isBlockedOnStorefrontHost(`https://second.shops-sub.workers.dev${p}`, sameAsPublic), true, `a staff URL equal to the public one never opens ${p} on the shop host`)
   }
 })
 

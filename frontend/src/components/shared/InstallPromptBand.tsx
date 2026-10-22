@@ -3,6 +3,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Share from 'lucide-react/dist/esm/icons/share.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { isAdminHostname } from '../../app/pathRouting.ts'
+import { withShopName } from '../../app/clientIdentity.ts'
 import {
   dismissInstallBand,
   installBandRoute,
@@ -40,11 +41,11 @@ export default function InstallPromptBand({ translate }: { translate: InstallPro
   const shop = !isAdminHostname()
   const bandText = iosShare
     ? (shop
-      ? translate('install_shop_ios_hint', 'Install Leang Cosmetics: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង Leang Cosmetics៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។')
+      ? withShopName(translate('install_shop_ios_hint', 'Install {shop}: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង {shop}៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។'))
       : translate('ios_install_hint', 'Install: tap ••• or Share, then Add to Home Screen.', 'ដំឡើង៖ ចុច ••• ឬ ចែករំលែក (Share) រួចជ្រើសរើស បន្ថែមទៅអេក្រង់ដើម (Add to Home Screen)។'))
-    : (shop ? translate('install_shop_band', 'Install Leang Cosmetics', 'ដំឡើង Leang Cosmetics') : installLabel)
+    : (shop ? withShopName(translate('install_shop_band', 'Install {shop}', 'ដំឡើង {shop}')) : installLabel)
   const detail = shop
-    ? translate('install_shop_detail', 'Open Leang Cosmetics from its own icon on your home screen. It needs an internet connection.', 'បើក Leang Cosmetics ពីរូបតំណាងផ្ទាល់ខ្លួននៅលើអេក្រង់ដើម។ វាត្រូវការអ៊ីនធឺណិត។')
+    ? withShopName(translate('install_shop_detail', 'Open {shop} from its own icon on your home screen. It needs an internet connection.', 'បើក {shop} ពីរូបតំណាងផ្ទាល់ខ្លួននៅលើអេក្រង់ដើម។ វាត្រូវការអ៊ីនធឺណិត។'))
     : translate(
       'install_offer_detail',
       'Opens from its own icon on your home screen. It still needs the internet, and the phone keeps its saved sign-in instead of clearing it.',

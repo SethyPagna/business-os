@@ -4,6 +4,13 @@
 // shop's icons are the L mark cut from the owner's logo, never the words; an
 // Android launcher's circle or squircle must show the whole mark with no inner
 // frame. Wiring (which file each page and manifest names) is brandIcons.test.ts.
+// The manifests checked here are the ones the Worker builds from each client's
+// identity (the rendered config's [vars], see clientFixtureIdentity.ts); public/'s
+// are the neutral fallback. The staff icons are shared, so every client's staff
+// manifest is held to them; a shop manifest names the client's OWN art, which is
+// committed (and ledgered) only for Leang Cosmetics, so its files are read from
+// Leang's manifest where the private Records/Clients/leang.env exists, and every
+// client's shop manifest is held to the same structure.
 //
 // Run: node tests/pwaIcons.test.ts
 
@@ -13,6 +20,8 @@ import fs from 'node:fs'
 import test from 'node:test'
 import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
+import { resolveClientIdentity, shopManifest as buildShopManifest, staffManifest as buildStaffManifest } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { shopClients } from './clientFixtureIdentity.ts'
 
 type Role = 'any' | 'maskable' | 'apple' | 'favicon' | 'retired'
 type LedgerEntry = { sha256: string; brand: 'staff' | 'shop'; role: Role; bytesOf?: string }
@@ -45,14 +54,18 @@ const sha256 = (bytes: Buffer): string => crypto.createHash('sha256').update(byt
 const readJson = <T>(relPath: string): T => JSON.parse(fs.readFileSync(fileURLToPath(new URL(relPath, import.meta.url)), 'utf8')) as T
 
 const ledger = readJson<Ledger>('./fixtures/pwa-icon-ledger.json')
-const staffManifest = readJson<Manifest>('../public/manifest.json')
-const shopManifest = readJson<Manifest>('../public/portal-manifest.json')
+const clients = shopClients('pwaIcons.test', "the pixels of Leang's shop manifest icons")
+// Every client's staff manifest (the staff art is shared); the shop manifests whose icon art is committed.
+const staffManifests = clients.map(({ vars }) => buildStaffManifest(resolveClientIdentity(vars)) as Manifest)
+const shopManifests = clients.map(({ vars }) => buildShopManifest(resolveClientIdentity(vars)) as Manifest)
+const shippedShopManifests = shopManifests.filter((_, index) => clients[index].shipsIcons)
 const currentIcons = (brand: 'staff' | 'shop' | null, roles: Role[]): string[] =>
   Object.entries(ledger.immutable)
     .filter(([, entry]) => (brand === null || entry.brand === brand) && roles.includes(entry.role))
     .map(([file]) => file)
 const manifestIcons = (manifest: Manifest, purpose: string): string[] =>
   manifest.icons.filter((icon) => icon.purpose.split(/\s+/).includes(purpose)).map((icon) => icon.src.replace(/^\//, ''))
+const manifestIconsOf = (manifests: Manifest[], purpose: string): string[] => manifests.flatMap((manifest) => manifestIcons(manifest, purpose))
 
 const PNG_SIGNATURE = '89504e470d0a1a0a'
 
@@ -157,7 +170,7 @@ function icoEntries(bytes: Buffer): { size: number; payload: Buffer }[] {
 const unique = (files: string[]): string[] => [...new Set(files)].sort()
 
 test('every maskable icon fills the launcher shape: the whole mark inside the safe circle, flat field outside it', () => {
-  const maskables = unique([...manifestIcons(staffManifest, 'maskable'), ...manifestIcons(shopManifest, 'maskable'), ...currentIcons(null, ['maskable'])])
+  const maskables = unique([...manifestIconsOf(staffManifests, 'maskable'), ...manifestIconsOf(shippedShopManifests, 'maskable'), ...currentIcons(null, ['maskable'])])
   assert.ok(maskables.length >= 4, 'both apps list maskable icons')
   const faults: string[] = []
   for (const file of maskables) {
@@ -173,8 +186,8 @@ test('every maskable icon fills the launcher shape: the whole mark inside the sa
 
 test('the shop icons show the owner\'s L mark alone on a flat field, never the words or the poster', () => {
   const shopIcons = unique([
-    ...manifestIcons(shopManifest, 'any'),
-    ...manifestIcons(shopManifest, 'maskable'),
+    ...manifestIconsOf(shippedShopManifests, 'any'),
+    ...manifestIconsOf(shippedShopManifests, 'maskable'),
     ...currentIcons('shop', ['any', 'maskable', 'apple']).filter((file) => file.endsWith('.png')),
   ])
   const markAspect = OWNER_LOGO_MARK.width / OWNER_LOGO_MARK.height
@@ -187,6 +200,19 @@ test('the shop icons show the owner\'s L mark alone on a flat field, never the w
     if (shape.reach < MIN_MARK_REACH || shape.reach > MAX_SHOP_MARK_REACH) faults.push(`${file}: the mark reaches ${shape.reach.toFixed(3)} x side, outside ${MIN_MARK_REACH}..${MAX_SHOP_MARK_REACH}`)
   }
   assert.deepEqual(faults, [])
+})
+
+test("every client's manifests offer any and maskable icons at 192 and 512, the staff ones the shared staff art", () => {
+  for (const [index, { record }] of clients.entries()) {
+    const sizes = (manifest: Manifest, purpose: string): string[] => (manifest.icons as Array<{ src: string; sizes?: string; purpose: string }>)
+      .filter((icon) => icon.purpose === purpose).map((icon) => icon.sizes ?? '').sort()
+    for (const purpose of ['any', 'maskable']) {
+      assert.deepEqual(sizes(staffManifests[index], purpose), ['192x192', '512x512'], `${record.id}: staff ${purpose}`)
+      assert.deepEqual(sizes(shopManifests[index], purpose), ['192x192', '512x512'], `${record.id}: shop ${purpose}`)
+    }
+    assert.deepEqual(unique(manifestIconsOf([staffManifests[index]], 'any')), ['icon-192.png', 'icon-512.png'], `${record.id}: the staff app wears the shared BO art`)
+    for (const file of manifestIconsOf([shopManifests[index]], 'any')) assert.ok(`/${file}`.startsWith(record.iconPrefix), `${record.id}: ${file} is the client's own art`)
+  }
 })
 
 test('the ledger names every icon in frontend/public, and new art gets a new file name', () => {

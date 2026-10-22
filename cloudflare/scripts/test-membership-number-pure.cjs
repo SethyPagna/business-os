@@ -14,6 +14,9 @@
 //   3. concurrent minting -- the UNIQUE index arbitrates and the loser retries
 //   4. one minter: no source file mints its own membership number any more
 //   5. migration 0110 backfilling existing rows into the same sequence
+//   6. the prefix is the deployment's, not Leang's (Oct 22 2026): SM- and M-
+//      sequences never see LC- rows, an invalid prefix throws before any SQL,
+//      and the browser's display helper agrees with the Worker per prefix
 //
 // Run (from cloudflare/): node scripts/test-membership-number-pure.cjs
 
@@ -51,32 +54,51 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const membership = loadReal('lib/membershipNumber.ts')
+const { leangVars, skipLeang } = require('./harness/wrangler_vars.cjs')
+
+// The house prefix. Every function takes the prefix since Oct 22 2026 (it comes
+// from the client identity, BUSINESS_OS_MEMBERSHIP_PREFIX); the LC- literals
+// below are what that prefix must produce. It is a literal here because the
+// prefix is a parameter of the functions under test; that Leang's own
+// configuration says LC- is pinned below where its private render exists.
+const LC = 'LC-'
 
 let checks = 0
 const check = (fn) => { fn(); checks += 1 }
 
 // --- 1. the house format --------------------------------------------------
 
-check(() => assert.equal(membership.MEMBERSHIP_PREFIX, 'LC-', 'the house prefix is LC- (Leang Cosmetic)'))
-check(() => assert.equal(membership.formatMembershipNumber(1), 'LC-00001'))
-check(() => assert.equal(membership.formatMembershipNumber(4966), 'LC-04966'))
-check(() => assert.equal(membership.formatMembershipNumber(99999), 'LC-99999'))
+{
+  const leang = leangVars('wrangler.toml')
+  if (leang) check(() => assert.equal(leang.BUSINESS_OS_MEMBERSHIP_PREFIX, LC, 'the house prefix is LC- (Leang Cosmetic)'))
+  else skipLeang('test-membership-number-pure', "Leang's configured membership prefix")
+}
+// Changed Oct 22 2026: MEMBERSHIP_PREFIX, MEMBERSHIP_PLACEHOLDER and
+// MEMBERSHIP_SQL_GLOB were exports that baked LC- into the Worker for every
+// client. None may come back: a default would silently number Second Shop's
+// customers LC-00001.
+for (const removed of ['MEMBERSHIP_PREFIX', 'MEMBERSHIP_PLACEHOLDER', 'MEMBERSHIP_SQL_GLOB']) {
+  check(() => assert.equal(membership[removed], undefined, removed + " must stay removed: the prefix is the deployment's"))
+}
+check(() => assert.equal(membership.formatMembershipNumber(1, LC), 'LC-00001'))
+check(() => assert.equal(membership.formatMembershipNumber(4966, LC), 'LC-04966'))
+check(() => assert.equal(membership.formatMembershipNumber(99999, LC), 'LC-99999'))
 // Past the padded width the format grows rather than wrapping or truncating.
-check(() => assert.equal(membership.formatMembershipNumber(100000), 'LC-100000'))
-check(() => assert.throws(() => membership.formatMembershipNumber(0), /positive integer/))
-check(() => assert.throws(() => membership.formatMembershipNumber(-1), /positive integer/))
+check(() => assert.equal(membership.formatMembershipNumber(100000, LC), 'LC-100000'))
+check(() => assert.throws(() => membership.formatMembershipNumber(0, LC), /positive integer/))
+check(() => assert.throws(() => membership.formatMembershipNumber(-1, LC), /positive integer/))
 
-check(() => assert.equal(membership.parseMembershipSequence('LC-00042'), 42))
-check(() => assert.equal(membership.parseMembershipSequence('  lc-42  '), 42))
-check(() => assert.equal(membership.parseMembershipSequence('LC-100000'), 100000))
+check(() => assert.equal(membership.parseMembershipSequence('LC-00042', LC), 42))
+check(() => assert.equal(membership.parseMembershipSequence('  lc-42  ', LC), 42))
+check(() => assert.equal(membership.parseMembershipSequence('LC-100000', LC), 100000))
 // The legacy random format is deliberately NOT part of the sequence: such a
 // row keeps its number and simply doesn't reserve a sequence slot.
-check(() => assert.equal(membership.parseMembershipSequence('LCMN-A1B2C3D4'), null))
-check(() => assert.equal(membership.parseMembershipSequence('LC-00000'), null))
-check(() => assert.equal(membership.parseMembershipSequence('LC-'), null))
-check(() => assert.equal(membership.parseMembershipSequence('LC-12A'), null))
-check(() => assert.equal(membership.parseMembershipSequence(null), null))
-check(() => assert.equal(membership.parseMembershipSequence(''), null))
+check(() => assert.equal(membership.parseMembershipSequence('LCMN-A1B2C3D4', LC), null))
+check(() => assert.equal(membership.parseMembershipSequence('LC-00000', LC), null))
+check(() => assert.equal(membership.parseMembershipSequence('LC-', LC), null))
+check(() => assert.equal(membership.parseMembershipSequence('LC-12A', LC), null))
+check(() => assert.equal(membership.parseMembershipSequence(null, LC), null))
+check(() => assert.equal(membership.parseMembershipSequence('', LC), null))
 
 // --- 2. the gap-fill rule -------------------------------------------------
 
@@ -92,7 +114,7 @@ check(() => assert.deepEqual(
   'a batch fills every hole in ascending order, then continues past the end',
 ))
 
-const allocate = membership.createMembershipNumberAllocator(['LC-00001', 'LC-00003', null, '', 'LCMN-DEADBEEF'])
+const allocate = membership.createMembershipNumberAllocator(['LC-00001', 'LC-00003', null, '', 'LCMN-DEADBEEF'], LC)
 check(() => assert.equal(allocate(), 'LC-00002', 'the hole at 2 is filled before the sequence grows past 3'))
 check(() => assert.equal(allocate(), 'LC-00004', 'the next call continues past the already-taken 3'))
 check(() => assert.equal(allocate(), 'LC-00005', 'each call remembers what it has already handed out'))
@@ -140,25 +162,25 @@ async function main() {
   // code disagreed on every one of these assertions.
   insertCustomer('Beta', 'LC-00002')
   insertCustomer('Gamma', 'LC-00004')
-  const minted = await membership.mintMembershipNumber(db)
+  const minted = await membership.mintMembershipNumber(db, LC)
   assert.equal(minted, 'LC-00003', 'the hole at 3 is filled before the sequence grows; a legacy LCMN- number does not block')
 
   // A portal account can hold a number with no matching customer row yet
   // (e.g. a signup whose contact fold failed) -- mint must see it too, since
   // customers and portal_accounts share ONE sequence.
   insertPortalAccount('LC-00003')
-  const mintedAfterPortal = await membership.mintMembershipNumber(db)
+  const mintedAfterPortal = await membership.mintMembershipNumber(db, LC)
   assert.equal(mintedAfterPortal, 'LC-00005', 'portal_accounts.membership_id reserves its slot even with no matching customer row')
 
   // extraTaken still folds in numbers held by neither table yet (e.g. other
   // rows already assigned earlier in the same in-flight import batch).
-  const mintedWithExtra = await membership.mintMembershipNumber(db, ['LC-00005'])
+  const mintedWithExtra = await membership.mintMembershipNumber(db, LC, ['LC-00005'])
   assert.equal(mintedWithExtra, 'LC-00006', 'extraTaken is unioned with both tables')
 
   // Concurrent-collision retry still works: the DB unique index is the final
   // arbiter when two writers mint the same instant, and the loser re-mints.
   let raceAttempts = 0
-  const recovered = await membership.withMintedMembershipNumber(db, async (number) => {
+  const recovered = await membership.withMintedMembershipNumber(db, LC, async (number) => {
     raceAttempts += 1
     if (raceAttempts === 1) insertCustomer('Interloper', number)
     insertCustomer('Racer', number)
@@ -195,12 +217,12 @@ async function main() {
   }
   paddedRaw.prepare("INSERT INTO customers (name, membership_number) VALUES ('Padded', ' LC-00001 '), ('Plain', 'LC-00002')").run()
   assert.equal(
-    await membership.mintMembershipNumber(paddedDb), 'LC-00003',
+    await membership.mintMembershipNumber(paddedDb, LC), 'LC-00003',
     'a whitespace-padded " LC-00001 " is taken -- the glob trims exactly like parseMembershipSequence',
   )
   paddedRaw.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (' lc-00003 ', 'Padded Portal', '099222333', 'x')").run()
   assert.equal(
-    await membership.mintMembershipNumber(paddedDb), 'LC-00004',
+    await membership.mintMembershipNumber(paddedDb, LC), 'LC-00004',
     'the same trim covers portal_accounts.membership_id -- ONE glob, both columns',
   )
   checks += 2
@@ -212,6 +234,69 @@ async function main() {
     seen.add(row.membership_number)
   }
   checks += 1
+
+  // --- Second Shop: the same code under another prefix (Oct 22 2026) -----------
+  // Rows from three families sit side by side: SM-, LC- and the neutral M-.
+  // Each prefix may only see its own, which is what keeps a second client's
+  // sequence from being steered by the first one's numbers (or by a shorter
+  // prefix that is the tail of a longer one: M- vs SM-).
+  const secondRaw = openDb(loadAll())
+  const secondDb = {
+    prepare(sql) {
+      const stmt = secondRaw.prepare(sql)
+      return { get: async (p) => stmt.get(p), all: async (p) => stmt.all(p) || [], run: async (p) => stmt.run(p) }
+    },
+  }
+  const secondInsert = secondRaw.prepare('INSERT INTO customers (name, membership_number) VALUES (@name, @n)')
+  for (const n of ['SM-00001', 'sm-00003', ' SM-00004 ', 'SM-12A', 'SM-', 'SM-\u17e0\u17e0\u17e0\u17e1\u17e2', 'LC-00002', 'M-00007']) {
+    secondInsert.run({ name: 'c ' + n, n })
+  }
+  const globRows = (prefix) => secondRaw
+    .prepare('SELECT membership_number AS n FROM customers WHERE ' + membership.membershipGlob('membership_number', prefix) + ' ORDER BY id')
+    .all().map((row) => row.n)
+  assert.deepEqual(globRows('SM-'), ['SM-00001', 'sm-00003', ' SM-00004 '], 'the SM- glob selects sm- house rows only, any case, trimmed; not SM-12A, a bare prefix, Khmer digits, LC- or M-')
+  assert.deepEqual(globRows('LC-'), ['LC-00002'])
+  assert.deepEqual(globRows('M-'), ['M-00007'], 'M- must not pick up SM-00001: GLOB anchors at the start')
+  assert.equal(await membership.mintMembershipNumber(secondDb, 'SM-'), 'SM-00002', 'LC-00002 does not reserve slot 2 for Second Shop')
+  assert.equal(await membership.mintMembershipNumber(secondDb, 'LC-'), 'LC-00001', 'and SM numbers do not reserve LC slots')
+  assert.equal(await membership.mintMembershipNumber(secondDb, 'M-'), 'M-00001')
+  assert.equal(await membership.mintMembershipNumber(secondDb, 'SM-', ['sm-00002', 'LC-00005']), 'SM-00005', 'extraTaken counts this prefix only')
+  secondRaw.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES ('SM-00002', 'Second Portal', '099111222', 'x')").run()
+  assert.equal(await membership.mintMembershipNumber(secondDb, 'SM-'), 'SM-00005', 'portal_accounts.membership_id reserves its SM slot')
+  checks += 8
+
+  const secondAllocate = membership.createMembershipNumberAllocator(['SM-00001', 'LC-00002', 'SM-00003'], 'SM-')
+  assert.equal(secondAllocate(), 'SM-00002', "the allocator ignores another prefix's numbers")
+  assert.equal(secondAllocate(), 'SM-00004')
+  const secondMinted = await membership.withMintedMembershipNumber(secondDb, 'SM-', async (number) => {
+    secondInsert.run({ name: 'new Second customer', n: number })
+    return number
+  })
+  assert.equal(secondMinted, 'SM-00005', 'withMintedMembershipNumber writes under the prefix it was given')
+  checks += 3
+
+  // A prefix the glob could not safely carry is refused everywhere, before any
+  // SQL or write runs. A caller that forgets the argument fails loudly too:
+  // silently counting zero rows would hand out duplicates of the first number.
+  const refused = ['', 'sm-', 'SM', 'S*-', 'S[M]-', "S'-", 'S M-', 'TOOLONGX-', '1SM-', undefined, null, 5]
+  let writes = 0
+  for (const bad of refused) {
+    assert.throws(() => membership.formatMembershipNumber(1, bad), /Invalid membership prefix/, 'format ' + String(bad))
+    assert.throws(() => membership.parseMembershipSequence('SM-00001', bad), /Invalid membership prefix/, 'parse ' + String(bad))
+    assert.throws(() => membership.isHouseMembershipNumber('SM-00001', bad), /Invalid membership prefix/, 'isHouse ' + String(bad))
+    assert.throws(() => membership.membershipGlob('membership_number', bad), /Invalid membership prefix/, 'glob ' + String(bad))
+    assert.throws(() => membership.createMembershipNumberAllocator(['SM-00001'], bad), /Invalid membership prefix/, 'allocator ' + String(bad))
+    await assert.rejects(() => membership.mintMembershipNumber(secondDb, bad), /Invalid membership prefix/, 'mint ' + String(bad))
+    await assert.rejects(() => membership.withMintedMembershipNumber(secondDb, bad, async () => { writes += 1 }), /Invalid membership prefix/, 'withMinted ' + String(bad))
+  }
+  assert.equal(writes, 0, 'an invalid prefix never reaches the write')
+  assert.throws(() => membership.formatMembershipNumber(1), /Invalid membership prefix/, 'a caller that forgets the prefix argument fails loudly')
+  assert.throws(() => membership.parseMembershipSequence('LC-00001'), /Invalid membership prefix/)
+  // Valid shapes: a letter, then letters/digits up to six in all (A12345-), ending in a hyphen.
+  for (const good of ['M-', 'SM-', 'LC-', 'SHOP1-', 'A12345-']) {
+    assert.equal(membership.formatMembershipNumber(1, good), good + '00001', good)
+  }
+  checks += 6
 }
 
 // --- 4. one minter, not four ----------------------------------------------
@@ -243,7 +328,44 @@ check(() => assert.equal(
   /export function generateCustomerMembershipNumber/.test(frontendHelper), false,
   'the browser must not compose membership numbers -- a pre-filled value defeats the server sequence',
 ))
-check(() => assert.match(frontendHelper, /CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 'the frontend shows the LC- house format'))
+
+// The browser's display helper is the Worker's counterpart. Its prefix comes
+// from the client identity (it replaced the hard-coded CUSTOMER_MEMBERSHIP_PREFIX
+// = 'LC' on Oct 22 2026), so run the real file with the identity stubbed and
+// hold it to the Worker's own answers.
+const identityPrefix = { current: 'LC-' }
+const frontendHelperModule = (() => {
+  const { outputText } = ts.transpileModule(frontendHelper, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'customerMembershipNumber.ts',
+  })
+  const moduleObj = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(moduleObj.exports, (request) => {
+    assert.equal(request, '../../app/clientIdentity.ts', 'the helper reads nothing but the client identity')
+    return { getClientIdentity: () => ({ membershipPrefix: identityPrefix.current }) }
+  }, moduleObj)
+  return moduleObj.exports
+})()
+check(() => assert.equal(frontendHelperModule.customerMembershipPlaceholder(), 'LC-00001', "the placeholder follows the identity's prefix"))
+check(() => {
+  identityPrefix.current = 'SM-'
+  try {
+    assert.equal(frontendHelperModule.customerMembershipPlaceholder(), 'SM-00001')
+    assert.equal(frontendHelperModule.isHouseCustomerMembershipNumber('sm-00042'), true)
+    assert.equal(frontendHelperModule.isHouseCustomerMembershipNumber('LC-00042'), false, "another client's number is not this client's house format")
+  } finally {
+    identityPrefix.current = 'LC-'
+  }
+})
+for (const prefix of ['LC-', 'SM-', 'M-']) {
+  check(() => assert.equal(frontendHelperModule.customerMembershipPlaceholder(prefix), membership.formatMembershipNumber(1, prefix), "placeholder == the server's first number: " + prefix))
+  for (const value of ['LC-00042', ' lc-00042 ', 'SM-00042', 'sm-7', 'M-00001', 'LC-12A', 'LC-', 'SM-', 'LCMN-DEADBEEF', 'SM-\u17e1\u17e2', '', null, undefined]) {
+    check(() => assert.equal(
+      frontendHelperModule.isHouseCustomerMembershipNumber(value, prefix), membership.isHouseMembershipNumber(value, prefix),
+      'browser and Worker agree on ' + JSON.stringify(value) + ' under ' + prefix,
+    ))
+  }
+}
 
 // --- 5. the backfill migration --------------------------------------------
 

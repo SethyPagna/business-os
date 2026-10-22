@@ -8,18 +8,20 @@
 // sequence entirely: the create route only mints when the submitted number is
 // blank, so a pre-filled random value always won.
 //
-// The house format is `LC-#####` (Leang Cosmetic), zero-padded, and the
-// sequence gap-fills -- a number freed by a deleted or merged customer is
-// reused before the sequence grows. Neither of those is knowable from the
+// The house format is the deployment's prefix plus a zero-padded number
+// (`LC-00042` at Leang Cosmetics; the prefix comes from the client identity),
+// and the sequence gap-fills -- a number freed by a deleted or merged customer
+// is reused before the sequence grows. Neither of those is knowable from the
 // browser, which is exactly why minting belongs on the server. What is left
 // here is display and validation only.
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 
-export const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'
 export const CUSTOMER_MEMBERSHIP_DIGITS = 5
-/** Example shown in the input, never submitted. */
-export const CUSTOMER_MEMBERSHIP_PLACEHOLDER = 'LC-00001'
 
-const MEMBERSHIP_PATTERN = /^LC-\d+$/
+/** Example shown in the input, never submitted. */
+export function customerMembershipPlaceholder(prefix: string = getClientIdentity().membershipPrefix): string {
+  return `${prefix}${'1'.padStart(CUSTOMER_MEMBERSHIP_DIGITS, '0')}`
+}
 
 /** Trims and upper-cases, the same normalisation the server stores. */
 export function normalizeCustomerMembershipNumber(value: unknown): string {
@@ -27,6 +29,7 @@ export function normalizeCustomerMembershipNumber(value: unknown): string {
 }
 
 /** True when the value already carries the house format. */
-export function isHouseCustomerMembershipNumber(value: unknown): boolean {
-  return MEMBERSHIP_PATTERN.test(normalizeCustomerMembershipNumber(value))
+export function isHouseCustomerMembershipNumber(value: unknown, prefix: string = getClientIdentity().membershipPrefix): boolean {
+  const normalized = normalizeCustomerMembershipNumber(value)
+  return normalized.startsWith(prefix) && /^\d+$/.test(normalized.slice(prefix.length))
 }

@@ -3,6 +3,15 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import * as clientIdentity from '../src/app/clientIdentity.ts'
+import { EXAMPLE_RECORD, primeClientIdentity, shopClients } from './clientFixtureIdentity.ts'
+
+// The band names the shop from the page's client identity: render it as the neutral
+// fixture client's shop host does (clients/example.env rendered, see
+// clientFixtureIdentity.ts). The host gates below also run on Leang Cosmetics' hosts
+// where this machine has the private Records/Clients/leang.env (else one SKIP line).
+primeClientIdentity(clientIdentity.getClientIdentity)
+const clients = shopClients('installOffer.test', "Leang's staff and shop hosts in the install gates")
 
 // PWA-3a install offer (PWA-FINAL D7). Owner defaults of 28 Sep 2026: a closed
 // install bar never returns on that device, and desktops get the account-menu
@@ -69,7 +78,7 @@ type Device = {
 
 function useDevice(device: Device): { window: EventTarget; storage: Storage } {
   const storage = device.storage ?? memoryStorage()
-  const hostname = device.hostname ?? 'admin.leangbeauty.com'
+  const hostname = device.hostname ?? EXAMPLE_RECORD.adminHost
   const win = Object.assign(new EventTarget(), {
     localStorage: storage,
     sessionStorage: memoryStorage(),
@@ -367,6 +376,7 @@ const pathRouting = await import('../src/app/pathRouting.ts')
 const compileBand = (install: InstallModule): ComponentModule => compileComponent('src/components/shared/InstallPromptBand.tsx', {
   '../../utils/standaloneNavigation.ts': install,
   '../../app/pathRouting.ts': pathRouting,
+  '../../app/clientIdentity.ts': clientIdentity,
   '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
   './InfoHint.tsx': InfoHintStub,
 })
@@ -499,11 +509,13 @@ async function renderStaffBand(hostname: string, language: Language): Promise<st
 }
 
 await check('the staff band shows the pack text on the admin host and nothing on the shop host', async () => {
-  for (const language of ['en', 'km'] as const) {
-    const html = await renderStaffBand('admin.leangbeauty.com', language)
-    assert.ok(visibleText(html).includes(String(readPack(language).ios_install_hint)), `${language}: the admin host shows the band in the UI language`)
+  for (const { record } of clients) {
+    for (const language of ['en', 'km'] as const) {
+      const html = await renderStaffBand(record.adminHost, language)
+      assert.ok(visibleText(html).includes(String(readPack(language).ios_install_hint)), `${record.id} ${language}: the admin host shows the band in the UI language`)
+    }
+    assert.equal(await renderStaffBand(record.shopHost, 'en'), '', `${record.id}: staff signing in on the shop host must not install a shop-named app`)
   }
-  assert.equal(await renderStaffBand('leangbeauty.com', 'en'), '', 'staff signing in on the shop host must not install a shop-named app')
 })
 
 await check('translateFromPack falls back to the Khmer text when the pack has no value', async () => {
@@ -536,9 +548,9 @@ await check('the staff sign-in screen carries the band; the spinner and the forc
   assert.doesNotMatch(forced, /IosInstallHint/, 'no band over the forced password change')
 })
 
-await check('the staff loading screens say Leang Cosmetics Admin', () => {
+await check('the staff loading screens name the staff app from the client identity', () => {
   const titles = [...appSource.matchAll(/<h1 className="business-os-initial-title">([^<]*)<\/h1>/g)].map(([, title]) => title)
-  assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
+  assert.deepEqual(titles, ['{getClientIdentity().adminTitle}', '{getClientIdentity().adminTitle}'])
 })
 
 await check('the staff account menu offers Install next to Update, on the admin host, whenever an install is possible', () => {
@@ -595,7 +607,7 @@ await check('install sheet texts carry their own Khmer, and every inline fallbac
   }
 })
 
-const SHOP_HOST = 'leangbeauty.com'
+const SHOP_HOST = EXAMPLE_RECORD.shopHost
 const SHOP_NAMES_NO_STAFF = /admin|staff|Business OS|បុគ្គលិក|អ្នកគ្រប់គ្រង/i
 const SHOP_BUTTON_CLASS = 'shop-drawer-icon-button'
 
@@ -750,12 +762,10 @@ await check('install button texts carry their own Khmer, matching the packs', ()
 
 await check('the band and button gate reads the host: admin hosts are refused, shop hosts are not', () => {
   for (const [hostname, admin] of [
-    ['admin.leangbeauty.com', true],
+    ...clients.flatMap(({ record }) => [[record.adminHost, true], [record.shopHost, false], [record.wwwHost, false]] as const),
     ['localhost', true],
     ['127.0.0.1', true],
     ['[::1]', true],
-    [SHOP_HOST, false],
-    ['www.leangbeauty.com', false],
   ] as const) {
     useDevice({ userAgent: USER_AGENTS.iphoneSafari, hostname })
     assert.equal(pathRouting.isAdminHostname(), admin, `${hostname}: isAdminHostname`)

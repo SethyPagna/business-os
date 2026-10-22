@@ -102,7 +102,7 @@ const VARIABLES = [
   // optional: one left out (or none) is left out of [vars] and the code keeps its neutral default. They are
   // the Worker variables BUSINESS_OS_<NAME>.
   ...[
-    ['SHOP_NAME', 'Shop name: page title, install name, two-factor issuer and storefront copy. Also makes the Worker build /manifest.json and /portal-manifest.json from the identity.', NOT_TOML_UNSAFE_NAME, 'Example Shop'],
+    ['SHOP_NAME', 'Shop name: page title, install name, two-factor issuer and storefront copy.', NOT_TOML_UNSAFE_NAME, 'Example Shop'],
     ['SHOP_NAME_KM', 'Shop name in Khmer.', NOT_TOML_UNSAFE_NAME, '(the name in Khmer script)'],
     ['SHOP_ALIAS', 'Another name customers know the shop by.', NOT_TOML_UNSAFE_NAME, 'Example'],
     ['SHOP_CATEGORY', 'Kind of shop, for storefront wording (for example beauty). Left out: general-shop wording.', /^[a-z][a-z0-9_-]{0,31}$/, 'general'],
@@ -113,10 +113,6 @@ const VARIABLES = [
     name, kind: 'identity', workerVar: `BUSINESS_OS_${name}`, default: '', allowEmpty: true, pattern, example: '', shown,
     doc: `${doc} Optional.`,
   })),
-  {
-    name: 'MANIFEST_ROUTES', kind: 'identity', default: 'false', pattern: /^(?:true|false)$/, example: 'false', shown: 'true',
-    doc: 'true hands /manifest.json and /portal-manifest.json to the Worker (run_worker_first), which builds both from the shop identity. Set it only once the deployed code does (release 6.0.956 or later); before that those two paths are static files and a Worker route would 404 them. Optional.',
-  },
   { name: 'FORWARDER_NAME', kind: 'forwarder', allowEmpty: true, default: '', pattern: /^[a-z0-9][a-z0-9-]{0,62}$/, example: '', shown: 'bm-admin',
     doc: 'Name of a second, tiny Worker that hands every request to this client\'s Worker over a service binding, so the staff app has an address of its own on workers.dev (<client>-admin.<subdomain>.workers.dev). Rendered to cloudflare/admin-forwarder/wrangler.toml and deployed by hand (docs/setup/multi-client.md). Optional; none or empty: no forwarder.' },
   // Free text that explains a client's history inside the rendered file. They
@@ -142,7 +138,6 @@ const COMPUTED_SOURCES = {
   ROUTE_LINES: ['ROUTES'],
   PREVIEW_URLS_LINE: ['WORKERS_DEV'],
   IDENTITY_VARS: IDENTITY_NAMES,
-  MANIFEST_ROUTE_LINE: ['MANIFEST_ROUTES'],
   IMAGES_ON: ['IMAGES_BINDING'],
   VERSION_METADATA_ON: ['VERSION_METADATA'],
 }
@@ -151,6 +146,11 @@ const PAIRS = [['GOOGLE_LOGIN_CLIENT_ID', 'GOOGLE_LOGIN_REDIRECT_URI'], ['GOOGLE
 const COMPUTED = Object.keys(COMPUTED_SOURCES)
 
 const BY_NAME = new Map(VARIABLES.map((v) => [v.name, v]))
+// Variables an earlier release had. A client file that still sets one is told why it is gone, not only that the
+// name is unknown. (GitHub variables are read leniently, so a leftover one there is ignored without a message.)
+const RETIRED = {
+  MANIFEST_ROUTES: 'was retired in 6.0.962: the code always serves /manifest.json and /portal-manifest.json from the shop identity, so the template always lists both routes; delete the line',
+}
 const PLANS = ['paid', 'free']
 
 class RenderError extends Error {
@@ -248,7 +248,7 @@ function resolveValues(source, { strict = false } = {}) {
   const keys = source instanceof Map ? [...source.keys()] : Object.keys(source)
   const problems = []
   if (strict) {
-    for (const k of keys) if (!BY_NAME.has(k)) problems.push(`${k} is not a variable this template knows`)
+    for (const k of keys) if (!BY_NAME.has(k)) problems.push(Object.prototype.hasOwnProperty.call(RETIRED, k) ? `${k} ${RETIRED[k]}` : `${k} is not a variable this template knows`)
   }
   const out = {}
   for (const v of VARIABLES) {
@@ -296,9 +296,6 @@ function computed(values) {
     PREVIEW_URLS_LINE: values.WORKERS_DEV === 'true' ? 'preview_urls = false' : '',
     // The identity variables that are set, as Worker [vars], in a fixed order.
     IDENTITY_VARS: IDENTITY_NAMES.filter((n) => values[n]).map((n) => `BUSINESS_OS_${n} = "${values[n]}"`).join('\n'),
-    // Once the deployed code builds both manifests from the identity, the asset layer must hand those two
-    // paths to the Worker instead of answering with the static files.
-    MANIFEST_ROUTE_LINE: values.MANIFEST_ROUTES === 'true' ? '  "/manifest.json", "/portal-manifest.json",' : '',
     IMAGES_ON: values.IMAGES_BINDING === 'true' ? 'true' : '',
     VERSION_METADATA_ON: values.VERSION_METADATA === 'true' ? 'true' : '',
   }

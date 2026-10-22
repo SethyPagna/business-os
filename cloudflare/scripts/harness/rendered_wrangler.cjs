@@ -9,6 +9,8 @@
 //   wrangler.paid()          // text of a rendered wrangler.toml
 //   wrangler.free()          // text of a rendered wrangler.free.toml
 //   wrangler.values          // the fixture's resolved variables
+//   wrangler.identity        // a neutral shop identity (Example Shop) for tests that need the identity variables set
+//   wrangler.paid(wrangler.identity)    // the same render with that identity: what the identity tests read
 //   wrangler.paid({ ROUTES: 'none' })   // the same with one variable changed
 //   wrangler.clientEnvFile()   // path of the private leang.env when this machine has it, else null
 //   wrangler.clientRender('paid')   // the private client's own render (null where absent)
@@ -35,6 +37,20 @@ function valuesWith(overrides = {}) {
 
 const render = (plan, overrides) => lib.renderVariant(template(), valuesWith(overrides), plan)
 
+// clients/example.env leaves the seven identity variables empty (the neutral Business OS defaults). Tests that exercise a
+// client WITH an identity use this one: the same shape a real client has (a name, its Khmer spelling, an alias, a
+// category, an icon file prefix, a staff app name, a membership prefix), with neutral values. It is a committed test
+// fixture, not a client: nothing here is any shop's real value.
+const IDENTITY = Object.freeze({
+  SHOP_NAME: 'Example Shop',
+  SHOP_NAME_KM: 'ហាងគំរូ',
+  SHOP_ALIAS: 'Example Cosmetics',
+  SHOP_CATEGORY: 'beauty',
+  SHOP_ICON_PREFIX: '/example-shop-',
+  ADMIN_SHORT_NAME: 'Ex Admin',
+  MEMBERSHIP_PREFIX: 'EX-',
+})
+
 module.exports = {
   ROOT,
   TEMPLATE_PATH,
@@ -44,6 +60,7 @@ module.exports = {
   template,
   get values() { return valuesWith() },
   valuesWith,
+  identity: IDENTITY,
   paid: (overrides) => render('paid', overrides),
   free: (overrides) => render('free', overrides),
   // The real client's values live outside the repository (never committed); null where they are absent (CI, a fresh clone).

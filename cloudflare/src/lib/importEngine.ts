@@ -86,6 +86,7 @@ import {
 } from './importCsv'
 import { parseImportCost, importCostSource, parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
+import { resolveClientIdentity } from './clientIdentity'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
@@ -2468,7 +2469,7 @@ export async function classifyProducts(
   return results
 }
 
-export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppliers' | 'delivery_contacts', rows: ParsedCsvRow[], policyJson?: string | null): Promise<ImportRowResult[]> {
+export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppliers' | 'delivery_contacts', rows: ParsedCsvRow[], policyJson: string | null | undefined, membershipPrefix: string): Promise<ImportRowResult[]> {
   const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
   // Full rows (not just id/name/phone) so a matched row can be merged
   // field-by-field against what's actually stored, per getContactMergePolicy.
@@ -2518,7 +2519,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // duplicating routes/contacts.ts's. Two minters on one column is a
   // collision waiting for the day someone imports a spreadsheet while a
   // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
-  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
+  // one house format (the deployment's prefix + `#####`), one gap-fill rule. The allocator is the
   // synchronous flavour, seeded from the full `existing` snapshot this pass
   // already loaded (no D1 round trip per row) plus all supplied IDs, and
   // remembers every number it hands out so blank rows cannot take a later
@@ -2534,7 +2535,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // table gets a say over, so an import that never consulted it could hand a
   // blank row the exact number a pending portal account already holds.
   const portalTaken = table === 'customers'
-    ? (await db.prepare(`SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id')}`).all<{ membership_id: string }>())
+    ? (await db.prepare(`SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id', membershipPrefix)}`).all<{ membership_id: string }>())
       .map((record) => record.membership_id)
     : []
   const nextMembershipNumber = table === 'customers'
@@ -2542,7 +2543,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
         ...existing.map((record) => (record as { membership_number?: unknown }).membership_number),
         ...rows.map((row) => row.membership_number),
         ...portalTaken,
-      ])
+      ], membershipPrefix)
     : (): string => { throw new Error('Membership numbers are customers-only') }
 
   // Same-name-can't-coexist rule applies within one file too, not just
@@ -4582,11 +4583,12 @@ export function preserveExistingMoneyOnBlankCells(
   }
 }
 
-async function classifyRows(db: D1Compat, type: ImportType, rows: ParsedCsvRow[], jobId: string, policyJson?: string | null): Promise<ImportRowResult[]> {
+async function classifyRows(env: Env, db: D1Compat, type: ImportType, rows: ParsedCsvRow[], jobId: string, policyJson?: string | null): Promise<ImportRowResult[]> {
+  const membershipPrefix = resolveClientIdentity(env).membershipPrefix
   if (type === 'products') return classifyProducts(db, rows, jobId, policyJson)
-  if (type === 'customers') return classifyContacts(db, 'customers', rows, policyJson)
-  if (type === 'suppliers') return classifyContacts(db, 'suppliers', rows, policyJson)
-  if (type === 'delivery_contacts') return classifyContacts(db, 'delivery_contacts', rows, policyJson)
+  if (type === 'customers') return classifyContacts(db, 'customers', rows, policyJson, membershipPrefix)
+  if (type === 'suppliers') return classifyContacts(db, 'suppliers', rows, policyJson, membershipPrefix)
+  if (type === 'delivery_contacts') return classifyContacts(db, 'delivery_contacts', rows, policyJson, membershipPrefix)
   if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson), { redirectTarget: importBranchRedirectTarget(policyJson) })
   if (type === 'stock_actions') return classifyUnifiedStockActions(db, rows, policyJson)
   return classifySales(db, rows, { redirectTarget: importBranchRedirectTarget(policyJson) })
@@ -4634,7 +4636,7 @@ export async function loadAndClassify(env: Env, jobId: string, maxRows: number =
   if (!decided) return null
   const rows = decided.rows.slice(0, maxRows)
   const db = getDb(env)
-  const results = await classifyRows(db, decided.type, rows, jobId, decided.policyJson)
+  const results = await classifyRows(env, db, decided.type, rows, jobId, decided.policyJson)
   sw.lap('classifyMs')
   const decisions = getDecisionMap(decided.policyJson)
   for (const result of results) {
@@ -5254,7 +5256,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
     const results = meta.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, meta.policyJson, rowImagePaths)
-      : await classifyRows(db, meta.type, windowRows, jobId, meta.policyJson)
+      : await classifyRows(env, db, meta.type, windowRows, jobId, meta.policyJson)
     sw.lap('classifyChunkMs')
 
     // Cross-chunk in-file duplicate detection for products -- see
@@ -6320,7 +6322,7 @@ async function applyStockActionsContinuation(
     const windowSize = reconcile ? totalRows : stock.classifyWindow ?? STOCK_ACTION_CLASSIFY_WINDOW
     try {
     const windowRows = await readMaterializedWindow(db, jobId, cursor, windowSize, decisions)
-    const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
+    const results = (await classifyRows(env, db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
     sw.lap('classifyChunkMs')
     // Classification runs to the end before any dispatch, so a refusal here leaves every business table untouched.
     await refuseUnconfirmedStockRedirect(db, results)
@@ -6863,7 +6865,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       : deniedImagePaths
     let results = job.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, job.policy_json, rowImagePaths)
-      : await classifyRows(db, job.type, windowRows, jobId, job.policy_json)
+      : await classifyRows(env, db, job.type, windowRows, jobId, job.policy_json)
     for (const result of results) {
       const decision = decisions[String(result.rowNumber)]
       if (decision?.action === 'skip') result.action = 'skip'

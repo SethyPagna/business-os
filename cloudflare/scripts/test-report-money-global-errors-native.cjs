@@ -65,10 +65,13 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/reportMoneyPrecision') {
     return originalLoad.call(this, path.join(root, 'src', 'lib', 'reportMoneyPrecision.ts'), parent, isMain)
   }
-  // index.ts iterates APP_DOCUMENT_ROUTES at module scope to register the
-  // admin-host document handler, so this one lib must be the real module: a
-  // harmless proxy is not iterable and the Worker never finishes loading.
-  if (request === './lib/adminDocumentIdentity') return originalLoad.call(this, path.join(root, 'src', 'lib', 'adminDocumentIdentity.ts'), parent, isMain)
+  // index.ts iterates APP_DOCUMENT_ROUTES and MANIFEST_ROUTES at module scope
+  // to register the document and manifest handlers, so these libs must be the
+  // real modules: a harmless proxy is not iterable and the Worker never
+  // finishes loading. queueRoles is pure and rides with them.
+  if (['./lib/documentRoutes', './lib/documentIdentity', './lib/clientIdentity', './lib/queueRoles'].includes(request)) {
+    return originalLoad.call(this, path.join(root, 'src', 'lib', request.slice('./lib/'.length) + '.ts'), parent, isMain)
+  }
   // The F4 origin guard is /api middleware: a harmless proxy returns
   // undefined without calling next(), so every request would die unfinalized.
   if (request === './lib/originGuard') return originalLoad.call(this, path.join(root, 'src', 'lib', 'originGuard.ts'), parent, isMain)

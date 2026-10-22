@@ -35,6 +35,7 @@ import {
   verifyState,
 } from '../lib/googleOauth'
 import type { Env } from '../index'
+import { resolveClientIdentity } from '../lib/clientIdentity'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -53,7 +54,6 @@ const OTP_RECOVERY_LIMIT_MAX = 5
 const OTP_RECOVERY_LIMIT_WINDOW_MS = 15 * 60 * 1000
 // Stable code of the retired /password-reset/otp route (security audit P2-a).
 const PASSWORD_RESET_OTP_RETIRED_CODE = 'PASSWORD_RESET_OTP_RETIRED'
-const ADMIN_APP_NAME = 'Leang Cosmetics Admin'
 
 // Brute-force / credential-stuffing protection on POST /login. Previously
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
@@ -972,8 +972,8 @@ app.post('/otp/setup', requireAuth, async (c) => {
 
   // The issuer is only an authenticator-app label; it does not affect the
   // generated codes. Use the staff app name for newly enrolled devices so
-  // people do not select an old BusinessOS or Leang Beauty entry.
-  const { base32, otpauthUrl } = generateTotpSecret(target.username, ADMIN_APP_NAME)
+  // people do not select an old BusinessOS entry or another client's.
+  const { base32, otpauthUrl } = generateTotpSecret(target.username, resolveClientIdentity(c.env).adminTitle)
   // Without a usable APP_ENCRYPTION_KEY the TOTP secret is refused rather
   // than stored in plaintext; nothing is written and enrollment does not start.
   let encrypted: string
@@ -1361,13 +1361,14 @@ app.get('/oauth/callback', async (c) => {
     oauthMode,
   )
   const basePayload: Record<string, unknown> = { type: 'business-os-oauth', provider: 'google', mode: oauthMode, ts: Date.now() }
+  const appName = resolveClientIdentity(c.env).adminTitle
 
   const fail = (status: 400 | 401 | 500, error: string, title = 'Google sign-in failed') =>
     c.html(buildOauthCallbackHtml({
       payload: { ...basePayload, status: 'error', error },
       targetUrl: returnTarget.url,
       title,
-      message: error || `Please return to ${ADMIN_APP_NAME} and try again.`,
+      message: error || `Please return to ${appName} and try again.`,
     }), status)
 
   if (!stateResult.success) return fail(400, stateResult.error || 'Google sign-in failed.')
@@ -1407,7 +1408,7 @@ app.get('/oauth/callback', async (c) => {
       const finishingUser = actorId ? await getSessionUser(c) : null
       if (!actorId) { callbackPayload = { success: false, error: 'A local user session is required to link Google.' } }
       else if (!finishingUser || Number(finishingUser.id) !== actorId) {
-        callbackPayload = { success: false, error: `Sign in to ${ADMIN_APP_NAME} in this browser as the account you are linking, then connect Google again.` }
+        callbackPayload = { success: false, error: `Sign in to ${appName} in this browser as the account you are linking, then connect Google again.` }
       }
       // S-auth4e: same gate as /oauth/start -- a session that must first
       // replace a publicly known password cannot attach a lasting way in.
@@ -1512,8 +1513,8 @@ app.get('/oauth/callback', async (c) => {
     const successPayload: Record<string, unknown> = { ...basePayload, status: callbackPayload.success === false ? 'error' : 'success', ...callbackPayload }
     const title = successPayload.status === 'success' ? (oauthMode === 'link' ? 'Google account connected' : 'Google sign-in complete') : 'Google sign-in failed'
     const message = successPayload.status === 'success'
-      ? (oauthMode === 'link' ? 'Returning to your profile now.' : `Returning to ${ADMIN_APP_NAME} now.`)
-      : String(successPayload.error || `Please return to ${ADMIN_APP_NAME} and try again.`)
+      ? (oauthMode === 'link' ? 'Returning to your profile now.' : `Returning to ${appName} now.`)
+      : String(successPayload.error || `Please return to ${appName} and try again.`)
     return c.html(buildOauthCallbackHtml({ payload: successPayload, targetUrl: returnTarget.url, title, message }), status)
   } catch (error) {
     // The detail stays in the Worker log; the page the browser renders is generic.

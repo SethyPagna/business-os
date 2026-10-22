@@ -10,8 +10,10 @@
 // imports a spreadsheet while a cashier registers a walk-in -- each source
 // only checked the rows IT knew about.
 //
-// The house format is `LC-#####` (Leang Cosmetic), zero-padded to
-// MEMBERSHIP_SEQUENCE_DIGITS, and the sequence is GAP-FILLING: the next
+// The house format is the deployment's prefix plus a zero-padded number
+// (`LC-00042` at Leang Cosmetics; BUSINESS_OS_MEMBERSHIP_PREFIX, see
+// lib/clientIdentity.ts), MEMBERSHIP_SEQUENCE_DIGITS wide, and the sequence is
+// GAP-FILLING: the next
 // number handed out is the smallest positive integer not currently in use,
 // so a number freed by a deleted/merged customer is reused before the
 // sequence grows.
@@ -55,17 +57,22 @@
 
 import type { D1Compat } from './db'
 
-export const MEMBERSHIP_PREFIX = 'LC-'
 export const MEMBERSHIP_SEQUENCE_DIGITS = 5
-/** Shown as an input placeholder / example. Never written to the database. */
-export const MEMBERSHIP_PLACEHOLDER = 'LC-00001'
+
+// Every function below takes the deployment's prefix (resolveClientIdentity(env)
+// .membershipPrefix). It goes into a SQLite GLOB, so only the validated shape
+// clientIdentity.ts produces is accepted.
+function checkedPrefix(prefix: string): string {
+  if (!/^[A-Z][A-Z0-9]{0,5}-$/.test(prefix)) throw new Error(`Invalid membership prefix: ${JSON.stringify(prefix)}`)
+  return prefix
+}
 
 /**
- * SQLite GLOB fragment selecting rows whose `column` is `LC-`/`lc-` + digits
- * only. Folded to lowercase on both sides: GLOB is case-sensitive (unlike
+ * SQLite GLOB fragment selecting rows whose `column` is the prefix (any case)
+ * + digits only. Folded to lowercase on both sides: GLOB is case-sensitive (unlike
  * LIKE), and a hand-typed membership number is stored exactly as entered --
  * routes/contacts.ts's create/update paths do not force it to uppercase, so
- * a staff-typed `lc-00042` is a real row this must still recognise as taken
+ * a staff-typed `lc-00042` (prefix LC-) is a real row this must still recognise as taken
  * (parseMembershipSequence already treats it as sequence 42 via its own
  * upper-casing; this glob has to agree, or gap-fill would keep handing out
  * a number that only fails at INSERT time via the case-insensitive UNIQUE
@@ -85,24 +92,20 @@ export const MEMBERSHIP_PLACEHOLDER = 'LC-00001'
  * portal_accounts.membership_id into its customers-only allocator seed)
  * shares this ONE glob rather than hand-rolling their own and drifting.
  */
-export function membershipGlob(column: string): string {
-  return `lower(trim(${column})) GLOB 'lc-[0-9]*' AND lower(trim(${column})) NOT GLOB 'lc-*[^0-9]*'`
+export function membershipGlob(column: string, prefix: string): string {
+  const lowered = checkedPrefix(prefix).toLowerCase()
+  return `lower(trim(${column})) GLOB '${lowered}[0-9]*' AND lower(trim(${column})) NOT GLOB '${lowered}*[^0-9]*'`
 }
-
-/** SQLite GLOB that selects rows whose number is `LC-` followed by digits only. */
-export const MEMBERSHIP_SQL_GLOB = membershipGlob('membership_number')
-
-const MEMBERSHIP_PATTERN = /^LC-(\d+)$/
 
 /**
  * `1` -> `LC-00001`. Sequences past the padded width keep their natural width
  * (`LC-100000`) rather than being truncated -- the format grows, it never wraps.
  */
-export function formatMembershipNumber(sequence: number): string {
+export function formatMembershipNumber(sequence: number, prefix: string): string {
   if (!Number.isInteger(sequence) || sequence < 1) {
     throw new Error(`Membership sequence must be a positive integer, got ${String(sequence)}`)
   }
-  return `${MEMBERSHIP_PREFIX}${String(sequence).padStart(MEMBERSHIP_SEQUENCE_DIGITS, '0')}`
+  return `${checkedPrefix(prefix)}${String(sequence).padStart(MEMBERSHIP_SEQUENCE_DIGITS, '0')}`
 }
 
 /**
@@ -111,11 +114,13 @@ export function formatMembershipNumber(sequence: number): string {
  * house sequence" -- such a row keeps its number and simply doesn't
  * participate in gap-filling.
  */
-export function parseMembershipSequence(value: unknown): number | null {
+export function parseMembershipSequence(value: unknown, prefix: string): number | null {
   const raw = String(value ?? '').trim().toUpperCase()
-  const match = MEMBERSHIP_PATTERN.exec(raw)
-  if (!match) return null
-  const sequence = Number(match[1])
+  const house = checkedPrefix(prefix)
+  if (!raw.startsWith(house)) return null
+  const digits = raw.slice(house.length)
+  if (!/^\d+$/.test(digits)) return null
+  const sequence = Number(digits)
   if (!Number.isSafeInteger(sequence) || sequence < 1) return null
   return sequence
 }
@@ -126,8 +131,8 @@ export function normalizeMembershipNumber(value: unknown): string {
 }
 
 /** True when `value` already carries the house format. */
-export function isHouseMembershipNumber(value: unknown): boolean {
-  return parseMembershipSequence(value) !== null
+export function isHouseMembershipNumber(value: unknown, prefix: string): boolean {
+  return parseMembershipSequence(value, prefix) !== null
 }
 
 /**
@@ -179,16 +184,16 @@ export function allocateMembershipSequences(taken: Iterable<number>, count: numb
  * DB-facing minter that unions both tables on every call instead of relying
  * on a caller-supplied snapshot.
  */
-export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>): () => string {
+export function createMembershipNumberAllocator(existingNumbers: Iterable<unknown>, prefix: string): () => string {
   const takenSequences = new Set<number>()
   for (const value of existingNumbers) {
-    const sequence = parseMembershipSequence(value)
+    const sequence = parseMembershipSequence(value, prefix)
     if (sequence !== null) takenSequences.add(sequence)
   }
   return () => {
     const sequence = firstFreeMembershipSequence(takenSequences)
     takenSequences.add(sequence)
-    return formatMembershipNumber(sequence)
+    return formatMembershipNumber(sequence, prefix)
   }
 }
 
@@ -209,30 +214,30 @@ export function createMembershipNumberAllocator(existingNumbers: Iterable<unknow
  * The database's own UNIQUE indexes remain the final arbiter for a lost
  * race; see withMintedMembershipNumber below.
  */
-export async function mintMembershipNumber(db: D1Compat, extraTaken: Iterable<unknown> = []): Promise<string> {
+export async function mintMembershipNumber(db: D1Compat, prefix: string, extraTaken: Iterable<unknown> = []): Promise<string> {
   const sequences: number[] = []
   for (const value of extraTaken) {
-    const sequence = parseMembershipSequence(value)
+    const sequence = parseMembershipSequence(value, prefix)
     if (sequence !== null) sequences.push(sequence)
   }
 
   const customerRows = await db.prepare(
-    `SELECT membership_number FROM customers WHERE ${MEMBERSHIP_SQL_GLOB}`,
+    `SELECT membership_number FROM customers WHERE ${membershipGlob('membership_number', prefix)}`,
   ).all<{ membership_number: string }>()
   for (const row of customerRows) {
-    const sequence = parseMembershipSequence(row.membership_number)
+    const sequence = parseMembershipSequence(row.membership_number, prefix)
     if (sequence !== null) sequences.push(sequence)
   }
 
   const portalRows = await db.prepare(
-    `SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id')}`,
+    `SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id', prefix)}`,
   ).all<{ membership_id: string }>()
   for (const row of portalRows) {
-    const sequence = parseMembershipSequence(row.membership_id)
+    const sequence = parseMembershipSequence(row.membership_id, prefix)
     if (sequence !== null) sequences.push(sequence)
   }
 
-  return formatMembershipNumber(firstFreeMembershipSequence(sequences))
+  return formatMembershipNumber(firstFreeMembershipSequence(sequences), prefix)
 }
 
 /**
@@ -255,12 +260,13 @@ export function isMembershipCollision(error: unknown): boolean {
  */
 export async function withMintedMembershipNumber<T>(
   db: D1Compat,
+  prefix: string,
   write: (membershipNumber: string) => Promise<T>,
   attempts = 5,
 ): Promise<T> {
   let lastError: unknown = null
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const membershipNumber = await mintMembershipNumber(db)
+    const membershipNumber = await mintMembershipNumber(db, prefix)
     try {
       return await write(membershipNumber)
     } catch (error) {

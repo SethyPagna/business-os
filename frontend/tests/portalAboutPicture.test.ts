@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { canWriteSettingKey } from '../src/utils/portalPermissions.ts'
+import { resolveClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { CLIENT_IDENTITY, EXAMPLE_RECORD, leangVars, skipLeang } from './clientFixtureIdentity.ts'
 
 let failed = 0
 const runTest = async (name: string, fn: () => void | Promise<void>): Promise<void> => {
@@ -190,10 +192,15 @@ await runTest('AF-6: both packs carry the five keys beside coverImage, top level
   assert.doesNotMatch(NEW_KEYS.map((key) => km[key]).join(' '), /(?<!ទាន់)សម័យ/)
 })
 
-await runTest('PWA-1 hand-over: the storefront tab title falls back to Leang Cosmetics, never the old name', () => {
+await runTest('PWA-1 hand-over: the storefront tab title falls back to the configured shop name (Leang Cosmetics at Leang, the fixture client\'s name elsewhere), never the old name', () => {
   const source = read('../src/components/catalog/CatalogPage.tsx')
   assert.doesNotMatch(source, /Leang Beauty/)
-  assert.match(page(), /document\.title = titleText \|\| 'Leang Cosmetics'/)
+  assert.match(page(), /const \{ shopName \} = getClientIdentity\(\)/)
+  assert.match(page(), /document\.title = titleText \|\| shopName/)
+  assert.equal(CLIENT_IDENTITY.shopName, EXAMPLE_RECORD.shopName)
+  const leang = leangVars()
+  if (leang) assert.equal(resolveClientIdentity(leang).shopName, 'Leang Cosmetics')
+  else skipLeang('portalAboutPicture.test', "Leang's configured shop name")
 })
 
 if (failed) {

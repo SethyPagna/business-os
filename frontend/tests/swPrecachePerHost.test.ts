@@ -55,14 +55,14 @@ function makeCaches(store: Store) {
   }
 }
 
-function worker(code: string, hostname: string, hash: string, store: Store) {
+function worker(code: string, hostname: string, hash: string, store: Store, html = shell) {
   const origin = `https://${hostname}`
   const fetched: string[] = []
   const listeners: Record<string, (event: unknown) => void> = {}
   const fetch = async (input: unknown) => {
     const path = pathOf(input)
     fetched.push(path)
-    if (path === '/' || path === '/index.html') return basic(new Response(shell, { headers: { 'content-type': 'text/html' } }))
+    if (path === '/' || path === '/index.html') return basic(new Response(html, { headers: { 'content-type': 'text/html' } }))
     if (path === '/business-os-precache.json') return basic(new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } }))
     if (path.endsWith('.css')) return basic(new Response('body{}', { headers: { 'content-type': 'text/css' } }))
     if (path.endsWith('.js')) return basic(new Response('export {}', { headers: { 'content-type': 'text/javascript' } }))
@@ -148,6 +148,31 @@ for (const [label, code] of [['source', source], ['shipped sw.js', shipped]] as 
     await shop.install()
     await shop.request(languagePacks.km)
     assert.equal(shopStore.get('business-os-app-shell-one')?.has('/__business_os_ui_language__'), false)
+  })
+
+  // A workers.dev client (owner, 22 Oct 2026): staff at second-admin.shops-sub.workers.dev, a host
+  // the worker knows only from the identity block the Worker wrote into the shell.
+  await runTest(`a configured staff host installs as the staff app; the shop host and a look-alike stay the storefront (${label})`, async () => {
+    const secondShell = shell.replace('<head>', '<head><script id="business-os-identity" type="application/json">{"shopName":"Second Shop","staffHost":"second-admin.shops-sub.workers.dev"}</script>')
+    const staffStore: Store = new Map()
+    const staff = worker(code, 'second-admin.shops-sub.workers.dev', 'one', staffStore, secondShell)
+    const deferred = await staff.install()
+    assert.deepEqual(assets(staff.fetched), [...required, ...staffShell].sort(), 'the staff shell plan')
+    assert.deepEqual([...deferred].sort(), [...routes].sort())
+    assert.ok(staff.fetched.includes('/manifest.json') && !staff.fetched.includes('/portal-manifest.json'), 'the staff install identity')
+    await staff.request(languagePacks.km)
+    const remembered = await staffStore.get('business-os-app-shell-one')?.get('/__business_os_ui_language__')?.clone().json()
+    assert.equal(remembered?.language, 'km', 'the staff app remembers its language pack')
+
+    for (const hostname of ['second.shops-sub.workers.dev', 'second-admin.shops-sub.workers.dev.evil.com']) {
+      const shopStore: Store = new Map()
+      const shop = worker(code, hostname, 'one', shopStore, secondShell)
+      assert.deepEqual([...await shop.install()], [], `${hostname}: nothing deferred`)
+      assert.deepEqual(assets(shop.fetched), [...required].sort(), `${hostname}: the storefront plan`)
+      assert.ok(shop.fetched.includes('/portal-manifest.json') && !shop.fetched.includes('/manifest.json'), `${hostname}: the shop install identity`)
+      await shop.request(languagePacks.km)
+      assert.equal(shopStore.get('business-os-app-shell-one')?.has('/__business_os_ui_language__'), false, `${hostname}: no language remembered`)
+    }
   })
 }
 

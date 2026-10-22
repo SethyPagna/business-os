@@ -1,5 +1,6 @@
 import { normalizePortalLanguage } from './portalLanguageOptions.ts'
 import type { PortalLanguage } from './portalLanguageOptions.ts'
+import { withShopName } from '../../app/clientIdentity.ts'
 
 type PortalTextMap = Record<string, string>
 
@@ -95,7 +96,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     password: 'ពាក្យសម្ងាត់',
     createPassword: 'បង្កើតពាក្យសម្ងាត់',
     forgotPasswordHint: 'ភ្លេចពាក្យសម្ងាត់? សូមទាក់ទងយើង ដើម្បីកំណត់វាឡើងវិញ។',
-    signupReminder: 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។',
+    signupReminder: 'ប្រសិនបើអ្នកធ្លាប់ទិញពី {shopNames} សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។',
     customer: 'អតិថិជន',
     company: 'ក្រុមហ៊ុន',
     note: 'កំណត់សម្គាល់',
@@ -125,7 +126,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     faqEmptyState: 'មិនទាន់មានសំណួរនៅឡើយទេ។ សូមទាក់ទងយើងគ្រប់ពេល យើងរីករាយជួយអ្នក។',
     logoImage: 'រូបសញ្ញា',
     aiTitle: 'ជំនួយការសម្រស់',
-    aiIntro: "ប្រាប់យើងថាអ្នកកំពុងរកអ្វី ហើយជំនួយការ AI នឹងណែនាំផលិតផលពី Leang Beauty។",
+    aiIntro: "ប្រាប់យើងថាអ្នកកំពុងរកអ្វី ហើយជំនួយការ AI នឹងណែនាំផលិតផលពី {shopAlias}។",
     aiDisclaimer: 'ចម្លើយ AI សម្រាប់យោងប៉ុណ្ណោះ។ សម្រាប់ការណែនាំត្រឹមត្រូវ សូមទាក់ទងក្រុមការងាររបស់ហាង។',
     assistantNotice: 'បង្កើតដោយ AI សម្រាប់យោងប៉ុណ្ណោះ។',
     assistantContactNote: 'សម្រាប់ការប្រឹក្សាត្រឹមត្រូវ សូមទាក់ទងក្រុមការងាររបស់ហាង។',
@@ -163,7 +164,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     removeFromWishlist: 'ដកចេញពីបញ្ជីចង់បាន',
     decreaseQty: 'បន្ថយចំនួន',
     increaseQty: 'បង្កើនចំនួន',
-    noPaymentNotice: 'យើង Leang Cosmetics/Leang Beauty មិនទទួលការទូទាត់តាមអនឡាញទេ — សូមទាក់ទងយើងដើម្បីទិញ។ ឯកជនភាពរបស់អ្នកគឺជាអាទិភាពរបស់យើង។',
+    noPaymentNotice: 'យើង {shopNames} មិនទទួលការទូទាត់តាមអនឡាញទេ — សូមទាក់ទងយើងដើម្បីទិញ។ ឯកជនភាពរបស់អ្នកគឺជាអាទិភាពរបស់យើង។',
     noPaymentNoticeShort: 'មិនមានការទូទាត់តាមអនឡាញទេ — សូមទាក់ទងយើងដើម្បីទិញ។ ដើម្បីសុវត្ថិភាពរបស់អ្នក។',
     contactUs: 'ទាក់ទងយើង',
     contactUsMinimize: 'បង្រួមប៊ូតុងទាក់ទងយើង',
@@ -209,7 +210,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
 export function getPortalLanguageText(language: unknown, key: unknown): string {
   const normalized = normalizePortalLanguage(language)
   const text = normalized ? PORTAL_TEXT_BY_LANGUAGE[normalized]?.[String(key || '')] : undefined
-  return typeof text === 'string' && text.trim() ? text : ''
+  return typeof text === 'string' && text.trim() ? withShopName(text) : ''
 }
 
 // A value equal to one of these English defaults is system text, shown in the shopper's

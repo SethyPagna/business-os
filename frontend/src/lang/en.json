@@ -250,7 +250,7 @@
   "aboutContent": "About content",
   "aboutContentHint": "Tell customers about your story, hours, policies, or services.",
   "aboutEmpty": "Add your first About block to build a richer page with reorderable text, images, and video.",
-  "aboutNoTranslateHint": "If a visitor translates this page with their browser, words in double square brackets stay exactly as written, for example [[Leang Cosmetics]].",
+  "aboutNoTranslateHint": "If a visitor translates this page with their browser, words in double square brackets stay exactly as written, for example [[{shop}]].",
   "aboutTitle": "About title",
   "absorbed_by_store": "Absorbed by store",
   "accent_color": "Accent Color",
@@ -3218,7 +3218,7 @@
   "organization": "Organization",
   "organization_hidden_hint": "Organization details stay hidden until you expand this section.",
   "organization_join_hint": "Search the organization name and select it before signing in.",
-  "organization_join_locked": "Organization creation is currently disabled. This server is prepared for LeangBeauty and future organization-ready expansion.",
+  "organization_join_locked": "Organization creation is currently disabled. This server is prepared for {organization} and future organization-ready expansion.",
   "organization_name": "Organization name",
   "organization_not_selected": "Choose organization",
   "organization_privacy_hint": "Organization identifiers stay hidden here. Only the organization name and role context are shown.",
@@ -3632,7 +3632,7 @@
         },
         "5": {
           "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Cosmetics for more accurate advice?"
+          "question": "How can I contact {shop} for more accurate advice?"
         },
         "6": {
           "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
@@ -3643,7 +3643,7 @@
           "question": "Can I ask whether a product is original or from a specific brand line?"
         },
         "8": {
-          "answer": "Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
+          "answer": "Yes. {shop} carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
           "question": "Do you sell skincare, makeup, hair care, and body care together?"
         },
         "9": {
@@ -3680,7 +3680,7 @@
         },
         "17": {
           "answer": "Yes. The assistant is designed to prioritize products from our current catalogue, then explain why those items fit your question.",
-          "question": "Does the AI only recommend products available at Leang Cosmetics?"
+          "question": "Does the AI only recommend products available at {shop}?"
         },
         "18": {
           "answer": "No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.",
@@ -6416,7 +6416,7 @@
   "replacement_sale_hint": "It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.",
   "historical_settlement": "Recorded as an exchange",
   "membership_number_auto": "Assigned on save",
-  "membership_number_auto_hint": "The next available LC- number is assigned when you save.",
+  "membership_number_auto_hint": "The next available {prefix} number is assigned when you save.",
   "membership_number_preserved_hint": "This existing membership number is preserved and cannot be changed.",
   "add_items_to_sale": "Add items to this sale",
   "add_items_search_placeholder": "Search by name or barcode",
@@ -7137,7 +7137,8 @@
   "merge_duplicates_stop": "Stop and keep completed cases",
   "merge_duplicates_undo_unavailable": "Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.",
   "portal_legal_map_consent_revoke": "Unload map and forget this choice",
-  "portal_legal_footer_independent": "Leang Cosmetics is an independent beauty retailer in Cambodia.",
+  "portal_legal_footer_independent": "{shop} is an independent beauty retailer in Cambodia.",
+  "portal_legal_footer_independent_general": "{shop} is an independent retailer in Cambodia.",
   "portal_legal_business_fallback": "This business",
   "portal_legal_terms_returns_h": "Returns",
   "portal_legal_terms_returns_b": "Returns are accepted within 7 days for unopened items with the receipt.",
@@ -7389,9 +7390,9 @@
   "ios_install_step_menu": "Tap ••• or Share in your browser.",
   "ios_install_step_add": "Tap Add to Home Screen.",
   "ios_install_step_web_app": "Keep Open as Web App on, then tap Add.",
-  "install_shop_band": "Install Leang Cosmetics",
-  "install_shop_ios_hint": "Install Leang Cosmetics: tap ••• or Share, then Add to Home Screen.",
-  "install_shop_detail": "Open Leang Cosmetics from its own icon on your home screen. It needs an internet connection.",
+  "install_shop_band": "Install {shop}",
+  "install_shop_ios_hint": "Install {shop}: tap ••• or Share, then Add to Home Screen.",
+  "install_shop_detail": "Open {shop} from its own icon on your home screen. It needs an internet connection.",
   "stock_import_over_tier_cap": "This stock file has more rows than one import can check against a single live-stock snapshot. Split it into smaller files and import them one after another.",
   "import_preflight_partial": "Only the first rows of this file were checked here. The whole file is still checked when the import itself runs.",
   "catalog_integrity_partial": "Only part of the catalogue was scanned. Products past the limit were not checked, so this result is not a clean bill of health for the whole catalogue.",

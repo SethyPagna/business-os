@@ -84,6 +84,9 @@ const PURE_LIB_SPECIFIERS = [
   // (it replaced nine bare env.IMPORT_QUEUE.send calls). Also pure -- only an
   // `import type` -- and a {} stub turns every chunk tail into a TypeError.
   './queueDispatch',
+  // clientIdentity.ts resolves the membership prefix classifyRows passes on.
+  // Pure (no imports), so it loads for real.
+  './clientIdentity',
 ]
 const pureLibCache = new Map()
 function getPureLib(specifier) {

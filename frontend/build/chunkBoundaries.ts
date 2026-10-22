@@ -5,6 +5,10 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // Startup dependencies must never inherit a feature chunk: HTTP imports
   // actor scope, while authentication reads storage constants at module load.
   ['/src/constants.ts', 'app-constants'],
+  // The client identity (dependency-free) is read at module load by the
+  // storefront, sign-in and loading screens. Under the /src/app/ rule it pulled
+  // 'app-shell' into the storefront's catalog-products closure.
+  ['/src/app/clientIdentity.ts', 'app-constants'],
   ['/src/api/actorReadScope.ts', 'actor-read-scope'],
   // The sign-out fence and its owner helper are static imports of both
   // actorReadScope.ts and http.ts, so they load on every boot anyway (the

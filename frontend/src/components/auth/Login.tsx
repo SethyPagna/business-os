@@ -22,6 +22,7 @@ import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
 import NewPasswordFields from './password/NewPasswordFields.tsx'
 import { takePasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
   beginTrackedRequest,
@@ -35,12 +36,12 @@ const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 // The staff sign-in shows the staff app's own icon, not the storefront's: an
 // explicit request (Aug 25 2026) reversed the earlier storefront default and
 // split the brands by audience; the owner kept the blue BO icon (28 Sep 2026).
-// The name fallback is the shop's (owner, 27 Sep 2026: "Leang Cosmetics"). A
-// logo or name configured in settings wins. The storefront keeps its own icon
+// The name fallback is the shop's (owner, 27 Sep 2026), from the deployment's
+// identity (app/clientIdentity.ts). A logo or name configured in settings wins. The storefront keeps its own icon
 // defaults (PublicCatalogPage.tsx DEFAULT_PUBLIC_PORTAL_ICON, CatalogPage.tsx
 // DEFAULT_PORTAL_ICON_SRC); tests/brandIcons.test.ts pins the icon split.
 const DEFAULT_LOGIN_LOGO_SRC = '/icon-512.png'
-const DEFAULT_LOGIN_BRAND_NAME = 'Leang Cosmetics'
+const LOGIN_IDENTITY = getClientIdentity()
 
 type IdValue = string | number
 type TranslateFunction = (key: string) => string | undefined
@@ -314,8 +315,8 @@ export default function Login() {
   const [organizationMatches, setOrganizationMatches] = useState<OrganizationMatch[]>([])
   const [organizationLoading, setOrganizationLoading] = useState(false)
   const [organizationLocked, setOrganizationLocked] = useState(false)
-  // User-reported ask: "Lock the organization field to LeangCosmetics by
-  // default... Do not remove the ability to unlock/edit -- allow unpinning
+  // User-reported ask: "Lock the organization field to [the shop's
+  // organization] by default... Do not remove the ability to unlock/edit -- allow unpinning
   // specifically when switching to a different organization." The locked
   // render below used to be a hard `null` with no way back -- correct for
   // "don't make me retype it every time" but left no path at all for the
@@ -356,17 +357,14 @@ export default function Login() {
   // uploaded/has logo display turned off (showLogo) -- never a broken
   // image or blank title.
   // User-reported: "the busines-os logo in login page the icon hasn't been
-  // removed" -- this app has always been a single-tenant Leang Beauty
-  // deployment, so defaulting to the generic Building2 icon/"Business OS"
+  // removed" -- defaulting to the generic Building2 icon/"Business OS"
   // string (only overridden once the config fetch below resolves) meant
   // every fresh page load flashed the wrong branding first. Default to the
-  // same bundled Leang Beauty icon/name the public catalog side already
-  // falls back to (PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON,
-  // portalManifest.ts's DEFAULT_PORTAL_MANIFEST_NAME) so first paint is
+  // deployment's own shop name (app/clientIdentity.ts) so first paint is
   // already correct; still overridden by the live config fetch below the
   // instant a real uploaded logo/name is configured in Settings.
   const [brandLogo, setBrandLogo] = useState(DEFAULT_LOGIN_LOGO_SRC)
-  const [brandName, setBrandName] = useState(DEFAULT_LOGIN_BRAND_NAME)
+  const [brandName, setBrandName] = useState(LOGIN_IDENTITY.shopName)
 
   useEffect(() => {
     let cancelled = false
@@ -1093,7 +1091,7 @@ export default function Login() {
                     setOrganizationId('')
                     setOrganizationExpanded(true)
                   }}
-                  placeholder="LeangBeauty"
+                  placeholder={LOGIN_IDENTITY.organizationName}
                   autoComplete="organization"
                 />
                 {organizationLoading ? (

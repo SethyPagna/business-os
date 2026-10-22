@@ -21,8 +21,13 @@ const os = require('node:os')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const harness = require('./branch-cutover-workerd-harness.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const root = path.resolve(__dirname, '../..')
+// The export job reads the main database from the client's rendered Worker config (cloudflare/wrangler.toml is generated per
+// client and untracked, so a fresh checkout has none): the fixture client stands in, as in test-ops-d1-physical-export-pure.cjs.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 const SCALE = Number(process.env.CUTOVER_SCALE || 0.25)
 const STATEMENT_MS = 250
 const load = (...p) => import(pathToFileURL(path.join(root, ...p)).href)

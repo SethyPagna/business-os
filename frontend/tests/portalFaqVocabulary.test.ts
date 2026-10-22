@@ -4,6 +4,17 @@ import {
   localizePortalConfig,
   localizePortalFaqText,
 } from '../src/components/catalog/portalContentI18n.ts'
+import { getClientIdentity } from '../src/app/clientIdentity.ts'
+import { resolveClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { primeClientIdentity, processClient, rerunAsLeang } from './clientFixtureIdentity.ts'
+
+// Machine-translated copy keeps the shop's own names in English. They come from
+// the page's client identity, which a page reads once: run as the neutral fixture
+// client's shop host (clients/example.env rendered, see clientFixtureIdentity.ts),
+// then again as Leang's where this machine has the private Records/Clients/leang.env.
+const { record, vars } = processClient()
+primeClientIdentity(getClientIdentity, resolveClientIdentity(vars))
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 type LocalizedFaqItem = { question: string; answer: string }
 type LocalizedPortalConfig = {
@@ -97,15 +108,26 @@ for (const language of firstPartyLanguages) {
   assert.doesNotMatch(edited, /\b(sensitive skin|products|specific budget)\b/i, `${language} edited FAQ still has key English fragments`)
 }
 
-const protectedCopy = String(localizePortalFaqText(
-  'Contact Leang Beauty through Facebook, Instagram, Telegram, or phone for product stock advice.',
-  'km',
-))
-assert.match(protectedCopy, /Leang Beauty/)
+const protectedSource = `Contact ${record.shopAlias} through Facebook, Instagram, Telegram, or phone for product stock advice.`
+const protectedCopy = String(localizePortalFaqText(protectedSource, 'km'))
+assert.match(protectedCopy, new RegExp(escapeRegExp(record.shopAlias)))
 assert.match(protectedCopy, /Facebook/)
 assert.match(protectedCopy, /Instagram/)
 assert.match(protectedCopy, /Telegram/)
-assert.notEqual(protectedCopy, 'Contact Leang Beauty through Facebook, Instagram, Telegram, or phone for product stock advice.')
+assert.notEqual(protectedCopy, protectedSource)
+// Discriminating: "Cosmetics" alone is a vocabulary word (a neutral page renders "Leang គ្រឿងសម្អាង"), so only
+// the configured name keeps "Leang Cosmetics" whole. Each client's name and alias is held to that; the control
+// is the same word in a name the identity does not protect, which IS translated, so these checks can tell.
+const unprotectedCopy = String(localizePortalFaqText('Other Cosmetics sells cosmetic products.', 'km'))
+assert.doesNotMatch(unprotectedCopy, /^Other Cosmetics /, 'control: an unprotected name is translated')
+assert.match(unprotectedCopy, /^Other /)
+for (const name of [record.shopName, record.shopAlias]) {
+  const nameSource = `${name} sells cosmetic products.`
+  const nameCopy = String(localizePortalFaqText(nameSource, 'km'))
+  assert.match(nameCopy, new RegExp(`^${escapeRegExp(name)} `), `${name} stays whole`)
+  assert.notEqual(nameCopy, nameSource)
+}
+assert.ok(/cosmetics/i.test(record.shopName + record.shopAlias), 'the client has a vocabulary word in its names, so the checks above discriminate')
 
 for (const language of firstPartyLanguages) {
   for (const key of ['faqTitle', 'aiTitle', 'products', 'membership', 'stockStatus', 'filters']) {
@@ -130,7 +152,7 @@ const newStarterFaq = [
   },
   {
     question: 'Do you guarantee that products sold here are 100% authentic?',
-    answer: 'Yes. Leang Beauty only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.',
+    answer: `Yes. ${record.shopAlias} only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.`,
   },
   {
     question: 'Where can I see current promotions and discounts?',
@@ -149,4 +171,5 @@ for (const language of firstPartyLanguages) {
   })
 }
 
-console.log('PASS portal FAQ vocabulary fallback')
+rerunAsLeang(import.meta.url, 'portalFaqVocabulary.test', "Leang's protected shop names in Khmer copy")
+console.log(`PASS portal FAQ vocabulary fallback (${record.id})`)

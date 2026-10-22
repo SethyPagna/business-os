@@ -1,4 +1,5 @@
 import { defaultConfigText } from './portalLanguagePacks.ts'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 
 type PlainRecord = Record<string, unknown>
 type TextRecord = Record<string, string>
@@ -128,14 +129,15 @@ Object.entries(FAQ_FUTURE_EDIT_VOCABULARY_BY_LANGUAGE).forEach(([language, vocab
   }
 })
 
-const PUBLIC_COPY_PROTECTED_TERMS = [
-  'Leang Beauty',
-  'Leang Cosmetic',
-  'Business OS',
-  'Facebook',
-  'Instagram',
-  'Telegram',
-]
+const PUBLIC_COPY_BRAND_TERMS = ['Business OS', 'Facebook', 'Instagram', 'Telegram']
+
+// The shop's name and its alias. A trailing "s" is dropped so the singular
+// ("Leang Cosmetic") stays protected along with the plural.
+function publicCopyProtectedTerms(): string[] {
+  const { shopName, shopAlias } = getClientIdentity()
+  const names = [shopAlias, shopName].map((name) => name.trim().replace(/s$/, '')).filter(Boolean)
+  return [...new Set([...names, ...PUBLIC_COPY_BRAND_TERMS])]
+}
 
 function isPlainObject(value: unknown): value is PlainRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -252,7 +254,7 @@ function escapeRegExp(value: unknown): string {
 function protectPublicCopyTerms(value: unknown): { text: string, placeholders: PublicCopyPlaceholder[] } {
   let text = String(value || '')
   const placeholders: PublicCopyPlaceholder[] = []
-  PUBLIC_COPY_PROTECTED_TERMS.forEach((term) => {
+  publicCopyProtectedTerms().forEach((term) => {
     const pattern = new RegExp(escapeRegExp(term), 'g')
     text = text.replace(pattern, (match) => {
       const token = `__BUSINESS_OS_PUBLIC_TERM_${placeholders.length}__`

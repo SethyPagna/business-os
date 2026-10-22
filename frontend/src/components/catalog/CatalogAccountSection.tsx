@@ -9,6 +9,7 @@ import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
+import { withShopName } from '../../app/clientIdentity.ts'
 
 // The storefront Account area (§2). Replaces the old anonymous membership
 // lookup: guests can still use everything, and an account only adds "permanent
@@ -21,8 +22,8 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 const PORTAL_MIN_PASSWORD_LENGTH = 10
 const PASSWORD_HINT_EN = 'At least 10 characters. Use a password you do not reuse elsewhere.'
 const PASSWORD_HINT_KM = 'យ៉ាងតិច ១០ តួអក្សរ។ ប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើឡើងវិញនៅកន្លែងផ្សេង។'
-const REMINDER = 'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
-const REMINDER_KM = 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។'
+const REMINDER = 'If you have previously bought from {shopNames}, please contact us for your membership ID — your phone number must match. Just a reminder.'
+const REMINDER_KM = 'ប្រសិនបើអ្នកធ្លាប់ទិញពី {shopNames} សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។'
 
 export default function CatalogAccountSection({
   copy,
@@ -64,6 +65,7 @@ export default function CatalogAccountSection({
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [reminderOpen, setReminderOpen] = useState(false)
   const signupPausedText = copy('signupPaused', 'New accounts are paused for now. Existing members can sign in below.', 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។')
+  const reminderText = withShopName(copy('signupReminder', REMINDER, REMINDER_KM))
   // The server is the authority: a sign-up it refused as paused closes the
   // Sign up tab as well, and the refusal is said in the visitor's language.
   const pausedByServer = errorCode === 'portal_signup_paused'
@@ -314,7 +316,7 @@ export default function CatalogAccountSection({
                   {copy('signupPasswordHint', PASSWORD_HINT_EN, PASSWORD_HINT_KM)}
                 </p>
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10 dark:text-amber-200">
-                  {copy('signupReminder', REMINDER, REMINDER_KM)}
+                  {reminderText}
                 </p>
                 <SignupConsentField
                   copy={copy}
@@ -335,7 +337,7 @@ export default function CatalogAccountSection({
       {reminderOpen ? (
         <ConfirmDialog
           title={copy('signupReminderTitle', 'Before you create an account', 'មុនពេលបង្កើតគណនី')}
-          message={copy('signupReminder', REMINDER, REMINDER_KM)}
+          message={reminderText}
           confirmLabel={copy('createAccount', 'Create account', 'បង្កើតគណនី')}
           cancelLabel={copy('back', 'Back', 'ត្រឡប់')}
           keyboard

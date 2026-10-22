@@ -54,6 +54,8 @@ function loadReal(relPath, requireOverrides = {}) {
 const searchMatch = loadReal('lib/searchMatch.ts')
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/loyaltyEligibility': loadReal('lib/loyaltyEligibility.ts'),
+  // buildPortalConfig falls back to the configured shop name (Oct 22 2026).
+  '../lib/clientIdentity': loadReal('lib/clientIdentity.ts'),
   '../lib/actorSnapshot': loadReal('lib/actorSnapshot.ts'),
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),

@@ -150,6 +150,7 @@ function portalFixture({ state, planTier }) {
   const portal = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db },
     './membershipNumber': loadReal('lib/membershipNumber.ts'),
+    './clientIdentity': loadReal('lib/clientIdentity.ts'),
     './phone': phone,
     './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
     './contactDuplicates': loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding }),

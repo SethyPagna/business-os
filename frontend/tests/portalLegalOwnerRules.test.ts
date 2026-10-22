@@ -23,6 +23,12 @@ import {
   interpolateLegal,
   legalText,
 } from '../src/components/catalog/legal/legalContent.ts'
+import { resolveClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { escapeRegExp, shopClients, writeIdentityBlock } from './clientFixtureIdentity.ts'
+
+// Runs as the neutral fixture client (clients/example.env rendered, see clientFixtureIdentity.ts) and,
+// where this machine has the private Records/Clients/leang.env, as Leang Cosmetics too (else one SKIP line).
+const clients = shopClients('portalLegalOwnerRules.test', "Leang's footer line")
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => fs.readFileSync(path.resolve(here, rel), 'utf8')
@@ -34,7 +40,9 @@ const copyIn = (lang: 'en' | 'km'): CopyFn => (_key, en, km) => (lang === 'km' ?
 // Returns the KEY, so a test can see which message a caller selected.
 const keyCopy: CopyFn = (key) => key
 
-async function bundle<T>(entry: string): Promise<T> {
+// A distinct `instance` gives a fresh module instance (and so a fresh read of the
+// page's client identity); the same entry and instance share one.
+async function bundle<T>(entry: string, instance = ''): Promise<T> {
   const built = buildSync({
     entryPoints: [path.resolve(here, entry)],
     bundle: true, write: false, format: 'esm', platform: 'neutral', jsx: 'automatic',
@@ -45,10 +53,11 @@ async function bundle<T>(entry: string): Promise<T> {
     /from\s*"(react(?:\/[\w.-]+)*)"/g,
     (_all, specifier) => `from "${pathToFileURL(requireFrom.resolve(specifier)).href}"`,
   )
-  return await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64')) as T
+  const tagged = instance ? `${source}\n// instance: ${instance}\n` : source
+  return await import('data:text/javascript;base64,' + Buffer.from(tagged).toString('base64')) as T
 }
 
-const details = { name: 'Leang Cosmetics', legalName: '', registrationNumber: '', address: '', phone: '', email: '' }
+const details = { name: clients[0].record.shopName, legalName: '', registrationNumber: '', address: '', phone: '', email: '' }
 const pageText = (page: 'privacy' | 'terms', lang: 'en' | 'km') =>
   LEGAL_PAGE_SECTIONS[page].flatMap((s) => [s.heading, ...s.bodies]).map((k) => interpolateLegal(legalText(lang, k), details, 2026)).join('\n')
 
@@ -92,13 +101,38 @@ test("the fallback name 'This business' is translated", async () => {
   assert.doesNotMatch(km, /This business/)
 })
 
+// The footer as a host with this client identity renders it (null: no identity
+// block, the neutral Business OS document).
+async function footerOnHost(instance: string, identity: Parameters<typeof writeIdentityBlock>[0] | null, businessName: string) {
+  const undo = identity ? writeIdentityBlock(identity) : () => {}
+  try {
+    const mod = await bundle<{ default: React.FunctionComponent<Record<string, unknown>> }>('../src/components/catalog/legal/LegalPages.tsx', instance)
+    return {
+      en: renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('en'), businessName })),
+      km: renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('km'), businessName })),
+    }
+  } finally {
+    undo()
+  }
+}
+
 test('the footer bottom row shows the independent-retailer line in both languages', async () => {
-  const mod = await bundle<{ default: React.FunctionComponent<Record<string, unknown>> }>('../src/components/catalog/legal/LegalPages.tsx')
-  const en = renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('en'), businessName: 'Leang Cosmetics' }))
-  assert.match(en, /data-portal-footer-independent="true">Leang Cosmetics is an independent beauty retailer in Cambodia\.</)
-  const km = renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('km'), businessName: 'Leang Cosmetics' }))
-  assert.match(km, /data-portal-footer-independent="true">Leang Cosmetics ជាអ្នកលក់រាយ[^<]*កម្ពុជា។</)
-  assert.doesNotMatch(km, /independent beauty retailer/)
+  for (const { record, vars } of clients) {
+    const { en, km } = await footerOnHost(`${record.id}-host`, resolveClientIdentity(vars), record.shopName)
+    const name = escapeRegExp(record.shopName)
+    assert.match(en, new RegExp(`data-portal-footer-independent="true">${name} is an independent beauty retailer in Cambodia\\.<`), `${record.id} (en)`)
+    assert.match(km, new RegExp(`data-portal-footer-independent="true">${name} ជាអ្នកលក់រាយ[^<]*កម្ពុជា។<`), `${record.id} (km)`)
+    assert.doesNotMatch(km, /independent beauty retailer/)
+  }
+})
+
+test('another client gets its own name and, without the beauty category, the general retailer line', async () => {
+  const secondShop = await footerOnHost('second-shop-host', resolveClientIdentity({ BUSINESS_OS_SHOP_NAME: 'Second Shop' }), 'Second Shop')
+  assert.match(secondShop.en, /data-portal-footer-independent="true">Second Shop is an independent retailer in Cambodia\.</)
+  assert.match(secondShop.km, /data-portal-footer-independent="true">Second Shop ជាអ្នកលក់រាយឯករាជ្យនៅកម្ពុជា។</)
+  assert.doesNotMatch(secondShop.en + secondShop.km, /Leang|Example|beauty|សម្រស់/)
+  const neutral = await footerOnHost('neutral-host', null, '')
+  assert.match(neutral.en, /data-portal-footer-independent="true">Business OS is an independent retailer in Cambodia\.</)
 })
 
 test('the consent refusal names the action: sign-in is not told to "create an account"', async () => {

@@ -87,6 +87,7 @@ const sqlBinding = loadReal('lib/sqlBinding.ts')
 const passwordHash = loadReal('lib/passwordHash.ts', { bcryptjs: countingBcrypt })
 const failedSignInCost = loadReal('lib/failedSignInCost.ts', { './planTier': loadReal('lib/planTier.ts') })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
+  './clientIdentity': loadReal('lib/clientIdentity.ts'),
   './db': { getDb: () => db },
   './membershipNumber': loadReal('lib/membershipNumber.ts'),
   './phone': phone,

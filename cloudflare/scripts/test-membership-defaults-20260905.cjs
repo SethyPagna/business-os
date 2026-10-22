@@ -5,6 +5,20 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { wranglerVars, leangVars, skipLeang } = require('./harness/wrangler_vars.cjs')
+// The deployment's vars. The house prefix comes from the client identity
+// (BUSINESS_OS_MEMBERSHIP_PREFIX); unset it is the neutral M-, so every route
+// that mints is given this env, and every LC- expectation below is numbered
+// under the house LC- sequence. The fixture client's vars (a neutral identity on
+// clients/example.env's addresses) carry everything but that prefix; that
+// Leang's own configuration says LC- is pinned where its private render exists.
+const LC = 'LC-'
+const HOUSE_ENV = { ...wranglerVars('wrangler.toml'), BUSINESS_OS_MEMBERSHIP_PREFIX: LC }
+{
+  const leang = leangVars('wrangler.toml')
+  if (leang) assert.equal(leang.BUSINESS_OS_MEMBERSHIP_PREFIX, LC, "Leang's configured prefix is the house prefix these cases are numbered under")
+  else skipLeang('test-membership-defaults-20260905', "Leang's configured membership prefix")
+}
 const raw = openDb(loadAll())
 // The PUT route commits through db.batch; the hook lets the membership race
 // check below plant a competing writer between a mint and its UPDATE.
@@ -22,6 +36,7 @@ function load(file, dependencies = {}) {
   return m.exports
 }
 const membership = load('lib/membershipNumber.ts')
+const clientIdentity = load('lib/clientIdentity.ts')
 const contactOptions = load('lib/contactOptions.ts')
 const phone = load('lib/phone.ts')
 const anonymousCustomer = load('lib/anonymousCustomer.ts')
@@ -29,6 +44,7 @@ const sqlBinding = load('lib/sqlBinding.ts')
 const contactDuplicates = load('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding })
 const portal = load('routes/portal.ts', {
   '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
+  '../lib/clientIdentity': clientIdentity,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/anonymousCustomer': anonymousCustomer,
@@ -50,6 +66,7 @@ const contactDependencies = {
   '../lib/contactSalesSource': load('lib/contactSalesSource.ts', { './permissions': permissionsModule, './contactOptions': contactOptions }),
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/membershipNumber': membership,
+  '../lib/clientIdentity': clientIdentity,
   '../lib/anonymousCustomer': anonymousCustomer,
   '../lib/customerPointsReturn': load('lib/customerPointsReturn.ts'),
   './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: String(loyaltyOn) }) },
@@ -72,6 +89,7 @@ const contactsWrite = load('routes/contacts.ts', {
 }).default
 const imports = load('lib/importEngine.ts', {
   './membershipNumber': membership,
+  './clientIdentity': clientIdentity,
   './contactOptions': contactOptions,
   './contactDuplicates': contactDuplicates,
   './phone': phone,
@@ -129,22 +147,22 @@ async function main() {
   // A legacy random id and a legacy LCMN- id sit in the same column but
   // never parse as a sequence slot -- they must not shift the gap-fill.
   raw.prepare("INSERT INTO customers (name, membership_number) VALUES ('Legacy random','QWERTY12'), ('Legacy prefixed','LCMN-DEADBEEF')").run()
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00003', 'the hole at 3 is filled before the sequence grows; legacy formats do not block')
+  assert.equal(await membership.mintMembershipNumber(db, LC), 'LC-00003', 'the hole at 3 is filled before the sequence grows; legacy formats do not block')
 
   // A portal account can hold a number with no matching customer row yet
   // (e.g. a signup whose contact fold failed) -- mint must see it too, since
   // customers and portal_accounts share ONE sequence.
   raw.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES ('LC-00003','Orphan Portal','099000111','x')").run()
-  assert.equal(await membership.mintMembershipNumber(db), 'LC-00005', 'portal_accounts.membership_id reserves its slot even with no matching customer row')
+  assert.equal(await membership.mintMembershipNumber(db, LC), 'LC-00005', 'portal_accounts.membership_id reserves its slot even with no matching customer row')
 
   // extraTaken still folds in numbers held by neither table yet (e.g. other
   // rows already assigned earlier in the same in-flight import batch).
-  assert.equal(await membership.mintMembershipNumber(db, ['LC-00005']), 'LC-00006', 'extraTaken is unioned with both tables')
+  assert.equal(await membership.mintMembershipNumber(db, LC, ['LC-00005']), 'LC-00006', 'extraTaken is unioned with both tables')
 
   // Concurrent-collision retry still works: the DB unique index is the final
   // arbiter when two writers mint the same instant, and the loser re-mints.
   let raceAttempts = 0
-  const raced = await membership.withMintedMembershipNumber(db, async number => {
+  const raced = await membership.withMintedMembershipNumber(db, LC, async number => {
     raceAttempts += 1
     if (raceAttempts === 1) raw.prepare('INSERT INTO customers (name, membership_number) VALUES (@name,@number)').run({ name: 'Interloper', number })
     raw.prepare('INSERT INTO customers (name, membership_number) VALUES (@name,@number)').run({ name: 'Racer', number })
@@ -153,7 +171,7 @@ async function main() {
   assert.equal(raceAttempts, 2, 'the loser of the UNIQUE-index race re-mints and retries')
   assert.equal(raced, 'LC-00006', 'the retried mint is still a valid gap-fill result')
   let rejected = 0
-  await assert.rejects(() => membership.withMintedMembershipNumber(db, async () => { rejected++; throw new Error('UNIQUE constraint failed: customers.membership_number') }, 3), /UNIQUE/)
+  await assert.rejects(() => membership.withMintedMembershipNumber(db, LC, async () => { rejected++; throw new Error('UNIQUE constraint failed: customers.membership_number') }, 3), /UNIQUE/)
   assert.equal(rejected, 3, 'a non-collision error is not swallowed, and a persistent collision still exhausts its retry budget')
 
   // Reset to a clean sequence before the import-engine assertions below,
@@ -163,9 +181,9 @@ async function main() {
 
   const classified = await imports.classifyContacts(db, 'customers', [
     { name: 'Blank one' }, { name: 'Supplied', membership_number: 'LCMN-SUPPLIED1' }, { name: 'Blank two' },
-  ])
+  ], undefined, LC)
   assert.deepEqual(classified.map(row => row.data.membership_number), ['LC-00001', 'LCMN-SUPPLIED1', 'LC-00002'], 'blank import rows gap-fill the house sequence; a supplied value is kept verbatim')
-  const updated = await imports.classifyContacts(db, 'customers', [{ name: 'Member', membership_number: 'REPLACE1' }], JSON.stringify({ conflictMode: 'overwrite', fieldRules: { membership_number: 'use_imported' } }))
+  const updated = await imports.classifyContacts(db, 'customers', [{ name: 'Member', membership_number: 'REPLACE1' }], JSON.stringify({ conflictMode: 'overwrite', fieldRules: { membership_number: 'use_imported' } }), LC)
   assert.equal(updated[0].data.membership_number, ' legacy-Id ', 'a matched customer keeps its own identity even under an overwrite policy')
   const engineSource = fs.readFileSync(path.join(__dirname, '../src/lib/importEngine.ts'), 'utf8')
   const applyStart = engineSource.indexOf("} else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {")
@@ -187,7 +205,7 @@ async function main() {
   assert.equal(applied.membership_number, ' legacy-Id ', 'apply cannot rewrite identity from a stale review')
 
   raw.prepare("INSERT INTO customers (id,name,updated_at) VALUES (9901,'Import Before','2026-09-08 00:00:00')").run()
-  const staleImport = await imports.classifyContacts(db, 'customers', [{ name: 'Import Before', notes: 'stale overwrite' }])
+  const staleImport = await imports.classifyContacts(db, 'customers', [{ name: 'Import Before', notes: 'stale overwrite' }], undefined, LC)
   const staleGroups = []
   new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', code)(
     { type: 'customers' }, staleImport, [], staleGroups, '2026-09-08 00:00:02', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones,
@@ -259,16 +277,36 @@ ${collisionCode}
   // between turned a routine edit into a raw 500 with the field still blank.
   // ONE rule, ONE retry story, both call sites.
   raw.prepare("INSERT INTO customers (id,name) VALUES (900,'Race A'),(901,'Race B')").run()
-  const putCustomer = (id, payload) => contactsWrite.request(`/customers/${id}`, {
+  const putCustomer = (id, payload, env = HOUSE_ENV) => contactsWrite.request(`/customers/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', 'x-test-permissions': '{"contacts":true}' },
     body: JSON.stringify(payload),
-  }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
+  }, env, { waitUntil: () => {}, passThroughOnException: () => {} })
 
   const firstPut = await putCustomer(900, { name: 'Race A', membership_number: '' })
   assert.equal(firstPut.status, 200, 'blanking the membership field on a customer that has never had one mints a house number')
   const firstNumber = (await db.prepare('SELECT membership_number FROM customers WHERE id=900').get()).membership_number
   assert.match(firstNumber, /^LC-\d{5}$/)
+
+  // The prefix is the deployment's: the same route under a second client's vars
+  // mints SM-, and under no vars at all the neutral M- -- never the house LC-.
+  raw.prepare("INSERT INTO customers (id,name) VALUES (902,'Prefix second'),(903,'Prefix neutral')").run()
+  assert.equal((await putCustomer(902, { name: 'Prefix second', membership_number: '' }, { BUSINESS_OS_MEMBERSHIP_PREFIX: 'SM-' })).status, 200)
+  assert.match((await db.prepare('SELECT membership_number FROM customers WHERE id=902').get()).membership_number, /^SM-00001$/, "the second client's first number, not continuing the house sequence")
+  assert.equal((await putCustomer(903, { name: 'Prefix neutral', membership_number: '' }, {})).status, 200)
+  assert.match((await db.prepare('SELECT membership_number FROM customers WHERE id=903').get()).membership_number, /^M-00001$/, 'an unconfigured deployment uses the neutral prefix')
+  // The create route too: a blank number on POST mints from the env's prefix.
+  const postCustomer = (payload, env) => contactsWrite.request('/customers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-test-permissions': '{"contacts":true}' },
+    body: JSON.stringify(payload),
+  }, env, { waitUntil: () => {}, passThroughOnException: () => {} })
+  const created = await postCustomer({ name: 'Prefix POST second', phone: '+855 77 100 200' }, { BUSINESS_OS_MEMBERSHIP_PREFIX: 'SM-' })
+  assert.ok(created.status === 200 || created.status === 201, 'POST /customers with a blank number is accepted: ' + created.status)
+  assert.match((await db.prepare("SELECT membership_number FROM customers WHERE name='Prefix POST second'").get()).membership_number, /^SM-\d{5}$/, 'POST mints in the env\'s prefix')
+  const createdHouse = await postCustomer({ name: 'Prefix POST house', phone: '+855 77 100 201' }, HOUSE_ENV)
+  assert.ok(createdHouse.status === 200 || createdHouse.status === 201)
+  assert.match((await db.prepare("SELECT membership_number FROM customers WHERE name='Prefix POST house'").get()).membership_number, /^LC-\d{5}$/)
 
   // The second PUT loses the UNIQUE-index race: a competing writer grabs the
   // exact number it just minted, in the instant between the mint and the
@@ -300,7 +338,7 @@ ${collisionCode}
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-test-permissions': '{"contacts":true}' },
     body: JSON.stringify({ name: 'New Person', phone: '+855 88 765 432', membership_number: 'LC-09992' }),
-  }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
+  }, HOUSE_ENV, { waitUntil: () => {}, passThroughOnException: () => {} })
   assert.equal(racedCreate.status, 409, 'a canonical phone claimed between precheck and INSERT is refused')
   assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM customers WHERE name='New Person'").get().n, 0, 'the guarded INSERT did not partially commit')
 

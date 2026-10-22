@@ -33,6 +33,9 @@ const migrationsDir = path.join(__dirname, '..', 'migrations')
 // and their pure helpers -- plus the same real deps importEngine needs just
 // to finish loading (mirrors test-import-engine-pure.cjs's real set).
 const REAL = new Set(['loyaltyEligibility',
+  // classifyRows resolves the membership prefix from it for every import type,
+  // so the inert `{}` stub breaks even a stock-action window (Oct 22 2026).
+  'clientIdentity',
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
   // P10-4: applyUnifiedStockAdd calls recomputeCatalogCost after every add

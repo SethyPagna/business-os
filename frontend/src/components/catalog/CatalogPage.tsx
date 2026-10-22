@@ -27,6 +27,8 @@ import { pickFiles } from '../../utils/filePicker.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
+import { legalKey } from './legal/legalContent.ts'
+import { getClientIdentity, withShopName } from '../../app/clientIdentity.ts'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import {
@@ -514,15 +516,15 @@ function normalizeFaqItems(input: unknown): FaqItem[] {
 
 const FAQ_TRANSLATION_LOOKUP = new Map(
   [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].flatMap(([index, question, answer]) => [
-    [question.trim().toLowerCase(), `starterFaq.${index}.question`],
-    [answer.trim().toLowerCase(), `starterFaq.${index}.answer`],
+    [withShopName(question).trim().toLowerCase(), `starterFaq.${index}.question`],
+    [withShopName(answer).trim().toLowerCase(), `starterFaq.${index}.answer`],
   ]),
 )
 
 function translatedPortalText(t: ((key: string) => string) | null | undefined, key: string, fallback: string): string {
   const fullKey = 'portalEditor.' + key
   const value = typeof t === 'function' ? t(fullKey) : ''
-  return value && value !== fullKey ? value : fallback
+  return withShopName(value && value !== fullKey ? value : fallback)
 }
 
 function translateConfiguredFaqText(t: ((key: string) => string) | null | undefined, value: unknown): string {
@@ -1392,8 +1394,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const portalResource = portalLanguagePacksModule?.getPortalLanguageText(activeCopyLanguage, key) || ''
     if (portalResource) return portalResource
     if (publicView) return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm, portalLanguagePacksModule)
-    const global = typeof t === 'function' ? t(key) : ''
-    if (global && global !== key && !isBrokenLocalizedString(global)) return global
+    const packKey = legalKey(key)
+    const global = typeof t === 'function' ? t(packKey) : ''
+    if (global && global !== packKey && !isBrokenLocalizedString(global)) return withShopName(global)
     return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm, portalLanguagePacksModule)
   }
   const displayConfig = useMemo<PortalConfig>(
@@ -1982,8 +1985,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     // installable.
     if (!publicView || typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Cosmetics').trim()
-    document.title = titleText || 'Leang Cosmetics'
+    const { shopName } = getClientIdentity()
+    const titleText = String(previewConfig.businessName || previewConfig.title || shopName).trim()
+    document.title = titleText || shopName
     return () => { document.title = previousTitle }
   }, [publicView, previewConfig.businessName, previewConfig.title])
 

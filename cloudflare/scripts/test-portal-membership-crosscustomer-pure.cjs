@@ -61,6 +61,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/clientIdentity': loadReal('lib/clientIdentity.ts'),
   '../lib/loyaltyEligibility': loadReal('lib/loyaltyEligibility.ts'),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),

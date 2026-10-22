@@ -129,4 +129,26 @@ check('saved need-more-details default reaches the public config', productDefaul
 check('caution default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productCautionDefault, '')
 check('need-more-details default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productNeedMoreDetailsDefault, '')
 
+// Oct 22 2026: with no business name saved, the portal's name and title are the
+// deployment's configured shop name. They were the literal 'Leang Cosmetics'
+// for every client, so a second shop's storefront opened under Leang's name.
+const { wranglerVars: vars, leangVars: leangConfig, skipLeang } = require('./harness/wrangler_vars.cjs')
+const CLIENT_ENV = vars('wrangler.toml')
+const SECOND_ENV = { BUSINESS_OS_SHOP_NAME: 'Second Shop', BUSINESS_OS_PUBLIC_URL: 'https://second.shops-sub.workers.dev' }
+check('fixture client: no saved name opens as its configured shop name', buildPortalConfig({}, CLIENT_ENV).businessName, CLIENT_ENV.BUSINESS_OS_SHOP_NAME)
+check('fixture client: and the portal title is the same', buildPortalConfig({}, CLIENT_ENV).title, CLIENT_ENV.BUSINESS_OS_SHOP_NAME)
+const LEANG_ENV = leangConfig('wrangler.toml')
+if (LEANG_ENV) {
+  check('Leang: no saved name still opens as Leang Cosmetics', buildPortalConfig({}, LEANG_ENV).businessName, 'Leang Cosmetics')
+  check('Leang: and the portal title is the same', buildPortalConfig({}, LEANG_ENV).title, 'Leang Cosmetics')
+} else {
+  skipLeang('test-portal-public-url-pure', "Leang's own portal name and title")
+}
+check('a second client: no saved name opens as Second Shop', buildPortalConfig({}, SECOND_ENV).businessName, 'Second Shop')
+check('a second client: and the portal title is the same', buildPortalConfig({}, SECOND_ENV).title, 'Second Shop')
+check('no vars at all: the neutral Business OS, never a client', buildPortalConfig({}, ENV).businessName, 'Business OS')
+check('a saved business name wins over the configured one', buildPortalConfig({ business_name: 'Saved Name' }, SECOND_ENV).businessName, 'Saved Name')
+check('a saved business name is also the title', buildPortalConfig({ business_name: 'Saved Name' }, SECOND_ENV).title, 'Saved Name')
+check('a saved portal title wins over the name', buildPortalConfig({ customer_portal_title: 'Saved Title', business_name: 'Saved Name' }, SECOND_ENV).title, 'Saved Title')
+
 console.log(`\nALL ${checks} CHECKS PASSED`)

@@ -1,6 +1,7 @@
 import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifySignInPassword } from './passwordHash'
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from './failedSignInCost'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
+import { resolveClientIdentity } from './clientIdentity'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
@@ -105,15 +106,14 @@ export type SigninResult =
 // One deliberately non-committal message for every "we can't verify you as an
 // existing customer" branch (unknown id / phone mismatch / already claimed) so
 // none of them becomes an existence oracle for a membership id or phone.
-const EXISTING_REMINDER =
-  'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
-
-function existingReject(): SignupResult {
-  return { ok: false, status: 409, error: EXISTING_REMINDER, code: 'verification_failed', abuse: true }
+function existingReject(env: Env): SignupResult {
+  const shopNames = resolveClientIdentity(env).shopNames
+  const error = `If you have previously bought from ${shopNames}, please contact us for your membership ID — your phone number must match. Just a reminder.`
+  return { ok: false, status: 409, error, code: 'verification_failed', abuse: true }
 }
 
 // One membership-number authority for the whole app: lib/membershipNumber.ts
-// mints the next gap-filling `LC-#####`. This file used to carry a THIRD
+// mints the next gap-filling house number (`LC-#####` at Leang). This file used to carry a THIRD
 // independent generator (random `LCMN-` + 6 crypto bytes). A storefront id is
 // an account NUMBER, not a credential -- signup already requires a phone that
 // matches the customer record and login requires phone AND password -- so a
@@ -126,7 +126,7 @@ function existingReject(): SignupResult {
 // (claimAccount either claims an existing customer's number or creates the
 // customer row). The INSERT below is still the final arbiter for a lost race.
 async function generateMembershipId(env: Env): Promise<string> {
-  return mintMembershipNumber(getDb(env))
+  return mintMembershipNumber(getDb(env), resolveClientIdentity(env).membershipPrefix)
 }
 
 // Does any customer already carry this canonical phone (primary or a secondary
@@ -207,16 +207,16 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
     const customer = await db.prepare(
       'SELECT id, name, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
     ).get<{ id: number; name: string | null; phone: string | null; address: string | null; is_anonymous: number }>({ m: membershipId })
-    if (!customer || isAnonymousCustomer(customer)) return existingReject()
+    if (!customer || isAnonymousCustomer(customer)) return existingReject(env)
     const phoneMatches = collectContactPhones(customer).some((raw) => canonicalizePhone(raw) === canonical)
-    if (!phoneMatches) return existingReject()
+    if (!phoneMatches) return existingReject(env)
     return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
   }
 
   // New-customer path: the phone must be absent from customers entirely — if
   // it is already a customer, they are an existing buyer and must use the id.
   const existing = await findCustomerByCanonicalPhone(env, canonical)
-  if (existing) return existingReject()
+  if (existing) return existingReject(env)
 
   const newMembershipId = await generateMembershipId(env)
   return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
@@ -317,7 +317,7 @@ async function claimAccount(
       if (args.contactId != null) {
         const guardedContact = await db.prepare('SELECT is_anonymous FROM customers WHERE id = @id LIMIT 1')
           .get<{ is_anonymous: number | null }>({ id: args.contactId })
-        if (isAnonymousCustomer(guardedContact)) return existingReject()
+        if (isAnonymousCustomer(guardedContact)) return existingReject(env)
       }
       if (!/UNIQUE constraint failed/i.test(message)) throw error
       // Only a collision on an id WE minted (createContact === true) may
@@ -325,9 +325,9 @@ async function claimAccount(
       // loop's own bound (maxAttempts) is what stops it, and an id supplied
       // by the caller always falls through to existingReject() below on its
       // very first (and only, maxAttempts === 1) failure.
-      if (!(args.createContact === true && isMembershipCollision(error))) return existingReject()
+      if (!(args.createContact === true && isMembershipCollision(error))) return existingReject(env)
       lastError = error
-      membershipId = await mintMembershipNumber(db)
+      membershipId = await mintMembershipNumber(db, resolveClientIdentity(env).membershipPrefix)
     }
   }
 

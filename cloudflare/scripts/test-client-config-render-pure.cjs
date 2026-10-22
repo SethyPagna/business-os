@@ -468,7 +468,7 @@ const IDENTITY = {
 check('the shop identity is seven optional [vars], written in a fixed order after the organization name, and absent when unset', () => {
   const none = wrangler.paid()
   assert.ok(!/BUSINESS_OS_(SHOP|ADMIN_SHORT|MEMBERSHIP)/.test(none), 'the example client sets no identity: not one line')
-  assert.ok(!none.includes('Client identity'), 'and not its comment either')
+  assert.ok(!none.includes('Who this deployment is'), 'and not its comment either')
   const text = wrangler.paid(IDENTITY)
   const lines = text.split('\n')
   const after = lines.indexOf('BUSINESS_OS_ORGANIZATION_NAME = "Example Shop"')
@@ -478,7 +478,7 @@ check('the shop identity is seven optional [vars], written in a fixed order afte
     'BUSINESS_OS_SHOP_NAME = "Example Shop"', 'BUSINESS_OS_SHOP_NAME_KM = "ហាងគំរូ"', 'BUSINESS_OS_SHOP_ALIAS = "Example"', 'BUSINESS_OS_SHOP_CATEGORY = "beauty"',
     'BUSINESS_OS_SHOP_ICON_PREFIX = "/example-"', 'BUSINESS_OS_ADMIN_SHORT_NAME = "Example Admin"', 'BUSINESS_OS_MEMBERSHIP_PREFIX = "EX-"',
   ])
-  assert.match(text, /# Client identity \(cloudflare\/src\/lib\/clientIdentity\.ts\)/)
+  assert.match(text, /# Who this deployment is \(src\/lib\/clientIdentity\.ts\)/)
   // each is optional on its own
   const two = wrangler.paid({ SHOP_NAME: 'Only Name', MEMBERSHIP_PREFIX: 'ON-' })
   assert.deepEqual(two.split('\n').filter((l) => /^BUSINESS_OS_(SHOP|ADMIN_SHORT|MEMBERSHIP)/.test(l)), ['BUSINESS_OS_SHOP_NAME = "Only Name"', 'BUSINESS_OS_MEMBERSHIP_PREFIX = "ON-"'])
@@ -490,19 +490,32 @@ check('the shop identity is seven optional [vars], written in a fixed order afte
   }
 })
 
-check('the two manifest routes follow MANIFEST_ROUTES alone, not the shop name, and sit right after the sitemap', () => {
+check('the two manifest routes are always in run_worker_first (6.0.962 retired the MANIFEST_ROUTES switch): both plans, with or without an identity, once, right after the sitemap', () => {
   const route = '  "/manifest.json", "/portal-manifest.json",'
-  assert.ok(!wrangler.paid(IDENTITY).includes('"/manifest.json"'), 'an identity without the switch leaves the manifests static')
-  for (const plan of ['paid', 'free']) {
-    const on = lib.renderVariant(wrangler.template(), wrangler.valuesWith({ ...IDENTITY, MANIFEST_ROUTES: 'true' }), plan)
-    const lines = on.split('\n')
-    const at = lines.indexOf(route)
-    assert.ok(at > 0 && lines.filter((l) => l === route).length === 1, `${plan}: the two routes appear once`)
-    assert.match(lines[at - 1], /"\/sitemap\.xml",$/)
-    assert.equal(targetLib.parseTarget(on).workerName, 'example-shop')
+  for (const [label, overrides] of [['no identity', {}], ['with identity', IDENTITY]]) {
+    for (const plan of ['paid', 'free']) {
+      const on = lib.renderVariant(wrangler.template(), wrangler.valuesWith(overrides), plan)
+      const lines = on.split('\n')
+      const at = lines.indexOf(route)
+      assert.ok(at > 0 && lines.filter((l) => l === route).length === 1, plan + ', ' + label + ': the two routes appear once')
+      assert.match(lines[at - 1], /^  # The install manifests carry the configured names/, plan + ', ' + label + ': the comment names why')
+      assert.match(lines[at - 2], /"\/sitemap\.xml",$/)
+      assert.equal(targetLib.parseTarget(on).workerName, 'example-shop')
+    }
   }
-  assert.ok(wrangler.paid({ MANIFEST_ROUTES: 'true' }).includes('/portal-manifest.json'), 'the switch works without an identity too')
-  throwsRender(() => lib.resolveValues(withOverrides({ MANIFEST_ROUTES: 'yes' })), /MANIFEST_ROUTES has an invalid value/, 'bad switch')
+  // no variable can switch them off: the renderer has no placeholder or variable for them any more
+  assert.ok(!lib.VARIABLES.some((v) => /MANIFEST/.test(v.name)) && !lib.COMPUTED.some((n) => /MANIFEST/.test(n)))
+  assert.ok(![...lib.templatePlaceholders(wrangler.template())].some((n) => /MANIFEST/.test(n)))
+  // a client file written for 6.0.959 that still sets the switch is told why it is refused, without a value
+  for (const value of ['true', 'false']) {
+    const err = (() => { try { lib.resolveValues(withOverrides({ MANIFEST_ROUTES: value }), { strict: true }) } catch (e) { return e } return null })()
+    assert.ok(err instanceof lib.RenderError, 'a retired variable is refused in a client file')
+    assert.equal(err.problems.length, 1)
+    assert.match(err.problems[0], /^MANIFEST_ROUTES was retired in 6\.0\.962: .*delete the line$/)
+    assert.ok(!err.problems[0].includes('=' + value), 'no value in the message')
+  }
+  // GitHub variables are read leniently: a leftover MANIFEST_ROUTES variable there is ignored, not fatal
+  assert.doesNotThrow(() => lib.resolveValues({ ...Object.fromEntries(lib.readEnvFile(wrangler.EXAMPLE_ENV)), MANIFEST_ROUTES: 'true' }))
 })
 
 check('QUEUE_PREFIX defaults to the code\'s own queue names; another prefix needs release 6.0.959 or later and says so', () => {
