@@ -19,14 +19,47 @@ const APP_SHELL_CACHE = APP_SHELL_VERSION
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`
 const APP_SHELL_URLS = ['/', '/index.html', '/business-os-precache.json']
 const STAFF_IDENTITY_URLS = ['/manifest.json', '/icon-192.png', '/icon-512.png', '/icon-192-maskable-v2.png', '/icon-512-maskable-v2.png', '/admin-apple-touch-icon-v1.png', '/admin-favicon-v1.ico']
-const SHOP_IDENTITY_URLS = ['/portal-manifest.json', '/leang-cosmetics-icon-192-v2.png', '/leang-cosmetics-icon-512-v2.png', '/leang-cosmetics-icon-192-maskable-v2.png', '/leang-cosmetics-icon-512-maskable-v2.png', '/leang-cosmetics-apple-touch-icon-v2.png', '/leang-cosmetics-favicon-v2.ico']
-// The same host rule as isAdminHostname (app/pathRouting.ts) and the index.html bootstrap.
-function isAdminHost(hostname) {
+const SHOP_MANIFEST_URL = '/portal-manifest.json'
+// The shop's icons belong to the deployment, not to this build: their paths
+// come from the identity block the Worker writes into the shell
+// (cloudflare/src/lib/documentIdentity.ts). Every icon is a top-level file,
+// and a shop's own icon names carry a version (-v2), so a conventional probe
+// path whose bytes may change (/favicon.ico, /icon.png) is never kept.
+const ROOT_ICON_PATH = /^\/[^/]+\.(?:png|ico)$/
+const VERSIONED_ROOT_ICON_PATH = /^\/[^/]+-v\d+\.(?:png|ico)$/
+const IDENTITY_BLOCK = /<script\b[^>]*\bid=["']business-os-identity["'][^>]*>([\s\S]*?)<\/script>/i
+// The same host rule as isStaffHostname (app/clientIdentity.ts) and the
+// index.html bootstrap. staffHost is the deployment's configured staff host
+// (BM Shop's bm-admin.khshop.workers.dev), which only the shell's identity
+// block carries: a worker cannot read the Worker's configuration.
+function isAdminHost(hostname, staffHost = '') {
   const host = String(hostname || '').toLowerCase()
   return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1' || host.startsWith('admin.')
+    || (staffHost !== '' && host === staffHost)
 }
-function appShellUrlsForHost(hostname) {
-  return [...APP_SHELL_URLS, ...(isAdminHost(hostname) ? STAFF_IDENTITY_URLS : SHOP_IDENTITY_URLS)]
+function staffHostFromShell(html) {
+  try {
+    const staffHost = JSON.parse(IDENTITY_BLOCK.exec(html)?.[1] || '{}')?.staffHost
+    return typeof staffHost === 'string' ? staffHost.toLowerCase().trim() : ''
+  } catch {
+    return ''
+  }
+}
+// The install identity a host keeps beside the shell: the staff app's manifest
+// and icons, or the shop's manifest and the icons its identity block names.
+function identityUrlsForHost(hostname, html) {
+  return isAdminHost(hostname, staffHostFromShell(html))
+    ? STAFF_IDENTITY_URLS
+    : [SHOP_MANIFEST_URL, ...shopIconUrlsFromShell(html)]
+}
+function shopIconUrlsFromShell(html) {
+  let icons = {}
+  try {
+    icons = JSON.parse(IDENTITY_BLOCK.exec(html)?.[1] || '{}')?.shopIcons || {}
+  } catch {
+    icons = {}
+  }
+  return [...new Set(Object.values(icons).filter((url) => typeof url === 'string' && ROOT_ICON_PATH.test(url)))]
 }
 // How long the stale-asset recovery will wait for a newly requested build to
 // finish installing before it gives up on handing control over (see
@@ -105,6 +138,19 @@ async function retainedStaticCaches() {
   const incumbent = proof.previous.replace('business-os-app-shell-', 'business-os-static-')
   return [incumbent, ...(Array.isArray(proof.migrationStaticCaches) ? proof.migrationStaticCaches : [])]
     .filter((name, index, names) => typeof name === 'string' && /^business-os-static-[A-Za-z0-9_-]{1,128}$/.test(name) && names.indexOf(name) === index)
+}
+
+// Only the staff app remembers its language pack. A configured staff host
+// (not admin.*) is known only from the cached shell's identity block.
+async function rememberUiLanguageOnStaffHost(language) {
+  const hostname = self.location.hostname
+  if (!isAdminHost(hostname)) {
+    const cache = await caches.open(APP_SHELL_CACHE)
+    const shell = await cache.match('/index.html') || await cache.match('/')
+    const html = shell ? await shell.clone().text().catch(() => '') : ''
+    if (!isAdminHost(hostname, staffHostFromShell(html))) return
+  }
+  await rememberUiLanguage(language)
 }
 
 async function rememberUiLanguage(language) {
@@ -248,7 +294,7 @@ async function precacheAppShell() {
   // and a redirected document served for a navigation is a network error --
   // a permanently blank page (isValidDocumentResponse above says why). Fetch
   // and store only what is safe to serve back.
-  await Promise.allSettled(appShellUrlsForHost(self.location.hostname).map(async (url) => {
+  const cacheShellUrl = async (url) => {
     const request = new Request(url, { cache: 'reload' })
     const response = await fetch(request)
     const valid = url === '/' || url === '/index.html'
@@ -256,16 +302,20 @@ async function precacheAppShell() {
       : isValidStaticResponse(request, response)
     if (!valid) throw new Error(`Unusable shell response: ${url}`)
     await cache.put(request, response.clone())
-  }))
+  }
+  await Promise.allSettled(APP_SHELL_URLS.map(cacheShellUrl))
   const shell = await cache.match('/index.html') || await cache.match('/')
   if (!shell || !isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
+  const html = await shell.clone().text().catch(() => '')
+  // Which identity this host installs can depend on the configured staff
+  // host, which only the shell carries, so the shell comes first.
+  await Promise.allSettled(identityUrlsForHost(self.location.hostname, html).map(cacheShellUrl))
 
   // The worker is registered after the first page load, so those entry files
   // were fetched before this worker controlled the page. Discover the hashed
   // JS/CSS references from the cached HTML and explicitly precache them; a
   // fresh iOS install can then be terminated and reopened offline without
   // rendering an inert HTML shell.
-  const html = await shell.clone().text().catch(() => '')
   const htmlEntryAssets = [...html.matchAll(/(?:src|href)=["'](\/assets\/[^"'#?]+(?:\?[^"']*)?)["']/g)]
     .map((match) => match[1])
   const precacheResponse = await cache.match('/business-os-precache.json')
@@ -275,7 +325,7 @@ async function precacheAppShell() {
   // Each host precaches its own plan: the storefront only its startup
   // closure, the staff host its shell plus the remembered UI language pack.
   // A manifest without host plans (a rollback, a test fixture) is one plan.
-  const adminHost = isAdminHost(self.location.hostname)
+  const adminHost = isAdminHost(self.location.hostname, staffHostFromShell(html))
   const plan = precachePayload?.hosts?.[adminHost ? 'admin' : 'shop'] || precachePayload
   const assetUrls = (value) => (Array.isArray(value)
     ? value.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
@@ -454,7 +504,8 @@ function isAppDocumentPath(pathname) {
 function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
     || STAFF_IDENTITY_URLS.includes(pathname)
-    || SHOP_IDENTITY_URLS.includes(pathname)
+    || pathname === SHOP_MANIFEST_URL
+    || VERSIONED_ROOT_ICON_PATH.test(pathname)
     || pathname === '/runtime-noise-guard.js'
     || pathname === '/theme-bootstrap.js'
 }
@@ -779,7 +830,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   const language = url.pathname.match(LANGUAGE_PACK_PATH)?.[1]
-  if (language && isAdminHost(self.location.hostname)) event.waitUntil(rememberUiLanguage(language).catch(() => {}))
+  if (language) event.waitUntil(rememberUiLanguageOnStaffHost(language).catch(() => {}))
   if (!isCacheableStaticPath(url.pathname)) return
   // P4-4b: every cacheable static path (hashed build assets AND the
   // unhashed manifest/icons/runtime-noise-guard.js/theme-bootstrap.js) is

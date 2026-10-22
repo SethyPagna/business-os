@@ -58,6 +58,13 @@ Module._load = function patchedLoad(request, parent, isMain) {
     providerCanUseWebResearch: () => false,
   }
   if (request === './rateLimit') return { checkRateLimit: async () => ({ allowed: true }) }
+  // portalAi.ts reads the shop category and name from the client identity (pure, no imports).
+  if (request === './clientIdentity') {
+    const identity = transpile('lib/clientIdentity.ts')
+    const identityModule = { exports: {} }
+    new Function('exports', 'require', 'module', identity.outputText)(identityModule.exports, require, identityModule)
+    return identityModule.exports
+  }
   return originalLoad.call(this, request, parent, isMain)
 }
 const portalAiModuleObj = { exports: {} }

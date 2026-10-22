@@ -12,6 +12,7 @@
  */
 
 import { SYNC } from '../constants.ts'
+import { isServedStaffHostname } from '../app/clientIdentity.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
 import { timeoutSignal } from '../utils/abortTimeout.ts'
@@ -234,7 +235,7 @@ function isProtectedAdminHost(): boolean {
   if (typeof window === 'undefined') return false
   try {
     const hostname = String(window.location?.hostname || '').trim()
-    return /^admin\./i.test(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
+    return isServedStaffHostname(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
   } catch (_) {
     return false
   }

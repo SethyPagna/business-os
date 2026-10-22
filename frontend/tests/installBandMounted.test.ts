@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { act } from 'react'
 import { createHarness, installSteppedClock, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import { writeIdentityBlock } from './leangClientIdentity.ts'
 
 // The real InstallPromptBand, mounted (React DOM + the real standaloneNavigation module + the real
 // iOS steps modal), on a phone-shaped window. installOffer.test.ts drives the pure module and
@@ -56,6 +57,9 @@ type Scenario = { win: EventTarget; mountBand(language?: Language): Promise<Moun
 async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Promise<void> {
   const harness = await createHarness()
   const win = configureWindow(device)
+  // The page as the Worker serves it on a Leang host: its identity block names
+  // Leang Cosmetics (cloudflare/wrangler.toml), read once per harness.
+  const undoIdentity = writeIdentityBlock()
   const surfaces: MountedSurface[] = []
   try {
     await run({
@@ -82,6 +86,7 @@ async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Pr
     })
   } finally {
     for (const surface of surfaces) await surface.unmount()
+    undoIdentity()
     await harness.close()
   }
 }

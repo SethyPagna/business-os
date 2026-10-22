@@ -129,4 +129,18 @@ check('saved need-more-details default reaches the public config', productDefaul
 check('caution default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productCautionDefault, '')
 check('need-more-details default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productNeedMoreDetailsDefault, '')
 
+// Oct 22 2026: with no business name saved, the portal's name and title are the
+// deployment's configured shop name. They were the literal 'Leang Cosmetics'
+// for every client, so a second shop's storefront opened under Leang's name.
+const LEANG_ENV = require('./harness/wrangler_vars.cjs').wranglerVars('wrangler.toml')
+const BM_ENV = { BUSINESS_OS_SHOP_NAME: 'BM Shop', BUSINESS_OS_PUBLIC_URL: 'https://bmshop.khshop.workers.dev' }
+check('Leang: no saved name still opens as Leang Cosmetics', buildPortalConfig({}, LEANG_ENV).businessName, 'Leang Cosmetics')
+check('Leang: and the portal title is the same', buildPortalConfig({}, LEANG_ENV).title, 'Leang Cosmetics')
+check('BM Shop: no saved name opens as BM Shop', buildPortalConfig({}, BM_ENV).businessName, 'BM Shop')
+check('BM Shop: and the portal title is the same', buildPortalConfig({}, BM_ENV).title, 'BM Shop')
+check('no vars at all: the neutral Business OS, never a client', buildPortalConfig({}, ENV).businessName, 'Business OS')
+check('a saved business name wins over the configured one', buildPortalConfig({ business_name: 'Saved Name' }, BM_ENV).businessName, 'Saved Name')
+check('a saved business name is also the title', buildPortalConfig({ business_name: 'Saved Name' }, BM_ENV).title, 'Saved Name')
+check('a saved portal title wins over the name', buildPortalConfig({ customer_portal_title: 'Saved Title', business_name: 'Saved Name' }, BM_ENV).title, 'Saved Title')
+
 console.log(`\nALL ${checks} CHECKS PASSED`)

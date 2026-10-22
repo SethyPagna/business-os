@@ -79,6 +79,7 @@ const searchMatch = loadReal('lib/searchMatch.ts')
 const portalText = loadReal('lib/portalText.ts')
 const cache = loadReal('lib/cache.ts', { './db': dbModule, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) } })
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/clientIdentity': loadReal('lib/clientIdentity.ts'),
   '../lib/loyaltyEligibility': loadReal('lib/loyaltyEligibility.ts'),
   '../lib/actorSnapshot': loadReal('lib/actorSnapshot.ts'),
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),

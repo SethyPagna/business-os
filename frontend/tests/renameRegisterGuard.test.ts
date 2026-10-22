@@ -18,6 +18,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { staffManifest } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { LEANG_CLIENT_IDENTITY } from './leangClientIdentity.ts'
 
 const FRONTEND = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const REPO = path.dirname(FRONTEND)
@@ -150,17 +152,10 @@ const RULES: Rule[] = [
   },
   {
     id: 'R16 Leang Cosmetics, not Leang Beauty', owner: '27 Sep: "Leang Cosmetics" everywhere; staff app "Leang Cosmetics Admin"',
-    old: /Leang Beauty/, sampleOld: "generateTotpSecret(target.username, 'Leang Beauty')", sampleNew: 'generateTotpSecret(target.username, ADMIN_APP_NAME)',
+    old: /Leang Beauty/, sampleOld: "generateTotpSecret(target.username, 'Leang Beauty')", sampleNew: 'generateTotpSecret(target.username, resolveClientIdentity(c.env).adminTitle)',
+    // Since 6.0.956 the alias lives only in wrangler.toml (BUSINESS_OS_SHOP_ALIAS) and copy names it
+    // through {shopNames}/{shopAlias}, so no source file needs an allowance.
     packs: ['en', 'km'], code: true, worker: true,
-    allow: [
-      { file: 'frontend/src/components/catalog/CatalogAccountSection.tsx', text: 'bought from Leang Cosmetics/Leang Beauty', why: 'names the old shop name on purpose so past buyers recognise it' },
-      { file: 'frontend/src/components/catalog/CatalogAccountSection.tsx', text: 'ធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty', why: 'the Khmer copy of that reminder, which G38 P0 (d7357d88a) moved into the shared sign-up dialog' },
-      { file: 'frontend/src/components/catalog/PortalNoPaymentNotice.tsx', text: 'Leang Cosmetics/Leang Beauty', why: 'same deliberate old-name mention' },
-      { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Cosmetics/Leang Beauty', why: 'the Khmer copy of those two notices' },
-      { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Beauty', why: 'the Khmer copy of those two notices' },
-      { file: 'frontend/src/components/catalog/portalContentI18n.ts', text: "'Leang Beauty',", why: 'do-not-translate list, so the old name is never machine-translated' },
-      { file: 'cloudflare/src/lib/portalAccounts.ts', text: 'bought from Leang Cosmetics/Leang Beauty', why: 'the Worker copy of the sign-up reminder' },
-    ],
   },
   {
     id: 'R8 concise delivery fee (Khmer fallbacks)', owner: '10 Sep: ថ្លៃដឹក for the fee',
@@ -259,10 +254,12 @@ const originalPriceAsCost = Object.keys(en)
   .filter((key) => /original price/i.test(en[key]) && km[key]?.includes('ថ្លៃដើម'))
 assert.deepEqual(originalPriceAsCost, [], `"original price" rendered as the cost-price word: ${originalPriceAsCost.join(', ')}`)
 
-// The staff app and the shop keep the names the owner chose (27-28 Sep).
-const manifest = JSON.parse(read(path.join(FRONTEND, 'public', 'manifest.json'))) as Record<string, string>
+// The staff app and the shop keep the names the owner chose (27-28 Sep). Since
+// 6.0.956 they come from Leang's wrangler [vars]; the Worker serves the manifest
+// and names the two-factor issuer from the same identity.
+const manifest = staffManifest(LEANG_CLIENT_IDENTITY)
 assert.equal(manifest.name, 'Leang Cosmetics Admin')
 assert.equal(manifest.short_name, 'Leang Admin')
-assert.match(read(path.join(REPO, 'cloudflare', 'src', 'routes', 'auth.ts')), /const ADMIN_APP_NAME = 'Leang Cosmetics Admin'/)
+assert.match(read(path.join(REPO, 'cloudflare', 'src', 'routes', 'auth.ts')), /generateTotpSecret\(target\.username, resolveClientIdentity\(c\.env\)\.adminTitle\)/)
 
 console.log(`PASS renameRegisterGuard: ${RULES.length} rename rules hold across both packs, frontend code and Worker copy; ${CANONICAL.length} canonical terms pinned`)

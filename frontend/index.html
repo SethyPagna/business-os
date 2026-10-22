@@ -18,13 +18,23 @@
          when a field starts zooming again. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
-    <meta name="description" content="Browse Leang Cosmetics products and contact the store." />
-    <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
-         storefront. All three absolute values name the PRIMARY host, for two
-         reasons: crawlers do not resolve relative URLs, and any alias
-         host that ever serves this very same document (www., a preview URL)
-         is folded into leangbeauty.com by an absolute canonical without any
-         per-host work at all.
+    <meta name="description" content="Browse Business OS products and contact the store." />
+    <!-- This file names no client. One build serves every deployment, and the
+         Worker writes the deployment's own identity (wrangler [vars], see
+         cloudflare/src/lib/clientIdentity.ts) into the title, description,
+         icons, Open Graph tags, canonical URL, the identity block below and
+         the loading shell of every app document it serves
+         (cloudflare/src/lib/documentIdentity.ts). What is written here is the
+         neutral Business OS identity, which only a document the Worker never
+         saw shows: the Vite dev server, or an unknown path the asset layer
+         answers on its own.
+
+         Canonical URL and link previews (Open Graph / Twitter card) for the
+         storefront: the Worker writes ABSOLUTE values naming the configured
+         public host, for two reasons: crawlers do not resolve relative URLs,
+         and any alias host that ever serves this very same document (www., a
+         preview URL) is folded into the primary one without any per-host
+         work at all.
 
          The storefront's indexable URLs are the home page and the three
          query-addressed legal readers (?legal=privacy|terms|cookies, which the
@@ -33,19 +43,17 @@
          canonical. If a policy ever becomes its own document, the canonical
          has to become per-URL, and that means a Worker rewrite.
 
-         On admin hosts the Worker replaces canonical and og:* along with the
-         title and icons (cloudflare/src/lib/adminDocumentIdentity.ts). It
-         replaces them with RELATIVE values on purpose: nothing should ever
-         preview or index the admin app, and the point there is only that it is
-         not the storefront. The inline bootstrap below leaves all of these
-         alone. -->
-    <link rel="canonical" href="https://leangbeauty.com/" />
+         On admin hosts the Worker writes RELATIVE values instead, on purpose:
+         nothing should ever preview or index the admin app, and the point
+         there is only that it is not the storefront. The inline bootstrap
+         below leaves all of these alone. -->
+    <link rel="canonical" href="/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Leang Cosmetics" />
-    <meta property="og:title" content="Leang Cosmetics" />
-    <meta property="og:description" content="Browse Leang Cosmetics products and contact the store." />
-    <meta property="og:url" content="https://leangbeauty.com/" />
-    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512-v2.png" />
+    <meta property="og:site_name" content="Business OS" />
+    <meta property="og:title" content="Business OS" />
+    <meta property="og:description" content="Browse Business OS products and contact the store." />
+    <meta property="og:url" content="/" />
+    <meta property="og:image" content="/icon-512.png" />
     <meta name="twitter:card" content="summary" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,18 +66,21 @@
          two values the theme-color meta above carries per host. One static
          value, not a per-host swap: both hosts want the same answer. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Leang Cosmetics" />
+    <meta name="apple-mobile-web-app-title" content="Business OS" />
     <meta name="format-detection" content="telephone=no" />
     <!-- Public-first metadata is intentional. iOS may snapshot the raw HTML
          before JavaScript runs, so the customer domain must never initially
          advertise the staff app. The synchronous bootstrap below swaps these
          to the staff identity on admin.* / localhost. -->
     <link rel="manifest" href="/portal-manifest.json" />
-    <link rel="icon" type="image/x-icon" href="/leang-cosmetics-favicon-v2.ico" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/leang-cosmetics-icon-192-v2.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/leang-cosmetics-icon-512-v2.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/leang-cosmetics-apple-touch-icon-v2.png" />
-    <title>Leang Cosmetics</title>
+    <link rel="icon" type="image/x-icon" href="/admin-favicon-v1.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/admin-apple-touch-icon-v1.png" />
+    <title>Business OS</title>
+    <!-- The deployment's identity, rewritten by the Worker; read by the
+         bootstrap below and by src/app/clientIdentity.ts. -->
+    <script id="business-os-identity" type="application/json">{"shopName":"Business OS","shopNameKm":"Business OS","shopAlias":"","shopNames":"Business OS","shopCategory":"","shopDescription":"Browse Business OS products and contact the store.","adminTitle":"Business OS Admin","adminShortName":"Business OS Admin","adminDescription":"Till, stock and sales for Business OS staff","organizationName":"Business OS","membershipPrefix":"M-","staffHost":"","shopIcons":{"favicon":"/admin-favicon-v1.ico","icon192":"/icon-192.png","icon512":"/icon-512.png","maskable192":"/icon-192-maskable-v2.png","maskable512":"/icon-512-maskable-v2.png","appleTouch":"/admin-apple-touch-icon-v1.png"}}</script>
     <script>
       (function setInitialBusinessOsRoute() {
         var pathname = String(window.location && window.location.pathname || '/')
@@ -122,29 +133,33 @@
           '/server': true
         }
         var hostname = String(window.location && window.location.hostname || '').toLowerCase()
-        // Alias-host VISITS redirect to the canonical host. The old
-        // leangcosmetics.* entries were removed when that domain was retired
-        // completely (Sep 26 2026): no route serves this document there any
-        // more, so they could never match. Only
-        // page navigations go through this bootstrap -- API/upload fetches
-        // never load index.html -- so existing integrations keep working
-        // while people (and bookmarks/PWA opens) land on the new domain
-        // with their path and query preserved. try/catch keeps the test
-        // DOM doubles (no location.replace) and any exotic browser on the
-        // normal render path instead of a blank page.
-        var redirectHosts = {
-          'www.leangbeauty.com': 'leangbeauty.com'
-        }
-        if (redirectHosts[hostname]) {
+        // A www. alias VISIT redirects to the bare host. Only page
+        // navigations go through this bootstrap -- API/upload fetches never
+        // load index.html -- so existing integrations keep working while
+        // people (and bookmarks/PWA opens) land on the canonical host with
+        // their path and query preserved. try/catch keeps the test DOM
+        // doubles (no location.replace) and any exotic browser on the normal
+        // render path instead of a blank page.
+        if (hostname.indexOf('www.') === 0) {
           try {
-            window.location.replace('https://' + redirectHosts[hostname] + window.location.pathname + window.location.search + window.location.hash)
+            window.location.replace('https://' + hostname.slice(4) + window.location.pathname + window.location.search + window.location.hash)
           } catch (redirectError) { /* fall through to normal render */ }
         }
+        // The deployment's identity, written by the Worker. Its staffHost is
+        // the configured staff host (BM Shop's bm-admin.khshop.workers.dev),
+        // a staff host as admin.* and loopback are (src/app/clientIdentity.ts
+        // isStaffHostname).
+        var identity = {}
+        try {
+          identity = JSON.parse(document.getElementById('business-os-identity').textContent) || {}
+        } catch (identityError) { /* the served head stays as it is */ }
+        var staffHost = typeof identity.staffHost === 'string' ? identity.staffHost.toLowerCase() : ''
         var adminHostname = hostname === 'localhost'
           || hostname === '127.0.0.1'
           || hostname === '[::1]'
           || hostname === '::1'
           || hostname.indexOf('admin.') === 0
+          || (staffHost !== '' && hostname === staffHost)
         var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
         // Owner, 27 Sep 2026: the public site never shows admin -- on a shop
         // host every document is the storefront (src/app/pathRouting.ts).
@@ -168,42 +183,42 @@
         }
         // What installs follows the HOST, what renders follows the route: an
         // unknown path on admin.* renders the storefront but must never
-        // install as the shop.
-        var themeColor = document.querySelector('meta[name="theme-color"]')
-        if (!adminHostname) {
-          document.title = 'Leang Cosmetics'
-          var description = document.querySelector('meta[name="description"]')
-          if (description) description.setAttribute('content', 'Browse Leang Cosmetics products and contact the store.')
-          var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-          if (appTitle) appTitle.setAttribute('content', 'Leang Cosmetics')
-          if (themeColor) themeColor.setAttribute('content', '#ffffff')
-          var manifest = document.querySelector('link[rel="manifest"]')
-          if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
-          var icons = document.querySelectorAll('link[rel="icon"]')
-          for (var iconIndex = 0; iconIndex < icons.length; iconIndex += 1) {
-            var iconSize = icons[iconIndex].getAttribute('sizes')
-            icons[iconIndex].setAttribute('href', iconSize === '192x192' ? '/leang-cosmetics-icon-192-v2.png' : (iconSize === '512x512' ? '/leang-cosmetics-icon-512-v2.png' : '/leang-cosmetics-favicon-v2.ico'))
-            icons[iconIndex].setAttribute('type', iconSize ? 'image/png' : 'image/x-icon')
+        // install as the shop. The names and the shop's icons come from the
+        // identity block above; a value it lacks leaves the served tag alone.
+        var brand = adminHostname
+          ? {
+            title: identity.adminTitle,
+            appTitle: identity.adminShortName,
+            description: identity.adminDescription,
+            themeColor: '#fffdf8',
+            manifest: '/manifest.json',
+            icons: { favicon: '/admin-favicon-v1.ico', icon192: '/icon-192.png', icon512: '/icon-512.png', appleTouch: '/admin-apple-touch-icon-v1.png' }
           }
-          var appleIcon = document.querySelector('link[rel="apple-touch-icon"]')
-          if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v2.png')
-        } else {
-          document.title = 'Leang Cosmetics Admin'
-          var adminAppTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-          if (adminAppTitle) adminAppTitle.setAttribute('content', 'Leang Admin')
-          var adminDescription = document.querySelector('meta[name="description"]')
-          if (adminDescription) adminDescription.setAttribute('content', 'Till, stock and sales for Leang Cosmetics staff')
-          if (themeColor) themeColor.setAttribute('content', '#fffdf8')
-          var adminManifest = document.querySelector('link[rel="manifest"]')
-          if (adminManifest) adminManifest.setAttribute('href', '/manifest.json')
-          var adminIcons = document.querySelectorAll('link[rel="icon"]')
-          for (var adminIconIndex = 0; adminIconIndex < adminIcons.length; adminIconIndex += 1) {
-            var adminIconSize = adminIcons[adminIconIndex].getAttribute('sizes')
-            adminIcons[adminIconIndex].setAttribute('href', adminIconSize === '192x192' ? '/icon-192.png' : (adminIconSize === '512x512' ? '/icon-512.png' : '/admin-favicon-v1.ico'))
-            adminIcons[adminIconIndex].setAttribute('type', adminIconSize ? 'image/png' : 'image/x-icon')
+          : {
+            title: identity.shopName,
+            appTitle: identity.shopName,
+            description: identity.shopDescription,
+            themeColor: '#ffffff',
+            manifest: '/portal-manifest.json',
+            icons: identity.shopIcons || {}
           }
-          var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
-          if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/admin-apple-touch-icon-v1.png')
+        function setHeadAttribute(selector, name, value) {
+          var element = document.querySelector(selector)
+          if (element && value) element.setAttribute(name, value)
+        }
+        if (brand.title) document.title = brand.title
+        setHeadAttribute('meta[name="apple-mobile-web-app-title"]', 'content', brand.appTitle)
+        setHeadAttribute('meta[name="description"]', 'content', brand.description)
+        setHeadAttribute('meta[name="theme-color"]', 'content', brand.themeColor)
+        setHeadAttribute('link[rel="manifest"]', 'href', brand.manifest)
+        setHeadAttribute('link[rel="apple-touch-icon"]', 'href', brand.icons.appleTouch)
+        var iconLinks = document.querySelectorAll('link[rel="icon"]')
+        for (var iconIndex = 0; iconIndex < iconLinks.length; iconIndex += 1) {
+          var iconSize = iconLinks[iconIndex].getAttribute('sizes')
+          var iconHref = iconSize === '192x192' ? brand.icons.icon192 : (iconSize === '512x512' ? brand.icons.icon512 : brand.icons.favicon)
+          if (!iconHref) continue
+          iconLinks[iconIndex].setAttribute('href', iconHref)
+          iconLinks[iconIndex].setAttribute('type', iconSize ? 'image/png' : 'image/x-icon')
         }
         if (!publicRoute) {
           // Opt the ADMIN shell out of machine translation (Sep 22 2026).
@@ -383,8 +398,8 @@
           <div class="business-os-initial-spinner" aria-hidden="true"></div>
           <div class="business-os-initial-brand">
             <h1 class="business-os-initial-title">
-              <span data-business-os-admin>Leang Cosmetics Admin</span>
-              <span data-business-os-public>Leang Cosmetics</span>
+              <span data-business-os-admin data-business-os-identity="adminTitle">Business OS Admin</span>
+              <span data-business-os-public data-business-os-identity="shopName">Business OS</span>
             </h1>
             <p class="business-os-initial-copy">
               <span data-business-os-admin>Opening workspace</span>

@@ -69,6 +69,7 @@ const contactOptions = loadReal('lib/contactOptions.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
 const accounts = loadReal('lib/portalAccounts.ts', {
+  './clientIdentity': loadReal('lib/clientIdentity.ts'),
   './db': dbModule,
   './membershipNumber': loadReal('lib/membershipNumber.ts'),
   './phone': phone,

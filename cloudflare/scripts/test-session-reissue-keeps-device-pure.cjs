@@ -75,6 +75,7 @@ const isAdminControlUser = (u) => Number(u?.id) === 1
 
 const loadAuthRoute = (authModule) => load('routes/auth.ts', {
   hono: require('hono'),
+  '../lib/clientIdentity': load('lib/clientIdentity.ts'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
   '../lib/requestBodyGuard': credentialGuardPassThrough,

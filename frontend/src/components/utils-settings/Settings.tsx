@@ -5,6 +5,7 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { resolveTaxEnabled } from '../../utils/taxSettings.ts'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
@@ -607,7 +608,7 @@ export default function Settings() {
   const typographyPreview = previewLanguage === 'km'
     ? {
         eyebrow: 'Khmer',
-        title: 'លាង កូស្មេធីក',
+        title: getClientIdentity().shopNameKm,
         sidebar: 'ម៉ឺនុយចំហៀង',
         section: 'ចំណងជើងផ្នែក',
         body: 'ទំព័រផលិតផល បង្កាន់ដៃ និងការកំណត់ នឹងប្រើពុម្ពអក្សរ និងទំហំអក្សរនេះ។',
@@ -615,7 +616,7 @@ export default function Settings() {
       }
     : {
         eyebrow: 'English',
-        title: 'Leang Cosmetics',
+        title: getClientIdentity().shopName,
         sidebar: 'Sidebar item',
         section: 'Section heading',
         body: 'Products, receipts, settings, and forms will use this font family and size scale.',

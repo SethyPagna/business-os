@@ -1,3 +1,5 @@
+import { isStaffHostname } from './clientIdentity.ts'
+
 const API_PREFIX = '/api/'
 const UPLOADS_PREFIX = '/uploads/'
 const STATIC_ASSET_RE = /\.[a-z0-9]+$/i
@@ -101,12 +103,7 @@ export function isAdminAppPath(pathname: unknown): boolean {
 
 export function isAdminHostname(): boolean {
   if (typeof window === 'undefined') return true
-  const hostname = String(window.location?.hostname || '').toLowerCase()
-  return hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '[::1]'
-    || hostname === '::1'
-    || hostname.startsWith('admin.')
+  return isStaffHostname(window.location?.hostname)
 }
 
 // Owner, 27 Sep 2026: the public site never shows admin. On a storefront host

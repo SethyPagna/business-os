@@ -47,13 +47,15 @@ not_found_handling = "single-page-application"
 binding = "STATIC_ASSETS"
 # Everything after /ws is a DOCUMENT route: the asset layer would otherwise
 # answer it from index.html without ever invoking this Worker, and G4's
-# admin-host identity rewrite has to happen before iOS reads those bytes (see
-# src/lib/adminDocumentIdentity.ts). The list mirrors that file's
+# identity rewrite has to happen before iOS reads those bytes (see
+# src/lib/documentIdentity.ts). The list mirrors that file's
 # APP_DOCUMENT_ROUTES exactly -- scripts/test-admin-host-document-rewrite-pure
 # .cjs fails if they drift, because a path listed here without a handler there
 # 404s a whole page, and a handler there without a path here never runs.
 run_worker_first = [
   "/api/*", "/uploads/*", "/health", "/ws", "/robots.txt", "/sitemap.xml",
+  # The install manifests carry the configured names (src/lib/clientIdentity.ts).
+  "/manifest.json", "/portal-manifest.json",
   # A deleted build chunk must 404 instead of being answered with the SPA
   # document (src/index.ts's /assets/* handler says why).
   "/assets/*",
@@ -351,6 +353,27 @@ BUSINESS_OS_ORGANIZATION_SLUG = "leangbeauty"
 # the organization in the database never stuck. Setting it here is what makes
 # the rename permanent.
 BUSINESS_OS_ORGANIZATION_NAME = "LeangBeauty"
+
+# Who this deployment is (src/lib/clientIdentity.ts). One build serves every
+# client, so the shop's name, icons and house formats come from here, never
+# from code; an unset var falls back to the neutral Business OS identity.
+# BUSINESS_OS_SHOP_NAME: storefront title, install name and copy; the staff
+#   app is "<name> Admin". _NAME_KM: the Khmer spelling, where one is shown.
+# BUSINESS_OS_SHOP_ALIAS: a second name the shop is known by ("Name/Alias").
+# BUSINESS_OS_SHOP_CATEGORY: "beauty" keeps the cosmetics wording (AI
+#   persona, legal footer); unset is a general shop.
+# BUSINESS_OS_SHOP_ICON_PREFIX: the shop's icon files in frontend/public
+#   (<prefix>icon-192-v2.png etc.); unset uses the staff app's icons.
+# BUSINESS_OS_MEMBERSHIP_PREFIX: customer membership numbers (LC-00042). Never
+#   change it on a live deployment: existing numbers stop counting as house
+#   numbers and the sequence starts again.
+BUSINESS_OS_SHOP_NAME = "Leang Cosmetics"
+BUSINESS_OS_SHOP_NAME_KM = "លាង កូស្មេធីក"
+BUSINESS_OS_SHOP_ALIAS = "Leang Beauty"
+BUSINESS_OS_SHOP_CATEGORY = "beauty"
+BUSINESS_OS_SHOP_ICON_PREFIX = "/leang-cosmetics-"
+BUSINESS_OS_ADMIN_SHORT_NAME = "Leang Admin"
+BUSINESS_OS_MEMBERSHIP_PREFIX = "LC-"
 
 # Sentry ingest DSN. A DSN is a PUBLIC key by design -- it only permits
 # writing events into this one project, never reading them -- so it belongs

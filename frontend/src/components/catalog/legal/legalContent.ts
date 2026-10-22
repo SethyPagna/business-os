@@ -20,6 +20,7 @@
 // details from /api/portal/config and carry an explicit "have this reviewed"
 // notice. Nothing here is legal advice.
 import { fmtDateOnly } from '../../../utils/formatters.ts'
+import { getClientIdentity, withShopName } from '../../../app/clientIdentity.ts'
 
 export type LegalPageKey = 'privacy' | 'terms' | 'cookies'
 
@@ -144,7 +145,8 @@ const EN: Record<string, string> = {
   portal_legal_identity_phone: 'Phone',
   portal_legal_identity_email: 'Email',
   portal_legal_footer_rights: 'Site operated by {name}.',
-  portal_legal_footer_independent: 'Leang Cosmetics is an independent beauty retailer in Cambodia.',
+  portal_legal_footer_independent: '{shop} is an independent beauty retailer in Cambodia.',
+  portal_legal_footer_independent_general: '{shop} is an independent retailer in Cambodia.',
   portal_legal_business_fallback: 'This business',
   portal_legal_footer_content_concerns: 'If something on this site is about you, or you are concerned about an image, contact {email}. We review every request and ask only for the information needed to identify the content and the person making the request.',
   portal_legal_footer_landmark: 'Site information and policies',
@@ -280,7 +282,8 @@ const KM: Record<string, string> = {
   portal_legal_identity_phone: 'ទូរស័ព្ទ',
   portal_legal_identity_email: 'អ៊ីមែល',
   portal_legal_footer_rights: 'គេហទំព័រនេះដំណើរការដោយ {name}។',
-  portal_legal_footer_independent: 'Leang Cosmetics ជាអ្នកលក់រាយផលិតផលសម្រស់ឯករាជ្យនៅកម្ពុជា។',
+  portal_legal_footer_independent: '{shop} ជាអ្នកលក់រាយផលិតផលសម្រស់ឯករាជ្យនៅកម្ពុជា។',
+  portal_legal_footer_independent_general: '{shop} ជាអ្នកលក់រាយឯករាជ្យនៅកម្ពុជា។',
   portal_legal_business_fallback: 'អាជីវកម្មនេះ',
   portal_legal_footer_content_concerns: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទង {email}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
   portal_legal_footer_landmark: 'ព័ត៌មាននិងគោលការណ៍របស់គេហទំព័រ',
@@ -397,12 +400,21 @@ export const PORTAL_LEGAL_EN: Readonly<Record<string, string>> = EN
 export const PORTAL_LEGAL_KM: Readonly<Record<string, string>> = KM
 
 /**
+ * The footer says "beauty retailer" only for a beauty shop; any other shop
+ * reads the `_general` sentence. Every reader of the key goes through here.
+ */
+export function legalKey(key: string): string {
+  return key === 'portal_legal_footer_independent' && getClientIdentity().shopCategory !== 'beauty' ? `${key}_general` : key
+}
+
+/**
  * Resolve one legal string for the storefront's current language: Khmer for
- * `km`, English for anything else.
+ * `km`, English for anything else, with the shop's name filled in.
  */
 export function legalText(target: string, key: string): string {
-  if (String(target || '') === 'km') return KM[key] ?? EN[key] ?? ''
-  return EN[key] ?? ''
+  const own = legalKey(key)
+  const text = String(target || '') === 'km' ? KM[own] ?? EN[own] ?? '' : EN[own] ?? ''
+  return withShopName(text)
 }
 
 /**

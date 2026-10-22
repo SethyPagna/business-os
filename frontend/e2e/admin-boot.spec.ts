@@ -43,14 +43,17 @@ test.describe('admin shell boot', () => {
   test('renders the login form, not a blank page', async ({ page }) => {
     // CATCHES: the admin root failing to mount. Asserting on the two real form
     // CONTROLS (and the submit button) rather than on brand text is what makes
-    // it discriminating -- index.html paints "Leang Cosmetics Admin" before any script
+    // it discriminating -- index.html paints the admin title before any script
     // runs, so a text assertion passes on a dead page.
     const health = collectPageHealth(page)
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
 
     // Hostname routing: 127.0.0.1 is an admin hostname (src/app/pathRouting.ts).
     await expect(page.locator('html')).toHaveAttribute('data-business-os-initial-route', 'admin')
-    await expect(page).toHaveTitle('Leang Cosmetics Admin')
+    // The deployment's identity block names the staff app (the Worker writes it;
+    // this fixture server serves the build's neutral one).
+    const identity = JSON.parse(await page.locator('#business-os-identity').textContent() || '{}')
+    await expect(page).toHaveTitle(identity.adminTitle)
 
     await expect(page.locator(USERNAME_FIELD)).toBeVisible()
     await expect(page.locator(PASSWORD_FIELD)).toBeVisible()

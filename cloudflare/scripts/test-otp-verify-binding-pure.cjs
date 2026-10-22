@@ -11,6 +11,8 @@ const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
 const assert = require('assert')
+const { createAuthHarness } = require('./harness/load_auth_route.cjs')
+const { wranglerVars } = require('./harness/wrangler_vars.cjs')
 
 function transpile(relPath) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', relPath), 'utf8')
@@ -139,10 +141,24 @@ await check('source lock: the frontend sends the challenge and the persistent de
   assert.ok(verifyAt > -1 && /getOrCreatePersistentDeviceId\(\)/.test(transport.slice(verifyAt, verifyAt + 400)), 'otpVerify must carry the persistent deviceId for the re-run device gate')
 })
 
-await check('source lock: new OTP enrollment uses the Leang Cosmetics Admin authenticator label', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
-  assert.ok(/const ADMIN_APP_NAME = 'Leang Cosmetics Admin'/.test(src))
-  assert.ok(/generateTotpSecret\(target\.username, ADMIN_APP_NAME\)/.test(src))
+await check('new OTP enrollment labels the authenticator entry with the deployment\'s staff app name', async () => {
+  // Changed 22 Oct 2026: this was a source lock on a Leang Cosmetics Admin
+  // constant. The label is now resolveClientIdentity(env).adminTitle, so the
+  // real /otp/setup route is run under each deployment's vars. The issuer is
+  // what an authenticator app shows, so it must never name another client.
+  const issuerFor = async (vars) => {
+    const h = createAuthHarness()
+    Object.assign(h.env, vars)
+    h.addUser({ id: 801, username: 'staff', password: 'staff-password' })
+    const setup = await h.request('/otp/setup', 'POST', { userId: 801, password: 'staff-password' }, { actorId: 801 })
+    assert.strictEqual(setup.status, 200)
+    const url = new URL(setup.body.otpAuthUrl)
+    assert.strictEqual(decodeURIComponent(url.pathname.slice(1)), url.searchParams.get('issuer') + ' (staff)', 'the entry label carries the same issuer')
+    return url.searchParams.get('issuer')
+  }
+  assert.strictEqual(await issuerFor(wranglerVars('wrangler.toml')), 'Leang Cosmetics Admin', "Leang's vars keep the label the owner named (28 Sep)")
+  assert.strictEqual(await issuerFor({ BUSINESS_OS_SHOP_NAME: 'BM Shop' }), 'BM Shop Admin')
+  assert.strictEqual(await issuerFor({}), 'Business OS Admin', 'unconfigured: the product name, never a client')
 })
 
 await check('source lock: peer-admin 2FA recovery requires a password-confirmed, audited break-glass action', () => {

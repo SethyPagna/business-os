@@ -5,6 +5,7 @@ import '@fontsource/noto-sans-khmer/400.css'
 import '@fontsource/noto-sans-khmer/500.css'
 import '@fontsource/noto-sans-khmer/600.css'
 import { isPublicCatalogPath } from './app/pathRouting.ts'
+import { getClientIdentity } from './app/clientIdentity.ts'
 import './styles/main.css'
 import {
   isGuardableStyleSheetError,
@@ -374,7 +375,7 @@ function InitialShellFallback({ publicMode }: { publicMode: boolean }) {
       <div className="business-os-initial-panel">
         <div className="business-os-initial-spinner" aria-hidden="true" />
         <div className="business-os-initial-brand">
-          <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetics' : 'Leang Cosmetics Admin'}</h1>
+          <h1 className="business-os-initial-title">{publicMode ? getClientIdentity().shopName : getClientIdentity().adminTitle}</h1>
           <p className="business-os-initial-copy">
             {publicMode ? 'Opening catalog' : 'Opening workspace'}
           </p>

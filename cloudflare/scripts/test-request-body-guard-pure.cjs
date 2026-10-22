@@ -141,7 +141,11 @@ async function main() {
   const guard = { admitRequestBody, smallBodyAccess, requireJsonSameOriginCredentialPost, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
   const SAME_ORIGIN = { headers: { 'sec-fetch-site': 'same-origin' } }
   const portalImagePrivacy = load('lib/portalImagePrivacy.ts')
+  // Real module: buildPortalConfig falls back to the configured shop name.
+  const clientIdentity = load('lib/clientIdentity.ts')
+  const documentRoutes = load('lib/documentRoutes.ts')
   const portal = load('routes/portal.ts', {
+    '../lib/clientIdentity': clientIdentity,
     '../lib/loyaltyEligibility': load('lib/loyaltyEligibility.ts'),
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
     '../lib/portalAbuseKey': { portalAbuseKey: async () => 'unit-portal-abuse-key' },
@@ -196,10 +200,13 @@ async function main() {
     './routes/auth': { __esModule: true, default: authRoutes },
     './routes/system': { __esModule: true, default: system },
     './routes/sync': { createSyncRoute: () => new Hono() },
-    // Real module, not a stub: index.ts iterates APP_DOCUMENT_ROUTES at module
-    // scope to register the admin-host document handler, and the poisoned proxy
-    // is not iterable.
-    './lib/adminDocumentIdentity': load('lib/adminDocumentIdentity.ts'),
+    // Real modules, not stubs: index.ts iterates APP_DOCUMENT_ROUTES and
+    // MANIFEST_ROUTES at module scope to register the document and manifest
+    // handlers, and the poisoned proxy is not iterable.
+    './lib/clientIdentity': clientIdentity,
+    './lib/documentRoutes': documentRoutes,
+    './lib/documentIdentity': load('lib/documentIdentity.ts', { './clientIdentity': clientIdentity, './documentRoutes': documentRoutes }),
+    './lib/queueRole': load('lib/queueRole.ts'),
     // Real module too: the poisoned proxy would throw as middleware on every
     // /api request (F4 origin guard, mounted ahead of body admission).
     './lib/originGuard': load('lib/originGuard.ts'),

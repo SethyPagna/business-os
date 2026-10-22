@@ -23,6 +23,7 @@ const ts = require('typescript')
 const { passwordHashStub, failedSignInCostStub } = require('./harness/password_hash_stub.cjs')
 const { credentialGuardPassThrough } = require('./harness/credential_guard_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
+const { wranglerVars } = require('./harness/wrangler_vars.cjs')
 
 function load(rel, overrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', rel)
@@ -52,6 +53,12 @@ const SCHEMA = `
 let db
 let actor
 const googleOauth = load('lib/googleOauth.ts')
+const clientIdentity = load('lib/clientIdentity.ts')
+// The return pages name the deployment's staff app (client identity, from
+// wrangler [vars]). Leang's own vars come from the config that deploys it; only
+// the identity keys are passed so no URL var changes how the callback routes.
+const IDENTITY_VAR = /^BUSINESS_OS_(SHOP_|ADMIN_SHORT_NAME$|ORGANIZATION_NAME$|MEMBERSHIP_PREFIX$)/
+const LEANG_IDENTITY = Object.fromEntries(Object.entries(wranglerVars('wrangler.toml')).filter(([key]) => IDENTITY_VAR.test(key)))
 const noop = async () => {}
 const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {} }
 
@@ -91,6 +98,7 @@ function sessionFromCookie(c) {
 }
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
+  '../lib/clientIdentity': clientIdentity,
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
   '../lib/requestBodyGuard': credentialGuardPassThrough,
@@ -152,13 +160,13 @@ function reset() {
 
 const googleSubjectOf = (id) => db.prepare('SELECT google_subject FROM users WHERE id = @id').get({ id }).google_subject
 
-async function callback(cookieToken) {
+async function callback(cookieToken, identityVars = LEANG_IDENTITY) {
   // The browser that started the link also holds its PKCE cookie (bound to
   // the state's nonce) -- see test-google-oauth-pkce-cookie-pure.cjs.
   const cookies = ['bos_google_pkce=n1.test-verifier']
   if (cookieToken) cookies.push(`bos_session=${cookieToken}`)
   const headers = { Cookie: cookies.join('; ') }
-  const res = await authRoute.request('/oauth/callback?code=c&state=s', { headers }, { ...READY_ENV, DB: db }, ctx)
+  const res = await authRoute.request('/oauth/callback?code=c&state=s', { headers }, { ...identityVars, ...READY_ENV, DB: db }, ctx)
   return { status: res.status, html: await res.text() }
 }
 
@@ -223,6 +231,16 @@ async function check(name, fn) {
     assert.equal(status, 400)
     assert.match(html, /Sign in to Leang Cosmetics Admin in this browser/)
     assert.equal(googleSubjectOf(2), null)
+  })
+
+  await check('the same refusal names the deployment\'s own staff app, never another client\'s', async () => {
+    const bm = await callback(null, { BUSINESS_OS_SHOP_NAME: 'BM Shop' })
+    assert.equal(bm.status, 400)
+    assert.match(bm.html, /Sign in to BM Shop Admin in this browser/)
+    assert.doesNotMatch(bm.html, /leang/i)
+    const neutral = await callback(null, {})
+    assert.match(neutral.html, /Sign in to Business OS Admin in this browser/, 'an unconfigured deployment shows the product name')
+    assert.doesNotMatch(neutral.html, /leang/i)
   })
 
   await check('link is refused when a DIFFERENT user is signed in where it finishes', async () => {
@@ -314,10 +332,15 @@ async function check(name, fn) {
     assert.ok((await res.json()).url)
   })
 
-  await check('the Google return pages name the staff app as the owner named it (28 Sep: Leang Cosmetics Admin)', async () => {
+  await check('the Google return pages take the staff app name from the client identity, not from a literal (changed 22 Oct)', async () => {
+    // 28 Sep the owner named the staff app "Leang Cosmetics Admin" and this
+    // test pinned a const holding it. One build now serves every client, so
+    // the name is resolveClientIdentity(env).adminTitle; the rendered text is
+    // checked above, and the source must hold no client name that could win.
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
     assert.doesNotMatch(source, /Business OS/)
-    assert.match(source, /const ADMIN_APP_NAME = 'Leang Cosmetics Admin'/)
+    assert.doesNotMatch(source, /Leang Cosmetics/)
+    assert.doesNotMatch(source, /ADMIN_APP_NAME/)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

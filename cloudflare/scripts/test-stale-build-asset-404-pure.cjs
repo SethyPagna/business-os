@@ -120,7 +120,10 @@ function makeContext(assetResponse, { bound = true } = {}) {
   // ever store one.
   const followStart = index.indexOf('  let response = await assets.fetch(c.req.raw)')
   assert.ok(followStart >= 0, 'FAIL: serveAppDocument no longer follows the asset layer\'s own redirect')
-  const followEnd = index.indexOf('  const shouldRewrite = shouldRewriteAdminDocument({', followStart)
+  // The anchor is the statement after the redirect hop. It was renamed on
+  // Oct 22 2026 (shouldRewriteAdminDocument -> shouldRewriteAppDocument, when
+  // the document rewrite became host-independent); the block it ends is unchanged.
+  const followEnd = index.indexOf('  const shouldRewrite = shouldRewriteAppDocument({', followStart)
   assert.ok(followEnd > followStart, 'FAIL: could not read the redirect-following block')
   const follow = new Function('assets', 'c', 'URL', 'Request',
     `return (async () => {${index.slice(followStart, followEnd)}; return response })()`)

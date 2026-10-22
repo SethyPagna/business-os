@@ -8,6 +8,7 @@
  */
 
 import { SYNC } from '../constants.ts'
+import { isServedStaffHostname } from '../app/clientIdentity.ts'
 import { getSyncServerUrl } from './http.ts'
 import { isSignoutBlocked } from './unresolvedSignout.ts'
 
@@ -66,7 +67,7 @@ function isProtectedAdminHost(): boolean {
   if (typeof window === 'undefined') return false
   try {
     const hostname = String(window.location?.hostname || '').trim()
-    return /^admin\./i.test(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
+    return isServedStaffHostname(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
   } catch (_) {
     return false
   }

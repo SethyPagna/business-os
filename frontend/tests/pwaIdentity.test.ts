@@ -5,6 +5,9 @@
 // "Leang Cosmetics Admin" / "Leang Admin" and keeps the blue BO icon; the
 // shop (leangbeauty.com) installs as "Leang Cosmetics" / "Leang Cosmetics"
 // (owner, 19 Oct 2026: the full name on both home screens; was "Leang").
+// Those names are Leang's identity in wrangler.toml [vars]; the Worker builds
+// both manifests from it (cloudflare/src/lib/clientIdentity.ts), and the
+// files in public/ are the neutral fallback a document the Worker never saw uses.
 //
 // Run: node tests/pwaIdentity.test.ts
 import assert from 'node:assert/strict'
@@ -13,7 +16,11 @@ import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { PORTAL_LIGHT_SURFACE } from '../src/components/catalog/portalContrast.ts'
 import * as pathRouting from '../src/app/pathRouting.ts'
-import { ADMIN_DOCUMENT_HOSTS, APP_DOCUMENT_ROUTES } from '../../cloudflare/src/lib/adminDocumentIdentity.ts'
+import { getClientIdentity } from '../src/app/clientIdentity.ts'
+import { APP_DOCUMENT_ROUTES } from '../../cloudflare/src/lib/documentRoutes.ts'
+import { clientIdentityJson, resolveClientIdentity, shopManifest, staffManifest, type ClientIdentity } from '../../cloudflare/src/lib/clientIdentity.ts'
+import { isStaffHostname as workerSaysStaff } from '../../cloudflare/src/lib/publicHostGate.ts'
+import { primeClientIdentity } from './leangClientIdentity.ts'
 
 type ManifestIcon = { src: string; sizes: string; type: string; purpose: string }
 type WebAppManifest = {
@@ -33,10 +40,27 @@ const read = (relPath: string): string =>
   fs.readFileSync(fileURLToPath(new URL(relPath, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 const publicFile = (src: string): string => fileURLToPath(new URL(`../public/${src.replace(/^\//, '')}`, import.meta.url))
 
-const staffManifestText = read('../public/manifest.json')
-const shopManifestText = read('../public/portal-manifest.json')
-const staff = JSON.parse(staffManifestText) as WebAppManifest
-const shop = JSON.parse(shopManifestText) as WebAppManifest
+function tomlVars(relPath: string): Record<string, string> {
+  const text = read(relPath)
+  const vars: Record<string, string> = {}
+  for (const match of text.slice(text.indexOf('\n[vars]\n')).matchAll(/^([A-Z][A-Z0-9_]*) = "([^"]*)"$/gm)) vars[match[1]] = match[2]
+  return vars
+}
+const leangVars = tomlVars('../../cloudflare/wrangler.toml')
+const leang = resolveClientIdentity(leangVars)
+// BM Shop's URL scheme (owner, 22 Oct 2026): the shop at <client>.khshop.workers.dev,
+// staff at <client>-admin.khshop.workers.dev, which a forwarder Worker hands to the
+// main one with the host preserved. A *.workers.dev name cannot start with admin.
+const bmShop = resolveClientIdentity({
+  BUSINESS_OS_SHOP_NAME: 'BM Shop',
+  BUSINESS_OS_ADMIN_URL: 'https://bm-admin.khshop.workers.dev',
+  BUSINESS_OS_PUBLIC_URL: 'https://bm.khshop.workers.dev',
+})
+// The page reads its identity once; the router in this file runs as BM Shop's.
+primeClientIdentity(getClientIdentity, bmShop)
+const staff = staffManifest(leang) as WebAppManifest
+const shop = shopManifest(leang) as WebAppManifest
+const staticManifests = [JSON.parse(read('../public/manifest.json')), JSON.parse(read('../public/portal-manifest.json'))] as WebAppManifest[]
 const navChrome = read('../src/components/navigation/nav-chrome.css')
 const indexHtml = read('../index.html')
 
@@ -108,15 +132,15 @@ runTest('the shop is coloured like the storefront surface', () => {
 })
 
 runTest('no manifest promises offline use or carries a retired name', () => {
-  for (const text of [staffManifestText, shopManifestText]) {
-    assert.doesNotMatch(text, /offline|business ?os|leang beauty/i)
-  }
+  for (const manifest of [staff, shop]) assert.doesNotMatch(JSON.stringify(manifest), /offline|business ?os|leang beauty/i)
+  for (const manifest of staticManifests) assert.doesNotMatch(JSON.stringify(manifest), /offline|leang/i)
 })
 
-runTest('the raw HTML head names the shop before the bootstrap overwrites it', () => {
+runTest('the raw HTML head names no client: the Worker writes the shop in', () => {
   const html = read('../index.html')
-  assert.match(html, /<title>Leang Cosmetics<\/title>/)
-  assert.match(html, /<meta name="apple-mobile-web-app-title" content="Leang Cosmetics" \/>/)
+  assert.match(html, /<title>Business OS<\/title>/)
+  assert.match(html, /<meta name="apple-mobile-web-app-title" content="Business OS" \/>/)
+  assert.doesNotMatch(html, /leang/i)
 })
 
 runTest('neither manifest names the other host\'s icons', () => {
@@ -126,7 +150,7 @@ runTest('neither manifest names the other host\'s icons', () => {
 })
 
 runTest('every manifest icon ships at the size it declares', () => {
-  for (const icon of [...staff.icons, ...shop.icons]) {
+  for (const icon of [...staff.icons, ...shop.icons, ...staticManifests.flatMap((manifest) => manifest.icons)]) {
     assert.equal(icon.type, 'image/png', icon.src)
     assert.ok(fs.existsSync(publicFile(icon.src)), `${icon.src} is missing from frontend/public`)
     const { width, height } = pngSize(publicFile(icon.src))
@@ -138,7 +162,7 @@ runTest('every manifest icon ships at the size it declares', () => {
 
 const bootstrapSource = indexHtml.match(/<script>\s*(\(function setInitialBusinessOsRoute\(\)[\s\S]*?\}\(\)\))\s*<\/script>/)?.[1]
 
-function bootstrapHead(hostname: string, pathname: string): { manifest: string | null; themeColor: string | null; title: string } {
+function bootstrapHead(hostname: string, pathname: string, identity: ClientIdentity = leang): { manifest: string | null; themeColor: string | null; title: string } {
   assert.ok(bootstrapSource, 'the identity bootstrap should stay inline in <head>')
   const element = () => ({
     attrs: new Map<string, string>(),
@@ -157,6 +181,7 @@ function bootstrapHead(hostname: string, pathname: string): { manifest: string |
     documentElement: { setAttribute() {} },
     head: { appendChild(node: unknown) { return node } },
     createElement: element,
+    getElementById: (id: string) => (id === 'business-os-identity' ? { textContent: clientIdentityJson(identity) } : null),
     querySelector: (selector: string) => selectors[selector] || null,
     querySelectorAll: () => [],
   }
@@ -187,6 +212,13 @@ const HOSTNAMES = [
   '127.0.0.1',
   '[::1]',
   'admin.example.test',
+  'bm.khshop.workers.dev',
+  'bm-admin.khshop.workers.dev',
+  'BM-Admin.khshop.workers.dev',
+  'admin.khshop.workers.dev',
+  'bm-admin.khshop.workers.dev.evil.com',
+  'xbm-admin.khshop.workers.dev',
+  'bm-admin.khshop.workers.dev.',
 ]
 const UNKNOWN_PATH = '/some-unknown-path'
 
@@ -199,7 +231,7 @@ runTest('the browser\'s IPv6 loopback spelling "[::1]" is a staff host everywher
 runTest('React uses the same host predicate the bootstrap does', () => {
   assert.equal(typeof pathRouting.isAdminHostname, 'function', 'pathRouting.ts exports isAdminHostname')
   for (const hostname of HOSTNAMES) {
-    const bootstrapAdmin = bootstrapHead(hostname, UNKNOWN_PATH).manifest === '/manifest.json'
+    const bootstrapAdmin = bootstrapHead(hostname, UNKNOWN_PATH, bmShop).manifest === '/manifest.json'
     assert.equal(routerSaysAdminHost(hostname), bootstrapAdmin, `${hostname}: router and bootstrap disagree`)
     const previous = (globalThis as { window?: unknown }).window
     ;(globalThis as { window?: unknown }).window = { location: { hostname } }
@@ -211,10 +243,33 @@ runTest('React uses the same host predicate the bootstrap does', () => {
   }
 })
 
-runTest('every host the Worker rewrites as staff is a staff host in the page too', () => {
-  for (const hostname of ADMIN_DOCUMENT_HOSTS) {
-    assert.equal(routerSaysAdminHost(hostname), true, `${hostname}: Worker says staff, router says shop`)
-    assert.equal(bootstrapHead(hostname, UNKNOWN_PATH).manifest, '/manifest.json', `${hostname}: Worker says staff, bootstrap says shop`)
+runTest('the Worker (API gate and document identity), the bootstrap and the router agree on every host', () => {
+  for (const hostname of HOSTNAMES) {
+    const worker = workerSaysStaff(hostname.toLowerCase(), bmShop.staffHost)
+    assert.equal(routerSaysAdminHost(hostname), worker, `${hostname}: Worker and router disagree`)
+    assert.equal(bootstrapHead(hostname.toLowerCase(), UNKNOWN_PATH, bmShop).manifest === '/manifest.json', worker, `${hostname}: Worker and bootstrap disagree`)
+  }
+})
+
+runTest('the configured staff host is staff; the public host, look-alikes and an unset var are not', () => {
+  assert.equal(bmShop.staffHost, 'bm-admin.khshop.workers.dev')
+  assert.equal(leang.staffHost, 'admin.leangbeauty.com', "Leang's staff host comes from its BUSINESS_OS_ADMIN_URL")
+  assert.equal(workerSaysStaff('bm-admin.khshop.workers.dev', bmShop.staffHost), true)
+  for (const hostname of ['bm.khshop.workers.dev', 'bm-admin.khshop.workers.dev.evil.com', 'xbm-admin.khshop.workers.dev', 'bm-admin.khshop.workers.dev.', 'admin-bm.khshop.workers.dev']) {
+    assert.equal(workerSaysStaff(hostname, bmShop.staffHost), false, `${hostname} must be the storefront`)
+    assert.equal(routerSaysAdminHost(hostname), false, `${hostname} must be the storefront in the page`)
+  }
+  assert.equal(workerSaysStaff('bm-admin.khshop.workers.dev', resolveClientIdentity({}).staffHost), false, 'unset: no configured staff host')
+  assert.equal(workerSaysStaff('bm-admin.khshop.workers.dev'), false, 'no staff host passed')
+  for (const [adminUrl, publicUrl] of [
+    ['https://bm.khshop.workers.dev', 'https://bm.khshop.workers.dev'],
+    ['https://www.bm.khshop.workers.dev/', 'https://bm.khshop.workers.dev'],
+    ['ftp://bm-admin.khshop.workers.dev', 'https://bm.khshop.workers.dev'],
+    ['not a url', 'https://bm.khshop.workers.dev'],
+  ]) {
+    const identity = resolveClientIdentity({ BUSINESS_OS_ADMIN_URL: adminUrl, BUSINESS_OS_PUBLIC_URL: publicUrl })
+    assert.equal(identity.staffHost, '', `${adminUrl}: the public host (or an unusable URL) never becomes a staff host`)
+    assert.equal(workerSaysStaff('bm.khshop.workers.dev', identity.staffHost), false, `${adminUrl}: the shop stays the storefront`)
   }
 })
 

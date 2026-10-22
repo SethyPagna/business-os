@@ -679,12 +679,13 @@ if (typeof window !== 'undefined') {
       })
     } else {
       // Vite dev -- use stored value (localhost:8787 for wrangler local
-      // dev), falling back to the PRODUCTION admin origin (user, Part 388:
-      // "default leangbeauty.com and admin.leangbeauty.com") so a fresh
-      // checkout talks to the real server until someone points it
-      // elsewhere on the Server page.
+      // dev), falling back to the Leang production admin origin (user, Part
+      // 388) so a fresh checkout talks to the real server until someone
+      // points it elsewhere on the Server page. import.meta.env.DEV keeps
+      // that address out of every production bundle, which serves other
+      // clients too.
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
-      if (!url) url = sanitizeSyncServerUrl('https://admin.leangbeauty.com')
+      if (!url && import.meta.env.DEV) url = sanitizeSyncServerUrl('https://admin.leangbeauty.com')
     }
 
     if (url) {

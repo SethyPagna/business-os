@@ -39,6 +39,7 @@ import {
 import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
 import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
+import { resolveClientIdentity } from '../lib/clientIdentity'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
@@ -1718,7 +1719,7 @@ function registerContactRoutes(config: ContactConfig) {
     let result: { changes: number; lastInsertRowid: number }
     try {
       result = mintMembership
-        ? await withMintedMembershipNumber(db, async (membershipNumber) => {
+        ? await withMintedMembershipNumber(db, resolveClientIdentity(c.env).membershipPrefix, async (membershipNumber) => {
           payload.membership_number = membershipNumber
           return runContactInsert()
         })
@@ -2066,7 +2067,7 @@ function registerContactRoutes(config: ContactConfig) {
     // just lost. Same one retry story as the POST route above.
     try {
       if (mintMembership) {
-        await withMintedMembershipNumber(db, async (membershipNumber) => {
+        await withMintedMembershipNumber(db, resolveClientIdentity(c.env).membershipPrefix, async (membershipNumber) => {
           payload.membership_number = membershipNumber
           if (contactUpdate) contactUpdate.params = { ...payload, id }
           if (statements.length) await db.batch(statements)
@@ -3170,7 +3171,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     const duplicateGuard = contactDuplicateWriteGuardStatement('customers', { name: name || storedPhone, phones: duplicateDecision.phones })
     let inserted: { changes: number; lastInsertRowid: number }
     try {
-      inserted = await withMintedMembershipNumber(db, async (membership) => {
+      inserted = await withMintedMembershipNumber(db, resolveClientIdentity(c.env).membershipPrefix, async (membership) => {
         const insert = {
           sql: `INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
             VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,

@@ -107,6 +107,7 @@ const db = wrap(rawDb)
 const session = loadReal('lib/portalSession.ts', {
   './db': { getDb: () => db },
   './portalAccounts': loadReal('lib/portalAccounts.ts', {
+  './clientIdentity': loadReal('lib/clientIdentity.ts'),
     './db': { getDb: () => db },
     './membershipNumber': {},
     './phone': {},

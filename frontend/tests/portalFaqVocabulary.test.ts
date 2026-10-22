@@ -4,6 +4,12 @@ import {
   localizePortalConfig,
   localizePortalFaqText,
 } from '../src/components/catalog/portalContentI18n.ts'
+import { getClientIdentity } from '../src/app/clientIdentity.ts'
+import { primeClientIdentity } from './leangClientIdentity.ts'
+
+// Machine-translated copy keeps the shop's own names in English. They come from
+// the page's client identity: run as Leang's shop host (cloudflare/wrangler.toml).
+primeClientIdentity(getClientIdentity)
 
 type LocalizedFaqItem = { question: string; answer: string }
 type LocalizedPortalConfig = {
@@ -106,6 +112,11 @@ assert.match(protectedCopy, /Facebook/)
 assert.match(protectedCopy, /Instagram/)
 assert.match(protectedCopy, /Telegram/)
 assert.notEqual(protectedCopy, 'Contact Leang Beauty through Facebook, Instagram, Telegram, or phone for product stock advice.')
+// Discriminating: "Cosmetics" alone is a vocabulary word, so only the configured
+// name keeps "Leang Cosmetics" whole (a neutral page renders "Leang គ្រឿងសម្អាង").
+const shopNameCopy = String(localizePortalFaqText('Leang Cosmetics sells cosmetic products.', 'km'))
+assert.match(shopNameCopy, /^Leang Cosmetics /)
+assert.notEqual(shopNameCopy, 'Leang Cosmetics sells cosmetic products.')
 
 for (const language of firstPartyLanguages) {
   for (const key of ['faqTitle', 'aiTitle', 'products', 'membership', 'stockStatus', 'filters']) {

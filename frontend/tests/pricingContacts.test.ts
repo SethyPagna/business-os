@@ -92,10 +92,10 @@ await runTest('serializeContactOptions round-trips structured contact options', 
   assert.equal(parsed[1]?.phone, '456')
 })
 
-await runTest('the browser never mints a membership number -- LC- is the house format', () => {
+await runTest('the browser never mints a membership number -- the deployment prefix is the house format', () => {
   const source = readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
-  assert.match(source, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/)
-  assert.match(source, /CUSTOMER_MEMBERSHIP_PLACEHOLDER = 'LC-00001'/)
+  assert.match(source, /export function customerMembershipPlaceholder\(prefix: string = getClientIdentity\(\)\.membershipPrefix\)/)
+  assert.match(source, /export function isHouseCustomerMembershipNumber\(value: unknown, prefix: string = getClientIdentity\(\)\.membershipPrefix\)/)
   // The LC- sequence gap-fills, so only the database knows the next free
   // number. cloudflare/src/lib/membershipNumber.ts is the one minter.
   assert.doesNotMatch(source, /Math\.random/)

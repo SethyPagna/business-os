@@ -4,6 +4,8 @@
 // shop's icons are the L mark cut from the owner's logo, never the words; an
 // Android launcher's circle or squircle must show the whole mark with no inner
 // frame. Wiring (which file each page and manifest names) is brandIcons.test.ts.
+// The manifests checked here are the ones the Worker builds from Leang's
+// identity (wrangler.toml [vars]); public/'s are the neutral fallback.
 //
 // Run: node tests/pwaIcons.test.ts
 
@@ -13,6 +15,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
+import { resolveClientIdentity, shopManifest as buildShopManifest, staffManifest as buildStaffManifest } from '../../cloudflare/src/lib/clientIdentity.ts'
 
 type Role = 'any' | 'maskable' | 'apple' | 'favicon' | 'retired'
 type LedgerEntry = { sha256: string; brand: 'staff' | 'shop'; role: Role; bytesOf?: string }
@@ -45,8 +48,15 @@ const sha256 = (bytes: Buffer): string => crypto.createHash('sha256').update(byt
 const readJson = <T>(relPath: string): T => JSON.parse(fs.readFileSync(fileURLToPath(new URL(relPath, import.meta.url)), 'utf8')) as T
 
 const ledger = readJson<Ledger>('./fixtures/pwa-icon-ledger.json')
-const staffManifest = readJson<Manifest>('../public/manifest.json')
-const shopManifest = readJson<Manifest>('../public/portal-manifest.json')
+function tomlVars(relPath: string): Record<string, string> {
+  const text = fs.readFileSync(fileURLToPath(new URL(relPath, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+  const vars: Record<string, string> = {}
+  for (const match of text.slice(text.indexOf('\n[vars]\n')).matchAll(/^([A-Z][A-Z0-9_]*) = "([^"]*)"$/gm)) vars[match[1]] = match[2]
+  return vars
+}
+const leang = resolveClientIdentity(tomlVars('../../cloudflare/wrangler.toml'))
+const staffManifest = buildStaffManifest(leang) as Manifest
+const shopManifest = buildShopManifest(leang) as Manifest
 const currentIcons = (brand: 'staff' | 'shop' | null, roles: Role[]): string[] =>
   Object.entries(ledger.immutable)
     .filter(([, entry]) => (brand === null || entry.brand === brand) && roles.includes(entry.role))

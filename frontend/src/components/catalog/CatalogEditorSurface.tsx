@@ -27,6 +27,7 @@ import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import type { PrivateAiStatus } from './portalPrivateAi.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { createEditorText } from './editor/editorText.ts'
+import { withShopName } from '../../app/clientIdentity.ts'
 
 const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
 const ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH = 200
@@ -1005,7 +1006,7 @@ function CatalogEditorSurfaceContent() {
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
               />
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                {copy('aboutNoTranslateHint', 'If a visitor translates this page with their browser, words in double square brackets stay exactly as written, for example [[Leang Cosmetics]].')}
+                {withShopName(copy('aboutNoTranslateHint', 'If a visitor translates this page with their browser, words in double square brackets stay exactly as written, for example [[{shop}]].'))}
               </p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">

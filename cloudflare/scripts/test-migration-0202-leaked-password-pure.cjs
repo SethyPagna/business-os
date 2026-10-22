@@ -156,6 +156,7 @@ const promisedDb = (raw) => ({
 })
 
 const authRoute = load('routes/auth.ts', {
+  '../lib/clientIdentity': load('lib/clientIdentity.ts'), // the staff app name in the OTP label and the Google pages
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,

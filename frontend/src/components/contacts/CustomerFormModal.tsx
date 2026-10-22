@@ -9,7 +9,8 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
+import { customerMembershipPlaceholder } from './customerMembershipNumber'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import { createSeparateContactDecision, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
@@ -171,7 +172,7 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
       return
     }
     // A new customer has no number yet -- the server mints the next one in
-    // the LC- sequence when this field arrives blank. Only an EXISTING
+    // the house sequence when this field arrives blank. Only an EXISTING
     // customer, being edited, must still carry one.
     if (customer && !membershipNumber) {
       setLocalError(tr(t, 'membership_number_required', 'Membership number is required'))
@@ -252,7 +253,7 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
           <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {tr(t, 'membership_number', 'Membership number')}{customer ? ' *' : ''}
           </label>
-          {/* Minted by the server, not the browser: the LC- sequence gap-fills,
+          {/* Minted by the server, not the browser: the house sequence gap-fills,
               which only the database can know. A new customer sees the field
               read-only until save. Existing stored numbers are preserved by the
               backend; only a legacy existing record with no number stays editable. */}
@@ -263,12 +264,12 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
             className={`input w-full ${membershipNumberReadOnly ? 'cursor-default bg-gray-50 text-gray-600 dark:bg-zinc-800 dark:text-gray-300' : ''}`}
             value={form.membership_number || ''}
             onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
-            placeholder={customer ? CUSTOMER_MEMBERSHIP_PLACEHOLDER : tr(t, 'membership_number_auto', 'Assigned on save')}
+            placeholder={customer ? customerMembershipPlaceholder() : tr(t, 'membership_number_auto', 'Assigned on save')}
             readOnly={membershipNumberReadOnly}
             aria-readonly={membershipNumberReadOnly}
           />
           {!customer ? (
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_auto_hint', 'The next available LC- number is assigned when you save.')}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_auto_hint', 'The next available {prefix} number is assigned when you save.').split('{prefix}').join(getClientIdentity().membershipPrefix)}</p>
           ) : membershipNumberReadOnly ? (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_preserved_hint', 'This existing membership number is preserved and cannot be changed.')}</p>
           ) : null}

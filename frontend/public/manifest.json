@@ -1,7 +1,7 @@
 {
-  "name": "Leang Cosmetics Admin",
-  "short_name": "Leang Admin",
-  "description": "Till, stock and sales for Leang Cosmetics staff",
+  "name": "Business OS Admin",
+  "short_name": "Business OS Admin",
+  "description": "Till, stock and sales for Business OS staff",
   "id": "/",
   "start_url": "/",
   "scope": "/",

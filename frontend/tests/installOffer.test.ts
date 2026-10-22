@@ -3,6 +3,12 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import * as clientIdentity from '../src/app/clientIdentity.ts'
+import { primeClientIdentity } from './leangClientIdentity.ts'
+
+// The band names the shop from the page's client identity: render it as Leang's
+// shop host does (Leang Cosmetics, from cloudflare/wrangler.toml).
+primeClientIdentity(clientIdentity.getClientIdentity)
 
 // PWA-3a install offer (PWA-FINAL D7). Owner defaults of 28 Sep 2026: a closed
 // install bar never returns on that device, and desktops get the account-menu
@@ -367,6 +373,7 @@ const pathRouting = await import('../src/app/pathRouting.ts')
 const compileBand = (install: InstallModule): ComponentModule => compileComponent('src/components/shared/InstallPromptBand.tsx', {
   '../../utils/standaloneNavigation.ts': install,
   '../../app/pathRouting.ts': pathRouting,
+  '../../app/clientIdentity.ts': clientIdentity,
   '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
   './InfoHint.tsx': InfoHintStub,
 })
@@ -536,9 +543,9 @@ await check('the staff sign-in screen carries the band; the spinner and the forc
   assert.doesNotMatch(forced, /IosInstallHint/, 'no band over the forced password change')
 })
 
-await check('the staff loading screens say Leang Cosmetics Admin', () => {
+await check('the staff loading screens name the staff app from the client identity', () => {
   const titles = [...appSource.matchAll(/<h1 className="business-os-initial-title">([^<]*)<\/h1>/g)].map(([, title]) => title)
-  assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
+  assert.deepEqual(titles, ['{getClientIdentity().adminTitle}', '{getClientIdentity().adminTitle}'])
 })
 
 await check('the staff account menu offers Install next to Update, on the admin host, whenever an install is possible', () => {

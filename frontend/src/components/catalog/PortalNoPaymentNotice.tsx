@@ -1,6 +1,7 @@
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import { LegalInlineLink } from './legal/LegalPages.tsx'
 import { LEGAL_PAGE_TITLE_KEY, legalText } from './legal/legalContent.ts'
+import { withShopName } from '../../app/clientIdentity.ts'
 
 // The standing "we don't take online payments, contact us — for your safety"
 // notice (§2). The user gave one canonical sentence and said various versions
@@ -15,7 +16,7 @@ import { LEGAL_PAGE_TITLE_KEY, legalText } from './legal/legalContent.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
-const FULL = "WE, Leang Cosmetics/Leang Beauty don't take online payments — contact us to purchase. YOUR PRIVACY IS OUR PRIORITY."
+const FULL = "WE, {shopNames} don't take online payments — contact us to purchase. YOUR PRIVACY IS OUR PRIORITY."
 const SHORT = 'No online payments — please contact us to purchase. For your safety.'
 
 export default function PortalNoPaymentNotice({
@@ -29,7 +30,7 @@ export default function PortalNoPaymentNotice({
 }) {
   const text = variant === 'short'
     ? copy('noPaymentNoticeShort', SHORT)
-    : copy('noPaymentNotice', FULL)
+    : withShopName(copy('noPaymentNotice', FULL))
   const privacyKey = LEGAL_PAGE_TITLE_KEY.privacy
   const privacyLabel = copy(privacyKey, legalText('en', privacyKey), legalText('km', privacyKey))
   return (

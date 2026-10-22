@@ -25,6 +25,7 @@ import Headset from 'lucide-react/dist/esm/icons/headset.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
 import { useApp } from '../../app/AppContextCore.tsx'
+import { getClientIdentity } from '../../app/clientIdentity.ts'
 import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './publicFirstPaint.ts'
@@ -66,13 +67,14 @@ const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'
 
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
-// Fixed storefront browser branding for the live storefront, served as
-// STATIC same-origin files (installable, unlike the old runtime blob: manifest
-// -- see the brand effect below). Not per-merchant customizable (11.14-16).
-const STOREFRONT_NAME = 'Leang Cosmetics'
-const STOREFRONT_HOME_SCREEN_NAME = 'Leang Cosmetics'
-const STOREFRONT_ICON = '/leang-cosmetics-icon-512-v2.png'
-const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
+// The storefront's browser branding is the deployment's own identity
+// (app/clientIdentity.ts), served as STATIC same-origin files (installable,
+// unlike the old runtime blob: manifest -- see the brand effect below). Not
+// per-merchant customizable (11.14-16).
+const STOREFRONT_IDENTITY = getClientIdentity()
+const STOREFRONT_NAME = STOREFRONT_IDENTITY.shopName
+const STOREFRONT_ICON = STOREFRONT_IDENTITY.shopIcons.icon512
+const STOREFRONT_APPLE_TOUCH_ICON = STOREFRONT_IDENTITY.shopIcons.appleTouch
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 
 type LooseRecord = Record<string, any>
@@ -428,7 +430,7 @@ export default function PublicCatalogPage() {
   const [categories, setCategories] = useState<CatalogOption[]>([])
   const [brands, setBrands] = useState<string[]>([])
   const [branches, setBranches] = useState<CatalogOption[]>([])
-  // Default landing tab is About (user request): leangbeauty.com opens on the
+  // Default landing tab is About (user request): the storefront opens on the
   // store's About page. resolvePortalActiveTab falls back to the first visible
   // tab if About is turned off in config.
   const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...paintConfigRef.current } as PortalConfig, (_key, fallback = '') => fallback, 'about'))
@@ -920,7 +922,7 @@ export default function PublicCatalogPage() {
   //
   // The fix keeps the established staff/storefront brand split (staff =
   // /manifest.json and the BO icons, which index.html's bootstrap picks on
-  // admin hosts; storefront = the Leang files) but serves the storefront's
+  // admin hosts; storefront = the deployment's shop files) but serves the storefront's
   // icon + manifest as STATIC same-origin files, which ARE installable,
   // instead of a runtime blob. No canvas, no idle scheduling, no
   // business-config input -- just a fixed brand swap. See
@@ -952,7 +954,7 @@ export default function PublicCatalogPage() {
 
     const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')
     const previousAppleTitle = appleTitle?.getAttribute('content') || ''
-    if (appleTitle) appleTitle.setAttribute('content', STOREFRONT_HOME_SCREEN_NAME)
+    if (appleTitle) appleTitle.setAttribute('content', STOREFRONT_NAME)
 
     return () => {
       restoreTitle()

@@ -12,6 +12,7 @@ import { useApp as useAppHook } from './AppContext.tsx'
 import { NotesProvider } from './components/notes/NotesContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
+import { getClientIdentity } from './app/clientIdentity.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
@@ -1441,7 +1442,7 @@ function PageLoader() {
         <div className="business-os-initial-panel">
           <div className="business-os-initial-spinner" aria-hidden="true" />
           <div className="business-os-initial-brand">
-            <h1 className="business-os-initial-title">Leang Cosmetics Admin</h1>
+            <h1 className="business-os-initial-title">{getClientIdentity().adminTitle}</h1>
             <p className="business-os-initial-copy">
               {stalled ? 'Page bundle is still loading' : 'Loading this workspace view...'}
             </p>
@@ -1921,7 +1922,7 @@ export default function App() {
           <div className="business-os-initial-panel">
             <div className="business-os-initial-spinner" aria-hidden="true" />
             <div className="business-os-initial-brand">
-              <h1 className="business-os-initial-title">Leang Cosmetics Admin</h1>
+              <h1 className="business-os-initial-title">{getClientIdentity().adminTitle}</h1>
               <p className="business-os-initial-copy">Preparing secure sign-in...</p>
             </div>
           </div>

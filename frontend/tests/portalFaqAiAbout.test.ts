@@ -16,6 +16,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
 import { faqEntries, filterFaqEntries, faqSearchVisible, nextOpenFaqKey } from '../src/components/catalog/portalFaqLayout.ts'
+import { writeIdentityBlock } from './leangClientIdentity.ts'
 
 const SRC = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'src')
 const requireActual = createRequire(import.meta.url)
@@ -37,7 +38,10 @@ function loadModule(relative: string) {
   return module.exports
 }
 
+// The tabs read the page's client identity as they load: load them as on a Leang host.
+const undoIdentity = writeIdentityBlock()
 const tabsModule = loadModule('components/catalog/CatalogSecondaryTabs.tsx')
+undoIdentity()
 const Tabs = tabsModule.default as React.ComponentType<Record<string, unknown>>
 const FaqList = tabsModule.FaqList as (props: Record<string, unknown>) => React.ReactElement
 
@@ -304,7 +308,7 @@ runTest('About: the shop name is printed once, with no About pill above it', () 
   assert.equal((different.match(/Leang/g) || []).length, 1, 'a different title never prints a second name')
 })
 
-runTest('About: the Leang icon replaces initials when no logo is shown', () => {
+runTest('About: the shop icon (Leang Cosmetics\' configured icon) replaces initials when no logo is shown', () => {
   const out = html(aboutProps())
   assert.match(out, /src="\/leang-cosmetics-icon-512-v2\.png"/)
   assert.doesNotMatch(out, />LE</, 'no initials')

@@ -7,22 +7,28 @@
  * storefront host only the storefront's own API is reachable; everything else
  * is a plain 404, as if the staff app did not exist there.
  *
- * The host rule is the frontend's isAdminHostname (src/app/pathRouting.ts,
- * index.html's bootstrap, the service worker): admin.* and loopback are the
- * staff app, every other host is the storefront. Telegram, Google OAuth and
- * the deploy kit all call admin.leangbeauty.com, which is untouched.
+ * The host rule is the frontend's isStaffHostname (src/app/clientIdentity.ts,
+ * index.html's bootstrap, the service worker): admin.*, loopback and the
+ * deployment's configured staff host are the staff app, every other host is
+ * the storefront. Telegram, Google OAuth and the deploy kit all call
+ * admin.leangbeauty.com, which is untouched. The configured host (BM Shop's
+ * bm-admin.khshop.workers.dev, where a *.workers.dev name cannot start with
+ * admin.) is ClientIdentity.staffHost: an exact hostname, never the public
+ * host (lib/clientIdentity.ts staffHostFrom).
  *
  * Pure and dependency-free: no D1, KV or subrequest, so it costs a string
  * compare on the Free plan's 10 ms budget and the pure test runs it as is.
  */
 
-export function isStaffHostname(hostname: unknown): boolean {
+export function isStaffHostname(hostname: unknown, staffHost: unknown = ''): boolean {
   const host = String(hostname || '').toLowerCase().trim()
+  const configured = String(staffHost || '').toLowerCase().trim()
   return host === 'localhost'
     || host === '127.0.0.1'
     || host === '[::1]'
     || host === '::1'
     || host.startsWith('admin.')
+    || (configured !== '' && host === configured)
 }
 
 // Exactly what the storefront bundle calls (src/api/portalPublicTransport.ts
@@ -71,10 +77,10 @@ export function gatePath(pathname: string): string | null {
 }
 
 /** true when this request must be answered 404 on a storefront host. */
-export function isBlockedOnStorefrontHost(url: string): boolean {
+export function isBlockedOnStorefrontHost(url: string, staffHost: unknown = ''): boolean {
   let parsed: URL
   try { parsed = new URL(url) } catch { return true }
-  if (isStaffHostname(parsed.hostname)) return false
+  if (isStaffHostname(parsed.hostname, staffHost)) return false
   const path = gatePath(parsed.pathname)
   if (path === null) return true
   const lower = path.toLowerCase()

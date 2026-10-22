@@ -9,6 +9,8 @@ import { buildPortalSocialFromConfig, flattenPortalSocialGroups } from '../src/c
 import { FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
 import { localizePortalFaqText } from '../src/components/catalog/portalContentI18n.ts'
 import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
+import { withShopName } from '../src/app/clientIdentity.ts'
+import { LEANG_CLIENT_IDENTITY } from './leangClientIdentity.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(`../src/components/catalog/${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const require = createRequire(import.meta.url)
@@ -142,7 +144,8 @@ runCase('the footer states the independent-retailer line', () => {
   const legal = read('legal/LegalPages.tsx')
   assert.match(legal, /data-portal-footer-independent="true">\{text\('portal_legal_footer_independent'\)\}/)
   const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
-  assert.equal(en.portal_legal_footer_independent, 'Leang Cosmetics is an independent beauty retailer in Cambodia.')
+  assert.equal(LEANG_CLIENT_IDENTITY.shopCategory, 'beauty', 'Leang keeps the beauty-retailer line')
+  assert.equal(withShopName(en.portal_legal_footer_independent, LEANG_CLIENT_IDENTITY), 'Leang Cosmetics is an independent beauty retailer in Cambodia.')
 })
 
 runCase('the offers banner renders once, inside the products section, with a retry', () => {

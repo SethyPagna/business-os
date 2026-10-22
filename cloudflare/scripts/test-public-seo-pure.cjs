@@ -4,11 +4,13 @@
 // One Worker serves the public shop (leangbeauty.com) and the internal admin
 // app (admin.leangbeauty.com). The shop should be findable and preview well
 // when its link is shared; the admin app must never be indexed or previewed
-// as the shop. This runs the REAL lib/publicSeo.ts and the REAL admin rewrite
-// rules, and pins the wiring that makes them reachable: both paths in
+// as the shop. This runs the REAL lib/publicSeo.ts and the REAL document
+// rewrite rules, and pins the wiring that makes them reachable: both paths in
 // run_worker_first of BOTH wrangler configs (else the asset layer answers
-// them with index.html), handlers above the D1 middleware, and the raw
-// index.html carrying the Open Graph tags a preview crawler reads.
+// them with index.html), handlers above the D1 middleware, and the Open Graph
+// tags a preview crawler reads. Since Oct 22 2026 index.html names no client,
+// so those tags' values are the ones the Worker writes from wrangler [vars];
+// this file reads Leang Cosmetics' from wrangler.toml.
 //
 // Run (from cloudflare/): node scripts/test-public-seo-pure.cjs
 'use strict'
@@ -17,14 +19,39 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 const { load } = require('./test-request-body-guard-pure.cjs')
+const { wranglerVars } = require('./harness/wrangler_vars.cjs')
 
 const CF = path.join(__dirname, '..')
 const REPO = path.join(CF, '..')
 const read = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
 
-// The real host list: the split is only as good as ADMIN_DOCUMENT_HOSTS.
-const identity = load('lib/adminDocumentIdentity.ts')
-const seo = load('lib/publicSeo.ts', { './adminDocumentIdentity': identity })
+// The real host rule (the API gate's): admin.*, loopback and the configured
+// staff host, which comes from the deployment's BUSINESS_OS_ADMIN_URL.
+const clientIdentity = load('lib/clientIdentity.ts')
+const gate = load('lib/publicHostGate.ts')
+const identity = load('lib/documentIdentity.ts', { './clientIdentity': clientIdentity, './publicHostGate': gate })
+const seo = load('lib/publicSeo.ts', { './publicHostGate': gate })
+const LEANG_ENV = wranglerVars('wrangler.toml')
+const staffHostOf = (env) => clientIdentity.staffHostFrom(env.BUSINESS_OS_ADMIN_URL, env.BUSINESS_OS_PUBLIC_URL)
+const STAFF_HOST = staffHostOf(LEANG_ENV)
+// The rules the Worker registers for one request to this host.
+const rulesFor = (hostname, env = LEANG_ENV) => identity.documentRewrites({
+  identity: clientIdentity.resolveClientIdentity(env),
+  hostname,
+  shopOrigin: identity.shopOriginFrom(env.BUSINESS_OS_PUBLIC_URL, 'https://' + hostname + '/'),
+})
+// What one rule writes into an element that starts with these attributes.
+function written(rules, selector, attributes = {}) {
+  const matching = rules.filter((candidate) => candidate.selector === selector)
+  assert.equal(matching.length, 1, 'expected exactly one rule for ' + selector)
+  const writes = []
+  matching[0].element({
+    getAttribute: (name) => (name in attributes ? attributes[name] : null),
+    setAttribute: (_name, value) => writes.push(value),
+    setInnerContent: (value) => writes.push(value),
+  })
+  return writes
+}
 const workerIndex = read(path.join(CF, 'src', 'index.ts'))
 const indexHtml = read(path.join(REPO, 'frontend', 'index.html'))
 
@@ -39,7 +66,7 @@ const ADMIN_HOSTS = ['admin.leangbeauty.com', 'localhost', '127.0.0.1']
 check('the storefront host is indexable and points at its sitemap', () => {
   for (const host of PUBLIC_HOSTS) {
     const origin = 'https://' + host
-    const robots = seo.robotsTxt(host, origin)
+    const robots = seo.robotsTxt(host, origin, STAFF_HOST)
     assert.match(robots, /^User-agent: \*\n/, host)
     assert.match(robots, /\nDisallow: \/api\/\n/, host + ': the API is not a page')
     assert.doesNotMatch(robots, /Disallow: \/\n/, host + ': the shop itself is not blocked')
@@ -49,13 +76,34 @@ check('the storefront host is indexable and points at its sitemap', () => {
 
 check('every admin host is fully disallowed and has no sitemap', () => {
   for (const host of ADMIN_HOSTS) {
-    assert.equal(seo.robotsTxt(host, 'https://' + host), 'User-agent: *\nDisallow: /\n', host)
-    assert.equal(seo.sitemapXml(host, 'https://' + host), null, host + ': nothing to index')
+    assert.equal(seo.robotsTxt(host, 'https://' + host, STAFF_HOST), 'User-agent: *\nDisallow: /\n', host)
+    assert.equal(seo.sitemapXml(host, 'https://' + host, STAFF_HOST), null, host + ': nothing to index')
   }
 })
 
+check('a configured staff host is the admin host too, by exact hostname', () => {
+  // Oct 22 2026: BM Shop's staff app is bm-admin.khshop.workers.dev (a
+  // *.workers.dev name cannot start with admin.). Without the configured host
+  // it would be served a crawlable robots.txt and a sitemap for the admin app.
+  const BM = { BUSINESS_OS_ADMIN_URL: 'https://bm-admin.khshop.workers.dev', BUSINESS_OS_PUBLIC_URL: 'https://bm.khshop.workers.dev' }
+  const BM_STAFF = staffHostOf(BM)
+  assert.equal(BM_STAFF, 'bm-admin.khshop.workers.dev')
+  assert.equal(seo.robotsTxt('bm-admin.khshop.workers.dev', 'https://bm-admin.khshop.workers.dev', BM_STAFF), 'User-agent: *\nDisallow: /\n')
+  assert.equal(seo.sitemapXml('bm-admin.khshop.workers.dev', 'https://bm-admin.khshop.workers.dev', BM_STAFF), null)
+  for (const host of ['bm.khshop.workers.dev', 'bm-admin.khshop.workers.dev.evil.com', 'xbm-admin.khshop.workers.dev']) {
+    assert.match(seo.robotsTxt(host, 'https://' + host, BM_STAFF), new RegExp('Sitemap: https://' + host.replace(/\./g, '\\.') + '/sitemap\\.xml'), host + ' is the storefront')
+    assert.ok(seo.sitemapXml(host, 'https://' + host, BM_STAFF).includes('https://' + host + '/'), host)
+  }
+  // Under Leang's config BM's staff host is just another host.
+  assert.doesNotMatch(seo.robotsTxt('bm-admin.khshop.workers.dev', 'https://bm-admin.khshop.workers.dev', STAFF_HOST), /Disallow: \/\n/)
+  // No configured staff host: admin.* and local development are the admin app, nothing else.
+  assert.equal(seo.robotsTxt('localhost', 'http://localhost:8787', undefined), 'User-agent: *\nDisallow: /\n')
+  assert.equal(seo.robotsTxt('admin.leangbeauty.com', 'https://admin.leangbeauty.com', undefined), 'User-agent: *\nDisallow: /\n')
+  assert.doesNotMatch(seo.robotsTxt('bm-admin.khshop.workers.dev', 'https://bm-admin.khshop.workers.dev', undefined), /Disallow: \/\n/)
+})
+
 check('the sitemap is the home page and the three legal pages, on the request origin', () => {
-  const xml = seo.sitemapXml('leangbeauty.com', 'https://leangbeauty.com')
+  const xml = seo.sitemapXml('leangbeauty.com', 'https://leangbeauty.com', STAFF_HOST)
   assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/)
   const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
   assert.deepEqual(locs, [
@@ -96,72 +144,77 @@ check('both wrangler configs route the two paths to the Worker', () => {
   }
 })
 
-check('the raw storefront document carries the link-preview tags', () => {
+check('the raw document carries every link-preview tag, so the Worker has something to write into', () => {
+  // Changed Oct 22 2026: index.html used to hold Leang Cosmetics' values. It is
+  // neutral now (test-admin-host-document-rewrite-pure.cjs pins that); what a
+  // crawler reads on the shop host is what the next check shows the Worker writes.
   const head = indexHtml.slice(0, indexHtml.indexOf('<script>'))
-  const meta = (property) => {
-    const match = head.match(new RegExp('<meta property="' + property.replace(':', '\\:') + '" content="([^"]*)"'))
-    assert.ok(match, property + ' is in the static head, before any script runs')
-    return match[1]
+  for (const property of ['og:type', 'og:site_name', 'og:title', 'og:description', 'og:url', 'og:image']) {
+    assert.ok(head.includes('<meta property="' + property + '" content="'), property + ' is in the static head, before any script runs')
   }
-  assert.equal(meta('og:type'), 'website')
-  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
-  assert.equal(meta('og:site_name'), shopManifest.name)
-  assert.equal(meta('og:title'), 'Leang Cosmetics')
-  assert.equal(meta('og:description'), shopManifest.description, 'the preview describes the shop the way its installed app does')
-  // Prices can be hidden from the public storefront, so the preview never promises them.
-  assert.doesNotMatch(meta('og:description'), /price/i)
-  assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512-v2\.png$/, 'absolute, on the public host')
+  assert.match(head, /<meta property="og:type" content="website" \/>/)
   assert.match(head, /<meta name="twitter:card" content="summary" \/>/)
+})
+
+check('Leang\'s shop host serves the link preview its static head used to carry', () => {
+  const rules = rulesFor('leangbeauty.com')
+  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
+  const leangManifest = clientIdentity.shopManifest(clientIdentity.resolveClientIdentity(LEANG_ENV))
+  assert.equal(shopManifest.name, 'Business OS', 'the committed manifest is the neutral one; the Worker serves Leang\'s')
+  assert.deepEqual(written(rules, 'meta[property="og:site_name"]'), [leangManifest.name])
+  assert.deepEqual(written(rules, 'meta[property="og:title"]'), ['Leang Cosmetics'])
+  const description = written(rules, 'meta[property="og:description"]')
+  assert.deepEqual(description, [leangManifest.description], 'the preview describes the shop the way its installed app does')
+  // Prices can be hidden from the public storefront, so the preview never promises them.
+  assert.doesNotMatch(description[0], /price/i)
+  const image = written(rules, 'meta[property="og:image"]')
+  assert.match(image[0], /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512-v2\.png$/, 'absolute, on the public host')
   assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512-v2.png')), 'the preview image ships')
 })
 
-check('the document declares its canonical URL on the primary host, so the alias cannot rank on its own', () => {
-  const head = indexHtml.slice(0, indexHtml.indexOf('<script>'))
-  const canonical = head.match(/<link rel="canonical" href="([^"]*)"/)
-  assert.ok(canonical, 'the static head carries no canonical URL')
-  assert.equal(canonical[1], 'https://leangbeauty.com/', 'the canonical is absolute, on the primary host')
-  const ogUrl = head.match(/<meta property="og:url" content="([^"]*)"/)
-  assert.ok(ogUrl, 'the static head carries no og:url')
-  assert.equal(ogUrl[1], canonical[1], 'og:url and the canonical must be the same address')
-  // Any alias host (www.) serving this exact document keeps its own sitemap
-  // and robots on the request origin (each host answers for itself), and the
-  // canonical above is what folds it into leangbeauty.com -- so the alias must
-  // never appear in the tag. The retired leangcosmetics.dpdns.org must not
-  // appear either.
+check('the shop declares its canonical URL on the primary host, so the alias cannot rank on its own', () => {
+  // The Worker writes the CONFIGURED public address whatever host was asked.
+  const primary = written(rulesFor('leangbeauty.com'), 'link[rel="canonical"]')
+  assert.deepEqual(primary, ['https://leangbeauty.com/'], 'the canonical is absolute, on the primary host')
+  assert.deepEqual(written(rulesFor('leangbeauty.com'), 'meta[property="og:url"]'), primary, 'og:url and the canonical must be the same address')
+  // An alias host (www.) serving this document keeps its own sitemap and
+  // robots on the request origin (each host answers for itself), and the
+  // canonical is what folds it into leangbeauty.com -- so the alias must never
+  // appear in the tag. The retired leangcosmetics.dpdns.org must not appear
+  // either.
   for (const host of PUBLIC_HOSTS.filter((candidate) => candidate !== 'leangbeauty.com')) {
-    assert.ok(!canonical[1].includes(host), host + ' must canonicalise to the primary host, not to itself')
+    const rules = rulesFor(host)
+    for (const [selector] of [['link[rel="canonical"]'], ['meta[property="og:url"]'], ['meta[property="og:image"]']]) {
+      const [value] = written(rules, selector)
+      assert.ok(!value.includes(host), host + ' must canonicalise to the primary host, not to itself: ' + selector)
+      assert.ok(value.startsWith('https://leangbeauty.com/'), selector + ' names the primary host: ' + value)
+    }
   }
-  assert.ok(!/dpdns|leangcosmetics/i.test(canonical[1]), 'the retired domain must not be the canonical')
-  assert.ok(seo.sitemapXml('www.leangbeauty.com', 'https://www.leangbeauty.com').includes('https://www.leangbeauty.com/'), 'the alias still answers for its own URLs')
+  const dpdns = written(rulesFor('www.leangbeauty.com'), 'link[rel="canonical"]')[0]
+  assert.ok(!/dpdns|leangcosmetics/i.test(dpdns), 'the retired domain must not be the canonical')
+  assert.ok(seo.sitemapXml('www.leangbeauty.com', 'https://www.leangbeauty.com', STAFF_HOST).includes('https://www.leangbeauty.com/'), 'the alias still answers for its own URLs')
+})
+
+check('a deployment with no public address canonicalises to the origin it was asked on, never to Leang', () => {
+  const bare = { BUSINESS_OS_SHOP_NAME: 'BM Shop' }
+  const rules = rulesFor('shop.example.test', bare)
+  assert.deepEqual(written(rules, 'link[rel="canonical"]'), ['https://shop.example.test/'])
+  assert.doesNotMatch(JSON.stringify(written(rules, 'meta[property="og:image"]')), /leang/i)
 })
 
 check('the admin host rewrites every preview tag away from the storefront', () => {
-  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
+  const shopManifest = clientIdentity.shopManifest(clientIdentity.resolveClientIdentity(LEANG_ENV))
   const storefrontValues = new Set([shopManifest.name, shopManifest.short_name, shopManifest.description])
+  const adminRules = rulesFor('admin.leangbeauty.com')
   for (const property of ['og:site_name', 'og:title', 'og:description', 'og:image', 'og:url']) {
-    const rule = identity.ADMIN_DOCUMENT_REWRITES.find((candidate) => candidate.selector === 'meta[property="' + property + '"]')
-    assert.ok(rule, 'no admin rewrite for ' + property)
-    const writes = []
-    rule.element({
-      getAttribute: () => null,
-      setAttribute: (_name, value) => writes.push(value),
-      setInnerContent: (value) => writes.push(value),
-    })
+    const writes = written(adminRules, 'meta[property="' + property + '"]')
     assert.ok(writes.length === 1 && writes[0], property + ' writes one value')
     assert.ok(!storefrontValues.has(writes[0]), property + ' still names the storefront')
     assert.doesNotMatch(writes[0], /leang-cosmetics-|leangbeauty.com/i, property + ' still points at a storefront file or address')
   }
   // The canonical too: an admin document telling a crawler its canonical
   // address is the shop's front page is the same leak in a different tag.
-  const canonicalRule = identity.ADMIN_DOCUMENT_REWRITES.find((candidate) => candidate.selector === 'link[rel="canonical"]')
-  assert.ok(canonicalRule, 'no admin rewrite for the canonical URL')
-  const canonicalWrites = []
-  canonicalRule.element({
-    getAttribute: () => 'https://leangbeauty.com/',
-    setAttribute: (_name, value) => canonicalWrites.push(value),
-    setInnerContent: (value) => canonicalWrites.push(value),
-  })
-  assert.deepEqual(canonicalWrites, ['/'], 'the admin canonical is its own document, never the storefront')
+  assert.deepEqual(written(adminRules, 'link[rel="canonical"]', { href: 'https://leangbeauty.com/' }), ['/'], 'the admin canonical is its own document, never the storefront')
 })
 
 console.log('\ntest-public-seo-pure: ' + checks + ' checks passed')
