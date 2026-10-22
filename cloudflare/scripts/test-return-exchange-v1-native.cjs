@@ -32,6 +32,8 @@ const MUTANTS = {
     to: 'returned: (() => { const own = recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate); return own.length ? [{ quantity: own.reduce((s, l) => s + l.quantity, 0), usd: Math.min(...own.map(l => l.usd ?? Infinity)), khr: Math.min(...own.map(l => l.khr ?? Infinity)) }] : [] })(),' },
   // 6.0.958 (P3-B): an unposted replacement line is priced from the catalog read NOW; a mutant that prices it from a remembered figure is the stale-snapshot defect.
   'unposted-uses-stale-price': { file: 'src/lib/returnExchange.ts', from: "    const catalog = sellingPriceCeilCent(money(line.product.selling_price_usd ?? 0, 'return_exchange_price_invalid'))", to: '    const catalog = 10' },
+  // The exchange answers through the returns router's cost projection (cost visibility matrix); without it a returns-only caller would read acquisition costs.
+  'cost-projection-off': { file: 'src/routes/returns.ts', from: "app.use('*', acquisitionCostResponses)", to: "app.use('*', async (_c, next) => next())" },
   'credit-is-whole-refund': { file: 'src/lib/returnExchange.ts', from: 'credit_usd: credit,', to: 'credit_usd: input.refundUsd,' },
 }
 
@@ -362,6 +364,17 @@ async function main() {
         assert.deepEqual([rose.quoted.refund_usd, rose.quoted.total_usd, rose.quoted.net_usd], [10, 34, 24])
         assert.deepEqual(roseRows.items.map(row => [row.quantity, row.applied_price_usd, row.total_usd]), [[1, 10, 10], [2, 12, 24]])
         assert.equal(Number(roseRows.sale.total_usd), 34)
+      })
+      // Cost visibility (test-cost-visibility-matrix-pure.cjs): the exchange create runs inside the returns router, so its answers pass the same projection as every other
+      // returns answer -- a caller without the cost grant gets no acquisition cost from the quote, the create or the detail, while the grant holder's detail does carry one.
+      const COST = /cost_price|unit_cost|purchase_price|received_cost|cogs/
+      const detailAs = (id, options) => h.call('GET', H.fresh(`/api/returns/${id}`), undefined, 'exchange detail', { observe: true, ...options })
+      const noCostDetail = rose.created?.status === 200 ? await detailAs(rose.created.body.id, { cookie: returnsOnly }) : null
+      const adminDetail = rose.created?.status === 200 ? await detailAs(rose.created.body.id, {}) : null
+      r.check('cost: no acquisition cost reaches a caller without the cost grant (quote, create, detail); the admin detail does carry one (the control)', () => {
+        assert.equal(noCostDetail.status, 200, JSON.stringify(noCostDetail.body))
+        for (const [name, body] of [['quote', rose.quote.body], ['create', rose.created.body], ['detail', noCostDetail.body]]) assert.doesNotMatch(JSON.stringify(body), COST, name)
+        assert.match(JSON.stringify(adminDetail.body), COST, 'the control: the pattern does match a body that carries a cost')
       })
       await setCatalog(7)
       const fell = await exchange(sale, [{ item: 0, quantity: 1 }], screenLines, { cookie: returnsOnly, payment: aba(14) })

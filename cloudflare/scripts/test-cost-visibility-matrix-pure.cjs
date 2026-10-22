@@ -113,6 +113,10 @@ const PROJECTED = {
 // route files that never put a cost-bearing field in a response (checked below)
 const NO_COST = ['ai.ts', 'auth.ts', 'branchCutoverOperator.ts', 'devices.ts', 'fees.ts', 'files.ts', 'lookups.ts', 'notes.ts', 'notifications.ts', 'organizations.ts',
   'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts', 'inventoryChecks.ts']
+// Files in routes/ that are not routers: a handler body split out of a PROJECTED router and called from inside one of its routes (6.0.958: the exchange create).
+// Every answer leaves through the parent's c.json, which the parent's acquisitionCostResponses patches before the handler runs, so the file is governed by its
+// parent -- as long as it never builds a Response of its own. The native tests prove the projection end to end (test-return-exchange-v1-native.cjs, "cost:").
+const SPLIT_FROM_PARENT = { 'returnExchangeCreate.ts': { parent: 'returns.ts', call: /\bcreateExchangeReturnV1\(/ } }
 const COST_FIELD = /\b(cost_price_(?:usd|khr)|purchase_price_(?:usd|khr)|received_cost_usd|cost_usd|cogs|total_cost_usd)\b/
 
 check('SERVER: every cost-bearing route module is governed by the projection middleware or an explicit cost gate', () => {
@@ -124,9 +128,19 @@ check('SERVER: every cost-bearing route module is governed by the projection mid
 
 check('SERVER: every route file is classified, so a new surface cannot ship unreviewed', () => {
   const files = fs.readdirSync(path.join(root, 'cloudflare/src/routes')).filter((name) => name.endsWith('.ts'))
-  const known = new Set([...Object.keys(PROJECTED), ...NO_COST])
+  const known = new Set([...Object.keys(PROJECTED), ...NO_COST, ...Object.keys(SPLIT_FROM_PARENT)])
   for (const file of files) assert.ok(known.has(file), file + ' is new: classify it in PROJECTED (cost-bearing) or NO_COST (and justify it) before it ships')
   for (const file of known) assert.ok(files.includes(file), file + ' is classified but no longer exists')
+})
+
+check('SERVER: a handler split out of a projected router answers only through the parent\'s c.json, so the parent\'s cost projection applies', () => {
+  for (const [file, { parent, call }] of Object.entries(SPLIT_FROM_PARENT)) {
+    assert.ok(Object.hasOwn(PROJECTED, parent), file + ': its parent ' + parent + ' must be a PROJECTED route')
+    assert.match(read('cloudflare/src/routes', parent), call, parent + ' calls ' + file)
+    const source = read('cloudflare/src/routes', file).replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    assert.doesNotMatch(source, /new Response\(|Response\.json\(|\bc\.(?:body|text|html|newResponse)\(/, file + ' must answer through c.json so ' + parent + ' projection applies')
+    assert.match(source, /\bc\.json\(/, file + ' answers with c.json')
+  }
 })
 
 check('SERVER: Inventory costs need both grants, use the strict whitelist and never expose the raw review key', () => {
