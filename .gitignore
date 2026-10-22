@@ -32,6 +32,8 @@ backend/*firebase-admin*.json
 *.license
 minio.license
 ops/secrets/
+# Client deny-list for the migration lint: names of other clients, never committed.
+cloudflare/scripts/.client-denylist.local
 runtime/secrets/
 
 # Logs
