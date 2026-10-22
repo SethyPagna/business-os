@@ -205,7 +205,7 @@ try {
     await running.mounted.unmount()
   })
 
-  await runTest('the page being hidden releases the camera, and coming back does not restart it', async () => {
+  await runTest('the page being hidden releases the camera, and coming back starts it again by itself (owner, 22 Oct: no ask for an allowed camera)', async () => {
     stage.liveVideoFrames = true
     const { Detector, log } = watchingDetector()
     const running = await mountProbe('granted', { detector: Detector })
@@ -217,9 +217,30 @@ try {
     await assertQuiet(running, log)
     setVisibility('visible')
     await act(async () => { fire('document', 'visibilitychange') })
+    await waitFor(() => isScanning(running))
+    assert.equal(running.probe.getUserMediaCalls, 2, 'coming back opens the camera again with no tap')
+    assert.ok(isScanning(running), 'and the scan is running')
+    assert.deepEqual(running.probe.tracks.map((track) => track.readyState), ['ended', 'live'])
+    // Hidden again: the second camera is released too, each track once.
+    setVisibility('hidden')
+    await act(async () => { fire('document', 'visibilitychange') })
+    assert.deepEqual(running.probe.tracks.map((track) => track.stopCount), [1, 1])
+    setVisibility('visible')
+    await running.mounted.unmount()
+  })
+
+  await runTest('a camera paused on purpose (photo picker, idle) stays paused when the page comes back: only a camera that was running resumes', async () => {
+    stage.liveVideoFrames = true
+    const running = await mountProbe('granted', { native: false })
+    await waitFor(() => isScanning(running))
+    await act(async () => { running.camera().parkCamera() })
+    setVisibility('hidden')
+    await act(async () => { fire('document', 'visibilitychange') })
+    setVisibility('visible')
+    await act(async () => { fire('document', 'visibilitychange') })
     await settle(60)
-    assert.equal(running.probe.getUserMediaCalls, 1, 'foregrounding a PWA is not a user gesture: no automatic restart')
-    assert.equal(running.view(), 'manual|', 'it waits on the Start camera button')
+    assert.equal(running.probe.getUserMediaCalls, 1, 'no request behind a paused camera')
+    assert.equal(running.view(), 'manual|', 'it waits on the Start camera button, as paused')
     await running.mounted.unmount()
   })
 

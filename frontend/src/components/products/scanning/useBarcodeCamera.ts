@@ -8,8 +8,9 @@
 // one frame in flight.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
+import { isCameraBlockedByDocumentPolicy, isInAppBrowser } from './cameraPolicy.ts'
 import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
+import { classifyCameraFailure, type CameraFailure } from './cameraFailure.ts'
 import {
   NATIVE_TICK_INTERVAL_MS,
   SCAN_GUIDE_BOX,
@@ -21,7 +22,7 @@ import {
   viewOf,
   zxingHeadStartOver,
 } from './barcodeFrameDecoder.ts'
-import { listCameras, nextCameraId, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
+import { clearCameraChoice, listCameras, nextCameraId, readCameraChoice, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
 import { acquireDecodeClient, type DecodeClient, type DecodeFrames } from './decodeWorkerClient.ts'
 import { createScanIdlePolicy, scanIntervalMs } from './scanIdlePolicy.ts'
 import {
@@ -60,8 +61,22 @@ export interface CameraMessages {
   scanUnsupported: string
   cameraDocumentBlocked: string
   cameraPermissionBlocked: string
+  cameraBusy: string
   scanFailed: string
   scanPromptDismissed: string
+}
+
+// What each kind of failed start leaves on the sheet: one line (from the
+// modal's messages) and the state that decides the one action beside it. A
+// block is the only red; a camera that cannot be retried (no camera, a view
+// that forbids it) leaves the photo as the action.
+const FAILURE_VIEW: Record<CameraFailure, { status: ScannerStatus; permission: CameraPermissionState | null; message: keyof CameraMessages }> = {
+  'document-blocked': { status: 'blocked', permission: 'blocked', message: 'cameraDocumentBlocked' },
+  blocked: { status: 'blocked', permission: 'denied', message: 'cameraPermissionBlocked' },
+  dismissed: { status: 'dismissed', permission: null, message: 'scanPromptDismissed' },
+  'no-camera': { status: 'manual', permission: 'unsupported', message: 'scanUnsupported' },
+  busy: { status: 'manual', permission: null, message: 'cameraBusy' },
+  failed: { status: 'manual', permission: null, message: 'scanFailed' },
 }
 
 interface UseBarcodeCameraOptions {
@@ -80,6 +95,20 @@ type CameraConstraintSet = MediaTrackConstraintSet & { torch?: boolean; focusMod
 function getScanErrorText(error: unknown): string {
   const source = error as { message?: unknown; name?: unknown } | null | undefined
   return `${String(source?.name || '')} ${String(source?.message || error || '')}`
+}
+
+/** The one camera request of a scan. A remembered camera is asked for as a
+ * preference, which cannot fail; but older WebKit has rejected an unknown
+ * deviceId anyway, so a camera that has gone is forgotten and the default one
+ * opened, without the person ever hearing about it. */
+async function openCamera(): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(withRememberedCamera(CAMERA_CONSTRAINTS))
+  } catch (error) {
+    if (!readCameraChoice() || !/OverconstrainedError|ConstraintNotSatisfiedError/i.test(getScanErrorText(error))) throw error
+    clearCameraChoice()
+    return navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
+  }
 }
 
 function stopStream(stream: MediaStream | null | undefined): void {
@@ -129,11 +158,13 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   const detectionHandledRef = useRef(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const nextScanAtRef = useRef(0)
+  // The page was hidden while the camera ran: coming back starts it again by itself.
+  const resumeOnReturnRef = useRef(false)
   // Seeded from `open` rather than 'idle': the modal is only ever mounted by
   // the tap on a scanner button, and that tap already starts the camera (see
-  // the open effect). An 'idle' first frame would flash the "Request camera
-  // access" empty state for one paint before the effect flips it to
-  // 'starting' -- exactly the two-step screen the owner asked to remove.
+  // the open effect). An 'idle' first frame would flash the paused-camera
+  // empty state for one paint before the effect flips it to 'starting' --
+  // exactly the two-step screen the owner asked to remove.
   const [status, setStatus] = useState<ScannerStatus>(open ? 'starting' : 'idle')
   const statusRef = useRef<ScannerStatus>('idle')
   const [error, setError] = useState('')
@@ -187,10 +218,10 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     }
   }, [])
 
-  // Releases the camera and parks on the Start camera button: the page was
-  // backgrounded, the photo picker took over, or the scan sat idle too long.
-  // `error` is cleared so the panel says "Camera paused", not whatever the last
-  // run left there.
+  // Releases the camera and parks on the Start camera button: the photo picker
+  // took over, the scan sat idle too long, or the page was hidden (which starts
+  // it again by itself on return). `error` is cleared so the panel says "Camera
+  // paused", not whatever the last run left there.
   const parkCamera = useCallback((): void => {
     cleanup()
     setError('')
@@ -346,11 +377,10 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
-    const permissionWasDenied = nextPermissionState === 'denied'
 
     // Re-requesting cannot repair a saved browser denial. Stay blocked until
     // the user changes the site setting, avoiding a getUserMedia retry loop.
-    if (permissionWasDenied) {
+    if (nextPermissionState === 'denied') {
       cleanup()
       setStatus('blocked')
       setError(messages.cameraPermissionBlocked)
@@ -373,7 +403,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // the 446 KB ZXing chunk -- the prompt arrived a download later than the
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
-      const stream = await navigator.mediaDevices.getUserMedia(withRememberedCamera(CAMERA_CONSTRAINTS))
+      const stream = await openCamera()
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
         return
@@ -382,8 +412,8 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // Owned from here on: every later bail-out is a token change, and a token
       // only changes through cleanup() (or a newer startCamera, which calls
       // cleanup() first), which stops this stream. A throw lands in the catch
-      // below, whose first statement is cleanup() -- so a decoder that fails to
-      // start can never leave the camera light on.
+      // below, which calls cleanup() before it does anything slow -- so a
+      // decoder that fails to start can never leave the camera light on.
       streamRef.current = stream
       setPermissionState('granted')
       const [track] = stream.getVideoTracks?.() || []
@@ -428,28 +458,28 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       if (startTokenRef.current !== startToken) return
       beginScanning(video)
     } catch (scanError) {
-      const scanErrorText = getScanErrorText(scanError)
-      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
-      const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && permissionWasDenied)
-      const dismissed = denied && !blocked
+      // A start that was closed or replaced has nothing left to report; this also keeps the AbortError
+      // video.play() throws when its stream is released from being read as a busy camera.
+      if (startTokenRef.current !== startToken) return
       cleanup()
-      setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
-      setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
-      // `denied` is either blocked or dismissed, so a failure that reaches the last branch was never a permission one.
-      setError(
-        documentBlocked
-          ? messages.cameraDocumentBlocked
-          : blocked
-            ? messages.cameraPermissionBlocked
-          : dismissed
-            ? messages.scanPromptDismissed
-            : messages.scanFailed,
-      )
+      // What the browser holds NOW: tapping Block on this very request is a saved denial from here on,
+      // and the person should be told so at once, not after a second try.
+      const permissionAfter = await readCameraPermissionState()
+      if (startSequenceRef.current !== startToken) return
+      const failure = classifyCameraFailure(getScanErrorText(scanError), {
+        permissionDenied: permissionAfter === 'denied',
+        inAppBrowser: isInAppBrowser(navigator.userAgent || ''),
+      })
+      const view = FAILURE_VIEW[failure]
+      setPermissionState(view.permission ?? permissionAfter)
+      setStatus(view.status)
+      setError(messages[view.message])
     }
   }, [
     beginScanning,
     cleanup,
+    // The lines FAILURE_VIEW can pick, listed one by one so a parent re-render with the same words keeps this callback's identity.
+    messages.cameraBusy,
     messages.cameraDocumentBlocked,
     messages.cameraPermissionBlocked,
     messages.scanFailed,
@@ -467,38 +497,6 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     saveCameraChoice(nextId)
     await startCamera()
   }, [startCamera])
-
-  const prepareScanner = useCallback(async (): Promise<void> => {
-    cleanup()
-    setError('')
-    setStatus('idle')
-
-    if (
-      typeof window === 'undefined' ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      setPermissionState('unsupported')
-      setStatus('manual')
-      setError(messages.scanUnsupported)
-      return
-    }
-
-    if (isCameraBlockedByDocumentPolicy()) {
-      setPermissionState('blocked')
-      setStatus('blocked')
-      setError(messages.cameraDocumentBlocked)
-      return
-    }
-
-    const nextPermissionState = await readCameraPermissionState()
-    setPermissionState(nextPermissionState)
-    // Permission is durable browser state; a MediaStream is not. This is the
-    // RESUME path only (the page came back to the foreground), which is not a
-    // user gesture -- so it re-reads permission and parks on the Start camera
-    // button instead of calling getUserMedia. Opening the modal is a gesture
-    // and goes straight to startCamera; see the open effect below.
-    setStatus('manual')
-  }, [cleanup, messages.cameraDocumentBlocked, messages.scanUnsupported])
 
   const closeScanner = useCallback((): void => {
     detectionHandledRef.current = true
@@ -526,12 +524,15 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   useEffect(() => {
     if (!open) return undefined
     detectionHandledRef.current = false
+    resumeOnReturnRef.current = false
     setReadOk(false)
-    // Owner rule (2026-09-14): pressing the scanner button opens the camera
-    // directly. The click that mounted this modal IS the user gesture, so the
-    // request happens here instead of behind a second "Start camera" tap; the
-    // guards inside startCamera (unsupported, document policy, saved denial)
-    // still decide whether getUserMedia is reached at all.
+    // Owner rules (2026-09-14, 2026-10-22): pressing the scanner button opens
+    // the camera directly, and an allowed camera is never asked for again. The
+    // request happens here instead of behind a "Start camera" tap; the guards
+    // inside startCamera (unsupported, document policy, saved denial) still
+    // decide whether getUserMedia is reached at all, and a browser that has to
+    // ask shows its own prompt. Only a start that FAILED shows the app's own
+    // ask (the Try camera again button).
     void startCameraRef.current()
     return () => {
       detectionHandledRef.current = true
@@ -544,15 +545,23 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   }, [cleanup, open])
 
   // iOS can keep a PWA page mounted while it is backgrounded. Stop every
-  // camera track immediately, but never auto-resume it on foreground: coming
-  // back to the page is not a user gesture, so the user taps Start camera.
+  // camera track the moment the page is hidden (the system's recording dot and
+  // the lock-screen prompt both depend on it), and start the camera again when
+  // the page comes back. That needs no tap: the Media Capture spec asks for no
+  // user gesture, and a muted video with no audio track plays without one. If
+  // the browser refuses anyway, startCamera lands on the Try camera again
+  // button. Only a camera that was running comes back, so a failure, a block or
+  // the idle pause stays exactly as it was.
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
-        parkCamera()
-      } else {
-        void prepareScanner()
+        const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
+        resumeOnReturnRef.current = running && !detectionHandledRef.current
+        if (running) parkCamera()
+      } else if (resumeOnReturnRef.current) {
+        resumeOnReturnRef.current = false
+        void startCameraRef.current()
       }
     }
     const handlePageHide = () => cleanup()
@@ -562,7 +571,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('pagehide', handlePageHide)
     }
-  }, [cleanup, open, parkCamera, prepareScanner])
+  }, [cleanup, open, parkCamera])
 
   useEffect(() => {
     if (!open) return undefined

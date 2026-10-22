@@ -16,8 +16,15 @@
 // One tap is safe now because the protections moved rather than disappeared:
 // the modal is mounted only by a deliberate tap on a scanner button (that tap
 // IS the gesture), `open` is the only effect input so a re-render cannot
-// restart a stream, a saved denial still short-circuits before getUserMedia,
-// and foregrounding a backgrounded PWA still parks on the button.
+// restart a stream, and a saved denial still short-circuits before getUserMedia.
+//
+// Owner, 22 Oct 2026: "make sure that barcode scanner don't ask for allow ... if it
+// doesn't load then it asks". That retires the last two asks the Part 605 design
+// kept: foregrounding a backgrounded PWA used to park on a Start/Request camera
+// button (the camera now starts again by itself, see scannerCameraScenarios), and
+// a camera that is merely paused or whose permission the browser cannot report no
+// longer shows "We need camera access ... allow". The app's own ask is the Try
+// camera again button, and it exists only after a start failed.
 //
 // The render test at the bottom is the discriminating one: on the pre-change
 // source it fails with 0 getUserMedia calls, because the open effect only ran
@@ -63,11 +70,8 @@ async function runTest(name: string, fn: TestCallback) {
 const labels = {
   scanReady: 'Scan ready',
   requestingCamera: 'Requesting camera',
-  scanUnsupported: 'Unsupported',
-  cameraPermissionNeeded: 'Need camera',
   cameraPaused: 'Camera paused',
   cameraPermissionBlocked: 'Blocked',
-  requestCameraAccess: 'Request access',
   startCamera: 'Start camera',
   tryCameraAgain: 'Try again',
   error: '',
@@ -99,16 +103,29 @@ await runTest('deriveScannerPresentation keeps dismissed prompts distinct from h
   assert.equal(dismissed.emptyStateMessage, 'Dismissed')
   assert.equal(dismissed.requestCameraLabel, 'Try again')
 
-  const manual = deriveScannerPresentation({ status: 'manual', permissionState: 'unknown', labels, promptDismissedMessage: 'Dismissed' })
-  assert.equal(manual.stateKind, 'manual')
-  assert.equal(manual.emptyStateMessage, 'Need camera')
+  // Not scanning and nothing failed can only mean a camera that ran and was released (photo
+  // picker, idle pause): "paused", whatever the permissions API says or cannot say. The panel
+  // never asks for permission it has not been refused.
+  for (const permissionState of ['unknown', 'prompt', 'granted']) {
+    const paused = deriveScannerPresentation({ status: 'manual', permissionState, labels, promptDismissedMessage: 'Dismissed' })
+    assert.equal(paused.stateKind, 'manual', permissionState)
+    assert.equal(paused.emptyStateMessage, 'Camera paused', `${permissionState}: paused, not "we need camera access"`)
+    assert.equal(paused.requestCameraLabel, 'Start camera', permissionState)
+  }
+})
 
-  // Granted + not scanning is now only reachable AFTER a stream was released
-  // (backgrounded page, photo picker), never on open -- so the copy describes
-  // a paused camera instead of telling the user to start one.
-  const granted = deriveScannerPresentation({ status: 'manual', permissionState: 'granted', labels, promptDismissedMessage: 'Dismissed' })
-  assert.equal(granted.emptyStateMessage, 'Camera paused')
-  assert.equal(granted.requestCameraLabel, 'Start camera')
+await runTest('a start that failed is the only thing that asks: one line, "Try camera again"', () => {
+  for (const permissionState of ['unknown', 'prompt', 'granted']) {
+    const failedStart = deriveScannerPresentation({ status: 'manual', permissionState, labels: { ...labels, error: 'Could not start' }, promptDismissedMessage: 'Dismissed' })
+    assert.equal(failedStart.emptyStateMessage, 'Could not start', permissionState)
+    assert.equal(failedStart.requestCameraLabel, 'Try again', `${permissionState}: never "Start" or "Request access" after a failure`)
+    assert.equal(failedStart.stateKind, 'manual', 'a failure that is not a block is neutral')
+  }
+  const starting = deriveScannerPresentation({ status: 'starting', permissionState: 'unknown', labels, promptDismissedMessage: 'Dismissed' })
+  assert.equal(starting.stateKind, 'starting')
+  assert.equal(starting.statusMessage, 'Requesting camera', 'a camera that is starting is named for a screen reader and shows nothing else')
+  const source = fs.readFileSync(new URL('../src/components/products/scanning/barcodeScannerState.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /cameraPermissionNeeded|requestCameraAccess/, 'the "we need camera access" ask is retired')
 })
 
 await runTest('opening the scanner starts the camera itself, and the button survives only for the states that cannot', () => {
@@ -123,23 +140,25 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   // camera request must never wait on the decoder: the worker boots beside it
   // (starting it is not awaited), and only after the camera is open does the
   // fallback wait for the worker to be ready.
-  const startBlock = hook.slice(hook.indexOf('const startCamera'), hook.indexOf('const prepareScanner'))
-  const acquisitions = startBlock.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []
-  assert.equal(acquisitions.length, 1, 'both decoders must share ONE getUserMedia call')
-  const acquireAt = startBlock.indexOf('navigator.mediaDevices.getUserMedia(')
+  const startBlock = hook.slice(hook.indexOf('const startCamera'), hook.indexOf('const switchCamera'))
+  const acquisitions = startBlock.match(/await openCamera\(\)/g) || []
+  assert.equal(acquisitions.length, 1, 'both decoders must share ONE camera request')
+  const requestBlock = hook.slice(hook.indexOf('async function openCamera'), hook.indexOf('function stopStream'))
+  assert.equal((requestBlock.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'the request, and its one fallback for a remembered camera that is gone')
+  assert.equal((hook.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'and no other part of the scanner opens a camera')
+  const acquireAt = startBlock.indexOf('await openCamera()')
   const chooseDecoderAt = startBlock.indexOf('const NativeBarcodeDetector = getNativeBarcodeDetector()')
   const startWorkerAt = startBlock.indexOf('clientRef.current = openDecodeClient()')
   const waitForWorkerAt = startBlock.indexOf('await client.ready')
   assert.ok(acquireAt > 0 && chooseDecoderAt > acquireAt, 'the camera must be acquired BEFORE the native/fallback decision, not inside one branch')
   assert.ok(startWorkerAt > 0 && startWorkerAt < acquireAt, 'the decoder worker boots in parallel with the camera request')
-  assert.doesNotMatch(startBlock.slice(startWorkerAt, startBlock.indexOf('const stream = await navigator')).replace(/\/\/.*$/gm, ''), /await/, 'starting the worker is never awaited ahead of the camera')
+  assert.doesNotMatch(startBlock.slice(startWorkerAt, startBlock.indexOf('const stream = await openCamera()')).replace(/\/\/.*$/gm, ''), /await/, 'starting the worker is never awaited ahead of the camera')
   assert.ok(waitForWorkerAt > acquireAt, 'the fallback waits for the worker only after the camera is already open')
   assert.doesNotMatch(source + hook, /decodeFromConstraints\(/, 'decodeFromConstraints hides getUserMedia behind the decoder import; it must not be called again')
   assert.match(hook, /const CAMERA_CONSTRAINTS: MediaStreamConstraints/, 'the shared constraints belong in one hoisted object')
   assert.match(hook, /if \(track\.readyState !== 'ended'\) track\.stop\(\)/, 'cleanup must not stop an ended track again')
 
   const openEffect = hook.slice(hook.indexOf('const startCameraRef'), hook.indexOf('// iOS can keep a PWA page mounted'))
-  const prepareBlock = hook.slice(hook.indexOf('const prepareScanner'), hook.indexOf('const closeScanner'))
   const visibilityBlock = hook.slice(hook.indexOf('// iOS can keep a PWA page mounted'), hook.indexOf('void watchCameraPermission'))
   const permissionBlock = hook.slice(hook.indexOf('void watchCameraPermission'), hook.indexOf('return {', hook.indexOf('void watchCameraPermission')))
 
@@ -148,9 +167,11 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   assert.match(openEffect, /\}, \[cleanup, open\]\)/, '`open` must be the only input that can start a camera -- a re-render must never restart one')
   assert.match(hook, /useState<ScannerStatus>\(open \? 'starting' : 'idle'\)/, 'the first paint must be the camera shell, not a frame of the old request-access empty state')
 
-  // 2. the paths that are NOT a user gesture still refuse to start a stream
-  assert.doesNotMatch(prepareBlock, /startCamera\(/, 'the resume path must re-read permission and park on the button, not call getUserMedia')
-  assert.doesNotMatch(visibilityBlock, /startCamera\(/, 'foregrounding an installed PWA must not auto-restart the camera')
+  // 2. coming back to the page restarts a camera that was running (no tap, no ask) and nothing else
+  assert.doesNotMatch(hook, /prepareScanner/, 'the resume path that parked on a Start camera button is gone')
+  assert.match(visibilityBlock, /const running = statusRef\.current === 'starting' \|\| statusRef\.current === 'scanning'[\s\S]*?resumeOnReturnRef\.current = running && !detectionHandledRef\.current/, 'only a camera that was running (and not already read) is remembered')
+  assert.match(visibilityBlock, /else if \(resumeOnReturnRef\.current\) \{\s*resumeOnReturnRef\.current = false\s*void startCameraRef\.current\(\)/, 'coming back restarts it through the guarded start, once')
+  assert.match(openEffect, /resumeOnReturnRef\.current = false/, 'a newly opened scanner starts with nothing to resume')
   assert.doesNotMatch(permissionBlock, /startCamera\(/, 'permission changes must not auto-start the camera')
 
   // 3. the explicit button remains for retry/blocked/denied/failed only
@@ -165,7 +186,7 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   assert.match(source, /handlePhotoSelection[\s\S]*?completeDetection\(nextValue\)/, 'photo barcode results must use the same terminal completion path')
   assert.match(hook, /nextPermissionState === 'denied'[\s\S]*?setStatus\('blocked'\)[\s\S]*?return/, 'a saved browser denial must not trigger another getUserMedia request loop')
   assert.match(hook, /detectionHandledRef\.current = false/, 'a newly opened scanner must be able to complete one fresh result')
-  assert.match(hook, /cleanup\(\)[\s\S]*?setPermissionState\(documentBlocked/, 'failed starts must stop partially-open camera tracks')
+  assert.match(hook, /catch \(scanError\) \{[\s\S]*?cleanup\(\)[\s\S]*?setPermissionState\(view\.permission/, 'failed starts must stop partially-open camera tracks before they report')
   assert.match(source, /<Modal[^>]*layer="nested"/, 'the camera dialog must sit above the workflow modal that opened it')
   assert.match(modalSource, /layer === 'nested' \? 'z-\[1070\]' : 'z-\[1050\]'/, 'nested tools must use a higher dialog layer')
   const searchHandler = searchButtonSource.slice(searchButtonSource.indexOf('const handleDetected'), searchButtonSource.indexOf('}, [onDetected])'))
@@ -290,7 +311,7 @@ try {
     try {
       assert.equal(mounted.probe.getUserMediaCalls, 0, 'a saved browser denial must short-circuit before any getUserMedia retry loop')
       assert.equal(FakeWorker.instances.length, 0, 'and must not start a decoder worker it cannot use')
-      assert.match(mounted.text, /Camera access is blocked/, 'a blocked camera must explain itself instead of showing a blank video')
+      assert.match(mounted.text, /lock icon in the address bar/, 'a blocked camera must explain itself (one line of steps) instead of showing a blank video')
       assert.match(mounted.text, /Try camera again/, 'the explicit retry button survives exactly for this state')
     } finally {
       await mounted.unmount()
