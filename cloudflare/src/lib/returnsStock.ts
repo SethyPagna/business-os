@@ -164,9 +164,10 @@ export function matchRefundSaleLine<L extends RefundSaleLine>(
   return { line: matches[0], matchedBy: 'product' }
 }
 
-// The price a replacement of `productId` may be floored at because the customer already paid it on the sale being
-// returned: the lowest RECORDED unit price (sale_items.applied_price_*) among the sale lines that the return's own lines
-// resolve to AND that sold this very product. It is read only from `saleLines`, the rows of the original sale. It is never
+// The price the units of a replacement of `productId` that a returned unit covers (returnedUnitsForReplacement) may be
+// floored at because the customer already paid it on the sale being returned: the lowest RECORDED unit price
+// (sale_items.applied_price_*) among the sale lines that the return's own lines resolve to AND that sold this very
+// product. It is read only from `saleLines`, the rows of the original sale. It is never
 // the refund figure: a return line may post a lower price than the line charged (a goodwill refund stays possible, see
 // resolveRefundUnitPrice), so a refund price of 0 would otherwise drag the floor to 0 and let a caller without the POS
 // price grant record a free replacement. `null` per currency means no recorded figure, and the floor is then the catalog
@@ -185,26 +186,51 @@ export function recordedSoldPriceForReplacement<L extends RefundSaleLine>(
   const usd: number[] = []
   const khr: number[] = []
   const recorded = (value: unknown): number | null => value == null || !Number.isFinite(Number(value)) ? null : Number(value)
-  if (saleLines?.length && productId > 0) {
-    for (const item of returnItems) {
-      let match: ReturnType<typeof matchRefundSaleLine>
-      try {
-        match = matchRefundSaleLine([...saleLines], item)
-      } catch (error) {
-        // Sold at different prices on several lines and the return did not pick one: the refund path already refuses it
-        // (return_refund_price_ambiguous); with no way to tell which price was paid there is no sold price to lean on.
-        if (error instanceof RefundSaleLineError) continue
-        throw error
-      }
-      if (!match || Number(match.line.product_id) !== productId) continue
-      const lineUsd = recorded(match.line.applied_price_usd)
-      const lineKhr = recorded(match.line.applied_price_khr)
-      if (lineUsd != null) usd.push(lineUsd)
-      if (lineKhr != null) khr.push(lineKhr)
-      else if (lineUsd != null && Number(exchangeRate) > 0) khr.push(Math.floor(lineUsd * Number(exchangeRate) + 1e-6))
-    }
+  for (const { line } of returnedLinesOfProduct(saleLines, returnItems, productId)) {
+    const lineUsd = recorded(line.applied_price_usd)
+    const lineKhr = recorded(line.applied_price_khr)
+    if (lineUsd != null) usd.push(lineUsd)
+    if (lineKhr != null) khr.push(lineKhr)
+    else if (lineUsd != null && Number(exchangeRate) > 0) khr.push(Math.floor(lineUsd * Number(exchangeRate) + 1e-6))
   }
   return { usd: usd.length ? Math.min(...usd) : null, khr: khr.length ? Math.min(...khr) : null }
+}
+
+// How many units of `productId` the return hands back against the sale being returned: the units a replacement of that very
+// product may swap at the sold price (recordedSoldPriceForReplacement). Counted from the same lines, whatever happens to the
+// returned stock (restock, damaged, none): the customer gave those units back. A replacement of more units than this is not
+// refused -- it is simply a purchase -- the units beyond it just do not get the sold price.
+export function returnedUnitsForReplacement<L extends RefundSaleLine>(
+  saleLines: readonly L[] | null | undefined,
+  returnItems: ReadonlyArray<{ sale_item_id?: number | null; product_id?: number | null; quantity?: number | string | null }>,
+  productId: number,
+): number {
+  return returnedLinesOfProduct(saleLines, returnItems, productId)
+    .reduce((sum, { quantity }) => sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0), 0)
+}
+
+// The recorded lines of `productId` on the sale that the return's own lines resolve to, each with the units returned against it.
+function returnedLinesOfProduct<L extends RefundSaleLine>(
+  saleLines: readonly L[] | null | undefined,
+  returnItems: ReadonlyArray<{ sale_item_id?: number | null; product_id?: number | null; quantity?: number | string | null }>,
+  productId: number,
+): Array<{ line: L; quantity: number }> {
+  const found: Array<{ line: L; quantity: number }> = []
+  if (!saleLines?.length || !(productId > 0)) return found
+  for (const item of returnItems) {
+    let match: { line: L; matchedBy: 'sale_item' | 'product' } | null
+    try {
+      match = matchRefundSaleLine([...saleLines], item)
+    } catch (error) {
+      // Sold at different prices on several lines and the return did not pick one: the refund path already refuses it
+      // (return_refund_price_ambiguous); with no way to tell which price was paid there is no sold price to lean on.
+      if (error instanceof RefundSaleLineError) continue
+      throw error
+    }
+    if (!match || Number(match.line.product_id) !== productId) continue
+    found.push({ line: match.line, quantity: Number(item.quantity) })
+  }
+  return found
 }
 
 export type ReturnLotSplit = { batchId: number; quantity: number }

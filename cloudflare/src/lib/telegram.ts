@@ -3168,6 +3168,7 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
     ...items,
     ret.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${ret.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
     ...replacements,
+    (ret.replacements?.length ?? 0) > TELEGRAM_MAX_ITEM_LINES ? `+ ${ret.replacements!.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
     ret.kind === 'supplier'
       ? (ret.compensationUsd != null || ret.compensationKhr != null ? `Supplier pays: ${money(ret.compensationUsd, ret.compensationKhr)}` : '')
       // No refund money means no refund line. A settlement that moved no cash

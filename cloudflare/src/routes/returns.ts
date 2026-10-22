@@ -21,7 +21,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, recordedSoldPriceForReplacement, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
+  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, recordedSoldPriceForReplacement, returnedUnitsForReplacement, RefundSaleLineError, type RefundSaleLine, planReturnLot, ReturnLotRequiredError,
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
@@ -1788,19 +1788,21 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
-  // A replacement line is an ordinary sale line, so only a caller who may set a price on a sale may price it under the
-  // catalog / promotion / original-sale price (lib/returnReplacementPrice.ts). Decided in memory unless a line is
-  // posted below both its catalog price and the price it was sold at. The "price it was sold at" is the RECORDED price of
-  // the original sale's own line (recordedSoldPriceForReplacement), never the refund figure above: a return line may
+  // A replacement is an exchange plus an optional extra purchase, with no cap on its quantity. Only a caller who may set a
+  // price on a sale may price it under the catalog / promotion price; the units a returned unit of the same product covers
+  // may sell down to the price the original sale recorded, every other unit may not (lib/returnReplacementPrice.ts).
+  // Decided in memory unless a product is posted below its catalog-based floor. The "price it was sold at" is the RECORDED
+  // price of the original sale's own line (recordedSoldPriceForReplacement), never the refund figure above: a return line may
   // post a lower price than the line charged, and a posted 0 must not become the replacement's floor.
   if (replacementLines.length && !canSetSalePrice(user)) {
     const offender = await firstDisallowedReplacementPrice(db, replacementLines.map((line) => {
-      const sold = recordedSoldPriceForReplacement(saleMeta ? soldLines : null, returnItems, line.productId, returnExchangeRate)
+      const sale = saleMeta ? soldLines : null
+      const sold = recordedSoldPriceForReplacement(sale, returnItems, line.productId, returnExchangeRate)
       const meta = productMap.get(line.productId)!
       return {
         productId: line.productId, quantity: line.quantity, priceUsd: line.priceUsd, priceKhr: line.priceKhr,
         catalogUsd: toNumber(meta.selling_price_usd), catalogKhr: toNumber(meta.selling_price_khr),
-        soldUsd: sold.usd, soldKhr: sold.khr,
+        soldUsd: sold.usd, soldKhr: sold.khr, returnedQuantity: returnedUnitsForReplacement(sale, returnItems, line.productId),
       }
     }), returnExchangeRate)
     if (offender) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId }, 403)
@@ -2973,6 +2975,43 @@ app.post('/supplier', async (c) => {
   return c.json({ id: returnId, returnNumber })
 })
 
+type ReturnedLineRef = { sale_item_id?: number | null; product_id?: number | null; quantity?: number | string | null }
+
+/**
+ * PATCH /api/returns/:id for a caller without the POS price grant: the product id of a recorded replacement that the edit
+ * takes under its floor, or null. The replacement sale is its own sale and is not re-priced by an edit, so taking returned
+ * units away (fewer units covered, or the covering line pointed at another product) could otherwise leave it priced for
+ * units that are no longer returned. Only a replacement that PASSED with the lines as they were and FAILS with the edited
+ * ones counts: one already under its floor (a grant holder recorded it, or it predates the unit count) never turns an
+ * unrelated edit into a refusal. `saleLines` is the original sale's lines, null for a return with no sale.
+ */
+async function editBreaksReplacementFloor(db: ReturnType<typeof getDb>, input: {
+  returnId: number
+  exchangeRate: number
+  saleLines: readonly RefundSaleLine[] | null
+  before: readonly ReturnedLineRef[]
+  after: readonly ReturnedLineRef[]
+}): Promise<number | null> {
+  const recorded = await db.prepare('SELECT product_id,quantity,applied_price_usd,applied_price_khr FROM return_replacement_items WHERE return_id=? ORDER BY id')
+    .all<{ product_id: number | null; quantity: number; applied_price_usd: number | null; applied_price_khr: number | null }>([input.returnId])
+  if (!recorded.length) return null
+  const productIds = [...new Set(recorded.map((row) => Number(row.product_id)).filter((id) => id > 0))]
+  const catalog = new Map((await selectInChunks(productIds, 0, (chunk) => db.prepare(
+    `SELECT id,selling_price_usd,selling_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`,
+  ).all<{ id: number; selling_price_usd: number | null; selling_price_khr: number | null }>(chunk))).map((row) => [Number(row.id), row]))
+  const linesFor = (items: readonly ReturnedLineRef[]) => recorded.map((row) => {
+    const productId = Number(row.product_id)
+    const sold = recordedSoldPriceForReplacement(input.saleLines, items, productId, input.exchangeRate)
+    return {
+      productId, quantity: Number(row.quantity), priceUsd: Number(row.applied_price_usd) || 0, priceKhr: Number(row.applied_price_khr) || 0,
+      catalogUsd: Number(catalog.get(productId)?.selling_price_usd) || 0, catalogKhr: Number(catalog.get(productId)?.selling_price_khr) || 0,
+      soldUsd: sold.usd, soldKhr: sold.khr, returnedQuantity: returnedUnitsForReplacement(input.saleLines, items, productId),
+    }
+  })
+  if (await firstDisallowedReplacementPrice(db, linesFor(input.before), input.exchangeRate)) return null
+  return (await firstDisallowedReplacementPrice(db, linesFor(input.after), input.exchangeRate))?.productId ?? null
+}
+
 // PATCH /api/returns/:id -- edit a customer return's items/reason/notes.
 // Reverses the previous restock (deduct what it added back), re-validates
 // against current sale quantities, replaces the return_items rows, and
@@ -3110,7 +3149,7 @@ app.patch('/:id', async (c) => {
   }
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
-    id: number; product_id: number | null; product_name: string | null; quantity: number
+    id: number; sale_item_id: number | null; product_id: number | null; product_name: string | null; quantity: number
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
@@ -3259,6 +3298,16 @@ app.patch('/:id', async (c) => {
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
+  }
+
+  // The replacement sale is not re-priced by this edit, so an edit that takes returned units away could leave it under its floor
+  // (the units a returned unit covers are what let it sell below the catalog price). Refused before anything is written.
+  if (Array.isArray(body.items) && !canSetSalePrice(user)) {
+    const offending = await editBreaksReplacementFloor(db, {
+      returnId, exchangeRate: positiveRate(existing.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE,
+      saleLines: existing.sale_id ? editSalePriceLines : null, before: existingItems, after: newItems,
+    })
+    if (offending != null) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offending }, 403)
   }
 
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
