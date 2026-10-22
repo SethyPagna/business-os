@@ -30,7 +30,7 @@ export type ReplacementPriceLine = {
   priceKhr: number
   catalogUsd: number
   catalogKhr: number
-  /** The unit price the same product was sold at on the sale being returned, when the server read it from that sale. */
+  /** The unit price the same product was RECORDED at on the sale being returned (the sale line's own row, never a posted or refund figure). */
   soldUsd: number | null
   soldKhr: number | null
 }

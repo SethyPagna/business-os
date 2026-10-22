@@ -21,7 +21,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
+  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, recordedSoldPriceForReplacement, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
@@ -1790,18 +1790,17 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }
   // A replacement line is an ordinary sale line, so only a caller who may set a price on a sale may price it under the
   // catalog / promotion / original-sale price (lib/returnReplacementPrice.ts). Decided in memory unless a line is
-  // posted below both its catalog price and the price it was sold at.
+  // posted below both its catalog price and the price it was sold at. The "price it was sold at" is the RECORDED price of
+  // the original sale's own line (recordedSoldPriceForReplacement), never the refund figure above: a return line may
+  // post a lower price than the line charged, and a posted 0 must not become the replacement's floor.
   if (replacementLines.length && !canSetSalePrice(user)) {
-    const soldPrices = (productId: number) => returnItems.flatMap((item, index) =>
-      Number(item.product_id) === productId && refundPrices[index].fromSaleLine ? [refundPrices[index]] : [])
     const offender = await firstDisallowedReplacementPrice(db, replacementLines.map((line) => {
-      const sold = soldPrices(line.productId)
+      const sold = recordedSoldPriceForReplacement(saleMeta ? soldLines : null, returnItems, line.productId, returnExchangeRate)
       const meta = productMap.get(line.productId)!
       return {
         productId: line.productId, quantity: line.quantity, priceUsd: line.priceUsd, priceKhr: line.priceKhr,
         catalogUsd: toNumber(meta.selling_price_usd), catalogKhr: toNumber(meta.selling_price_khr),
-        soldUsd: sold.length ? Math.min(...sold.map((price) => price.unitUsd)) : null,
-        soldKhr: sold.length ? Math.min(...sold.map((price) => price.unitKhr)) : null,
+        soldUsd: sold.usd, soldKhr: sold.khr,
       }
     }), returnExchangeRate)
     if (offender) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId }, 403)

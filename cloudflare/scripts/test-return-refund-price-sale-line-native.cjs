@@ -104,6 +104,40 @@ function kernelChecks(k) {
   // No sale line: posted price (the manual-return contract).
   assert.deepEqual(k.resolveRefundUnitPrice({ saleLine: null, postedUsd: 999.99, postedKhr: 0 }),
     { unitUsd: 999.99, unitKhr: 0, fromSaleLine: false })
+
+  // 6.0.949 (P3-1): the price a replacement is floored at is the RECORDED sale-line price (recordedSoldPriceForReplacement), never the
+  // refund figure resolveRefundUnitPrice returns. A product-matched line may post a LOWER refund price (goodwill), so the refund price
+  // can be 0 while the sale line charged 10.01: the floor must stay 10.01.
+  const sold = (items, productId, saleLines = lines, rate = 4000) => k.recordedSoldPriceForReplacement(saleLines, items, productId, rate)
+  assert.deepEqual(sold([{ sale_item_id: 1, product_id: 3 }], 3), { usd: 10.01, khr: 40040 }, 'sale_item_id: the recorded line price')
+  assert.deepEqual(sold([{ product_id: 3, applied_price_usd: 0, applied_price_khr: 0 }], 3), { usd: 10.01, khr: 40040 },
+    'product-matched with a posted 0: the refund price is 0, the floor is not')
+  assert.deepEqual(sold([{ product_id: 3, applied_price_usd: 0.01, applied_price_khr: 1 }], 3), { usd: 10.01, khr: 40040 }, 'any posted price is ignored')
+  assert.deepEqual(sold([{ sale_item_id: 1, applied_price_usd: 0, applied_price_khr: 0 }], 3), { usd: 10.01, khr: 40040 }, 'a posted price beside a sale_item_id is ignored')
+  assert.deepEqual(sold([{ product_id: 4 }], 4), { usd: 30.03, khr: 120120 }, 'two lines at one price are one price')
+  assert.deepEqual(sold([{ product_id: 5 }], 5), { usd: null, khr: null }, 'two lines at different prices and no pick: no sold price (the refund path refuses it first)')
+  assert.deepEqual(sold([{ sale_item_id: 5 }], 5), { usd: 8, khr: 32000 }, 'picking the cheaper line floors at the cheaper line')
+  assert.deepEqual(sold([{ sale_item_id: 4 }, { sale_item_id: 5 }], 5), { usd: 8, khr: 32000 }, 'several lines of one product: the lowest recorded price')
+  assert.deepEqual(sold([{ sale_item_id: 4 }, { product_id: 3 }], 3), { usd: 10.01, khr: 40040 }, 'mixed lines: only the lines of the replaced product count')
+  assert.deepEqual(sold([{ product_id: 3 }], 4), { usd: null, khr: null }, 'a return of another product gives no sold price')
+  assert.deepEqual(sold([{ sale_item_id: 2, product_id: 3 }], 3), { usd: null, khr: null }, 'a sale_item_id naming another product\'s line is not this product\'s price')
+  assert.deepEqual(sold([{ sale_item_id: 99, product_id: 3 }], 3), { usd: null, khr: null }, 'a sale_item_id that is not on the sale: nothing')
+  assert.deepEqual(sold([{ product_id: 99 }], 99), { usd: null, khr: null }, 'a product the sale never sold: nothing')
+  assert.deepEqual(sold([{ product_id: 3 }], 0), { usd: null, khr: null }, 'no replaced product: nothing')
+  assert.deepEqual(sold([{ product_id: 3 }], 3, null), { usd: null, khr: null }, 'no original sale: no "sale being returned", no sold price')
+  assert.deepEqual(sold([{ sale_item_id: 1, product_id: 3 }], 3, []), { usd: null, khr: null }, 'a sale with no lines: nothing')
+  // A line the sales import wrote has a dollar price and no riel price: its riel price is the dollars at the sale's rate, never 0.
+  const imported = [{ id: 7, product_id: 8, applied_price_usd: 3, applied_price_khr: null }, { id: 8, product_id: null, applied_price_usd: 0.5, applied_price_khr: null }]
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, imported), { usd: 3, khr: 12000 }, 'NULL riel price: dollars x the sale rate')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, imported, 4100), { usd: 3, khr: 12300 }, 'the rate is the sale\'s')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, [{ ...imported[0], applied_price_usd: 2.99 }]), { usd: 2.99, khr: 11960 }, 'whole riel, no float residue')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, imported, 0), { usd: 3, khr: null }, 'no usable rate: no riel figure (the riel floor is then the catalog price)')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, [{ ...imported[0], applied_price_usd: null }]), { usd: null, khr: null }, 'no price recorded at all: nothing')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, [{ ...imported[0], applied_price_khr: 11000 }]), { usd: 3, khr: 11000 }, 'a recorded riel price wins over the derived one')
+  assert.deepEqual(sold([{ sale_item_id: 7 }], 8, [{ ...imported[0], applied_price_usd: 0, applied_price_khr: 0 }]), { usd: 0, khr: 0 },
+    'a line truly sold free is a recorded 0: the floor is the price on the original sale')
+  assert.deepEqual(sold([{ sale_item_id: 8, product_id: 8 }], 8, imported), { usd: null, khr: null }, 'a sale line with no product never prices a product')
+  assert.deepEqual(sold([{ sale_item_id: 8 }], 0, imported), { usd: null, khr: null }, 'a sale line with no product is not "product 0" either')
 }
 
 async function main() {

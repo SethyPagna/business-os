@@ -79,7 +79,7 @@ const IMPORT_COSTS = [COST_EDIT, COST_VIEW]
 const CONTACTS_BULK: ActionRequirement = { key: 'contacts:bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts' }
 // Add variant creates a product row, so the Worker demands Add as well (routes/products.ts POST /variant).
 const PRODUCTS_ADD: ActionRequirement = { key: 'products:add', tKey: 'perm_act_products_add', label: 'Add product' }
-// Opening stock and stock-changing product imports are stock-ins: the Worker demands Adjust / receive at Full.
+// Opening stock and stock-changing product, inventory and stock-action imports are stock-ins: the Worker demands Adjust / receive at Full.
 const INVENTORY_ADJUST: ActionRequirement = { key: 'inventory:adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock' }
 
 /**
@@ -163,6 +163,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // types -- strict full-grant checks there ('stock_actions' needs
     // products+inventory+sales all at Full Access).
     { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    // An inventory or stock-actions file that adds or removes stock is refused whole without Adjust / receive at Full
+    // (routes/importJobs.ts requireChangedProductImportStockAction, lib/importEngine.ts isStockAdjustImportType), however
+    // Import is set -- the same rule as the products import's stock-quantity control above.
+    { key: 'import_stock', tKey: 'perm_control_inventory_import_stock', label: 'Stock quantities in inventory and stock-action imports', shortTKey: 'perm_short_import_stock', short: 'Stock in imports', review: 'block', follows: 'import', requires: [INVENTORY_ADJUST] },
   ],
 
   inventory_checks: [

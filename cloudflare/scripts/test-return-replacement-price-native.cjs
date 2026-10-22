@@ -20,8 +20,12 @@
 //   4. a riel price under the catalog riel price                                       -> 403;
 //   5. the straight swap at the original sale's price                                  -> 200; a cent under it -> 403;
 //   6. a caller with sales, with pos, and the admin: any price, $0 included            -> 200 (what POST /api/sales allows them).
-// Checks marked "base:" are red on a77883c78 (run with BASE_COMMIT=a77883c78 to bundle the modified Worker files as that
-// commit had them).
+//   5b (6.0.949, P3-1). "the price on the original sale" is the RECORDED line of that sale, never a figure the caller posted: a return
+//      line matched by product (no sale_item_id) may post a lower refund price, and that refund figure used to become the floor, so a
+//      product-matched return posted at 0 plus a replacement at 0 passed. Held for the dollar and the riel leg, a named and a
+//      product-matched line, mixed lines, and a manual return naming some other sale's line.
+// Checks marked "base:" are red on the commit before them (run with BASE_COMMIT=<sha> to bundle the modified Worker files as that
+// commit had them; the 5b checks are red on 169215b95, the rest on a77883c78).
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
 
@@ -125,6 +129,140 @@ async function main() {
     r.check(`the straight swap at the original sale's $3 (catalog $5) is recorded (${swapAtSold.status}); $2.99 is refused (${swapUnderSold.status})`, () => {
       assert.equal(swapAtSold.status, 200, JSON.stringify(swapAtSold.body))
       forbidden(swapUnderSold, 821)
+    })
+
+    // ---- 5b. the price a replacement may rest on is the RECORDED sale line, never a figure the caller posted (6.0.949, P3-1) ------------------------
+    // A return line with no sale_item_id is matched to the sale's line by product, and its posted price may only LOWER the refund (goodwill).
+    // The floor used to take that refund figure as the sold price, so a caller posting the return line at 0 and the replacement at 0 passed.
+    const floorSales = {
+      plain: await H.importSale(h, 832, 'completed', [{ productId: 821, name: 'RP Source', quantity: 30, price: 3 }], { jobId: 'rp-job' }),
+      mixed: await H.importSale(h, 833, 'completed', [{ productId: 821, name: 'RP Source', quantity: 5, price: 3 }, { productId: 823, name: 'RP Plain', quantity: 5, price: 1 }], { jobId: 'rp-job' }),
+      twoPrices: await H.importSale(h, 834, 'completed', [{ productId: 821, name: 'RP Source', quantity: 2, price: 3 }, { productId: 821, name: 'RP Source', quantity: 2, price: 2 }], { jobId: 'rp-job' }),
+      riel: await H.importSale(h, 835, 'completed', [{ productId: 821, name: 'RP Source', quantity: 5, price: 3 }], { jobId: 'rp-job' }),
+    }
+    // The import writes no riel price; give one sale line a recorded riel price below dollars x rate to prove the riel floor reads the row.
+    await h.db.prepare('UPDATE sale_items SET applied_price_khr=11000 WHERE id=?').bind(floorSales.riel.items[0].id).run()
+    const floorCounts = async () => ({
+      returns: Number((await h.one('SELECT COUNT(*) AS n FROM returns')).n),
+      sales: Number((await h.one('SELECT COUNT(*) AS n FROM sales')).n),
+    })
+    const onSale = (sale, items, replacement, label, options = { cookie: returnsOnly }) => h.call('POST', '/api/returns', {
+      client_request_id: `rp-${++seq}`, sale_id: sale.sale.id, reason: 'RP floor', return_type: 'restock',
+      items: items.map(item => ({ quantity: 1, stock_action: 'restock', branch_id: 1, ...item })),
+      replacement_items: [{ quantity: 1, branch_id: 1, ...replacement }] }, label, options)
+    const productMatched = (productId, name, extra = {}) => ({ product_id: productId, product_name: name, ...extra })
+    const refundOf = async result => Number((await h.one('SELECT total_refund_usd FROM returns WHERE id=?', result.body.id)).total_refund_usd)
+    const floorBefore = await floorCounts()
+
+    // The exploit: the return line posted at 0 (product-matched) and the replacement at 0 -- and at a dollar, still under the $3 the line charged.
+    const zeroPm = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: product-matched return posted 0, replacement $0')
+    const onePm = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 1, applied_price_khr: 4000 }, 'floor: product-matched return posted 0, replacement $1')
+    const cheapPm = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0.01, applied_price_khr: 40 })],
+      { product_id: 821, applied_price_usd: 2.99, applied_price_khr: 11960 }, 'floor: product-matched return posted a cent, replacement $2.99')
+    r.check(`base: a product-matched return line posted at 0 does not floor the replacement at 0 -- ${zeroPm.status}/${onePm.status}/${cheapPm.status}`, () => {
+      forbidden(zeroPm, 821)
+      forbidden(onePm, 821)
+      forbidden(cheapPm, 821)
+    })
+    const floorAfter = await floorCounts()
+    r.check(`the refusals wrote nothing: ${JSON.stringify(floorAfter)} == ${JSON.stringify(floorBefore)}`, () => assert.deepEqual(floorAfter, floorBefore))
+
+    // The sale_item_id path never read the posted price (the recorded line is the refund): still refused, still the same floor.
+    const zeroSi = await onSale(floorSales.plain, [{ sale_item_id: floorSales.plain.items[0].id, product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }],
+      { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: sale_item_id return posted 0, replacement $0')
+    r.check(`control: a return line naming its sale_item_id and posting 0 still cannot floor the replacement at 0 -- ${zeroSi.status}`, () => forbidden(zeroSi, 821))
+    const mixedLinesZero = await onSale(floorSales.plain, [
+      { sale_item_id: floorSales.plain.items[0].id, product_id: 821, applied_price_usd: 0, applied_price_khr: 0 },
+      productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 }),
+    ], { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: a sale_item_id line and a product-matched line, replacement $0')
+    r.check(`base: two return lines of the product (one named, one product-matched, both posted 0) still floor the replacement at the sold price -- ${mixedLinesZero.status}`, () => forbidden(mixedLinesZero, 821))
+
+    // The straight swap and the ordinary legitimate replacements are untouched.
+    const goodwillSwap = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 12000 }, 'floor: goodwill (0) refund, replacement at the sold price')
+    r.check(`a product-matched return posted at 0 (a goodwill refund) swapped for the same product at the sold $3 is recorded (${goodwillSwap.status})`, () => assert.equal(goodwillSwap.status, 200, JSON.stringify(goodwillSwap.body)))
+    const goodwillTotals = goodwillSwap.status === 200 ? [await refundOf(goodwillSwap), await replacementTotal(goodwillSwap)] : null
+    r.check(`the goodwill refund stays 0 and the replacement sale carries $3 -- ${JSON.stringify(goodwillTotals)}`, () => assert.deepEqual(goodwillTotals, [0, 3]))
+    const omitted = await onSale(floorSales.plain, [productMatched(821, 'RP Source')],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 12000 }, 'floor: product-matched return with no posted price, replacement at the sold price')
+    const higher = await onSale(floorSales.plain, [productMatched(821, 'RP Source')],
+      { product_id: 821, applied_price_usd: 4, applied_price_khr: 16000 }, 'floor: replacement between the sold price and the catalog price')
+    const atCatalogPm = await onSale(floorSales.plain, [productMatched(821, 'RP Source')],
+      { product_id: 821, applied_price_usd: 5, applied_price_khr: 20000 }, 'floor: replacement at the catalog price')
+    const aboveCatalogPm = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 99, applied_price_khr: 396000 })],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 12000 }, 'floor: product-matched return posted above the sold price')
+    r.check(`control: a product-matched return with no posted price, a replacement between the sold and the catalog price, one at the catalog price and a high posted refund price are all recorded -- ${[omitted, higher, atCatalogPm, aboveCatalogPm].map(result => result.status)}`, () => {
+      for (const result of [omitted, higher, atCatalogPm, aboveCatalogPm]) assert.equal(result.status, 200, JSON.stringify(result.body))
+    })
+    const aboveRefund = aboveCatalogPm.status === 200 ? await refundOf(aboveCatalogPm) : null
+    r.check(`control: the refund of a high posted price is still capped at the recorded $3 -- ${aboveRefund}`, () => assert.equal(aboveRefund, 3))
+
+    // The riel leg is held to the same recorded price. The import left no riel price on the line, so it is the dollars at the sale's rate (4000).
+    const riel1Si = await onSale(floorSales.plain, [{ sale_item_id: floorSales.plain.items[0].id, product_id: 821 }],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 1 }, 'floor: sale_item_id return, replacement $3 and 1 riel')
+    const riel1Pm = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 1 }, 'floor: product-matched return posted 0, replacement $3 and 1 riel')
+    const rielExact = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: 11999 }, 'floor: replacement $3 and 11999 riel')
+    r.check(`base: the riel price of a replacement cannot go under the sold price either: 1 riel / 11999 riel under a $3 line (no riel price recorded) -- ${riel1Si.status}/${riel1Pm.status}/${rielExact.status}`, () => {
+      forbidden(riel1Si, 821)
+      forbidden(riel1Pm, 821)
+      forbidden(rielExact, 821)
+    })
+    const recordedRiel = (price) => onSale(floorSales.riel, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 3, applied_price_khr: price }, `floor: recorded riel price 11000, replacement riel ${price}`)
+    const recordedRielUnder = await recordedRiel(10999)
+    const recordedRielAt = await recordedRiel(11000)
+    r.check(`base: a recorded riel price (11000, under $3 x 4000) is the riel floor, whatever the return line posted -- 10999: ${recordedRielUnder.status}, 11000: ${recordedRielAt.status}`, () => {
+      forbidden(recordedRielUnder, 821)
+      assert.equal(recordedRielAt.status, 200, JSON.stringify(recordedRielAt.body))
+    })
+
+    // Lines of other products and sales do not move the floor.
+    const otherProduct = await onSale(floorSales.mixed, [productMatched(823, 'RP Plain', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 1, applied_price_khr: 4000 }, 'floor: return of 823 (sold $1), replacement of 821 at $1')
+    r.check(`a replacement of a product is not floored at the price ANOTHER product was returned at ($1 line of 823, 821 at $1) -- ${otherProduct.status}`, () => forbidden(otherProduct, 821))
+    const bothZero = await onSale(floorSales.mixed, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 }), productMatched(823, 'RP Plain', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 823, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: partial mixed return posted 0, replacement of 823 at $0')
+    const bothAtSold = await onSale(floorSales.mixed, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 }), productMatched(823, 'RP Plain', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 823, applied_price_usd: 1, applied_price_khr: 4000 }, 'floor: partial mixed return posted 0, replacement of 823 at its sold $1')
+    r.check(`base: a mixed return posted at 0 floors each replaced product at its own sold price: 823 at $0 refused (${bothZero.status}), at its sold $1 recorded (${bothAtSold.status})`, () => {
+      forbidden(bothZero, 823)
+      assert.equal(bothAtSold.status, 200, JSON.stringify(bothAtSold.body))
+    })
+    const beforeAmbiguous = await floorCounts()
+    const ambiguous = await onSale(floorSales.twoPrices, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: product sold on two lines at different prices, no pick')
+    const afterAmbiguous = await floorCounts()
+    r.check(`control: a product sold at two prices on the sale and not picked is refused before the floor (400 return_refund_price_ambiguous), nothing written -- ${ambiguous.status}`, () => {
+      assert.equal(ambiguous.status, 400, JSON.stringify(ambiguous.body))
+      assert.equal(ambiguous.body.code, 'return_refund_price_ambiguous')
+      assert.deepEqual(afterAmbiguous, beforeAmbiguous)
+    })
+    const cheaperLine = floorSales.twoPrices.items[1]
+    const pickedAt = await onSale(floorSales.twoPrices, [{ sale_item_id: cheaperLine.id, product_id: 821 }], { product_id: 821, applied_price_usd: 2, applied_price_khr: 8000 }, 'floor: picked the $2 line, replacement $2')
+    const pickedUnder = await onSale(floorSales.twoPrices, [{ sale_item_id: cheaperLine.id, product_id: 821 }], { product_id: 821, applied_price_usd: 1.99, applied_price_khr: 7960 }, 'floor: picked the $2 line, replacement $1.99')
+    r.check(`a pick of the $2 line floors the replacement at $2: recorded at $2 (${pickedAt.status}), refused at $1.99 (${pickedUnder.status})`, () => {
+      assert.equal(pickedAt.status, 200, JSON.stringify(pickedAt.body))
+      forbidden(pickedUnder, 821)
+    })
+
+    // A manual return (no sale) has no "sale being returned": a sale_item_id that names a line of some OTHER sale is not an authority for the price.
+    const foreignLine = await h.call('POST', '/api/returns', {
+      client_request_id: `rp-${++seq}`, reason: 'RP foreign sale line', return_type: 'restock',
+      items: [{ sale_item_id: floorSales.plain.items[0].id, product_id: 822, product_name: 'RP Promo', quantity: 1, applied_price_usd: 10, applied_price_khr: 40000, stock_action: 'restock', branch_id: 1 }],
+      replacement_items: [{ product_id: 822, quantity: 1, branch_id: 1, applied_price_usd: 3, applied_price_khr: 12000 }] }, 'floor: manual return naming a foreign sale line (sold $3), replacement of a $10 product at $3', { cookie: returnsOnly })
+    r.check(`base: a manual return that names another sale's $3 line does not floor a $10 product's replacement at $3 -- ${foreignLine.status}`, () => forbidden(foreignLine, 822))
+
+    // Whoever may set a price on a sale may still post the product-matched zero.
+    const salesGrantZero = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: sales grant, product-matched zero', { cookie: withSales })
+    const adminZero = await onSale(floorSales.plain, [productMatched(821, 'RP Source', { applied_price_usd: 0, applied_price_khr: 0 })],
+      { product_id: 821, applied_price_usd: 0, applied_price_khr: 0 }, 'floor: admin, product-matched zero', {})
+    r.check(`control: a caller with sales and the admin keep any price on a product-matched line -- ${salesGrantZero.status}/${adminZero.status}`, () => {
+      for (const result of [salesGrantZero, adminZero]) assert.equal(result.status, 200, JSON.stringify(result.body))
     })
 
     // ---- 6. whoever may set a price on a sale may set it here ----------------------------------------------------------------------------------
