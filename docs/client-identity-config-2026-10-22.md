@@ -90,8 +90,9 @@ service worker as `staffHost` in the identity block the Worker streams into ever
 - Leang's icon files still ship in the shared build (unreferenced on other deployments).
 - Data and history keep Leang-specific guards on purpose: migrations (`LC-` backfills), the retired
   leangcosmetics hosts list in `routes/portal.ts`, the legacy org slugs in `coreDataInvariants.ts`, the
-  one-off General-customer repair (`LC-04971`, which a new deployment would still run), ops tooling
-  and deploy kit defaults (the multi-client deploy lane owns those).
+  one-off General-customer repair (`LC-04971`: a manual, confirmed system step that only clears that
+  exact value on that one customer, so on another deployment it finds nothing to do), ops tooling and
+  deploy kit defaults (the multi-client deploy lane owns those).
 - Beauty wording that `BUSINESS_OS_SHOP_CATEGORY` does not switch yet: the default AI page title
   "Beauty Assistant" (`routes/portal.ts`) and its Khmer pack title, and the beauty starter FAQ. A
   non-beauty shop sees them until staff edit them, or until the owner supplies general wording in both
