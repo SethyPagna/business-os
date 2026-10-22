@@ -112,6 +112,21 @@ export function catalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy = 'val
 export const CATALOG_COST_DERIVE_SQL = catalogCostFormulaSql().derive
 export const CATALOG_COST_HAS_RECORDED_LOT_SQL = catalogCostFormulaSql().hasRecordedLot
 
+// products.purchase_price_usd/khr is the legacy twin of cost_price_usd/khr: the same figure, and every writer that sets a
+// cost sets its twin in the same statement (the triggers and recompute above write both from one derive). An unknown
+// (NULL) cost mirrors as 0: the twin is DEFAULT 0 and every reader reads a 0 or NULL there as "unfilled"
+// (stockUnitCostSql in routes/inventory.ts), so neither is ever rewritten into the other.
+// Pinned by test-cost-mirror-writers-native.cjs and the 0269 backfill; the health query's drift rule is the same one.
+export const COST_MIRROR_COLUMNS = { cost_price_usd: 'purchase_price_usd', cost_price_khr: 'purchase_price_khr' } as const
+/** SQL for the twin of a cost expression (a bound parameter or a column). */
+export const costMirrorSql = (costSql: string): string => `COALESCE(${costSql}, 0)`
+/** Sets the twin of every cost column `row` writes to that cost (replacing a twin the caller sent); a row that writes no cost column is unchanged. */
+export function mirrorCostColumns<T extends Record<string, unknown>>(row: T): T {
+  const writable: Record<string, unknown> = row
+  for (const [cost, mirror] of Object.entries(COST_MIRROR_COLUMNS)) if (Object.hasOwn(writable, cost)) writable[mirror] = writable[cost] ?? 0
+  return row
+}
+
 function buildCatalogCostSetSql(inputPolicy: CatalogCostInputPolicy = 'validated'): string {
   const derive = catalogCostFormulaSql(inputPolicy).derive
   return `cost_price_usd = COALESCE(${derive}, cost_price_usd),

@@ -113,6 +113,7 @@ SELECT 'product_conflict_merge_run_cases.run_id->product_conflict_merge_runs' AS
 SELECT 'product_conflict_merge_runs.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM product_conflict_merge_runs c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_cost_entries.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_cost_entries c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_cost_entries.user_id->users' AS relation, COUNT(*) AS orphan_count FROM product_cost_entries c LEFT JOIN users p ON p.id = c.user_id WHERE c.user_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_cost_mirror_0269.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_cost_mirror_0269 c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM product_duplicate_dismissals c LEFT JOIN users p ON p.id = c.dismissed_by_id WHERE c.dismissed_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_images.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_images c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_merge_map_0165.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0165 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;

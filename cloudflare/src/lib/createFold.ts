@@ -4,7 +4,7 @@ import { audit, buildAuditStatement } from './audit'
 import { actorId, actorSnapshot, type ActorLike } from './actorSnapshot'
 import { addressedStatements, type BranchEffect } from './branchRedirectWrite'
 import { bumpVersion } from './cache'
-import { catalogCostRecomputeIfChangedStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeIfChangedStatement, mirrorCostColumns, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { getDb } from './db'
 import { nullableMoney4, multiplyMoney4 } from './moneyPrecision'
 import { getActionTier } from './permissions'
@@ -119,8 +119,10 @@ export async function foldCreateIntoExisting(
     if (merged.cost_price_khr !== undefined) updates.cost_price_khr = merged.cost_price_khr
   }
   if (Object.keys(updates).length) {
-    const setSql = Object.keys(updates).map((key) => `${key} = @${key}`).join(', ')
-    const write = { sql: `UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { ...updates, id: duplicate.id } }
+    // The twin moves with the cost in the same UPDATE; the audit row below keeps what the fold chose.
+    const written = mirrorCostColumns({ ...updates })
+    const setSql = Object.keys(written).map((key) => `${key} = @${key}`).join(', ')
+    const write = { sql: `UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { ...written, id: duplicate.id } }
     // U-cost: the folded cost was typed into the product form, so it records
     // the form's product_cost_entries row -- the 0195 triggers re-derive
     // cost_price_usd at every stock movement and honour only a cost with

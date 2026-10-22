@@ -1,6 +1,7 @@
 -- forensics-catalog-mirror-drift-rows: the products behind health-catalog-cost.active_mirror_drift, one row each
 -- (DATA-MATCH DM-16 drill-down, lane 6.0.943). active_mirror_drift counts ACTIVE products whose
--- purchase_price_usd is not the same value as cost_price_usd (SQLite IS NOT: NULL differs from 0). The
+-- purchase_price_usd twin is not aligned with cost_price_usd: the same value, or an unknown (NULL) cost with a twin of
+-- 0 or NULL (the mirror rule of lane 6.0.944, COST_MIRROR_COLUMNS in lib/catalogCostRecompute.ts). The
 -- selection is health-catalog-cost's own: the same active-row filter and the same mirror predicate, applied
 -- inside d so the derive runs only for the drifting rows; derived is CATALOG_COST_DERIVE_SQL verbatim
 -- (lib/catalogCostRecompute.ts); test-health-drilldown-rows-native.cjs pins it, the active filter and the predicate
@@ -9,11 +10,9 @@
 -- 0195/0256/0261 triggers and recomputeCatalogCost write BOTH columns only when the formula has a figure
 -- (COALESCE(derive, stored)), which leaves a split nothing re-derives. Facts per product, by what each one confirms or refutes:
 --   the pair              cost_price_usd, purchase_price_usd, drift_kind, diff_usd, the KHR twins
---     cost_unknown_mirror_zero  (NULL, 0): BY POLICY, not damage. routes/inventory.ts mirrorCostFields stores
---                               an unknown cost as NULL on cost and 0 on the mirror (the mirror is DEFAULT 0),
---                               and lib/datedStockCountDecisions.ts and importEngine.ts insert NULL cost with
---                               the mirror left at its default. Fix = the health predicate, not the data.
---     mirror_zero_cost_set      (X, 0): a cost-only writer or an INSERT that left the mirror at its default:
+--                               (an unknown NULL cost with a twin of 0 is the policy -- routes/inventory.ts
+--                               mirrorCostFields, the dated count insert -- and is not listed: it is not drift)
+--     mirror_zero_cost_set     (X, 0): a cost-only writer or an INSERT that left the mirror at its default:
 --                               importEngine.ts product import insert and update, routes/products.ts conflict
 --                               merge, lib/createFold.ts, a manual edit while no lot has a recorded cost
 --     cost_zero_mirror_set / both_set_differ / cost_unknown_mirror_set / mirror_null: a stale mirror, the
@@ -55,13 +54,12 @@ WITH d AS MATERIALIZED (
     CASE WHEN COALESCE(products.client_request_id, '') = '' THEN 'none'
       WHEN instr(products.client_request_id, ':') BETWEEN 2 AND 25 AND substr(products.client_request_id, 1, instr(products.client_request_id, ':') - 1) NOT GLOB '*[^a-z-]*'
         THEN substr(products.client_request_id, 1, instr(products.client_request_id, ':') - 1) ELSE 'opaque' END AS request_kind
-  FROM products WHERE products.is_active = 1 AND products.cost_price_usd IS NOT products.purchase_price_usd
+  FROM products WHERE products.is_active = 1 AND NOT (products.cost_price_usd IS products.purchase_price_usd OR (products.cost_price_usd IS NULL AND COALESCE(products.purchase_price_usd, 0) = 0))
 )
 SELECT
   d.id AS product_id, d.cost_price_usd, d.purchase_price_usd, d.derived AS derived_cost_usd,
   typeof(d.cost_price_usd) AS cost_type, typeof(d.purchase_price_usd) AS mirror_type,
-  CASE WHEN d.cost_price_usd IS NULL AND d.purchase_price_usd = 0 THEN 'cost_unknown_mirror_zero'
-    WHEN d.cost_price_usd IS NULL THEN 'cost_unknown_mirror_set'
+  CASE WHEN d.cost_price_usd IS NULL THEN 'cost_unknown_mirror_set'
     WHEN d.purchase_price_usd IS NULL THEN 'mirror_null'
     WHEN ABS(d.cost_price_usd - d.purchase_price_usd) < 0.0001 THEN 'precision'
     WHEN d.purchase_price_usd = 0 THEN 'mirror_zero_cost_set'

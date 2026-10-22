@@ -278,11 +278,11 @@ async function main() {
     const { CATALOG_COST_DERIVE_SQL } = loadRealLib('catalogCostRecompute.ts')
     const health = sql('health-catalog-cost')
     const list = sql(CATALOG_LIST)
-    const derived = /products\.purchase_price_usd, (COALESCE\(.*\)) AS derived FROM products WHERE products\.is_active = 1\s*\)/.exec(health)
+    const derived = /products\.purchase_price_khr, (COALESCE\(.*\)) AS derived FROM products WHERE products\.is_active = 1\s*\)/.exec(health)
     assert.ok(derived, 'health-catalog-cost lost its derived column')
     assert.equal(derived[1], squash(CATALOG_COST_DERIVE_SQL), 'the health derive is no longer CATALOG_COST_DERIVE_SQL')
     assert.ok(list.includes(`${derived[1]} AS derived,`), 'the list\'s derive is not health-catalog-cost\'s')
-    const predicate = /\(SELECT COUNT\(\*\) FROM d WHERE (cost_price_usd IS NOT purchase_price_usd)\) AS active_mirror_drift/.exec(health)
+    const predicate = /\(SELECT COUNT\(\*\) FROM d WHERE (NOT \(cost_price_usd IS purchase_price_usd OR \(cost_price_usd IS NULL AND COALESCE\(purchase_price_usd, 0\) = 0\)\))\) AS active_mirror_drift,/.exec(health)
     assert.ok(predicate, 'health-catalog-cost lost active_mirror_drift')
     const qualified = predicate[1].replace(/\b(cost_price_usd|purchase_price_usd)\b/g, 'products.$1')
     assert.ok(list.includes(`FROM products WHERE products.is_active = 1 AND ${qualified} )`), 'the list does not select with the active_mirror_drift predicate over the active rows')
@@ -292,7 +292,7 @@ async function main() {
     const db = migratedDatabase()
     insert(db, 'branches', { id: 1, name: 'Store', is_default: 1 })
     insert(db, 'products', [
-      { id: 1, name: 'Unknown cost', cost_price_usd: null, purchase_price_usd: 0 },                    // by policy: mirrorCostFields, the dated count insert
+      { id: 1, name: 'Cost cleared', cost_price_usd: null, purchase_price_usd: 4 },
       { id: 2, name: 'Cost only', cost_price_usd: 5.5, purchase_price_usd: 0, created_at: '2026-10-01T18:30:00.000Z', client_request_id: 'import:job-9' },
       { id: 3, name: 'Cost cleared', cost_price_usd: 0, purchase_price_usd: 3 },
       { id: 4, name: 'Rounding', cost_price_usd: 4, purchase_price_usd: 4.00001 },
@@ -303,6 +303,7 @@ async function main() {
       { id: 9, name: 'Both unknown', cost_price_usd: null, purchase_price_usd: null },
       { id: 10, name: 'Inactive', cost_price_usd: 1, purchase_price_usd: 2, is_active: 0 },
       { id: 11, name: 'Lot cost', cost_price_usd: null, purchase_price_usd: 0 },
+      { id: 12, name: 'Unknown cost', cost_price_usd: null, purchase_price_usd: 0 },                   // by policy: mirrorCostFields, the dated count insert
     ])
     insert(db, 'product_batches', [
       { id: 51, variant_product_id: 5, batch_key: 'k51', unit_cost_usd: 0, received_at: '2026-09-01' },
@@ -323,12 +324,12 @@ async function main() {
     const rows = rowsOf(db, CATALOG_LIST)
     assert.equal(rows.length, health.active_mirror_drift, 'the list is the column')
     assert.deepEqual(rows.map((r) => r.product_id), [1, 2, 3, 4, 5, 6, 7])
-    assert.deepEqual(rows.map((r) => r.drift_kind), ['cost_unknown_mirror_zero', 'mirror_zero_cost_set', 'cost_zero_mirror_set', 'precision', 'both_set_differ', 'mirror_null', 'both_set_differ'])
+    assert.deepEqual(rows.map((r) => r.drift_kind), ['cost_unknown_mirror_set', 'mirror_zero_cost_set', 'cost_zero_mirror_set', 'precision', 'both_set_differ', 'mirror_null', 'both_set_differ'])
     const by = Object.fromEntries(rows.map((r) => [r.product_id, r]))
-    for (const id of [8, 9, 10, 11]) assert.ok(!(id in by), `control product ${id} must not be listed`)
+    for (const id of [8, 9, 10, 11, 12]) assert.ok(!(id in by), `control product ${id} must not be listed`)
 
     assert.deepEqual(pick(by[1], ['cost_price_usd', 'purchase_price_usd', 'derived_cost_usd', 'cost_type', 'mirror_type', 'lots', 'cost_entries', 'request_kind']),
-      { cost_price_usd: null, purchase_price_usd: 0, derived_cost_usd: null, cost_type: 'null', mirror_type: 'real', lots: 0, cost_entries: 0, request_kind: 'none' })
+      { cost_price_usd: null, purchase_price_usd: 4, derived_cost_usd: null, cost_type: 'null', mirror_type: 'real', lots: 0, cost_entries: 0, request_kind: 'none' })
     assert.deepEqual(pick(by[2], ['derived_cost_usd', 'created_day', 'request_kind', 'cost_entries', 'last_entry_id', 'last_entry_cost_usd', 'last_entry_baseline_batch_id', 'last_entry_at', 'last_entry_matches_cost', 'last_entry_matches_mirror', 'last_audit_at', 'last_audit_action', 'last_cost_override_at']),
       { derived_cost_usd: null, created_day: '2026-10-02', request_kind: 'import', cost_entries: 1, last_entry_id: 1, last_entry_cost_usd: 5.5, last_entry_baseline_batch_id: 0, last_entry_at: '2026-10-02 03:00:00',
         last_entry_matches_cost: 1, last_entry_matches_mirror: 0, last_audit_at: '2026-10-03 03:00:00', last_audit_action: 'update', last_cost_override_at: '2026-10-02 03:00:00' },
@@ -343,7 +344,7 @@ async function main() {
 
     // A second count of the same query on the same database after one more offender and one fewer: the list follows the column.
     db.exec('UPDATE products SET purchase_price_usd = cost_price_usd WHERE id = 5')
-    insert(db, 'products', { id: 12, name: 'New split', cost_price_usd: 1, purchase_price_usd: 0 })
+    insert(db, 'products', { id: 13, name: 'New split', cost_price_usd: 1, purchase_price_usd: 0 })
     assert.deepEqual([rowsOf(db, CATALOG_LIST).length, one(db, 'health-catalog-cost').active_mirror_drift], [7, 7])
   })
 

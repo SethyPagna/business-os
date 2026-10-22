@@ -43,7 +43,7 @@ import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_P
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, COST_MIRROR_COLUMNS, catalogCostRecomputeIfChangedSql, costEntryActorParams, costMirrorSql, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
 import { explicitCostReviewWritePlan, mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -2151,8 +2151,10 @@ app.post('/bulk-price-adjust', async (c) => {
     whereSql: `(${fieldCondition('cost_price_usd')}) AND ${ownClaim}`, nextUsdSql: nextValueSql('cost_price_usd'),
     params: { delta, claimNonce }, actor: { id: actorId(user), name: actorSnapshot(user) },
   }) : null
+  // A cost field moves its purchase_price_* twin to the same figure in the same UPDATE (the new value reads the old row).
+  const twinSet = (field: string) => { const twin = COST_MIRROR_COLUMNS[field as keyof typeof COST_MIRROR_COLUMNS]; return twin ? `${twin} = ${nextValueSql(field)}, ` : '' }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
-    sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
+    sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, ${twinSet(field)}updated_at = CURRENT_TIMESTAMP
           WHERE is_active = 1 AND (${fieldCondition(field)}) AND ${ownClaim}`,
     params: { delta, claimNonce },
   }))
@@ -4018,7 +4020,7 @@ export async function foldDuplicateProductInto(
   const canonicalStockBefore = snapshot.canonicalStockBefore
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
-  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; parent_id?: number | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null; cost_review_key?: string | null }
+  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; parent_id?: number | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null; purchase_price_usd?: number | null; purchase_price_khr?: number | null; cost_review_key?: string | null }
   const canonicalBefore = snapshot.canonicalProduct as MergeProductPricingRow | undefined
   const dupPricing = snapshot.duplicateProduct as MergeProductPricingRow | undefined
   const reviewedPlan = atomicHistory?.reviewedPlan
@@ -4280,6 +4282,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
               wholesale_price_khr = @wholesaleKhr,
               cost_price_usd = @costUsd,
               cost_price_khr = @costKhr,
+              purchase_price_usd = ${costMirrorSql('@costUsd')},
+              purchase_price_khr = ${costMirrorSql('@costKhr')},
               barcode = @barcode,
               category = CASE WHEN @reviewed = 1 THEN @category ELSE category END,
               categories = CASE WHEN @reviewed = 1 THEN @categories ELSE categories END,
@@ -4617,6 +4621,9 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
       wholesale_price_khr: Number(canonicalBefore?.wholesale_price_khr) || 0,
       cost_price_usd: costOrNull(canonicalBefore?.cost_price_usd),
       cost_price_khr: costOrNull(canonicalBefore?.cost_price_khr),
+      // The merge writes the twin with the cost (the keeper UPDATE above), so undo puts the twin back as it was, not rebuilt from the cost.
+      purchase_price_usd: costOrNull(canonicalBefore?.purchase_price_usd),
+      purchase_price_khr: costOrNull(canonicalBefore?.purchase_price_khr),
     },
     keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
     dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),

@@ -258,6 +258,10 @@ export interface MergeReversal {
     // keeper whose cost was unknown carries null, and undo puts NULL back.
     cost_price_usd?: number | null
     cost_price_khr?: number | null
+    // The purchase_price_* twin of each cost, as it was. Absent in a snapshot written before the merge wrote the twin: that merge
+    // never touched it, so undo leaves it alone.
+    purchase_price_usd?: number | null
+    purchase_price_khr?: number | null
   }
   keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
@@ -538,7 +542,7 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
 //   sale_not_paid_repair_0173, catalog_cost_recompute_0175,
-//   catalog_cost_repair_0195_backup, sale_cost_repair_0200 (held) -- repair receipts of
+//   catalog_cost_repair_0195_backup, sale_cost_repair_0200 (held), product_cost_mirror_0269 -- repair receipts of
 //     a data migration (before-values and applied flags per product id); the
 //     same provenance rule as stock_row_moves: they say what was repaired, they
 //     are not a live link.
@@ -2014,12 +2018,18 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
     const savedCost = (value: number | null | undefined): number | null => (value == null || !Number.isFinite(Number(value)) ? null : Number(value))
     const hasUsdCost = r.keeperPricingBefore.cost_price_usd !== undefined
     const hasKhrCost = r.keeperPricingBefore.cost_price_khr !== undefined
+    const hasUsdTwin = r.keeperPricingBefore.purchase_price_usd !== undefined
+    const hasKhrTwin = r.keeperPricingBefore.purchase_price_khr !== undefined
     const costSet = `${hasUsdCost ? `,
                 cost_price_usd = @costUsd` : ''}${hasKhrCost ? `,
-                cost_price_khr = @costKhr` : ''}`
+                cost_price_khr = @costKhr` : ''}${hasUsdTwin ? `,
+                purchase_price_usd = @purchaseUsd` : ''}${hasKhrTwin ? `,
+                purchase_price_khr = @purchaseKhr` : ''}`
     const costParams = {
       ...(hasUsdCost ? { costUsd: savedCost(r.keeperPricingBefore.cost_price_usd) } : {}),
       ...(hasKhrCost ? { costKhr: savedCost(r.keeperPricingBefore.cost_price_khr) } : {}),
+      ...(hasUsdTwin ? { purchaseUsd: savedCost(r.keeperPricingBefore.purchase_price_usd) } : {}),
+      ...(hasKhrTwin ? { purchaseKhr: savedCost(r.keeperPricingBefore.purchase_price_khr) } : {}),
     }
     // The wholesale tier, restored the same conditional way cost is, and for
     // the same reason. Three snapshot vintages reach this line:
