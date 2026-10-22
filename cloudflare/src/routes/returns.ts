@@ -69,7 +69,7 @@ import {
 import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLines } from '../lib/saleTransitions'
 import type { CustomerReturnQuoteV1 } from '../lib/customerReturnEntitlement'
 import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
-import { createExchangeReturnV1 } from './returnExchangeCreate'
+import { createExchangeReturnV1 } from '../lib/returnExchangeCreate'
 import { RETURN_EXCHANGE_MAX_LINES, ReturnExchangeError, type ExchangeLineIntent } from '../lib/returnExchangeIntent'
 import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
 import type { ExchangeCatalogProduct } from '../lib/returnExchangeContext'
@@ -1359,7 +1359,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }
 
   // A money-v1 return with replacement lines is the one-step exchange (owner, 22 Oct 2026). It reads once and writes set-based so a Free
-  // invocation can carry it; everything it needs from here on lives in routes/returnExchangeCreate.ts.
+  // invocation can carry it; everything it needs from here on lives in lib/returnExchangeCreate.ts.
   if (canonicalIntent.money_precision_version === 1 && Array.isArray(canonicalIntent.replacement_items) && canonicalIntent.replacement_items.length) {
     return createExchangeReturnV1({
       c, db, user, actorId: authenticatedActorId, body: body as Record<string, any>, intent: canonicalIntent, requestJson, requestDigest,

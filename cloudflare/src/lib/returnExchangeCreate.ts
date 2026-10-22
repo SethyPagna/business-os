@@ -1,47 +1,47 @@
 import type { Context } from 'hono'
 import type { Env } from '../index'
-import type { SessionUser } from '../lib/auth'
-import type { D1Compat } from '../lib/db'
-import { actorSnapshot } from '../lib/actorSnapshot'
-import { isAnonymousCustomer } from '../lib/anonymousCustomer'
+import type { SessionUser } from './auth'
+import type { D1Compat } from './db'
+import { actorSnapshot } from './actorSnapshot'
+import { isAnonymousCustomer } from './anonymousCustomer'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersions } from '../lib/cache'
+import { bumpVersions } from './cache'
 import {
   BranchRetiredNoSuccessorError, branchEffectGuardPredicate, branchEffectGuards, branchEffectRefusal, branchRedirectTarget,
   foldedLotSurvivors, resolveBranchEffect, type BranchEffect,
-} from '../lib/branchEffect'
-import { contactDisplayAddress } from '../lib/contactOptions'
-import { customerReturnAuthorityPredicate, customerReturnQuotePlanFromRows, publicCustomerReturnQuote } from '../lib/customerReturnQuotePlan'
-import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
-import { multiplyMoney4 } from '../lib/moneyPrecision'
-import { isCashPaymentMethod, paymentMethodKey, parseConfiguredMethods, parsePaymentMethodKinds } from '../lib/paymentMethodRegistry'
-import { productStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE } from '../lib/productStockGuard'
-import { businessDateTimeId } from '../lib/receiptNumber'
-import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
+} from './branchEffect'
+import { contactDisplayAddress } from './contactOptions'
+import { customerReturnAuthorityPredicate, customerReturnQuotePlanFromRows, publicCustomerReturnQuote } from './customerReturnQuotePlan'
+import { loyaltyAccrualSql } from './loyaltyEligibility'
+import { multiplyMoney4 } from './moneyPrecision'
+import { isCashPaymentMethod, paymentMethodKey, parseConfiguredMethods, parsePaymentMethodKinds } from './paymentMethodRegistry'
+import { productStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE } from './productStockGuard'
+import { businessDateTimeId } from './receiptNumber'
+import { fillOmittedReturnCosts } from './returnCostAccess'
 import {
   assertReturnCreatePlanBounds, assertReturnCreateQueryBudget, projectedReturnStateForReturnCreateV1, replacementSaleIdSql,
   returnCreateGuardStatement, returnCreateIdSql, returnCreateOwnMovementCountSql, returnCreatePreconditionSql, ReturnCreateBudgetError,
   RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse, type ReturnCreateStatement,
-} from '../lib/returnCreateAction'
-import { ReturnExchangeError, settleExchange, type ExchangeLineIntent, type ExchangePaymentIntent } from '../lib/returnExchange'
-import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
-import { exchangeContextQuery, ExchangeContextTooLargeError, firstFreeNumber, numberCandidates, parseExchangeContext, type ExchangeContext, type ExchangeContextRow } from '../lib/returnExchangeContext'
-import { planExchangeReturnLots, planExchangeStock, type ExchangeReturnLine, type ExchangeStockAction } from '../lib/returnExchangePlan'
+} from './returnCreateAction'
+import { ReturnExchangeError, settleExchange, type ExchangeLineIntent, type ExchangePaymentIntent } from './returnExchange'
+import { priceAndQuoteExchange } from './returnExchangeQuote'
+import { exchangeContextQuery, ExchangeContextTooLargeError, firstFreeNumber, numberCandidates, parseExchangeContext, type ExchangeContext, type ExchangeContextRow } from './returnExchangeContext'
+import { planExchangeReturnLots, planExchangeStock, type ExchangeReturnLine, type ExchangeStockAction } from './returnExchangePlan'
 import {
   branchStockStatement, exchangePostconditionSql, exchangeSaleRows, fallbackLotStatement, lotReceivedStatement, lotStockStatement,
   movementsStatement, productStockStatement, replacementItemsStatement, returnAllocationsStatement, returnItemsStatement,
   saleAllocationsStatement, saleItemsStatement,
   type ExchangeLotDelta, type ExchangeMovementRow, type ExchangeReturnAllocationRow, type ExchangeReturnItemRow,
-} from '../lib/returnExchangeWrite'
-import { refundCashOut, saleReturnTagWrite } from '../lib/returnRefundSplit'
-import { DAMAGE_IN_MOVEMENT, planDamagedReturnLine, REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice } from '../lib/returnsStock'
-import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
-import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
-import { buildSaleRecordEventsInsert, sha256Hex } from '../lib/saleRecordEvents'
-import { normalizeSearchText } from '../lib/searchMatch'
-import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from '../lib/stockTransaction'
-import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
-import { formatSaleTelegramLines, sendReturnTelegramEvent } from '../lib/telegram'
+} from './returnExchangeWrite'
+import { refundCashOut, saleReturnTagWrite } from './returnRefundSplit'
+import { DAMAGE_IN_MOVEMENT, planDamagedReturnLine, REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice } from './returnsStock'
+import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
+import { SaleMoneyContractError } from './saleMoneyPrecision'
+import { buildSaleRecordEventsInsert, sha256Hex } from './saleRecordEvents'
+import { normalizeSearchText } from './searchMatch'
+import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from './stockTransaction'
+import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from './stockCondition'
+import { formatSaleTelegramLines, sendReturnTelegramEvent } from './telegram'
 
 // POST /api/returns for a money-v1 sale with replacement lines: the one-step exchange (owner, 22 Oct 2026). The shared prefix of
 // createCustomerReturn (permission, request id, canonical intent, idempotency receipt) has already run; everything from the first

@@ -15,7 +15,7 @@ const H = require('./harness/al_money_native.cjs')
 
 const MUTANTS = {
   // The admission control forgets the statements already spent: a plan that only fits an empty invocation is let through.
-  'budget-ignores-used': { file: 'src/routes/returnExchangeCreate.ts', from: 'assertReturnCreateQueryBudget(args.queryLimit, args.statementsUsed(), transactionStatementCount, 14)',
+  'budget-ignores-used': { file: 'src/lib/returnExchangeCreate.ts', from: 'assertReturnCreateQueryBudget(args.queryLimit, args.statementsUsed(), transactionStatementCount, 14)',
     to: 'assertReturnCreateQueryBudget(args.queryLimit, 0, 0, 0)' },
 }
 

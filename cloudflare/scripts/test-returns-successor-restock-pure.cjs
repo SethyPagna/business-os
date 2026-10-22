@@ -236,7 +236,7 @@ const returnsRouteOverrides = {
   '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
   '../lib/returnExchangeIntent': returnExchangeIntentKernel,
   '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
-  './returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
+  '../lib/returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
