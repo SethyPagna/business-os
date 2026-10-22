@@ -91,9 +91,9 @@ const changes = (results, policyJson = policy()) => productImportResultsChangeSt
   assert.equal(PRODUCT_IMPORT_STOCK_REFUSAL.code, 'product_import_stock_adjust_required')
 
   const src = fs.readFileSync(path.join(srcRoot, 'lib/importEngine.ts'), 'utf8')
-  const apply = src.indexOf("job.type === 'products' && !authority.allowProductStockWrites")
+  const apply = src.indexOf('importResultsChangeStock(db, job.type, results, job.policy_json)')
   assert.ok(apply > 0 && apply < src.indexOf("sw.lap('classifyChunkMs')", apply), 'the apply refuses a stock-writing chunk before any write of that chunk')
-  assert.match(src, /allowProductStockWrites = job\.type !== 'products' \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/)
+  assert.match(src, /allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/)
   assert.match(src, /ImportApplyAuthorizationError\('inventory:adjust'/)
   const routes = fs.readFileSync(path.join(srcRoot, 'routes/importJobs.ts'), 'utf8')
   assert.equal((routes.match(/requireChangedProductImportStockAction\(c as any, job\)/g) || []).length, 2, 'both the approve and the re-apply route refuse before queueing')

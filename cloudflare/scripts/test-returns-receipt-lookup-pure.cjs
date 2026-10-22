@@ -130,6 +130,14 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // 6.0.925's failure text (it imports nothing): the route's two fixed-text 500s, a failed supplier return and a failed return edit, answer through it.
+  '../lib/failureText': loadReal('lib/failureText.ts'),
+  // Security follow-up B: the replacement-price floor and the supplier-return receipt the route now imports, REAL over the same kernels.
+  '../lib/returnReplacementPrice': loadReal('lib/returnReplacementPrice.ts', {
+    './permissions': permissions, './moneyPrecision': moneyPrecision, './promotionRules': promotionRules,
+    './saleItemPricing': saleItemPricing, './sqlBinding': sqlBinding,
+  }),
+  '../lib/supplierReturnReceipt': loadReal('lib/supplierReturnReceipt.ts', { './saleRecordEvents': { sha256Hex: async () => '' } }),
   // routes/returns.ts counts imported returned units through saleTransitions (N1 / finding C).
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
