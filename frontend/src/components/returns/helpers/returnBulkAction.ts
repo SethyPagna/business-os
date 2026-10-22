@@ -9,6 +9,8 @@ export interface ReturnBulkRow {
   return_type?: string | null
   supplier_settlement?: string | null
   updated_at?: string | null
+  /** The replacement sale a one-step exchange opened (Returns list rows carry it). */
+  replacement_sale_id?: number | string | null
 }
 
 export interface ReturnBulkItem {
@@ -16,6 +18,11 @@ export interface ReturnBulkItem {
   expected_status: string
   expected_method: string
   expected_updated_at: string | null
+  /**
+   * Cancelling a return that opened a replacement sale (6.0.958): the returns that take replacement units back, [] to keep the replacement.
+   * Required by the Worker whenever replacement units are still with the customer (helpers/returnReplacementCancel.ts).
+   */
+  replacement?: { return_ids: number[] }
 }
 
 export interface ReturnBulkPayload {

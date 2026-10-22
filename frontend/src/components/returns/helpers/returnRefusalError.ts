@@ -19,6 +19,12 @@
 //                                         pinned to the pack by scripts/test-cutover-li-pack-parity-pure.cjs
 //   return_edit_empty                400  PATCH /api/returns/:id with an explicit empty item list (6.0.41);
 //                                         reached by a retry an older build stored before the client refused it
+//   return_cancel_replacement_choice_required  409  POST /api/returns/bulk cancelling a return whose replacement items are still with the
+//                                         customer without saying what happens to them (6.0.958)
+//   return_cancel_replacement_invalid          400/409  POST /api/returns/bulk naming replacement returns that are not this return's (6.0.958)
+//   return_replacement_price_forbidden         403  POST /api/returns/bulk cancelling the return a discounted replacement depends on, by a caller
+//                                         who may not set prices (6.0.958; also sent by POST /api/returns)
+//   return_bulk_over_plan_budget     400  POST /api/returns/bulk and its undo/redo: a selection too large for one Free-plan invocation (6.0.958)
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
@@ -27,6 +33,10 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_stock_skipped_sale': 'This sale never took stock off the shelf (e.g. an import), so nothing was changed.',
   'branch_retired_no_successor': 'This record belongs to an inactive branch, and no active branch has taken its place. Nothing was changed.',
   'return_edit_empty': 'A return must keep at least one line. To undo the whole return, cancel it instead.',
+  'return_cancel_replacement_choice_required': 'A return being cancelled has replacement items still with the customer. Say whether they are cancelled too.',
+  'return_cancel_replacement_invalid': 'The replacement items chosen do not belong to the return being cancelled. Nothing was changed.',
+  'return_replacement_price_forbidden': 'You do not have permission to change the price of a replacement item. It is sold at the catalog price, its promotion price, or the price on the original sale.',
+  'return_bulk_over_plan_budget': 'This selection is too large for the current plan. Select fewer returns or replacement items, then try again.',
 }
 
 // A refusal whose sentence names values the Worker sends as `params`

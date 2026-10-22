@@ -484,6 +484,9 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // return_restore_over_capacity: product, returned, sold), so the restated
   // sentence keeps them -- see returns/helpers/returnRefusalError.ts.
   error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null
+  // POST /api/returns/bulk's 409 return_cancel_replacement_choice_required lists, per cancelled exchange return, the replacement lines still
+  // with the customer, so the cancel dialog can ask about exactly those (components/returns/helpers/returnReplacementCancel.ts).
+  error.replacements = Array.isArray(parsed?.replacements) ? parsed.replacements : null
   error.current = parsed?.current || null
   // Older Workers only returned the generic `current` record for a settings
   // conflict. Prefer the newer, intentionally field-scoped payload, but

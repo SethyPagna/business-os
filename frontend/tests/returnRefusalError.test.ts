@@ -32,7 +32,9 @@ const trFrom = (pack: Record<string, string>) => (key: string, fallback: string)
 // active successor (cloudflare/src/lib/branchEffect.ts, 409 on POST /). return_edit_empty (6.0.41): an edit that
 // would leave a return with no lines -- the client no longer builds one, but a retry stored by an older build can
 // still be resent and refused, and a Khmer till must read why.
-const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale', 'branch_retired_no_successor', 'return_edit_empty']
+// 6.0.958: cancelling an exchange return asks about its replacement items, and a grouped action too big for a Free invocation is refused up front.
+const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale', 'branch_retired_no_successor', 'return_edit_empty',
+  'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_replacement_price_forbidden', 'return_bulk_over_plan_budget']
 
 runTest('the mapping covers exactly the FX-returns refusal codes, RET-B E1, the retired-branch one and the empty edit', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
@@ -110,6 +112,12 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   // RET-B E1: the bulk status change on a stock-skipped sale's return says why.
   assert.match(bulk, /Number\(linkedSale\.stock_skipped\) === 1\) fail\(`[^`]*would move stock that never moved[^`]*`, 409, 'return_stock_skipped_sale'\)/,
     'the stock-skipped refusal fails with return_stock_skipped_sale and says why')
+  // 6.0.958: the cancel's replacement question and its plan-size refusal are the Worker's own sentences, word for word, with their codes.
+  for (const code of ['return_cancel_replacement_choice_required', 'return_bulk_over_plan_budget']) {
+    assert.ok(bulk.includes(`'${code}'`) && bulk.includes(RETURN_REFUSAL_ERRORS[code].replace(/'/g, "\'")), `the bulk action refuses with ${code} in the helper's English`)
+  }
+  assert.ok(bulk.includes("'return_cancel_replacement_invalid'"), 'the bulk action refuses a foreign replacement return with return_cancel_replacement_invalid')
+  assert.ok(readWorker('lib/returnReplacementPrice.ts').includes(`error: '${RETURN_REFUSAL_ERRORS.return_replacement_price_forbidden}'`), 'the price refusal the cancel shares with the create is the helper English')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
   // CUTOVER-LR: the whole disabled-branch family (redirect required / invalid target / no successor) goes out as one 409 body.
