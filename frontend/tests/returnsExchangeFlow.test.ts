@@ -110,6 +110,16 @@ assert.doesNotMatch(newReturn, /interface ReplacementLine \{[^}]*\bprice_(usd|kh
 assert.match(newReturn, /catalog_usd: input\.catalogUsd/, 'a replacement row starts from the catalog price')
 console.log('PASS the replacement quantity is uncapped and only returned units default to the sold price')
 
+// 3c. 6.0.960 (release review c2f27dce6, P3-4): the "Same item" shortcut read /api/products for the catalog price, which needs the Products view,
+//     so a role with Returns alone was refused (403) and the shortcut was dead. The read goes through resolveSameItemCatalog, which falls back to
+//     the sale's own catalog snapshot when it is refused (the behaviour is pinned in replacementPricing.test.ts); nothing may read it bare again.
+const sameItem = newReturn.slice(newReturn.indexOf('const addReplacementSameItem'), newReturn.indexOf('const updateReplacement'))
+assert.match(sameItem, /await resolveSameItemCatalog\(/, 'the shortcut resolves its catalog price through the fallback helper')
+assert.match(sameItem, /\}, selectedItems, item\.product_id\)/, 'the fallback reads the lines of the sale being returned')
+assert.doesNotMatch(sameItem.replace(/await resolveSameItemCatalog\([\s\S]*?\}, selectedItems, item\.product_id\)/, ''), /getProductsByIds/, 'the catalog read exists only inside the fallback helper call')
+assert.match(newReturn, /base_price_usd\?: number \| string \| null/, 'the sale line type carries the catalog snapshot the fallback reads')
+console.log('PASS the Same item shortcut survives a refused catalog read')
+
 // ---------------------------------------------------------------------------
 // 5. "for damaged products make sure it has a tag label, not editing the name"
 // ---------------------------------------------------------------------------

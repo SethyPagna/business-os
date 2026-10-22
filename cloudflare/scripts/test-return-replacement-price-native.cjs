@@ -24,25 +24,32 @@
 //      line matched by product (no sale_item_id) may post a lower refund price, and that refund figure used to become the floor, so a
 //      product-matched return posted at 0 plus a replacement at 0 passed. Held for the dollar and the riel leg, a named and a
 //      product-matched line, mixed lines, and a manual return naming some other sale's line.
+// 6.0.960 section 8 (release review c2f27dce6, P1-1): a product on SEVERAL returned lines at different recorded prices pairs each covered unit with its
+//      own line, highest recorded price first -- 2 x $5 + 1 x $0 back (refund $10) cannot be swapped for three units at $0 -- for the dollar and the riel leg.
 // Checks marked "base:" are red on the commit before them (run with BASE_COMMIT=<sha> to bundle the modified Worker files as that
-// commit had them; the 5b checks are red on 169215b95, the rest on a77883c78).
+// commit had them; the 5b checks are red on 169215b95, the rest on a77883c78, the section 8 ones on c2f27dce6).
 // 6.0.952 section 7 (quantity: an exchange plus an optional extra purchase). MUTANT=<name> bundles the Worker with ONE deliberate defect in the
 // floor logic; a mutant the checks do not turn red is a hole in them. node test-return-replacement-price-native.cjs lists the names below.
 const FLOOR = 'src/lib/returnReplacementPrice.ts'
 const MUTANTS = {
-  'covered-all': { file: FLOOR, from: 'const covered = Math.min(units, Math.max(0, Number(first.returnedQuantity) || 0))', to: 'const covered = units' },
-  'covered-none': { file: FLOOR, from: 'const covered = Math.min(units, Math.max(0, Number(first.returnedQuantity) || 0))', to: 'const covered = 0' },
-  'covered-unit-reused': { file: FLOOR, from: '    left -= swapped\n', to: '' },
-  'sold-price-not-applied': { file: FLOOR, from: 'swapped * lowest(base, sold)', to: 'swapped * base' },
+  'covered-all': { file: FLOOR, from: 'return total + sum + Math.max(0, need) * base', to: 'return total + sum + Math.max(0, need) * Math.min(base, covering[covering.length - 1]?.price ?? base)' },
+  'covered-none': { file: FLOOR, from: "const price = leg === 'usd' ? line.usd : line.khr", to: 'const price = null' },
+  'covered-unit-reused': { file: FLOOR, from: '      left -= swapped\n', to: '' },
+  'sold-price-not-applied': { file: FLOOR, from: 'sum += swapped * Math.min(base, covering[at].price)', to: 'sum += swapped * base' },
   'per-line-not-per-product': { file: FLOOR, from: 'lines.forEach((line, index) => groups.set(line.productId, [...(groups.get(line.productId) ?? []), { line, index, promo: null }]))', to: 'lines.forEach((line, index) => groups.set(index, [{ line, index, promo: null }]))' },
   'riel-leg-dropped': { file: FLOOR, from: "const LEGS: readonly Leg[] = ['usd', 'khr']", to: "const LEGS: readonly Leg[] = ['usd']" },
   'dollar-leg-dropped': { file: FLOOR, from: "const LEGS: readonly Leg[] = ['usd', 'khr']", to: "const LEGS: readonly Leg[] = ['khr']" },
   'promotion-ignored': { file: FLOOR, from: 'usePromo ? promo?.[leg] ?? null : null', to: 'null' },
   'covered-to-lowest-base-first': { file: FLOOR, from: '.sort((a, b) => b.base - a.base)', to: '.sort((a, b) => a.base - b.base)' },
+  // 6.0.960: the pairing order and the per-line minimum.
+  'covered-to-lowest-recorded-first': { file: FLOOR, from: '[...returned].sort(highestRecordedFirst)', to: '[...returned].sort((a, b) => highestRecordedFirst(b, a))' },
+  'sold-price-pooled-lowest': { file: FLOOR, from: 'sum += swapped * Math.min(base, covering[at].price)', to: 'sum += swapped * Math.min(base, ...covering.map((unit) => unit.price))' },
+  'sold-price-pooled-highest': { file: FLOOR, from: 'sum += swapped * Math.min(base, covering[at].price)', to: 'sum += swapped * Math.min(base, ...[Math.max(...covering.map((unit) => unit.price))])' },
+  'line-price-not-capped-by-base': { file: FLOOR, from: 'sum += swapped * Math.min(base, covering[at].price)', to: 'sum += swapped * covering[at].price' },
   'tolerance-zero': { file: FLOOR, from: 'const TOLERANCE_PER_UNIT = 0.00005', to: 'const TOLERANCE_PER_UNIT = 0' },
   'other-products-units-cover': { file: 'src/lib/returnsStock.ts',
-    from: 'return returnedLinesOfProduct(saleLines, returnItems, productId)\n    .reduce((sum, { quantity }) => sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0), 0)',
-    to: 'return returnItems.reduce((sum, item) => sum + (Number(item.quantity) > 0 ? Number(item.quantity) : 0), 0)' },
+    from: 'if (!match || Number(match.line.product_id) !== productId) continue',
+    to: 'if (!match) continue' },
 }
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
@@ -304,6 +311,9 @@ async function main() {
     await H.seedProduct(h, 9241, 'RP Exchange', 5, 600, 1)
     await H.seedProduct(h, 9251, 'RP Other', 4, 600, 1)
     await H.seedProduct(h, 9261, 'RP Elsewhere', 6, 600, 1)
+    // Section 8's products are seeded here, before any exchange: the harness gives a lot the id product + 5000, which later auto-numbered lots would otherwise take.
+    await H.seedProduct(h, 9271, 'RP TwoPrice', 5, 900, 1)
+    await H.seedProduct(h, 9281, 'RP Pricey', 4, 600, 1)
     const exchSale = await H.importSale(h, 836, 'completed', [{ productId: 9241, name: 'RP Exchange', quantity: 60, price: 3 }, { productId: 9251, name: 'RP Other', quantity: 5, price: 1 }], { jobId: 'rp-job' })
     const exchLine = exchSale.items[0]
     const other = exchSale.items[1]
@@ -459,6 +469,98 @@ async function main() {
       assert.equal(tierOkReversed.status, 200, JSON.stringify(tierOkReversed.body))
       forbidden(tierUnder, 9261)
       forbidden(tierAllSold, 9261)
+    })
+
+    // ---- 8. one product on SEVERAL returned lines at DIFFERENT recorded prices (6.0.960, release review c2f27dce6, P1-1) ---------------------------------
+    // A legacy sale can carry a product on two lines at different prices (a buy-2-get-1 line at $0 beside two at $5). Each returned unit was paid at ITS
+    // line's price, so the covered units pair with their own recorded lines, highest recorded price first -- the floor is the sum over the returned lines
+    // of min(units left, units returned from the line) x min(base, the line's price), and every unit past the returned ones is floored at the base price.
+    // The 6.0.952 rule pooled every returned line at the LOWEST price, so a returns-only caller could swap 2 x $5 + 1 x $0 (refund $10) for three units
+    // priced $0. The sales import writes these lines with no riel price: the riel floor is each line's dollars x the sale rate. (The lines hold 40
+    // units each so the return-quantity cap never matters: only the returned units named in each request do.)
+    const b2g1Sale = await H.importSale(h, 838, 'completed', [{ productId: 9271, name: 'RP TwoPrice', quantity: 40, price: 5 }, { productId: 9271, name: 'RP TwoPrice', quantity: 40, price: 0 }], { jobId: 'rp-job' })
+    const halfSale = await H.importSale(h, 839, 'completed', [{ productId: 9271, name: 'RP TwoPrice', quantity: 40, price: 5 }, { productId: 9271, name: 'RP TwoPrice', quantity: 40, price: 4.5 }], { jobId: 'rp-job' })
+    const priceySale = await H.importSale(h, 840, 'completed', [{ productId: 9281, name: 'RP Pricey', quantity: 30, price: 6 }], { jobId: 'rp-job' })
+    // `lines` = [[index of the sale line, units returned from it], ...]; `replacements` go out in the same request.
+    const swapLines = (sale, productId, lines, replacements, label, options = { cookie: returnsOnly }) => h.call('POST', '/api/returns', {
+      client_request_id: `rp-${++seq}`, sale_id: sale.sale.id, reason: 'RP two prices', return_type: 'restock',
+      items: lines.map(([index, quantity]) => ({ sale_item_id: sale.items[index].id, product_id: productId, quantity, stock_action: 'restock', branch_id: 1 })),
+      replacement_items: replacements.map(line => ({ branch_id: 1, ...line })) }, label, options)
+    const twoBefore = await floorCounts()
+
+    // The review's PROBE-1 through the real route: 2 x $5 + 1 x $0 back (refund $10), three units out for nothing.
+    const allFree = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 0, 0)], 'two prices: 2 x $5 + 1 x $0 back, 3 out at $0')
+    const allFreeSplit = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 1, 0, 0), out(9271, 2, 0, 0)], 'two prices: 2 x $5 + 1 x $0 back, 1 + 2 out at $0')
+    const justUnder = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 3.33)], 'two prices: 2 x $5 + 1 x $0 back, 3 out at $9.99 in all')
+    r.check(`base: 2 x $5 + 1 x $0 back (refund $10), three units out at $0 -- as one line (${allFree.status}), split in two (${allFreeSplit.status}) or for $9.99 in all (${justUnder.status}) -- is refused: each returned unit was paid its own line's price`, () => {
+      forbidden(allFree, 9271)
+      forbidden(allFreeSplit, 9271)
+      forbidden(justUnder, 9271)
+    })
+    const twoAfterRefusals = await floorCounts()
+    r.check(`the refusals wrote nothing: ${JSON.stringify(twoAfterRefusals)} == ${JSON.stringify(twoBefore)}`, () => assert.deepEqual(twoAfterRefusals, twoBefore))
+
+    const trueSwap = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 2, 5), out(9271, 1, 0, 0)], 'two prices: 2 x $5 + 1 x $0 back, 2 x $5 + 1 x $0 out')
+    const blend = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 3.3334)], 'two prices: 2 x $5 + 1 x $0 back, 3 out at the $10 blend')
+    r.check(`at the floor the exchange is recorded: 2 x $5 + 1 x $0 out (${trueSwap.status}) and three units at the $10 blend (${blend.status})`, () => {
+      assert.equal(trueSwap.status, 200, JSON.stringify(trueSwap.body))
+      assert.equal(blend.status, 200, JSON.stringify(blend.body))
+    })
+    const trueSwapMoney = trueSwap.status === 200 ? [await refundOf(trueSwap), await replacementTotal(trueSwap)] : null
+    r.check(`the swap nets to nothing, as it should: refund $10 and a replacement sale of $10 -- ${JSON.stringify(trueSwapMoney)}`, () => assert.deepEqual(trueSwapMoney, [10, 10]))
+
+    // Fewer units out than back: the highest-paid returned units cover them first, so two units out cost the $5 they were paid (not the $0 unit's price).
+    const twoOutCheap = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 2, 2.5)], 'two prices: 3 back, 2 out at $2.50')
+    const twoOutAtPaid = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 2, 5)], 'two prices: 3 back, 2 out at $5')
+    r.check(`3 back (2 x $5 + 1 x $0), 2 out: $5 for the two is refused (${twoOutCheap.status}), $5 each is recorded (${twoOutAtPaid.status})`, () => {
+      forbidden(twoOutCheap, 9271)
+      assert.equal(twoOutAtPaid.status, 200, JSON.stringify(twoOutAtPaid.body))
+    })
+    // More units out than back: the three returned units are covered at $5, $5 and $0, the fourth is a purchase at the catalog $5 -- $15 in all.
+    const fourAtFloor = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 4, 3.75)], 'two prices: 3 back, 4 out at $15 in all')
+    const fourUnder = await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 4, 3.7475)], 'two prices: 3 back, 4 out at $14.99 in all')
+    r.check(`3 back, 4 out: $15 in all ($5 + $5 + $0 + the catalog $5) is recorded (${fourAtFloor.status}), $14.99 is refused (${fourUnder.status})`, () => {
+      assert.equal(fourAtFloor.status, 200, JSON.stringify(fourAtFloor.body))
+      forbidden(fourUnder, 9271)
+    })
+    // 2 x $5 + 2 x $4.50 back (refund $19): the pooled rule priced every swapped unit at $4.50 ($18).
+    const halfAtLowest = await swapLines(halfSale, 9271, [[0, 2], [1, 2]], [out(9271, 4, 4.5)], 'two prices: 2 x $5 + 2 x $4.50 back, 4 out at $4.50')
+    const halfAtBlend = await swapLines(halfSale, 9271, [[0, 2], [1, 2]], [out(9271, 4, 4.75)], 'two prices: 2 x $5 + 2 x $4.50 back, 4 out at the $19 blend')
+    const halfSplit = await swapLines(halfSale, 9271, [[0, 2], [1, 2]], [out(9271, 2, 4.5), out(9271, 2, 5)], 'two prices: 2 x $5 + 2 x $4.50 back, 2 x $4.50 + 2 x $5 out (lines in the other order)')
+    r.check(`2 x $5 + 2 x $4.50 back (refund $19): four out at $4.50 ($18) is refused (${halfAtLowest.status}); the $19 blend (${halfAtBlend.status}) and 2 x $4.50 + 2 x $5 in the other order (${halfSplit.status}) are recorded`, () => {
+      forbidden(halfAtLowest, 9271)
+      assert.equal(halfAtBlend.status, 200, JSON.stringify(halfAtBlend.body))
+      assert.equal(halfSplit.status, 200, JSON.stringify(halfSplit.body))
+    })
+    // The riel leg pairs per line too: the lines carry no riel price (the import wrote none), so it is each line's dollars x 4000 -- 20000 and 18000.
+    const halfRielUnder = await swapLines(halfSale, 9271, [[0, 2], [1, 2]], [out(9271, 4, 4.75, 18999)], 'two prices: 2 x $5 + 2 x $4.50 back, 4 out, dollars at the blend but riel 18999')
+    const halfRielAt = await swapLines(halfSale, 9271, [[0, 2], [1, 2]], [out(9271, 4, 4.75, 19000)], 'two prices: 2 x $5 + 2 x $4.50 back, 4 out, riel 19000 (the blend)')
+    r.check(`riel: 4 out at the dollar blend with 18999 riel each (${halfRielUnder.status}) is refused, 19000 (${halfRielAt.status}) is recorded -- the riel floor is 20000 x 2 + 18000 x 2`, () => {
+      forbidden(halfRielUnder, 9271)
+      assert.equal(halfRielAt.status, 200, JSON.stringify(halfRielAt.body))
+    })
+    // Returning only the free unit: it was paid $0, so it swaps for $0; a second free unit is a purchase.
+    const freeOnly = await swapLines(b2g1Sale, 9271, [[1, 1]], [out(9271, 1, 0, 0)], 'two prices: the $0 unit back, 1 out at $0')
+    const freeTwice = await swapLines(b2g1Sale, 9271, [[1, 1]], [out(9271, 2, 0, 0)], 'two prices: the $0 unit back, 2 out at $0')
+    r.check(`only the $0 unit back: one out at $0 is recorded (${freeOnly.status}); two out at $0 is refused (${freeTwice.status}), the second is a purchase at $5`, () => {
+      assert.equal(freeOnly.status, 200, JSON.stringify(freeOnly.body))
+      forbidden(freeTwice, 9271)
+    })
+    // A line sold ABOVE today's catalog price floors at the catalog price: min(base, line price), per line.
+    const priceyAtCatalog = await swapLines(priceySale, 9281, [[0, 1]], [out(9281, 1, 4)], 'two prices: sold $6 against catalog $4, 1 back, 1 out at the catalog $4')
+    const priceyUnder = await swapLines(priceySale, 9281, [[0, 1]], [out(9281, 1, 3.99, 15960)], 'two prices: sold $6 against catalog $4, 1 back, 1 out at $3.99')
+    r.check(`a line sold above today's catalog price floors at the catalog price: $4 is recorded (${priceyAtCatalog.status}), $3.99 is refused (${priceyUnder.status})`, () => {
+      assert.equal(priceyAtCatalog.status, 200, JSON.stringify(priceyAtCatalog.body))
+      forbidden(priceyUnder, 9281)
+    })
+    // Whoever may set a price on a sale keeps any price on the very same exchange.
+    const grantedFree = [
+      await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 0, 0)], 'two prices: sales grant, 3 out at $0', { cookie: withSales }),
+      await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 0, 0)], 'two prices: pos grant, 3 out at $0', { cookie: withPos }),
+      await swapLines(b2g1Sale, 9271, [[0, 2], [1, 1]], [out(9271, 3, 0, 0)], 'two prices: admin, 3 out at $0', {}),
+    ]
+    r.check(`control: a caller with sales, a caller with pos and the admin keep any price on the same exchange -- ${grantedFree.map(result => result.status)}`, () => {
+      for (const result of grantedFree) assert.equal(result.status, 200, JSON.stringify(result.body))
     })
   } finally {
     await h.mf.dispose()
