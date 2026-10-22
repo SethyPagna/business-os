@@ -12,7 +12,7 @@ import {
 import type { ExchangeCatalogProduct } from './returnExchangeContext'
 import { planReturnMoney, ReturnMoneyError, saleReturnMoney } from './returnRefundSplit'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_REPLACEMENT_PRICE_REFUSAL } from './returnReplacementPrice'
-import { recordedSoldPriceForReplacement, returnedUnitsForReplacement } from './returnsStock'
+import { recordedSoldLinesForReplacement } from './returnsStock'
 
 // The replacement side of an exchange, priced and quoted from what the refund quote already read. The quote route and the create call this
 // ONE function, so the figure the till reviews is the figure the commit recomputes and compares.
@@ -119,14 +119,13 @@ export async function priceAndQuoteExchange(input: ExchangeQuoteInputs): Promise
 
   // A replacement is an exchange plus an optional extra purchase with no cap on its quantity. Only a caller who may set a price on a sale
   // may price it under the catalog / promotion price; the units a returned unit of the same product covers may sell down to the price the
-  // original sale recorded (lib/returnReplacementPrice.ts). v1 prices are dollars, with riel derived at the sale's rate on both sides.
+  // original sale recorded, each returned unit at the sale line it came from (lib/returnReplacementPrice.ts, 6.0.960). v1 prices are dollars, with riel derived at the sale's rate on both sides.
   if (!canSetSalePrice(input.user)) {
     const offender = await firstDisallowedReplacementPrice(input.db, priced.lines.map((line) => {
-      const sold = recordedSoldPriceForReplacement(soldLines as never, input.returnedLines, line.product_id, rate)
       return {
         productId: line.product_id, quantity: line.quantity, priceUsd: line.unit_price_usd, priceKhr: line.unit_price_khr,
         catalogUsd: line.catalog_usd, catalogKhr: multiplyMoney4(line.catalog_usd, rate),
-        soldUsd: sold.usd, soldKhr: sold.khr, returnedQuantity: returnedUnitsForReplacement(soldLines as never, input.returnedLines, line.product_id),
+        returned: recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate),
       }
     }), rate)
     if (offender) return fail(403, { ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId })

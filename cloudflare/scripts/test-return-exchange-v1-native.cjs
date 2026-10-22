@@ -12,6 +12,7 @@
 //   4. more units than returned: 1 back / 3 out;
 //   5. a Not Paid original: the refund lowers the debt, nothing is netted, the replacement is Not Paid;
 //   6. the same request replayed: the recorded answer, nothing written twice;
+//   4c. one product on two sale lines at different prices: each returned unit is floored at the line it came from, never at the pooled lowest (6.0.960);
 //   7. refusals leave nothing behind: a short payment, a stale replacement quote, a price under the floor, more units than the shelf holds.
 // MUTANT=<name> bundles ONE deliberate defect; BASE_COMMIT=<sha> bundles the Worker as that commit had it (red on a702ea0e7).
 const assert = require('node:assert/strict')
@@ -25,6 +26,9 @@ const MUTANTS = {
   'no-credit-row': { file: 'src/lib/returnExchange.ts', from: 'const credit = input.creditUsd > 0 ?', to: 'const credit = false ?' },
   'collected-reads-amount-paid': { file: 'src/lib/salesAnalytics.ts', from: "Number(sale.source_return_id || 0) !== 0 && version === 0", to: "Number(sale.source_return_id || 0) !== 0" },
   'lossy-context': { file: 'src/lib/returnExchangeContext.ts', from: "CASE WHEN typeof(${expression})='real' THEN json_object('${REAL_MARKER}',quote(${expression})) ELSE ${expression} END", to: '${expression}' },
+  // 6.0.960 (release review P1-1): covered units pair with their own recorded lines; pooling them at the lowest price lets 11 dollars of units go out for 3.
+  'pooled-floor': { file: 'src/lib/returnExchangeQuote.ts', from: 'returned: recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate),',
+    to: 'returned: (() => { const own = recordedSoldLinesForReplacement(soldLines as never, input.returnedLines, line.product_id, rate); return own.length ? [{ quantity: own.reduce((s, l) => s + l.quantity, 0), usd: Math.min(...own.map(l => l.usd ?? Infinity)), khr: Math.min(...own.map(l => l.khr ?? Infinity)) }] : [] })(),' },
   'credit-is-whole-refund': { file: 'src/lib/returnExchange.ts', from: 'credit_usd: credit,', to: 'credit_usd: input.refundUsd,' },
 }
 
@@ -41,6 +45,7 @@ async function main() {
     // values, so a context read that goes through json_object alone refuses this current row as a write conflict.
     await H.seedProduct(h, 9504, 'EX1 Powder', 16.1, 200, 6)
     await H.seedProduct(h, 9505, 'EX1 Serum', 8, 200, 3)
+    await H.seedProduct(h, 9506, 'EX1 Primer', 10, 200, 4)
     const returnsOnly = await h.addEmployee(1951, 'ex1-returns-only', { returns: true })
     const withPrice = await h.addEmployee(1952, 'ex1-returns-pos', { returns: true, pos: true })
 
@@ -226,6 +231,31 @@ async function main() {
       r.check(`two parts: the extra units cannot go out under the catalog price either (${tooCheap.quote?.status} ${tooCheap.quote?.body?.code})`, () => {
         assert.equal(tooCheap.quote.status, 403)
         assert.equal(tooCheap.quote.body.code, 'return_replacement_price_forbidden')
+      })
+    }
+
+    // ---- 4c. one product on two lines at different prices -------------------------------------------------------------------------------------------
+    // A Primer (catalog $10) was sold as 2 x $5 and 1 x $1 (a buy-more offer worked by hand). All 3 come back. The replacement of 3 Primers by a caller
+    // with only Returns may go out no lower than 2 x 5 + 1 x 1 = $11 together: each unit is held to the line it was returned from. Pooled at the lowest
+    // recorded price ($1) the same caller could take 3 Primers for $3.
+    {
+      const sold = await H.createSale(h, { key: 'ex1-two-prices', status: 'completed', lines: [{ productId: 9506, quantity: 2, manualPrice: 5 }, { productId: 9506, quantity: 1, manualPrice: 1 }],
+        paymentDetails: [{ method: 'Cash', amount_usd: 11, amount_khr: 0 }] })
+      assert.equal(sold.status, 200, JSON.stringify(sold.body))
+      const sale = { id: sold.body.id, items: await h.all('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id', sold.body.id) }
+      const back = [{ item: 0, quantity: 2 }, { item: 1, quantity: 1 }]
+      const cheap = await exchange(sale, back, [{ product_id: 9506, quantity: 3, applied_price_usd: 3 }], { cookie: returnsOnly })
+      r.check(`two-price sale: 3 Primers for $9 (3 x $3) is under the $11 the returned lines were paid -- refused (${cheap.quote?.status} ${cheap.quote?.body?.code})`, () => {
+        assert.equal(cheap.quote.status, 403)
+        assert.equal(cheap.quote.body.code, 'return_replacement_price_forbidden')
+      })
+      const counted = await counts()
+      const fair = await exchange(sale, back, [{ product_id: 9506, quantity: 2, applied_price_usd: 5 }, { product_id: 9506, quantity: 1, applied_price_usd: 1 }], { cookie: returnsOnly })
+      const afterFair = await counts()
+      r.check(`two-price sale: 2 x $5 + 1 x $1 (the same $11 the lines were paid) is allowed (${fair.created?.status}); refund ${fair.quoted?.refund_usd}, new sale ${fair.quoted?.total_usd}, net ${fair.quoted?.net_usd}`, () => {
+        assert.equal(fair.created.status, 200, JSON.stringify(fair.created?.body))
+        assert.deepEqual([fair.quoted.refund_usd, fair.quoted.total_usd, fair.quoted.net_usd], [11, 11, 0])
+        assert.equal(afterFair.returns, counted.returns + 1)
       })
     }
 
