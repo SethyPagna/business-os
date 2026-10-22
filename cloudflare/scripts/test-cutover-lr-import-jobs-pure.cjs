@@ -452,12 +452,16 @@ async function main() {
       } else if (type === 'products') {
         // S8 (15 Oct 2026) rewrote two statement shapes on purpose: a new product states the cost its sheet left blank as
         // NULL (the oracle bound 0), and a new lot's received money is the receipt's own (NULL when unknown, not
-        // COALESCE(x, 0)). Everything else is byte-identical.
+        // COALESCE(x, 0)). Lane 6.0.944 added the purchase_price_* twin of each cost to that INSERT, binding the cost's own
+        // values again. Everything else is byte-identical.
         const asOracleWrote = (text) => {
           const statement = JSON.parse(text)
           if (statement.sql.startsWith('INSERT INTO products (')) {
             const columns = statement.sql.slice(statement.sql.indexOf('(') + 1, statement.sql.indexOf(')')).split(',').map((column) => column.trim())
             statement.params[columns.indexOf('cost_price_khr')] = null
+            const usd = columns.indexOf('cost_price_usd') + 1, khr = columns.indexOf('cost_price_khr') + 1
+            statement.sql = statement.sql.replace('cost_price_khr, stock_quantity', 'cost_price_khr, purchase_price_usd, purchase_price_khr, stock_quantity')
+              .replace(`?${khr}, ?${khr + 1},`, `?${khr}, COALESCE(?${usd}, 0), COALESCE(?${khr}, 0), ?${khr + 1},`)
           }
           return JSON.stringify(statement)
         }

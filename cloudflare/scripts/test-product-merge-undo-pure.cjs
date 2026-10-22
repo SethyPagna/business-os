@@ -698,7 +698,7 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
     const before = d1.db.prepare(`
       SELECT selling_price_usd, selling_price_khr,
              wholesale_price_usd, wholesale_price_khr,
-             cost_price_usd, cost_price_khr
+             cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr
         FROM products WHERE id = ?
     `).get(keeper.id)
     const result = await foldForward(d1, keeper, dup, branchNameById, ctx)
@@ -719,6 +719,8 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
                  wholesale_price_khr=@wholesaleKhr,
                  cost_price_usd=@costUsd,
                  cost_price_khr=@costKhr,
+                 purchase_price_usd=COALESCE(@costUsd, 0),
+                 purchase_price_khr=COALESCE(@costKhr, 0),
                  updated_at=CURRENT_TIMESTAMP
            WHERE id=@id`, {
       id: keeper.id,
@@ -736,6 +738,8 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
       wholesale_price_khr: Number(before.wholesale_price_khr),
       cost_price_usd: Number(before.cost_price_usd),
       cost_price_khr: Number(before.cost_price_khr),
+      purchase_price_usd: before.purchase_price_usd,
+      purchase_price_khr: before.purchase_price_khr,
     }
     return result
   }
@@ -761,14 +765,18 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
         { env: {}, user: { id: 42 }, direction: 'undo' },
       )
       assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 4)
+      assert.deepEqual({ ...d1.db.prepare('SELECT cost_price_usd, purchase_price_usd, cost_price_khr, purchase_price_khr FROM products WHERE id=1').get() },
+        { cost_price_usd: 4, purchase_price_usd: 0, cost_price_khr: 4000, purchase_price_khr: 0 },
+        'undo puts the keeper purchase twin back as the snapshot recorded it (a drifted 0), exactly, not rebuilt from the cost (lane 6.0.944)')
       assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
 
       await applier.run(
         { applier: 'product.merge', snapshot_id: recorded.snapshotId },
         { env: {}, user: { id: 42 }, direction: 'redo' },
       )
-      const redone = d1.db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id=1').get()
+      const redone = d1.db.prepare('SELECT cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id=1').get()
       assert.equal(redone.cost_price_usd, 5)
+      assert.deepEqual([redone.purchase_price_usd, redone.purchase_price_khr], [5, 5000], 'the merge writes the twin with the merged cost')
       assert.notEqual(redone.cost_price_usd, 4.5)
       assert.equal(redone.cost_price_khr, 5000)
       const saved = JSON.parse(d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(recorded.snapshotId).payload_json)
@@ -776,6 +784,22 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
     }
     assert.deepEqual(observedRedoCosts, [5, 5], 'every redo uses the saved 4/5/6 cluster mean')
     assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 1, 'the remaining cluster member is untouched')
+  })
+
+  await check('undo of a merge whose keeper had no recorded cost puts NULL back, with the twin the snapshot recorded (lane 6.0.944)', async () => {
+    d1.db.prepare(`UPDATE undo_snapshots SET payload_json = json_set(payload_json, '$.keeperPricingBefore.cost_price_usd', NULL, '$.keeperPricingBefore.cost_price_khr', NULL) WHERE id = ?`).run(recorded.snapshotId)
+    assert.deepEqual({ ...d1.db.prepare('SELECT purchase_price_usd, purchase_price_khr FROM products WHERE id=1').get() }, { purchase_price_usd: 5, purchase_price_khr: 5000 }, 'the merged keeper holds the redone cost 5 on its twin too')
+    await applier.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual({ ...d1.db.prepare('SELECT cost_price_usd, purchase_price_usd, cost_price_khr, purchase_price_khr FROM products WHERE id=1').get() },
+      { cost_price_usd: null, purchase_price_usd: 0, cost_price_khr: null, purchase_price_khr: 0 })
+  })
+
+  await check('undo of a merge recorded before the twin was snapshotted restores the cost and leaves the twin alone (lane 6.0.944)', async () => {
+    await applier.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
+    d1.db.prepare(`UPDATE undo_snapshots SET payload_json = json_remove(payload_json, '$.keeperPricingBefore.purchase_price_usd', '$.keeperPricingBefore.purchase_price_khr') WHERE id = ?`).run(recorded.snapshotId)
+    await applier.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual({ ...d1.db.prepare('SELECT cost_price_usd, purchase_price_usd, cost_price_khr, purchase_price_khr FROM products WHERE id=1').get() },
+      { cost_price_usd: 0, purchase_price_usd: 5, cost_price_khr: 0, purchase_price_khr: 5000 }, 'the cost is restored (this replica records an unknown cost as 0); the twin the merge wrote stays, not rebuilt from the cost')
   })
 }
 

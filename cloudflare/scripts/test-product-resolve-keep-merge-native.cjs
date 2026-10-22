@@ -365,16 +365,21 @@ async function main() {
 
   await check('legacy chosen-cost fold snapshots still undo exactly and redo their recorded choice', async () => {
     fresh()
-    const keeperBefore = one('SELECT name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, is_active FROM products WHERE id = 10')
+    const keeperBefore = one('SELECT name, barcode, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr, selling_price_usd, is_active FROM products WHERE id = 10')
     const done = await legacyMerge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: 6.5 })
     assert.equal(done.status, 200, JSON.stringify(done.body))
+    // No cost review follows a chosen cost, so the keeper UPDATE is the only writer of the twin (lane 6.0.944); undo below puts the
+    // twin back as it was (keeperBefore holds it), not rebuilt from the restored cost.
+    const kept = one('SELECT cost_price_usd, purchase_price_usd, cost_price_khr, purchase_price_khr FROM products WHERE id = 10')
+    assert.ok(kept.cost_price_khr > 0, 'the fold wrote a KHR cost too')
+    assert.deepEqual(kept, { cost_price_usd: 6.5, purchase_price_usd: 6.5, cost_price_khr: kept.cost_price_khr, purchase_price_khr: kept.cost_price_khr }, 'the chosen cost moves its purchase twin, both currencies, in the keeper UPDATE')
     const history = one("SELECT id, undo_payload, redo_payload FROM action_history WHERE status = 'undoable' ORDER BY id DESC LIMIT 1")
     assert.ok(history, 'the merge is in History, undoable like every pair merge')
     const applier = undoAppliers.resolveUndoApplier(JSON.parse(history.undo_payload))
     assert.equal(applier.name, 'product.merge')
     const ctx = (direction) => ({ env: { DB: {} }, user: ADMIN, direction, historyId: history.id })
     await applier.run(JSON.parse(history.undo_payload), ctx('undo'))
-    assert.deepEqual(one('SELECT name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, is_active FROM products WHERE id = 10'), keeperBefore)
+    assert.deepEqual(one('SELECT name, barcode, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr, selling_price_usd, is_active FROM products WHERE id = 10'), keeperBefore)
     assert.equal(one('SELECT is_active FROM products WHERE id = 11').is_active, 1)
     await applier.run(JSON.parse(history.redo_payload), ctx('redo'))
     assert.deepEqual(one('SELECT name, barcode, cost_price_usd FROM products WHERE id = 10'), { name: 'Rose Toner 100ml', barcode: '8801111111111', cost_price_usd: 6.5 })

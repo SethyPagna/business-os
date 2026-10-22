@@ -323,6 +323,8 @@ async function main() {
         selling_price_usd: 22, selling_price_khr: 0,
         wholesale_price_usd: 20, wholesale_price_khr: 0,
         cost_price_usd: 8, cost_price_khr: 0,
+        // lane 6.0.944: the merge writes the keeper's purchase twin with its cost, so the snapshot holds the twin as it was
+        purchase_price_usd: 8, purchase_price_khr: 0,
       }, 'undo must restore the exact pre-merge prices')
     })
 

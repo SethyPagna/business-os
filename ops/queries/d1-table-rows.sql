@@ -178,5 +178,6 @@ SELECT
     'inventory_check_items', (SELECT COUNT(*) FROM inventory_check_items),
     'inventory_check_events', (SELECT COUNT(*) FROM inventory_check_events),
     'imported_sale_stock_skip_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_0235),
-    'imported_sale_stock_skip_guard_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_guard_0235)
+    'imported_sale_stock_skip_guard_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_guard_0235),
+    'product_cost_mirror_0269', (SELECT COUNT(*) FROM product_cost_mirror_0269)
   ) AS rows_10;

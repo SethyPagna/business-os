@@ -55,7 +55,7 @@ import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/dated
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
-import { catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
+import { catalogCostRecomputeIfChangedStatement, mirrorCostColumns } from '../lib/catalogCostRecompute'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -1342,8 +1342,9 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
 // for "cost" and "purchase" separately stays in sync from one place.
 // An unknown cost stays NULL on cost_price_*; the purchase_price_* mirror is
 // DEFAULT 0 (0 there means "unfilled"), so it takes 0 rather than NULL.
+// The rule itself is mirrorCostColumns (lib/catalogCostRecompute.ts), shared by every writer of a cost.
 function mirrorCostFields(usd: number | null, khr: number | null) {
-  return { purchase_price_usd: usd ?? 0, purchase_price_khr: khr ?? 0, cost_price_usd: usd, cost_price_khr: khr }
+  return mirrorCostColumns({ purchase_price_usd: 0, purchase_price_khr: 0, cost_price_usd: usd, cost_price_khr: khr })
 }
 
 // "Add stock with pricing unlocked": the receiving-different-stock case

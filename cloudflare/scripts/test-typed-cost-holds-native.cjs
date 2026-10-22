@@ -194,7 +194,7 @@ new Function('require', 'module', 'exports', transpile(`
   import { normalizeSearchText, compactSearchText } from './searchMatch'
   import { productStockGuardStatement, assertProductStatusInput } from './productStockGuard'
   ${extract(engineSource, 'export function productImportStockStatements(', '\n}')}
-  const { catalogCostRecomputeStatement } = catalog
+  const { catalogCostRecomputeStatement, COST_MIRROR_COLUMNS, costMirrorSql } = catalog
   // Absent before the fix: the loop then simply never calls it.
   const typedCostEntryBeforeWriteStatement = (catalog as any).typedCostEntryBeforeWriteStatement
   function str(value: unknown): string { return value == null ? '' : String(value).trim() }

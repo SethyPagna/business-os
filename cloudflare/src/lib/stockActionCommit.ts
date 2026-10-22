@@ -9,7 +9,7 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stock
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
-import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeStatement, costMirrorSql } from './catalogCostRecompute'
 import { resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { BRANCH_REDIRECT_REQUIRED_ERROR, BRANCH_REDIRECT_TARGET_INVALID_ERROR, branchEffectGuardPredicate } from './branchEffect'
 
@@ -251,9 +251,10 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
     const [inserted] = await executeStockTransaction(db, [{ sql: `
       INSERT OR IGNORE INTO products (
         name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd, cost_price_khr,
-        stock_quantity, is_active, client_request_id, created_at, updated_at
+        purchase_price_usd, stock_quantity, is_active, client_request_id, created_at, updated_at
       ) VALUES (
         @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd, NULL,
+        ${costMirrorSql('@costPriceUsd')},
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `, params: {

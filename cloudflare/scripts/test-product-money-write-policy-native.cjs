@@ -133,8 +133,8 @@ function seed(name = 'Existing') {
   assert.equal(row(created.body.id).cost_price_usd, 1.2345)
   assert.equal(row(created.body.id).selling_price_usd, 1.24)
   assert.equal(row(created.body.id).selling_price_khr, 4321.1234, 'KHR is not given USD cent ceiling')
-  assert.equal(row(created.body.id).purchase_price_usd, 2.3457)
-  assert.equal(row(created.body.id).purchase_price_khr, 9000.1235, 'purchase cost uses nearest four decimals in both currencies')
+  assert.equal(row(created.body.id).purchase_price_usd, 1.2345, 'a typed cost sets its purchase twin (lane 6.0.944): the purchase_price_usd the body sent is replaced')
+  assert.equal(row(created.body.id).purchase_price_khr, 9000.1235, 'a purchase value with no cost beside it keeps nearest four decimals')
   const variant = await request(products, 'POST', '/variant', { name: 'Variant New', cost_price_usd: 1.2345, selling_price_usd: '1.23004' })
   assert.equal(variant.status, 200, JSON.stringify(variant))
   assert.equal(row(variant.body.id).selling_price_usd, 1.24)
@@ -190,6 +190,9 @@ function seed(name = 'Existing') {
   const deniedBefore = row(id)
   assert.equal((await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, { ...admin, tier: 'none' })).status, 403)
   assert.deepEqual(row(id), deniedBefore)
+  // The first edit of this row wrote its cost and so set its purchase twin to it (lane 6.0.944): the before-image is what the row holds now.
+  const purchaseBeforeQueue = row(id).purchase_price_usd
+  assert.equal(purchaseBeforeQueue, 1.2345)
   const queued = await request(products, 'PUT', `/${id}`, { cost_price_usd: 1.2345, selling_price_usd: '1.23004' }, requester)
   assert.equal(queued.status, 202, JSON.stringify(queued))
   const pendingId = queued.body.pendingActionId
@@ -198,7 +201,7 @@ function seed(name = 'Existing') {
   assert.equal(payload.product_money_policy_version, 2)
   assert.equal(payload._product_money_write_plan.version, 2)
   assert.equal(payload._product_money_write_plan.before.selling_price_usd, 1.234567)
-  assert.equal(payload._product_money_write_plan.before.purchase_price_usd, 2.345678)
+  assert.equal(payload._product_money_write_plan.before.purchase_price_usd, purchaseBeforeQueue)
   assert.equal(payload._product_money_write_plan.after.selling_price_usd, 1.24)
   const approved = await request(reviews, 'POST', `/${pendingId}/approve`, {})
   assert.equal(approved.status, 200, JSON.stringify(approved))
@@ -279,7 +282,7 @@ function seed(name = 'Existing') {
   const v1ReplayId = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by) VALUES('products','update','product',?,?,'open',2)").run(v1ReplayProductId, JSON.stringify(v1ReplayPayload)).lastInsertRowid)
   assert.equal((await request(reviews, 'POST', `/${v1ReplayId}/approve`, {})).status, 200)
   assert.equal(row(v1ReplayProductId).cost_price_usd, 4.5678, 'an already-frozen six-field v1 plan still applies through the real review route')
-  assert.equal(row(v1ReplayProductId).purchase_price_usd, v1ReplayBefore.purchase_price_usd, 'v1 replay neither owns nor rewrites purchase cost')
+  assert.equal(row(v1ReplayProductId).purchase_price_usd, 4.5678, 'v1 replay owns no purchase value of its own (readProductMoneyPlan refuses one below); the twin is the cost it wrote (lane 6.0.944)')
   const groupId = seed('Group Original')
   const groupBefore = row(groupId), auditBefore = auditCount
   const groupBad = await request(products, 'PUT', `/${groupId}`, { name: 'Group Changed', __rename_scope: 'group', cost_price_usd: 2 })
