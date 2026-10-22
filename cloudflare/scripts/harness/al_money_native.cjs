@@ -107,7 +107,6 @@ async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
   // names the exact statement that fails).
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(name => name.endsWith('.sql')).sort()) {
     const sqls = splitSql(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
-      .filter(sql => !(file === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())))
     try { await db.batch(sqls.map(sql => db.prepare(sql))) } catch {
       for (const sql of sqls) {
         try { await db.prepare(sql).run() } catch (error) { throw new Error(`Migration ${file}: ${error.message}`) }

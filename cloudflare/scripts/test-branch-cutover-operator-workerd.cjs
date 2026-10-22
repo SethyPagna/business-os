@@ -57,6 +57,7 @@ async function main() {
     const migrations = []
     for (const { name, sql: migrationSql } of completedCutover.migrationEntries()) {
       for (const sql of split(migrationSql)) {
+        // The archived chain's 0098 still has the 7-term seed workerd refuses; it inserts nothing on an empty users table.
         if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         migrations.push(db.prepare(sql))
       }

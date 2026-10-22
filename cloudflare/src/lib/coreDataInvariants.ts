@@ -231,11 +231,14 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   // EXISTING row in place -- without it, the new slug matches nothing and
   // this function inserts a SECOND, empty organization beside the real one
   // (and the login pin starts falling back to first-by-id). 'business-os'
-  // is the identity the code originally shipped with; 'leangcosmetics' is
-  // the identity in production before the Aug 2026 rename to LeangBeauty.
+  // is the identity the code originally shipped with, and the one migration
+  // 0030 seeds since 22 Oct 2026; 'leangcosmetics' is the identity in
+  // production before the Aug 2026 rename to LeangBeauty; 'leang-cosmetics'
+  // is what 0030 seeded into every new database before 22 Oct 2026.
   const PREVIOUS_IDENTITIES = [
     { slug: 'leangcosmetics', publicId: 'org_leangcosmetics' },
     { slug: 'business-os', publicId: 'org_business_os' },
+    { slug: 'leang-cosmetics', publicId: 'leang-cosmetics' },
   ]
 
   const fastPathResult = await tryFastPath(db, orgName, orgSlug, publicId)

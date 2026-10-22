@@ -205,7 +205,6 @@ async function nativeD1() {
     const dir = path.resolve(__dirname,'../migrations')
     for (const name of fs.readdirSync(dir).filter(n=>n.endsWith('.sql')).sort()) {
       const statements = split(fs.readFileSync(path.join(dir,name),'utf8'))
-        .filter(sql=>!(name==='0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())))
       for (let i=0;i<statements.length;i+=50) await db.batch(statements.slice(i,i+50).map(sql=>db.prepare(sql)))
     }
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)

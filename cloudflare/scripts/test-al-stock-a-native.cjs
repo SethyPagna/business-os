@@ -185,9 +185,6 @@ async function migrate(db) {
   const statements = []
   for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.sql')).sort()) {
     for (const statement of split(fs.readFileSync(path.join(dir, name), 'utf8')).filter(s => s.trim())) {
-      // Miniflare's test D1 caps compound SELECT terms lower than the deployed runner; this one seed statement is a
-      // no-op on an empty users table (same exemption test-customer-return-create-d1-native.cjs makes).
-      if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
       statements.push({ name, statement })
     }
   }

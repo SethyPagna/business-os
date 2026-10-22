@@ -1,6 +1,6 @@
 // Exercise the installed Wrangler parser AND `d1 migrations apply --local`.
 // Bootstrap the pre-0153 schema directly so unrelated historical data
-// migrations (including 0098's compound SELECT limit) do not mask this test.
+// migrations do not mask this test.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')

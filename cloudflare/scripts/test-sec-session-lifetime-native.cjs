@@ -58,7 +58,6 @@ async function boot() {
   db = await mf.getD1Database('DB')
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
     for (const statement of splitSql(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))) {
-      if (file === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
       await db.prepare(statement).run()
     }
   }

@@ -105,7 +105,6 @@ async function main() {
     const db = await mf.getD1Database('DB')
     for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((f) => f.endsWith('.sql')).sort()) {
       for (const statement of splitSql(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))) {
-        if (file === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
         try { await db.prepare(statement).run() } catch (error) { throw new Error(`Migration ${file}: ${error.message}`) }
       }
     }

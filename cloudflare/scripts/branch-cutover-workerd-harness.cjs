@@ -100,6 +100,7 @@ async function seed(call, { scale = 1, tables } = {}) {
   const entries = archive ? archive.migrationEntries() : fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort().map(name => ({ name, sql: fs.readFileSync(path.join(root, 'migrations', name), 'utf8') }))
   for (const { name, sql: migrationSql } of entries) {
     for (const sql of split(migrationSql)) {
+      // An archived chain's 0098 still has the 7-term seed workerd refuses; it inserts nothing on an empty users table.
       if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
       migrations.push({ sql })
     }

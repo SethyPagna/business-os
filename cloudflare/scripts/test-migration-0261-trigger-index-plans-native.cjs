@@ -291,7 +291,6 @@ async function rowsRead() {
     const apply = async (names) => {
       const stmts = []
       for (const name of names) for (const s of split(read(name)).filter((s) => s.trim())) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(s.trim())) continue
         stmts.push(s)
       }
       for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100).map((s) => db.prepare(s)))

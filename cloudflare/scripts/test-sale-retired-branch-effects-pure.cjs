@@ -188,6 +188,9 @@ function migratedDb(ref = null) {
     const seed = new Database(':memory:')
     seed.pragma('foreign_keys = OFF')
     for (const migration of ref ? archivedMigrations(ref) : loadAll()) seed.exec(migration)
+    // An archived chain still imports 0064's old-system expenses, which the current chain stopped doing on
+    // 22 Oct 2026; both fixtures start without them, fee ids included.
+    if (ref) seed.exec("DELETE FROM fees WHERE created_by_name = 'Old system'; DELETE FROM sqlite_sequence WHERE name = 'fees';")
     if (ref) assert.equal(seed.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_schema_epoch'").get().n, 0)
     else assert.throws(() => seed.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
     migratedTemplates.set(key, seed.serialize())

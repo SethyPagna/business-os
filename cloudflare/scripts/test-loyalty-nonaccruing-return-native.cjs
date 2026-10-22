@@ -50,7 +50,6 @@ async function main() {
     try {
       const migrations = []
       for (const name of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         migrations.push({ sql })
       }
       for (let i = 0; i < migrations.length; i += 50) await seed(migrations.slice(i, i + 50))

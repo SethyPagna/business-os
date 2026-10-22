@@ -48,7 +48,6 @@ async function main() {
       for (const sql of migrationStatements(fs.readFileSync(path.join(migrationDir, file), 'utf8'))) {
         try { await native.prepare(sql).run() }
         catch (error) {
-          if (/too many terms in compound SELECT/i.test(String(error)) && /^INSERT\b/i.test(sql)) continue
           throw new Error(`${file}: ${sql.slice(0, 160)} :: ${error}`)
         }
       }

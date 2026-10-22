@@ -204,11 +204,7 @@ function request(clientRequestId, productId) {
 async function migrate(db) {
   const dir = path.join(root, 'migrations')
   for (const name of fs.readdirSync(dir).filter((file) => file.endsWith('.sql')).sort()) {
-    // As in test-cost-receipt-identity-native.cjs: 0098's alias seed is a
-    // no-op on an empty users table, and exceeds Miniflare's compound-SELECT
-    // cap, so only that statement is omitted.
     const statements = split(fs.readFileSync(path.join(dir, name), 'utf8'))
-      .filter((sql) => !(name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())))
     for (let i = 0; i < statements.length; i += 50) {
       try {
         await db.batch(statements.slice(i, i + 50).map((sql) => db.prepare(sql)))

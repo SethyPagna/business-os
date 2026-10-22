@@ -2,20 +2,13 @@
 /**
  * Apply cloudflare/migrations to a LOCAL miniflare D1 file, in order.
  *
- * Why this exists instead of `npm run migrate:local`
- * --------------------------------------------------
- * `wrangler d1 migrations apply business-os --local` cannot apply this
- * project's migration set at all on wrangler 4.116.0. It concatenates every
- * pending file into one local query and dies in its own result aggregation:
- *
- *     X [ERROR] too many terms in compound SELECT: SQLITE_ERROR
- *       at executeLocally (wrangler-dist/cli.js:283614)
- *
- * Measured: the first run applied the schema through 0097 and recorded 97 rows
- * in d1_migrations before erroring; re-running with 64 files still pending
- * failed the same way and applied NOTHING, so it does not converge by
- * repetition. SQLITE_MAX_COMPOUND_SELECT is a compile-time limit in workerd,
- * not something a flag can raise.
+ * Why this was written instead of `npm run migrate:local`
+ * -------------------------------------------------------
+ * Until 22 Oct 2026 `wrangler d1 migrations apply business-os --local` stopped
+ * at 0098 with "too many terms in compound SELECT": that file's seed had 7
+ * UNION ALL terms, and workerd's SQLite, like D1, allows 5 (a compile-time
+ * limit). 0098 no longer seeds, and wrangler now applies the whole chain to an
+ * empty database (scripts/test-fresh-d1-chain-native.cjs proves it).
  *
  * This applier is deliberately boring: same files, same order, one transaction
  * per file, recorded in the same d1_migrations table wrangler uses, so a later

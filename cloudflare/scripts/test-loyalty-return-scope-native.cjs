@@ -35,7 +35,7 @@ const seedStock = async statements => {
   assert.deepEqual(await stockState(),before,'refused raw mutation preserves every stock row and system flag')
 }
 try{
-const migrations=[];for(const name of fs.readdirSync(path.join(root,'migrations')).filter(n=>n.endsWith('.sql')).sort())for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8'))){if(name==='0098_user_aliases.sql'&&/^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim()))continue;migrations.push({sql})}
+const migrations=[];for(const name of fs.readdirSync(path.join(root,'migrations')).filter(n=>n.endsWith('.sql')).sort())for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8'))){migrations.push({sql})}
 for(let i=0;i<migrations.length;i+=50)await seed(migrations.slice(i,i+50))
 const token='synthetic-scope-session',hash=createHash('sha256').update(token).digest('hex')
 await seed([

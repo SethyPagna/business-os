@@ -148,7 +148,6 @@ async function main() {
     const stmts = []
     for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) {
       for (const sql of split(fs.readFileSync(path.join(dir, name), 'utf8')).filter((s) => s.trim())) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         stmts.push(sql)
       }
     }

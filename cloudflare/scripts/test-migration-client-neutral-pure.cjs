@@ -40,13 +40,15 @@ check('the manifest describes exactly the files in cloudflare/migrations, byte f
   assert.equal(manifest.migrations.length, files.size)
 })
 
-const CLIENT_SPECIFIC = ['0030', '0064', '0072', '0098', '0099', '0103', '0109', '0110', '0111', '0112', '0117', '0153', '0163', '0164', '0165', '0166', '0168', '0173', '0174', '0176', '0178', '0179', '0183', '0251']
+const CLIENT_SPECIFIC = ['0072', '0099', '0103', '0109', '0110', '0111', '0112', '0117', '0153', '0163', '0164', '0165', '0166', '0168', '0173', '0174', '0176', '0178', '0179', '0183', '0251']
 
-check('the legacy class split is pinned: 135 SCHEMA, 56 GENERIC-DATA, 24 CLIENT-SPECIFIC-DATA', () => {
+// 0030, 0064 and 0098 were CLIENT-SPECIFIC-DATA until 22 Oct 2026, when the owner approved editing them
+// so the chain builds a new D1 and carries none of the first client's rows (test-fresh-d1-chain-native.cjs).
+check('the legacy class split is pinned: 137 SCHEMA, 57 GENERIC-DATA, 21 CLIENT-SPECIFIC-DATA', () => {
   const count = (cls) => manifest.migrations.filter((m) => m.class === cls).length
-  assert.equal(count('SCHEMA'), 135)
-  assert.equal(count('GENERIC-DATA'), 56)
-  assert.equal(count('CLIENT-SPECIFIC-DATA'), 24)
+  assert.equal(count('SCHEMA'), 137)
+  assert.equal(count('GENERIC-DATA'), 57)
+  assert.equal(count('CLIENT-SPECIFIC-DATA'), 21)
   const client = manifest.migrations.filter((m) => m.class === 'CLIENT-SPECIFIC-DATA').map((m) => m.name.slice(0, 4))
   assert.deepEqual(client, CLIENT_SPECIFIC, 'reclassifying a legacy migration is a decision: edit this list in the same commit and say why')
 })
@@ -252,10 +254,7 @@ const SKIPPED_BACKFILLS = ['0010', '0016', '0037', '0038', '0039', '0040', '0041
 // are the files that would contaminate a new client; every one that is NOT empty
 // below is refused if it were submitted today. Empty = the lint cannot see it.
 const EXPECTED_CLIENT = {
-  '0030': ['literal-rows'],
-  '0064': ['literal-id', 'literal-rows'],
   '0072': [],
-  '0098': ['literal-rows'],
   '0099': [],
   '0103': ['literal-rows'],
   '0109': ['unconditional-write'],
@@ -278,7 +277,7 @@ const EXPECTED_CLIENT = {
   '0251': ['unconditional-write'],
 }
 
-check('calibration: the lint refuses 17 of the 24 client-specific migrations and names the 7 policy rewrites it cannot see', () => {
+check('calibration: the lint refuses 14 of the 21 client-specific migrations and names the 7 policy rewrites it cannot see', () => {
   const got = {}
   for (const entry of manifest.migrations) {
     const number = entry.name.slice(0, 4)
@@ -288,10 +287,10 @@ check('calibration: the lint refuses 17 of the 24 client-specific migrations and
   assert.deepEqual(got, EXPECTED_CLIENT)
   const blind = Object.keys(EXPECTED_CLIENT).filter((n) => EXPECTED_CLIENT[n].length === 0)
   assert.deepEqual(blind, ['0072', '0099', '0110', '0111', '0117', '0166', '0178'])
-  assert.equal(Object.keys(EXPECTED_CLIENT).length - blind.length, 17)
+  assert.equal(Object.keys(EXPECTED_CLIENT).length - blind.length, 14)
 })
 
-check('calibration: the SCHEMA and GENERIC-DATA files trip only the two known shapes (derived-column backfills without WHERE, and pinned ids in 0145/0146 CHECKs)', () => {
+check('calibration: the SCHEMA and GENERIC-DATA files trip only the three known shapes (derived-column backfills without WHERE, pinned ids in 0145/0146 CHECKs, and 0030\'s one neutral default row)', () => {
   const got = {}
   for (const entry of manifest.migrations) {
     if (entry.class === 'CLIENT-SPECIFIC-DATA') continue
@@ -302,6 +301,7 @@ check('calibration: the SCHEMA and GENERIC-DATA files trip only the two known sh
   for (const n of SKIPPED_BACKFILLS) expected[n] = ['unconditional-write']
   expected['0145'] = ['check-literal-id']
   expected['0146'] = ['check-literal-id']
+  expected['0030'] = ['literal-rows']
   assert.deepEqual(got, expected)
 })
 

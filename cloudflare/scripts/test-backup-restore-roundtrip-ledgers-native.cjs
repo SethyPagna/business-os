@@ -68,7 +68,6 @@ async function main() {
     const dir = path.join(root, 'migrations')
     for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) {
       for (const sql of split(fs.readFileSync(path.join(dir, name), 'utf8'))) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         try { await db.prepare(sql).run() } catch (error) { throw new Error(name + ': ' + error.message) }
       }
     }

@@ -24,7 +24,7 @@ const actors = [
   { id: 914, username: 'e2e_employee_cost_view', code: 'employee', permissions: { sales: true, 'sales:add_items': true, 'sales:amend': true, pos: false, products: false, product_cost_view: true, product_cost_edit: false } },
 ]
 const products = [{ id: 201, name: 'E2E Original Powder', price: 9.5 }, { id: 202, name: 'E2E Added Serum', price: 7.25 }, { id: 203, name: 'E2E Replacement Balm', price: 3 }]
-const receipt = { startedAtUTC: new Date().toISOString(), runtime: process.version, origin, dist, migrations: [], skippedEmptyAliasInsert: 0, requests: [], outboundRefusals: [], actors: actors.map(({ id, username, code, permissions }) => ({ id, username, code, permissions })), products, limits: ['Disposable ephemeral native workerd/D1/R2/KV only.', 'Fixture state queries are host-side observations; business API and session/grant enforcement are actual Worker.', 'Built assets served by local host; no external origins permitted.'] }
+const receipt = { startedAtUTC: new Date().toISOString(), runtime: process.version, origin, dist, migrations: [], requests: [], outboundRefusals: [], actors: actors.map(({ id, username, code, permissions }) => ({ id, username, code, permissions })), products, limits: ['Disposable ephemeral native workerd/D1/R2/KV only.', 'Fixture state queries are host-side observations; business API and session/grant enforcement are actual Worker.', 'Built assets served by local host; no external origins permitted.'] }
 receipt.pid = process.pid
 let mf, server, adminCookie, sequence = 0
 const record = () => { if (evidencePath) fs.writeFileSync(evidencePath, JSON.stringify(receipt, null, 2) + '\n') }
@@ -48,7 +48,6 @@ async function main() {
   receipt.foreignKeys = await all('PRAGMA foreign_keys')
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(f => f.endsWith('.sql')).sort()) {
     for (const statement of splitSql(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))) {
-      if (file === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) { receipt.skippedEmptyAliasInsert++; continue }
       try { await run(statement) } catch (error) { throw new Error(`Migration ${file}: ${error.message}`) }
     }
     receipt.migrations.push(file)

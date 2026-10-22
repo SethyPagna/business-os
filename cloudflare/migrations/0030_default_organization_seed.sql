@@ -16,8 +16,14 @@
 -- (default branch, default roles) -- conditioned on the table actually
 -- being empty, so an already-customized name on an existing install is
 -- never overwritten.
+--
+-- The row is neutral. On its first request the Worker adopts it and renames it
+-- to the deployment's configured organization (lib/coreDataInvariants.ts,
+-- PREVIOUS_IDENTITIES). Until 22 Oct 2026 it seeded the first client's name, which
+-- put that name into every new database (owner-approved change; databases that
+-- already applied this file never run it again).
 INSERT INTO organizations (name, slug, public_id, is_active, setup_enabled)
-SELECT 'Leang Cosmetics', 'leang-cosmetics', 'leang-cosmetics', 1, 0
+SELECT 'Business OS', 'business-os', 'org_business_os', 1, 0
 WHERE NOT EXISTS (SELECT 1 FROM organizations);
 
 -- Same conditional-seed reasoning for the default group `getDefaultGroup()`
@@ -27,5 +33,5 @@ WHERE NOT EXISTS (SELECT 1 FROM organizations);
 INSERT INTO organization_groups (organization_id, name, slug, is_default, is_active)
 SELECT o.id, 'Main', 'main', 1, 1
 FROM organizations o
-WHERE o.slug = 'leang-cosmetics'
+WHERE o.slug = 'business-os'
   AND NOT EXISTS (SELECT 1 FROM organization_groups);

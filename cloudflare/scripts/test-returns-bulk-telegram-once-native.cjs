@@ -111,7 +111,6 @@ async function migrate(db) {
   const dir = path.join(root, 'migrations')
   for (const name of fs.readdirSync(dir).filter((file) => file.endsWith('.sql')).sort()) {
     for (const statement of split(fs.readFileSync(path.join(dir, name), 'utf8'))) {
-      if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
       try { await db.prepare(statement).run() } catch (error) { error.message = `${name}: ${error.message}`; throw error }
     }
   }

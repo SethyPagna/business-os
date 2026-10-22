@@ -52,7 +52,6 @@ async function main() {
     const list = []
     for (const name of files) {
       for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         list.push({ sql })
       }
     }

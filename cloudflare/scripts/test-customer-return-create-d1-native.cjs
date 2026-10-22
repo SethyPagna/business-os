@@ -45,11 +45,6 @@ async function migrate(db) {
   for (const name of fs.readdirSync(dir).filter(name => name.endsWith('.sql')).sort()) {
     const statements = split(fs.readFileSync(path.join(dir, name), 'utf8'))
     for (const statement of statements) {
-      // The fixture has no users while migrations run, so 0098's alias seed is
-      // observably a no-op. Miniflare's test D1 has a lower compound-SELECT
-      // term cap than the deployed migration runner; install its schema/indexes
-      // but omit only that empty-data seed statement.
-      if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
       try { await db.prepare(statement).run() } catch (error) {
         error.message = `${name}: ${error.message}`
         throw error

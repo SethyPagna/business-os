@@ -2,7 +2,7 @@
 -- Rebuild: node ops/scripts/client/build-baseline.mjs   Check: node ops/scripts/client/build-baseline.mjs --check
 -- Use: ops/scripts/client/provision-database.mjs (empty database only), then the normal chain applies 0270+.
 -- schema-fingerprint: 08658d7306f7db68074b35a01e5ba5f930a3191a97fb6fb23896e1be86f015db
--- chain-digest: d96d1469142bc86bfd8e1ee305745a4e5fbbc86eae87ed4a1d7afb10d44246f8   (sha256 of the manifest name:sha256 lines through 0269)
+-- chain-digest: 15d1d60c52375b0ec754ee38734815badfd56b02a75a382b3fc695901e386875   (sha256 of the manifest name:sha256 lines through 0269)
 -- objects: 159 tables (FTS shadow tables are created by their CREATE VIRTUAL TABLE), 208 indexes, 0 views, 220 triggers
 -- Rows: only the seed block below. No organization, fee, alias, customer, product, sale or setting.
 

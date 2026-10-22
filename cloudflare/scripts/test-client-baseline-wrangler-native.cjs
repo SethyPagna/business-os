@@ -6,8 +6,7 @@
 // Miniflare D1 file, adds a dummy 0270 beside the 215 real files, and runs the actual
 // `wrangler d1 migrations list` and `apply --local` against it:
 //   - list names only 0270 as unapplied
-//   - apply runs only 0270 (the chain itself cannot be applied locally in one go on this wrangler:
-//     see scripts/apply-local-migrations.cjs), exits 0, and records it
+//   - apply runs only 0270, exits 0, and records it
 //   - the schema afterwards equals the full chain + 0270
 // Everything happens in a temp directory; it never touches .wrangler/state and binds no port.
 const assert = require('node:assert/strict')

@@ -56,7 +56,7 @@ const endLoyaltyRestore = async state => {
 try{
 const files=fs.readdirSync(path.join(root,'migrations')).filter(n=>n.endsWith('.sql')).sort()
 const isReset=n=>n==='0251_loyalty_points_watermark.sql'
-const apply=async names=>{const list=[];for(const name of names)for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8'))){if(name==='0098_user_aliases.sql'&&/^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim()))continue;list.push({sql})}for(let i=0;i<list.length;i+=50)await seed(list.slice(i,i+50))}
+const apply=async names=>{const list=[];for(const name of names)for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8'))){list.push({sql})}for(let i=0;i<list.length;i+=50)await seed(list.slice(i,i+50))}
 await apply(files.filter(n=>!isReset(n)))
 const token='synthetic-reset-session',hash=createHash('sha256').update(token).digest('hex')
 const old="datetime('now','-3 days')"

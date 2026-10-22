@@ -38,6 +38,7 @@ function check(name, fn) {
 const PREVIOUS_IDENTITIES = [
   { slug: 'leangcosmetics', publicId: 'org_leangcosmetics' },
   { slug: 'business-os', publicId: 'org_business_os' },
+  { slug: 'leang-cosmetics', publicId: 'leang-cosmetics' },
 ]
 
 // Mirrors ensureCoreDataInvariants' organization half.
@@ -132,6 +133,28 @@ check('a leangcosmetics row is RENAMED to leangbeauty in place, not duplicated',
   db.close()
 })
 
+check('a database seeded by 0030 before 22 Oct 2026 is adopted and renamed in place', () => {
+  // 0030 used to seed every new database as Leang Cosmetics / leang-cosmetics. A
+  // deployment with another slug must rename that row, never add a second one.
+  const db = freshDb([{ id: 1, name: 'Leang Cosmetics', slug: 'leang-cosmetics', public_id: 'leang-cosmetics' }])
+  ensureOrganization(db, { BUSINESS_OS_ORGANIZATION_NAME: 'Example Shop', BUSINESS_OS_ORGANIZATION_SLUG: 'example-shop' })
+  const all = db.prepare('SELECT id, name, slug, public_id FROM organizations').all()
+  assert.deepStrictEqual(all, [{ id: 1, name: 'Example Shop', slug: 'example-shop', public_id: 'org_example_shop' }])
+  db.close()
+})
+
+check('production: the configured leangbeauty row is kept and a stray old-seed row is left alone', () => {
+  const production = { id: 2, name: 'LeangBeauty', slug: 'leangbeauty', public_id: 'org_leangbeauty' }
+  const stray = { id: 1, name: 'Leang Cosmetics', slug: 'leang-cosmetics', public_id: 'leang-cosmetics' }
+  const leang = { BUSINESS_OS_ORGANIZATION_NAME: 'LeangBeauty', BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty' }
+  for (const rows of [[production], [stray, production]]) {
+    const db = freshDb(rows)
+    assert.strictEqual(Number(ensureOrganization(db, leang)), 2, 'the configured row wins over every previous identity')
+    assert.deepStrictEqual(db.prepare('SELECT id, name, slug, public_id FROM organizations ORDER BY id').all(), rows)
+    db.close()
+  }
+})
+
 check('slug and public_id move with the name, so the login pin can match', () => {
   // Renaming only the NAME would leave slug 'business-os', so
   // BUSINESS_OS_ORGANIZATION_SLUG would still match nothing and
@@ -205,6 +228,13 @@ check('a blank config value falls back rather than writing an empty name', () =>
 const fs = require('fs')
 const path = require('path')
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'coreDataInvariants.ts'), 'utf8')
+
+check('the PREVIOUS_IDENTITIES mirror above equals the list in coreDataInvariants.ts', () => {
+  const block = /const PREVIOUS_IDENTITIES = \[([\s\S]*?)\]/.exec(src)
+  assert.ok(block, 'PREVIOUS_IDENTITIES not found in coreDataInvariants.ts')
+  const entries = [...block[1].matchAll(/\{ slug: '([^']+)', publicId: '([^']+)' \}/g)].map((m) => ({ slug: m[1], publicId: m[2] }))
+  assert.deepStrictEqual(entries, PREVIOUS_IDENTITIES)
+})
 
 check('coreDataInvariants no longer hardcodes the organization name', () => {
   assert.doesNotMatch(

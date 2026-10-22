@@ -5,9 +5,9 @@ its own Cloudflare account; every later client is on a separate one. A fix to on
 through the shared code; it runs per account.
 
 The shared chain (`cloudflare/migrations`, 215 files through 0269) was written for the first client.
-Replayed on an empty database it leaves that client's organization, 4,240 of its expense rows and its
-loyalty shutdown behind, and on a populated database of another client several files rewrite data on first
-apply. This page is the rule that stops that growing, and the way a new client avoids it.
+Replayed on an empty database it leaves that client's loyalty shutdown behind, and on a populated database
+of another client several files rewrite data on first apply. Until 22 Oct 2026 it also left that client's
+organization name (0030) and 4,240 of its expense rows (0064), and stopped at 0098 on D1 (see the last section). This page is the rule that stops that growing, and the way a new client avoids it.
 
 ## The three classes
 
@@ -15,12 +15,12 @@ Every file is classified in `cloudflare/migrations-manifest.json` with its sha25
 
 | Class | Meaning | Files 0001-0269 |
 |---|---|---|
-| `SCHEMA` | DDL only: tables, indexes, triggers, views, FTS, guard selects. No INSERT, UPDATE, DELETE, REPLACE. | 135 |
-| `GENERIC-DATA` | Writes rows by a rule that is correct on any database: derived-column backfills, table rebuilds that copy rows, schema-invariant reconciliations, defaults inserted only if absent. | 56 |
-| `CLIENT-SPECIFIC-DATA` | Carries one client's rows, ids or names, or rewrites a populated database by a decision only that client made. Legacy only. | 24 |
+| `SCHEMA` | DDL only: tables, indexes, triggers, views, FTS, guard selects. No INSERT, UPDATE, DELETE, REPLACE. | 137 |
+| `GENERIC-DATA` | Writes rows by a rule that is correct on any database: derived-column backfills, table rebuilds that copy rows, schema-invariant reconciliations, defaults inserted only if absent. | 57 |
+| `CLIENT-SPECIFIC-DATA` | Carries one client's rows, ids or names, or rewrites a populated database by a decision only that client made. Legacy only. | 21 |
 
 `SCHEMA` means no row is written, and the test checks it both ways: a file that writes rows cannot be
-`SCHEMA`, and a file that writes none cannot be `GENERIC-DATA`. The 24 client-specific files are
+`SCHEMA`, and a file that writes none cannot be `GENERIC-DATA`. The 21 client-specific files are
 pinned by number in the test; reclassifying one is an edit to that list.
 
 ## Shared migrations from 0270 on
@@ -30,7 +30,8 @@ They are `SCHEMA` or `GENERIC-DATA`. `CLIENT-SPECIFIC-DATA` is refused outright 
 To add a migration, add the file and its manifest entry in the same commit. The test prints the exact
 entry to paste (name, sha256, class, reason) when one is missing. Once merged, the bytes are frozen:
 the sha256 makes editing or deleting an applied migration a red test. Changing an applied file changes
-nothing in production and breaks the 0243 and 0258 pins in the deploy kit; add a new migration instead.
+nothing on a database that already applied it (and 0243 and 0258 are also pinned by the deploy kit); add a
+new migration instead. The one owner-approved exception is described in the last section.
 
 `cloudflare/scripts/test-migration-client-neutral-pure.cjs` runs the lint on every file numbered 270
 or later:
@@ -74,8 +75,10 @@ branch names, business name) come from the client's configuration, not from a mi
 
 ## Provisioning a new client
 
-The chain is not used for a new database. A new database gets the schema baseline and a ledger stamp,
-and then only the migrations numbered 0270 and later run on it.
+The chain is not used for a new client's database. The chain can build one from empty (that is the
+disaster-recovery path, `cloudflare/scripts/test-fresh-d1-chain-native.cjs`), but its 21 client-specific
+files would still leave the first client's loyalty shutdown behind. A new database gets the schema baseline and
+a ledger stamp, and then only the migrations numbered 0270 and later run on it.
 
 1. Create the empty D1 database in the client's own Cloudflare account.
 2. Rehearse once on a throwaway D1 database in that account (create, provision, verify, delete). The
@@ -117,8 +120,8 @@ database, and the stock triggers refuse every stock write without the first:
 | `stock_schema_receipt_boundary` | `0` | MAX(stock_mutation_receipts.id) on an empty database |
 | `multilot_revert_watermark` | `0` | MAX(inventory_movements.id) on an empty database |
 
-**Not seeded, and why.** The first client's organization (0030) and fees (0064) are its own; the runtime creates
-the configured organization, group and branch itself. `user_aliases` (0098, 0103) bind its staff names. The
+**Not seeded, and why.** The organization (0030) is not needed: the runtime creates the configured organization,
+group and branch itself. `user_aliases` (0103) bind the first client's staff names. The
 loyalty switch (0179, 0251) is its shutdown: with no `loyalty_points_enabled` setting the triggers and
 `loyaltyPointsEnabled()` already read "off", so a new client starts with loyalty off without any row. Whether that
 is the right default for a new client is the owner's call. The two shift defaults (0118) equal the code defaults
@@ -135,17 +138,25 @@ They are dead on any other client. The test pins this list so it cannot grow unn
 ## Why the first client's existing history needs no change
 
 The ledger tracks file names, not content. Its database already holds 0001 to 0269 in `d1_migrations`;
-nothing there is re-run, renamed or edited, and no file in `cloudflare/migrations` changes. The manifest and the
+nothing there is re-run or renamed.
+
+Three applied files were edited on 22 Oct 2026, owner-approved, so the chain builds a new D1 again and carries
+none of the first client's rows. 0098 lost its seed of that client's cashier nicknames, whose 7-term compound
+SELECT stopped every new D1 (D1 allows 5; the seed inserted nothing there anyway, as users is empty while
+migrations run). 0064 lost the 4,240 expense rows and keeps a no-op `SELECT 1`. 0030 seeds a neutral
+organization that the runtime renames (`leang-cosmetics` joined PREVIOUS_IDENTITIES for databases built
+before). The original files are kept byte for byte in that client's private data pack, outside this repository. The manifest and the
 baseline are additions. The baseline is the same schema its chain produced (the test replays the chain and
 compares the fingerprint), so a new client and the first client differ only in their rows. The first client keeps
-applying 0270 and later exactly as before. The 24 client-specific files stay in the chain because removing them
+applying 0270 and later exactly as before. The 21 remaining client-specific files stay in the chain because removing them
 would break the sha pins and every test that reads them.
 
 ## Keeping the baseline honest
 
 - `node ops/scripts/client/build-baseline.mjs --check` fails if the file on disk is not what the current chain
   produces. Rebuilding is the same command without `--check`. The baseline is frozen at 0269 and never needs a
-  rebuild unless a file numbered 0269 or lower changes, which the sha256 forbids.
+  rebuild unless a file numbered 0269 or lower changes, which the sha256 forbids. The 22 Oct 2026 edits
+  changed no schema: only the baseline's chain-digest line moved.
 - A later baseline (for example `schema-0300.sql`) is cut the same way: set `DEFAULT_THROUGH` in
   `cloudflare/scripts/harness/client_baseline.cjs` and `baselineThrough` in the manifest together, then rebuild.
 - The release gate runs four tests: `test-migration-client-neutral-pure.cjs` (manifest, lint, positive controls,
@@ -154,4 +165,7 @@ would break the sha pins and every test that reads them.
   `test-migration-fresh-chain-rows-pure.cjs` (the exact rows the chain leaves on an empty database, and that the
   baseline leaves none of them) and `test-client-baseline-wrangler-native.cjs` (the installed wrangler's own
   `migrations list` and `apply --local` accept the stamp and run only 0270).
-- The import database (`cloudflare/migrations-import`, one staging migration) is not covered here.
+- `test-fresh-d1-chain-native.cjs` replays both chains (including `cloudflare/migrations-import`) on workerd,
+  which enforces D1's 5-term compound SELECT limit, then boots the real Worker as a new client and as the first
+  client's rebuild. `--wrangler` runs the real `wrangler d1 migrations apply --local` instead (5 to 10 minutes).
+- The baseline does not cover the import database (`cloudflare/migrations-import`, one staging migration).

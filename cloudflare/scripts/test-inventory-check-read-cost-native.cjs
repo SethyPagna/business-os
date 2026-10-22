@@ -117,7 +117,6 @@ async function main() {
     const migrationDir = path.join(root, 'migrations'), statements = []
     for (const name of fs.readdirSync(migrationDir).filter(n => n.endsWith('.sql')).sort()) {
       for (const sql of split(fs.readFileSync(path.join(migrationDir, name), 'utf8')).filter(sql => sql.trim())) {
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         statements.push(sql)
       }
     }

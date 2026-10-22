@@ -69,9 +69,6 @@ async function main() {
     const migrations = fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()
     for (const name of migrations) {
       for (const sql of split(fs.readFileSync(path.join(migrationDir, name), 'utf8'))) {
-        // Existing native fixture exception: empty user_alias seed is a no-op,
-        // but its compound SELECT exceeds this workerd fixture's term limit.
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         try { await db.prepare(sql).run() } catch (error) { throw new Error(name + ': ' + error.message) }
       }
     }

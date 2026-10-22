@@ -62,8 +62,6 @@ async function main() {
     const migrationDir = path.join(root, 'migrations')
     for (const name of fs.readdirSync(migrationDir).filter((n) => n.endsWith('.sql')).sort()) {
       for (const sql of split(fs.readFileSync(path.join(migrationDir, name), 'utf8'))) {
-        // Same fixture exception as test-backup-schema-discovery-native.cjs.
-        if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         try { await db.prepare(sql).run() } catch (error) { throw new Error(name + ': ' + error.message) }
       }
     }

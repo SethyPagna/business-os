@@ -403,11 +403,6 @@ async function migrate(db) {
   const dir = path.join(root, 'migrations')
   for (const name of fs.readdirSync(dir).filter(file => file.endsWith('.sql')).sort()) {
     for (const statement of split(fs.readFileSync(path.join(dir, name), 'utf8'))) {
-      // Same single exception as test-customer-return-create-d1-native.cjs:
-      // Miniflare's D1 has a lower compound-SELECT term cap than the deployed
-      // migration runner, and 0098's alias seed is observably a no-op here
-      // because the fixture has no users while migrations run.
-      if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
       try { await db.prepare(statement).run() } catch (error) {
         error.message = `${name}: ${error.message}`
         throw error

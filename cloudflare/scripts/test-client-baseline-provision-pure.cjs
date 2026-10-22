@@ -214,8 +214,8 @@ check('baseline + stamp + 0270 ends with the same schema as the full chain + 027
     assert.deepEqual(census, { d1_migrations: 216, system_flags: 3 })
 
     // The chain route, for contrast, is not empty (see test-migration-fresh-chain-rows-pure.cjs).
-    assert.equal(viaChain.prepare('SELECT COUNT(*) n FROM fees').get().n, 4240)
     assert.equal(viaChain.prepare('SELECT COUNT(*) n FROM organizations').get().n, 1)
+    assert.equal(viaChain.prepare("SELECT value FROM settings WHERE key = 'loyalty_points_enabled'").get().value, 'false')
   } finally { viaBaseline.close(); viaChain.close() }
 })
 

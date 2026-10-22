@@ -154,7 +154,6 @@ async function d1Controls(){
     const dir=path.join(__dirname,'../migrations')
     for(const name of fs.readdirSync(dir).filter(n=>n.endsWith('.sql')&&Number(n.slice(0,4))<=242).sort()){
       for(const sql of split(fs.readFileSync(path.join(dir,name),'utf8'))){
-        if(name==='0098_user_aliases.sql'&&/^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim()))continue
         await raw.prepare(sql).run()
       }
     }

@@ -39,7 +39,6 @@ async function main() {
       CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
       INSERT INTO roles VALUES(1,'admin','{}');`
     if(fullSchema) {
-      // Historical 0098 data SQL exceeds native D1's compound SELECT limit.
       // This mode verifies the exact resulting schema, not fresh deployment of
       // every historical migration or historical seed/data parity.
       const SQLite = require('better-sqlite3'), migrated = new SQLite(':memory:')
