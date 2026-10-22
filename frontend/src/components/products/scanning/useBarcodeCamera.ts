@@ -100,12 +100,19 @@ function getScanErrorText(error: unknown): string {
 /** The one camera request of a scan. A remembered camera is asked for as a
  * preference, which cannot fail; but older WebKit has rejected an unknown
  * deviceId anyway, so a camera that has gone is forgotten and the default one
- * opened, without the person ever hearing about it. */
-async function openCamera(): Promise<MediaStream> {
+ * opened, without the person ever hearing about it. The second request is a
+ * request like any other: if the start it belongs to was closed or replaced
+ * while the first one was pending (`startToken` is no longer the current one),
+ * it is not made at all -- the camera would otherwise switch on, and on an
+ * iPhone ask again, after the sheet is gone. The first error is rethrown and
+ * the caller, seeing the stale token, says nothing. */
+async function openCamera(startToken: number, currentToken: () => number): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia(withRememberedCamera(CAMERA_CONSTRAINTS))
   } catch (error) {
     if (!readCameraChoice() || !/OverconstrainedError|ConstraintNotSatisfiedError/i.test(getScanErrorText(error))) throw error
+    // A superseded start also leaves the saved choice alone: a newer start may already have chosen another camera.
+    if (currentToken() !== startToken) throw error
     clearCameraChoice()
     return navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
   }
@@ -403,7 +410,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // the 446 KB ZXing chunk -- the prompt arrived a download later than the
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
-      const stream = await openCamera()
+      const stream = await openCamera(startToken, () => startTokenRef.current)
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
         return
@@ -551,13 +558,19 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   // user gesture, and a muted video with no audio track plays without one. If
   // the browser refuses anyway, startCamera lands on the Try camera again
   // button. Only a camera that was running comes back, so a failure, a block or
-  // the idle pause stays exactly as it was.
+  // the idle pause stays exactly as it was. "Running" means a stream was actually
+  // held: a start whose request is still pending (the browser's prompt is up, or
+  // a system dialog hid the page) has nothing to resume, and asking again from
+  // every return would stack a new prompt on the one still waiting. That request
+  // is let go of here (parkCamera drops the start's token), so if it is answered
+  // later the stream it brings is stopped on arrival and the sheet shows the
+  // paused panel, one tap from a camera that is by then allowed.
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
-        resumeOnReturnRef.current = running && !detectionHandledRef.current
+        resumeOnReturnRef.current = running && streamRef.current !== null && !detectionHandledRef.current
         if (running) parkCamera()
       } else if (resumeOnReturnRef.current) {
         resumeOnReturnRef.current = false

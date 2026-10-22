@@ -14,6 +14,9 @@
 //      reject it; that path is in the scenarios test.)
 //   5. A browser that blocks the prompt (--deny-permission-prompts) is reported as a block at once,
 //      after one request, and never retried by itself.
+//   6. (6.0.961, release review c2f27dce6, P3-2) The page hidden and shown again while the FIRST request is
+//      still waiting for an answer asks nothing more -- the request count stays at one over any number of
+//      cycles -- and the stream that arrives late is ended, not left on.
 //
 // Run: node tests/scannerPermissionFlowBrowser.test.ts
 import assert from 'node:assert/strict'
@@ -62,6 +65,8 @@ window.__streams = []
 const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
 navigator.mediaDevices.getUserMedia = async (constraints) => {
   window.__requests += 1
+  // A scenario can hold the first answer back (the browser's prompt still up) until the test opens the gate.
+  if (window.__gate) await window.__gate
   const stream = await getUserMedia(constraints)
   window.__streams.push(stream)
   return stream
@@ -104,6 +109,8 @@ interface Scenario {
   prompt: 'accept' | 'block'
   /** localStorage before the page loads. */
   storage?: Record<string, string>
+  /** The first getUserMedia call waits until the test calls window.__openGate(): a prompt that is still up. */
+  holdFirstRequest?: boolean
 }
 
 async function run(scenario: Scenario, during: (browserPage: Page) => Promise<void>): Promise<void> {
@@ -121,6 +128,12 @@ async function run(scenario: Scenario, during: (browserPage: Page) => Promise<vo
     const browserPage = await context.newPage()
     browserPage.on('pageerror', (error) => { throw error })
     await browserPage.addInitScript(instrumentation)
+    if (scenario.holdFirstRequest) {
+      await browserPage.addInitScript(() => {
+        const w = window as any
+        w.__gate = new Promise<void>((resolve) => { w.__openGate = () => { w.__gate = null; resolve() } })
+      })
+    }
     if (scenario.storage) await browserPage.addInitScript((entries) => { for (const [key, value] of Object.entries(entries)) localStorage.setItem(key, value) }, scenario.storage)
     // A loaded machine can take minutes to optimise dependencies on first load.
     await browserPage.goto(`${origin}/scanner-permission-flow`, { timeout: 240_000 })
@@ -186,6 +199,22 @@ try {
     await waitForStatus(browserPage, 'scanning')
     assert.equal(await requests(browserPage), 1, 'a preference that cannot be met is not an error')
     assert.equal(await bodyText(browserPage), '')
+  })
+
+  await runTest('hiding and showing the page while the first request is still pending asks only once, and the stream that arrives late is ended', { prompt: 'accept', holdFirstRequest: true }, async (browserPage) => {
+    await browserPage.waitForFunction(() => (window as any).__requests === 1, null, { timeout: 30_000 })
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await browserPage.evaluate(() => (window as any).__setVisibility('hidden'))
+      await browserPage.evaluate(() => (window as any).__setVisibility('visible'))
+      await browserPage.waitForTimeout(300)
+    }
+    assert.equal(await requests(browserPage), 1, 'three cycles while the browser is still asking: no further request')
+    await browserPage.evaluate(() => (window as any).__openGate())
+    await browserPage.waitForFunction(() => (window as any).__streams.length === 1, null, { timeout: 30_000 })
+    await browserPage.waitForTimeout(500)
+    assert.deepEqual(await trackStates(browserPage), [['ended']], 'the stream that arrived after the page was hidden is ended, not left on')
+    assert.equal(await requests(browserPage), 1, 'and its arrival started nothing')
+    assert.notEqual(await browserPage.evaluate(() => (window as any).__scan.status as string), 'scanning', 'the camera is not reported as running')
   })
 
   await runTest('a browser that blocks the prompt is a block at once: one request, then the block line, and no retry by itself', { prompt: 'block' }, async (browserPage) => {

@@ -11,6 +11,8 @@
 //     start, a paused camera are neutral.
 //   * The camera is released the moment the sheet closes, a code is read, or the page is hidden
 //     (a camera left on shows the system's recording dot), and comes back by itself when the page does.
+//   * Never a request after the sheet is gone: not the fallback to the default camera, and not a restart from a page return
+//     while the first request is still waiting for an answer (6.0.961, release review c2f27dce6, P3-1 and P3-2).
 //
 // One test per scenario row of the lane report (Records/Consolidation/2026-10-21/LANE-953.md).
 //
@@ -158,6 +160,21 @@ function assertPanel(sheet: Sheet, expected: { line: string; action: string; red
   assert.equal(redThings(sheet.container).length, expected.red ? 1 : 0, `${label}: ${expected.red ? 'the icon is red' : 'nothing is red'}`)
   if (expected.red) assert.match(classOf(panelIcon(sheet.container)), /text-red-400/, `${label}: and the red is the panel icon`)
   assert.deepEqual(warmThings(sheet.container).map(classOf), [], `${label}: no warning colour`)
+}
+
+/** getUserMedia whose answers the test gives, one request at a time, so a close, a hide or a newer start can land while a request is still pending. */
+function holdRequests() {
+  const media = navigatorOf().mediaDevices as { getUserMedia: (constraints: unknown) => Promise<unknown> }
+  const answerNow = media.getUserMedia
+  const requests: Array<{ constraints: unknown; grant: () => void; fail: (name: string) => void }> = []
+  media.getUserMedia = (constraints: unknown) => new Promise((resolve, reject) => {
+    requests.push({
+      constraints,
+      grant: () => resolve(answerNow(constraints)),
+      fail: (name) => { const error = new Error(name); error.name = name; reject(error) },
+    })
+  })
+  return requests
 }
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -333,6 +350,51 @@ try {
     }
   })
 
+  // The fallback to the default camera is a second getUserMedia call, so it is held to the same rule as the first: nothing is requested for a start
+  // that is over. Red before 6.0.961: the sheet closed while the remembered camera's request was pending, the request failed, and the camera came on anyway.
+  await runTest('a remembered camera that fails AFTER the sheet closed: the default camera is not requested late, and the saved choice is left alone', async () => {
+    stage.liveVideoFrames = true
+    const storage = memoryStorage({ 'business-os-scanner-camera-v1': 'cam-unplugged' })
+    windowOf().localStorage = storage
+    try {
+      const probe = installCamera('granted', {})
+      const requests = holdRequests()
+      const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: (key: string) => key })
+      assert.equal(requests.length, 1, 'the open made its one request, and it is still pending')
+      await mounted.unmount()
+      await act(async () => { requests[0].fail('OverconstrainedError'); await settle(40) })
+      assert.equal(requests.length, 1, 'no request after the sheet closed')
+      assert.equal(probe.tracks.length, 0, 'and no camera ever came on')
+      assert.equal(storage.data.get('business-os-scanner-camera-v1'), 'cam-unplugged', 'a start that is over does not rewrite the saved choice either')
+    } finally {
+      delete windowOf().localStorage
+    }
+  })
+
+  await runTest('a remembered camera that fails after a NEWER start began: only the newer start asks, once', async () => {
+    stage.liveVideoFrames = true
+    const storage = memoryStorage({ 'business-os-scanner-camera-v1': 'cam-unplugged' })
+    windowOf().localStorage = storage
+    const probe = installCamera('granted', {})
+    const requests = holdRequests()
+    const state = { camera: null as ReturnType<typeof useBarcodeCamera> | null }
+    const mounted = await mountComponent(PROBE, { open: true, onDetected() {}, onClose() {}, onCamera: (camera: ReturnType<typeof useBarcodeCamera>) => { state.camera = camera } })
+    try {
+      assert.equal(requests.length, 1)
+      await act(async () => { void state.camera!.startCamera(); await settle(30) })
+      assert.equal(requests.length, 2, 'the newer start made its own request')
+      await act(async () => { requests[0].fail('OverconstrainedError'); await settle(40) })
+      assert.equal(requests.length, 2, 'the replaced start did not fall back to a third request')
+      assert.equal(storage.data.get('business-os-scanner-camera-v1'), 'cam-unplugged', 'and did not clear a choice the newer start may be using')
+      await act(async () => { requests[1].grant(); await settle(60) })
+      await waitFor(() => /^scanning\|/.test(mounted.container.textContent))
+      assert.deepEqual(probe.tracks.map((track) => track.readyState), ['live'], 'the newer start is the one camera that is on')
+    } finally {
+      await mounted.unmount()
+      delete windowOf().localStorage
+    }
+  })
+
   // ---- the paused camera: neutral, and only after it ran ---------------------------------
 
   await runTest('the idle pause is the neutral "Camera paused" line with Start camera (the permissions API saying "prompt" changes nothing)', async () => {
@@ -499,6 +561,72 @@ try {
     await mounted.unmount()
     await act(async () => { answer(); await new Promise((resolve) => setTimeout(resolve, 40)) })
     assert.deepEqual(trackStates(probe), [[1, 'ended']], 'the camera that arrives after the sheet is gone is stopped on arrival')
+  })
+
+  // Only a camera that was ACTUALLY running comes back by itself. Red before 6.0.961: the page hidden while the first request was still pending
+  // counted as "running", so every return asked again (one request became four over three cycles), stacking a prompt on the one still waiting.
+  const pausedPanel = `${en.camera_paused_resume}${en.start_camera}`
+  await runTest('the page hidden and shown while the first request is still pending: one request in all, and the stream that arrives late is stopped', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('prompt', {})
+    const requests = holdRequests()
+    const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
+    try {
+      assert.equal(requests.length, 1, 'the open made its one request; the browser is still asking')
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        await hide()
+        await show()
+        assert.equal(requests.length, 1, `cycle ${cycle + 1}: coming back asks nothing more`)
+      }
+      await act(async () => { requests[0].grant(); await settle(40) })
+      assert.deepEqual(trackStates(probe), [[1, 'ended']], 'the stream that arrives after the page was hidden is stopped on arrival')
+      assert.equal(requests.length, 1, 'and its arrival starts nothing')
+      assert.equal(mounted.container.textContent.trim(), pausedPanel, 'the sheet shows the neutral paused panel, one tap from a camera that is allowed by now')
+      assert.deepEqual(redThings(mounted.container), [])
+      // That tap is a new request, answered at once, and then the camera is simply running.
+      const button = findAll(mounted.container, (node) => node.tagName === 'BUTTON' && node.textContent.trim() === en.start_camera)[0]
+      await act(async () => { propsOf(button).onClick() })
+      await settle(30)
+      assert.equal(requests.length, 2, 'the tap asked')
+      await act(async () => { requests[1].grant(); await settle(60) })
+      assert.deepEqual(trackStates(probe), [[1, 'ended'], [0, 'live']])
+      assert.equal(mounted.container.textContent.trim(), '', 'running, quiet')
+    } finally {
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('a request answered while the page is hidden brings a stream that is stopped at once, and coming back does not ask again', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted', {})
+    const requests = holdRequests()
+    const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
+    try {
+      await hide()
+      await act(async () => { requests[0].grant(); await settle(40) })
+      assert.deepEqual(trackStates(probe), [[1, 'ended']], 'the camera that arrives while the page is hidden is not left on')
+      await show()
+      assert.equal(requests.length, 1, 'returning does not ask again for a request that never produced a camera')
+      assert.equal(mounted.container.textContent.trim(), pausedPanel)
+      assert.deepEqual(trackStates(probe), [[1, 'ended']], 'stopped exactly once')
+    } finally {
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('a camera that was running still comes back by itself, however often the page goes away (the pending-request rule does not touch it)', async () => {
+    const running = await openProbe('granted')
+    try {
+      for (let cycle = 0; cycle < 2; cycle += 1) {
+        await hide()
+        await show()
+        await waitFor(() => /^scanning\|/.test(running.mounted.container.textContent))
+      }
+      assert.equal(running.probe.getUserMediaCalls, 3, 'one request to open, one per return')
+      assert.deepEqual(trackStates(running.probe), [[1, 'ended'], [1, 'ended'], [0, 'live']])
+    } finally {
+      await running.mounted.unmount()
+    }
   })
 
   // ---- offline and the strings ------------------------------------------------------------------

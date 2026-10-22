@@ -141,18 +141,22 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   // (starting it is not awaited), and only after the camera is open does the
   // fallback wait for the worker to be ready.
   const startBlock = hook.slice(hook.indexOf('const startCamera'), hook.indexOf('const switchCamera'))
-  const acquisitions = startBlock.match(/await openCamera\(\)/g) || []
+  const acquisitions = startBlock.match(/await openCamera\(/g) || []
   assert.equal(acquisitions.length, 1, 'both decoders must share ONE camera request')
   const requestBlock = hook.slice(hook.indexOf('async function openCamera'), hook.indexOf('function stopStream'))
   assert.equal((requestBlock.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'the request, and its one fallback for a remembered camera that is gone')
+  // 6.0.961 (release review c2f27dce6, P3-1): the fallback is a request like any other, so it is made only for a start that is still current
+  // (the behaviour is in scannerCameraScenarios.test.ts); the token the start was given is what openCamera is handed.
+  assert.match(startBlock, /await openCamera\(startToken, \(\) => startTokenRef\.current\)/, 'openCamera is handed the start token and a way to read the current one')
+  assert.match(requestBlock, /if \(currentToken\(\) !== startToken\) throw error\s+clearCameraChoice\(\)\s+return navigator\.mediaDevices\.getUserMedia\(CAMERA_CONSTRAINTS\)/, 'the fallback request is skipped, and the saved choice left alone, once the start is over')
   assert.equal((hook.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'and no other part of the scanner opens a camera')
-  const acquireAt = startBlock.indexOf('await openCamera()')
+  const acquireAt = startBlock.indexOf('await openCamera(')
   const chooseDecoderAt = startBlock.indexOf('const NativeBarcodeDetector = getNativeBarcodeDetector()')
   const startWorkerAt = startBlock.indexOf('clientRef.current = openDecodeClient()')
   const waitForWorkerAt = startBlock.indexOf('await client.ready')
   assert.ok(acquireAt > 0 && chooseDecoderAt > acquireAt, 'the camera must be acquired BEFORE the native/fallback decision, not inside one branch')
   assert.ok(startWorkerAt > 0 && startWorkerAt < acquireAt, 'the decoder worker boots in parallel with the camera request')
-  assert.doesNotMatch(startBlock.slice(startWorkerAt, startBlock.indexOf('const stream = await openCamera()')).replace(/\/\/.*$/gm, ''), /await/, 'starting the worker is never awaited ahead of the camera')
+  assert.doesNotMatch(startBlock.slice(startWorkerAt, startBlock.indexOf('const stream = await openCamera(')).replace(/\/\/.*$/gm, ''), /await/, 'starting the worker is never awaited ahead of the camera')
   assert.ok(waitForWorkerAt > acquireAt, 'the fallback waits for the worker only after the camera is already open')
   assert.doesNotMatch(source + hook, /decodeFromConstraints\(/, 'decodeFromConstraints hides getUserMedia behind the decoder import; it must not be called again')
   assert.match(hook, /const CAMERA_CONSTRAINTS: MediaStreamConstraints/, 'the shared constraints belong in one hoisted object')
@@ -169,7 +173,9 @@ await runTest('opening the scanner starts the camera itself, and the button surv
 
   // 2. coming back to the page restarts a camera that was running (no tap, no ask) and nothing else
   assert.doesNotMatch(hook, /prepareScanner/, 'the resume path that parked on a Start camera button is gone')
-  assert.match(visibilityBlock, /const running = statusRef\.current === 'starting' \|\| statusRef\.current === 'scanning'[\s\S]*?resumeOnReturnRef\.current = running && !detectionHandledRef\.current/, 'only a camera that was running (and not already read) is remembered')
+  // 6.0.961 (release review c2f27dce6, P3-2): "running" means a stream was actually held -- a start whose request is still pending has nothing to resume,
+  // and asking again from every return would stack a new request on the one still waiting (the behaviour is in scannerCameraScenarios.test.ts).
+  assert.match(visibilityBlock, /const running = statusRef\.current === 'starting' \|\| statusRef\.current === 'scanning'[\s\S]*?resumeOnReturnRef\.current = running && streamRef\.current !== null && !detectionHandledRef\.current/, 'only a camera that was running (a stream held, and not already read) is remembered')
   assert.match(visibilityBlock, /else if \(resumeOnReturnRef\.current\) \{\s*resumeOnReturnRef\.current = false\s*void startCameraRef\.current\(\)/, 'coming back restarts it through the guarded start, once')
   assert.match(openEffect, /resumeOnReturnRef\.current = false/, 'a newly opened scanner starts with nothing to resume')
   assert.doesNotMatch(permissionBlock, /startCamera\(/, 'permission changes must not auto-start the camera')
