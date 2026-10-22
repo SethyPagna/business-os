@@ -18,11 +18,13 @@ assert.match(
   /client_request_id = \? AND client_request_id <> '' LIMIT 1/,
   'sale idempotency lookup must include the predicate of its partial unique index',
 )
+// The supplier return's occupied-id lookup now lives with its actor-scoped receipt (release review a77883c78, should-fix 2).
 assert.equal(
-  (returnsRoute.match(/client_request_id = \? AND client_request_id <> '' LIMIT 1/g) || []).length,
+  (read('cloudflare', 'src', 'lib', 'supplierReturnReceipt.ts').match(/LEFT JOIN returns o ON o\.client_request_id=\? AND o\.client_request_id<>'' LIMIT 1/g) || []).length,
   1,
   'the occupied legacy return-request lookup must include the partial-index predicate',
 )
+assert.doesNotMatch(returnsRoute, /FROM returns WHERE client_request_id ?= ?\?/, 'no bare request-id lookup is left in the returns route')
 assert.match(
   returnsRoute,
   /LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/,
@@ -84,6 +86,9 @@ db.exec(`
     id TEXT PRIMARY KEY,
     actor_id INTEGER NOT NULL,
     request_id TEXT NOT NULL,
+    return_id INTEGER,
+    request_digest TEXT,
+    response_json TEXT,
     UNIQUE(actor_id, request_id)
   );
 
@@ -111,6 +116,13 @@ assert.match(
 )
 assert.match(
   plan("SELECT r.id,o.id FROM (SELECT 1) seed LEFT JOIN return_create_receipts r ON r.actor_id=? AND r.request_id=? LEFT JOIN returns o ON o.client_request_id=? AND o.client_request_id<>'' LIMIT 1", [7, 'return:1', 'return:1']),
+  /sqlite_autoindex_return_create_receipts[\s\S]*idx_returns_client_request_unique_pg/,
+)
+// The supplier return's replay lookup is the same two seeks; the SQL under test is the shipped text.
+const supplierLookup = /db\.prepare\(`(SELECT r\.return_id[\s\S]*?LIMIT 1)`\)/.exec(read('cloudflare', 'src', 'lib', 'supplierReturnReceipt.ts'))
+assert.ok(supplierLookup, 'the supplier receipt lookup is found in its module')
+assert.match(
+  plan(supplierLookup[1].replace(/\s+/g, ' '), [7, 'supplier:1', 'supplier:1']),
   /sqlite_autoindex_return_create_receipts[\s\S]*idx_returns_client_request_unique_pg/,
 )
 assert.match(

@@ -455,8 +455,8 @@ const FOLLOWED_CONTROLS = {
   'products:import_stock': {
     file: 'lib/importEngine.ts',
     proof: [
-      /const allowProductStockWrites = job\.type !== 'products' \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/,
-      /if \(job\.type === 'products' && !authority\.allowProductStockWrites\) \{[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
+      /const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/, /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/,
+      /if \(!authority\.allowProductStockWrites\) \{[\s\S]{0,200}?importResultsChangeStock\(db, job\.type, results, job\.policy_json\)[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
     ],
   },
 }
@@ -484,7 +484,7 @@ const REQUIREMENT_PROOFS = {
   },
   'inventory:adjust': [
     { file: 'lib/createFold.ts', proof: [/function foldStockInPermissionRefusal\(user\) \{\s*if \(user && getActionTier\(user, 'inventory', 'adjust'\) === 'full'\)\s*return null/] },
-    { file: 'lib/importEngine.ts', proof: [/const allowProductStockWrites = job\.type !== 'products' \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/] },
+    { file: 'lib/importEngine.ts', proof: [/const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/, /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/] },
   ],
   product_cost_edit: { file: 'routes/importJobs.ts', proof: [/const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/, /code: isRead \? 'product_cost_view_required' : 'product_cost_edit_required'/] },
   product_cost_view: { file: 'routes/importJobs.ts', proof: [/const isRead = c\.req\.method === 'GET' \|\| c\.req\.method === 'HEAD'/, /const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/] },

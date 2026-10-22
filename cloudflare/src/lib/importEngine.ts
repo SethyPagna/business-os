@@ -101,7 +101,7 @@ import { resolveProductImagePathIdentities } from './productImagePermission'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
-import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
+import { parseStockAction, saleGroupKeyFor, stockActionPlanChangesStock } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES, planHistoricalSaleReceiptNumbers } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import { branchCanSell, branchRole } from './branchRoles'
@@ -472,6 +472,15 @@ export const PRODUCT_IMPORT_STOCK_REFUSAL = {
 } as const
 
 /**
+ * Import types whose rows can move stock: products (a starting quantity, a receipt, a snapshot), inventory
+ * (Add / Remove / Set) and stock actions (Add / sale / create). A file of one of these that does move stock is an
+ * inventory:adjust write whoever imports it (security audit P2-c; release review a77883c78, should-fix 6).
+ */
+export function isStockAdjustImportType(type: string): boolean {
+  return type === 'products' || type === 'inventory' || type === 'stock_actions'
+}
+
+/**
  * True when the file would add or change stock (security audit P2-c): a new product with a starting quantity, an
  * additive receipt (merge_stock / override_add) on a matched product, or an absolute branch snapshot (no planned
  * mode) whose quantity differs from the stored branch quantity. Field-only modes (fill_blank, a column replace,
@@ -535,10 +544,29 @@ export async function productImportChangesSupplier(env: Env, job: ImportApplyJob
   return productImportResultsChangeSupplier(getDb(env), await analyzedProductImportRows(env, job, ['update']), job.policy_json)
 }
 
-/** Approval-time form: would this job's analyzed plan add or change stock? */
+/**
+ * True when these classified rows of a stock-moving import would add or change stock, by type: a products file by
+ * productImportResultsChangeStock; an inventory file by any row left to apply (a Set to the on-hand count and a zero
+ * Add / Remove are already skipped, so every create / update row is a movement); a stock-actions file by any row
+ * whose plan adds or deducts at a branch.
+ */
+export async function importResultsChangeStock(
+  db: D1Compat,
+  type: string,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<boolean> {
+  if (type === 'products') return productImportResultsChangeStock(db, results, policyJson)
+  const applies = (result: ImportRowResult) => result.action === 'create' || result.action === 'update'
+  if (type === 'inventory') return results.some((result) => applies(result) && Number((result.data as Record<string, unknown> | undefined)?.quantity) > 0)
+  if (type === 'stock_actions') return results.some((result) => applies(result) && stockActionPlanChangesStock((result.data as unknown as UnifiedStockResolvedRow | undefined)?.plan))
+  return false
+}
+
+/** Approval-time form: would this job's analyzed plan add or change stock (a products, inventory or stock-actions import)? */
 export async function productImportChangesStock(env: Env, job: ImportApplyJob): Promise<boolean> {
-  if (job.type !== 'products') return false
-  return productImportResultsChangeStock(getDb(env), await analyzedProductImportRows(env, job, ['update', 'create']), job.policy_json)
+  if (!isStockAdjustImportType(job.type)) return false
+  return importResultsChangeStock(getDb(env), job.type, await analyzedProductImportRows(env, job, ['update', 'create']), job.policy_json)
 }
 
 /** Approval-time form: would this job's analyzed plan change a price or discount (or create a discounted product)? */
@@ -584,7 +612,8 @@ export async function assertCurrentImportApplyAuthority(
   const allowProductSupplierWrites = job.type !== 'products' || getActionTier(actor, 'products', 'supplier') !== 'none'
   const allowProductPriceWrites = job.type !== 'products' || getActionTier(actor, 'products', 'price') !== 'none'
   // Stock is an inventory adjust, which only a full grant holds (like a fold's starting quantity and a stock session).
-  const allowProductStockWrites = job.type !== 'products' || getActionTier(actor, 'inventory', 'adjust') === 'full'
+  // The same grant gates an inventory or stock-actions file: inventory:import alone never allowed it to move stock.
+  const allowProductStockWrites = !isStockAdjustImportType(job.type) || getActionTier(actor, 'inventory', 'adjust') === 'full'
   return { actor, allowProductImageWrites, allowProductSupplierWrites, allowProductPriceWrites, allowProductStockWrites }
 }
 
@@ -6191,6 +6220,8 @@ export async function applyStockActionsJob(
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
   actor: SessionUser,
+  // The authorizing user no longer holds inventory:adjust (Full): any plan that moves stock is refused, not applied.
+  stockWritesDenied: boolean,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
   db = stockQueryBudgetDb(db, getPlanLimits(env).d1QueriesPerInvocation)
@@ -6227,12 +6258,12 @@ export async function applyStockActionsJob(
         { code: 'stock_import_over_tier_cap' },
       )
     }
-    return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
+    return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor, stockWritesDenied)
   }
   if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
     throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
   }
-  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
+  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor, stockWritesDenied)
 }
 
 // DIRECT-mode continuation engine (M4). Two windowed phases, resumed across
@@ -6264,6 +6295,7 @@ async function applyStockActionsContinuation(
   startedAtMs: number,
   totalRows: number,
   actor: SessionUser,
+  stockWritesDenied: boolean,
 ): Promise<{ applied: number; failed: number }> {
   // Per-invocation dispatch budget, tier-aware -- see lib/planTier.ts. The
   // module-level STOCK_ACTION_* exports keep their Paid values.
@@ -6418,6 +6450,10 @@ async function applyStockActionsContinuation(
       const resolved = r?.data as unknown as UnifiedStockResolvedRow | undefined
       const plan = resolved?.plan
       if (!r || r.action === 'error' || r.action === 'skip' || !plan) { after = record.row_number; continue }
+      // Checked on the plans this invocation actually dispatches, before any of this unit's writes (zero reads).
+      if (stockWritesDenied && stockActionPlanChangesStock(plan)) {
+        throw new ImportApplyAuthorizationError('inventory:adjust', 'The user who authorized this import does not have permission to adjust stock.')
+      }
       let unitRows = [r]
       const beforePhysical = budget.physicalBatches
       try {
@@ -6746,7 +6782,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // would mutate sales tables with the wrong row shape. Returns here with
     // its own {applied, failed}; the lease is released in the shared finally.
     if (job.type === 'stock_actions') {
-      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor)
+      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor, !authority.allowProductStockWrites)
     }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
@@ -6892,8 +6928,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
       await lockProductImportPrice(db, results, job.policy_json)
     }
-    if (job.type === 'products' && !authority.allowProductStockWrites) {
-      if (await productImportResultsChangeStock(db, results, job.policy_json)) {
+    // Products and inventory files; a stock-actions file is gated where its plans are dispatched.
+    if (!authority.allowProductStockWrites) {
+      if (await importResultsChangeStock(db, job.type, results, job.policy_json)) {
         throw new ImportApplyAuthorizationError('inventory:adjust', 'The user who authorized this import does not have permission to adjust stock.')
       }
     }

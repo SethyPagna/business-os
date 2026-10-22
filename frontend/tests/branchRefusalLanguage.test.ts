@@ -56,25 +56,67 @@ const STOCK_ALIASES = { stock_schema_unavailable: 'stock_receipt_unavailable', s
 CODES.push('repair_integrity_restore_permission_required')
 CODES.push('loyalty_points_disabled')
 // Return money and product supplier refusals (6.0.930): each pack's English is the Worker's own sentence, word for word.
-const WORKER_SENTENCE_CODES: Record<string, [string, string]> = {
+// [Worker file, code, status the Worker answers with (409 when not named)].
+const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, number]> = {
   customer_return_owed_unreadable: ['lib/returnRefundSplit.ts', 'customer_return_owed_unreadable'],
   return_refund_khr_unavailable: ['routes/returns.ts', 'return_refund_khr_unavailable'],
   return_reopens_paid_sale_debt: ['lib/returnRefundSplit.ts', 'return_reopens_paid_sale_debt'],
   product_supplier_edit_required: ['lib/productSupplierGate.ts', 'product_supplier_edit_required'],
+  // 6.0.926: a replacement line priced under the floor (403), and the two fixed texts that replaced the database's own message on a failed save (500).
+  return_replacement_price_forbidden: ['lib/returnReplacementPrice.ts', 'return_replacement_price_forbidden', 403],
+  supplier_return_failed: ['routes/returns.ts', 'supplier_return_failed', 500],
+  return_edit_failed: ['routes/returns.ts', 'return_edit_failed', 500],
 }
-CODES.push(...Object.keys(WORKER_SENTENCE_CODES))
+// idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
+// transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).
+const SHARED_CODES = ['idempotency_conflict']
+CODES.push(...Object.keys(WORKER_SENTENCE_CODES), ...SHARED_CODES)
 
 await runTest('return money and supplier refusals carry the Worker sentence as English and a real Khmer pair', async () => {
-  for (const [code, [file]] of Object.entries(WORKER_SENTENCE_CODES)) {
+  for (const [code, [file, , status = 409]] of Object.entries(WORKER_SENTENCE_CODES)) {
     const source = read(WORKER, ...file.split('/'))
     assert.ok(source.includes(code), code + ' is still a Worker code in ' + file)
     assert.ok(source.includes(EN[code]), code + ': the English pack text is the Worker sentence in ' + file)
     uiLanguage = 'km'; packServed = KM
-    const error = refusal(code, EN[code], 409)
+    const error = refusal(code, EN[code], status)
     await lang.restateBranchRefusal(error)
-    assert.equal(error.message, KM[code]); assert.equal(error.code, code)
+    assert.equal(error.message, KM[code]); assert.equal(error.code, code); assert.equal((error as { status?: number }).status, status, code + ' keeps its status')
   }
   uiLanguage = 'en'
+})
+
+await runTest('the failed-save and price-floor texts are the Worker fixed sentences, with the response status and code beside them', () => {
+  const returns = read(WORKER, 'routes', 'returns.ts')
+  assert.ok(returns.includes(`unexpectedFailureBody('returns', error, '${EN.supplier_return_failed}', 'supplier_return_failed'), 500)`), 'POST /returns/supplier answers a failed save with the fixed text, 500, detail to the log')
+  assert.ok(returns.includes(`unexpectedFailureBody('returns', error, '${EN.return_edit_failed}', 'return_edit_failed'), 500)`), 'PATCH /returns/:id answers a failed save with the fixed text, 500, detail to the log')
+  const price = read(WORKER, 'lib', 'returnReplacementPrice.ts')
+  assert.ok(price.includes(`error: '${EN.return_replacement_price_forbidden}',`) && price.includes("code: 'return_replacement_price_forbidden',"))
+  assert.ok(returns.includes('RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId }, 403)'), 'refused with 403 before anything is written')
+  // The two failed-save texts replaced an interpolated (error as Error).message: no database text is put into either response any more.
+  assert.ok(!returns.includes('Failed to record supplier return items'), 'the raw supplier failure text is gone')
+  assert.ok(!returns.includes('Failed to update return:'), 'the raw return-edit failure text is gone')
+})
+
+await runTest('idempotency_conflict is restated for every request-id refusal with one sentence that names no internal field', async () => {
+  const sources = [['lib', 'supplierReturnReceipt.ts'], ['routes', 'returns.ts'], ['routes', 'sales.ts'], ['routes', 'fees.ts']].map(parts => read(WORKER, ...parts))
+  for (const source of sources) assert.ok(source.includes("code: 'idempotency_conflict'"), 'the Worker still sends the code')
+  // The Worker sentences differ (and name client_request_id); the pack's single sentence must not claim to be any of them.
+  assert.ok(!/client_request_id|request identity/i.test(EN.idempotency_conflict + KM.idempotency_conflict), 'no internal field name reaches the operator')
+  assert.ok(sources.every(source => !source.includes(EN.idempotency_conflict)), 'it is a class sentence, not one Worker sentence')
+  assert.match(EN.idempotency_conflict, /nothing was changed/i); assert.match(KM.idempotency_conflict, /គ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរ/)
+  uiLanguage = 'km'; packServed = KM
+  for (const worker of ['client_request_id was already used for different return data.', 'client_request_id is already owned by another return.', 'Request identity was used for different sale data.']) {
+    const error = refusal('idempotency_conflict', worker, 409)
+    assert.equal((await lang.restateBranchRefusal(error)).message, KM.idempotency_conflict, worker)
+    assert.equal(error.code, 'idempotency_conflict'); assert.equal((error as { status?: number }).status, 409)
+  }
+  uiLanguage = 'en'
+  const english = 'client_request_id was already used for different return data.'
+  assert.equal((await lang.restateBranchRefusal(refusal('idempotency_conflict', english, 409))).message, english, 'an English screen keeps the Worker sentence')
+  assert.equal(branchRuleErrorKey({ code: 'idempotency_conflict' }), 'idempotency_conflict')
+  // A surface that decides on the code (stock lines: "remove and add again") keeps its own, more specific text.
+  const outcome = read(FRONTEND, 'src', 'utils', 'stockAdjustOutcome.ts')
+  assert.ok(/idempotency_conflict: \{\s*key: 'stock_request_id_conflict'/.test(outcome), 'stock lines still say what to do')
 })
 
 await runTest('loyalty refusal is localized without promising retroactive points or changing its status', async () => {

@@ -93,6 +93,11 @@ export interface StockActionPlan {
   conflicts: string[]
 }
 
+/** True when applying the plan adds or deducts stock at some branch (a noop, or only zero quantities, does not). */
+export function stockActionPlanChangesStock(plan: StockActionPlan | null | undefined): boolean {
+  return !!plan && plan.kind !== 'noop' && plan.branchActions.some((action) => action.direction !== 'none' && action.quantity > 0)
+}
+
 const SALE_ACTION_RE = /^sale\s*(\d+)?$/i
 const ADD_ACTION_RE = /^(add|receive|stock|purchase|in)$/i
 const CREATE_ACTION_RE = /^(create|new)$/i
