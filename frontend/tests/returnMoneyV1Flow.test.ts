@@ -36,7 +36,9 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     captureActorReadScope: () => ({ authority }), isActorReadScopeCurrent: (scope: { authority: number }) => scope.authority === authority,
     setSubmitting: (value: boolean) => events.push('busy:' + value), loadReturnsTransport: async () => transport,
     pendingV1: null, pendingLoaded: true, reviewedPendingBody: options.restored ? pending.bodyJson : null, setReviewedPendingBody: () => {}, user: { id: 7 }, isV1Sale: true, quote: { sale_id: 11 }, reviewedIntentRef: { current: 'exact' }, quoteIntent: 'exact', pendingError: '',
-    replacements: [], activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
+    replacements: [], replacementLinesV1: [], exchangeActive: false, exchangeQuote: null, payRows: [], configuredMethods: ['Cash', 'ABA'], changeCurrency: 'USD', exchangePayIssue: null,
+    exchangePaymentBody: () => ({ details: [], change_currency: 'USD' }),
+    activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
     notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
     notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message,
@@ -105,12 +107,70 @@ for (const outcome of ['success', 'error', 'unmount']) {
   h.bindings.replacementsMissingLot = []; h.bindings.quoteIntentRef = { current: 'exact' }
   h.bindings.setQuoteBusy = (value: boolean) => h.events.push('quoteBusy:' + value)
   h.bindings.setQuote = () => h.events.push('quote'); h.bindings.setStep = () => h.events.push('step')
+  h.bindings.setExchangeQuote = () => {}; h.bindings.setPayRows = () => {}; h.bindings.initialExchangePayRows = () => []
   h.bindings.RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 1
   h.bindings.loadReturnsTransport = async () => ({ getReturnQuoteV1: () => response.promise })
   const review = callback('../src/components/returns/NewReturnModal.tsx', 'reviewReturn', h.bindings)()
   await new Promise(resolve => setTimeout(resolve, 0)); h.bindings.quoteIntentRef.current = 'edited'
   response.resolve({ sale_id: 11 }); await review
   assert.ok(!h.events.includes('quote')); assert.ok(!h.events.includes('step')); assert.ok(h.events.includes('quoteBusy:false'))
+}
+{
+  // 6.0.958: a money-v1 sale WITH replacement lines is reviewed like any other -- one server call prices the return and its replacement
+  // together -- instead of stopping at "create the replacement sale separately". Nothing in the review refuses a v1 sale for having them.
+  const h = setup(), asked: unknown[] = [], plain: unknown[] = []
+  const lines = [{ product_id: 9, branch_id: 2, batch_id: null, quantity: 1 }]
+  const exchange = { version: 1, sale_id: 11, exchange_rate: 4000, not_paid: false, net_usd: 6 }
+  h.bindings.quoteBusy = false; h.bindings.unsupportedMoneyVersion = false
+  h.bindings.replacementsMissingLot = []; h.bindings.quoteIntentRef = { current: 'exact' }
+  h.bindings.replacements = [{ key: 'r1' }]; h.bindings.replacementLinesV1 = lines; h.bindings.exchangeActive = true
+  h.bindings.setQuoteBusy = () => {}; h.bindings.setQuote = (value: unknown) => h.events.push('quote:' + JSON.stringify(value))
+  h.bindings.setStep = (value: string) => h.events.push('step:' + value)
+  h.bindings.setExchangeQuote = (value: unknown) => h.events.push('exchange:' + (value ? 'set' : 'none'))
+  h.bindings.setPayRows = (value: unknown[]) => h.events.push('payRows:' + value.length)
+  h.bindings.initialExchangePayRows = (_exchange: unknown, methods: string[]) => [{ id: 'settlement-new', method: methods[0], usd: '6.00', khr: '' }]
+  h.bindings.RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 100
+  h.bindings.loadReturnsTransport = async () => ({
+    getReturnExchangeQuoteV1: (...args: unknown[]) => { asked.push(args); return Promise.resolve({ quote: { sale_id: 11 }, exchange }) },
+    getReturnQuoteV1: (...args: unknown[]) => { plain.push(args); return Promise.resolve({ sale_id: 11 }) },
+  })
+  await callback('../src/components/returns/NewReturnModal.tsx', 'reviewReturn', h.bindings)()
+  assert.equal(asked.length, 1, 'the exchange quote is asked for once')
+  assert.deepEqual(asked[0], [11, [{ sale_item_id: 3, quantity: 1 }], lines], 'with the returned lines AND the replacement lines')
+  assert.equal(plain.length, 0, 'the plain refund quote is not used for an exchange')
+  assert.deepEqual(h.events.filter(x => /^(step|exchange|payRows)/.test(x)), ['exchange:set', 'payRows:1', 'step:confirm'], 'reviewed -> payment rows opened -> the confirm screen, no refusal')
+  assert.ok(!h.events.includes('notify'), 'no trap: nothing tells the operator to create the replacement separately')
+}
+{
+  // The frozen body carries the exchange: replacement lines, the reviewed replacement quote and the customer's payment, in one prepare call.
+  const h = setup(); const prepared: unknown[][] = []
+  const exchange = { version: 1, sale_id: 11, exchange_rate: 4000, not_paid: false, net_usd: 6 }
+  const lines = [{ product_id: 9, branch_id: 2, batch_id: null, quantity: 1 }]
+  const payment = { details: [{ method: 'ABA', amount_usd: 6, amount_khr: 0 }], change_currency: 'USD' }
+  h.bindings.replacementLinesV1 = lines; h.bindings.exchangeActive = true; h.bindings.exchangeQuote = exchange
+  h.bindings.exchangePaymentBody = () => payment
+  h.bindings.loadReturnsTransport = async () => ({
+    loadPendingReturnCreateV1: () => null, authorizeReturnCreateRecovery: () => undefined,
+    prepareReturnCreateV1: (...args: unknown[]) => { prepared.push(args); h.events.push('prepare'); return { bodyJson: '{"client_request_id":"x"}' } },
+    submitReturnCreateV1: () => { h.events.push('POST'); return Promise.resolve({ id: 1 }) },
+    clearPendingReturnCreateV1: () => { h.events.push('clear') },
+  })
+  const run = callback('../src/components/returns/NewReturnModal.tsx', 'submitNetReturn', h.bindings)()
+  await new Promise(resolve => setTimeout(resolve, 0)); h.success.resolve(); await run
+  assert.equal(prepared.length, 1)
+  assert.deepEqual(prepared[0][3], { quote: exchange, payment, lines }, 'prepareReturnCreateV1 freezes the replacement quote, the payment and the lines with the return')
+  assert.ok(h.events.includes('POST') && h.events.includes('clear'))
+}
+{
+  // A tender that does not cover the amount due is the operator's to fix on this screen: nothing is frozen, nothing is sent.
+  const h = setup(); const notices: string[] = []
+  h.bindings.replacementLinesV1 = [{ product_id: 9, branch_id: 2, batch_id: null, quantity: 1 }]; h.bindings.exchangeActive = true
+  h.bindings.exchangeQuote = { version: 1, sale_id: 11, exchange_rate: 4000, not_paid: false, net_usd: 6 }; h.bindings.exchangePayIssue = 'short'
+  h.bindings.notify = (message: string) => notices.push(message)
+  h.bindings.T = (key: string, fallback: string) => key === 'return_exchange_payment_short' ? 'SHORT' : fallback
+  await callback('../src/components/returns/NewReturnModal.tsx', 'submitNetReturn', h.bindings)()
+  assert.ok(!h.events.includes('prepare') && !h.events.includes('POST'), 'nothing frozen, nothing sent')
+  assert.deepEqual(notices, ['SHORT'], 'the operator is told the payment is short, in the language pack words')
 }
 {
   const guard = callback('../src/components/returns/EditReturnModal.tsx', 'handleSubmit', { ret: { money_precision_version: 1 } })

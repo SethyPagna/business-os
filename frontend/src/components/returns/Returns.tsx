@@ -145,6 +145,10 @@ interface ReturnRow extends Record<string, unknown> {
   notes?: string | null
   total_refund_usd?: number | string | null
   total_refund_khr?: number | string | null
+  // The one-step exchange (6.0.958): the replacement sale this return opened, and what it came to.
+  replacement_sale_id?: number | string | null
+  replacement_receipt_number?: string | null
+  replacement_total_usd?: number | string | null
   supplier_compensation_usd?: number | string | null
   supplier_loss_usd?: number | string | null
   supplier_compensation_khr?: number | string | null
@@ -306,7 +310,7 @@ function countActiveFlags(flags: boolean[] = []): number {
 // keys, so chooser and file can never disagree.
 export const RETURN_EXPORT_KEYS = [
   'Return_Number', 'Scope', 'Date', 'Receipt', 'Customer', 'Supplier', 'Reason',
-  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
+  'Type', 'Settlement', 'Refund_USD', 'Replacement_Receipt', 'Replacement_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
 ] as const
 
 function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts = false): Array<Record<string, unknown>> {
@@ -321,6 +325,8 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts 
     Type: getReturnTypeLabel(ret, tr),
     Settlement: ret.supplier_settlement || '',
     Refund_USD: ret.total_refund_usd || 0,
+    Replacement_Receipt: ret.replacement_receipt_number || '',
+    Replacement_USD: ret.replacement_total_usd ?? '',
     ...(canViewCosts ? { Compensation_USD: ret.supplier_compensation_usd ?? '', Business_Loss_USD: ret.supplier_loss_usd ?? '', Compensation_KHR: ret.supplier_compensation_khr ?? '', Business_Loss_KHR: ret.supplier_loss_khr ?? '' } : {}),
     Status: ret.status || 'completed',
   }))
