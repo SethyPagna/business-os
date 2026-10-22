@@ -38,7 +38,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
-import { planReplacementParts, replacementPartsTotalUsd } from './helpers/replacementPricing.ts'
+import { planReplacementParts, replacementPartsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
@@ -85,6 +85,10 @@ interface SaleItemRow {
   quantity?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
+  // The catalog snapshot the sale line carries (the price before any manual cut): what the "Same item" shortcut prices the extra units at when
+  // the catalog itself cannot be read (a Returns-only role has no Products view).
+  base_price_usd?: number | string | null
+  base_price_khr?: number | string | null
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
@@ -546,22 +550,25 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // The straight swap -- the returned units back out as the same product. It lives INSIDE the replacement section (not under the
   // returned rows), so the section stays the one place a replacement is chosen. The row starts at the returned quantity, and the
   // returned units go out at the price the sale recorded; any units added beyond them are priced at the catalog price, which is
-  // read here (the sale line does not carry it).
+  // read here. That read needs the Products view, which a role with Returns alone does not have (403), so it can never be what the
+  // shortcut depends on: when it is refused or fails, the extras fall back to the sale's own catalog snapshot (resolveSameItemCatalog).
   const addReplacementSameItem = async (item: SaleReturnItem) => {
     if (!item.product_id || sameItemBusy) return
     setSameItemBusy(true)
     try {
-      const { getProductsByIds } = await import('../../api/productReadTransport.ts')
-      const payload = await getProductsByIds([item.product_id]) as { items?: ReplacementCandidate[] }
-      const product = Array.isArray(payload?.items) ? payload.items[0] : null
-      if (!product) throw new Error(T('no_products_found', 'No products found. Try another name, SKU or barcode.'))
+      const catalog = await resolveSameItemCatalog(async () => {
+        const { getProductsByIds } = await import('../../api/productReadTransport.ts')
+        const payload = await getProductsByIds([item.product_id]) as { items?: ReplacementCandidate[] }
+        return Array.isArray(payload?.items) ? payload.items[0] : null
+      }, selectedItems, item.product_id)
+      if (!catalog) throw new Error(T('no_products_found', 'No products found. Try another name, SKU or barcode.'))
       addReplacementLine({
         productId: item.product_id as number | string,
         productName: String(item.product_name || item.name || '').trim(),
         branchId: item.branch_id || foundSale?.branch_id || null,
         quantity: item.returnQty || 1,
-        catalogUsd: toNumber(product.selling_price_usd),
-        catalogKhr: toNumber(product.selling_price_khr),
+        catalogUsd: catalog.usd,
+        catalogKhr: catalog.khr,
       })
     } catch (error) {
       notify(`${T('search_error', 'Search error')}: ${getLoaderErrorMessage(error, T('error', 'Error'))}`, 'error')

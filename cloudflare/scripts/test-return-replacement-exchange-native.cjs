@@ -18,7 +18,10 @@
 //      cash refund total does not move;
 //   6. PATCH /returns/:id by a caller without the POS price grant may not be what takes a recorded replacement under its floor by taking
 //      returned units away (403, nothing changed), but an unrelated edit, more units, a notes-only edit, a grant holder, and a replacement
-//      that was already under its floor are not refused.
+//      that was already under its floor are not refused;
+//   7. (6.0.960, release review c2f27dce6) the same guard on a sale that carries the product on two lines at different prices: the floor pairs
+//      each covered unit with its own recorded line, highest price first, so taking the dearer line's units out of the return is refused and an
+//      unrelated edit of the very same units is not.
 // Checks marked "base:" are red on the commit before this change (BASE_COMMIT=95dd89f15). MUTANT=<name> bundles ONE deliberate defect.
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
@@ -37,6 +40,7 @@ async function main() {
   try {
     await H.seedProduct(h, 9301, 'EX Lipstick', 5, 100, 1)
     await H.seedProduct(h, 9302, 'EX Gloss', 4, 100, 1)
+    await H.seedProduct(h, 9311, 'EX TwoPrice', 5, 400, 1)
     const returnsOnly = await h.addEmployee(1941, 'ex-returns-only', { returns: true })
     const sold = await H.importSale(h, 901, 'completed', [{ productId: 9301, name: 'EX Lipstick', quantity: 20, price: 3 }], { jobId: 'ex-job' })
     const line = sold.items[0]
@@ -216,6 +220,28 @@ async function main() {
       assert.equal(granted10.status, 200, JSON.stringify(granted10.body))
       assert.equal(lateEdit.status, 200, JSON.stringify(lateEdit.body))
     })
+
+    // ---- 7. the same guard on a sale with one product on two lines at different prices ------------------------------------------------------
+    // 40 units each at $5 and at $0 (a buy-2-get-1 shape); 2 x $5 + 1 x $0 come back and the same three go out at 2 x $5 + 1 x $0: the floor ($10).
+    const twoPrice = await H.importSale(h, 903, 'completed', [{ productId: 9311, name: 'EX TwoPrice', quantity: 40, price: 5 }, { productId: 9311, name: 'EX TwoPrice', quantity: 40, price: 0 }], { jobId: 'ex-job' })
+    const dear = twoPrice.items[0]
+    const free = twoPrice.items[1]
+    const back = lines => ({ items: lines.map(([row, quantity]) => ({ sale_item_id: row.id, product_id: 9311, quantity, stock_action: 'restock', branch_id: 1 })) })
+    const created = await h.call('POST', '/api/returns', { client_request_id: `ex-${++seq}`, sale_id: twoPrice.sale.id, reason: 'EX two prices', return_type: 'restock',
+      ...back([[dear, 2], [free, 1]]), replacement_items: [out(9311, 2, 5), out(9311, 1, 0)].map(line => ({ branch_id: 1, ...line })) }, 'two prices: 2 x $5 + 1 x $0 back, the same out', { cookie: returnsOnly })
+    r.check(`fixture: 2 x $5 + 1 x $0 back and 2 x $5 + 1 x $0 out is recorded for a caller without the grant -- ${created.status}`, () => assert.equal(created.status, 200, JSON.stringify(created.body)))
+    const sameTwoPrice = await edit(created.body.id, { ...back([[dear, 2], [free, 1]]), reason: 'EX two prices, same units' }, 'two prices edit: the same units, new reason')
+    const dearOnly = await edit(created.body.id, { ...back([[dear, 2]]), reason: 'EX two prices, dear line only' }, 'two prices edit: only the two $5 units stay returned')
+    const unitsAfter = Number((await h.one('SELECT SUM(quantity) AS n FROM return_items WHERE return_id=?', created.body.id)).n)
+    r.check(`the same units are not refused (${sameTwoPrice.status}); keeping only the two $5 units returned leaves three out against two covered -- $15, not the $10 posted -- and is refused (${dearOnly.status} ${dearOnly.body.code}), the return still has ${unitsAfter} units`, () => {
+      assert.equal(sameTwoPrice.status, 200, JSON.stringify(sameTwoPrice.body))
+      assert.equal(dearOnly.status, 403, JSON.stringify(dearOnly.body))
+      assert.equal(dearOnly.body.code, 'return_replacement_price_forbidden')
+      assert.equal(dearOnly.body.product_id, 9311)
+      assert.equal(unitsAfter, 3)
+    })
+    const adminDearOnly = await edit(created.body.id, { ...back([[dear, 2]]), reason: 'EX two prices, admin' }, 'two prices edit: admin keeps only the two $5 units', {})
+    r.check(`control: a grant holder makes the same edit (${adminDearOnly.status})`, () => assert.equal(adminDearOnly.status, 200, JSON.stringify(adminDearOnly.body)))
   } finally {
     await h.mf.dispose()
   }

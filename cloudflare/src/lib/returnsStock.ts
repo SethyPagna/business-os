@@ -164,49 +164,39 @@ export function matchRefundSaleLine<L extends RefundSaleLine>(
   return { line: matches[0], matchedBy: 'product' }
 }
 
-// The price the units of a replacement of `productId` that a returned unit covers (returnedUnitsForReplacement) may be
-// floored at because the customer already paid it on the sale being returned: the lowest RECORDED unit price
-// (sale_items.applied_price_*) among the sale lines that the return's own lines resolve to AND that sold this very
-// product. It is read only from `saleLines`, the rows of the original sale. It is never
-// the refund figure: a return line may post a lower price than the line charged (a goodwill refund stays possible, see
-// resolveRefundUnitPrice), so a refund price of 0 would otherwise drag the floor to 0 and let a caller without the POS
-// price grant record a free replacement. `null` per currency means no recorded figure, and the floor is then the catalog
-// / promotion price. No original sale (a manual return, `saleLines` null) has no "sale being returned", so no sold price
-// either: a sale_item_id posted without a sale_id names a line of some other sale and is not an authority.
+/** Units the return hands back from ONE recorded line of the sale, with the unit price that line was RECORDED at (null: none recorded). */
+export type ReturnedSoldLine = { quantity: number; usd: number | null; khr: number | null }
+
+// What a replacement of `productId` may lean on because the customer already paid it on the sale being returned: the units
+// the return hands back of that product, each with the RECORDED unit price (sale_items.applied_price_*) of the sale line it
+// comes from -- one entry per returned line, never pooled into a count and a single lowest price, because a sale can carry
+// one product on several lines at different prices (a buy-2-get-1 line at $0 beside two at $5) and each returned unit was
+// paid at its own line's price. Only the sale lines that the return's own lines resolve to AND that sold this very product
+// count; they are read only from `saleLines`, the rows of the original sale. It is never the refund figure: a return line
+// may post a lower price than the line charged (a goodwill refund stays possible, see resolveRefundUnitPrice), so a refund
+// price of 0 would otherwise drag the floor to 0 and let a caller without the POS price grant record a free replacement.
+// `null` per currency means that line recorded no figure, and its units are then floored at the catalog / promotion price.
+// No original sale (a manual return, `saleLines` null) has no "sale being returned", so no lines at all: a sale_item_id posted
+// without a sale_id names a line of some other sale and is not an authority. The units are counted whatever happens to the
+// returned stock (restock, damaged, none): the customer gave those units back. A replacement of more units than these is not
+// refused -- it is simply a purchase -- the units beyond them just do not get a sold price (lib/returnReplacementPrice.ts).
 //
 // A line the sales import wrote carries a dollar price and no riel price (applied_price_khr NULL). Its riel price is what
 // the dollars were worth on that sale -- the dollar price at `exchangeRate` (the rate the sale booked), whole riel, rounded
 // down so a till that rounds down is never refused -- not 0, which would switch the riel floor off for exactly those lines.
-export function recordedSoldPriceForReplacement<L extends RefundSaleLine>(
-  saleLines: readonly L[] | null | undefined,
-  returnItems: ReadonlyArray<{ sale_item_id?: number | null; product_id?: number | null }>,
-  productId: number,
-  exchangeRate: number,
-): { usd: number | null; khr: number | null } {
-  const usd: number[] = []
-  const khr: number[] = []
-  const recorded = (value: unknown): number | null => value == null || !Number.isFinite(Number(value)) ? null : Number(value)
-  for (const { line } of returnedLinesOfProduct(saleLines, returnItems, productId)) {
-    const lineUsd = recorded(line.applied_price_usd)
-    const lineKhr = recorded(line.applied_price_khr)
-    if (lineUsd != null) usd.push(lineUsd)
-    if (lineKhr != null) khr.push(lineKhr)
-    else if (lineUsd != null && Number(exchangeRate) > 0) khr.push(Math.floor(lineUsd * Number(exchangeRate) + 1e-6))
-  }
-  return { usd: usd.length ? Math.min(...usd) : null, khr: khr.length ? Math.min(...khr) : null }
-}
-
-// How many units of `productId` the return hands back against the sale being returned: the units a replacement of that very
-// product may swap at the sold price (recordedSoldPriceForReplacement). Counted from the same lines, whatever happens to the
-// returned stock (restock, damaged, none): the customer gave those units back. A replacement of more units than this is not
-// refused -- it is simply a purchase -- the units beyond it just do not get the sold price.
-export function returnedUnitsForReplacement<L extends RefundSaleLine>(
+export function recordedSoldLinesForReplacement<L extends RefundSaleLine>(
   saleLines: readonly L[] | null | undefined,
   returnItems: ReadonlyArray<{ sale_item_id?: number | null; product_id?: number | null; quantity?: number | string | null }>,
   productId: number,
-): number {
-  return returnedLinesOfProduct(saleLines, returnItems, productId)
-    .reduce((sum, { quantity }) => sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0), 0)
+  exchangeRate: number,
+): ReturnedSoldLine[] {
+  const recorded = (value: unknown): number | null => value == null || !Number.isFinite(Number(value)) ? null : Number(value)
+  return returnedLinesOfProduct(saleLines, returnItems, productId).flatMap(({ line, quantity }) => {
+    if (!(Number.isFinite(quantity) && quantity > 0)) return []
+    const usd = recorded(line.applied_price_usd)
+    const khr = recorded(line.applied_price_khr) ?? (usd != null && Number(exchangeRate) > 0 ? Math.floor(usd * Number(exchangeRate) + 1e-6) : null)
+    return [{ quantity, usd, khr }]
+  })
 }
 
 // The recorded lines of `productId` on the sale that the return's own lines resolve to, each with the units returned against it.

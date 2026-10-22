@@ -21,7 +21,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, recordedSoldPriceForReplacement, returnedUnitsForReplacement, RefundSaleLineError, type RefundSaleLine, planReturnLot, ReturnLotRequiredError,
+  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, recordedSoldLinesForReplacement, RefundSaleLineError, type RefundSaleLine, planReturnLot, ReturnLotRequiredError,
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
@@ -1792,17 +1792,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // price on a sale may price it under the catalog / promotion price; the units a returned unit of the same product covers
   // may sell down to the price the original sale recorded, every other unit may not (lib/returnReplacementPrice.ts).
   // Decided in memory unless a product is posted below its catalog-based floor. The "price it was sold at" is the RECORDED
-  // price of the original sale's own line (recordedSoldPriceForReplacement), never the refund figure above: a return line may
-  // post a lower price than the line charged, and a posted 0 must not become the replacement's floor.
+  // price of the original sale's own lines (recordedSoldLinesForReplacement: each returned unit at the line it came from), never the
+  // refund figure above: a return line may post a lower price than the line charged, and a posted 0 must not become the replacement's floor.
   if (replacementLines.length && !canSetSalePrice(user)) {
     const offender = await firstDisallowedReplacementPrice(db, replacementLines.map((line) => {
       const sale = saleMeta ? soldLines : null
-      const sold = recordedSoldPriceForReplacement(sale, returnItems, line.productId, returnExchangeRate)
       const meta = productMap.get(line.productId)!
       return {
         productId: line.productId, quantity: line.quantity, priceUsd: line.priceUsd, priceKhr: line.priceKhr,
         catalogUsd: toNumber(meta.selling_price_usd), catalogKhr: toNumber(meta.selling_price_khr),
-        soldUsd: sold.usd, soldKhr: sold.khr, returnedQuantity: returnedUnitsForReplacement(sale, returnItems, line.productId),
+        returned: recordedSoldLinesForReplacement(sale, returnItems, line.productId, returnExchangeRate),
       }
     }), returnExchangeRate)
     if (offender) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offender.productId }, 403)
@@ -3001,11 +3000,10 @@ async function editBreaksReplacementFloor(db: ReturnType<typeof getDb>, input: {
   ).all<{ id: number; selling_price_usd: number | null; selling_price_khr: number | null }>(chunk))).map((row) => [Number(row.id), row]))
   const linesFor = (items: readonly ReturnedLineRef[]) => recorded.map((row) => {
     const productId = Number(row.product_id)
-    const sold = recordedSoldPriceForReplacement(input.saleLines, items, productId, input.exchangeRate)
     return {
       productId, quantity: Number(row.quantity), priceUsd: Number(row.applied_price_usd) || 0, priceKhr: Number(row.applied_price_khr) || 0,
       catalogUsd: Number(catalog.get(productId)?.selling_price_usd) || 0, catalogKhr: Number(catalog.get(productId)?.selling_price_khr) || 0,
-      soldUsd: sold.usd, soldKhr: sold.khr, returnedQuantity: returnedUnitsForReplacement(input.saleLines, items, productId),
+      returned: recordedSoldLinesForReplacement(input.saleLines, items, productId, input.exchangeRate),
     }
   })
   if (await firstDisallowedReplacementPrice(db, linesFor(input.before), input.exchangeRate)) return null
