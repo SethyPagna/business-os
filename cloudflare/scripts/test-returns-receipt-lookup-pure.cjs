@@ -115,12 +115,23 @@ const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshotKernel,
   './saleMoneyPrecision': saleMoneyPrecision,
 })
+const returnExchangeIntentKernel = loadReal('lib/returnExchangeIntent.ts')
 const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
+  './returnExchangeIntent': returnExchangeIntentKernel,
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {} },
   './moneyPrecision': moneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
 })
+// 6.0.958: the quote-plan lib the route now imports, REAL over the same kernels; the exchange itself has its own native test.
+const customerReturnQuotePlanKernel = loadReal('lib/customerReturnQuotePlan.ts', {
+  './customerReturnEntitlement': customerReturnEntitlement, './productMergeLineage': productMergeLineage, './returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  './saleRecordEvents': { sha256Hex: async () => '' }, './saleMoneyPrecision': saleMoneyPrecision,
+})
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
+  '../lib/returnExchangeIntent': returnExchangeIntentKernel,
+  '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
+  './returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),

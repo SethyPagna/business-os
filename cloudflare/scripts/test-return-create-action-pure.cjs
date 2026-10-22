@@ -57,8 +57,30 @@ assert.deepEqual(canonicalV1.items, [{ sale_item_id: 8, quantity: 1, stock_actio
 assert.deepEqual(canonicalV1.expected_quote, expectedQuote)
 assert.equal(Object.hasOwn(canonicalV1.items[0], 'applied_price_usd'), false, 'client price is outside v1 intent')
 assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 0, reason: 'x', items: [{ quantity: 1 }] }), /unsupported/i)
-assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
-  items: [{ sale_item_id: 8, quantity: 1 }], replacement_items: [{ product_id: 2, quantity: 1 }], expected_quote: expectedQuote }), /replacement/i)
+// 6.0.958: a money-v1 return may carry replacement lines (the one-step exchange). They travel with the replacement quote the till reviewed and the
+// customer's payment, or not at all; a plain v1 return keeps the exact digest keys it always had.
+assert.deepEqual(Object.keys(canonicalV1), ['money_precision_version', 'sale_id', 'return_number', 'receipt_number', 'customer_id', 'customer_name', 'branch_id', 'reason',
+  'return_type', 'notes', 'items', 'expected_quote', 'replacement_items'], 'a plain v1 return keeps the exact digest keys (and so bytes) it had before the exchange existed')
+assert.deepEqual(canonicalV1.replacement_items, [])
+assert.equal(Object.hasOwn(canonicalV1, 'expected_exchange') || Object.hasOwn(canonicalV1, 'exchange_payment'), false)
+const exchangeQuote = { version: 1, sale_id: 4, exchange_rate: 4000, not_paid: false,
+  lines: [{ product_id: 2, product_name: 'Gloss', branch_id: 2, batch_id: null, quantity: 1, unit_price_usd: 6.48, unit_price_khr: 25920, total_usd: 6.48, total_khr: 25920 }],
+  calculated_total_usd: 6.48, rounding_adjustment_usd: 0, total_usd: 6.48, total_khr: 25920, refund_usd: 1, owed_reduction_usd: 0, credit_usd: 1, net_usd: 5.48 }
+const exchangeBody = { money_precision_version: 1, sale_id: 4, reason: 'x', items: [{ sale_item_id: 8, quantity: 1 }],
+  replacement_items: [{ product_id: 2, quantity: 1, branch_id: 2, batch_id: 14002, applied_price_usd: 6.48, name: 'untrusted' }], expected_quote: expectedQuote,
+  expected_exchange: exchangeQuote, exchange_payment: { details: [{ method: ' ABA ', amount_usd: '5.48', amount_khr: 0 }], change_currency: 'khr' } }
+const canonicalExchange = subject.canonicalReturnCreateIntent(exchangeBody)
+assert.deepEqual(canonicalExchange.replacement_items, [{ product_id: 2, branch_id: 2, batch_id: 14002, quantity: 1, applied_price_usd: 6.48 }], 'only accepted client intent: no names')
+assert.deepEqual(canonicalExchange.expected_exchange, exchangeQuote)
+assert.deepEqual(canonicalExchange.exchange_payment, { details: [{ method: 'ABA', amount_usd: 5.48, amount_khr: 0 }], change_currency: 'KHR' })
+assert.notEqual(JSON.stringify(canonicalExchange), JSON.stringify(subject.canonicalReturnCreateIntent({ ...exchangeBody, exchange_payment: { details: [{ method: 'ABA', amount_usd: 5.48, amount_khr: 0 }], change_currency: 'USD' } })),
+  'the change currency is part of the intent: a retry with another currency is not an exact repeat')
+for (const [name, body, code] of [
+  ['no reviewed quote', { ...exchangeBody, expected_exchange: undefined }, 'return_exchange_quote_invalid'],
+  ['an unknown quote field', { ...exchangeBody, expected_exchange: { ...exchangeQuote, extra: 1 } }, 'return_exchange_quote_invalid'],
+  ['a bad payment row', { ...exchangeBody, exchange_payment: { details: [{ method: 'ABA', amount_usd: -1, amount_khr: 0 }], change_currency: 'USD' } }, 'return_exchange_payment_invalid'],
+  ['a riel refund row with replacement lines', { ...exchangeBody, refund_currency: 'KHR' }, 'return_exchange_refund_currency'],
+]) assert.throws(() => subject.canonicalReturnCreateIntent(body), (error) => error.code === code, name)
 assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
   items: [{ sale_item_id: 9, quantity: 1 }], expected_quote: expectedQuote }), /does not match/i)
 // P4-3: the damaged-line choice is IN the digest only when the client sent it,

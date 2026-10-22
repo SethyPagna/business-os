@@ -216,7 +216,9 @@ const saleRecordsContract = {
   SALE_RECORD_FIELDS: ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items', 'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver', 'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'cancel_reason', 'cancel_note'],
 }
 const saleRecordEventsKernel = loadReal('lib/saleRecordEvents.ts', { './saleRecords': saleRecordsContract })
+const returnExchangeIntentKernel = loadReal('lib/returnExchangeIntent.ts')
 const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
+  './returnExchangeIntent': returnExchangeIntentKernel,
   './saleRecordEvents': saleRecordEventsKernel, './moneyPrecision': moneyPrecisionKernel,
   './customerReturnEntitlement': customerReturnEntitlementKernel,
 })
@@ -231,7 +233,16 @@ const saleBulkStatusKernel = {
     params: { id, revision },
   }),
 }
+// 6.0.958: the quote-plan lib the route now imports, REAL over the same kernels; the exchange itself has its own native test.
+const customerReturnQuotePlanKernel = loadReal('lib/customerReturnQuotePlan.ts', {
+  './customerReturnEntitlement': customerReturnEntitlementKernel, './productMergeLineage': productMergeLineageKernel, './returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  './saleRecordEvents': saleRecordEventsKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
+})
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
+  '../lib/returnExchangeIntent': returnExchangeIntentKernel,
+  '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
+  './returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
