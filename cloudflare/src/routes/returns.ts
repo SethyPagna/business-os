@@ -33,7 +33,7 @@ import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
 import { unexpectedFailureBody } from '../lib/failureText'
-import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
+import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
   readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
 } from '../lib/supplierReturnReceipt'
@@ -3137,7 +3137,7 @@ app.patch('/:id', async (c) => {
       returnId, exchangeRate: positiveRate(existing.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE,
       saleLines: existing.sale_id ? editSalePriceLines : null, before: existingItems, after: newItems,
     })
-    if (offending != null) return c.json({ ...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offending }, 403)
+    if (offending != null) return c.json({ ...RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, product_id: offending }, 403)
   }
 
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []

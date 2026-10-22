@@ -29,6 +29,7 @@ const H = require('./harness/al_money_native.cjs')
 const MUTANTS = {
   'edit-guard-off': { file: 'src/routes/returns.ts', from: 'if (Array.isArray(body.items) && !canSetSalePrice(user)) {', to: 'if (false) {' },
   'edit-refuses-already-under': { file: 'src/routes/returns.ts', from: 'if (await firstDisallowedReplacementPrice(db, linesFor(input.before), input.exchangeRate)) return null', to: '' },
+  'edit-uses-price-code': { file: 'src/routes/returns.ts', from: '...RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, product_id: offending', to: '...RETURN_REPLACEMENT_PRICE_REFUSAL, product_id: offending' },
   'edit-guard-ignores-after': { file: 'src/routes/returns.ts', from: 'return (await firstDisallowedReplacementPrice(db, linesFor(input.after), input.exchangeRate))?.productId ?? null', to: 'return null' },
 }
 
@@ -187,7 +188,8 @@ async function main() {
     const stockAfterLower = await stock(9301)
     r.check(`base: a caller without the grant cannot take returned units away from a recorded replacement: ${lower.status} ${lower.body.code}; the return still has ${quantityAfterLower} units and stock is untouched`, () => {
       assert.equal(lower.status, 403, JSON.stringify(lower.body))
-      assert.equal(lower.body.code, 'return_replacement_price_forbidden')
+      assert.equal(lower.body.code, 'return_edit_replacement_floor')
+      assert.match(lower.body.error, /separate return/)
       assert.equal(lower.body.product_id, 9301)
       assert.equal(quantityAfterLower, 2)
       assert.deepEqual(stockAfterLower, stockBeforeEdit)
@@ -236,10 +238,30 @@ async function main() {
     r.check(`the same units are not refused (${sameTwoPrice.status}); keeping only the two $5 units returned leaves three out against two covered -- $15, not the $10 posted -- and is refused (${dearOnly.status} ${dearOnly.body.code}), the return still has ${unitsAfter} units`, () => {
       assert.equal(sameTwoPrice.status, 200, JSON.stringify(sameTwoPrice.body))
       assert.equal(dearOnly.status, 403, JSON.stringify(dearOnly.body))
-      assert.equal(dearOnly.body.code, 'return_replacement_price_forbidden')
+      assert.equal(dearOnly.body.code, 'return_edit_replacement_floor')
       assert.equal(dearOnly.body.product_id, 9311)
       assert.equal(unitsAfter, 3)
     })
+    // Raising the returned quantity of the dearer line is the same refusal with the same advice: three $5 units back against three out leaves a $15 floor, the
+    // recorded $10 stays, and the cashier is told to record the extra unit as a separate return (its own code, not the "cannot set a price" one a POST gets).
+    const stockBeforeMore = await stock(9311)
+    const moreDear = await edit(created.body.id, { ...back([[dear, 3], [free, 1]]), reason: 'EX two prices, one more dear unit' }, 'two prices edit: one more $5 unit returned, 3 x $5 + 1 x $0')
+    const moreDearAgain = await edit(created.body.id, { ...back([[dear, 3], [free, 1]]), reason: 'EX two prices, one more dear unit' }, 'two prices edit: the same refused edit sent again')
+    const stockAfterMore = await stock(9311)
+    const unitsAfterMore = Number((await h.one('SELECT SUM(quantity) AS n FROM return_items WHERE return_id=?', created.body.id)).n)
+    r.check(`raising the returned quantity of the dearer line is refused with its own code and advice (${moreDear.status} ${moreDear.body.code}), again on a repeat (${moreDearAgain.status}); nothing was written -- the return still has ${unitsAfterMore} units, stock untouched`, () => {
+      for (const result of [moreDear, moreDearAgain]) {
+        assert.equal(result.status, 403, JSON.stringify(result.body))
+        assert.equal(result.body.code, 'return_edit_replacement_floor')
+        assert.equal(result.body.product_id, 9311)
+        assert.match(result.body.error, /Record the extra unit as a separate return/)
+      }
+      assert.equal(unitsAfterMore, 3)
+      assert.deepEqual(stockAfterMore, stockBeforeMore)
+    })
+    const extraBack = await h.call('POST', '/api/returns', { client_request_id: `ex-${++seq}`, sale_id: twoPrice.sale.id, reason: 'EX two prices, the extra unit on its own', return_type: 'restock',
+      ...back([[dear, 1]]) }, 'two prices: the extra $5 unit recorded as a separate return', { cookie: returnsOnly })
+    r.check(`the advice works: the extra unit recorded as a return of its own is accepted (${extraBack.status})`, () => assert.equal(extraBack.status, 200, JSON.stringify(extraBack.body)))
     const adminDearOnly = await edit(created.body.id, { ...back([[dear, 2]]), reason: 'EX two prices, admin' }, 'two prices edit: admin keeps only the two $5 units', {})
     r.check(`control: a grant holder makes the same edit (${adminDearOnly.status})`, () => assert.equal(adminDearOnly.status, 200, JSON.stringify(adminDearOnly.body)))
   } finally {

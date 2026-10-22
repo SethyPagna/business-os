@@ -25,6 +25,14 @@ export const RETURN_REPLACEMENT_PRICE_REFUSAL = {
   code: 'return_replacement_price_forbidden',
 } as const
 
+// PATCH /api/returns/:id, same floor, different cause: the edit takes returned units away from a recorded replacement (or points the covering
+// line at a dearer one), so the replacement already sold would now sit under what the returned units can cover. The caller did not try to set a
+// price, so the sentence says what to do instead: the extra unit is a return of its own.
+export const RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL = {
+  error: 'This change would leave the replacement below its allowed price. Record the extra unit as a separate return.',
+  code: 'return_edit_replacement_floor',
+} as const
+
 /** Whoever may sell at a price of their own: the grant POST /api/sales asks for (routes/sales.ts, `pos` or `sales`). */
 export function canSetSalePrice(user: PermissionUser): boolean {
   return hasAnyPermission(user, ['pos', 'sales'])
