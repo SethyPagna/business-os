@@ -95,16 +95,19 @@ const quote = (pricing, refund, owed = 0, notPaid = false) => X.buildExchangeQuo
 
 // ---- settling the tender: the worked examples ---------------------------------------------------------------------------
 const row = (method, amount_usd, amount_khr = 0) => ({ method, amount_usd, amount_khr })
+// 6.0.963: the refund credit row is flagged, so a later cancel can take it back off the sale and so the receipt never prints it as the cash method.
+const creditRow = (usd, method = 'Cash') => ({ ...row(method, usd), refund_credit: true })
 {
   // 1. Same product, net zero: the credit alone covers the sale, nothing changes hands.
   const even = settle({ totalUsd: 10, creditUsd: 10 })
-  assert.deepEqual(even.paymentDetails, [row('Cash', 10)])
+  assert.deepEqual(even.paymentDetails, [creditRow(10)])
   assert.deepEqual({ usd: even.amountPaidUsd, khr: even.amountPaidKhr, st: even.saleStatus }, { usd: 10, khr: 0, st: 'completed' })
   assert.deepEqual({ ...even.change }, { changeUsd: 0, changeKhr: 0, changeIsActual: 0, changeExchangeRate: null })
 
   // 2. Different, dearer product: the customer pays the difference on top of the credit.
   const pay = settle({ totalUsd: 16, creditUsd: 10, payment: { details: [row('ABA', 6)], change_currency: 'USD' } })
-  assert.deepEqual(pay.paymentDetails, [row('Cash', 10), row('ABA', 6)])
+  assert.deepEqual(pay.paymentDetails, [creditRow(10), row('ABA', 6)])
+  assert.equal(pay.paymentDetails[1].refund_credit, undefined, 'only the credit row is flagged')
   assert.equal(pay.paymentMethod, 'Cash + ABA')
   assert.equal(pay.amountPaidUsd, 16)
   assert.equal(pay.change.changeIsActual, 0)

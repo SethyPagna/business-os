@@ -18,7 +18,7 @@ import {
 } from './returnCreateAction'
 import { importedReturnLines } from './saleTransitions'
 import {
-  carriesRetiredReturnLabel, planReturnMoney, readSalesReturnMoney, RETURN_REOPENS_PAID_SALE_DEBT, RETURN_REOPENS_PAID_SALE_DEBT_ERROR, ReturnMoneyError,
+  carriesRetiredReturnLabel, planReturnMoney, readSalesReturnMoney, saleReturnMoney, saleReturnMoneySql, type SaleReturnMoney, RETURN_REOPENS_PAID_SALE_DEBT, RETURN_REOPENS_PAID_SALE_DEBT_ERROR, ReturnMoneyError,
   saleReturnRecordWord, saleReturnStateSql, saleReturnTagStatement,
 } from './returnRefundSplit'
 import { saleStoredState, type SaleReturnState } from './saleStatusResolution'
@@ -148,7 +148,13 @@ type Member = {
   // completed when the cancel is applied, so applying writes nothing for it; UNDO cancels it again (the units leave the shelf), REDO restores it.
   // Absent on snapshots written before 6.0.958, whose members are all the returns the operator selected.
   linked?: true
+  // Cancelling an exchange return takes back the refund credit that paid the replacement sale (6.0.963, owner: "Mark it Not Paid"): the credit tender row leaves
+  // the sale's payments and the sale owes it again. Both sides are the exact stored columns, so undo and redo put back precisely what was there.
+  // Absent on every other member and on snapshots written before 6.0.963.
+  credit?: { saleId: number; usd: number; before: SaleCreditState; after: SaleCreditState }
 }
+
+type SaleCreditState = { payment_method: string | null; payment_details: string | null; amount_paid_usd: number; amount_paid_khr: number; sale_status: string }
 
 type ReturnMoneyState = { owed_reduction_usd: number; refund_currency: string | null }
 // before/after: the sale's Records status word on each side (saleReturnRecordWord:
@@ -339,13 +345,42 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
   return out
 }
 
+// The replacement sale must still be exactly as the plan read it. The check rides inside the member's own guard statement (every statement counts
+// against a Free invocation), so it is a predicate here and the write is the only statement of its own.
+function creditStatePredicate(state: SaleCreditState, saleId: number): { predicate: string; params: Row } {
+  return {
+    predicate: 'EXISTS(SELECT 1 FROM sales WHERE id=@creditSale AND payment_details IS @creditDetails AND payment_method IS @creditMethod AND amount_paid_usd IS @creditUsd AND amount_paid_khr IS @creditKhr AND sale_status IS @creditStatus)',
+    params: { creditSale: saleId, creditDetails: state.payment_details, creditMethod: state.payment_method, creditUsd: state.amount_paid_usd, creditKhr: state.amount_paid_khr, creditStatus: state.sale_status },
+  }
+}
+
+function mergeGuard(statement: Statement, predicate: string, params: Row): void {
+  const tail = ') THEN 1 ELSE 0 END'
+  const at = statement.sql.lastIndexOf(tail)
+  statement.sql = `${statement.sql.slice(0, at)} AND (${predicate})${statement.sql.slice(at)}`
+  Object.assign(statement.params, params)
+}
+
+function creditStatements(member: Member, direction: 1 | -1, stamp: string): Statement[] {
+  const credit = member.credit
+  if (!credit) return []
+  const to = direction > 0 ? credit.after : credit.before
+  return [{ sql: 'UPDATE sales SET payment_method=@pm,payment_details=@pd,amount_paid_usd=@pu,amount_paid_khr=@pk,sale_status=@st,updated_at=@stamp WHERE id=@saleId',
+    params: { saleId: credit.saleId, pd: to.payment_details, pm: to.payment_method, pu: to.amount_paid_usd, pk: to.amount_paid_khr, st: to.sale_status, stamp } }]
+}
+
 function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, applying = false): Statement[] {
   // A linked replacement return is already completed when the cancel is applied: nothing to write on the way in, everything on undo and redo.
-  if (!member.changed || (applying && member.linked)) return []
+  if (!member.changed) return []
+  // The take-back return is already completed when the cancel is applied; only its debt/cash split can move (the credit it was refunded against is gone).
+  if (applying && member.linked) {
+    return member.money ? [{ sql: 'UPDATE returns SET owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,updated_at=@stamp WHERE id=@id', params: { ...member.money.after, stamp, id: member.id } }] : []
+  }
   const target = direction > 0 ? member.after : member.before
   const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
   return [
     ...stockStatements(member, direction, user, stamp),
+    ...creditStatements(member, direction, stamp),
     {
       sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,${money ? 'owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,' : ''}updated_at=@stamp WHERE id=@id`,
       params: { ...target, ...(money ?? {}), stamp, id: member.id },
@@ -620,7 +655,13 @@ export type ReplacementOutstanding = {
 }
 // Every line of the replacement sale, taken back or not (`quantity` is what is left, 0 for a line that is fully back), with the catalog
 // price the price floor holds the units that stay to.
-type ReplacementInfo = Omit<ReplacementOutstanding, 'lines'> & { lines: Array<ReplacementOutstandingLine & { catalog_usd: number | null }> }
+type ExchangeSaleMoney = {
+  source_return_id: number | null; sale_status: string | null; return_state: string | null; payment_method: string | null; payment_details: string | null
+  amount_paid_usd: number; amount_paid_khr: number; total_usd: number; exchange_rate: number; refund_usd: number; refund_owed_usd: number
+  // The sale's own money and every return on it, read by the same statement (no extra D1 query): what a take-back's debt/cash split is planned against.
+  stored: SaleReturnMoney
+}
+type ReplacementInfo = Omit<ReplacementOutstanding, 'lines'> & { lines: Array<ReplacementOutstandingLine & { catalog_usd: number | null }>; money: ExchangeSaleMoney }
 
 async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<Map<number, ReplacementInfo>> {
   const infos = new Map<number, ReplacementInfo>()
@@ -631,7 +672,10 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
       COALESCE(si.applied_price_usd,rri.applied_price_usd) AS applied_price_usd,COALESCE(si.applied_price_khr,rri.applied_price_khr) AS applied_price_khr,
       MAX(COALESCE(si.returned_quantity,0),0)+COALESCE((SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r2 ON r2.id=ri.return_id
         WHERE ri.sale_item_id=rri.sale_item_id AND COALESCE(r2.status,'completed')<>'cancelled'),0) AS returned_quantity,
-      s.id AS sale_id,s.sale_status,s.receipt_number,s.exchange_rate,s.money_precision_version,p.selling_price_usd
+      s.id AS sale_id,s.sale_status,s.receipt_number,s.exchange_rate,s.money_precision_version,p.selling_price_usd,
+      s.source_return_id,s.return_state,s.payment_method,s.payment_details,s.amount_paid_usd,s.amount_paid_khr,s.total_usd,
+      r.total_refund_usd AS refund_usd,r.owed_reduction_usd AS refund_owed_usd,s.calculated_total_usd,s.status_before_return,
+      ${saleReturnMoneySql('s')}
     FROM return_replacement_items rri
     JOIN returns r ON r.id=rri.return_id
     LEFT JOIN sales s ON s.id=r.replacement_sale_id
@@ -644,6 +688,15 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
     const info = infos.get(returnId) ?? {
       return_id: returnId, sale_id: Number(row.sale_id) || 0, receipt_number: (row.receipt_number as string | null) ?? null,
       money_precision_version: Number(row.money_precision_version) || 0, exchange_rate: Number(row.exchange_rate) || 0, lines: [],
+      money: {
+        source_return_id: row.source_return_id == null ? null : Number(row.source_return_id), sale_status: (row.sale_status as string | null) ?? null,
+        return_state: (row.return_state as string | null) ?? null, payment_method: (row.payment_method as string | null) ?? null,
+        payment_details: (row.payment_details as string | null) ?? null, amount_paid_usd: Number(row.amount_paid_usd) || 0, amount_paid_khr: Number(row.amount_paid_khr) || 0,
+        total_usd: Number(row.total_usd) || 0, exchange_rate: Number(row.exchange_rate) || 0,
+        refund_usd: Number(row.refund_usd) || 0, refund_owed_usd: Number(row.refund_owed_usd) || 0,
+        stored: saleReturnMoney({ id: row.sale_id, sale_status: row.sale_status, status_before_return: row.status_before_return, total_usd: row.total_usd, amount_paid_usd: row.amount_paid_usd,
+          amount_paid_khr: row.amount_paid_khr, exchange_rate: row.exchange_rate, money_precision_version: row.money_precision_version, calculated_total_usd: row.calculated_total_usd, return_money_json: row.return_money_json }),
+      },
     }
     // A cancelled replacement sale (or a line the sale no longer has) has nothing left with the customer.
     const gone = normalize(row.sale_status) === 'cancelled' || row.sale_item_id == null || !(Number(row.sale_quantity) > 0)
@@ -666,7 +719,7 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
  */
 export async function readReplacementOutstanding(db: D1Compat, returnIds: number[]): Promise<ReplacementOutstanding[]> {
   const infos = await readReplacementInfo(db, returnIds)
-  return [...infos.values()].flatMap(({ lines, ...info }) => {
+  return [...infos.values()].flatMap(({ lines, money: _money, ...info }) => {
     const left = lines.filter((line) => line.quantity > 0).map(({ catalog_usd: _catalog, ...line }) => line)
     return left.length ? [{ ...info, lines: left }] : []
   })
@@ -720,13 +773,119 @@ async function planReplacementChoices(db: D1Compat, request: BulkRequest, return
   return infos
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[] }> {
+// ---- the refund credit of a cancelled exchange (6.0.963) -----------------------------------------------------------------------------------------
+// A one-step exchange pays its replacement sale partly with the refund it books: the first tender row of the sale is that credit (flagged
+// refund_credit). Cancelling the return cancels the refund, so the credit no longer pays for anything: owner, 22 Oct 2026, "Mark it Not Paid".
+// The credit row leaves the sale's payments, the sale reads Not Paid for that share (the existing Not Paid rules: receivables, the drawer's cash
+// tenders and the reports all read the sale as stored), and a take-back return of the sale splits its refund again, debt first, against the sale as
+// it now stands -- so the customer ends up having paid for exactly what they keep. Nothing is deleted: the exact columns on both sides ride in the
+// snapshot, which is what undo and redo replay, and the Records line of the sale shows its payment state moving.
+const CREDIT_TOLERANCE = 0.005
+const money4 = (value: number): number => Math.round(value * 10000) / 10000
+
+type TenderRow = { method?: unknown; amount_usd?: unknown; amount_khr?: unknown; refund_credit?: unknown }
+
+function creditRowIndex(rows: TenderRow[], creditUsd: number): number {
+  const flagged = rows.findIndex((row) => row && row.refund_credit === true)
+  if (flagged >= 0) return flagged
+  const first = rows[0]
+  return first && Number(first.amount_khr) === 0 && Math.abs(Number(first.amount_usd) - creditUsd) < 0.00005 ? 0 : -1
+}
+
+async function planCreditReversals(db: D1Compat, request: BulkRequest, members: Member[], replacement: Map<number, ReplacementInfo>): Promise<SaleStatusSnapshot[]> {
+  if (request.field !== 'status' || request.target !== 'cancelled') return []
+  const events: SaleStatusSnapshot[] = []
+  for (const member of members) {
+    if (member.linked || !member.changed || member.scope !== 'customer') continue
+    const info = replacement.get(member.id)
+    const sale = info?.money
+    if (!info || !sale || info.money_precision_version !== 1 || sale.source_return_id !== member.id || normalize(sale.sale_status) === 'cancelled') continue
+    const creditUsd = money4(sale.refund_usd - sale.refund_owed_usd)
+    if (!(creditUsd > 0)) continue
+    let rows: TenderRow[]
+    try { rows = JSON.parse(sale.payment_details || '[]') } catch { continue }
+    if (!Array.isArray(rows)) continue
+    const index = creditRowIndex(rows, creditUsd)
+    if (index < 0) continue
+    const credit = Number(rows[index].amount_usd) || 0
+    const rest = rows.filter((_, position) => position !== index)
+    const before: SaleCreditState = {
+      payment_method: sale.payment_method, payment_details: sale.payment_details, amount_paid_usd: sale.amount_paid_usd,
+      amount_paid_khr: sale.amount_paid_khr, sale_status: normalize(sale.sale_status, 'completed'),
+    }
+    const paidUsd = Math.max(0, money4(sale.amount_paid_usd - credit))
+    const rate = sale.exchange_rate > 0 ? sale.exchange_rate : 0
+    const owed = money4(sale.total_usd - paidUsd - (sale.amount_paid_khr && rate ? sale.amount_paid_khr / rate : 0))
+    const methods = [...new Set(rest.map((row) => String(row.method ?? '')).filter(Boolean))]
+    const after: SaleCreditState = {
+      payment_method: methods.join(' + ') || null, payment_details: JSON.stringify(rest), amount_paid_usd: paidUsd, amount_paid_khr: sale.amount_paid_khr,
+      sale_status: before.sale_status === 'completed' && owed > CREDIT_TOLERANCE ? 'awaiting_payment' : before.sale_status,
+    }
+    member.credit = { saleId: info.sale_id, usd: credit, before, after }
+    // A take-back of the replacement was refunded as if the credit had been paid in cash: split it again, debt first, against the sale as it stands now.
+    const takeBacks = members.filter((candidate) => candidate.linked && candidate.saleId === info.sale_id)
+    if (takeBacks.length) {
+      const stored = sale.stored
+      {
+        const ids = takeBacks.map((candidate) => candidate.id).sort((a, b) => a - b)
+        let plan: ReturnType<typeof planReturnMoney>
+        try {
+          plan = planReturnMoney({
+            sale: { ...stored.sale, sale_status: after.sale_status, amount_paid_usd: after.amount_paid_usd, amount_paid_khr: after.amount_paid_khr },
+            returns: stored.returns.map((row) => ({ id: Number(row.id), active: normalize(row.status, 'completed') !== 'cancelled', refundUsd: row.total_refund_usd,
+              owedReductionUsd: row.owed_reduction_usd, currency: row.refund_currency ?? 'USD' })),
+            recompute: ids,
+          })
+        } catch (error) {
+          if (error instanceof ReturnMoneyError) fail(error.message, 409, error.code)
+          throw error
+        }
+        for (const takeBack of takeBacks) {
+          const row = stored.returns.find((candidate) => Number(candidate.id) === takeBack.id)
+          if (!row || !plan.owedReductionUsd.has(takeBack.id)) continue
+          const currency = row.refund_currency == null ? null : String(row.refund_currency)
+          takeBack.money = {
+            before: { owed_reduction_usd: Number(row.owed_reduction_usd) || 0, refund_currency: currency },
+            after: { owed_reduction_usd: plan.owedReductionUsd.get(takeBack.id)!, refund_currency: currency ?? 'USD' },
+          }
+        }
+      }
+    }
+    const stateOf = (status: string) => saleReturnRecordWord({ saleStatus: status, returnState: sale.return_state === 'full' || sale.return_state === 'partial' ? sale.return_state : null, deliveryPending: false })
+    events.push({ saleId: info.sale_id, before: stateOf(before.sale_status), after: stateOf(after.sale_status), paymentBefore: before.sale_status, paymentAfter: after.sale_status })
+  }
+  return events
+}
+
+/**
+ * Restoring an exchange return whose credit was reversed would book its refund again with nothing paying the replacement sale for it. The way back
+ * is the Undo of the cancel, which puts the credit and the take-backs back exactly; a restore from the list is refused whole.
+ */
+async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, returns: Row[]): Promise<void> {
+  if (request.field !== 'status' || request.target !== 'completed') return
+  const ids = request.items.map((item) => item.id).filter((id) => returns.some((row) => Number(row.id) === id && Number(row.replacement_sale_id) > 0 && normalize(row.status, 'completed') === request.source))
+  if (!ids.length) return
+  const sales = await rowsForIds<Row>(db, ids, (marks) => `SELECT s.source_return_id,s.payment_details,s.sale_status,s.money_precision_version FROM sales s WHERE s.source_return_id IN (${marks})`)
+  for (const sale of sales) {
+    const returnRow = returns.find((row) => Number(row.id) === Number(sale.source_return_id))
+    if (!returnRow || Number(sale.money_precision_version) !== 1 || normalize(sale.sale_status) === 'cancelled') continue
+    const creditUsd = money4((Number(returnRow.total_refund_usd) || 0) - (Number(returnRow.owed_reduction_usd) || 0))
+    if (!(creditUsd > 0)) continue
+    let rows: TenderRow[] = []
+    try { rows = JSON.parse(String(sale.payment_details || '[]')) } catch { rows = [] }
+    if (Array.isArray(rows) && creditRowIndex(rows, creditUsd) >= 0) continue
+    fail('This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.', 409, 'return_restore_exchange_credit')
+  }
+}
+
+async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
   const ids = request.items.map((item) => item.id)
   // The returns the till made to take replacement units back are read, guarded and stocked together with the selected ones.
   const linkedIds = [...new Set(request.items.flatMap((item) => item.replacement?.return_ids ?? []))].sort((a, b) => a - b)
   if (linkedIds.some((id) => ids.includes(id))) fail('A replacement return cannot also be one of the selected returns.', 400, 'return_cancel_replacement_invalid')
   if (ids.length + linkedIds.length > RETURN_BULK_LIMIT) fail(`Select between 1 and ${RETURN_BULK_LIMIT} returns including their replacement returns.`, 400)
   const returns = await rowsForIds<Row>(db, [...ids, ...linkedIds], (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
+  await refuseRestoreWithoutCredit(db, request, returns)
   const replacement = request.field === 'status' && request.target === 'cancelled'
     ? await planReplacementChoices(db, request, returns, user)
     : new Map<number, ReplacementInfo>()
@@ -760,6 +919,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
 
   const members: Member[] = []
   const guards: Statement[] = []
+  const memberGuards = new Map<number, Statement>()
   // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the active
   // branch the operator confirmed (X-Branch-Redirect; branch_redirect_required until then), in the lot that exists
   // there now; the return keeps its own branch and label. While every branch is active nothing is redirected and
@@ -813,8 +973,11 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       ...(linked ? { linked: true as const } : {}),
     }
     if (changed) {
-      guards.push(guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision", { id: expected.id, revision: Number(row.write_revision) || 0 }))
-      guards.push(guard(`${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: row.movement_fingerprint }))
+      // One guard statement per changed return (the revision it was read at and the stock movements it carries): every statement counts against a Free invocation.
+      const memberGuard = guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision AND ${movementFingerprint('@id')}=@fingerprint`,
+        { id: expected.id, revision: Number(row.write_revision) || 0, fingerprint: row.movement_fingerprint })
+      guards.push(memberGuard)
+      memberGuards.set(expected.id, memberGuard)
     }
 
     if (changed && request.field === 'status') {
@@ -913,7 +1076,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
   }
   const effectGuards = resolver.guards()
   if (effectGuards.length) guards.push(guard(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }))
-  return { members, guards }
+  return { members, guards, replacement, memberGuards }
 }
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
@@ -949,7 +1112,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards } = await buildMembers(db, request, redirectTarget, user)
+  const { members, guards, replacement, memberGuards } = await buildMembers(db, request, redirectTarget, user)
   // What the operator selected is what the receipt, the counts and the Telegram alert speak of; the linked replacement returns ride in the snapshot.
   const selected = members.filter((member) => !member.linked)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
@@ -958,12 +1121,18 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   const stamp = new Date().toISOString()
   const saleRows = request.field === 'status' ? await saleTagRows(db, selected, 'after') : []
   if (request.field === 'status') await planStatusMoney(db, members)
+  const creditEvents = await planCreditReversals(db, request, members, replacement)
+  for (const member of members) {
+    if (!member.credit) continue
+    const check = creditStatePredicate(member.credit.before, member.credit.saleId)
+    mergeGuard(memberGuards.get(member.id)!, check.predicate, check.params)
+  }
   const snapshot: Snapshot = { version: 1, operationId, field: request.field, members, tagged: true,
     saleStatuses: saleRows.map(row => {
       const stored = saleStoredState(row)
       const tag = entitlement.exactTags.has(row.saleId) ? entitlement.exactTags.get(row.saleId)! : row.tagAfter
       return { saleId: row.saleId, before: saleReturnRecordWord(stored), after: saleReturnRecordWord({ ...stored, returnState: tag }) }
-    }) }
+    }).concat(creditEvents) }
   const changedIds = selected.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = selected.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -999,7 +1168,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'field',@field,'source',@source,'target',@target,'changed_count',@changed,'unchanged_count',@unchanged),
             @actor,@name FROM return_bulk_operations WHERE id=@id`,
-    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged${members.some(member => member.linked) ? `; ${members.filter(member => member.linked).length} replacement return(s) taken back with it` : ''}`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
+    params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged${members.some(member => member.linked) ? `; ${members.filter(member => member.linked).length} replacement return(s) taken back with it` : ''}${members.some(member => member.credit) ? `; refund credit of ${members.filter(member => member.credit).length} replacement sale(s) moved to Not Paid` : ''}`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE return_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {
@@ -1047,7 +1216,12 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
-    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
+    const replayGuard = guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id })
+    if (member.credit) {
+      const check = creditStatePredicate(directionSign > 0 ? member.credit.before : member.credit.after, member.credit.saleId)
+      mergeGuard(replayGuard, check.predicate, check.params)
+    }
+    statements.push(replayGuard)
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
   // The tag is derived again from the returns as the replay leaves them, never copied from the snapshot:

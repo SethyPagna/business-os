@@ -95,6 +95,35 @@ async function main() {
       })
     }
 
+    // ---- 1b. the refund credit goes back to Not Paid (6.0.963) inside the same budget ----------------------------------------------------------------------------------
+    // Cancelling and KEEPING the replacement reverses the credit on the replacement sale (one write, its check inside the return's own guard): it fits, the sale owes
+    // the $10 as Not Paid, and the undo and redo fit too and put the exact columns back.
+    {
+      const x = await exchange(await makeSale([9815]), 1)
+      const columns = () => h.one('SELECT payment_method,payment_details,amount_paid_usd,amount_paid_khr,sale_status FROM sales WHERE id=?', x.s2.id)
+      const exchanged = await columns()
+      const done = await cancel(x.ret.id, 'cf-cancel-keep', [])
+      const reversed = await columns()
+      const cancelN = statementsOf(`cancel ${x.ret.id}`)
+      r.check(`1 back / 1 out, replacement kept: the credit moves to Not Paid on Free (${done.status}); ${cancelN} statements (limit ${H.FREE_QUERY_LIMIT})`, () => {
+        assert.equal(done.status, 200, JSON.stringify(done.body))
+        assert.ok(cancelN > 0 && cancelN <= H.FREE_QUERY_LIMIT, `cancel ${cancelN}`)
+        assert.deepEqual([reversed.payment_details, reversed.amount_paid_usd, reversed.sale_status], ['[]', 0, 'awaiting_payment'])
+        assert.equal(exchanged.sale_status, 'completed')
+      })
+      const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId), 'cf undo keep')
+      const afterUndo = await columns()
+      const redone = await H.historyStep(h, done.body.actionHistoryId, 'redo', await generationOf(done.body.actionHistoryId), 'cf redo keep')
+      const afterRedo = await columns()
+      r.check(`...undo (${undone.status}, ${statementsOf('cf undo keep')} statements) and redo (${redone.status}, ${statementsOf('cf redo keep')}) fit and restore the exact columns`, () => {
+        assert.equal(undone.status, 200, JSON.stringify(undone.body))
+        assert.equal(redone.status, 200, JSON.stringify(redone.body))
+        assert.ok(statementsOf('cf undo keep') <= H.FREE_QUERY_LIMIT && statementsOf('cf redo keep') <= H.FREE_QUERY_LIMIT)
+        assert.deepEqual(afterUndo, exchanged)
+        assert.deepEqual(afterRedo, reversed)
+      })
+    }
+
     // ---- 2. a selection too large for the plan is refused whole ----------------------------------------------------------------------------------------------
     // 5 lines back, 5 out. The replacement taken back in single-line returns (a 5-line take-back is itself over a Free invocation), then ONE cancel that links
     // all five.

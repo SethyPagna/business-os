@@ -501,7 +501,7 @@ runTest('the sale detail shows what a receipt shows, and stops there', () => {
   assert.ok(!saleDetail.includes("'payment_breakdown'"), 'the split payment must not be its own labelled row')
   // Two rows carry this label -- the awaiting-payment affordance comes first,
   // so anchor on the badge that only the settled row renders.
-  const payAt = saleDetail.indexOf('<span className="badge-blue text-xs">{sale.payment_method}</span>')
+  const payAt = saleDetail.indexOf('<span className="badge-blue text-xs">{paymentMethodShown}</span>')
   assert.ok(payAt >= 0, 'expected the settled payment-method row')
   assert.ok(
     saleDetail.slice(payAt, payAt + 1200).includes('paymentDetails.map'),

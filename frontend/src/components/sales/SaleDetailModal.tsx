@@ -218,7 +218,7 @@ interface SaleDetail {
   records_count?: number | string | null
 }
 
-type ParsedPayment = { method: string; amount_usd: number; amount_khr: number }
+type ParsedPayment = { method: string; amount_usd: number; amount_khr: number; refund_credit: boolean }
 
 // S4-24b -- the product search's rows. The staged line itself, and every
 // rule that builds one, live in saleAddLines.ts so they can be tested on
@@ -331,6 +331,8 @@ function parsePaymentDetails(raw: SaleDetail['payment_details']): ParsedPayment[
       method: String((entry as { method?: unknown })?.method ?? '').trim(),
       amount_usd: Number((entry as { amount_usd?: unknown })?.amount_usd) || 0,
       amount_khr: Number((entry as { amount_khr?: unknown })?.amount_khr) || 0,
+      // The one tender row of an exchange that is its refund credit, not money handed over: named as such, never as the cash method.
+      refund_credit: (entry as { refund_credit?: unknown })?.refund_credit === true,
     }))
     .filter((entry) => entry.method && (entry.amount_usd > 0 || entry.amount_khr > 0))
 }
@@ -1602,6 +1604,10 @@ export default function SaleDetailModal({
   // which holds the Contact Options JSON -- that is the "[]" the owner saw.
   const customerAddress = contactDisplayAddress(sale.customer_address)
   const paymentDetails = parsePaymentDetails(sale.payment_details)
+  const refundCreditLabel = translateOr('refund_credit', 'Refund credit', 'ប្រាក់សងវិញ')
+  const paymentMethodShown = paymentDetails.some((detail) => detail.refund_credit)
+    ? Array.from(new Set(paymentDetails.map((detail) => detail.refund_credit ? refundCreditLabel : detail.method))).join(' + ')
+    : sale.payment_method
   // Outstanding balance: an on-credit / partially-paid sale (tender below
   // total). Shown so the admin detail no longer hides "still owed".
   //
@@ -1952,14 +1958,14 @@ export default function SaleDetailModal({
                     <span className="block">
                       {sale.payment_method ? (
                         <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} title={translateOr('open_payment_settings', 'Open payment settings', 'បើកការកំណត់វិធីទូទាត់')}>
-                          <span className="badge-blue text-xs">{sale.payment_method}</span>
+                          <span className="badge-blue text-xs">{paymentMethodShown}</span>
                         </EntityLink>
                       ) : <span className="badge-blue text-xs">{t('none') || 'None'}</span>}
                       {paymentDetails.length > 1 ? (
                         <span className="mt-1 block space-y-0.5">
                           {paymentDetails.map((detail, index) => (
                             <span key={`${detail.method}-${index}`} className="flex justify-between gap-3 text-xs font-normal text-gray-500 dark:text-gray-400">
-                              <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} title={translateOr('open_payment_settings', 'Open payment settings', 'បើកការកំណត់វិធីទូទាត់')} className="min-w-0 flex-1 break-words">{detail.method}</EntityLink>
+                              <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} title={translateOr('open_payment_settings', 'Open payment settings', 'បើកការកំណត់វិធីទូទាត់')} className="min-w-0 flex-1 break-words">{detail.refund_credit ? refundCreditLabel : detail.method}</EntityLink>
                               <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
                             </span>
                           ))}

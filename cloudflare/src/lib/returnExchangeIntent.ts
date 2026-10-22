@@ -92,7 +92,8 @@ export function canonicalExchangeExpected(value: unknown): ExchangeQuoteV1 {
 
 // ---- the tender the customer adds -------------------------------------------------------------------------------------
 
-export type ExchangeTenderRow = { method: string; amount_usd: number; amount_khr: number }
+// `refund_credit` marks the one row that is the exchange's refund credit (not money the customer handed over): receipts name it, and cancelling the return reverses it.
+export type ExchangeTenderRow = { method: string; amount_usd: number; amount_khr: number; refund_credit?: true }
 export type ExchangePaymentIntent = { details: ExchangeTenderRow[]; change_currency: 'USD' | 'KHR' }
 
 const METHOD_MAX = 80

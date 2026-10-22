@@ -122,7 +122,7 @@ async function main() {
         assert.deepEqual([a.ret.total_refund_usd, a.ret.refund_currency, a.ret.owed_reduction_usd, a.ret.money_precision_version], [10, 'USD', 0, 1])
         assert.deepEqual([a.sale.money_precision_version, a.sale.total_usd, a.sale.calculated_total_usd, a.sale.amount_paid_usd, a.sale.amount_paid_khr, a.sale.change_usd, a.sale.change_khr, a.sale.sale_status],
           [1, 10, 10, 10, 0, 0, 0, 'completed'])
-        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }])
+        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 10, amount_khr: 0, refund_credit: true }])
         assert.equal(a.sale.source_return_id, a.ret.id)
         assert.equal(a.ret.replacement_sale_id, a.sale.id)
       })
@@ -150,7 +150,7 @@ async function main() {
       r.check(`customer pays: 1 x $10 back, 1 x $16 out, pays $6 by ABA (${result.created?.status})`, () => assert.equal(result.created.status, 200, JSON.stringify(result.created?.body)))
       const a = await rowsOf(result.created.body.id)
       r.check(`customer pays money: S2 $16 = credit Cash $10 + ABA $6, no change; refund $10 -- ${JSON.stringify(a.pay)}`, () => {
-        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }, { method: 'ABA', amount_usd: 6, amount_khr: 0 }])
+        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 10, amount_khr: 0, refund_credit: true }, { method: 'ABA', amount_usd: 6, amount_khr: 0 }])
         assert.deepEqual([a.sale.total_usd, a.sale.amount_paid_usd, a.sale.change_usd, a.sale.sale_status, a.sale.payment_method], [16, 16, 0, 'completed', 'Cash + ABA'])
         assert.equal(a.ret.total_refund_usd, 10)
       })
@@ -227,7 +227,7 @@ async function main() {
       const after = await stockOf(9505)
       r.check('two parts: two sale lines (1 x 8, 2 x 12), paid credit $8 + cash $24, shelf down by the 2 extra units', () => {
         assert.deepEqual(a.items.map(row => [row.quantity, row.applied_price_usd, row.total_usd]), [[1, 8, 8], [2, 12, 24]])
-        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 8, amount_khr: 0 }, { method: 'Cash', amount_usd: 24, amount_khr: 0 }])
+        assert.deepEqual(a.pay, [{ method: 'Cash', amount_usd: 8, amount_khr: 0, refund_credit: true }, { method: 'Cash', amount_usd: 24, amount_khr: 0 }])
         assert.deepEqual([a.sale.total_usd, a.sale.amount_paid_usd, a.ret.total_refund_usd], [32, 32, 8])
         assert.deepEqual([after.branch - before.branch, after.product - before.product, after.lots - before.lots], [-2, -2, -2])
       })

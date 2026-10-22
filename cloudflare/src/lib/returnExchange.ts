@@ -202,7 +202,7 @@ export function settleExchange(input: {
   changeRateSetting?: unknown
   notPaid: boolean
 }): ExchangeSettlement {
-  const credit = input.creditUsd > 0 ? [{ method: input.cashMethod, amount_usd: input.creditUsd, amount_khr: 0 }] : []
+  const credit: ExchangeTenderRow[] = input.creditUsd > 0 ? [{ method: input.cashMethod, amount_usd: input.creditUsd, amount_khr: 0, refund_credit: true }] : []
   const paymentDetails = [...credit, ...input.payment.details]
   if (paymentDetails.length > RETURN_EXCHANGE_MAX_TENDER_ROWS + 1) {
     throw new ReturnExchangeError('return_exchange_payment_invalid', 'The replacement payment has too many rows.')

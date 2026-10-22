@@ -74,6 +74,7 @@ export default function ReplacementChoiceList({ items, loading, failed, canTakeB
               <InfoHint label={tr('return_cancel_replacement_also', 'Also cancel the replacement items', 'បោះបង់ទំនិញជំនួសផងដែរ')}
                 text={tr('return_cancel_replacement_hint', 'The customer gives these items back: each ticked line returns to the shelf it came from and is refunded in the same step as the cancel. Untick a line to leave it with the customer. Undo brings them back out.', 'អតិថិជនប្រគល់ទំនិញទាំងនេះមកវិញ៖ ទំនិញដែលបានធីកនីមួយៗត្រឡប់ទៅធ្នើដើម ហើយសងប្រាក់ក្នុងជំហានតែមួយជាមួយការបោះបង់។ ដោះធីកចេញដើម្បីទុកឱ្យអតិថិជន។ ត្រឡប់វិញនឹងយកទំនិញចេញម្ដងទៀត។')} />
             </label>
+            <p data-note="credit-not-paid" className="pl-6 text-xs text-emerald-800 dark:text-emerald-200">{tr('return_cancel_replacement_not_paid', 'The refund credit stops paying for the items that stay: the sale owes it as Not Paid.', 'ប្រាក់សងវិញលែងបង់ថ្លៃទំនិញដែលនៅសល់ ដូច្នេះការលក់ជំពាក់វាជា «ប្រាក់ជំពាក់»។')}</p>
             {answer.cancel ? (
               <ul className="space-y-1 pl-6">
                 {outstanding.lines.map((line) => (

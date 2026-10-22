@@ -208,7 +208,8 @@ function parseItems(raw: ReceiptSale['items']): ReceiptItem[] {
   }
 }
 
-function parsePaymentDetails(raw: ReceiptSale['payment_details']): Array<{ method: string; amount_usd: number; amount_khr: number }> {
+// `refund_credit` marks the tender row that is an exchange's refund credit (not money handed over): the receipt names it, it is never printed as the cash method.
+function parsePaymentDetails(raw: ReceiptSale['payment_details']): Array<{ method: string; amount_usd: number; amount_khr: number; refund_credit: boolean }> {
   const candidate = Array.isArray(raw) ? raw : (() => {
     if (typeof raw !== 'string') return []
     try { return JSON.parse(raw) } catch { return [] }
@@ -218,6 +219,7 @@ function parsePaymentDetails(raw: ReceiptSale['payment_details']): Array<{ metho
     method: String(detail?.method || '').trim(),
     amount_usd: toNumber(detail?.amount_usd),
     amount_khr: toNumber(detail?.amount_khr),
+    refund_credit: (detail as { refund_credit?: unknown } | null)?.refund_credit === true,
   })).filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
 }
 
@@ -274,6 +276,7 @@ const LABELS = {
     followUs: 'Follow us',
     taxId: 'Tax ID:',
     receivedPayment: 'Received payment',
+    refundCredit: 'Refund credit',
   },
   km: {
     receipt: 'បង្កាន់ដៃ',
@@ -311,6 +314,7 @@ const LABELS = {
     followUs: 'តាមដានពួកយើង',
     taxId: 'លេខអត្តសញ្ញាណកម្មពន្ធ:',
     receivedPayment: 'បានទទួលប្រាក់',
+    refundCredit: 'ប្រាក់សងវិញ',
   },
 }
 
@@ -413,9 +417,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const items = useMemo(() => parseItems(sale.items), [sale.items])
   const paymentDetails = useMemo(() => parsePaymentDetails(sale.payment_details), [sale.payment_details])
   const paymentMethodText = useMemo(() => {
-    const detailMethods = Array.from(new Set(paymentDetails.map((detail) => detail.method)))
+    const detailMethods = Array.from(new Set(paymentDetails.map((detail) => detail.refund_credit ? labelFor(lang, 'refundCredit') : detail.method)))
     return detailMethods.join(' + ') || String(sale.payment_method || '').trim() || 'Cash'
-  }, [paymentDetails, sale.payment_method])
+  }, [paymentDetails, sale.payment_method, lang])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
   // Route every supported timestamp shape through the shared formatter:

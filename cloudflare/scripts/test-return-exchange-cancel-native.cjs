@@ -23,7 +23,12 @@ const FILE = 'src/lib/returnBulkAction.ts'
 const MUTANTS = {
   'choice-not-required': [{ file: FILE, from: 'return kept.length && !item.replacement ?', to: 'return false ?' }],
   'floor-guard-off': [{ file: FILE, from: 'if (user && !canSetSalePrice(user)) {', to: 'if (false) {' }],
-  'linked-not-undone': [{ file: FILE, from: 'if (!member.changed || (applying && member.linked)) return []', to: 'if (!member.changed || member.linked) return []' }],
+  'linked-not-undone': [{ file: FILE, from: 'if (applying && member.linked) {', to: 'if (member.linked) {' }],
+  // 6.0.963: the refund credit of a cancelled exchange goes back to Not Paid.
+  'credit-not-reversed': [{ file: FILE, from: 'member.credit = { saleId: info.sale_id, usd: credit, before, after }', to: 'void 0' }],
+  'takeback-not-resplit': [{ file: FILE, from: 'if (takeBacks.length) {', to: 'if (false) {' }],
+  'undo-leaves-credit': [{ file: FILE, from: 'const to = direction > 0 ? credit.after : credit.before', to: 'const to = credit.after' }],
+  'restore-allowed': [{ file: FILE, from: 'if (Array.isArray(rows) && creditRowIndex(rows, creditUsd) >= 0) continue', to: 'continue' }],
   'foreign-return-linkable': [
     { file: FILE, from: '|| Number(row.sale_id) !== linkedTo.sale_id', to: '' },
     { file: FILE, from: '|| own.some((item) => !lineIds.has(Number(item.sale_item_id)))', to: '' },
@@ -134,7 +139,7 @@ async function main() {
         assert.equal(kept.status, 200, JSON.stringify(kept.body))
         assert.deepEqual(kept.body.changedIds, [x.ret.id])
         assert.deepEqual(delta(before, afterKeep), { 9701: [-1, -1, -1], 9702: [0, 0, 0], 9703: [0, 0, 0] })
-        assert.deepEqual([s2After.sale_status, s2After.total_usd, s2After.return_state], ['completed', 22.48, null])
+        assert.deepEqual([s2After.sale_status, s2After.total_usd, s2After.return_state], ['awaiting_payment', 22.48, null])
       })
     }
 
@@ -157,7 +162,7 @@ async function main() {
         assert.equal(done.body.items.length, 1)
       })
       const label = (await h.one('SELECT label FROM action_history WHERE id=?', done.body.actionHistoryId)).label
-      r.check(`some: the history entry says a replacement return was taken back with the cancel -- ${label}`, () => assert.equal(label, '1 returns: status completed → cancelled; 0 unchanged; 1 replacement return(s) taken back with it'))
+      r.check(`some: the history entry says a replacement return was taken back with the cancel -- ${label}`, () => assert.equal(label, '1 returns: status completed → cancelled; 0 unchanged; 1 replacement return(s) taken back with it; refund credit of 1 replacement sale(s) moved to Not Paid'))
       r.check('some: stock exactly -- Palette +1 (its own lot), Lipstick -1 (the cancelled return), Gloss unchanged (it stays with the customer)', () => {
         assert.deepEqual(delta(before, after), { 9701: [-1, -1, -1], 9702: [1, 1, 1], 9703: [0, 0, 0] })
         assert.deepEqual(delta(mid, after), { 9701: [-1, -1, -1], 9702: [0, 0, 0], 9703: [0, 0, 0] })
@@ -328,9 +333,11 @@ async function main() {
     // ---- 9. the money: the shift drawer and the reports move exactly, and undo / redo put them back --------------------------------------------------
     // Each case is read through the open shift's drawer (GET /api/shifts/current) and the report totals (GET /api/reports/overview) as the change it makes.
     // The exchange: the customer pays $12.48 cash on top of the $10 credit. Gross model: S2 takes $22.48 (credit + cash) and R pays $10 out.
-    //   keep  -> R's $10 refund is gone, S2 stands: the drawer says +$22.48 (the credit was never cash: the customer owes it, see the report);
-    //   some  -> the Palette line comes back ($16 refund out), R's refund gone: the drawer says +$6.48;
-    //   all   -> every S2 line comes back ($22.48 refund out), R's refund gone: the drawer is exactly where it was before the exchange;
+    //   keep  -> R's $10 refund is gone and the $10 credit no longer pays S2 (6.0.963, "Mark it Not Paid"): the drawer keeps the $12.48 that really came in and
+    //            the $10 is Not Paid on S2;
+    //   some  -> the Palette line ($16) comes back, R's refund gone: the take-back lowers the $10 debt first, so $6 of it is cash; the drawer says +$6.48 --
+    //            exactly the Gloss the customer kept -- and nothing is owed;
+    //   all   -> every S2 line ($22.48) comes back: $10 lowers the debt, $12.48 is cash, the drawer is exactly where it was before the exchange;
     //   undo  -> the exchange as it stood; redo -> the cancel again, to the cent.
     {
       await h.db.prepare("INSERT INTO settings(key,value) VALUES('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
@@ -352,9 +359,10 @@ async function main() {
         revenue: round4(after.totals.revenue_usd - before.totals.revenue_usd),
         refunds: round4(after.totals.refund_usd - before.totals.refund_usd),
         collected: round4(after.totals.collected_total_usd - before.totals.collected_total_usd),
+        notPaid: round4(after.totals.not_paid_owed_usd - before.totals.not_paid_owed_usd),
       })
       const expectChange = (title, got, want) => r.check(`${title}: ${JSON.stringify(got)}`, () => assert.deepEqual(got, want))
-      const exchanged = { expectedUsd: 12.48, cashSalesUsd: 22.48, refundsUsd: 10, revenue: 12.48, refunds: 10, collected: 12.48 }
+      const exchanged = { expectedUsd: 12.48, cashSalesUsd: 22.48, refundsUsd: 10, revenue: 12.48, refunds: 10, collected: 12.48, notPaid: 0 }
 
       {
         const sale = await standardSale()
@@ -367,7 +375,7 @@ async function main() {
         assert.equal(done.status, 200, JSON.stringify(done.body))
         const two = await read()
         expectChange('money, all: every replacement line back and the return cancelled -- the drawer and the reports are where they were before the exchange', change(zero, two),
-          { expectedUsd: 0, cashSalesUsd: 22.48, refundsUsd: 22.48, revenue: 0, refunds: 22.48, collected: 0 })
+          { expectedUsd: 0, cashSalesUsd: 12.48, refundsUsd: 12.48, revenue: 0, refunds: 22.48, collected: 0, notPaid: 0 })
       }
       {
         const sale = await standardSale()
@@ -377,7 +385,7 @@ async function main() {
         assert.equal(done.status, 200, JSON.stringify(done.body))
         const two = await read()
         expectChange('money, keep: only the return is cancelled -- its $10 refund is gone, the replacement sale stands whole', change(zero, two),
-          { expectedUsd: 22.48, cashSalesUsd: 22.48, refundsUsd: 0, revenue: 22.48, refunds: 0, collected: 22.48 })
+          { expectedUsd: 12.48, cashSalesUsd: 12.48, refundsUsd: 0, revenue: 22.48, refunds: 0, collected: 12.48, notPaid: 10 })
         const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId))
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
         expectChange('money, keep, undone: the exchange as it stood', change(zero, await read()), exchanged)
@@ -391,7 +399,7 @@ async function main() {
         assert.equal(done.status, 200, JSON.stringify(done.body))
         const two = await read()
         expectChange('money, some: the Palette line back ($16 out), the return cancelled ($10 refund gone)', change(zero, two),
-          { expectedUsd: 6.48, cashSalesUsd: 22.48, refundsUsd: 16, revenue: 6.48, refunds: 16, collected: 6.48 })
+          { expectedUsd: 6.48, cashSalesUsd: 12.48, refundsUsd: 6, revenue: 6.48, refunds: 16, collected: 6.48, notPaid: 0 })
         const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId))
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
         const three = await read()
@@ -401,6 +409,97 @@ async function main() {
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
         expectChange('money, some, redone: the same cancel again, to the cent', change(zero, await read()), change(zero, two))
       }
+      {
+        // The Gloss ($6.48) comes back, the Palette ($16) stays: the take-back lowers the $10 debt by $6.48 and no cash leaves; $3.52 is still owed.
+        // The customer paid $12.48 and keeps the $16 Palette -- exactly what the sale says they owe.
+        const sale = await standardSale()
+        const zero = await read()
+        const x = await standardExchange(sale)
+        const gloss = await takeBack(x.s2, [1], 'xc-money-partial-take')
+        const done = await cancelNow(x.ret.id, 'xc-money-partial', { return_ids: [gloss] })
+        assert.equal(done.status, 200, JSON.stringify(done.body))
+        const two = await read()
+        expectChange('money, keep the Palette (the Gloss back): no cash out, $3.52 still owed', change(zero, two),
+          { expectedUsd: 12.48, cashSalesUsd: 12.48, refundsUsd: 0, revenue: 16, refunds: 6.48, collected: 12.48, notPaid: 3.52 })
+        const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId))
+        assert.equal(undone.status, 200, JSON.stringify(undone.body))
+        expectChange('money, keep the Palette, undone: the exchange as it stood', change(zero, await read()), exchanged)
+      }
+    }
+
+    // ---- 13. the refund credit is Not Paid again (6.0.963, owner: "Mark it Not Paid") -------------------------------------------------------------------
+    // Cancelling an exchange return cancels its refund, so the credit that paid the replacement sale for it is reversed: the credit tender row leaves the sale's
+    // payments, the sale reads Not Paid for that share, a take-back return splits its refund again (debt first), and undo / redo put back the exact columns.
+    {
+      const columns = id => h.one('SELECT payment_method,payment_details,amount_paid_usd,amount_paid_khr,sale_status FROM sales WHERE id=?', id)
+      const rowsOf = column => JSON.parse(column.payment_details || '[]')
+      const x = await standardExchange()
+      const exchanged = await columns(x.s2.id)
+      r.check('credit: the exchange pays the replacement with a flagged credit row ahead of the customer\'s own cash, $22.48 in all', () => {
+        assert.deepEqual(rowsOf(exchanged), [{ method: 'Cash', amount_usd: 10, amount_khr: 0, refund_credit: true }, { method: 'Cash', amount_usd: 12.48, amount_khr: 0 }])
+        assert.deepEqual([exchanged.amount_paid_usd, exchanged.sale_status], [22.48, 'completed'])
+      })
+      const kept = await cancelNow(x.ret.id, 'xc-np-keep', { return_ids: [] })
+      const reversed = await columns(x.s2.id)
+      const events = await h.all("SELECT kind FROM sale_record_events WHERE sale_id=? AND source_kind='return_bulk'", x.s2.id)
+      r.check(`credit, keep: the credit row leaves the payments and the sale owes it as Not Paid -- ${JSON.stringify([reversed.payment_details, reversed.amount_paid_usd, reversed.sale_status])}`, () => {
+        assert.equal(kept.status, 200, JSON.stringify(kept.body))
+        assert.deepEqual(rowsOf(reversed), [{ method: 'Cash', amount_usd: 12.48, amount_khr: 0 }])
+        assert.deepEqual([reversed.payment_method, reversed.amount_paid_usd, reversed.amount_paid_khr, reversed.sale_status], ['Cash', 12.48, 0, 'awaiting_payment'])
+        assert.equal(events.length, 1, 'the sale\'s Records show its payment state moving: ' + JSON.stringify(events))
+      })
+      const undone = await H.historyStep(h, kept.body.actionHistoryId, 'undo', await generationOf(kept.body.actionHistoryId))
+      const restored = await columns(x.s2.id)
+      r.check(`credit, keep, undo: the replacement sale is exactly as the exchange left it, byte for byte (${undone.status})`, () => {
+        assert.equal(undone.status, 200, JSON.stringify(undone.body))
+        assert.deepEqual(restored, exchanged)
+      })
+      const redone = await H.historyStep(h, kept.body.actionHistoryId, 'redo', await generationOf(kept.body.actionHistoryId))
+      const keepRedone = await columns(x.s2.id)
+      r.check(`credit, keep, redo: the credit is reversed again, exactly (${redone.status})`, () => {
+        assert.equal(redone.status, 200, JSON.stringify(redone.body))
+        assert.deepEqual(keepRedone, reversed)
+      })
+      const restoreBody = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', x.ret.id)
+      const restore = await h.call('POST', '/api/returns/bulk', { client_request_id: 'xc-np-restore', field: 'status', source: 'cancelled', target: 'completed',
+        items: [{ id: x.ret.id, expected_status: 'cancelled', expected_method: String(restoreBody.return_type || 'restock'), expected_updated_at: restoreBody.updated_at ?? null }] }, 'restore the cancelled exchange return')
+      r.check(`credit, restore: restoring the cancelled exchange return from the list is refused whole (${restore.status} ${restore.body.code}) -- the way back is the Undo`, () => {
+        assert.equal(restore.status, 409, JSON.stringify(restore.body))
+        assert.equal(restore.body.code, 'return_restore_exchange_credit')
+      })
+      assert.equal(await statusOf(x.ret.id), 'cancelled')
+      assert.deepEqual(await columns(x.s2.id), reversed)
+
+      // Partial keep: the Palette ($16) stays, the Gloss ($6.48) comes back. The take-back lowers the $10 debt first ($6.48), so no cash goes out and $3.52 is still owed:
+      // the customer paid $12.48 and keeps the $16 Palette -- exactly what they owe.
+      const y = await standardExchange()
+      const gloss = await takeBack(y.s2, [1], 'xc-np-gloss')
+      const glossBefore = await h.one('SELECT owed_reduction_usd,total_refund_usd,status FROM returns WHERE id=?', gloss)
+      const partial = await cancelNow(y.ret.id, 'xc-np-partial', { return_ids: [gloss] })
+      const glossAfter = await h.one('SELECT owed_reduction_usd,total_refund_usd,status FROM returns WHERE id=?', gloss)
+      const partialSale = await columns(y.s2.id)
+      r.check(`credit, partial keep (Palette stays, Gloss back): the Gloss refund ${glossBefore.owed_reduction_usd} -> ${glossAfter.owed_reduction_usd} of debt, none of it cash; the sale still owes the rest`, () => {
+        assert.equal(partial.status, 200, JSON.stringify(partial.body))
+        assert.deepEqual([glossBefore.owed_reduction_usd, glossBefore.total_refund_usd], [0, 6.48])
+        assert.deepEqual([glossAfter.owed_reduction_usd, glossAfter.total_refund_usd, glossAfter.status], [6.48, 6.48, 'completed'])
+        assert.deepEqual([partialSale.amount_paid_usd, partialSale.sale_status], [12.48, 'awaiting_payment'])
+      })
+      const partialUndone = await H.historyStep(h, partial.body.actionHistoryId, 'undo', await generationOf(partial.body.actionHistoryId))
+      const glossUndone = await h.one('SELECT owed_reduction_usd,status FROM returns WHERE id=?', gloss)
+      const saleUndone = await columns(y.s2.id)
+      r.check(`credit, partial keep, undo: the Gloss return is cancelled again with its debt split as before, the sale as the exchange left it (${partialUndone.status})`, () => {
+        assert.equal(partialUndone.status, 200, JSON.stringify(partialUndone.body))
+        assert.deepEqual([glossUndone.owed_reduction_usd, glossUndone.status], [0, 'cancelled'])
+        assert.deepEqual(saleUndone, exchanged)
+      })
+      const partialRedone = await H.historyStep(h, partial.body.actionHistoryId, 'redo', await generationOf(partial.body.actionHistoryId))
+      const glossRedone = await h.one('SELECT owed_reduction_usd,status FROM returns WHERE id=?', gloss)
+      const saleRedone = await columns(y.s2.id)
+      r.check(`credit, partial keep, redo: the same split again (${partialRedone.status})`, () => {
+        assert.equal(partialRedone.status, 200, JSON.stringify(partialRedone.body))
+        assert.deepEqual([glossRedone.owed_reduction_usd, glossRedone.status], [6.48, 'completed'])
+        assert.deepEqual(saleRedone, partialSale)
+      })
     }
 
     // ---- 10. what a cancel costs the database (the Paid plan here; test-return-exchange-cancel-free-native.cjs runs the Free plan's refusals) -------------------
