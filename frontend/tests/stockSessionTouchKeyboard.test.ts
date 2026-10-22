@@ -120,9 +120,11 @@ const modalSource = read('components/inventory/FastStockInModal.tsx')
   let focusCalls = 0
   let ungatedFocusTimers = 0
   let gatedFocusTimers = 0
+  let gatedLayoutFocus = 0
   let calledInComponent = false
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'useVisualViewportInset') calledInComponent = true
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'useLayoutEffect' && node.arguments[0]?.getText(file).includes('focusSearch()')) gatedLayoutFocus += 1
     if (ts.isCallExpression(node) && ts.isPropertyAccessChain(node.expression) && node.expression.name.text === 'focus' && node.expression.expression.getText(file) === 'searchInputRef.current') focusCalls += 1
     if (ts.isCallExpression(node) && node.expression.getText(file) === 'window.setTimeout' && node.arguments[0]) {
       const callback = node.arguments[0].getText(file)
@@ -134,7 +136,12 @@ const modalSource = read('components/inventory/FastStockInModal.tsx')
   visit(file)
   assert.ok(calledInComponent, 'FastStockInModal calls useVisualViewportInset (it renders its own portal, not the shared Modal)')
   assert.equal(ungatedFocusTimers, 0, 'no timer focuses the search box without the pointer gate')
-  assert.equal(gatedFocusTimers, 3, 'opening, after Add and after the option sheet all go through focusSearch')
+  // Opening and the option sheet's close stay on a timer: they must land after the dialog hook's own focus on open and
+  // the sheet's focus restore on close. Clearing the entry row (Add, the X, a scan) focuses in a layout effect
+  // instead, so the search box has focus the moment it is on screen (lane 6.0.950).
+  assert.equal(gatedFocusTimers, 2, 'opening and the option sheet go through focusSearch on a timer')
+  assert.equal(gatedLayoutFocus, 1, 'clearing the entry row focuses through focusSearch in a layout effect')
+  assert.match(modalSource, /const resetLine = \(\) => \{[\s\S]*?setSearchFocusRequest\(\(count\) => count \+ 1\)\r?\n  \}/, 'resetLine asks for that focus; it no longer starts a timer')
   assert.equal(focusCalls, 1, 'the search box is focused in exactly one place')
   assert.match(modalSource, /const focusSearch = \(\) => \{ if \(hasFinePointer\(\)\) searchInputRef\.current\?\.focus\(\) \}/)
 }

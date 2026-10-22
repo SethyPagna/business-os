@@ -4,7 +4,7 @@
 // through the same kernels as before: POST /api/inventory/fast-stock-in/commit
 // (per-line 0192 ids, deferred rounds), with the per-line fallback for an old
 // Worker.
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { captureActorReadScope, isActorReadScopeCurrent, captureActorWriteIdentity, isActorWriteIdentityCurrent, subscribeActorSessionQuarantine } from '../../api/actorReadScope.ts'
 import { SIGNOUT_INTENT_EVENT } from '../../api/unresolvedSignout.ts'
 import { ACTOR_GUARD_KEYS } from '../../api/branchRefusalLanguage.ts'
@@ -348,6 +348,13 @@ export default function FastStockInModal({
   const sessionIdRef = useRef(init.draft.sessionId)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const focusSearch = () => { if (hasFinePointer()) searchInputRef.current?.focus() }
+  // Clearing the entry row (a scan, the X, an added line) brings the search box back, and it takes focus in the very
+  // commit that mounts it: this request is a counter, answered by the layout effect below. A zero-delay timer did the
+  // same job a task later, so the box could be on screen, holding the scanned code, with focus still on the Qty field
+  // it came from; how long that lasted depended on the page's task queue, not on anything the person did.
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (searchFocusRequest > 0) focusSearch() }, [searchFocusRequest])
   const parentPanelRef = useRef<HTMLDivElement | null>(null)
 
   const productIdNumber = Number(picked?.id) > 0 ? Number(picked?.id) : 0
@@ -624,7 +631,7 @@ export default function FastStockInModal({
     setAddAttempted(false)
     pendingBatchRestoreRef.current = null
     setBatchChoice(mode === 'add' ? 'new' : 'none')
-    window.setTimeout(focusSearch, 0)
+    setSearchFocusRequest((count) => count + 1)
   }
 
   const applyEntry = (entry: Partial<StockSessionDraft>) => {
