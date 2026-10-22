@@ -11,29 +11,68 @@
 
 const path = require('path')
 const crypto = require('crypto')
+const targetLib = require('../client/target-lib.cjs')
 
 const GUARD_MIGRATIONS = [
   { name: '0243_stock_schema_epoch.sql', sha256: '8e61d1d147354456b092427d7117de5aa3d849d511f5934b457058acfcd7deb2' },
   { name: '0258_catalog_cost_admission.sql', sha256: 'a57dfe4f64c21af4bb08f82ebcbebdbaaf3bb17314128779b2c5e5c9cc53b8b9' },
 ]
-const MAIN_DATABASE_ID = '49795be9-eabe-43f1-8e16-b86faed60cb1'
-const MAIN_ACCOUNT_ID = '743e5b727d139e85ed11679097f6f99e'
 
+// Nothing below names a client. The account, the Worker, the databases and the
+// site of the deployment being released are read from that client's rendered
+// config (cloudflare/wrangler.toml, from ops/scripts/client/render-wrangler.mjs)
+// into a target, and every production command is built for that target.
 const DEFAULT_REF = 'claude/urgent-20260925'
 // DEPLOY.md "Free vs paid deploy" marks Workers Paid as current, and every
 // deploy recorded in progress.md reports `tier paid`.
 const DEFAULT_PLAN = 'paid'
-const DEFAULT_SITE = 'https://admin.leangbeauty.com'
-const WORKER_NAME = 'business-os'
 const CERT_DIR_NAME = 'certs'
 
-// Both production D1 databases, with the npm script that applies each one's
-// migrations (cloudflare/package.json) and its migrations folder
-// (cloudflare/wrangler.toml migrations_dir).
-const DATABASES = [
-  { name: 'business-os', migrationsDir: 'migrations', applyScript: 'migrate:remote' },
-  { name: 'business-os-import', migrationsDir: 'migrations-import', applyScript: 'migrate:import:remote' },
-]
+// The npm script that applies each of the client's two D1 databases' migrations
+// (cloudflare/package.json), by the binding the rendered config gives them.
+const APPLY_SCRIPTS = { DB: 'migrate:remote', IMPORT_DB: 'migrate:import:remote' }
+
+// ------------------------------------------------------------------ target
+
+// The deployment a release acts on, from its rendered config.
+//   { accountId, workerName, site, databases: [{ binding, name, id, migrationsDir, applyScript }], main, importDb }
+function targetFromParsed(parsed) {
+  const databases = [parsed.main, parsed.importDb].filter(Boolean).map((d) => ({
+    binding: d.binding, name: d.name, id: d.id, migrationsDir: d.migrationsDir, applyScript: APPLY_SCRIPTS[d.binding],
+  }))
+  return {
+    accountId: parsed.accountId,
+    workerName: parsed.workerName,
+    site: String(parsed.vars.BUSINESS_OS_ADMIN_URL || '').replace(/\/+$/, ''),
+    databases,
+    main: databases[0],
+    importDb: databases[1] || null,
+  }
+}
+
+// config text + what the environment expects -> target. Throws one Error whose
+// message lists fixed phrases only (this runs in public CI logs).
+//   expect: { accountId, d1MainId, adminUrl } (CF_ACCOUNT_ID, D1_MAIN_ID, ADMIN_URL)
+//   options.require: all three expectations must be given (CI)
+//   options.accountSecret: the CLOUDFLARE_ACCOUNT_ID the token runs with
+function targetFromConfig(text, expect = {}, options = {}) {
+  let parsed
+  try { parsed = targetLib.parseTarget(text) } catch (err) { throw new Error(err.code === 'no-config' ? 'the rendered Worker config has no account, Worker name or main database' : err.message) }
+  const problems = targetLib.checkExpectations(parsed, expect, options)
+  if (!parsed.importDb) problems.push('the rendered Worker config has no IMPORT_DB database')
+  if (problems.length) throw new Error(problems.join('; '))
+  return targetFromParsed(parsed)
+}
+
+// What a dry run walks when no config has been rendered yet: the commands are
+// shown with placeholders, nothing is read or run.
+function placeholderTarget() {
+  const databases = [
+    { binding: 'DB', name: '<main-database>', id: '<main-database-id>', migrationsDir: 'migrations', applyScript: APPLY_SCRIPTS.DB },
+    { binding: 'IMPORT_DB', name: '<import-database>', id: '<import-database-id>', migrationsDir: 'migrations-import', applyScript: APPLY_SCRIPTS.IMPORT_DB },
+  ]
+  return { accountId: '<account-id>', workerName: '<worker>', site: '', databases, main: databases[0], importDb: databases[1], placeholder: true }
+}
 
 // Real table names, all created in cloudflare/migrations/0001_init.sql.
 const KEY_TABLES = [
@@ -52,6 +91,7 @@ const NPM_SCRIPTS_USED = {
 const WRANGLER_SUBCOMMANDS_USED = [
   ['d1', 'migrations', 'apply'],
   ['whoami'],
+  ['whoami', '--json'],
   ['d1', 'time-travel', 'info'],
   ['d1', 'time-travel', 'restore'],
   ['d1', 'migrations', 'list'],
@@ -79,6 +119,7 @@ const FLAG_ALIASES = {
   'auth-from': 'authFrom', authfrom: 'authFrom', site: 'site', jobs: 'jobs',
   retries: 'retries', ci: 'ci', 'release-dir': 'releaseDir', releasedir: 'releaseDir',
   'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply',
+  'env-file': 'envFile', envfile: 'envFile',
   target: 'target', db: 'db', bookmark: 'bookmark', 'version-id': 'versionId', versionid: 'versionId',
   help: 'help', h: 'help',
 }
@@ -116,8 +157,13 @@ function parseArgs(argv) {
 
 // ------------------------------------------------------- command catalogue
 
+// Every wrangler command names the client's rendered config. A wrangler.toml of another client left in the
+// working directory must never decide which account a command reaches (it overrides CLOUDFLARE_ACCOUNT_ID).
+// The login check reads no config.
+const CLIENT_CONFIG = 'wrangler.toml'
 function wrangler(id, args, gate, extra = {}) {
-  return { id, kind: 'wrangler', args, gate, ...extra }
+  const explicit = args[0] === 'whoami' || args.includes('--config')
+  return { id, kind: 'wrangler', args: explicit ? args : [...args, '--config', CLIENT_CONFIG], gate, ...extra }
 }
 function npm(id, pkg, script, gate, extra = {}) {
   return { id, kind: 'npm', pkg, script, args: ['run', script], gate, ...extra }
@@ -130,53 +176,71 @@ function countsSql(tables = KEY_TABLES) {
   return `SELECT ${tables.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ')}`
 }
 
-// Every production command the kit can run. Parameters are filled in by the
-// caller; the gate is fixed here and cannot be lowered by a caller.
-const commandCatalog = {
-  guardState: (sql) => wrangler('stock-guard-state', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', sql], 'confirm'),
-  guardStageApply: (config) => wrangler('stock-guard-stage', ['d1', 'migrations', 'apply', 'business-os', '--remote', '--config', config], 'typeYES'),
-  whoami: () => wrangler('whoami', ['whoami'], 'none'),
-  timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
-  deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
-  counts: () => wrangler('counts', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', countsSql()], 'confirm'),
-  importMigrationLedger: () => wrangler('import-migration-ledger', ['d1', 'execute', 'business-os-import', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'], 'confirm'),
-  migrationsList: (db) => wrangler(`migrations-list:${db}`, ['d1', 'migrations', 'list', db, '--remote'], 'confirm'),
-  migrationsApply: (db) => {
-    const entry = DATABASES.find((d) => d.name === db)
-    if (!entry) throw new Error(`Unknown database ${db}`)
-    return npm(`migrations-apply:${db}`, 'cloudflare', entry.applyScript, 'typeYES')
-  },
-  deploy: (plan) => npm(`deploy:${plan}`, 'cloudflare', plan === 'free' ? 'deploy:free' : 'deploy', 'typeYES'),
-  rollbackWorker: (versionId, ci = false) => wrangler('rollback-worker', [
-    'rollback', ...(versionId ? [versionId] : []), '--name', WORKER_NAME,
-    '--message', 'Rollback from the release kit', ...(ci ? ['--yes'] : []),
-  ], 'double'),
-  restoreDatabase: (db, bookmark) => {
-    if (!DATABASES.some((d) => d.name === db)) throw new Error(`Unknown database ${db}`)
-    if (!bookmark) throw new Error('A bookmark is required to restore a database')
-    return wrangler(`restore:${db}`, ['d1', 'time-travel', 'restore', db, '--bookmark', bookmark], 'double')
-  },
-  fullAutomationBat: () => ({ id: 'full-automation-bat', kind: 'bat', args: ['full-automation.bat'], gate: 'typeYES' }),
+// Every production command the kit can run, built for ONE target (see
+// targetFromConfig): the databases, the Worker and the account are the ones
+// that client's rendered config names, and a database the target does not have
+// is refused. Parameters are filled in by the caller; the gate is fixed here
+// and cannot be lowered by a caller.
+// The login check names no client, so it exists apart from any target.
+const whoamiSpec = () => wrangler('whoami', ['whoami'], 'none')
+const fullAutomationSpec = () => ({ id: 'full-automation-bat', kind: 'bat', args: ['full-automation.bat'], gate: 'typeYES' })
+
+function catalogFor(target) {
+  if (!target || !target.main || !target.workerName) throw new Error('A command catalogue needs a target')
+  const main = target.main.name
+  const importName = target.importDb ? target.importDb.name : ''
+  const known = (db) => target.databases.find((d) => d.name === db)
+  return {
+    target,
+    guardState: (sql) => wrangler('stock-guard-state', ['d1', 'execute', main, '--remote', '--json', '--command', sql], 'confirm'),
+    guardStageApply: (config) => wrangler('stock-guard-stage', ['d1', 'migrations', 'apply', main, '--remote', '--config', config], 'typeYES'),
+    whoami: whoamiSpec,
+    // The accounts the token can act in, machine readable; the target check compares them with the rendered account.
+    whoamiJson: () => wrangler('whoami-json', ['whoami', '--json'], 'none'),
+    timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
+    deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
+    counts: () => wrangler('counts', ['d1', 'execute', main, '--remote', '--json', '--command', countsSql()], 'confirm'),
+    importMigrationLedger: () => wrangler('import-migration-ledger', ['d1', 'execute', importName, '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'], 'confirm'),
+    migrationsList: (db) => wrangler(`migrations-list:${db}`, ['d1', 'migrations', 'list', db, '--remote'], 'confirm'),
+    migrationsApply: (db) => {
+      const entry = known(db)
+      if (!entry) throw new Error(`Unknown database ${db}`)
+      return npm(`migrations-apply:${db}`, 'cloudflare', entry.applyScript, 'typeYES')
+    },
+    deploy: (plan) => npm(`deploy:${plan}`, 'cloudflare', plan === 'free' ? 'deploy:free' : 'deploy', 'typeYES'),
+    rollbackWorker: (versionId, ci = false) => wrangler('rollback-worker', [
+      'rollback', ...(versionId ? [versionId] : []), '--name', target.workerName,
+      '--message', 'Rollback from the release kit', ...(ci ? ['--yes'] : []),
+    ], 'double'),
+    restoreDatabase: (db, bookmark) => {
+      if (!known(db)) throw new Error(`Unknown database ${db}`)
+      if (!bookmark) throw new Error('A bookmark is required to restore a database')
+      return wrangler(`restore:${db}`, ['d1', 'time-travel', 'restore', db, '--bookmark', bookmark], 'double')
+    },
+    fullAutomationBat: fullAutomationSpec,
+  }
 }
 
 // One instance of every catalogue entry, for the offline test.
-function sampleCatalog() {
+function sampleCatalog(target) {
+  const catalog = catalogFor(target)
   return [
-    commandCatalog.whoami(),
-    ...DATABASES.map((d) => commandCatalog.timeTravelInfo(d.name)),
-    commandCatalog.deploymentStatus(),
-    commandCatalog.counts(),
-    commandCatalog.importMigrationLedger(),
-    commandCatalog.guardState(guardStateSql()),
-    commandCatalog.guardStageApply('.guard-stage-sample.toml'),
-    ...DATABASES.map((d) => commandCatalog.migrationsList(d.name)),
-    ...DATABASES.map((d) => commandCatalog.migrationsApply(d.name)),
-    commandCatalog.deploy('paid'),
-    commandCatalog.deploy('free'),
-    commandCatalog.rollbackWorker(''),
-    commandCatalog.rollbackWorker('00000000-0000-0000-0000-000000000000', true),
-    ...DATABASES.map((d) => commandCatalog.restoreDatabase(d.name, 'sample-bookmark')),
-    commandCatalog.fullAutomationBat(),
+    catalog.whoami(),
+    catalog.whoamiJson(),
+    ...target.databases.map((d) => catalog.timeTravelInfo(d.name)),
+    catalog.deploymentStatus(),
+    catalog.counts(),
+    catalog.importMigrationLedger(),
+    catalog.guardState(guardStateSql()),
+    catalog.guardStageApply('.guard-stage-sample.toml'),
+    ...target.databases.map((d) => catalog.migrationsList(d.name)),
+    ...target.databases.map((d) => catalog.migrationsApply(d.name)),
+    catalog.deploy('paid'),
+    catalog.deploy('free'),
+    catalog.rollbackWorker(''),
+    catalog.rollbackWorker('00000000-0000-0000-0000-000000000000', true),
+    ...target.databases.map((d) => catalog.restoreDatabase(d.name, 'sample-bookmark')),
+    catalog.fullAutomationBat(),
   ]
 }
 
@@ -268,14 +332,20 @@ function validateImportMigrationLedger(json, candidate) {
   return names
 }
 
-function guardStageConfig(config, directory) {
+// The stage config is the client's own rendered config with the main database's
+// migrations folder swapped for the staging folder. `expected` is the target
+// the release already read and checked against the environment: the config
+// handed in must be that very account and main database (id and name), with
+// exactly one database bound as DB, the default ledger and the standard folder.
+function guardStageConfig(config, directory, expected) {
   const account = /^account_id\s*=\s*"([^"]+)"\s*$/m.exec(config)?.[1]
   const blocks = [...config.matchAll(/^\[\[d1_databases\]\]\s*\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
-  const mains = blocks.filter(match => /^database_name\s*=\s*"business-os"\s*$/m.test(match[1]))
-  if (account !== MAIN_ACCOUNT_ID || mains.length !== 1) throw Error('Guard stage account/database configuration mismatch')
+  const mains = blocks.filter(match => /^binding\s*=\s*"DB"\s*$/m.test(match[1]))
+  if (!account || mains.length !== 1) throw Error('Guard stage account/database configuration mismatch')
   const block = mains[0][1]
   const value = key => new RegExp(`^${key}\\s*=\\s*"([^"]+)"\\s*$`, 'm').exec(block)?.[1]
-  if (value('database_id') !== MAIN_DATABASE_ID || value('migrations_dir') !== 'migrations'
+  if (!expected || !expected.accountId || !expected.main || account !== expected.accountId) throw Error('Guard stage account/database configuration mismatch')
+  if (value('database_id') !== expected.main.id || value('database_name') !== expected.main.name || value('migrations_dir') !== 'migrations'
     || (value('migrations_table') && value('migrations_table') !== 'd1_migrations')) throw Error('Guard stage database/ledger configuration mismatch')
   if (!/^\.guard-stage-[A-Za-z0-9-]+$/.test(directory)) throw Error('Invalid guard stage directory')
   return config.replace(mains[0][0], mains[0][0].replace(/^migrations_dir[ \t]*=[ \t]*"migrations"/m, match => match.replace('"migrations"', JSON.stringify(directory))))
@@ -481,9 +551,10 @@ function todayStamp(d = new Date()) {
 
 module.exports = {
   GUARD_MIGRATIONS, guardStageConfig, validateGuardFiles, guardStateSql, validateGuardState,
-  DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
-  DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
-  parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
+  DEFAULT_REF, DEFAULT_PLAN, CERT_DIR_NAME, APPLY_SCRIPTS,
+  targetFromParsed, targetFromConfig, placeholderTarget,
+  KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
+  parseArgs, catalogFor, whoamiSpec, fullAutomationSpec, sampleCatalog, countsSql, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,

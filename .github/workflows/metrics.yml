@@ -1,10 +1,22 @@
-# Read-only: whole trading days of the Worker's request metrics from Analytics Engine. The repository is
+# Read-only: whole trading days of ONE client's Worker request metrics from Analytics Engine. The repository is
 # public, so the log shows counts and PASS/FAIL; the numbers are encrypted (the token needs Account Analytics Read).
+#
+# The client chosen is the name of a GitHub environment: its reviewer, its Cloudflare token and account (secrets)
+# and the variables the Worker config is rendered from (the dataset the Worker writes to is one of them) all come
+# from there. The run first proves it is aimed at that client: CLIENT_SLUG equals the choice, and the rendered
+# account and main database equal CF_ACCOUNT_ID and D1_MAIN_ID.
 name: Metrics
 
 on:
   workflow_dispatch:
     inputs:
+      client:
+        description: Which client to read the metrics of (its own GitHub environment and Cloudflare account)
+        required: true
+        type: choice
+        options:
+          - leang
+          - bm
       from:
         description: First business date to read, YYYY-MM-DD (trading hours 08:00-20:00 Cambodia)
         required: true
@@ -36,7 +48,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: metrics
+  group: metrics-${{ inputs.client }}
   cancel-in-progress: false
 
 jobs:
@@ -61,12 +73,22 @@ jobs:
     name: metrics
     needs: gate
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.client }}
     timeout-minutes: 15
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Check the client
+        env:
+          CLIENT: ${{ inputs.client }}
+          CLIENT_SLUG: ${{ vars.CLIENT_SLUG }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CLIENT_SLUG) -or -not [string]::Equals($env:CLIENT, $env:CLIENT_SLUG, [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::This environment is not set up for the client chosen: its CLIENT_SLUG variable is missing or names another client.'
+            exit 1
+          }
+
       - name: Check the confirm word
         env:
           CONFIRM: ${{ inputs.confirm }}
@@ -86,6 +108,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: Render the Worker config for this client
+        env:
+          CLIENT_VARS: ${{ toJSON(vars) }}
+        run: node ops/scripts/client/render-wrangler.mjs --vars-json-env CLIENT_VARS
+
+      # REST only: the token must reach the rendered account, and the rendered account and
+      # main database must be the ones this environment names.
+      - name: Check the target (client, account, token)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+        run: node ops/scripts/client/assert-target.mjs
 
       - name: Read the metrics (Analytics Engine SQL, encrypted on the runner)
         env:

@@ -22,7 +22,7 @@ const cloudflareRoot = path.join(__dirname, '..')
 const pipeline = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'imagePipeline.ts'), 'utf8')
 const audit = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'imageAudit.ts'), 'utf8')
 const index = fs.readFileSync(path.join(cloudflareRoot, 'src', 'index.ts'), 'utf8')
-const wrangler = fs.readFileSync(path.join(cloudflareRoot, 'wrangler.toml'), 'utf8')
+const wrangler = require('./harness/rendered_wrangler.cjs').paid() // generated per client; the example client has the same bindings
 const MIGRATION_SQLS = loadAll()
 
 // The real strict matcher, transpiled -- reimplementing the rule here would

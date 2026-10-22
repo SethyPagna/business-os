@@ -12,6 +12,10 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const F = require('./harness/upload_fixtures.cjs')
 
+const rendered = require('./harness/rendered_wrangler.cjs')
+// The Worker the script reads is the client's own, named by its rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.resolve(__dirname, '../../ops/scripts/purge-non-media-uploads.mjs')
 const LIVE_BUCKET = 'business-os-assets-apac'
 const SPARE_BUCKET = ['business', 'os', 'assets'].join('-')
@@ -21,7 +25,7 @@ const DATABASE = 'abcdefab-cdef-4bcd-8fab-cdefabcdef01'
 const ENV = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, BUSINESS_OS_D1_DATABASE_ID: DATABASE, CLOUDFLARE_API_TOKEN: TOKEN }
 const ORIGIN = 'https://api.cloudflare.com'
 const ACCOUNT_PATH = `/client/v4/accounts/${ACCOUNT}`
-const WORKER = `${ACCOUNT_PATH}/workers/scripts/business-os`
+const WORKER = `${ACCOUNT_PATH}/workers/scripts/${rendered.values.WORKER_NAME}`
 const LIVE_VERSION = 'e5e5e5e5-5555-4555-8555-555555555555'
 const OBJECT_ROUTE = new RegExp(`^${ACCOUNT_PATH}/r2/buckets/([^/]+)/objects(?:/(.*))?$`)
 const CLOCK = new Date('2026-09-29T02:00:00.000Z')

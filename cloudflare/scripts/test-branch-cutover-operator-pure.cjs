@@ -15,6 +15,11 @@ const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const read = (...p) => fs.readFileSync(path.join(repo, ...p), 'utf8').replace(/\r\n/g, '\n')
 const load = (...p) => import(pathToFileURL(path.join(repo, ...p)).href)
+// The origin the script may call is the client's own: its admin and public URL from the rendered Worker config.
+// cloudflare/wrangler.toml is generated per client and untracked, so the fixture client (clients/example.env) stands in.
+const rendered = require('./harness/rendered_wrangler.cjs')
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 let checks = 0
 const check = async (name, fn) => { await fn(); checks++; console.log('PASS ' + name) }
 
@@ -116,14 +121,24 @@ async function main() {
   })
 
   await check('the ops script talks only to the production origin, sends the token in one header, and re-checks main', async () => {
-    const wrangler = read('cloudflare', 'wrangler.toml')
+    const wrangler = rendered.paid()
     const domains = [...wrangler.matchAll(/pattern = "([^"]+)", custom_domain = true/g)].map(m => m[1])
-    assert.ok(domains.length >= 2); for (const host of script.ALLOWED_HOSTS) assert.ok(domains.includes(host), host + ' is a production custom domain')
-    assert.equal(script.baseUrl(undefined), 'https://admin.leangbeauty.com'); assert.equal(script.baseUrl('https://leangbeauty.com/'), 'https://leangbeauty.com')
-    for (const bad of ['http://admin.leangbeauty.com', 'https://admin.leangbeauty.com.evil.example', 'https://evil.example', 'https://admin.leangbeauty.com:8443', 'https://admin.leangbeauty.com/x',
-      'https://admin.leangbeauty.com/?a=1', 'https://user@admin.leangbeauty.com', 'https://localhost', 'not a url', 'https://admin.leangbeauty.com#x']) {
+    assert.deepEqual([rendered.values.ADMIN_URL, rendered.values.PUBLIC_URL], ['https://admin.example.com', 'https://example.com'], 'the fixture client')
+    assert.ok(domains.length >= 2); for (const host of script.allowedHosts()) assert.ok(domains.includes(host), host + ' is a production custom domain')
+    assert.deepEqual([...script.allowedHosts()], ['admin.example.com', 'example.com'])
+    assert.equal(script.baseUrl(undefined), 'https://admin.example.com'); assert.equal(script.baseUrl('https://example.com/'), 'https://example.com')
+    assert.equal(script.defaultBaseUrl(), 'https://admin.example.com')
+    for (const bad of ['http://admin.example.com', 'https://admin.example.com.evil.example', 'https://evil.example', 'https://admin.example.com:8443', 'https://admin.example.com/x',
+      'https://admin.example.com/?a=1', 'https://user@admin.example.com', 'https://localhost', 'not a url', 'https://admin.example.com#x',
+      // another client's origin is refused: a run for one client can never send its token to another client's Worker
+      'https://admin.leangbeauty.com', 'https://leangbeauty.com']) {
       assert.throws(() => script.baseUrl(bad), error => error.code === 'bad-base-url', bad)
     }
+    // and another client's config gives another set of origins (positive control)
+    const other = rendered.target({ PUBLIC_URL: 'https://other.example', ADMIN_URL: 'https://admin.other.example', ROUTES: 'other.example,admin.other.example' })
+    assert.deepEqual([...script.allowedHosts(other)], ['admin.other.example', 'other.example'])
+    assert.equal(script.baseUrl(undefined, other), 'https://admin.other.example')
+    assert.throws(() => script.baseUrl('https://admin.example.com', other), error => error.code === 'bad-base-url')
     const source = read('ops', 'scripts', 'ops-branch-cutover.mjs')
     assert.equal((source.match(/\bfetchImpl\(/g) || []).length, 1); assert.ok(source.includes("redirect: 'error'"))
     assert.ok(source.includes('`${origin}/api/internal/branch-cutover/${action}`') && source.includes("method: 'POST'"))
@@ -131,11 +146,11 @@ async function main() {
     assert.equal((source.match(/operatorToken/g) || []).length, 2, 'read once from the environment, handed once to the request sender')
     assert.ok(source.includes("if (process.env.GITHUB_REF !== 'refs/heads/main') throw new OpsError('not-main'"))
     const calls = []
-    const send = script.makeSend({ origin: 'https://admin.leangbeauty.com', token: TOKEN, fetchImpl: async (url, init) => { calls.push([url, init]); return { status: 200, text: async () => '{"ok":true}' } } })
+    const send = script.makeSend({ origin: 'https://admin.example.com', token: TOKEN, fetchImpl: async (url, init) => { calls.push([url, init]); return { status: 200, text: async () => '{"ok":true}' } } })
     assert.deepEqual(await send('status', '{"a":1}'), { status: 200, json: { ok: true } })
-    assert.equal(calls[0][0], 'https://admin.leangbeauty.com/api/internal/branch-cutover/status'); assert.equal(calls[0][1].headers['x-cutover-operator-token'], TOKEN)
+    assert.equal(calls[0][0], 'https://admin.example.com/api/internal/branch-cutover/status'); assert.equal(calls[0][1].headers['x-cutover-operator-token'], TOKEN)
     assert.equal(calls[0][1].redirect, 'error'); assert.equal(calls[0][1].body, '{"a":1}'); assert.equal(JSON.stringify(calls[0][1]).includes(TOKEN), true, 'the header carries it')
-    const html = script.makeSend({ origin: 'https://admin.leangbeauty.com', token: TOKEN, fetchImpl: async () => ({ status: 403, text: async () => '<html>blocked</html>' }) })
+    const html = script.makeSend({ origin: 'https://admin.example.com', token: TOKEN, fetchImpl: async () => ({ status: 403, text: async () => '<html>blocked</html>' }) })
     assert.deepEqual(await html('status', '{}'), { status: 403, json: { _diag: { httpStatus: 403, cfMitigated: null, nonJson: '<html>blocked</html>' } } })
     assert.equal(script.beginRequestId('123456'), 'cutover_begin_123456'); assert.equal(script.beginRequestId('x y'), 'cutover_begin_local')
     assert.match(script.beginRequestId('99'), /^[A-Za-z0-9_-]{8,120}$/)

@@ -42,7 +42,10 @@ function loadModule(relPath) {
 
 const identity = loadModule('lib/adminDocumentIdentity.ts')
 const workerIndex = read(path.join(CF, 'src', 'index.ts'))
-const wrangler = read(path.join(CF, 'wrangler.toml'))
+// wrangler.toml is generated per client and untracked: read the template
+// rendered with the fake client of clients/example.env (same structure).
+const renderedWrangler = require('./harness/rendered_wrangler.cjs')
+const wrangler = renderedWrangler.paid()
 const headersFile = read(path.join(REPO, 'frontend', 'public', '_headers'))
 const pathRouting = read(path.join(REPO, 'frontend', 'src', 'app', 'pathRouting.ts'))
 const serviceWorker = read(path.join(REPO, 'frontend', 'src', 'public-runtime', 'service-worker.ts'))
@@ -376,19 +379,20 @@ check('no route is sent to the Worker without a handler', () => {
   }
 })
 
-check('every admin route this Worker serves is a known admin host', () => {
+check('the admin route this Worker serves is the host of its admin URL', () => {
+  // Which hostnames are ADMIN hosts is per client, so the pure test can only
+  // prove the shape: the rendered route table carries an admin.* custom domain
+  // that is exactly the host of BUSINESS_OS_ADMIN_URL, which is what the
+  // Worker's admin-host rule has to recognise. That a real client's admin host
+  // is in ADMIN_DOCUMENT_HOSTS is checked with that client's values in
+  // test-client-wrangler-parity-pure.cjs.
   const routes = wrangler.slice(wrangler.indexOf('routes = ['), wrangler.indexOf('\n]', wrangler.indexOf('routes = [')))
   const patterns = [...routes.matchAll(/pattern = "([^"]+)"/g)].map((m) => m[1])
   assert.ok(patterns.length >= 2, 'the route table was read, not missed')
-  assert.ok(patterns.includes('admin.leangbeauty.com'), 'the admin route was read')
-  for (const pattern of patterns) {
-    const hostname = pattern.split('/')[0].toLowerCase()
-    if (!hostname.startsWith('admin.')) continue
-    assert.ok(
-      identity.ADMIN_DOCUMENT_HOSTS.includes(hostname),
-      hostname + ' is deployed as an admin host but is not in ADMIN_DOCUMENT_HOSTS, so it would install as the storefront',
-    )
-  }
+  const adminHost = new URL(renderedWrangler.values.ADMIN_URL).hostname
+  assert.ok(patterns.includes(adminHost), 'the admin route was read')
+  assert.ok(adminHost.startsWith('admin.'), 'the admin host keeps the admin. prefix')
+  assert.match(wrangler, new RegExp('^BUSINESS_OS_ADMIN_URL = "https://' + adminHost.replace(/\./g, '\\.') + '"$', 'm'))
 })
 
 check('the SPA segments match the frontend admin route table', () => {

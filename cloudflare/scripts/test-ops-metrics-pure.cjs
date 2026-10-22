@@ -10,12 +10,19 @@ const path = require('path')
 const ts = require('typescript')
 const { pathToFileURL } = require('url')
 
+const rendered = require('./harness/rendered_wrangler.cjs')
+
 const ROOT = path.resolve(__dirname, '..', '..')
 const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf8')
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href)
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef'
 const TOKEN = 'test-token-not-a-real-one'
+// The dataset a client's Worker writes is named by its rendered config (cloudflare/wrangler.toml is generated per client and
+// untracked): the fixture client stands in, rendered into the account this test uses.
+const DATASET = rendered.values.ANALYTICS_DATASET
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile({ CF_ACCOUNT_ID: ACCOUNT })
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 
 let passed = 0
 async function check(name, fn) {
@@ -78,27 +85,35 @@ function fakeAnalytics(answers) {
 
   await check('queries: comments dropped, the window once, a revision filter only when asked, nothing injectable', () => {
     for (const [name, template] of Object.entries(templates)) {
-      const sql = metrics.buildQuery(template, { windows })
+      const sql = metrics.buildQuery(template, { windows, dataset: DATASET })
       assert.ok(!/\{\{|--|;/.test(sql), `${name}: placeholder, comment or semicolon left`)
       assert.strictEqual(sql.split("timestamp >= toDateTime('2026-09-29 01:00:00') AND timestamp < toDateTime('2026-09-29 13:00:00')").length, 2, `${name}: day 1 window`)
       assert.strictEqual(sql.split("timestamp >= toDateTime('2026-09-30 01:00:00') AND timestamp < toDateTime('2026-09-30 13:00:00')").length, 2, `${name}: day 2 window`)
       assert.ok(/AND \(\(timestamp >= [^\n]* OR \(timestamp >= [^\n]*\)\)/.test(sql), `${name}: the day windows are OR-ed inside one AND group`)
       assert.ok(!/blob8 =/.test(sql), `${name}: no build filter unless asked`)
-      assert.ok(/\bFROM Business_OS_Analytics\b/.test(sql) && /\bindex1 = 'req_metrics'/.test(sql), `${name}: dataset and index`)
+      assert.ok(sql.includes(`FROM ${DATASET}\n`) || sql.includes(`FROM ${DATASET} `) && /\bindex1 = 'req_metrics'/.test(sql), `${name}: dataset and index`)
     }
-    const filtered = metrics.buildQuery(templates['route-latency'], { windows, revision: 'c0ffee12ab34-dirty' })
+    const filtered = metrics.buildQuery(templates['route-latency'], { windows, dataset: DATASET, revision: 'c0ffee12ab34-dirty' })
     assert.ok(filtered.includes(") AND blob8 = 'c0ffee12ab34-dirty'"), filtered)
     for (const bad of ["x' OR '1'='1", 'a b', 'x'.repeat(65), 'rev;']) {
-      assert.throws(() => metrics.buildQuery(templates['route-latency'], { windows, revision: bad }), (e) => e.code === 'metrics-bad-revision', bad)
+      assert.throws(() => metrics.buildQuery(templates['route-latency'], { windows, dataset: DATASET, revision: bad }), (e) => e.code === 'metrics-bad-revision', bad)
     }
-    assert.throws(() => metrics.buildQuery('SELECT 1 WHERE ({{WINDOW}}) AND ({{WINDOW}})', { windows }), (e) => e.code === 'metrics-bad-template')
-    assert.throws(() => metrics.buildQuery('SELECT 1', { windows }), (e) => e.code === 'metrics-bad-template')
+    assert.throws(() => metrics.buildQuery('SELECT 1 WHERE ({{WINDOW}}) AND ({{WINDOW}})', { windows, dataset: DATASET }), (e) => e.code === 'metrics-bad-template')
+    assert.throws(() => metrics.buildQuery('SELECT 1', { windows, dataset: DATASET }), (e) => e.code === 'metrics-bad-template')
+    // the dataset is the client's own, one plain name, spliced once; a template that does not take it is refused
+    assert.throws(() => metrics.buildQuery('SELECT 1 FROM x WHERE ({{WINDOW}})', { windows, dataset: DATASET }), (e) => e.code === 'metrics-bad-template')
+    for (const bad of [undefined, '', 'x; DROP', "a'b", 'two words', '1abc', 'a'.repeat(64)]) {
+      assert.throws(() => metrics.buildQuery(templates['route-latency'], { windows, dataset: bad }), (e) => e.code === 'metrics-bad-dataset', String(bad))
+    }
+    assert.ok(metrics.buildQuery(templates['route-latency'], { windows, dataset: 'Other_Client_Analytics' }).includes('FROM Other_Client_Analytics'), 'another client reads its own dataset')
     assert.throws(() => metrics.loadTemplate('../queries/product-names'), (e) => e.code === 'metrics-unknown-query')
   })
 
   await check('templates read the datapoint layout lib/requestMetrics.ts writes, from the dataset wrangler binds', () => {
-    const dataset = /\[\[analytics_engine_datasets\]\]\s*binding = "Business_OS_Analytics"\s*dataset = "([^"]+)"/.exec(read('cloudflare', 'wrangler.toml'))
+    const dataset = /\[\[analytics_engine_datasets\]\]\s*binding = "Business_OS_Analytics"\s*dataset = "([^"]+)"/.exec(rendered.paid())
     assert.ok(dataset, 'wrangler.toml binds Business_OS_Analytics')
+    assert.strictEqual(dataset[1], DATASET, 'the dataset the metrics read is the one the rendered config binds')
+    assert.ok(!/Business_OS_Analytics\b/.test(Object.values(templates).join('\n')), 'no query names a client dataset')
     const rm = requestMetricsModule()
     assert.strictEqual(rm.METRICS_ANALYTICS_KIND, 'req_metrics')
     const acc = { ...rm.createRequestMetrics('api', '', 0), d1Ms: 2, rowsRead: 3, rowsWritten: 4, statements: 5, failed: 7, late: 8, d1Calls: 9, d1WallMs: 10, d1Primary: 11, d1Region: 'APAC' }
@@ -107,7 +122,7 @@ function fakeAnalytics(answers) {
     const double = Object.fromEntries(rm.datapointValues(point).map((value, i) => [`double${i + 1}`, value]))
     assert.deepStrictEqual([blob.blob1, blob.blob2, blob.blob3, blob.blob4, blob.blob5, blob.blob8], ['api', '/api/t', 'GET', '200', 'miss', 'c0ffee12ab34'])
     assert.deepStrictEqual([double.double1, double.double3, double.double5, double.double6, double.double9, double.double10], [1, 3, 5, 6, 9, 10])
-    const latency = metrics.buildQuery(templates['route-latency'], { windows })
+    const latency = metrics.buildQuery(templates['route-latency'], { windows, dataset: DATASET })
     for (const [column, as] of [['blob2', 'route'], ['blob3', 'method'], ['blob5', 'cache']]) assert.ok(latency.includes(`${column} AS ${as}`), `${column} AS ${as}`)
     assert.ok(latency.includes('quantileExactWeighted(0.50)(double1, _sample_interval) AS wall_p50_ms'), 'p50 of the wall time (double1), weighted like the p95')
     assert.ok(latency.includes('quantileExactWeighted(0.95)(double1, _sample_interval) AS wall_p95_ms'), 'p95 of the wall time (double1)')
@@ -116,14 +131,14 @@ function fakeAnalytics(answers) {
     assert.ok(latency.includes('SUM(_sample_interval * double6 * double9) / SUM(_sample_interval * double6) AS d1_calls_avg'))
     assert.ok(latency.includes("blob1 = 'api'") && latency.includes("blob4 >= '200' AND blob4 < '400'"), 'successful API requests only')
     assert.ok(/GROUP BY route, method, cache\b/.test(latency), 'one cache state per group')
-    const errors = metrics.buildQuery(templates['route-errors'], { windows })
+    const errors = metrics.buildQuery(templates['route-errors'], { windows, dataset: DATASET })
     assert.ok(errors.includes("NOT (blob4 >= '200' AND blob4 < '400')") && errors.includes('blob4 AS status'), 'errors are the complement, by status')
-    assert.ok(metrics.buildQuery(templates['build-revisions'], { windows }).includes('blob8 AS revision'), 'builds read blob8')
-    for (const sql of Object.values(templates)) assert.ok(sql.includes(`FROM ${dataset[1]}`), 'the dataset wrangler.toml binds')
+    assert.ok(metrics.buildQuery(templates['build-revisions'], { windows, dataset: DATASET }).includes('blob8 AS revision'), 'builds read blob8')
+    for (const template of Object.values(templates)) assert.ok(metrics.buildQuery(template, { windows, dataset: dataset[1] }).includes(`FROM ${dataset[1]}`), 'the dataset wrangler.toml binds')
   })
 
   await check('the cron runs inside the trading window are bg rows that latency and errors leave out, and the window\'s comment names them', () => {
-    const cron = /^crons = \["0 \*\/(\d+) \* \* \*"\]$/m.exec(read('cloudflare', 'wrangler.toml').replace(/\r\n/g, '\n'))
+    const cron = /^crons = \["0 \*\/(\d+) \* \* \*"\]$/m.exec(rendered.paid().replace(/\r\n/g, '\n'))
     assert.ok(cron, 'wrangler.toml runs the cron every N hours on the hour')
     const everyHours = Number(cron[1])
     const inside = Array.from({ length: 24 / everyHours }, (_, run) => run * everyHours)
@@ -139,8 +154,8 @@ function fakeAnalytics(answers) {
     const rm = requestMetricsModule()
     const cronPoint = { kind: 'bg', template: 'cron', method: '', status: '', cache: '', flags: '', wallMs: 1, weight: 1, acc: rm.createRequestMetrics('bg', 'cron', 0) }
     assert.strictEqual(rm.datapointLabels(cronPoint)[0], 'bg')
-    for (const name of ['route-latency', 'route-errors']) assert.ok(metrics.buildQuery(templates[name], { windows }).includes("blob1 = 'api'"), `${name} reads API rows only`)
-    assert.ok(!metrics.buildQuery(templates['build-revisions'], { windows }).includes('blob1'), 'the builds list counts every kind')
+    for (const name of ['route-latency', 'route-errors']) assert.ok(metrics.buildQuery(templates[name], { windows, dataset: DATASET }).includes("blob1 = 'api'"), `${name} reads API rows only`)
+    assert.ok(!metrics.buildQuery(templates['build-revisions'], { windows, dataset: DATASET }).includes('blob1'), 'the builds list counts every kind')
   })
 
   await check('latency rows: flows attached, numbers normalised, p95 withheld below 100 stored rows', () => {
@@ -159,7 +174,7 @@ function fakeAnalytics(answers) {
 
   await check('the SQL API call: one POST per query to the account analytics_engine/sql path, raw SQL body, bearer token', async () => {
     const fake = fakeAnalytics({ 'build-revisions': { status: 200, data: [{ revision: 'c0ffee12ab34', requests: 10, stored_rows: 10 }] } })
-    const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: '1', revision: 'c0ffee12ab34' })
+    const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: '1', revision: 'c0ffee12ab34' })
     assert.strictEqual(result.ok, true, JSON.stringify(result.problems))
     assert.strictEqual(fake.calls.length, 3)
     for (const { url, init } of fake.calls) {
@@ -171,24 +186,24 @@ function fakeAnalytics(answers) {
     }
     const bodies = fake.calls.map((c) => c.init.body)
     assert.deepStrictEqual(bodies.map((b) => b.includes("blob8 = 'c0ffee12ab34'")), [true, true, false], 'the build filter narrows latency and errors, never the builds list')
-    await assert.rejects(metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: 'not-an-account', token: TOKEN, from: '2026-09-29', days: 1 }), (e) => e.code === 'bad-account-id')
+    await assert.rejects(metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: 'not-an-account', token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1 }), (e) => e.code === 'bad-account-id')
   })
 
   await check('a read that saw nothing fails, and so does any failed query; statuses reach the public log, bodies do not', async () => {
-    const empty = await metrics.readMetrics({ fetchImpl: fakeAnalytics({}).fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1 })
+    const empty = await metrics.readMetrics({ fetchImpl: fakeAnalytics({}).fetchImpl, accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1 })
     assert.deepStrictEqual([empty.ok, empty.problems], [false, ['metrics-no-datapoints']], 'no datapoint at all is a failed read, not a quiet day')
     const served = fakeAnalytics({ 'build-revisions': { status: 200, data: [{ revision: 'c0ffee12ab34-dirty' }, { revision: 'dev' }] } }).fetchImpl
     for (const revision of ['c0ffee12ab35', 'c0ffee12ab34', 'c0ffee12']) {
-      const unserved = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1, revision })
+      const unserved = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1, revision })
       assert.deepStrictEqual([unserved.ok, unserved.problems], [false, ['metrics-revision-not-served']], `a build filter that matches no build in the window (${revision}) is a failed read, not a quiet build`)
       const unservedLog = metrics.publicLines({ result: unserved }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
       assert.ok(unservedLog.includes('problem: metrics-revision-not-served') && unservedLog.includes('metrics verdict: FAIL') && !unservedLog.includes('c0ffee'), unservedLog)
     }
-    const matched = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1, revision: 'c0ffee12ab34-dirty' })
+    const matched = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1, revision: 'c0ffee12ab34-dirty' })
     assert.deepStrictEqual([matched.ok, matched.problems], [true, []], 'the exact stamp of a served build passes with no route rows')
     const denied = await metrics.readMetrics({
       fetchImpl: fakeAnalytics({ 'route-latency': { status: 403, raw: '{"errors":[{"code":10000,"message":"Authentication error for /api/secret-route"}]}' }, 'build-revisions': { status: 200, data: [{ revision: 'dev' }] } }).fetchImpl,
-      accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1,
+      accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1,
     })
     assert.deepStrictEqual([denied.ok, denied.problems], [false, ['metrics-route-latency-failed']])
     const text = metrics.publicLines({ result: denied, bytes: 123 }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
@@ -196,7 +211,7 @@ function fakeAnalytics(answers) {
     assert.ok(!/secret-route|Authentication|10000/.test(text), 'the error body stays in the encrypted file')
     const garbage = await metrics.readMetrics({
       fetchImpl: fakeAnalytics({ 'route-errors': { status: 200, raw: 'not json' }, 'build-revisions': { status: 200, data: [{ revision: 'dev' }] } }).fetchImpl,
-      accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1,
+      accountId: ACCOUNT, token: TOKEN, dataset: DATASET, from: '2026-09-29', days: 1,
     })
     assert.deepStrictEqual(garbage.problems, ['metrics-route-errors-failed'], 'a 200 without a data array is a failed query')
   })
@@ -220,6 +235,27 @@ function fakeAnalytics(answers) {
       const file = fs.readFileSync(path.join(tmp, written[0]), 'utf8')
       for (const secret of ['/api/products/search', '87.25', TOKEN]) assert.ok(!file.includes(secret), `the report is not encrypted: ${secret}`)
       await assert.rejects(metrics.runMetrics({ env: { ...env, OPS_METRICS_FROM: '' }, fetchImpl: fake.fetchImpl }), (e) => e.code === 'missing-environment')
+      // the queries read the dataset of the client whose config this is, and only for the account of that config
+      assert.ok(fake.calls.length > 0 && fake.calls.every((c) => c.init.body.includes(`FROM ${DATASET}`)), 'every query reads the rendered config dataset')
+      const before = fake.calls.length
+      await assert.rejects(metrics.runMetrics({ env: { ...env, CLOUDFLARE_ACCOUNT_ID: 'f'.repeat(32) }, fetchImpl: fake.fetchImpl }), (e) => e.code === 'secret-account-differs-from-rendered')
+      assert.strictEqual(fake.calls.length, before, 'another account\'s token reaches Cloudflare with no query')
+      const keep = process.env.OPS_WRANGLER_CONFIG
+      process.env.OPS_WRANGLER_CONFIG = path.join(tmp, 'absent.toml')
+      try {
+        await assert.rejects(metrics.runMetrics({ env, fetchImpl: fake.fetchImpl }), (e) => e.code === 'rendered-config-missing')
+      } finally {
+        process.env.OPS_WRANGLER_CONFIG = keep
+      }
+      assert.strictEqual(fake.calls.length, before, 'no rendered config, no query')
+      // a client whose account has no Analytics Engine binds no dataset: nothing to read, said plainly, no query
+      process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile({ CF_ACCOUNT_ID: ACCOUNT, ANALYTICS_DATASET: 'none' })
+      try {
+        await assert.rejects(metrics.runMetrics({ env, fetchImpl: fake.fetchImpl }), (e) => e.code === 'metrics-no-dataset')
+      } finally {
+        process.env.OPS_WRANGLER_CONFIG = keep
+      }
+      assert.strictEqual(fake.calls.length, before, 'no dataset, no query')
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true })
     }
@@ -244,21 +280,26 @@ function fakeAnalytics(answers) {
     const confirm = /if \(-not \[string\]::Equals\(\$env:CONFIRM, 'metrics', \[System\.StringComparison\]::Ordinal\)\) \{/g
     assert.strictEqual((wf.match(confirm) || []).length, 2, 'the gate job and the metrics job both compare ordinally')
     assert.ok(!/\s-[ci]?(ne|eq|like|match)\b/i.test(wf), 'no culture-aware PowerShell comparison')
-    assert.ok(/ {2}metrics:\n {4}name: metrics\n {4}needs: gate\n/.test(wf) && /environment: production/.test(wf), 'the read waits for the gate and the production reviewer')
-    for (const line of wf.split('\n').filter((l) => l.includes('${{'))) {
-      assert.ok(/^\s+[A-Z_]+: \$\{\{ (inputs\.[a-z]+|secrets\.CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|runner\.temp) \}\}(\/ops-out)?$/.test(line) ||
-        /^\s+(if: always\(\) && steps\.checkout\.outcome == 'success'|path: \$\{\{ runner\.temp \}\}\/ops-out\/\*\.enc\.json)$/.test(line), `an expression outside env: ${line.trim()}`)
+    assert.ok(/ {2}metrics:\n {4}name: metrics\n {4}needs: gate\n/.test(wf) && /\n {4}environment: \$\{\{ inputs\.client \}\}\n/.test(wf) && !/environment: production/.test(wf), 'the read waits for the gate and the chosen client\'s own reviewer')
+    for (const line of wf.split('\n').filter((l) => l.includes('${{') && !/^\s*#/.test(l))) {
+      assert.ok(/^\s+[A-Z_0-9]+: \$\{\{ (inputs\.[a-z]+|vars\.[A-Z0-9_]+|toJSON\(vars\)|secrets\.CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|runner\.temp) \}\}(\/ops-out)?$/.test(line) ||
+        /^\s+(if: always\(\) && steps\.checkout\.outcome == 'success'|path: \$\{\{ runner\.temp \}\}\/ops-out\/\*\.enc\.json|environment: \$\{\{ inputs\.client \}\}|group: metrics-\$\{\{ inputs\.client \}\})$/.test(line), `an expression outside env: ${line.trim()}`)
     }
+    // the token and the account go to two steps only: the target check (REST, reads nothing of the shop) and the reader
     const secretLines = wf.split('\n').filter((l) => l.includes('secrets.'))
-    assert.strictEqual(secretLines.length, 2)
-    const stepOf = (needle) => wf.slice(wf.lastIndexOf('- name:', wf.indexOf(needle)), wf.indexOf(needle))
-    assert.ok(stepOf('secrets.CLOUDFLARE_API_TOKEN').includes('- name: Read the metrics'), 'only the reader step gets the token')
+    assert.strictEqual(secretLines.length, 4)
+    const stepOf = (needle, from = 0) => wf.slice(wf.lastIndexOf('- name:', wf.indexOf(needle, from)), wf.indexOf(needle, from))
+    const firstToken = wf.indexOf('secrets.CLOUDFLARE_API_TOKEN')
+    assert.ok(stepOf('secrets.CLOUDFLARE_API_TOKEN').includes('- name: Check the target'), 'the first step with the token is the target check')
+    assert.ok(stepOf('secrets.CLOUDFLARE_API_TOKEN', firstToken + 1).includes('- name: Read the metrics'), 'only the reader step gets the token after it')
+    assert.ok(wf.indexOf('render-wrangler.mjs --vars-json-env CLIENT_VARS') > 0 && wf.indexOf('render-wrangler.mjs') < firstToken && firstToken < wf.indexOf('ops-metrics.mjs'), 'render, then the target check, then the read')
+    assert.ok(/- name: Check the client\n {8}env:\n {10}CLIENT: \$\{\{ inputs\.client \}\}\n {10}CLIENT_SLUG: \$\{\{ vars\.CLIENT_SLUG \}\}\n/.test(wf) && wf.indexOf('Check the client') < wf.indexOf('Check the confirm word', wf.indexOf('needs: gate')), 'the client check opens the job')
     assert.ok(/run: node ops\/scripts\/ops-metrics\.mjs\n/.test(wf))
     assert.ok(/persist-credentials: false/.test(wf) && /retention-days: 3/.test(wf) && /path: \$\{\{ runner\.temp \}\}\/ops-out\/\*\.enc\.json/.test(wf), 'no stored credentials; only the encrypted file, kept 3 days')
     for (const name of ['OPS_OUT_DIR', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'OPS_METRICS_FROM', 'OPS_METRICS_DAYS', 'OPS_METRICS_REVISION']) {
       assert.ok(new RegExp(`\\n {10}${name}: `).test(wf), `the reader step sets ${name}`)
     }
-    assert.ok(!/^concurrency:\n {2}group: production-deploy/m.test(wf), 'a read-only reader does not hold up a release')
+    assert.ok(/^concurrency:\n {2}group: metrics-\$\{\{ inputs\.client \}\}\n/m.test(wf) && !/group: deploy-/.test(wf), 'a read-only reader does not hold up a release, and only waits for its own client')
   })
 
   console.log(`test-ops-metrics-pure: ${passed} checks passed`)

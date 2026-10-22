@@ -54,6 +54,18 @@ const devVars = parseEnvFile(DEV_VARS_FILE)
 const authEnv = parseEnvFile(AUTH_FILE)
 const env = { ...process.env, ...authEnv }
 
+// The token's account must be the account of the rendered config: wrangler prefers the environment's account over the
+// config's, so a saved token of one client next to the config of another would put secrets in the wrong account.
+const wantedAccount = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim()
+const renderedConfig = path.join(CLOUDFLARE_DIR, 'wrangler.toml')
+if (wantedAccount && fs.existsSync(renderedConfig)) {
+  const configured = /^account_id\s*=\s*"([^"]+)"\s*$/m.exec(fs.readFileSync(renderedConfig, 'utf8'))
+  if (configured && configured[1] !== wantedAccount) {
+    console.error('[sync-secrets] REFUSED: the rendered wrangler.toml is for a different Cloudflare account than CLOUDFLARE_ACCOUNT_ID. Nothing was pushed.')
+    process.exit(1)
+  }
+}
+
 let failures = 0
 for (const key of SECRET_KEYS) {
   const value = devVars[key]
@@ -62,12 +74,15 @@ for (const key of SECRET_KEYS) {
     continue
   }
   console.log(`[sync-secrets] Pushing ${key} to Cloudflare...`)
-  const argv = ['secret', 'put', key]
+  // The client's rendered config, named explicitly (a wrangler.toml of another client must never decide the
+  // account), and only ever for the account the token is for.
+  const argv = ['secret', 'put', key, '--config', 'wrangler.toml']
   // Do not rely on npm's transient PATH entry for `wrangler`. In particular,
   // Windows nested child processes can lose that entry and make a full
   // deploy stop after the build. Running the project-installed CLI through
   // Node is portable and keeps the secret value on stdin, never in argv.
   const result = spawnSync(process.execPath, [WRANGLER_BIN, ...argv], {
+    cwd: CLOUDFLARE_DIR,
     input: value,
     env,
     shell: false,

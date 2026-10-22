@@ -43,10 +43,10 @@ import {
   CLOUDFLARE_DIR, OpsError, cloudflareErrorCodes, commitId, errorRecord, isMain,
   requireEnv, runId, runMain, runWrangler, say, summary, truncate, writeEncryptedReport,
 } from './ops-common.mjs'
-import { DATABASE, interpretD1Output, parseJsonOutput, wranglerArgs } from './ops-d1-export.mjs'
+import { databaseName, interpretD1Output, parseJsonOutput, wranglerArgs } from './ops-d1-export.mjs'
 import { guardSql, scanSql } from './ops-sql-guard.mjs'
 
-export { DATABASE }
+export { databaseName }
 
 export const TASK = 'settings-upsert'
 export const ACTOR = 'ops:settings-upsert'
@@ -520,7 +520,7 @@ export async function runTask({ apply, rawInput, allowList, d1, context, checkpo
   const problems = []
   const errorCodes = []
   const report = {
-    kind: TASK, database: DATABASE, apply: apply === true, action: null, commit: context.commit, runId: context.runId,
+    kind: TASK, database: databaseName(), apply: apply === true, action: null, commit: context.commit, runId: context.runId,
     allowList: [...allowList], rawInput: typeof rawInput === 'string' ? truncate(rawInput, 2000) : null, requested: null,
     before: null, settingsVersionBefore: null, plan: null, restore: null, restoreHelp: RESTORE_HELP, audit: null,
     plannedSql: null, batchCheck: null, write: null, after: null, settingsVersionAfter: null, readBack: null, problems,

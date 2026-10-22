@@ -34,6 +34,7 @@ function check(label, cond) {
 }
 
 const root = path.join(__dirname, '..')
+const renderedWrangler = require('./harness/rendered_wrangler.cjs')
 const index = fs.readFileSync(path.join(root, 'src', 'index.ts'), 'utf8')
 
 // --- 1. Extract the real handler ------------------------------------------
@@ -104,8 +105,7 @@ function makeContext(assetResponse, { bound = true } = {}) {
   // --- 4. The route must actually reach the Worker ------------------------
   // A handler that wrangler never routes to the Worker is dead code: the
   // asset layer answers first and the fallback document comes back at 200.
-  for (const file of ['wrangler.toml', 'wrangler.free.toml']) {
-    const toml = fs.readFileSync(path.join(root, file), 'utf8')
+  for (const [file, toml] of [['wrangler.toml', renderedWrangler.paid()], ['wrangler.free.toml', renderedWrangler.free()]]) {
     const list = toml.slice(toml.indexOf('run_worker_first = ['), toml.indexOf(']', toml.indexOf('run_worker_first = [')))
     check(`${file} routes /assets/* to the Worker`, /"\/assets\/\*"/.test(list))
   }

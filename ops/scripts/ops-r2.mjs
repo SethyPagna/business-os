@@ -1,6 +1,9 @@
-// r2-apac-copy: zero-loss copy of the business-os-assets bucket into
-// business-os-assets-apac, driven from a GitHub runner through the temporary
-// Worker in ops/r2-copy-worker/. Run by .github/workflows/ops.yml:
+// r2-apac-copy: zero-loss copy of a client's old assets bucket (OPS_R2_SOURCE_BUCKET)
+// into the assets bucket its rendered Worker config names, driven from a GitHub
+// runner through the temporary Worker in ops/r2-copy-worker/ (its wrangler.toml is
+// rendered from wrangler.template.toml for this run: the account, the Worker name
+// and both buckets come from the client's config, never from this file).
+// Run by .github/workflows/ops.yml:
 //
 //   node ops/scripts/ops-r2.mjs buckets        check both buckets; copy mode creates a
 //                                              missing destination in apac
@@ -8,7 +11,8 @@
 //   node ops/scripts/ops-r2.mjs delete-worker  always, even after a failure
 //
 // Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, OPS_OUT_DIR, and
-// for `buckets` and `run` OPS_R2_MODE = copy | verify-only | topup.
+// for `buckets` and `run` OPS_R2_MODE = copy | verify-only | topup and
+// OPS_R2_SOURCE_BUCKET (the old bucket).
 //
 // Never writes to the source bucket: the Worker only reaches it through a
 // read-only wrapper. `copy` refuses to start unless the live production
@@ -29,13 +33,15 @@ import {
   randomToken, requireEnv, runId, runMain, runWrangler, say, sleep, summary, truncate, writeEncryptedReport,
 } from './ops-common.mjs'
 import {
-  COPY_WORKER, DEST_BUCKET, DEST_LOCATION, MAX_BYTES_PER_COPY, MAX_BYTES_PER_VERIFY, MAX_ITEMS_PER_COPY,
-  MAX_KEYS_PER_PRUNE, MAX_KEYS_PER_VERIFY, SOURCE_BUCKET, applyVerifyResults, batches, classify, emptyCopyTally,
+  DEST_LOCATION, MAX_BYTES_PER_COPY, MAX_BYTES_PER_VERIFY, MAX_ITEMS_PER_COPY,
+  MAX_KEYS_PER_PRUNE, MAX_KEYS_PER_VERIFY, applyVerifyResults, batches, classify, copyWorkerName, emptyCopyTally,
   indexByKey, keysWithStatus, listingTotals, matchResults, metadataObserved, normalizeLocation, orderInversions,
-  planCopy, planTopup, productionAssetsState, tallyCopy, tallyPrune, verifyVerdict,
+  planCopy, planTopup, productionAssetsState, r2Names, tallyCopy, tallyPrune, verifyVerdict,
 } from './ops-r2-lib.mjs'
 
 export const WORKER_DIR = path.join(REPO_ROOT, 'ops', 'r2-copy-worker')
+export const WORKER_TEMPLATE = path.join(WORKER_DIR, 'wrangler.template.toml')
+// Generated for each run from the template (gitignored): never committed.
 export const WORKER_TOML = path.join(WORKER_DIR, 'wrangler.toml')
 // copy        before the switch: mirror the source into the destination
 // verify-only any time: compare only
@@ -178,11 +184,11 @@ async function verifyKeys(client, c, keys, concurrency) {
 // Talks only through `client` (the Worker) and `api` (Cloudflare REST), so
 // the test drives it end to end against the real Worker code.
 // onProgress(done, total) is told after each copy request (counts only).
-export async function runJob({ mode, client, api, accountId, concurrency = 4, onProgress = () => {} }) {
+export async function runJob({ mode, client, api, accountId, names, concurrency = 4, onProgress = () => {} }) {
   if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'mode must be copy, verify-only or topup.')
   const out = { mode, ok: false, problems: [], counts: {}, details: {} }
 
-  out.production = await productionAssetsState(api, accountId)
+  out.production = await productionAssetsState(api, accountId, names)
   if (mode === 'copy' && out.production.state !== 'source') {
     out.problems.push('production-not-on-source')
     return out
@@ -261,7 +267,7 @@ export async function runJob({ mode, client, api, accountId, concurrency = 4, on
   let prune = { pruned: 0, keptSourcePresent: 0, alreadyAbsent: 0, failed: 0 }
   const pruneResults = []
   if (pruneKeys.length) {
-    out.productionBeforePrune = await productionAssetsState(api, accountId)
+    out.productionBeforePrune = await productionAssetsState(api, accountId, names)
     if (!pruneAllowed(mode, out.productionBeforePrune.state)) {
       out.problems.push('production-changed-during-run')
     } else {
@@ -439,18 +445,38 @@ function readWorkerToml() {
   return parseWorkerToml(fs.readFileSync(WORKER_TOML, 'utf8'))
 }
 
+// The copy Worker's config for this client and run: its account, its own name
+// and exactly the two buckets. Every placeholder must be used and none may be left.
+export function renderWorkerToml(template, accountId, names) {
+  const values = { ACCOUNT_ID: String(accountId).trim(), COPY_WORKER: names.copyWorker, SOURCE_BUCKET: names.source, DEST_BUCKET: names.dest }
+  let text = String(template)
+  for (const [key, value] of Object.entries(values)) {
+    const placeholder = `{{${key}}}`
+    if (!text.includes(placeholder)) throw new OpsError('worker-template-invalid', 'The copy Worker template lacks a placeholder.')
+    text = text.split(placeholder).join(value)
+  }
+  if (/\{\{[^}]*\}\}/.test(text)) throw new OpsError('worker-template-invalid', 'The copy Worker template has an unknown placeholder.')
+  return text
+}
+
+function writeWorkerToml(accountId, names) {
+  fs.writeFileSync(WORKER_TOML, renderWorkerToml(fs.readFileSync(WORKER_TEMPLATE, 'utf8'), accountId, names))
+}
+
 // Tolerates CRLF: the Windows runner checks files out with autocrlf.
 export function parseWorkerToml(text) {
   const account = /^account_id\s*=\s*"([0-9a-f]{32})"\s*$/m.exec(text)
+  const name = /^name\s*=\s*"([^"]+)"\s*$/m.exec(text)
   const bindings = [...text.matchAll(/\[\[r2_buckets\]\]\s*\nbinding\s*=\s*"([A-Z_]+)"\s*\nbucket_name\s*=\s*"([a-z0-9-]+)"/g)].map((m) => [m[1], m[2]])
-  return { accountId: account ? account[1] : null, bindings }
+  return { accountId: account ? account[1] : null, name: name ? name[1] : null, bindings }
 }
 
 // The Worker must deploy into the account the API calls target, bound to
 // exactly these two buckets.
-export function checkWorkerConfig(accountId, toml = readWorkerToml()) {
+export function checkWorkerConfig(accountId, names, toml = readWorkerToml()) {
   if (!toml.accountId || toml.accountId !== String(accountId).trim()) throw new OpsError('account-mismatch', 'CLOUDFLARE_ACCOUNT_ID does not match the copy Worker config.')
-  const want = JSON.stringify([['SOURCE', SOURCE_BUCKET], ['DESTINATION', DEST_BUCKET]])
+  if (toml.name !== names.copyWorker) throw new OpsError('worker-config-mismatch', 'The copy Worker config names another Worker.')
+  const want = JSON.stringify([['SOURCE', names.source], ['DESTINATION', names.dest]])
   if (JSON.stringify(toml.bindings) !== want) throw new OpsError('worker-config-mismatch', 'The copy Worker is not bound to exactly the two buckets.')
 }
 
@@ -462,13 +488,13 @@ function scrub(text, secret) {
   return truncate(String(text || '').split(secret).join('[redacted]'), 20000)
 }
 
-async function workerUrl(accountId) {
+async function workerUrl(accountId, names) {
   const r = await api('GET', `/accounts/${accountId}/workers/subdomain`)
   const sub = r && r.ok && r.json && r.json.result ? r.json.result.subdomain : null
   if (typeof sub !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}$/i.test(sub)) {
     throw new OpsError('workers-dev-subdomain-missing', 'The account has no workers.dev subdomain.', { status: r && r.status, codes: apiErrorCodes(r) })
   }
-  return `https://${COPY_WORKER}.${sub}.workers.dev`
+  return `https://${names.copyWorker}.${sub}.workers.dev`
 }
 
 async function deployWorker(copyToken, report) {
@@ -508,9 +534,11 @@ async function cmdRun() {
   let result = { mode: MODES.includes(mode) ? mode : 'unknown', ok: false, problems: [], counts: {} }
   try {
     if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy, verify-only or topup.')
-    checkWorkerConfig(accountId)
+    const names = r2Names()
+    writeWorkerToml(accountId, names)
+    checkWorkerConfig(accountId, names)
     // Refuse a post-switch copy, or a pre-switch top-up, before deploying anything.
-    const preflight = await productionAssetsState(api, accountId)
+    const preflight = await productionAssetsState(api, accountId, names)
     report.preflight = preflight
     if (mode === 'copy' && preflight.state !== 'source') {
       result.production = preflight
@@ -520,7 +548,7 @@ async function cmdRun() {
       result.production = preflight
       throw new OpsError('production-not-on-destination', 'Production does not read the destination bucket yet; topup refused.')
     }
-    const baseUrl = await workerUrl(accountId)
+    const baseUrl = await workerUrl(accountId, names)
     const copyToken = randomToken(32)
     await deployWorker(copyToken, report)
     const client = workerClient({ baseUrl, token: copyToken })
@@ -531,7 +559,7 @@ async function cmdRun() {
       lastProgress = Date.now()
       say('progress: {done} of {total} copy requests done', { done, total })
     }
-    result = await runJob({ mode, client, api, accountId, onProgress })
+    result = await runJob({ mode, client, api, accountId, names, onProgress })
   } catch (err) {
     report.error = errorRecord(err)
     result.problems.push(err instanceof OpsError ? err.code : 'internal-error')
@@ -565,18 +593,18 @@ async function bucketInfo(apiImpl, accountId, name) {
 // missing destination in apac. verify-only and topup create nothing, so there a
 // missing destination just fails the step. create() runs `wrangler r2 bucket
 // create` and resolves to { code, timedOut, stdout, stderr }.
-export async function checkBuckets({ api: apiImpl, accountId, mode, create, pause = sleep }) {
+export async function checkBuckets({ api: apiImpl, accountId, mode, create, names, pause = sleep }) {
   const out = { problems: [], created: false }
-  out.source = await bucketInfo(apiImpl, accountId, SOURCE_BUCKET)
+  out.source = await bucketInfo(apiImpl, accountId, names.source)
   if (!out.source.present) out.problems.push('source-bucket-unreadable')
-  let dest = await bucketInfo(apiImpl, accountId, DEST_BUCKET)
+  let dest = await bucketInfo(apiImpl, accountId, names.dest)
   if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {
     const r = await create()
     out.create = { exitCode: r.code, timedOut: r.timedOut, stdout: truncate(r.stdout, 20000), stderr: truncate(r.stderr, 20000) }
     if (r.code !== 0 || r.timedOut) out.problems.push('destination-create-failed')
     else out.created = true
     for (let i = 0; out.created && i < 6; i += 1) {
-      dest = await bucketInfo(apiImpl, accountId, DEST_BUCKET)
+      dest = await bucketInfo(apiImpl, accountId, names.dest)
       if (dest.present) break
       await pause(5000)
     }
@@ -600,16 +628,17 @@ async function cmdBuckets() {
   const lines = []
   try {
     if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy, verify-only or topup.')
+    const names = r2Names()
     const create = async () => {
       // From an empty directory, so wrangler finds no config to edit.
       const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-r2-create-'))
       try {
-        return await runWrangler(['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION], { cwd: empty, timeoutMs: 2 * 60 * 1000 })
+        return await runWrangler(['r2', 'bucket', 'create', names.dest, '--location', DEST_LOCATION], { cwd: empty, timeoutMs: 2 * 60 * 1000 })
       } finally {
         fs.rmSync(empty, { recursive: true, force: true })
       }
     }
-    const b = await checkBuckets({ api, accountId, mode, create })
+    const b = await checkBuckets({ api, accountId, mode, create, names })
     Object.assign(report, { source: b.source, destination: b.destination, create: b.create })
     problems = b.problems
     lines.push(['source bucket: {presence}, location {location}', { presence: b.source.present ? 'present' : 'absent', location: b.source.present ? b.source.location : 'unknown' }])
@@ -634,8 +663,8 @@ async function cmdBuckets() {
 
 // Deletes the temporary Worker and proves it is gone (a delete can take a
 // moment to show, so the check is repeated a few times).
-export async function deleteCopyWorker(apiImpl, accountId, { checks = 4, pause = sleep } = {}) {
-  const base = `/accounts/${accountId}/workers/scripts/${COPY_WORKER}`
+export async function deleteCopyWorker(apiImpl, accountId, { copyWorker = copyWorkerName(), checks = 4, pause = sleep } = {}) {
+  const base = `/accounts/${accountId}/workers/scripts/${copyWorker}`
   const del = await apiImpl('DELETE', `${base}?force=true`)
   const deleted = del && del.ok ? 'deleted' : del && del.status === 404 ? 'already-absent' : 'unknown'
   let check = null

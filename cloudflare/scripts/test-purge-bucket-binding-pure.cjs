@@ -4,8 +4,10 @@
 // in the old bucket -- the owner's spare photo copy, which nothing may write
 // (owner, 28 Sep) -- and then removed PRODUCTION Library rows whose files are
 // really in the live bucket. Pinned here:
-//   - BUCKET is the ASSETS bucket_name of cloudflare/wrangler.toml AND
-//     wrangler.free.toml, so the next bucket move fails this test until the
+//   - BUCKET is the ASSETS bucket_name of the client this one-off was written
+//     for, in its paid AND free config (rendered from the private client file
+//     where this machine has it: cloudflare/wrangler.toml is generated per
+//     client and untracked), so the next bucket move fails this test until the
 //     script moves with it;
 //   - before its first R2 or D1 request (dry run, --move and --restore) the
 //     script reads the production Worker's live ASSETS binding and refuses
@@ -29,6 +31,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const F = require('./harness/upload_fixtures.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.join(ROOT, 'ops', 'scripts', 'purge-non-media-uploads.mjs')
@@ -38,7 +41,10 @@ const TOKEN = ['tok', 'Binding', 'q3Rv8Lm2Wx6Tn1Zc4Pd9Hk7Fs5Gj0Ya'].join('_')
 const ACCOUNT = 'fedcba9876543210fedcba9876543210'
 const DATABASE = 'fedcba98-7654-3210-fedc-ba9876543210'
 const ENV = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, BUSINESS_OS_D1_DATABASE_ID: DATABASE, CLOUDFLARE_API_TOKEN: TOKEN }
-const WORKER = `/client/v4/accounts/${ACCOUNT}/workers/scripts/business-os`
+// The Worker the script reads is the client's own, named by its rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
+const WORKER = `/client/v4/accounts/${ACCOUNT}/workers/scripts/${rendered.values.WORKER_NAME}`
 const R2_PREFIX = `/client/v4/accounts/${ACCOUNT}/r2/`
 const OBJECTS_PATH = `${R2_PREFIX}buckets/${LIVE_BUCKET}/objects/`
 const D1_PATH = `/client/v4/accounts/${ACCOUNT}/d1/database/${DATABASE}/query`
@@ -54,9 +60,9 @@ function check(label, fn) {
 
 const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf8').replace(/\r\n/g, '\n')
 // The same reading test-ops-workflow-pure.cjs uses for the ASSETS binding.
-function assetsBucketOf(file) {
-  const match = /^\[\[r2_buckets\]\]\nbinding = "ASSETS"\nbucket_name = "([a-z0-9-]+)"$/m.exec(read('cloudflare', file))
-  assert.ok(match, `${file}: ASSETS is not a plain r2 binding`)
+function assetsBucketOf(text, label) {
+  const match = /^\[\[r2_buckets\]\]\nbinding = "ASSETS"\nbucket_name = "([a-z0-9-]+)"$/m.exec(text.replace(/\r\n/g, '\n'))
+  assert.ok(match, `${label}: ASSETS is not a plain r2 binding`)
   return match[1]
 }
 
@@ -190,8 +196,16 @@ async function main() {
 
   // ------------------------------------------------ 1. the bucket pin
   check('BUCKET is the live bucket business-os-assets-apac', () => assert.equal(script.BUCKET, LIVE_BUCKET))
-  check('BUCKET is the ASSETS bucket of cloudflare/wrangler.toml', () => assert.equal(script.BUCKET, assetsBucketOf('wrangler.toml')))
-  check('BUCKET is the ASSETS bucket of cloudflare/wrangler.free.toml', () => assert.equal(script.BUCKET, assetsBucketOf('wrangler.free.toml')))
+  // The private client file is outside the repository: where it is absent (CI, a fresh clone) the two pins are skipped, not faked.
+  const paidConfig = rendered.clientRender('paid')
+  const freeConfig = rendered.clientRender('free')
+  if (paidConfig && freeConfig) {
+    check('BUCKET is the ASSETS bucket of the client\'s paid config', () => assert.equal(script.BUCKET, assetsBucketOf(paidConfig, 'paid')))
+    check('BUCKET is the ASSETS bucket of the client\'s free config', () => assert.equal(script.BUCKET, assetsBucketOf(freeConfig, 'free')))
+  } else {
+    console.log('SKIP the two BUCKET pins against the client config: no private client env file on this machine')
+  }
+  check('the fixture client binds another bucket, so a run for it is refused (positive control)', () => assert.notEqual(script.BUCKET, assetsBucketOf(rendered.paid(), 'fixture')))
 
   // ----------------------------------- 2. live binding = BUCKET: proceeds
   for (const [mode, argv] of MODES) {
@@ -291,7 +305,7 @@ async function main() {
     process.exitCode = 1
     return
   }
-  console.log(`PASS ${checks} checks: BUCKET is the ASSETS bucket of both wrangler files; the live binding is read before any R2 or D1 request in dry run, --move and --restore, and anything but every live version on BUCKET is refused with zero R2 and D1 requests; a change while MOVE or RESTORE waits is refused before any change; the owner steps name the live bucket and never the old one or business-os-v1`)
+  console.log(`PASS ${checks} checks: BUCKET is the ASSETS bucket of the client config (where the private client file exists); the live binding is read before any R2 or D1 request in dry run, --move and --restore, and anything but every live version on BUCKET is refused with zero R2 and D1 requests; a change while MOVE or RESTORE waits is refused before any change; the owner steps name the live bucket and never the old one or business-os-v1`)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

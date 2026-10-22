@@ -39,7 +39,7 @@ const files = [
   ...roots.flatMap((dir) => collect(dir)),
   path.join(ROOT, 'index.html'),
   path.join(ROOT, 'package.json'),
-  path.join(REPO, 'cloudflare', 'wrangler.toml'),
+  path.join(REPO, 'cloudflare', 'wrangler.template.toml'),
   path.join(REPO, '.gitignore'),
 ].filter((file) => fs.existsSync(file))
 const hits = files.filter((file) => /scanbot/i.test(fs.readFileSync(file, 'utf8'))).map(rel)

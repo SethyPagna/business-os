@@ -19,6 +19,7 @@
 // stamps exactly the same way without deploying.
 'use strict'
 
+const fs = require('fs')
 const path = require('path')
 const { createHash } = require('crypto')
 const { execFileSync, spawnSync } = require('child_process')
@@ -66,9 +67,27 @@ function buildDefineArgs(stamp) {
   ].flatMap(([key, value]) => ['--define', `${key}:${JSON.stringify(value)}`])
 }
 
+// The config this deploy uses: the one named on the command line, else the rendered paid file. It is always passed
+// to wrangler explicitly -- a wrangler.toml of another client left in this folder overrides CLOUDFLARE_ACCOUNT_ID.
+function withConfig(args) {
+  const at = args.findIndex((a) => a === '--config' || a === '-c' || a.startsWith('--config='))
+  return at >= 0 ? args : [...args, '--config', 'wrangler.toml']
+}
+function configNamed(args) {
+  const at = args.findIndex((a) => a === '--config' || a === '-c')
+  if (at >= 0) return args[at + 1]
+  const inline = args.find((a) => a.startsWith('--config='))
+  return inline ? inline.slice('--config='.length) : null
+}
+
 function main() {
   const stamp = computeStamp()
-  const passthrough = process.argv.slice(2)
+  const passthrough = withConfig(process.argv.slice(2))
+  const config = configNamed(passthrough)
+  if (config && !fs.existsSync(path.resolve(CLOUDFLARE_DIR, config))) {
+    console.error('[deploy] ' + config + ' does not exist: render it first (node ../ops/scripts/client/render-wrangler.mjs --env-file <the client env file>).')
+    process.exit(1)
+  }
   console.log(`[deploy] revision  ${stamp.revision}`)
   console.log(`[deploy] hash      ${stamp.sourceHash}`)
   console.log(`[deploy] builtAt   ${stamp.builtAt}`)
@@ -87,6 +106,6 @@ function main() {
   process.exit(result.status == null ? 1 : result.status)
 }
 
-module.exports = { readRevision, computeStamp, buildDefineArgs }
+module.exports = { readRevision, computeStamp, buildDefineArgs, withConfig, configNamed }
 
 if (require.main === module) main()

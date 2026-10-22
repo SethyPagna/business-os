@@ -13,6 +13,8 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 const { pathToFileURL } = require('url')
 
+const rendered = require('./harness/rendered_wrangler.cjs')
+
 const ROOT = path.resolve(__dirname, '..', '..')
 const SCRIPT = path.join(ROOT, 'ops', 'scripts', 'ops-secret-names.mjs')
 const load = (...p) => import(pathToFileURL(path.join(ROOT, ...p)).href)
@@ -29,7 +31,13 @@ async function check(name, fn) {
 }
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef'
-const BASE = `/accounts/${ACCOUNT}/workers/scripts/business-os`
+// The Worker read is the client's own, named by its rendered config (cloudflare/wrangler.toml is generated per client and
+// untracked): the fixture client stands in, rendered into the account this test uses.
+const WORKER = rendered.values.WORKER_NAME
+const CONFIG = rendered.fixtureFile({ CF_ACCOUNT_ID: ACCOUNT })
+process.env.OPS_WRANGLER_CONFIG = CONFIG
+delete process.env.CLOUDFLARE_ACCOUNT_ID
+const BASE = `/accounts/${ACCOUNT}/workers/scripts/${WORKER}`
 const V1 = 'aaaaaaaa-0000-4000-8000-000000000001'
 const V2 = 'aaaaaaaa-0000-4000-8000-000000000002'
 // Neither may ever reach the public log; the value may not even reach the report.
@@ -81,7 +89,8 @@ function respond(s, method, p) {
     if (s.deployments === 'down') return { status: 503, json: null }
     return { status: 200, json: { success: true, result: { deployments: s.deployments } } }
   }
-  const m = /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/business-os\/versions\/([0-9a-f-]+)$/.exec(p)
+  const versionsAt = `${BASE}/versions/`
+  const m = p.startsWith(versionsAt) && /^[0-9a-f-]+$/.test(p.slice(versionsAt.length)) ? [null, p.slice(versionsAt.length)] : null
   if (m && Array.isArray(s.versions[m[1]])) return { status: 200, json: { success: true, result: { id: m[1], resources: { bindings: s.versions[m[1]] } } } }
   return { status: 404, json: { success: false, errors: [{ code: 10007 }] } }
 }
@@ -121,8 +130,21 @@ async function main() {
     const all = src.join('\n')
     const readByApp = EXPECTED.filter((n) => new RegExp(`\\b${n}\\b`).test(all))
     assert.deepStrictEqual(readByApp.filter((n) => n !== 'OAUTH_STATE_SECRET'), EXPECTED.filter((n) => n !== 'OAUTH_STATE_SECRET'), 'a listed name the app does not read')
-    const vars = fs.readFileSync(path.join(ROOT, 'cloudflare', 'wrangler.toml'), 'utf8').replace(/\r\n/g, '\n')
+    const vars = rendered.paid()
     for (const n of ['GOOGLE_LOGIN_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_ID']) assert.ok(new RegExp(`^${n} = "`, 'm').test(vars), `${n} is a plain var`)
+  })
+
+  await check('the Worker read is the client\'s own: its name comes from the rendered config, and a token of another account is refused', async () => {
+    const mine = fakeApi(scenario())
+    await sn.readSecretNames(mine.api, ACCOUNT)
+    assert.ok(mine.calls.length > 0 && mine.calls.every((c) => c.includes(`/workers/scripts/${WORKER}/`)), mine.calls.join('\n'))
+    const other = fakeApi(scenario())
+    await sn.readSecretNames(other.api, ACCOUNT, 'other-shop')
+    assert.ok(other.calls.length > 0 && other.calls.every((c) => c.includes('/workers/scripts/other-shop/')), other.calls.join('\n'))
+    assert.strictEqual(common.productionWorker(), WORKER)
+    assert.strictEqual(common.clientTarget().workerName, WORKER)
+    assert.throws(() => common.clientTarget({ env: { CLOUDFLARE_ACCOUNT_ID: 'f'.repeat(32) } }), (e) => e.code === 'secret-account-differs-from-rendered')
+    assert.throws(() => common.clientTarget({ file: path.join(os.tmpdir(), 'no-such-config.toml') }), (e) => e.code === 'rendered-config-missing')
   })
 
   await check('every secret set: secrets read secret/present, the client ids plain-text/absent, the verdict PASS', async () => {
@@ -276,6 +298,7 @@ async function main() {
       OPS_OUT_DIR: out,
       CLOUDFLARE_API_TOKEN: 'fake-token-for-test',
       CLOUDFLARE_ACCOUNT_ID: ACCOUNT,
+      OPS_WRANGLER_CONFIG: CONFIG,
       GITHUB_STEP_SUMMARY: summaryFile,
       GITHUB_RUN_ID: '4242',
       GITHUB_SHA: '0123456789abcdef0123456789abcdef01234567',

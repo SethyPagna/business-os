@@ -153,10 +153,14 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
+import { clientTarget, liveVersionBindings, productionWorker } from './ops-common.mjs'
 
-// The ASSETS bucket of cloudflare/wrangler.toml and wrangler.free.toml
-// (cloudflare/scripts/test-purge-bucket-binding-pure.cjs pins it to both).
+// The bucket this one-off cleanup was written for: the ASSETS bucket of the client
+// that still had these uploads (cloudflare/scripts/test-purge-bucket-binding-pure.cjs
+// pins it to that client's rendered config). It is not a general constant: the
+// account and the Worker below come from the config rendered for the client being
+// run, and every run first proves the live site stores its files in BUCKET, so a
+// client whose bucket is another one is refused before anything is read.
 export const BUCKET = 'business-os-assets-apac'
 export const ASSETS_BINDING = 'ASSETS'
 export const PREFIXES = ['uploads/', 'private/', 'imports/']
@@ -1460,13 +1464,11 @@ async function mapBySize(items, sizeOf, limit, largeFileBytes, worker) {
 }
 
 // ------------------------------------------------------------ Cloudflare
+// The account and the main database of the client's rendered Worker config
+// (node ops/scripts/client/render-wrangler.mjs --env-file <that client's env file>).
 function readWranglerIds() {
-  const here = path.dirname(fileURLToPath(import.meta.url))
-  const tomlPath = path.resolve(here, '..', '..', 'cloudflare', 'wrangler.toml')
-  const text = fs.readFileSync(tomlPath, 'utf8')
-  const accountId = /^account_id\s*=\s*"([0-9a-f]{32})"/m.exec(text)?.[1]
-  const dbBlock = /database_name\s*=\s*"business-os"\s*\r?\ndatabase_id\s*=\s*"([0-9a-f-]{36})"/.exec(text)?.[1]
-  return { accountId, databaseId: dbBlock }
+  const target = clientTarget()
+  return { accountId: target.accountId, databaseId: target.main.id }
 }
 
 function promptHidden(question) {
@@ -1608,7 +1610,9 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
 // too: the check never passes by default.
 export const WORKERS_READ_HINT = 'Add the permission row  Account | Workers Scripts | Read  to the token (step 1 at the top of this script) and run it again.'
 export async function liveBucketProblem(api, accountId) {
-  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  let worker
+  try { worker = productionWorker() } catch { return 'the Worker config has not been rendered for this client (node ops/scripts/client/render-wrangler.mjs --env-file <the client env file>).' }
+  const live = await liveVersionBindings(api, accountId, worker)
   if (!live.ok) {
     const status = live.detail?.status ? `, HTTP ${live.detail.status}` : ''
     const unreadable = live.reason === 'deployments-unreadable' || live.reason === 'bindings-unreadable'
@@ -1749,7 +1753,7 @@ export async function run({
     accountId = accountId || fromToml.accountId
     databaseId = databaseId || fromToml.databaseId
   }
-  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the BusinessOS checkout after a fresh git pull of main.')
+  if (!accountId || !databaseId) return fail('could not read the account id / database id from the rendered cloudflare/wrangler.toml. Render it first: node ops/scripts/client/render-wrangler.mjs --env-file <the client env file>.')
   token = String(env.CLOUDFLARE_API_TOKEN || await prompts.hidden('Cloudflare API token: ') || '').trim()
   if (!token) return fail('no token given.')
   const cf = makeClient({ token, accountId, databaseId, fetchImpl })

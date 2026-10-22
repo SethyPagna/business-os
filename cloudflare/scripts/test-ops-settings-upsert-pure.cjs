@@ -33,12 +33,16 @@ const { pathToFileURL } = require('url')
 const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const SRC = path.join(ROOT, 'cloudflare', 'src')
 // Normalise CRLF: a Windows checkout (core.autocrlf=true) must read what CI reads.
 const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n')
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href)
+// The database is the main one of the client's rendered config (untracked, per client): the fixture client stands in.
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 
 let passed = 0
 const notes = []
@@ -789,8 +793,9 @@ async function main() {
   })
 
   await check('the job reuses the export job\'s D1 plumbing instead of restating it', () => {
-    assert.strictEqual(mod.DATABASE, d1export.DATABASE)
-    assert.deepStrictEqual(d1export.wranglerArgs('SELECT 1'), ['d1', 'execute', 'business-os', '--remote', '--json', '--command', 'SELECT 1'])
+    assert.strictEqual(mod.databaseName(), d1export.databaseName())
+    assert.strictEqual(d1export.databaseName(), rendered.values.D1_MAIN_NAME, 'the main database of the client\'s rendered config')
+    assert.deepStrictEqual(d1export.wranglerArgs('SELECT 1'), ['d1', 'execute', rendered.values.D1_MAIN_NAME, '--remote', '--json', '--command', 'SELECT 1'])
     const text = read('ops', 'scripts', 'ops-settings-upsert.mjs')
     assert.ok(/from '\.\/ops-d1-export\.mjs'/.test(text) && /\bwranglerArgs\(sql\)/.test(text) && /\binterpretD1Output\(/.test(text))
     assert.ok(/from '\.\/ops-sql-guard\.mjs'/.test(text) && /\bguardSql\(/.test(text))

@@ -1,29 +1,56 @@
-# Deploy Business OS to production from GitHub, so a release does not depend
-# on the owner's own network (a VPN exit that Cloudflare challenges).
+# Deploy Business OS to ONE client's production from GitHub, so a release does
+# not depend on the owner's own network (a VPN exit that Cloudflare challenges).
+#
+# One codebase serves several clients, each with its own Cloudflare account, its
+# own data and its own approval. Pressing "Run workflow" asks WHICH client; that
+# choice is the name of a GitHub environment, and everything below comes from
+# that environment and from nowhere else:
+#   - the required reviewer (one approval per client, main only);
+#   - the secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID of that client's
+#     account, set by the owner and never handled by anyone else;
+#   - the variables (CLIENT_SLUG, CF_ACCOUNT_ID, D1_MAIN_ID, ADMIN_URL, PLAN_TIER
+#     and the rest of clients/example.env) that the Worker config is rendered from.
+# Nothing client-specific is in the repository: cloudflare/wrangler.toml does not
+# exist there, it is rendered from cloudflare/wrangler.template.toml.
+#
+# Before anything is written the run proves it is aimed at the client chosen: the
+# environment's CLIENT_SLUG equals the choice (a mistyped environment is created
+# empty by GitHub and fails here), the rendered account and main database equal
+# CF_ACCOUNT_ID and D1_MAIN_ID, the secret token's account equals the rendered
+# one and the Cloudflare login can act in it. The live checks look at ADMIN_URL.
 #
 # Runs ONLY when someone presses "Run workflow" (no push or pull request
-# trigger), waits for the `production` environment's required reviewer, and
-# refuses to start unless the confirm box says DEPLOY, compared ordinally
-# (byte for byte: no soft hyphen, zero-width or look-alike letter passes).
+# trigger), waits for the chosen environment's required reviewer, and refuses to
+# start unless the confirm box says DEPLOY, compared ordinally (byte for byte: no
+# soft hyphen, zero-width or look-alike letter passes).
 #
 # This repository is public, so its Actions logs are public too. The job
 # summary carries row COUNTS, restore-point bookmarks and commit ids only:
-# never row data, names, customers or amounts. Output of the commands that
-# read production is kept out of the log (release.cjs -CI).
+# never row data, names, customers or amounts, and never an account or database
+# id. Output of the commands that read production is kept out of the log
+# (release.cjs -CI).
 #
-# Setup, click by click: docs/setup/release-setup-guide.md.
+# Setup, click by click: docs/setup/multi-client.md (new client) and
+# docs/setup/release-setup-guide.md.
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
+      client:
+        description: Which client to release to (its own GitHub environment, Cloudflare account and approval)
+        required: true
+        type: choice
+        options:
+          - leang
+          - bm
       ref:
         description: Branch or commit to release
         required: true
         default: claude/urgent-20260925
         type: string
       plan:
-        description: Cloudflare plan config (production runs paid)
+        description: Cloudflare plan config (must be the client's own plan)
         required: true
         default: paid
         type: choice
@@ -44,19 +71,29 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-deploy
+  group: deploy-${{ inputs.client }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Release to production
+    name: Release to ${{ inputs.client }}
     runs-on: windows-latest
-    environment: production
+    environment: ${{ inputs.client }}
     timeout-minutes: 240
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Check the client
+        env:
+          CLIENT: ${{ inputs.client }}
+          CLIENT_SLUG: ${{ vars.CLIENT_SLUG }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CLIENT_SLUG) -or -not [string]::Equals($env:CLIENT, $env:CLIENT_SLUG, [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::This environment is not set up for the client chosen: its CLIENT_SLUG variable is missing or names another client.'
+            exit 1
+          }
+
       - name: Check the confirm word
         env:
           CONFIRM: ${{ inputs.confirm }}
@@ -89,6 +126,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /ops/scripts/deploy-kit/
+            /ops/scripts/client/
             /ops/scripts/ops-crypto.mjs
             /ops/keys/ops-export-public.pem
 
@@ -129,6 +167,15 @@ jobs:
           "commit=$releaseSha" >> $env:GITHUB_OUTPUT
           "kit_commit=$kitSha" >> $env:GITHUB_OUTPUT
 
+      # The Worker config is generated for this client from the template of the
+      # commit being released and the environment's variables. It is gitignored,
+      # so the release folder stays clean. A missing, unknown or invalid
+      # variable stops the run here, listed by name and never by value.
+      - name: Render the Worker config for this client
+        env:
+          CLIENT_VARS: ${{ toJSON(vars) }}
+        run: node kit/ops/scripts/client/render-wrangler.mjs --vars-json-env CLIENT_VARS --template release/cloudflare/wrangler.template.toml --out-dir release/cloudflare
+
       - name: Install packages (cloudflare)
         working-directory: release/cloudflare
         run: npm ci --no-audit --no-fund
@@ -151,10 +198,27 @@ jobs:
       - name: Safety tests (every test file on its own, retried on timeout)
         run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Jobs 2
 
+      # Nothing below reads or writes production before this has passed, and every
+      # later kit step repeats the same expectations, so it cannot be skipped by
+      # reordering. It also refuses a plan that is not the client's own.
+      - name: Check the target (client, account, databases)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+          PLAN_TIER: ${{ vars.PLAN_TIER }}
+          PLAN: ${{ inputs.plan }}
+        run: node kit/ops/scripts/deploy-kit/release.cjs target -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Plan $env:PLAN
+
       - name: Safety snapshot (restore point and row counts)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
           RELEASE_CONFIRM: ${{ inputs.confirm }}
         run: node kit/ops/scripts/deploy-kit/release.cjs snapshot -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT"
 
@@ -162,6 +226,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
           RELEASE_CONFIRM: ${{ inputs.confirm }}
           RUN_MIGRATIONS: ${{ inputs.run_migrations }}
         run: |
@@ -173,6 +240,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+          PLAN_TIER: ${{ vars.PLAN_TIER }}
           RELEASE_CONFIRM: ${{ inputs.confirm }}
           PLAN: ${{ inputs.plan }}
         run: node kit/ops/scripts/deploy-kit/release.cjs deploy -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Plan $env:PLAN
@@ -181,9 +252,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          D1_MAIN_ID: ${{ vars.D1_MAIN_ID }}
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
           RELEASE_CONFIRM: ${{ inputs.confirm }}
           PLAN: ${{ inputs.plan }}
-        run: node kit/ops/scripts/deploy-kit/release.cjs live -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Plan $env:PLAN
+        run: node kit/ops/scripts/deploy-kit/release.cjs live -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Plan $env:PLAN -Site $env:ADMIN_URL
 
       - name: Preserve release evidence and history
         if: always()

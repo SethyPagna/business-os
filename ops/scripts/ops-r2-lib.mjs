@@ -8,14 +8,26 @@
 // so the runner and the Worker share one definition of "identical".
 
 import { destinationIsOlder, differences } from '../r2-copy-worker/src/core.mjs'
-import { OpsError, PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
+import { OpsError, clientTarget, liveVersionBindings } from './ops-common.mjs'
 
-export { PRODUCTION_WORKER }
-export const SOURCE_BUCKET = 'business-os-assets'
-export const DEST_BUCKET = 'business-os-assets-apac'
 export const DEST_LOCATION = 'apac'
-export const COPY_WORKER = 'business-os-r2-copy'
 export const ASSETS_BINDING = 'ASSETS'
+
+// The names this job acts on. None is a constant: the Worker, the destination
+// bucket and the temporary copy Worker come from the client's rendered Worker
+// config (ops-common clientTarget), the old source bucket from the run's
+// environment (OPS_R2_SOURCE_BUCKET, the move is a one-off of the client that
+// still has one).
+const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
+export const copyWorkerName = (target = clientTarget()) => `${target.workerName}-r2-copy`
+export function r2Names({ target = clientTarget(), env = process.env } = {}) {
+  const source = String(env.OPS_R2_SOURCE_BUCKET || '').trim()
+  if (!BUCKET_NAME.test(source)) throw new OpsError('r2-source-bucket-missing', 'OPS_R2_SOURCE_BUCKET is not a bucket name.')
+  const dest = target.assetsBucket
+  if (!BUCKET_NAME.test(String(dest))) throw new OpsError('r2-destination-bucket-missing', 'The rendered Worker config names no assets bucket.')
+  if (source === dest) throw new OpsError('r2-source-is-destination', 'The source and the destination bucket are the same bucket.')
+  return { worker: target.workerName, source, dest, copyWorker: copyWorkerName(target) }
+}
 
 export const MAX_ITEMS_PER_COPY = 10
 export const MAX_BYTES_PER_COPY = 32 * 1024 * 1024
@@ -351,9 +363,10 @@ export function verifyVerdict(c, { sourceObjects, destObjects }) {
 // its latest deployment (all versions carrying traffic):
 //   source | destination | mixed | unknown
 // api(method, path) -> { ok, status, json } (ops-common cfApi, or a fake).
-export async function productionAssetsState(api, accountId) {
+// names: r2Names() -- the client's Worker and its two buckets.
+export async function productionAssetsState(api, accountId, names) {
   const unknown = (reason, detail) => ({ state: 'unknown', reason, detail })
-  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  const live = await liveVersionBindings(api, accountId, names.worker)
   if (!live.ok) return unknown(live.reason, live.detail)
   const buckets = []
   for (const v of live.versions) {
@@ -363,8 +376,8 @@ export async function productionAssetsState(api, accountId) {
   }
   const kinds = new Set(buckets.map((b) => {
     if (b.jurisdiction) return 'other'
-    if (b.bucket === SOURCE_BUCKET) return 'source'
-    if (b.bucket === DEST_BUCKET) return 'destination'
+    if (b.bucket === names.source) return 'source'
+    if (b.bucket === names.dest) return 'destination'
     return 'other'
   }))
   if (kinds.has('other')) return { ...unknown('other-bucket'), buckets }

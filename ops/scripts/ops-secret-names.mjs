@@ -24,7 +24,7 @@
 // of the public log.
 
 import {
-  OpsError, PRODUCTION_WORKER, apiErrorCodes, cfApi, commitId, isMain, liveVersionBindings,
+  OpsError, apiErrorCodes, cfApi, commitId, isMain, liveVersionBindings, productionWorker,
   requireEnv, runId, runMain, say, summary, writeEncryptedReport,
 } from './ops-common.mjs'
 
@@ -68,16 +68,16 @@ export function bindingKind(bindings, name) {
 }
 
 // api(method, path) -> { ok, status, json } (ops-common cfApi, or a fake).
-export async function readSecretNames(api, accountId) {
+export async function readSecretNames(api, accountId, worker = productionWorker()) {
   if (!ACCOUNT_ID.test(String(accountId))) throw new OpsError('bad-account-id', 'CLOUDFLARE_ACCOUNT_ID is not a 32-character hex id.')
   const problems = []
-  const base = `/accounts/${accountId}/workers/scripts/${PRODUCTION_WORKER}`
+  const base = `/accounts/${accountId}/workers/scripts/${worker}`
 
   const list = await api('GET', `${base}/secrets`)
   const listed = list && list.ok && list.json && Array.isArray(list.json.result) ? slim(list.json.result) : null
   if (!listed) problems.push('secret-list-unreadable')
 
-  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  const live = await liveVersionBindings(api, accountId, worker)
   if (!live.ok) problems.push('live-versions-unreadable')
   const versions = (live.ok ? live.versions : []).map((v) => {
     const all = slim(v.bindings)
@@ -155,11 +155,12 @@ async function main() {
   const commit = commitId()
   const run = runId()
 
-  const result = await readSecretNames((method, p) => cfApi(method, p), accountId)
+  const worker = productionWorker()
+  const result = await readSecretNames((method, p) => cfApi(method, p), accountId, worker)
 
   const payload = {
     kind: 'secret-names',
-    worker: PRODUCTION_WORKER,
+    worker,
     commit,
     runId: run,
     startedAt,
@@ -170,7 +171,7 @@ async function main() {
     counts: presenceCounts(result),
   }
   const report = writeEncryptedReport(outDir, `secret-names-${run}`, payload, {
-    kind: 'secret-names', name: PRODUCTION_WORKER, commit, runId: run, createdAt: payload.finishedAt,
+    kind: 'secret-names', name: worker, commit, runId: run, createdAt: payload.finishedAt,
   })
   for (const [template, values] of publicLines({ result, bytes: report.bytes })) {
     say(template, values)

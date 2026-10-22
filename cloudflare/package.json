@@ -7,18 +7,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local --var BUSINESS_OS_LOCAL_DEV:1",
+    "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local --var BUSINESS_OS_LOCAL_DEV:1 --config wrangler.toml",
     "build:frontend": "npm --prefix ../frontend run build",
+    "render:config": "node ../ops/scripts/client/render-wrangler.mjs",
     "typecheck": "tsc --noEmit",
     "test:import-engine": "node scripts/test-import-engine-pure.cjs && node scripts/test-sales-import-commit-pure.cjs",
     "test:import-image-match": "node scripts/test-import-image-match.cjs",
     "test:zip-reader": "node scripts/test-zip-reader.cjs",
     "test:plan-tier": "node scripts/test-plan-tier-pure.cjs && node scripts/test-wrangler-config-drift-pure.cjs && node scripts/test-queue-fallback-pure.cjs && node scripts/test-plan-tier-surfaces-pure.cjs",
     "test:native": "node scripts/run-native-suite.cjs",
-    "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --local",
-    "migrate:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --remote",
-    "migrate:import:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os-import --local",
-    "migrate:import:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os-import --remote",
+    "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply DB --local --config wrangler.toml",
+    "migrate:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply DB --remote --config wrangler.toml",
+    "migrate:import:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply IMPORT_DB --local --config wrangler.toml",
+    "migrate:import:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply IMPORT_DB --remote --config wrangler.toml",
     "deploy": "node scripts/deploy.cjs",
     "deploy:free": "node scripts/deploy.cjs --config wrangler.free.toml",
     "secrets:sync": "node scripts/sync-secrets.cjs",
@@ -26,8 +27,8 @@
     "deploy:full:free": "npm run typecheck && npm run build:frontend && npm run migrate:remote && npm run migrate:import:remote && npm run secrets:sync && npm run deploy:free",
     "dry-run:paid": "node scripts/with-wrangler-auth.cjs wrangler deploy --dry-run --outdir dist-dry-run-paid --config wrangler.toml",
     "dry-run:free": "node scripts/with-wrangler-auth.cjs wrangler deploy --dry-run --outdir dist-dry-run-free --config wrangler.free.toml",
-    "d1:shell:local": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --local --command",
-    "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command"
+    "d1:shell:local": "node scripts/with-wrangler-auth.cjs wrangler d1 execute DB --local --config wrangler.toml --command",
+    "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute DB --remote --config wrangler.toml --command"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

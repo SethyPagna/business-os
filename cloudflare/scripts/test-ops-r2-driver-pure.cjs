@@ -11,6 +11,7 @@ const crypto = require('crypto')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const { setup, nodeDeps, md5hex, FIXTURE_HTTP, FIXTURE_CUSTOM } = require('./harness/ops_r2_fake.cjs')
+const rendered = require('./harness/rendered_wrangler.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const load = (...p) => import(pathToFileURL(path.join(ROOT, ...p)).href)
@@ -28,6 +29,14 @@ async function check(name, fn) {
 
 const TOKEN = crypto.randomBytes(32).toString('base64url')
 const ACCOUNT = '0123456789abcdef0123456789abcdef'
+// The fixture client: its Worker and its assets bucket come from the rendered config
+// (clients/example.env), the old bucket from the run's environment.
+const WORKER = 'example-shop'
+const DEST_B = 'example-shop-assets'
+const SRC_B = 'example-old-assets'
+process.env.OPS_WRANGLER_CONFIG = rendered.fixtureFile()
+process.env.OPS_R2_SOURCE_BUCKET = SRC_B
+delete process.env.CLOUDFLARE_ACCOUNT_ID
 const V1 = 'aaaaaaaa-0000-4000-8000-000000000001'
 const V2 = 'aaaaaaaa-0000-4000-8000-000000000002'
 
@@ -40,7 +49,7 @@ function fakeApi(...states) {
   const bindingFor = new Map()
   async function api(method, p) {
     calls.push(`${method} ${p}`)
-    const base = `/accounts/${ACCOUNT}/workers/scripts/business-os`
+    const base = `/accounts/${ACCOUNT}/workers/scripts/${WORKER}`
     if (method === 'GET' && p === `${base}/deployments`) {
       const state = states[Math.min(deploymentsRead, states.length - 1)]
       deploymentsRead += 1
@@ -48,8 +57,8 @@ function fakeApi(...states) {
       const versions = state === 'mixed'
         ? [{ version_id: V1, percentage: 60 }, { version_id: V2, percentage: 40 }]
         : [{ version_id: V1, percentage: 100 }, { version_id: V2, percentage: 0 }]
-      bindingFor.set(V1, state === 'destination' || state === 'mixed' ? 'business-os-assets-apac' : state === 'other' ? 'someone-else' : 'business-os-assets')
-      bindingFor.set(V2, state === 'mixed' ? 'business-os-assets' : 'business-os-assets-apac')
+      bindingFor.set(V1, state === 'destination' || state === 'mixed' ? DEST_B : state === 'other' ? 'someone-else' : SRC_B)
+      bindingFor.set(V2, state === 'mixed' ? SRC_B : DEST_B)
       return {
         ok: true,
         status: 200,
@@ -81,6 +90,7 @@ async function main() {
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
   const driver = await load('ops', 'scripts', 'ops-r2.mjs')
   const common = await load('ops', 'scripts', 'ops-common.mjs')
+  const NAMES = lib.r2Names()
 
   // A client whose fetch goes straight into the Worker's handle().
   function clientFor(s, { wrap, record } = {}) {
@@ -90,10 +100,10 @@ async function main() {
       return worker.handle(new Request(url, init), env, nodeDeps)
     }
     if (wrap) fetchImpl = wrap(fetchImpl)
-    return driver.workerClient({ baseUrl: 'https://business-os-r2-copy.example.workers.dev', token: TOKEN, fetchImpl, pause: async () => {} })
+    return driver.workerClient({ baseUrl: `https://${WORKER}-r2-copy.example.workers.dev`, token: TOKEN, fetchImpl, pause: async () => {} })
   }
   const run = (s, mode, { api = fakeApi('source').api, wrap, record, concurrency, onProgress } = {}) =>
-    driver.runJob({ mode, client: clientFor(s, { wrap, record }), api, accountId: ACCOUNT, concurrency, onProgress })
+    driver.runJob({ mode, client: clientFor(s, { wrap, record }), api, accountId: ACCOUNT, names: NAMES, concurrency, onProgress })
 
   // A realistic source: images with full metadata, backup manifests (one
   // multipart), drive-staged files, backup folder objects, an empty object,
@@ -474,19 +484,19 @@ async function main() {
   })
 
   await check('productionAssetsState reads the newest deployment and every version carrying traffic', async () => {
-    assert.strictEqual((await lib.productionAssetsState(fakeApi('source').api, ACCOUNT)).state, 'source')
-    assert.strictEqual((await lib.productionAssetsState(fakeApi('destination').api, ACCOUNT)).state, 'destination')
-    assert.strictEqual((await lib.productionAssetsState(fakeApi('mixed').api, ACCOUNT)).state, 'mixed')
-    assert.strictEqual((await lib.productionAssetsState(fakeApi('other').api, ACCOUNT)).state, 'unknown')
-    assert.deepStrictEqual(await lib.productionAssetsState(fakeApi('api-down').api, ACCOUNT), { state: 'unknown', reason: 'deployments-unreadable', detail: { status: 503 } })
-    assert.strictEqual(lib.PRODUCTION_WORKER, common.PRODUCTION_WORKER)
+    assert.strictEqual((await lib.productionAssetsState(fakeApi('source').api, ACCOUNT, NAMES)).state, 'source')
+    assert.strictEqual((await lib.productionAssetsState(fakeApi('destination').api, ACCOUNT, NAMES)).state, 'destination')
+    assert.strictEqual((await lib.productionAssetsState(fakeApi('mixed').api, ACCOUNT, NAMES)).state, 'mixed')
+    assert.strictEqual((await lib.productionAssetsState(fakeApi('other').api, ACCOUNT, NAMES)).state, 'unknown')
+    assert.deepStrictEqual(await lib.productionAssetsState(fakeApi('api-down').api, ACCOUNT, NAMES), { state: 'unknown', reason: 'deployments-unreadable', detail: { status: 503 } })
+    assert.strictEqual(NAMES.worker, common.productionWorker())
     const withBinding = (binding) => async (method, p) => (p.endsWith('/deployments')
       ? { ok: true, status: 200, json: { result: { deployments: [{ created_on: '2026-09-25T00:00:00Z', versions: [{ version_id: V1, percentage: 100 }] }] } } }
       : { ok: true, status: 200, json: { result: { resources: { bindings: binding ? [binding] : [] } } } })
-    assert.deepStrictEqual(await lib.productionAssetsState(withBinding(null), ACCOUNT), { state: 'unknown', reason: 'assets-binding-missing', detail: undefined })
-    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'r2_bucket', name: 'ASSETS', bucket_name: 'business-os-assets', jurisdiction: 'eu' }), ACCOUNT)).state, 'unknown')
-    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'kv_namespace', name: 'ASSETS' }), ACCOUNT)).state, 'unknown')
-    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'r2_bucket', name: 'ASSETS', bucket_name: 'business-os-assets' }), ACCOUNT)).state, 'source')
+    assert.deepStrictEqual(await lib.productionAssetsState(withBinding(null), ACCOUNT, NAMES), { state: 'unknown', reason: 'assets-binding-missing', detail: undefined })
+    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'r2_bucket', name: 'ASSETS', bucket_name: SRC_B, jurisdiction: 'eu' }), ACCOUNT, NAMES)).state, 'unknown')
+    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'kv_namespace', name: 'ASSETS' }), ACCOUNT, NAMES)).state, 'unknown')
+    assert.strictEqual((await lib.productionAssetsState(withBinding({ type: 'r2_bucket', name: 'ASSETS', bucket_name: SRC_B }), ACCOUNT, NAMES)).state, 'source')
   })
 
   await check('failures and mismatches are counted and fail the job; the source is never written', async () => {
@@ -647,12 +657,12 @@ async function main() {
     const gone = { ok: false, status: 404, json: { success: false, errors: [{ code: 10007 }] } }
     const pause = async () => {}
     const a = api(ok, gone)
-    assert.deepStrictEqual(await driver.deleteCopyWorker(a.fn, ACCOUNT, { pause }).then((r) => [r.deleted, r.after, r.ok]), ['deleted', 'absent', true])
-    assert.ok(a.calls[0] === `DELETE /accounts/${ACCOUNT}/workers/scripts/business-os-r2-copy?force=true`)
-    assert.deepStrictEqual(await driver.deleteCopyWorker(api(gone, gone).fn, ACCOUNT, { pause }).then((r) => [r.deleted, r.ok]), ['already-absent', true])
-    assert.deepStrictEqual(await driver.deleteCopyWorker(api(ok, ok, ok, gone).fn, ACCOUNT, { pause }).then((r) => r.after), 'absent')
-    assert.deepStrictEqual(await driver.deleteCopyWorker(api(ok, ok).fn, ACCOUNT, { pause }).then((r) => [r.after, r.ok]), ['still-present', false])
-    assert.deepStrictEqual(await driver.deleteCopyWorker(api({ ok: false, status: 403, json: null }, { ok: false, status: 403, json: null }).fn, ACCOUNT, { pause }).then((r) => r.ok), false)
+    assert.deepStrictEqual(await driver.deleteCopyWorker(a.fn, ACCOUNT, { copyWorker: NAMES.copyWorker, pause }).then((r) => [r.deleted, r.after, r.ok]), ['deleted', 'absent', true])
+    assert.ok(a.calls[0] === `DELETE /accounts/${ACCOUNT}/workers/scripts/${WORKER}-r2-copy?force=true`)
+    assert.deepStrictEqual(await driver.deleteCopyWorker(api(gone, gone).fn, ACCOUNT, { copyWorker: NAMES.copyWorker, pause }).then((r) => [r.deleted, r.ok]), ['already-absent', true])
+    assert.deepStrictEqual(await driver.deleteCopyWorker(api(ok, ok, ok, gone).fn, ACCOUNT, { copyWorker: NAMES.copyWorker, pause }).then((r) => r.after), 'absent')
+    assert.deepStrictEqual(await driver.deleteCopyWorker(api(ok, ok).fn, ACCOUNT, { copyWorker: NAMES.copyWorker, pause }).then((r) => [r.after, r.ok]), ['still-present', false])
+    assert.deepStrictEqual(await driver.deleteCopyWorker(api({ ok: false, status: 403, json: null }, { ok: false, status: 403, json: null }).fn, ACCOUNT, { copyWorker: NAMES.copyWorker, pause }).then((r) => r.ok), false)
   })
 
   await check('the bucket step: only copy mode creates a missing destination, and only in apac', async () => {
@@ -665,7 +675,7 @@ async function main() {
         calls.push(`${method} ${p}`)
         const m = /^\/accounts\/[0-9a-f]{32}\/r2\/buckets\/([a-z0-9-]+)$/.exec(p)
         if (method !== 'GET' || !m) return { ok: false, status: 405, json: null }
-        if (m[1] === 'business-os-assets-apac' && creates.length && reads++ < appearsAfter) return { ok: false, status: 404, json: { success: false, errors: [{ code: 10006 }] } }
+        if (m[1] === DEST_B && creates.length && reads++ < appearsAfter) return { ok: false, status: 404, json: { success: false, errors: [{ code: 10006 }] } }
         const b = buckets[m[1]]
         if (!b || b === 'missing') return { ok: false, status: 404, json: { success: false, errors: [{ code: 10006 }] } }
         if (b === 'forbidden') return { ok: false, status: 403, json: { success: false, errors: [{ code: 10000 }] } }
@@ -673,13 +683,13 @@ async function main() {
       }
       const create = async () => {
         creates.push(1)
-        if (createCode === 0) buckets['business-os-assets-apac'] = { location: 'APAC' }
+        if (createCode === 0) buckets[DEST_B] = { location: 'APAC' }
         return { code: createCode, timedOut: false, stdout: '', stderr: createCode ? 'failed' : '' }
       }
       return { api, create, calls, creates }
     }
-    const run = (w, mode) => driver.checkBuckets({ api: w.api, accountId: ACCOUNT, mode, create: w.create, pause: async () => {} })
-    const SRC = { 'business-os-assets': { location: 'EEUR' } }
+    const run = (w, mode) => driver.checkBuckets({ api: w.api, accountId: ACCOUNT, mode, create: w.create, names: NAMES, pause: async () => {} })
+    const SRC = { [SRC_B]: { location: 'EEUR' } }
 
     let w = world({ ...SRC })
     let r = await run(w, 'verify-only')
@@ -703,13 +713,13 @@ async function main() {
     assert.deepStrictEqual((await run(w, 'copy')).problems, ['destination-create-failed'])
 
     for (const mode of ['copy', 'verify-only']) {
-      w = world({ ...SRC, 'business-os-assets-apac': { location: 'eeur' } })
+      w = world({ ...SRC, [DEST_B]: { location: 'eeur' } })
       assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['destination-not-apac'], 0], mode)
-      w = world({ ...SRC, 'business-os-assets-apac': { location: 'apac' } })
+      w = world({ ...SRC, [DEST_B]: { location: 'apac' } })
       assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [[], 0], mode)
-      w = world({ ...SRC, 'business-os-assets-apac': 'forbidden' })
+      w = world({ ...SRC, [DEST_B]: 'forbidden' })
       assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['destination-bucket-unreadable'], 0], `${mode}: unreadable is not missing`)
-      w = world({ 'business-os-assets': 'forbidden' })
+      w = world({ [SRC_B]: 'forbidden' })
       assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['source-bucket-unreadable'], 0], `${mode}: no source, no create`)
     }
     assert.ok(w.calls.every((c) => c.startsWith('GET ')), 'the bucket step reads with GET only')
@@ -727,18 +737,42 @@ async function main() {
     await assert.rejects(driver.waitForHealth(never, { pause: async (ms) => { u += ms }, now: () => u, deadlineMs: 30000 }), (e) => e.code === 'worker-not-reachable')
   })
 
+  await check('the names come from the client config and the run, never from a constant', () => {
+    assert.deepStrictEqual(NAMES, { worker: WORKER, source: SRC_B, dest: DEST_B, copyWorker: `${WORKER}-r2-copy` })
+    // another client's config gives another set of names (positive control)
+    const other = lib.r2Names({ target: rendered.target({ WORKER_NAME: 'other-shop', R2_BUCKET: 'other-shop-assets' }), env: { OPS_R2_SOURCE_BUCKET: 'other-old' } })
+    assert.deepStrictEqual(other, { worker: 'other-shop', source: 'other-old', dest: 'other-shop-assets', copyWorker: 'other-shop-r2-copy' })
+    assert.strictEqual(lib.copyWorkerName(rendered.target({ WORKER_NAME: 'other-shop' })), 'other-shop-r2-copy')
+    // the old bucket must be named, plain, and not the destination
+    for (const env of [{}, { OPS_R2_SOURCE_BUCKET: '' }, { OPS_R2_SOURCE_BUCKET: 'Bad Name' }, { OPS_R2_SOURCE_BUCKET: '-x' }]) {
+      assert.throws(() => lib.r2Names({ env }), (e) => e.code === 'r2-source-bucket-missing', JSON.stringify(env))
+    }
+    assert.throws(() => lib.r2Names({ env: { OPS_R2_SOURCE_BUCKET: DEST_B } }), (e) => e.code === 'r2-source-is-destination')
+    // the modules hold no client name
+    const fs = require('fs')
+    for (const file of ['ops-r2.mjs', 'ops-r2-lib.mjs']) {
+      const text = fs.readFileSync(path.join(ROOT, 'ops', 'scripts', file), 'utf8')
+      assert.ok(!/business-os-|leangbeauty|743e5b72/.test(text), `${file} names a client`)
+    }
+  })
+
   await check('the copy Worker config: same account as the API calls, bound to exactly the two buckets', () => {
-    assert.doesNotThrow(() => driver.checkWorkerConfig('743e5b727d139e85ed11679097f6f99e'))
-    assert.throws(() => driver.checkWorkerConfig(ACCOUNT), (e) => e.code === 'account-mismatch')
-    const good = { accountId: ACCOUNT, bindings: [['SOURCE', 'business-os-assets'], ['DESTINATION', 'business-os-assets-apac']] }
-    assert.doesNotThrow(() => driver.checkWorkerConfig(ACCOUNT, good))
-    assert.throws(() => driver.checkWorkerConfig(ACCOUNT, { ...good, bindings: [['SOURCE', 'business-os-assets-apac'], ['DESTINATION', 'business-os-assets']] }), (e) => e.code === 'worker-config-mismatch')
-    assert.throws(() => driver.checkWorkerConfig(ACCOUNT, { ...good, bindings: [...good.bindings, ['OTHER', 'x']] }), (e) => e.code === 'worker-config-mismatch')
-    // the Windows runner checks out with CRLF: same reading
-    const text = require('fs').readFileSync(driver.WORKER_TOML, 'utf8')
+    const fs = require('fs')
+    const template = fs.readFileSync(driver.WORKER_TEMPLATE, 'utf8')
+    const text = driver.renderWorkerToml(template, ACCOUNT, NAMES)
     const lf = driver.parseWorkerToml(text.replace(/\r\n/g, '\n'))
+    assert.deepStrictEqual(lf, { accountId: ACCOUNT, name: NAMES.copyWorker, bindings: [['SOURCE', SRC_B], ['DESTINATION', DEST_B]] })
+    // the Windows runner checks out with CRLF: same reading
     assert.deepStrictEqual(driver.parseWorkerToml(text.replace(/\r?\n/g, '\r\n')), lf)
-    assert.deepStrictEqual(lf, { accountId: '743e5b727d139e85ed11679097f6f99e', bindings: [['SOURCE', 'business-os-assets'], ['DESTINATION', 'business-os-assets-apac']] })
+    assert.doesNotThrow(() => driver.checkWorkerConfig(ACCOUNT, NAMES, lf))
+    assert.throws(() => driver.checkWorkerConfig('f'.repeat(32), NAMES, lf), (e) => e.code === 'account-mismatch')
+    assert.throws(() => driver.checkWorkerConfig(ACCOUNT, NAMES, { ...lf, name: WORKER }), (e) => e.code === 'worker-config-mismatch', 'the copy Worker is never the production Worker')
+    assert.throws(() => driver.checkWorkerConfig(ACCOUNT, NAMES, { ...lf, bindings: [['SOURCE', DEST_B], ['DESTINATION', SRC_B]] }), (e) => e.code === 'worker-config-mismatch')
+    assert.throws(() => driver.checkWorkerConfig(ACCOUNT, NAMES, { ...lf, bindings: [...lf.bindings, ['OTHER', 'x']] }), (e) => e.code === 'worker-config-mismatch')
+    // the template carries placeholders only, and rendering refuses a template that lost or gained one
+    assert.ok(!/[0-9a-f]{32}/.test(template) && !/business-os|leang/i.test(template), 'the template holds no client value')
+    assert.throws(() => driver.renderWorkerToml(template.replace('{{DEST_BUCKET}}', 'x'), ACCOUNT, NAMES), (e) => e.code === 'worker-template-invalid')
+    assert.throws(() => driver.renderWorkerToml(template + '\nx = "{{OTHER}}"\n', ACCOUNT, NAMES), (e) => e.code === 'worker-template-invalid')
   })
 
   if (process.exitCode) console.error(`test-ops-r2-driver-pure: FAILED (${passed} passed)`)
