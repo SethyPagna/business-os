@@ -74,7 +74,6 @@ const inModule = (surface: MountedSurface, id: string, predicate: (node: MemoryN
 }
 const exactButton = (surface: MountedSurface, text: string) => surface.find((node) => node.tagName === 'BUTTON' && node.textContent.trim() === text, `button ${text}`)
 const buttonCount = (surface: MountedSurface) => surface.findAll((node) => node.tagName === 'BUTTON').length
-const WORD = { none: en.none, view: en.view, review: en.review_required, full: en.label_full_access }
 
 // The module's main access, read off the catalog independently of the editor's own row builder.
 const mainKeysOf = (section: (typeof PERMISSION_SECTIONS)[number]): string[] => {

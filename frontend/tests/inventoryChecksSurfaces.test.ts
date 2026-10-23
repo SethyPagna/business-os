@@ -4,6 +4,8 @@ import { createHarness, propsOf, type MemoryNode } from './mountedComponentHarne
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
+// Counting is its own grant and so is every field it shows (owner, 21 Oct 2026): Inventory Full no longer implies them.
+const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true }
 
 // Board 6.0.859 (A1-A5, AC-A2/A3/A5/A6): the Sessions tab, the pinned controls, the session bar, Count review, states
 // and icon-only buttons -- mounted in both language packs with the real components and a doubled transport.
@@ -46,7 +48,7 @@ let failHistory = false
 let historyBody: { items: unknown[]; total: number; page: number; pageSize: number } = { items: [], total: 0, page: 1, pageSize: 20 }
 const productsBody = () => ({ items: products, total: products.length, page: 1, pageSize: 20, branches, stats: { total_products: products.length, stock_quantity: 20 }, rankings: { products: [] }, facets: { brands: ['Brand B'], categories: [], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, issues })
 const app = {
-  user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true } as Record<string, boolean> },
+  user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
     window.history.pushState(null, '', `/inventory#${anchor || ''}`)
@@ -355,7 +357,7 @@ try {
     assert.ok(order.find(node => node.getAttribute('data-sole-branch') !== null, 'branch label'))
     await order.unmount()
     // Received dates hidden: the date row is inert and says why.
-    app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, inventory_check_show_received: false } }
+    app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_received: false } }
     const hidden = await mount()
     const rangeButtons = hidden.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.date_time_range)
     assert.ok(rangeButtons.length === 1 && propsOf(rangeButtons[0]).disabled === true, 'the date trigger is disabled without received-date access')

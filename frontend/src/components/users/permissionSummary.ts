@@ -261,7 +261,7 @@ function rowKeys(row: ModuleRow, ...maps: PermissionState[]): string[] {
 }
 
 /** A stored value as the editor reads it: an action switch only counts when it is an explicit false. */
-function readValue(map: PermissionState, key: string, row: ModuleRow): string {
+function readValue(map: PermissionState, key: string): string {
   if (key.includes(':')) return map[key] === false ? 'off' : 'default'
   const value = map[key]
   return value === 'review' || value === 'view' ? value : value === true ? 'on' : 'off'
@@ -272,7 +272,7 @@ export function moduleChanged(row: ModuleRow, perms: PermissionState, baseline: 
   if (baseline === undefined || baseline === null) return false
   const before = normalizePermissionState(baseline)
   if (!!before.all !== !!perms.all) return true
-  return rowKeys(row, perms, before).some((key) => readValue(perms, key, row) !== readValue(before, key, row))
+  return rowKeys(row, perms, before).some((key) => readValue(perms, key) !== readValue(before, key))
 }
 
 /** Whether a row grants anything at all: the "On" filter. */
