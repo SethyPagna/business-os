@@ -253,7 +253,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // Review Required no longer grants any management action -- it behaves
   // identically to None for all of them.
   const filesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'files.ts'), 'utf8')
-  assert.match(filesSrc, /function hasFullLibraryAccess\(user: SessionUser\): boolean \{\s*\n\s*return getPermissionTier\(user, 'library'\) === 'full' \|\| hasPermission\(user, 'settings'\)/, "files.ts must define hasFullLibraryAccess() requiring real Full Access to 'library' (or the legacy 'settings' grant)")
+  assert.match(filesSrc, /function hasFullLibraryAccess\(user: SessionUser\): boolean \{\s*\n\s*return getPermissionTier\(user, 'library'\) === 'full'\s*\r?\n\}/, "files.ts must define hasFullLibraryAccess() requiring real Full Access to 'library' alone (Settings Full no longer stands in)")
   assert.match(filesSrc, /if \(!hasFullLibraryAccess\(user\)\) \{\s*\n\s*return c\.json\(\{ error: 'Deleting a file requires Full Access to Library\.' \}/, 'files.ts DELETE /:id must block anyone without real Full Access to Library, including Review Required')
   assert.match(filesSrc, /if \(!hasFullLibraryAccess\(user\)\) \{\s*\n\s*return c\.json\(\{ error: 'Renaming a file requires Full Access to Library\.' \}/, 'files.ts PATCH /:id must block anyone without real Full Access to Library')
   assert.doesNotMatch(filesSrc, /app\.use\('\*', async \(c, next\) => \{\s*\n\s*const user = c\.get\('user'\)\s*\n\s*const hasLibraryAccess/, 'files.ts must no longer have a router-wide library gate -- GET / is unconditional for any authenticated user')

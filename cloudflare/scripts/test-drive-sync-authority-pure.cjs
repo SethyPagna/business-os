@@ -86,12 +86,12 @@ const env = {
 }
 
 const USERS = {
-  settingsOnly: { id: 901, username: 'settings-only', permissions: { settings: true } },
-  settingsAndCost: { id: 902, username: 'settings-cost', permissions: { settings: true, product_cost_view: true } },
-  backupNoCost: { id: 903, username: 'backup-no-cost', permissions: { settings: true, backup: true } },
-  backupAndCost: { id: 904, username: 'backup-cost', permissions: { settings: true, backup: true, product_cost_view: true } },
+  settingsOnly: { id: 901, username: 'settings-only', permissions: { settings: true, drive_credentials: true } },
+  settingsAndCost: { id: 902, username: 'settings-cost', permissions: { settings: true, drive_credentials: true, product_cost_view: true } },
+  backupNoCost: { id: 903, username: 'backup-no-cost', permissions: { settings: true, drive_credentials: true, backup: true } },
+  backupAndCost: { id: 904, username: 'backup-cost', permissions: { settings: true, drive_credentials: true, backup: true, product_cost_view: true } },
   admin: { id: 905, username: 'owner', permissions: { all: true } },
-  inactive: { id: 906, username: 'gone', permissions: { settings: true, backup: true, product_cost_view: true }, is_active: 0 },
+  inactive: { id: 906, username: 'gone', permissions: { settings: true, drive_credentials: true, backup: true, product_cost_view: true }, is_active: 0 },
 }
 for (const u of Object.values(USERS)) {
   raw.prepare(`INSERT INTO users (id, username, name, password, permissions, is_active) VALUES (@id, @username, @username, 'x', @permissions, @active)`)
@@ -156,7 +156,7 @@ async function main() {
     }
     // Demotion after connecting stops the uploads with no disconnect needed.
     setSetting(DRIVE_SYNC_AUTHORIZED_BY_KEY, String(USERS.backupAndCost.id))
-    raw.prepare('UPDATE users SET permissions = @p WHERE id = @id').run({ id: USERS.backupAndCost.id, p: JSON.stringify({ settings: true, backup: true }) })
+    raw.prepare('UPDATE users SET permissions = @p WHERE id = @id').run({ id: USERS.backupAndCost.id, p: JSON.stringify({ settings: true, drive_credentials: true, backup: true }) })
     assert.equal((await checkDriveSyncAuthorizer(env)).reason, 'authorizer-lacks-grants')
   })
 

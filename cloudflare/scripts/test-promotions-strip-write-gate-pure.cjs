@@ -86,9 +86,9 @@ const USERS = {
     'live Manager (customer_portal)': as('manager', MANAGER_LIVE),
     'Employee + portal_posts (posts & promos)': as('employee', EMPLOYEE_AFTER_5, { portal_posts: true }),
     'Employee + customer_portal (portal config)': as('employee', EMPLOYEE_AFTER_5, { customer_portal: true }),
-    'Employee + full Settings': as('employee', EMPLOYEE_AFTER_5, { settings: true }),
   },
   refused: {
+    'Employee + full Settings alone (no longer includes the strip, owner 21 Oct 2026)': as('employee', EMPLOYEE_AFTER_5, { settings: true }),
     'Employee after the section 5 update': as('employee', EMPLOYEE_AFTER_5),
     'seeded Employee': as('employee', SEED.employee),
     'Manager-like role without any Website Editor grant': as('manager', { products: true, inventory: true }),

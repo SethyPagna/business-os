@@ -682,14 +682,15 @@ async function main() {
     assert.equal(res.body.code, 'invalid_about_image')
   })
 
-  await check('AW-4: a posts-only or config-only grant gets the bucket 403 for both keys; About-only and full Settings succeed', async () => {
+  await check('AW-4: a posts-only or config-only grant gets the bucket 403 for both keys; About-only succeeds, full Settings alone is refused', async () => {
     for (const key of [IMAGE, ALT]) {
       for (const actor of [POSTS_ONLY, CONFIG_ONLY]) {
         const res = await save(actor, { [key]: key === IMAGE ? POSTER : 'x' })
         assert.equal(res.status, 403, `${actor.username} ${key}: ${JSON.stringify(res.body)}`)
         assert.match(res.body.error, /Manage portal About/)
       }
-      for (const actor of [ABOUT_ONLY, SETTINGS_HOLDER]) {
+      assert.equal((await save(SETTINGS_HOLDER, { [key]: key === IMAGE ? POSTER : 'x' })).status, 403, 'Settings Full alone no longer saves a bucket key (owner, 21 Oct 2026)')
+      for (const actor of [ABOUT_ONLY]) {
         const res = await save(actor, { [key]: key === IMAGE ? POSTER : 'x' })
         assert.equal(res.status, 200, `${actor.username} ${key}: ${JSON.stringify(res.body)}`)
       }

@@ -192,7 +192,7 @@ async function main() {
   })
   await check('hidden fields refuse inference before querying; blind reads omit values and customer identities', async () => {
     const db = fixture(); product(db, 930001, 'Synthetic public name', 6)
-    const user = { id: 2, role_code: 'staff', role_permissions: JSON.stringify({ inventory: 'review', inventory_check_show_received: true }) }
+    const user = { id: 2, role_code: 'staff', role_permissions: JSON.stringify({ inventory: 'review', inventory_checks: true, inventory_check_show_received: true }) }
     const { result } = await read(db, {}, user)
     assert.equal(Object.hasOwn(result.items[0], 'display_quantity'), false)
     assert.equal(Object.hasOwn(result.stats, 'stock_quantity'), false)
@@ -203,7 +203,7 @@ async function main() {
     }
     const names = await read(db, { query: 'Synthetic' }, user)
     assert.equal(names.result.total, 1)
-    const noContacts = { id: 3, role_code: 'staff', role_permissions: JSON.stringify({ inventory: true, contacts: false }) }
+    const noContacts = { id: 3, role_code: 'staff', role_permissions: JSON.stringify({ inventory: true, inventory_checks: true, contacts: false }) }
     await assert.rejects(() => read(db, {}, noContacts, { rankingLimit: 5, customerRanking: 'sale_count' }), e => e.status === 403)
     db.close()
   })
@@ -252,7 +252,7 @@ async function main() {
       await assert.rejects(() => api.readInventoryCheckProducts(proxy, admin, query, { lowStock }), e => e.status === 400)
       assert.equal(proxy.calls, 0)
     }
-    const blindReceived = { id: 2, role_code: 'staff', role_permissions: JSON.stringify({ inventory: true, inventory_check_show_received: false }) }
+    const blindReceived = { id: 2, role_code: 'staff', role_permissions: JSON.stringify({ inventory: true, inventory_checks: true, inventory_check_show_received: false }) }
     await assert.rejects(() => read(db, { startDate: '2026-10-19' }, blindReceived), e => e.status === 403)
     await assert.rejects(() => read(db, { branchId: 999999 }), e => e.status === 400)
     db.exec('UPDATE branches SET is_active=0 WHERE id<>1')
