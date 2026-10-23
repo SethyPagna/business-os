@@ -75,7 +75,7 @@ import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
-import { parseOutstanding, takeBackReplacement, type ReplacementLine, type ReplacementOutstanding } from './helpers/returnReplacementCancel.ts'
+import { parseOutstanding, takeBackReplacement, validateTakeBack, type ReplacementLine, type ReplacementOutstanding, type TakeBackDeps } from './helpers/returnReplacementCancel.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
@@ -1356,33 +1356,50 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     return parseOutstanding(detail?.replacement_outstanding)
   }, [])
   const legacyTakeBackIdentities = useRef(new Map<string, { client_request_id: string; return_number: string }>())
-  const takeBackReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<number> => {
+  const takeBackDeps = useCallback(async (): Promise<TakeBackDeps> => {
+    const transport = await loadReturnsWriteTransport()
+    return {
+      userId: user?.id,
+      reason: tr('return_cancel_replacement_reason', 'Replacement items cancelled with the return', 'ទំនិញជំនួសត្រូវបានបោះបង់ជាមួយការប្រគល់មកវិញ'),
+      getReturnQuoteV1: transport.getReturnQuoteV1,
+      prepareReturnCreateV1: transport.prepareReturnCreateV1 as never,
+      submitReturnCreateV1: transport.submitReturnCreateV1 as never,
+      clearPendingReturnCreateV1: transport.clearPendingReturnCreateV1 as never,
+      loadPendingReturnCreateV1: transport.loadPendingReturnCreateV1,
+      createReturn: transport.createReturn,
+      // One identity per (return, choice): a take-back retried after an unknown outcome is the same request, never a second return.
+      legacyIdentity: (returnId, signature) => {
+        const key = `${returnId}:${signature}`
+        const known = legacyTakeBackIdentities.current.get(key)
+        if (known) return known
+        const created = { client_request_id: createClientRequestId('return'), return_number: `RET-${businessDateTimeId()}` }
+        legacyTakeBackIdentities.current.set(key, created)
+        return created
+      },
+    }
+  }, [tr, user?.id])
+  const reportTakeBackFailure = useCallback((error: unknown) => {
+    const code = (error as { code?: string } | null)?.code
+    notify(returnRefusalText(error, tr) ?? (code ? tr(code, error instanceof Error ? error.message : String(error || '')) : (error instanceof Error ? error.message : String(error || ''))), 'error')
+  }, [notify, tr])
+  // Each take-back is one complete return of the replacement sale; the cancel dialog asks every one of them (validateReplacementLines, a quote that writes
+  // nothing) before it makes the first, then makes them one step at a time.
+  const takeBackReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[], prepared?: unknown): Promise<number> => {
     try {
-      const transport = await loadReturnsWriteTransport()
-      return await takeBackReplacement({
-        userId: user?.id,
-        reason: tr('return_cancel_replacement_reason', 'Replacement items cancelled with the return', 'ទំនិញជំនួសត្រូវបានបោះបង់ជាមួយការប្រគល់មកវិញ'),
-        getReturnQuoteV1: transport.getReturnQuoteV1,
-        prepareReturnCreateV1: transport.prepareReturnCreateV1 as never,
-        submitReturnCreateV1: transport.submitReturnCreateV1 as never,
-        clearPendingReturnCreateV1: transport.clearPendingReturnCreateV1 as never,
-        createReturn: transport.createReturn,
-        // One identity per (return, choice): a take-back retried after an unknown outcome is the same request, never a second return.
-        legacyIdentity: (returnId, signature) => {
-          const key = `${returnId}:${signature}`
-          const known = legacyTakeBackIdentities.current.get(key)
-          if (known) return known
-          const created = { client_request_id: createClientRequestId('return'), return_number: `RET-${businessDateTimeId()}` }
-          legacyTakeBackIdentities.current.set(key, created)
-          return created
-        },
-      }, outstanding, lines)
+      return await takeBackReplacement(await takeBackDeps(), outstanding, lines, prepared)
     } catch (error) {
-      const code = (error as { code?: string } | null)?.code
-      notify(returnRefusalText(error, tr) ?? (code ? tr(code, error instanceof Error ? error.message : String(error || '')) : (error instanceof Error ? error.message : String(error || ''))), 'error')
+      reportTakeBackFailure(error)
       throw error
     }
-  }, [notify, tr, user?.id])
+  }, [reportTakeBackFailure, takeBackDeps])
+  const validateReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<unknown> => {
+    try {
+      return await validateTakeBack(await takeBackDeps(), outstanding, lines)
+    } catch (error) {
+      reportTakeBackFailure(error)
+      throw error
+    }
+  }, [reportTakeBackFailure, takeBackDeps])
 
   useEffect(() => {
     if (!selectAllRef.current) return
@@ -1907,6 +1924,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             fmtUSD={fmtUSD}
             loadOutstanding={loadReplacementOutstanding}
             takeBack={takeBackReplacementLines}
+            validateTakeBack={validateReplacementLines}
             onCheck={checkBulkAction}
             canTakeBack={canAddReturn}
             onClose={() => setBulkActionSnapshot(null)}
