@@ -55,9 +55,17 @@ type BulkRequest = {
     expected_updated_at: string | null
     // Cancelling a return that has replacement units still with the customer (6.0.958): the returns the till made to take those units back,
     // [] when the replacement stays. Sorted and unique. Absent on every other request.
-    replacement?: { return_ids: number[] }
+    replacement?: ReplacementChoice
   }>
+  // A check that writes nothing (6.0.964): the cancel is planned, validated and sized exactly as it would be applied, then answered without a write.
+  dry_run?: true
 }
+
+/**
+ * `planned`: only on a dry run -- the units of the replacement the till is ABOUT to take back (it has not made that return yet). They count as gone when the
+ * choice and the price floor are judged, and each planned take-back is sized as the linked return it will become.
+ */
+type ReplacementChoice = { return_ids: number[]; planned?: Array<{ sale_item_id: number; quantity: number }> }
 
 type ReturnItem = Row & {
   id: number
@@ -197,21 +205,37 @@ function methodValue(row: Row): string {
 
 const REPLACEMENT_RETURNS_PER_ITEM = 10
 
-function parseReplacementChoice(value: unknown, field: ReturnField, target: string): { return_ids: number[] } | undefined {
+function parseReplacementChoice(value: unknown, field: ReturnField, target: string, dryRun: boolean): ReplacementChoice | undefined {
   if (value === undefined) return undefined
   if (field !== 'status' || target !== 'cancelled') fail('A replacement choice only applies when cancelling a return.', 400)
   const choice = value as Row
-  if (!choice || typeof choice !== 'object' || Array.isArray(choice) || Object.keys(choice).some((key) => key !== 'return_ids')
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice) || Object.keys(choice).some((key) => key !== 'return_ids' && !(dryRun && key === 'planned'))
     || !Array.isArray(choice.return_ids) || choice.return_ids.length > REPLACEMENT_RETURNS_PER_ITEM) fail('The replacement choice is invalid.', 400)
   const ids = (choice.return_ids as unknown[]).map(Number)
   if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) fail('The replacement choice is invalid.', 400)
-  return { return_ids: ids.sort((a, b) => a - b) }
+  let planned: ReplacementChoice['planned']
+  if (choice.planned !== undefined) {
+    const list = choice.planned
+    if (!Array.isArray(list) || list.length > 50 || ids.length) fail('The replacement choice is invalid.', 400)
+    planned = (list as unknown[]).map((entry) => {
+      const line = entry as Row
+      const saleItemId = Number(line?.sale_item_id)
+      const quantity = Number(line?.quantity)
+      if (!line || typeof line !== 'object' || Object.keys(line).some((key) => key !== 'sale_item_id' && key !== 'quantity')
+        || !Number.isSafeInteger(saleItemId) || saleItemId <= 0 || !Number.isFinite(quantity) || quantity <= 0) fail('The replacement choice is invalid.', 400)
+      return { sale_item_id: saleItemId, quantity }
+    })
+    if (new Set(planned.map((line) => line.sale_item_id)).size !== planned.length) fail('The replacement choice is invalid.', 400)
+  }
+  return { return_ids: ids.sort((a, b) => a - b), ...(planned ? { planned } : {}) }
 }
 
 function parseRequest(raw: Row): BulkRequest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('A bulk return action is required.', 400)
-  const allowed = ['client_request_id', 'field', 'source', 'target', 'items']
+  const allowed = ['client_request_id', 'field', 'source', 'target', 'items', 'dry_run']
   if (Object.keys(raw).some((key) => !allowed.includes(key))) fail('Unsupported bulk return field.', 400)
+  if (raw.dry_run !== undefined && raw.dry_run !== true) fail('Unsupported bulk return field.', 400)
+  const dryRun = raw.dry_run === true
   if (typeof raw.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(raw.client_request_id)) fail('A stable request id is required.', 400)
   const field = String(raw.field || '') as ReturnField
   if (!['status', 'return_type', 'supplier_settlement'].includes(field)) fail('Invalid return field.', 400)
@@ -236,7 +260,7 @@ function parseRequest(raw: Row): BulkRequest {
       fail('Unique return ids and expected states are required.', 400)
     }
     ids.add(id)
-    const replacement = parseReplacementChoice(item.replacement, field, target)
+    const replacement = parseReplacementChoice(item.replacement, field, target, dryRun)
     return {
       id,
       expected_status: normalize(item.expected_status, 'completed'),
@@ -245,7 +269,7 @@ function parseRequest(raw: Row): BulkRequest {
       ...(replacement ? { replacement } : {}),
     }
   }).sort((left, right) => left.id - right.id)
-  return { client_request_id: raw.client_request_id, field, source, target, items }
+  return { client_request_id: raw.client_request_id, field, source, target, items, ...(dryRun ? { dry_run: true as const } : {}) }
 }
 
 function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
@@ -658,10 +682,20 @@ export type ReplacementOutstanding = {
 type ExchangeSaleMoney = {
   source_return_id: number | null; sale_status: string | null; return_state: string | null; payment_method: string | null; payment_details: string | null
   amount_paid_usd: number; amount_paid_khr: number; total_usd: number; exchange_rate: number; refund_usd: number; refund_owed_usd: number
+  change_usd: number; change_khr: number
   // The sale's own money and every return on it, read by the same statement (no extra D1 query): what a take-back's debt/cash split is planned against.
   stored: SaleReturnMoney
 }
 type ReplacementInfo = Omit<ReplacementOutstanding, 'lines'> & { lines: Array<ReplacementOutstandingLine & { catalog_usd: number | null }>; money: ExchangeSaleMoney }
+
+function recordedCatalog(itemsJson: unknown, index: number): number | null {
+  if (typeof itemsJson !== 'string' || itemsJson.length > 200_000) return null
+  try {
+    const items = JSON.parse(itemsJson)
+    const value = Array.isArray(items) ? Number(items[index]?.catalog_usd) : NaN
+    return Number.isFinite(value) && value >= 0 ? value : null
+  } catch { return null }
+}
 
 async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<Map<number, ReplacementInfo>> {
   const infos = new Map<number, ReplacementInfo>()
@@ -672,8 +706,8 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
       COALESCE(si.applied_price_usd,rri.applied_price_usd) AS applied_price_usd,COALESCE(si.applied_price_khr,rri.applied_price_khr) AS applied_price_khr,
       MAX(COALESCE(si.returned_quantity,0),0)+COALESCE((SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r2 ON r2.id=ri.return_id
         WHERE ri.sale_item_id=rri.sale_item_id AND COALESCE(r2.status,'completed')<>'cancelled'),0) AS returned_quantity,
-      s.id AS sale_id,s.sale_status,s.receipt_number,s.exchange_rate,s.money_precision_version,p.selling_price_usd,
-      s.source_return_id,s.return_state,s.payment_method,s.payment_details,s.amount_paid_usd,s.amount_paid_khr,s.total_usd,
+      s.id AS sale_id,s.sale_status,s.receipt_number,s.exchange_rate,s.money_precision_version,p.selling_price_usd,s.items AS sale_items_json,
+      s.source_return_id,s.return_state,s.payment_method,s.payment_details,s.amount_paid_usd,s.amount_paid_khr,s.total_usd,s.change_usd,s.change_khr,
       r.total_refund_usd AS refund_usd,r.owed_reduction_usd AS refund_owed_usd,s.calculated_total_usd,s.status_before_return,
       ${saleReturnMoneySql('s')}
     FROM return_replacement_items rri
@@ -692,7 +726,7 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
         source_return_id: row.source_return_id == null ? null : Number(row.source_return_id), sale_status: (row.sale_status as string | null) ?? null,
         return_state: (row.return_state as string | null) ?? null, payment_method: (row.payment_method as string | null) ?? null,
         payment_details: (row.payment_details as string | null) ?? null, amount_paid_usd: Number(row.amount_paid_usd) || 0, amount_paid_khr: Number(row.amount_paid_khr) || 0,
-        total_usd: Number(row.total_usd) || 0, exchange_rate: Number(row.exchange_rate) || 0,
+        total_usd: Number(row.total_usd) || 0, exchange_rate: Number(row.exchange_rate) || 0, change_usd: Number(row.change_usd) || 0, change_khr: Number(row.change_khr) || 0,
         refund_usd: Number(row.refund_usd) || 0, refund_owed_usd: Number(row.refund_owed_usd) || 0,
         stored: saleReturnMoney({ id: row.sale_id, sale_status: row.sale_status, status_before_return: row.status_before_return, total_usd: row.total_usd, amount_paid_usd: row.amount_paid_usd,
           amount_paid_khr: row.amount_paid_khr, exchange_rate: row.exchange_rate, money_precision_version: row.money_precision_version, calculated_total_usd: row.calculated_total_usd, return_money_json: row.return_money_json }),
@@ -706,7 +740,9 @@ async function readReplacementInfo(db: D1Compat, returnIds: number[]): Promise<M
       product_name: (row.product_name as string | null) ?? null, branch_id: row.branch_id == null ? null : Number(row.branch_id),
       batch_id: row.batch_id == null ? null : Number(row.batch_id), quantity: left,
       applied_price_usd: Number(row.applied_price_usd) || 0, applied_price_khr: Number(row.applied_price_khr) || 0,
-      catalog_usd: row.selling_price_usd == null ? null : Number(row.selling_price_usd),
+      // The catalog price the line was sold against, recorded on the sale when the exchange was made (release review P2-2: a catalog that moved since is not what
+      // the floor holds the units to); today's catalog only for a sale that recorded none.
+      catalog_usd: recordedCatalog(row.sale_items_json, info.lines.length) ?? (row.selling_price_usd == null ? null : Number(row.selling_price_usd)),
     })
     infos.set(returnId, info)
   }
@@ -739,6 +775,15 @@ async function planReplacementChoices(db: D1Compat, request: BulkRequest, return
     return !!row && normalize(row.status, 'completed') === request.source && normalize(row.return_scope, 'customer') !== 'supplier' && Number(row.replacement_sale_id) > 0
   })
   const infos = await readReplacementInfo(db, cancelling.map((item) => item.id))
+  // A dry run judges the choice as if the take-back it announces already existed: those units are not with the customer any more.
+  for (const item of request.items) {
+    const info = infos.get(item.id)
+    for (const planned of item.replacement?.planned ?? []) {
+      const line = info?.lines.find((candidate) => candidate.sale_item_id === planned.sale_item_id)
+      if (!line || planned.quantity > line.quantity + 1e-9) fail(`Return ${item.id} has no such replacement units to take back.`, 400, 'return_cancel_replacement_invalid')
+      line.quantity = Math.max(0, Number(subtractDecimalSum(line.quantity, [planned.quantity])))
+    }
+  }
   const undecided = request.items.flatMap((item) => {
     const info = infos.get(item.id)
     const kept = info ? info.lines.filter((line) => line.quantity > 0) : []
@@ -785,14 +830,13 @@ const money4 = (value: number): number => Math.round(value * 10000) / 10000
 
 type TenderRow = { method?: unknown; amount_usd?: unknown; amount_khr?: unknown; refund_credit?: unknown }
 
-function creditRowIndex(rows: TenderRow[], creditUsd: number): number {
-  const flagged = rows.findIndex((row) => row && row.refund_credit === true)
-  if (flagged >= 0) return flagged
-  const first = rows[0]
-  return first && Number(first.amount_khr) === 0 && Math.abs(Number(first.amount_usd) - creditUsd) < 0.00005 ? 0 : -1
+// ONLY the flag identifies the credit row (6.0.964). Matching the first row by amount would take a customer's own cash payment of the same size for the credit
+// and delete it; no exchange without the flag exists (v1 exchanges are new), so there is nothing a guess would be needed for.
+function creditRowIndex(rows: TenderRow[]): number {
+  return rows.findIndex((row) => row && row.refund_credit === true)
 }
 
-async function planCreditReversals(db: D1Compat, request: BulkRequest, members: Member[], replacement: Map<number, ReplacementInfo>): Promise<SaleStatusSnapshot[]> {
+async function planCreditReversals(request: BulkRequest, members: Member[], replacement: Map<number, ReplacementInfo>): Promise<SaleStatusSnapshot[]> {
   if (request.field !== 'status' || request.target !== 'cancelled') return []
   const events: SaleStatusSnapshot[] = []
   for (const member of members) {
@@ -805,8 +849,13 @@ async function planCreditReversals(db: D1Compat, request: BulkRequest, members: 
     let rows: TenderRow[]
     try { rows = JSON.parse(sale.payment_details || '[]') } catch { continue }
     if (!Array.isArray(rows)) continue
-    const index = creditRowIndex(rows, creditUsd)
+    const index = creditRowIndex(rows)
     if (index < 0) continue
+    // The change handed out beside the credit is cash that left the drawer against a sale the credit no longer pays: the debt would have to carry it and
+    // every settlement path keep it. Until it does, cancelling such an exchange is refused whole (6.0.964, release review P1-1).
+    if (sale.change_usd > 0 || sale.change_khr > 0) {
+      fail('This exchange gave change back to the customer, so its return cannot be cancelled here: the cash handed out would no longer be accounted for. Nothing was changed.', 409, 'return_cancel_exchange_change')
+    }
     const credit = Number(rows[index].amount_usd) || 0
     const rest = rows.filter((_, position) => position !== index)
     const before: SaleCreditState = {
@@ -873,7 +922,7 @@ async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, re
     if (!(creditUsd > 0)) continue
     let rows: TenderRow[] = []
     try { rows = JSON.parse(String(sale.payment_details || '[]')) } catch { rows = [] }
-    if (Array.isArray(rows) && creditRowIndex(rows, creditUsd) >= 0) continue
+    if (Array.isArray(rows) && creditRowIndex(rows) >= 0) continue
     fail('This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.', 409, 'return_restore_exchange_credit')
   }
 }
@@ -1086,6 +1135,19 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
   ])
 }
 
+/**
+ * The take-back the till announces is an ordinary return of the replacement sale, made in ONE invocation before the cancel. On a plan that runs few D1 queries
+ * per invocation (Free: 50) only a one-line return fits -- test-return-exchange-cancel-free-native.cjs measures it: a 2-line return is refused by its own
+ * admission -- so a longer take-back is refused here, BEFORE any of it is made (release review P3). A plan with room (Paid: 1000) takes up to the return maximum.
+ */
+const SMALL_PLAN_QUERY_LIMIT = 200
+function assertTakeBackFitsPlan(env: Env, request: BulkRequest): void {
+  const allowed = getPlanLimits(env).d1QueriesPerInvocation >= SMALL_PLAN_QUERY_LIMIT ? 50 : 1
+  if (request.items.some((item) => (item.replacement?.planned?.length ?? 0) > allowed)) {
+    fail('This return is too large for the current plan. Return fewer items or received dates, then try again.', 400, 'customer_return_over_plan_budget')
+  }
+}
+
 export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<Row> {
   return (await applyReturnBulkActionOutcome(env, user, raw, redirectTarget, queryBudget)).receipt
 }
@@ -1105,9 +1167,10 @@ export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
+  if (request.dry_run) assertTakeBackFitsPlan(env, request)
   const db = getDb(env)
   const canonical = JSON.stringify(request)
-  const previous = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
+  const previous = request.dry_run ? undefined : await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous) {
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
@@ -1121,7 +1184,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   const stamp = new Date().toISOString()
   const saleRows = request.field === 'status' ? await saleTagRows(db, selected, 'after') : []
   if (request.field === 'status') await planStatusMoney(db, members)
-  const creditEvents = await planCreditReversals(db, request, members, replacement)
+  const creditEvents = await planCreditReversals(request, members, replacement)
   for (const member of members) {
     if (!member.credit) continue
     const check = creditStatePredicate(member.credit.before, member.credit.saleId)
@@ -1177,6 +1240,12 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  if (request.dry_run) {
+    // Each take-back the till announces becomes one linked member: its guard, its debt/cash split update and its membership row.
+    const announced = request.items.filter((item) => item.replacement?.planned?.length).length * 3
+    if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length + announced) : statements.length + announced, queryBudget.reserveStatements)
+    return { receipt: { dryRun: true, ok: true, statements: statements.length + announced }, wrote: false }
+  }
   if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
     const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))

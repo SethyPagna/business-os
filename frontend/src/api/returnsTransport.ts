@@ -72,7 +72,7 @@ export type ExchangeQuoteLineV1 = {
   unit_price_usd: number; unit_price_khr: number; total_usd: number; total_khr: number
 }
 export type ExchangeQuoteV1 = {
-  version: 1; sale_id: number; exchange_rate: number; not_paid: boolean; lines: ExchangeQuoteLineV1[]
+  version: 1; sale_id: number; exchange_rate: number; change_exchange_rate: number; not_paid: boolean; lines: ExchangeQuoteLineV1[]
   calculated_total_usd: number; rounding_adjustment_usd: number; total_usd: number; total_khr: number
   refund_usd: number; owed_reduction_usd: number; credit_usd: number; net_usd: number
 }
@@ -112,12 +112,12 @@ export function validateReturnQuoteV1(value: unknown): ReturnQuoteV1 {
   return JSON.parse(JSON.stringify(quote)) as ReturnQuoteV1
 }
 export function validateExchangeQuoteV1(value: unknown): ExchangeQuoteV1 {
-  const keys = ['version', 'sale_id', 'exchange_rate', 'not_paid', 'lines', 'calculated_total_usd', 'rounding_adjustment_usd', 'total_usd', 'total_khr',
+  const keys = ['version', 'sale_id', 'exchange_rate', 'change_exchange_rate', 'not_paid', 'lines', 'calculated_total_usd', 'rounding_adjustment_usd', 'total_usd', 'total_khr',
     'refund_usd', 'owed_reduction_usd', 'credit_usd', 'net_usd']
   if (!exactKeys(value, keys) || value.version !== 1 || !Number.isSafeInteger(value.sale_id) || Number(value.sale_id) <= 0 || typeof value.not_paid !== 'boolean'
     || !Array.isArray(value.lines) || !value.lines.length || value.lines.length > 50) throw returnV1Error('return_v1_review_required')
   const quote = value as unknown as ExchangeQuoteV1
-  if (!finiteMoney(quote.exchange_rate) || quote.exchange_rate <= 0
+  if (!finiteMoney(quote.exchange_rate) || quote.exchange_rate <= 0 || !finiteMoney(quote.change_exchange_rate) || quote.change_exchange_rate <= 0
     || ![quote.calculated_total_usd, quote.total_usd, quote.total_khr, quote.refund_usd, quote.owed_reduction_usd, quote.credit_usd].every(v => finiteMoney(v))
     || !finiteMoney(quote.rounding_adjustment_usd, true) || !finiteMoney(quote.net_usd, true)) throw returnV1Error('return_v1_review_required')
   for (const line of quote.lines) {

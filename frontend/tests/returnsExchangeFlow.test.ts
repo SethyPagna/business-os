@@ -191,4 +191,9 @@ for (const key of ['replacement_items_label', 'replacement_items_short', 'add_re
   assert.ok(!(key in km), `km.json must drop the stale key ${key}`)
 }
 
+// 6.0.964 (release review P2-4): the riel the screen shows for a give-back is figured at the quote's change rate -- the rate the Worker records it at --
+// and never at the sale's own rate, which differs whenever the shop sets a change rate.
+assert.match(newReturn, /changeRielRoundedDown\(overpaidUsd, exchangeQuote\.change_exchange_rate\)/, 'the give-back in riel uses the quote change rate')
+assert.doesNotMatch(newReturn, /changeRielRoundedDown\([^)]*exchangeQuote\.exchange_rate\)/, 'and never the sale rate')
+
 console.log('PASS returns exchange copy is translated in both packs and the superseded copy is retired')

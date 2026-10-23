@@ -180,7 +180,7 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   const redirectTarget = branchRedirectTarget(c)
   const quoted = await priceAndQuoteExchange({
     db, user, saleId, plan, returnedLines: returnLines, replacementIntents: intent.replacement_items, branches: ctx.branches, products: ctx.products,
-    bodyBranchId: body.branch_id, redirectTarget, evaluatedAt: occurredAt,
+    bodyBranchId: body.branch_id, redirectTarget, evaluatedAt: occurredAt, changeRateSetting: ctx.settings.change_exchange_rate,
   })
   if (!quoted.ok) return reply(quoted.status, quoted.body)
   const { rate, headerEffect, recordedBranchId, branchId, branchRow, replacementIntents, priced, quote: exchangeQuote, refundUsd, refundKhr, owedReductionUsd, notPaid } = quoted
@@ -476,7 +476,9 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
       change_usd: settlement.change.changeUsd, change_khr: settlement.change.changeKhr,
       change_is_actual: settlement.change.changeIsActual, change_exchange_rate: settlement.change.changeExchangeRate,
       sale_status: saleStatus, notes: `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`,
-      items: JSON.stringify(saleRows.items.map((item) => ({
+      items: JSON.stringify(saleRows.items.map((item, position) => ({
+        // The catalog price the line was priced against: what a later cancel of the return holds the units that stay to (they sold at it or under it only because of the return).
+        catalog_usd: priced.lines[position].catalog_usd,
         product_id: item.product_id, product_name: item.product_name, quantity: item.quantity,
         applied_price_usd: item.applied_price_usd, applied_price_khr: item.applied_price_khr, base_price_usd: item.base_price_usd, base_price_khr: item.base_price_khr,
         total_usd: item.total_usd, total_khr: item.total_khr, cost_price_usd: item.cost_price_usd, cost_price_khr: item.cost_price_khr,

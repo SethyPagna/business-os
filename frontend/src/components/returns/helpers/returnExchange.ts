@@ -69,7 +69,7 @@ export function exchangeOverpaymentUsd(rows: readonly SettlementRow[], exchange:
   return Math.max(0, Math.round((paidEquivalentUsd - due.usd) * 10000) / 10000)
 }
 
-/** What a give-back or an overpayment comes to in riel: at the sale's rate, rounded DOWN to 100 (the drawer never hands out more than is owed). */
+/** What a give-back or an overpayment comes to in riel: at the quote's change rate (`change_exchange_rate`), rounded DOWN to 100 (the drawer never hands out more than is owed). */
 export function changeRielRoundedDown(usd: number, exchangeRate: number): number {
   return Math.floor((Number(usd) || 0) * (Number(exchangeRate) || 0) / 100 + 1e-9) * 100
 }

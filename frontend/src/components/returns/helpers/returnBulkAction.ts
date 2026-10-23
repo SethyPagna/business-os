@@ -22,7 +22,7 @@ export interface ReturnBulkItem {
    * Cancelling a return that opened a replacement sale (6.0.958): the returns that take replacement units back, [] to keep the replacement.
    * Required by the Worker whenever replacement units are still with the customer (helpers/returnReplacementCancel.ts).
    */
-  replacement?: { return_ids: number[] }
+  replacement?: { return_ids: number[]; /** Only on a dry run: the units about to be taken back, which the Worker judges the cancel as if already gone. */ planned?: Array<{ sale_item_id: number; quantity: number }> }
 }
 
 export interface ReturnBulkPayload {
@@ -31,6 +31,8 @@ export interface ReturnBulkPayload {
   source: string
   target: string
   items: ReturnBulkItem[]
+  /** A check that writes nothing: the Worker plans and sizes the cancel exactly as it would apply it, then answers without writing (6.0.964). */
+  dry_run?: true
 }
 
 export interface ReturnBulkResult {

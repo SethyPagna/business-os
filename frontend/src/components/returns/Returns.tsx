@@ -1335,6 +1335,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [actionHistory, bulkRetryKey, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
 
+  // The dry run behind the cancel dialog (6.0.964): sent before any replacement unit is taken back, it refuses what the real cancel would refuse -- the plan's
+  // size, the price floor, an exchange that gave change back -- and writes nothing, so a refused cancel never leaves a take-back standing.
+  const checkBulkAction = useCallback(async (request: ReturnBulkPayload): Promise<unknown> => {
+    try {
+      const { bulkUpdateReturns } = await loadReturnsWriteTransport()
+      return await withLoaderTimeout(() => bulkUpdateReturns(request), 'Bulk return check', RETURNS_HISTORY_RESTORE_TIMEOUT_MS)
+    } catch (error) {
+      notify(returnRefusalText(error, tr) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
+      throw error
+    }
+  }, [notify, tr])
+
   // Cancelling a return that opened a replacement sale asks what happens to the replacement items still with the customer (owner, 22 Oct 2026).
   // The look-up is the return's own detail read, fresh; taking units back is an ordinary return of the replacement sale (v1 through the same quote and
   // frozen request the New Return screen uses), made before the cancel and linked to it.
@@ -1895,6 +1907,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             fmtUSD={fmtUSD}
             loadOutstanding={loadReplacementOutstanding}
             takeBack={takeBackReplacementLines}
+            onCheck={checkBulkAction}
             canTakeBack={canAddReturn}
             onClose={() => setBulkActionSnapshot(null)}
             onApply={applyBulkAction}

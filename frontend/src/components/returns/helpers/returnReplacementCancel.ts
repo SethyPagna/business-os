@@ -1,4 +1,4 @@
-import type { ReturnBulkPayload } from './returnBulkAction.ts'
+import { makeReturnBulkRequestId, type ReturnBulkPayload } from './returnBulkAction.ts'
 
 // 6.0.958 (owner, 22 Oct 2026): "if cancel, ask if replacement also cancel, if so, choose some or all."
 //
@@ -189,8 +189,34 @@ export async function takeBackReplacement(deps: TakeBackDeps, outstanding: Repla
 export interface TakenBack { signature: string; id: number }
 
 /**
+ * The cancel as a dry run: each return that is about to have units taken back says which (the take-back does not exist yet); a take-back already made on an
+ * earlier attempt is linked as it will be. null when no take-back is still to be made -- the cancel alone is atomic, so there is nothing to check first.
+ */
+export function dryRunCancelPayload(input: {
+  payload: ReturnBulkPayload
+  outstanding: ReadonlyMap<number, ReplacementOutstanding>
+  answers: ReadonlyMap<number, ReplacementAnswer>
+  taken: ReadonlyMap<number, TakenBack>
+  clientRequestId: string
+}): ReturnBulkPayload | null {
+  let pending = false
+  const items = input.payload.items.map((item) => {
+    const outstanding = input.outstanding.get(item.id)
+    if (!outstanding) return item
+    const lines = pickedLines(outstanding, input.answers.get(item.id) ?? defaultAnswer(outstanding))
+    if (!lines.length) return { ...item, replacement: { return_ids: [] } }
+    const made = input.taken.get(item.id)
+    if (made && made.signature === takeBackSignature(lines)) return { ...item, replacement: { return_ids: [made.id] } }
+    pending = true
+    return { ...item, replacement: { return_ids: [], planned: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity })) } }
+  })
+  return pending ? { ...input.payload, client_request_id: input.clientRequestId, items, dry_run: true } : null
+}
+
+/**
  * The cancel request the dialog sends: the frozen bulk payload plus, for every exchange return that has replacement items left, the answer. Without a
- * take-back (the caller may not add returns) every answer is "keep". The returns taken back are made here, before anything is sent.
+ * take-back (the caller may not add returns) every answer is "keep". The returns taken back are made here, before anything is sent -- and only after
+ * `check` (a dry run of the cancel) has said the cancel will be accepted, so a refused cancel never leaves a take-back behind.
  */
 export async function composeCancelPayload(input: {
   payload: ReturnBulkPayload
@@ -198,9 +224,16 @@ export async function composeCancelPayload(input: {
   answers: ReadonlyMap<number, ReplacementAnswer>
   taken: Map<number, TakenBack>
   takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<number>
+  /** Sends the dry run; throws with the Worker's refusal. Absent in callers that do not need it. */
+  check?: (payload: ReturnBulkPayload) => Promise<unknown>
+  makeRequestId?: () => string
 }): Promise<ReturnBulkPayload> {
   if (!input.outstanding.size) return input.payload
   if (!input.takeBack) return withReplacementChoices(input.payload, new Map([...input.outstanding.keys()].map((id) => [id, [] as number[]])))
+  if (input.check) {
+    const dry = dryRunCancelPayload({ payload: input.payload, outstanding: input.outstanding, answers: input.answers, taken: input.taken, clientRequestId: (input.makeRequestId ?? makeReturnBulkRequestId)() })
+    if (dry) await input.check(dry)
+  }
   return withReplacementChoices(input.payload, await resolveReplacementChoices({ outstanding: input.outstanding, answers: input.answers, taken: input.taken, takeBack: input.takeBack }))
 }
 

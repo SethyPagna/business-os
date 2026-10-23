@@ -63,7 +63,7 @@ assert.deepEqual(Object.keys(canonicalV1), ['money_precision_version', 'sale_id'
   'return_type', 'notes', 'items', 'expected_quote', 'replacement_items'], 'a plain v1 return keeps the exact digest keys (and so bytes) it had before the exchange existed')
 assert.deepEqual(canonicalV1.replacement_items, [])
 assert.equal(Object.hasOwn(canonicalV1, 'expected_exchange') || Object.hasOwn(canonicalV1, 'exchange_payment'), false)
-const exchangeQuote = { version: 1, sale_id: 4, exchange_rate: 4000, not_paid: false,
+const exchangeQuote = { version: 1, sale_id: 4, exchange_rate: 4000, change_exchange_rate: 4000, not_paid: false,
   lines: [{ product_id: 2, product_name: 'Gloss', branch_id: 2, batch_id: null, quantity: 1, unit_price_usd: 6.48, unit_price_khr: 25920, total_usd: 6.48, total_khr: 25920 }],
   calculated_total_usd: 6.48, rounding_adjustment_usd: 0, total_usd: 6.48, total_khr: 25920, refund_usd: 1, owed_reduction_usd: 0, credit_usd: 1, net_usd: 5.48 }
 const exchangeBody = { money_precision_version: 1, sale_id: 4, reason: 'x', items: [{ sale_item_id: 8, quantity: 1 }],

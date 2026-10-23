@@ -148,6 +148,7 @@ export function priceExchangeLines(input: {
 export function buildExchangeQuoteV1(input: {
   saleId: number
   exchangeRate: number
+  changeRateSetting?: unknown
   pricing: ExchangePricing
   refundUsd: number
   owedReductionUsd: number
@@ -158,6 +159,7 @@ export function buildExchangeQuoteV1(input: {
     version: 1,
     sale_id: input.saleId,
     exchange_rate: input.exchangeRate,
+    change_exchange_rate: resolveChangeExchangeRate(input.changeRateSetting, input.exchangeRate),
     not_paid: input.notPaid,
     lines: input.pricing.lines.map((line) => ({
       product_id: line.product_id, product_name: line.product_name, branch_id: line.branch_id, batch_id: line.batch_id,

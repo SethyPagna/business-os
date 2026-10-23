@@ -37,7 +37,7 @@ function load() {
 const api = load()
 const quote = { money_precision_version: 1, sale_id: 11, sale_revision: 7, calculated_refund_usd: 9.67, rounding_adjustment_usd: 0, total_refund_usd: 9.67, total_refund_khr: 38680,
   items: [{ sale_item_id: 3, quantity: 1, total_usd: 9.67, total_khr: 38680, applied_price_usd: 9.67, applied_price_khr: 38680 }] }
-const exchange = { version: 1, sale_id: 11, exchange_rate: 4000, not_paid: false,
+const exchange = { version: 1, sale_id: 11, exchange_rate: 4000, change_exchange_rate: 4100, not_paid: false,
   lines: [{ product_id: 9, product_name: 'Gloss', branch_id: 2, batch_id: null, quantity: 1, unit_price_usd: 6.48, unit_price_khr: 25920, total_usd: 6.48, total_khr: 25920 }],
   calculated_total_usd: 6.48, rounding_adjustment_usd: 0, total_usd: 6.48, total_khr: 25920, refund_usd: 9.67, owed_reduction_usd: 0, credit_usd: 9.67, net_usd: -3.19 }
 const capability = { customer_return_create_version: 1, customer_return_edit_version: 0 }
@@ -61,6 +61,9 @@ for (const [name, change] of Object.entries({
   'no exchange at all': { exchange: undefined },
   'an unknown field': { exchange: { ...exchange, secret: 1 } },
   'no lines': { exchange: { ...exchange, lines: [] } },
+  // 6.0.964: the quote states the riel rate a give-back is figured at; without it the screen would guess the sale's rate.
+  'no change rate': { exchange: (({ change_exchange_rate: _rate, ...rest }) => rest)(exchange) },
+  'a zero change rate': { exchange: { ...exchange, change_exchange_rate: 0 } },
 })) {
   network = async () => ({ ...quote, ...capability, ...change })
   await assert.rejects(api.getReturnExchangeQuoteV1(11, intent, lines), /return_v1_review_required/, name)

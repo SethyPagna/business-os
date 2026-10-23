@@ -102,6 +102,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',
   return_restore_exchange_credit: 'return_restore_exchange_credit',
+  return_cancel_exchange_change: 'return_cancel_exchange_change',
   supplier_return_failed: 'supplier_return_failed',
   return_edit_failed: 'return_edit_failed',
   product_import_stock_adjust_required: 'product_import_stock_adjust_required',

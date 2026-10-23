@@ -1059,7 +1059,7 @@ app.post('/bulk', async (c) => {
     const bulkMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
     const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c),
       bulkMetrics ? { statementsUsed: () => bulkMetrics.attemptedStatements + 1, reserveStatements: 8 } : undefined)
-    c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    if (!result.dryRun) c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
     const changedIds = Array.isArray(result.changedIds) ? result.changedIds.map(Number) : []
@@ -1212,6 +1212,7 @@ app.post('/quote', async (c) => {
         returnedLines: requested.map((line) => ({ sale_item_id: line.sale_item_id, product_id: Number(soldById.get(line.sale_item_id)?.product_id) || null, quantity: line.quantity })),
         replacementIntents: replacementLines, branches: await readBranchDirectory(db), products,
         bodyBranchId: body.branch_id ?? null, redirectTarget: branchRedirectTarget(c), evaluatedAt: new Date().toISOString(),
+        changeRateSetting: (await db.prepare("SELECT value FROM settings WHERE key='change_exchange_rate'").get<{ value: string | null }>())?.value ?? null,
       })
       if (!quoted.ok) return c.json(quoted.body, quoted.status)
       payload.exchange = quoted.quote

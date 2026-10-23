@@ -26,6 +26,8 @@ export type ExchangeQuoteV1 = {
   version: 1
   sale_id: number
   exchange_rate: number
+  /** The rate a give-back or an overpayment in riel is figured at: the shop's change rate setting, else the sale's rate. What the screen shows is what the Worker records (6.0.964). */
+  change_exchange_rate: number
   /** The original sale reads Not Paid: no cash is netted across a debt; a shortfall leaves the replacement Not Paid. */
   not_paid: boolean
   lines: Array<{
@@ -48,7 +50,7 @@ export type ExchangeQuoteV1 = {
 }
 
 const QUOTE_KEYS = [
-  'version', 'sale_id', 'exchange_rate', 'not_paid', 'lines', 'calculated_total_usd', 'rounding_adjustment_usd',
+  'version', 'sale_id', 'exchange_rate', 'change_exchange_rate', 'not_paid', 'lines', 'calculated_total_usd', 'rounding_adjustment_usd',
   'total_usd', 'total_khr', 'refund_usd', 'owed_reduction_usd', 'credit_usd', 'net_usd',
 ] as const
 const QUOTE_LINE_KEYS = [
@@ -83,7 +85,7 @@ export function canonicalExchangeExpected(value: unknown): ExchangeQuoteV1 {
     }
   })
   return {
-    version: 1, sale_id: num(quote.sale_id), exchange_rate: num(quote.exchange_rate), not_paid: quote.not_paid as boolean, lines,
+    version: 1, sale_id: num(quote.sale_id), exchange_rate: num(quote.exchange_rate), change_exchange_rate: num(quote.change_exchange_rate), not_paid: quote.not_paid as boolean, lines,
     calculated_total_usd: num(quote.calculated_total_usd), rounding_adjustment_usd: num(quote.rounding_adjustment_usd),
     total_usd: num(quote.total_usd), total_khr: num(quote.total_khr), refund_usd: num(quote.refund_usd),
     owed_reduction_usd: num(quote.owed_reduction_usd), credit_usd: num(quote.credit_usd), net_usd: num(quote.net_usd),

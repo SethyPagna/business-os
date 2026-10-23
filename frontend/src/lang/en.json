@@ -7389,6 +7389,7 @@
   "return_cancel_replacement_pick_one": "Tick at least one replacement item, or untick the box to keep them all.",
   "refund_credit": "Refund credit",
   "return_cancel_replacement_not_paid": "The refund credit stops paying for the items that stay: the sale owes it as Not Paid.",
+  "return_cancel_exchange_change": "This exchange gave change back to the customer, so its return cannot be cancelled here: the cash handed out would no longer be accounted for. Nothing was changed.",
   "return_restore_exchange_credit": "This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.",
   "return_cancel_replacement_taken": "These items are already returned. Apply again to finish the cancel.",
   "return_cancel_replacement_reason": "Replacement items cancelled with the return",

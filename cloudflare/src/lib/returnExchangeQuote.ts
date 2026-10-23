@@ -31,6 +31,8 @@ export type ExchangeQuoteInputs = {
   bodyBranchId: unknown
   redirectTarget: number | null
   evaluatedAt: string
+  /** The shop's change_exchange_rate setting (raw); the quote states the riel rate it implies. */
+  changeRateSetting?: unknown
 }
 
 export type ExchangeQuoteResult =
@@ -152,7 +154,7 @@ export async function priceAndQuoteExchange(input: ExchangeQuoteInputs): Promise
   }
   return {
     ok: true, rate, headerEffect, recordedBranchId, branchId, branchRow, replacementIntents, priced,
-    quote: buildExchangeQuoteV1({ saleId: input.saleId, exchangeRate: rate, pricing: priced, refundUsd, owedReductionUsd, notPaid }),
+    quote: buildExchangeQuoteV1({ saleId: input.saleId, exchangeRate: rate, changeRateSetting: input.changeRateSetting, pricing: priced, refundUsd, owedReductionUsd, notPaid }),
     refundUsd, refundKhr, owedReductionUsd, notPaid,
   }
 }

@@ -92,11 +92,12 @@ export function planExchangeReturnLots(lines: readonly ExchangeReturnLine[], ctx
   return { ok: true, lotPlans }
 }
 
-function fifoLotsFor(ctx: ExchangeContext, productId: number, branchId: number): FifoLotAvailability[] {
+/** `extra`: units this request's own returned lines put back into a lot at that branch -- they are on the shelf before the replacement leaves it (6.0.964). */
+function fifoLotsFor(ctx: ExchangeContext, productId: number, branchId: number, extra: ReadonlyMap<string, number> = new Map()): FifoLotAvailability[] {
   const lots: Array<FifoLotAvailability & { batchNumber: number }> = []
   for (const lot of ctx.lots.values()) {
     if (lot.product_id !== productId || Number(lot.is_active) !== 1) continue
-    const available = ctx.lotStock.get(`${lot.id}:${branchId}`) ?? 0
+    const available = (ctx.lotStock.get(`${lot.id}:${branchId}`) ?? 0) + (extra.get(`${lot.id}:${branchId}`) ?? 0)
     if (!(available > 0)) continue
     lots.push({ batchId: lot.id, lotCode: lot.lot_code, receivedAt: lot.received_at, expiryDate: lot.expiry_date, available, batchNumber: lot.batch_number ?? 0 })
   }
@@ -136,6 +137,16 @@ export function planExchangeStock(input: {
   // ---- the replacement units: explicit lots must belong to the product, the rest leave the oldest lots first ----------------
   const fifo = new Map<string, FifoLotAvailability[]>()
   const replacementTakes: ExchangeLotTake[][] = []
+  // The returned units go back into their lots FIRST: a last unit exchanged for the same item is available to hand out again (release review P2-3).
+  const ownRestocks = new Map<string, number>()
+  input.returnLines.forEach((returned, index) => {
+    if (returned.stock_action !== 'restock' || !returned.product_id) return
+    const branchId = Number(returned.branch_id || input.headerBranchId)
+    for (const split of lotPlans[index]?.splits ?? []) {
+      const key = `${split.batchId}:${branchId}`
+      ownRestocks.set(key, (ownRestocks.get(key) || 0) + split.quantity)
+    }
+  })
   for (const [index, line] of input.replacementLines.entries()) {
     if (line.batchId != null) {
       const lot = ctx.lots.get(line.batchId)
@@ -146,7 +157,7 @@ export function planExchangeStock(input: {
       continue
     }
     const key = pairKey(line.productId, line.branchId)
-    if (!fifo.has(key)) fifo.set(key, fifoLotsFor(ctx, line.productId, line.branchId))
+    if (!fifo.has(key)) fifo.set(key, fifoLotsFor(ctx, line.productId, line.branchId, ownRestocks))
     const lots = fifo.get(key)!
     const { takes, uncovered } = allocateAcrossLots(lots, line.quantity)
     if (uncovered > 0 && takes.length > 0) {
@@ -235,6 +246,17 @@ export function planExchangeStock(input: {
       ...entry, is_active: Number(lot.is_active), lot_code: lot.lot_code || '', expiry_date: lot.expiry_date || '',
       before, after: before + entry.delta,
     })
+  }
+  // Postcondition: the lots the till sells from never end up holding more of a product at a branch than the branch itself does (what the POS reads is the
+  // lots; a unit they hold that the branch does not have is a unit the till would sell and the shelf cannot give). Checked per product and branch.
+  for (const snapshot of branchSnapshots) {
+    let lotsBefore = 0
+    for (const lot of ctx.lots.values()) if (lot.product_id === snapshot.product_id) lotsBefore += ctx.lotStock.get(`${lot.id}:${snapshot.branch_id}`) ?? 0
+    const lotsDelta = batchSnapshots.filter((row) => row.product_id === snapshot.product_id && row.branch_id === snapshot.branch_id).reduce((sum, row) => sum + row.delta, 0)
+      + fallbackLots.filter((row) => row.productId === snapshot.product_id && row.branchId === snapshot.branch_id).reduce((sum, row) => sum + row.quantity, 0)
+    if (lotsBefore + lotsDelta > snapshot.after + 1e-9 && lotsDelta > snapshot.delta + 1e-9) {
+      return refuse(409, { error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' })
+    }
   }
   return {
     ok: true,

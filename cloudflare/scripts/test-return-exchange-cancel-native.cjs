@@ -28,7 +28,7 @@ const MUTANTS = {
   'credit-not-reversed': [{ file: FILE, from: 'member.credit = { saleId: info.sale_id, usd: credit, before, after }', to: 'void 0' }],
   'takeback-not-resplit': [{ file: FILE, from: 'if (takeBacks.length) {', to: 'if (false) {' }],
   'undo-leaves-credit': [{ file: FILE, from: 'const to = direction > 0 ? credit.after : credit.before', to: 'const to = credit.after' }],
-  'restore-allowed': [{ file: FILE, from: 'if (Array.isArray(rows) && creditRowIndex(rows, creditUsd) >= 0) continue', to: 'continue' }],
+  'restore-allowed': [{ file: FILE, from: 'if (Array.isArray(rows) && creditRowIndex(rows) >= 0) continue', to: 'continue' }],
   'foreign-return-linkable': [
     { file: FILE, from: '|| Number(row.sale_id) !== linkedTo.sale_id', to: '' },
     { file: FILE, from: '|| own.some((item) => !lineIds.has(Number(item.sale_item_id)))', to: '' },

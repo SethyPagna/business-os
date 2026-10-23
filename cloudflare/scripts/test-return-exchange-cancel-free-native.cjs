@@ -19,6 +19,8 @@ const MUTANTS = {
   // The admission control never refuses: a selection that cannot fit is sent and fails inside the invocation.
   'budget-never-refuses': [{ file: FILE, from: 'if (used + planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {', to: 'if (false) {' }],
   // The route's own statements are forgotten: the batch is sized as if the invocation were empty.
+  // 6.0.964: the dry run that guards the screen's two-step flow (take the units back, THEN cancel) stops asking about a take-back too long for the plan.
+  'dry-run-take-back-size-ignored': [{ file: FILE, from: 'if (request.dry_run) assertTakeBackFitsPlan(env, request)', to: '' }],
   'used-forgotten': [{ file: FILE, from: 'assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(', to: 'assertReturnBulkBudget(env, 0, members.some(' }],
 }
 
@@ -191,6 +193,47 @@ async function main() {
       // Linking two of the three keeps the undo inside the budget: the third line simply stays with the customer.
       const partial = await cancel(large.x.ret.id, 'cf-cancel-three-partial', large.taken.slice(0, 2))
       r.check(`...linking 2 of the 3 is allowed (${partial.status}); the third stays with the customer`, () => assert.equal(partial.status, 200, JSON.stringify(partial.body)))
+    }
+
+    // ---- 4. the screen's two steps are checked BEFORE anything is written (release review P2-1, P3) --------------------------------------------------------------
+    // The screen makes the take-back return, then sends the cancel. A dry run of the cancel (the take-back announced, not made) refuses what the real cancel
+    // would refuse, so a refused cancel never leaves a take-back behind. On Free a take-back longer than one line cannot be made at all, and says so first.
+    {
+      const returnsCount = async () => Number((await h.one('SELECT COUNT(*) AS n FROM returns')).n)
+      const dry = async (x, planned, key) => {
+        const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', x.ret.id)
+        return h.call('POST', '/api/returns/bulk', { client_request_id: key, field: 'status', source: 'completed', target: 'cancelled', dry_run: true,
+          items: [{ id: x.ret.id, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null,
+            replacement: { return_ids: [], planned } }] }, key)
+      }
+      const plannedOf = async (x, from, to) => (await h.all('SELECT id FROM sale_items WHERE sale_id=? ORDER BY id', x.s2.id)).slice(from, to).map(line => ({ sale_item_id: line.id, quantity: 1 }))
+      // 2 back / 2 out: even the cancel alone is over a Free invocation once a take-back is linked.
+      const two = await exchange(await makeSale([9817, 9818]), 2)
+      const returnsBefore = await returnsCount()
+      const oneLine = await dry(two, await plannedOf(two, 0, 1), 'cf-dry-two-one')
+      const bothLines = await dry(two, await plannedOf(two, 0, 2), 'cf-dry-two-both')
+      const returnsAfter = await returnsCount()
+      r.check(`2 back / 2 out, one line announced: refused before anything is made (${oneLine.status} ${oneLine.body.code}); both lines: ${bothLines.status} ${bothLines.body.code}; no return was written`, () => {
+        assert.equal(oneLine.status, 400)
+        assert.equal(oneLine.body.code, 'return_bulk_over_plan_budget')
+        assert.equal(bothLines.status, 400)
+        assert.equal(bothLines.body.code, 'customer_return_over_plan_budget')
+        assert.equal(returnsAfter, returnsBefore)
+      })
+      assert.equal(await statusOf(two.ret.id), 'completed')
+      // 1 back / 2 out (the returned line off the shelf): a two-line take-back is refused by the size rule, a one-line one passes the dry run and then really fits.
+      const wide = await exchange(await makeSale([9819]), 1, 2, 'none')
+      const wideBoth = await dry(wide, await plannedOf(wide, 0, 2), 'cf-dry-wide-both')
+      const wideOne = await dry(wide, await plannedOf(wide, 0, 1), 'cf-dry-wide-one')
+      const taken = await takeBack(wide.s2, 0, 1, 'cf-take-wide')
+      const real = taken.status === 200 ? await cancel(wide.ret.id, 'cf-cancel-wide', [taken.id]) : taken
+      r.check(`1 back / 2 out: a 2-line take-back is refused first (${wideBoth.status} ${wideBoth.body.code}); a 1-line one passes the dry run (${wideOne.status}) and the real take-back + cancel then both go through (${taken.status}, ${real.status})`, () => {
+        assert.equal(wideBoth.status, 400)
+        assert.equal(wideBoth.body.code, 'customer_return_over_plan_budget')
+        assert.equal(wideOne.status, 200, JSON.stringify(wideOne.body))
+        assert.equal(taken.status, 200, JSON.stringify(taken.body))
+        assert.equal(real.status, 200, JSON.stringify(real.body))
+      })
     }
   } finally {
     await h.mf.dispose()

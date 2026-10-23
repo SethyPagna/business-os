@@ -1745,7 +1745,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             {exchangeQuote ? (() => {
               const due = exchangeDue(exchangeQuote)
               const overpaidUsd = exchangeOverpaymentUsd(payRows, exchangeQuote)
-              const rielOut = changeRielRoundedDown(overpaidUsd, exchangeQuote.exchange_rate)
+              // At the rate the Worker figures the give-back at (the shop's change rate, else the sale's), so the screen shows what is recorded.
+              const rielOut = changeRielRoundedDown(overpaidUsd, exchangeQuote.change_exchange_rate)
               const tr = (key: string, english: string, khmer?: string): string => {
                 const value = typeof t === 'function' ? t(key) : undefined
                 return value && value !== key ? value : (/[\u1780-\u17FF]/.test(typeof t === 'function' ? String(t('cancel') || '') : '') ? (khmer || english) : english)

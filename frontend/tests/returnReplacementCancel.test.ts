@@ -19,7 +19,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { transformSync } from 'esbuild'
-import { buildReturnBulkPayload } from '../src/components/returns/helpers/returnBulkAction.ts'
+import { buildReturnBulkPayload, type ReturnBulkPayload } from '../src/components/returns/helpers/returnBulkAction.ts'
 import {
   answerReady, composeCancelPayload, defaultAnswer, outstandingFromRefusal, parseOutstanding, pickedLines, resolveReplacementChoices, rowsNeedingReplacementAnswer,
   takeBackReplacement, takeBackSignature, toggleCancel, toggleLine, withReplacementChoices,
@@ -193,6 +193,35 @@ await runTest('3. the cancel is sent once its units are back; a second send link
   assert.deepEqual(calls, [[10, [2]]])
 })
 
+await runTest('3. a dry run of the cancel is sent BEFORE any take-back is made; a refused check leaves nothing behind (6.0.964)', async () => {
+  const outstanding = new Map([[10, info(10)], [12, info(12)]])
+  const answers = new Map([[10, toggleLine(toggleCancel(defaultAnswer(info(10)), true), 1)], [12, defaultAnswer(info(12))]])
+  const order: string[] = []
+  const sent: ReturnBulkPayload[] = []
+  const takeBack = async (o: ReplacementOutstanding, _lines: ReplacementLine[]) => { order.push(`take-back ${o.return_id}`); return 900 + o.return_id }
+  const check = async (payload: ReturnBulkPayload) => { order.push('check'); sent.push(payload) }
+  const taken = new Map<number, TakenBack>()
+  const first = await composeCancelPayload({ payload: frozen(), outstanding, answers, taken, takeBack, check, makeRequestId: () => 'return-bulk-dry-0001' })
+  assert.deepEqual(order, ['check', 'take-back 10'], 'the check comes first, then the take-back')
+  assert.equal(sent[0].dry_run, true)
+  assert.equal(sent[0].client_request_id, 'return-bulk-dry-0001')
+  assert.deepEqual(sent[0].items.map((item) => item.replacement ?? null).map((choice) => choice && { ids: choice.return_ids, planned: choice.planned?.length ?? 0 }),
+    [{ ids: [], planned: 1 }, null, { ids: [], planned: 0 }], 'the units about to be taken back are announced by sale line; a return that keeps its replacement says so')
+  assert.equal(first.dry_run, undefined, 'the real cancel is not a dry run')
+  // A refused check: the take-back is never made.
+  const refused: string[] = []
+  await assert.rejects(composeCancelPayload({ payload: frozen(), outstanding, answers, taken: new Map(), takeBack: async (o) => { refused.push('take-back'); return o.return_id },
+    check: async () => { throw Object.assign(new Error('over plan'), { code: 'return_bulk_over_plan_budget' }) } }), (error: { code?: string }) => error.code === 'return_bulk_over_plan_budget')
+  assert.deepEqual(refused, [], 'no take-back after a refused check')
+  // A retry whose take-back already exists is linked, not announced again; with nothing left to make there is no check at all.
+  order.length = 0
+  await composeCancelPayload({ payload: frozen(), outstanding, answers, taken, takeBack, check })
+  assert.deepEqual(order, [], 'the take-back exists already: nothing to check, nothing to make')
+  // Keeping every replacement needs no take-back, so no check either.
+  await composeCancelPayload({ payload: frozen(), outstanding, answers: new Map([[10, defaultAnswer(info(10))], [12, defaultAnswer(info(12))]]), taken: new Map(), takeBack, check })
+  assert.deepEqual(order, [])
+})
+
 await runTest('3. nothing is sent unless every answer is ready; an unready answer takes nothing back first', async () => {
   const outstanding = new Map([[10, info(10)], [12, info(12)]])
   const answers = new Map([[12, toggleCancel(defaultAnswer(info(12)), true)], [10, toggleLine(toggleLine(toggleCancel(defaultAnswer(info(10)), true), 1), 2)]])
@@ -214,7 +243,9 @@ type AnyProps = Record<string, any>
 function compileHelper(file: string): Record<string, unknown> {
   const compiled = transformSync(read('..', 'src', 'components', 'returns', 'helpers', file), { loader: 'ts', format: 'cjs' }).code
   const mod = { exports: {} as Record<string, unknown> }
-  new Function('require', 'module', 'exports', compiled)(nodeRequire, mod, mod.exports)
+  // The cancel helper takes the request-id maker from the bulk helper (a value import since 6.0.964).
+  const resolve = (id: string): unknown => id.endsWith('/returnBulkAction.ts') ? compileHelper('returnBulkAction.ts') : nodeRequire(id)
+  new Function('require', 'module', 'exports', compiled)(resolve, mod, mod.exports)
   return mod.exports
 }
 const helperCancel = compileHelper('returnReplacementCancel.ts')
@@ -293,7 +324,7 @@ await runTest('4. the question is part of the shared review: no second confirm, 
   assert.match(canApply, /answersReady/, 'and for every answer to be ready')
   assert.doesNotMatch(canApply, /failed/, 'a failed look-up does not block Apply: the Worker names the lines itself')
   assert.match(modalSource, /const fresh = outstandingFromRefusal\(error\)\s+if \(fresh\) \{ absorb\(fresh\); setLookup\('ready'\) \}/, 'a refused cancel brings its lines into the dialog')
-  assert.match(modalSource, /composeCancelPayload\(\{ payload, outstanding, answers, taken: taken\.current, takeBack: canTakeBack \? takeBack : undefined \}\)/, 'the request is composed by the tested helper')
+  assert.match(modalSource, /composeCancelPayload\(\{ payload, outstanding, answers, taken: taken\.current, takeBack: canTakeBack \? takeBack : undefined, check: onCheck \}\)/, 'the request is composed by the tested helper, after the dry run')
   assert.match(modalSource, /await onApply\(payload\)\s+onClose\(\)/, 'the dialog closes only after the cancel is recorded')
 })
 
@@ -316,7 +347,7 @@ const km = JSON.parse(read('..', 'src', 'lang', 'km.json')) as Record<string, st
 await runTest('5. every new sentence exists in English and Khmer, and the inline fallbacks are the pack\'s', () => {
   const keys = ['return_cancel_replacement_also', 'return_cancel_replacement_checking', 'return_cancel_replacement_load_failed', 'return_cancel_replacement_hint', 'return_cancel_replacement_need_add',
     'return_cancel_replacement_pick_one', 'return_cancel_replacement_taken', 'return_cancel_replacement_reason', 'return_cancel_replacement_changed',
-    'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_bulk_over_plan_budget', 'return_cancel_replacement_not_paid', 'return_restore_exchange_credit', 'refund_credit']
+    'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_bulk_over_plan_budget', 'return_cancel_replacement_not_paid', 'return_restore_exchange_credit', 'return_cancel_exchange_change', 'refund_credit']
   for (const key of keys) {
     assert.ok(String(en[key] || '').trim(), `en.${key}`)
     assert.match(String(km[key] || ''), /[ក-៿]/, `km.${key} is Khmer`)

@@ -28,6 +28,8 @@ interface Props {
   /** Cancelling a return that opened a replacement sale asks about the replacement items (owner, 22 Oct 2026); these are the reads and the write behind it. */
   loadOutstanding?: (returnId: number) => Promise<ReplacementOutstanding | null>
   takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<number>
+  /** A dry run of the cancel, sent BEFORE any take-back is made: it refuses what the real cancel would refuse (budget, price floor, change), writing nothing. */
+  onCheck?: (payload: ReturnBulkPayload) => Promise<unknown>
   /** Taking units back records a return, which needs permission to add returns. */
   canTakeBack?: boolean
   onClose: () => void
@@ -38,7 +40,7 @@ const CUSTOMER_METHODS = ['restock', 'refund', 'writeoff']
 const SUPPLIER_METHODS = ['refund', 'credit', 'replacement', 'writeoff']
 const STATUS_VALUES = ['completed', 'cancelled']
 
-export default function ReturnsBulkActionModal({ rows, scope, tr, fmtUSD, loadOutstanding, takeBack, canTakeBack = false, onClose, onApply }: Props) {
+export default function ReturnsBulkActionModal({ rows, scope, tr, fmtUSD, loadOutstanding, takeBack, canTakeBack = false, onCheck, onClose, onApply }: Props) {
   const [field, setField] = useState<ReturnBulkField>('status')
   const methodField = methodFieldForScope(scope)
   const canonicalMethodValues = useMemo(() => scope === 'supplier' ? SUPPLIER_METHODS : CUSTOMER_METHODS, [scope])
@@ -115,7 +117,7 @@ export default function ReturnsBulkActionModal({ rows, scope, tr, fmtUSD, loadOu
       // The ticked replacement lines are taken back first (ordinary returns of the replacement sale), then the cancel links them in one request.
       let payload = buildReturnBulkPayload({ rows, field: effectiveField, source, target })
       try {
-        payload = await composeCancelPayload({ payload, outstanding, answers, taken: taken.current, takeBack: canTakeBack ? takeBack : undefined })
+        payload = await composeCancelPayload({ payload, outstanding, answers, taken: taken.current, takeBack: canTakeBack ? takeBack : undefined, check: onCheck })
       } finally { setTakenRevision((revision) => revision + 1) }
       await onApply(payload)
       onClose()

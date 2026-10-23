@@ -40,10 +40,12 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_replacement_price_forbidden': 'You do not have permission to change the price of a replacement item. It is sold at the catalog price, its promotion price, or the price on the original sale.',
   'return_edit_replacement_floor': 'This change would leave the replacement below its allowed price. Record the extra unit as a separate return.',
   'return_bulk_over_plan_budget': 'This selection is too large for the current plan. Select fewer returns or replacement items, then try again.',
+  'return_cancel_exchange_change': 'This exchange gave change back to the customer, so its return cannot be cancelled here: the cash handed out would no longer be accounted for. Nothing was changed.',
   'return_restore_exchange_credit': 'This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.',
 }
 
 //   return_restore_exchange_credit   409  POST /api/returns/bulk restoring an exchange return whose refund credit was moved to Not Paid by its cancel (6.0.963); Undo of the cancel is the way back
+//   return_cancel_exchange_change   409  POST /api/returns/bulk cancelling an exchange return that handed change back to the customer (6.0.964): the cash handed out would be unaccounted for
 // A refusal whose sentence names values the Worker sends as `params`
 // (FX-exc1 item 4): with every value present it is restated through its
 // _detail key; with any missing it falls back to the plain key above.
