@@ -25,11 +25,16 @@ export function isIosWebKit(nav: Pick<Navigator, 'userAgent' | 'platform' | 'max
   return nav.platform === 'MacIntel' && (nav.maxTouchPoints || 0) > 1
 }
 
-export function shouldPauseOnClose(): boolean {
-  return IOS_CAMERA_PAUSE_ENABLED && isIosWebKit()
+/** `enabled` is injectable so both settings of the switch are testable. */
+export function shouldPauseOnClose(enabled = IOS_CAMERA_PAUSE_ENABLED, nav: Parameters<typeof isIosWebKit>[0] = globalThis.navigator): boolean {
+  return enabled && isIosWebKit(nav)
 }
 
 let parked: MediaStream | null = null
+// Set by releaseAllParkedCamera (shell unmount, sign-out): React runs a parent's unmount effect before its
+// children's, so the scanner under a vanishing shell would otherwise park a stream just after the release.
+// Parking stays refused until the scanner is opened again (allowCameraParking).
+let parkingRefused = false
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 let detach: () => void = () => {}
 
@@ -50,16 +55,28 @@ export function releaseParkedCamera(): void {
   if (stream) stopAll(stream)
 }
 
+// A muted track is one the system interrupted: it would show a frozen picture, so it is not reused.
 function isLive(stream: MediaStream): boolean {
   const tracks = stream.getVideoTracks?.() || []
-  return tracks.length > 0 && tracks.every((track) => track.readyState === 'live')
+  return tracks.length > 0 && tracks.every((track) => track.readyState === 'live' && !track.muted)
+}
+
+/** The shell is going away or the person signed out: release now and refuse to park until the next open. */
+export function releaseAllParkedCamera(): void {
+  parkingRefused = true
+  releaseParkedCamera()
+}
+
+/** The scanner is being opened by a person: parking is allowed again. */
+export function allowCameraParking(): void {
+  parkingRefused = false
 }
 
 /** Pauses `stream` (tracks disabled, not stopped) for the next open. Returns false,
  * having stopped nothing, when it cannot be kept; the caller then stops it. */
 export function parkCameraStream(stream: MediaStream): boolean {
   releaseParkedCamera()
-  if (!isLive(stream)) return false
+  if (parkingRefused || !isLive(stream)) return false
   stream.getTracks().forEach((track) => {
     // A torch left lit would stay lit under a paused camera.
     try { void track.applyConstraints?.({ advanced: [{ torch: false } as MediaTrackConstraintSet] })?.catch?.(() => {}) } catch (_) {}

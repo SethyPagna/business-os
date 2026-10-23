@@ -24,7 +24,7 @@ import {
 } from './barcodeFrameDecoder.ts'
 import { clearCameraChoice, listCameras, nextCameraId, readCameraChoice, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
 import { acquireDecodeClient, type DecodeClient, type DecodeFrames } from './decodeWorkerClient.ts'
-import { parkCameraStream, releaseParkedCamera, shouldPauseOnClose, takeParkedCameraStream } from './cameraKeepAlive.ts'
+import { allowCameraParking, parkCameraStream, releaseParkedCamera, shouldPauseOnClose, takeParkedCameraStream } from './cameraKeepAlive.ts'
 import { createScanIdlePolicy, scanIntervalMs } from './scanIdlePolicy.ts'
 import {
   getNativeBarcodeDetector,
@@ -540,6 +540,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     if (!open) return undefined
     detectionHandledRef.current = false
     resumeOnReturnRef.current = false
+    allowCameraParking()
     setReadOk(false)
     // Owner rules (2026-09-14, 2026-10-22): pressing the scanner button opens
     // the camera directly, and an allowed camera is never asked for again. The

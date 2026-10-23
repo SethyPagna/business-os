@@ -8,6 +8,7 @@
 // enabled=false (the old behaviour stopped), the reopen must make NO second
 // getUserMedia call, and every release path must still stop the tracks.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   FakeWorker,
   act,
@@ -25,11 +26,16 @@ import type { useBarcodeCamera } from '../src/components/products/scanning/useBa
 import {
   IOS_CAMERA_PAUSE_ENABLED,
   PARKED_CAMERA_IDLE_MS,
+  allowCameraParking,
   isIosWebKit,
+  parkCameraStream,
+  releaseAllParkedCamera,
+  shouldPauseOnClose,
+  takeParkedCameraStream,
 } from '../src/components/products/scanning/cameraKeepAlive.ts'
 
 type Camera = ReturnType<typeof useBarcodeCamera>
-type PausableTrack = CameraProbe['tracks'][number] & { enabled?: boolean; addEventListener?: (type: string, fn: () => void) => void }
+type PausableTrack = CameraProbe['tracks'][number] & { enabled?: boolean; muted?: boolean; addEventListener?: (type: string, fn: () => void) => void }
 
 let failed = 0
 async function runTest(name: string, fn: () => Promise<void>) {
@@ -78,25 +84,35 @@ try {
     assert.equal(isIosWebKit({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15', platform: 'MacIntel', maxTouchPoints: 0 }), false, 'a real Mac')
     assert.equal(isIosWebKit({ userAgent: ANDROID_UA, platform: 'Linux armv8l', maxTouchPoints: 5 }), false)
     assert.equal(isIosWebKit(undefined), false)
-    assert.equal(IOS_CAMERA_PAUSE_ENABLED, true, 'the pause switch is on (flip it off if the device test shows the camera dot stays)')
+    const iphone = { userAgent: IPHONE_UA, platform: 'iPhone', maxTouchPoints: 5 }
+    assert.equal(shouldPauseOnClose(true, iphone), true)
+    assert.equal(shouldPauseOnClose(false, iphone), false, 'the switch off means no pausing even on an iPhone')
+    assert.equal(shouldPauseOnClose(true, { userAgent: ANDROID_UA, platform: 'Linux armv8l', maxTouchPoints: 5 }), false)
   })
 
-  await runTest('iOS: closing pauses the stream, reopening reuses it with no second getUserMedia', async () => {
+  await runTest('iOS: closing pauses the stream and reopening reuses it (or, with the switch off, stops and asks again)', async () => {
     const run = await open(IPHONE_UA, 'iPhone', 5)
     await act(async () => { run.camera().closeScanner() })
-    assert.equal(run.track().stopCount, 0, 'the track is not stopped')
-    assert.equal(run.track().readyState, 'live')
-    assert.equal(run.track().enabled, false, 'it is paused')
+    if (IOS_CAMERA_PAUSE_ENABLED) {
+      assert.equal(run.track().stopCount, 0, 'the track is not stopped')
+      assert.equal(run.track().readyState, 'live')
+      assert.equal(run.track().enabled, false, 'it is paused')
+    } else {
+      assert.equal(run.track().stopCount, 1, 'switch off: stopped as on Android')
+      assert.notEqual(run.track().enabled, false)
+    }
     await act(async () => { await run.camera().startCamera() })
-    await waitFor(() => /^scanning\|/.test(run.mounted.container.textContent))
-    assert.equal(run.probe.getUserMediaCalls, 1, 'no second getUserMedia')
-    assert.equal(run.track().enabled, true, 'frames flow again')
-    assert.equal(run.track().stopCount, 0)
+    await waitFor(() => /^scanning|/.test(run.mounted.container.textContent))
+    if (IOS_CAMERA_PAUSE_ENABLED) {
+      assert.equal(run.probe.getUserMediaCalls, 1, 'no second getUserMedia')
+      assert.equal(run.track().enabled, true, 'frames flow again')
+      assert.equal(run.track().stopCount, 0)
+    } else {
+      assert.equal(run.probe.getUserMediaCalls, 2, 'switch off: a fresh start')
+    }
     await run.mounted.unmount()
-    assert.equal(run.track().stopCount, 0, 'unmounting the sheet pauses again')
-    assert.equal(run.track().enabled, false)
     fire('window', 'pagehide')
-    assert.equal(run.track().stopCount, 1, 'and pagehide lets go')
+    assert.ok(run.probe.tracks.every((track) => track.stopCount === 1), 'pagehide lets go of whatever was kept')
   })
 
   await runTest('Android and desktop: closing still stops the tracks, reopening asks again', async () => {
@@ -171,6 +187,69 @@ try {
     assert.equal(loud.probe.getUserMediaCalls, 2)
     await loud.mounted.unmount()
     fire('window', 'pagehide')
+  })
+  await runTest('iOS: a saved denial releases the paused stream', async () => {
+    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    await act(async () => { run.camera().closeScanner() })
+    assert.equal(run.track().stopCount, 0)
+    run.probe.permission.state = 'denied'
+    await act(async () => { await run.camera().startCamera() })
+    assert.equal(run.track().stopCount, 1, 'the paused camera is stopped, not left on under a block screen')
+    assert.equal(run.probe.getUserMediaCalls, 1)
+    await run.mounted.unmount()
+  })
+
+  await runTest('iOS: the torch is switched off when the camera is parked', async () => {
+    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    const applied: unknown[] = []
+    run.track().applyConstraints = async (next: unknown) => { applied.push(next) }
+    await act(async () => { run.camera().closeScanner() })
+    assert.ok(applied.some((next) => JSON.stringify(next).includes('"torch":false')), 'torch:false was requested')
+    assert.equal(run.track().enabled, false)
+    await run.mounted.unmount()
+    fire('window', 'pagehide')
+  })
+
+  await runTest('iOS: a muted (interrupted) parked track is not reused', async () => {
+    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    await act(async () => { run.camera().closeScanner() })
+    run.track().muted = true
+    await act(async () => { await run.camera().startCamera() })
+    await waitFor(() => run.probe.getUserMediaCalls === 2)
+    assert.equal(run.probe.getUserMediaCalls, 2, 'a fresh start')
+    assert.equal(run.track().stopCount, 1, 'the interrupted track was stopped')
+    await run.mounted.unmount()
+    fire('window', 'pagehide')
+  })
+
+  await runTest('sign-out and shell unmount release at once and refuse a later park until the scanner opens again', async () => {
+    const fakeStream = () => {
+      const track = { readyState: 'live', muted: false, enabled: true, stopCount: 0, stop() { this.stopCount += 1; this.readyState = 'ended' } }
+      return { track, stream: { getTracks: () => [track], getVideoTracks: () => [track] } as unknown as MediaStream }
+    }
+    const first = fakeStream()
+    allowCameraParking()
+    assert.equal(parkCameraStream(first.stream), true)
+    releaseAllParkedCamera()
+    assert.equal(first.track.stopCount, 1, 'the parked stream is stopped by the release')
+    // The child's unmount cleanup runs AFTER the parent's release: it must not park a new stream.
+    const second = fakeStream()
+    assert.equal(parkCameraStream(second.stream), false, 'parking is refused after a release-all')
+    assert.equal(second.track.enabled, true, 'the refused stream was left alone for the caller to stop')
+    assert.equal(takeParkedCameraStream(), null)
+    allowCameraParking()
+    assert.equal(parkCameraStream(second.stream), true, 'opening the scanner again allows parking')
+    releaseAllParkedCamera()
+    allowCameraParking()
+    // The wiring: the shell releases on unmount and on sign-out; opening the scanner allows parking again.
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+    assert.match(app, /useEffect\(\(\) => releaseAllParkedCamera, \[\]\)/)
+    assert.match(app, /if \(!user\) releaseAllParkedCamera\(\)/)
+    const hook = readFileSync(new URL('../src/components/products/scanning/useBarcodeCamera.ts', import.meta.url), 'utf8')
+    assert.match(hook, /allowCameraParking\(\)\s+setReadOk\(false\)/)
   })
 } finally {
   await stopStage()

@@ -411,14 +411,24 @@ export class FakeWorker {
   }
 
   private async boot(): Promise<void> {
+    // The stage can be stopped while a worker is still loading its decoder; a worker that boots then has nobody to answer.
+    if (!server) return
     if (FakeWorker.mode === 'fails') {
       await new Promise((settle) => setTimeout(settle, 0))
       this.reply({ type: 'failed', message: 'decoder could not start' })
       return
     }
-    const { createDecodeHandler } = await currentVite().ssrLoadModule(`${CORE}/barcodeDecodeHandler.ts`) as typeof import('../src/components/products/scanning/barcodeDecodeHandler.ts')
-    const { createLumaDecoder } = await currentVite().ssrLoadModule(`${CORE}/barcodeZxing.ts`) as typeof import('../src/components/products/scanning/barcodeZxing.ts')
-    this.handle = createDecodeHandler(createLumaDecoder()).handle
+    try {
+      const { createDecodeHandler } = await currentVite().ssrLoadModule(`${CORE}/barcodeDecodeHandler.ts`) as typeof import('../src/components/products/scanning/barcodeDecodeHandler.ts')
+      if (!server) return
+      const { createLumaDecoder } = await currentVite().ssrLoadModule(`${CORE}/barcodeZxing.ts`) as typeof import('../src/components/products/scanning/barcodeZxing.ts')
+      if (!server) return
+      this.handle = createDecodeHandler(createLumaDecoder()).handle
+    } catch (error) {
+      // A load cut short by the stage closing is not a failure of the test.
+      if (!server) return
+      throw error
+    }
     this.reply({ type: 'ready' })
   }
 

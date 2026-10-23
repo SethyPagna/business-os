@@ -36,7 +36,7 @@ import { presentWriteError } from './utils/writeErrorPresentation.ts'
 import { visibleTimeout } from './utils/visibilityPolling.ts'
 import { CheckConnectionButton } from './components/shared/SavingBlockedNote.tsx'
 import { countLegacyQueuedRecords } from './api/legacyQueueProbe.ts'
-import { releaseParkedCamera } from './components/products/scanning/cameraKeepAlive.ts'
+import { releaseAllParkedCamera } from './components/products/scanning/cameraKeepAlive.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -1659,7 +1659,7 @@ export function installActorSessionQuarantineDom(): () => void {
 export default function App() {
   useEffect(() => installActorSessionQuarantineDom(), [])
   // A scanner camera paused for the next tap (iPhone) never outlives the shell or the session.
-  useEffect(() => releaseParkedCamera, [])
+  useEffect(() => releaseAllParkedCamera, [])
   const {
     user,
     authReady,
@@ -1682,7 +1682,7 @@ export default function App() {
     t,
     storagePersisted,
   } = useApp()
-  useEffect(() => { if (!user) releaseParkedCamera() }, [user])
+  useEffect(() => { if (!user) releaseAllParkedCamera() }, [user])
   // A write addressed to a disabled branch waits here for the operator's redirect answer (api/branchRedirect.ts).
   const branchRedirect = useBranchRedirectQueue()
   const {
