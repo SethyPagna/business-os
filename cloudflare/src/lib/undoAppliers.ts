@@ -39,6 +39,7 @@ import {
 // it rather than around it. Never a rewrite -- migration 0115's triggers refuse
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
+import { expectedSaleStatusForReplay } from './saleRaisedAfterPayment'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction, type ReturnBulkQueryBudget } from './returnBulkAction'
@@ -1552,7 +1553,9 @@ async function replayAtomicSaleAddItems(
     snapshot: snapshotId,
     snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
     historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
-    saleStatus: reversal.saleStatus,
+    // Undo finds the sale as the addition left it (Not Paid when it raised a paid sale above the money taken), Redo as Undo
+    // restored it; a snapshot with no sale_status expects the status the lines were added in.
+    saleStatus: expectedSaleStatusForReplay(ctx.direction, reversal),
     replaySale:currentHeaderJson,replayLines:currentLinesJson,...lineage.params,
   }
   const memberGuards: string[] = []
@@ -3634,7 +3637,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       // status the sale was in when the line was added -- a sale that has
       // since been cancelled has already had these units restored by the
       // cancellation, and undoing here would add them a second time.
-      if (String(sale.sale_status || 'completed') !== String(reversal.saleStatus)) {
+      if (String(sale.sale_status || 'completed') !== expectedSaleStatusForReplay(ctx.direction, reversal)) {
         throw new UndoConflictError("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.", UNDO_RECORD_CHANGED_CODE)
       }
 

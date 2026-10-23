@@ -1468,7 +1468,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         () => getSalesApi().addSaleItems(saleId, items, '', review),
         'Add items to sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
-      ) as { addedLines?: number; stockMoved?: boolean; updated_at?: string } | null
+      ) as { addedLines?: number; stockMoved?: boolean; movedToNotPaid?: boolean; updated_at?: string } | null
       if (!isCurrent()) return false
       const added = Number(result?.addedLines || items.length)
       // The outcome names what actually happened to STOCK, because that is
@@ -1478,6 +1478,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ? (translateOr('sale_items_added_stock', 'Added {n} item(s) to the sale and took them out of stock.') || '').replace('{n}', String(added))
           : (translateOr('sale_items_added_no_stock', 'Added {n} item(s) to the sale. Stock moves when the sale is completed.') || '').replace('{n}', String(added)),
       )
+      if (result?.movedToNotPaid) notify(translateOr('sale_moved_to_not_paid', 'The total is now above what was paid, so this sale is Not Paid for the difference.'))
       await refreshCommittedLineSale(numericId, result?.updated_at, requestSecurity)
       if (!isCurrent()) return false
       await loadSales(true).catch(() => {})
@@ -1558,7 +1559,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         () => getSalesApi().amendSale(saleId, request),
         'Amend sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
-      ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean; updated_at?: string } | null
+      ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean; movedToNotPaid?: boolean; updated_at?: string } | null
       if (!isCurrent()) return false
       // The outcome names what actually happened to STOCK, because that is the
       // part a shopkeeper cannot see from the receipt -- and a stock-skipped
@@ -1571,6 +1572,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             ? (translateOr('sale_amended_stock', 'Sale updated, and {n} unit(s) moved in stock.') || '').replace('{n}', String(units))
             : translateOr('sale_amended', 'Sale updated.'),
       )
+      if (result?.movedToNotPaid) notify(translateOr('sale_moved_to_not_paid', 'The total is now above what was paid, so this sale is Not Paid for the difference.'))
       await refreshCommittedLineSale(numericId, result?.updated_at, requestSecurity)
       if (!isCurrent()) return false
       await loadSales(true).catch(() => {})

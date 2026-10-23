@@ -550,6 +550,12 @@ export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleL
 }
 
 export type SaleMoneySnapshot = {
+  /**
+   * The payment state a total raise moved the sale to (lib/saleRaisedAfterPayment.ts), and the state to put back. Present only
+   * when the writer moved the status; a snapshot without it (every action recorded before that rule) leaves the status alone.
+   */
+  sale_status?: string
+  delivery_pending?: 0 | 1
   money_precision_version?: 0 | 1
   calculated_total_usd?: number | null
   rounding_adjustment_usd?: number
@@ -610,10 +616,15 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
             tax_khr = CASE WHEN @has_tax_khr=1 THEN @tax_khr ELSE tax_khr END,
             delivery_fee_khr = CASE WHEN @has_delivery_fee_khr=1 THEN @delivery_fee_khr ELSE delivery_fee_khr END,
             membership_discount_khr = CASE WHEN @has_membership_discount_khr=1 THEN @membership_discount_khr ELSE membership_discount_khr END,
+            sale_status = CASE WHEN @has_sale_status=1 THEN @sale_status ELSE sale_status END,
+            delivery_pending = CASE WHEN @has_sale_status=1 THEN @delivery_pending ELSE delivery_pending END,
             updated_at = COALESCE(@updated_at, CURRENT_TIMESTAMP)
           WHERE id = @sale_id`,
     params: {
       sale_id: saleId,
+      has_sale_status: typeof money.sale_status === 'string' && money.sale_status ? 1 : 0,
+      sale_status: money.sale_status ?? null,
+      delivery_pending: money.delivery_pending === 1 ? 1 : 0,
       has_precision: hasPrecision ? 1 : 0,
       money_precision_version: money.money_precision_version ?? 0,
       calculated_total_usd: money.calculated_total_usd ?? null,
@@ -853,9 +864,11 @@ export function planSaleLineRemoval(input: {
 // edits the discount deliberately, as its own act.
 //
 // Amount paid is FROZEN too -- adding a line does not make the customer hand
-// over more money. The consequence is the correct one and it is already
-// rendered: total rises, so `outstanding = total - paid` becomes positive
-// and SaleDetailModal shows the "Outstanding (on credit)" row. Change is
+// over more money. The consequence: total rises, so `outstanding = total - paid` becomes
+// positive. Since 23 Oct 2026 (lane 6.0.967, lib/saleRaisedAfterPayment.ts) a PAID sale that
+// ends up owing money is moved to Not Paid in the same write, with the money already taken kept
+// as its deposit, so the debt shows in receivables, the shift and the reports and is never read
+// as cash. (Before, the sale stayed Completed and the health check counted it as completed_short.) Change is
 // re-derived by computeSaleTotals from the same (frozen) tender, which is
 // the same function POST / uses -- one definition of the money math, so an
 // added line can never round differently from a checkout.

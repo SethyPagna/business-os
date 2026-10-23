@@ -75,6 +75,7 @@ import {
   saleMoneyUpdateStatement,
   saleStatusDeductsStock,
 } from '../lib/saleLineAddition'
+import { markSaleNotPaidAfterRaise } from '../lib/saleRaisedAfterPayment'
 // S4-30: amending a recorded sale, as an append-only ledger. Same discipline
 // as S4-24b above -- every rule about who may amend, for how long, what moves
 // stock, and what happens to the money lives in the pure module, and this file
@@ -3693,6 +3694,8 @@ app.post('/:id/items', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  // A paid sale whose total is now above the money taken becomes Not Paid for the difference (lib/saleRaisedAfterPayment.ts).
+  const movedToNotPaid = markSaleNotPaidAfterRaise(sale, moneyBefore, moneyAfter)
   const addHeaderConflict=reviewSaleHeaderQuote(body,sale,moneyAfter,moneySettings,taxPlan.outcome.taxUsd)
   if(addHeaderConflict)return c.json(addHeaderConflict,409)
   const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
@@ -3750,7 +3753,8 @@ app.post('/:id/items', async (c) => {
   const baseResponse: Record<string, unknown> = {
     id: saleId,
     receiptNumber: sale.receipt_number || null,
-    saleStatus,
+    saleStatus: movedToNotPaid ? 'awaiting_payment' : saleStatus,
+    ...(movedToNotPaid ? { movedToNotPaid: true } : {}),
     addedLines: plan.lines.length,
     unitsDeducted: plan.deductedUnits,
     stockMoved: deductsStock,
@@ -3815,6 +3819,7 @@ app.post('/:id/items', async (c) => {
   const auditDetails = JSON.stringify({
     action: 'add_items', operation_id: addItemsOperationId,
     receipt_number: sale.receipt_number || null, sale_status: saleStatus,
+    ...(movedToNotPaid ? { sale_status_after: 'awaiting_payment', owed_after_usd: outstandingAfterLineChangeUsd(sale, moneyAfter.total_usd, exchangeRate) } : {}),
     lines: lineCount, units_deducted: plan.deductedUnits,
     subtotal_before: moneyBefore.subtotal_usd, subtotal_after: moneyAfter.subtotal_usd,
     total_before: moneyBefore.total_usd, total_after: moneyAfter.total_usd,
@@ -4426,6 +4431,7 @@ app.post('/:id/amendments', async (c) => {
     const moneyAfterSnapshot = amendmentMoneyAfter(
       sale, money, exchangeRate, mutationStamp, taxPlan.outcome.taxUsd, feeParsed.usd,
     )
+    const movedToNotPaid = markSaleNotPaidAfterRaise(sale, moneyBeforeSnapshot, moneyAfterSnapshot)
     const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd,{is_delivery:true,delivery_fee_usd:feeParsed.usd,delivery_fee_paid_by:'customer'})
     if(headerConflict)return c.json(headerConflict,409)
     const recordBefore = {
@@ -4441,7 +4447,7 @@ app.post('/:id/amendments', async (c) => {
     const response = {
       ...buildAmendmentResponsePayload({
         saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
-        stockSkipped, tax: taxPlan.outcome,
+        stockSkipped, tax: taxPlan.outcome, movedToNotPaid,
       }, mutationStamp),
       isDelivery: 1,
       deliveryContactId: contactRow.id,
@@ -4697,6 +4703,7 @@ app.post('/:id/amendments', async (c) => {
       feeTaxPlan.outcome.taxUsd,
       feePlan.feeAfterUsd,
     )
+    const movedToNotPaid = markSaleNotPaidAfterRaise(sale, moneyBeforeSnapshot, moneyAfterSnapshot)
     const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd,delivery_fee_paid_by:feePlan.payerAfter as 'customer'|'store'})
     if(headerConflict)return c.json(headerConflict,409)
     // The delivery header travels back with the money, exactly as the
@@ -4706,7 +4713,7 @@ app.post('/:id/amendments', async (c) => {
     // -- until something else forced a refetch.
     const response = {
       ...buildAmendmentResponsePayload({
-        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome, movedToNotPaid,
       }, mutationStamp),
       deliveryFeeUsd: feePlan.feeAfterUsd,
       deliveryFeeKhr: receiptKhrFromUsd(feePlan.feeAfterUsd, exchangeRate),
@@ -5196,6 +5203,7 @@ app.post('/:id/amendments', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const movedToNotPaid = markSaleNotPaidAfterRaise(sale, moneyBeforeSnapshot, moneyAfterSnapshot)
   const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd)
   if(headerConflict)return c.json(headerConflict,409)
   if (isLineUpdate || kind==='line_removed' || kind==='line_replaced') {
@@ -5233,7 +5241,7 @@ app.post('/:id/amendments', async (c) => {
   }
 
   const response = buildAmendmentResponsePayload({
-    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
+    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome, movedToNotPaid,
   }, mutationStamp)
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
@@ -5654,11 +5662,14 @@ function buildAmendmentResponsePayload(
     unitsMoved: number
     stockSkipped: boolean
     tax: AmendedTaxResult
+    /** The total went above the money taken, so the sale was moved to Not Paid for the difference (lib/saleRaisedAfterPayment.ts). */
+    movedToNotPaid?: boolean
   },
   updatedAt: string | null,
 ): Record<string, unknown> {
   return {
     id: input.saleId,
+    ...(input.movedToNotPaid ? { saleStatus: 'awaiting_payment', movedToNotPaid: true } : {}),
     // DECISION 6: an amended sale keeps its ORIGINAL receipt number, and a
     // reprint is a reprint -- settled by the owner on 2026-09-04. One sale,
     // one number, so no revenue report can count it twice.
