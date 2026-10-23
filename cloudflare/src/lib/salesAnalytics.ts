@@ -594,8 +594,12 @@ export function recognizedValuedExpr(p: string): string {
 //
 // Revenue is untouched by this: the sale's value and the return's refund are
 // each recognized on their own through CUSTOMER_REFUND_JOIN.
+//
+// Only a money-v0 row can be one of those history rows. A money-v1 replacement (lib/returnExchange.ts, 6.0.958) is paid for by
+// the refund credit plus the customer's tender, and a give-back exchange hands change out of an amount_paid that exceeds its total;
+// reading amount_paid_usd there would report the credit and the change as money the till took, so it reads total_usd like any v1 sale.
 export function collectedExpr(p: string): string {
-  return `CASE WHEN COALESCE(${p}source_return_id, 0) <> 0 THEN COALESCE(${p}amount_paid_usd, 0) ELSE COALESCE(${p}total_usd, 0) END`
+  return `CASE WHEN COALESCE(${p}source_return_id, 0) <> 0 AND COALESCE(${p}money_precision_version, 0) = 0 THEN COALESCE(${p}amount_paid_usd, 0) ELSE COALESCE(${p}total_usd, 0) END`
 }
 // The delivery fee the CUSTOMER paid (a store-absorbed fee was never collected).
 export function customerDeliveryFeeExpr(p: string): string {
@@ -1479,7 +1483,8 @@ function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMo
 function reportCollected(fact: ReportSaleFacts): ReportExactDecimal {
   const { sale, version } = fact
   if (fact.awaiting) return reportMoney(sale, 'total_usd', version).subtract(fact.refundPaid).subtract(fact.owed)
-  const payable = Number(sale.source_return_id || 0) !== 0
+  // Only a money-v0 row can be an old-exchange-model row (see collectedExpr); a v1 replacement took its total.
+  const payable = Number(sale.source_return_id || 0) !== 0 && version === 0
     ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
   return payable.subtract(fact.refundPaid)
 }

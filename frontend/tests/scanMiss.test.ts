@@ -228,8 +228,10 @@ await runTest('the camera hook has no permission-denied message: a denied start 
   const hook = read('src/components/products/scanning/useBarcodeCamera.ts')
   assert.doesNotMatch(hook, /scanPermissionDenied/)
   assert.doesNotMatch(read('src/components/products/scanning/BarcodeScannerModal.tsx'), /scanPermissionDenied/)
-  // The ladder that remains: every `denied` is `blocked` or `dismissed`, so nothing is left for a "denied" branch.
-  assert.match(hook, /const blocked = documentBlocked \|\| \(denied && permissionWasDenied\)\s*const dismissed = denied && !blocked/)
+  // The ladder that remains (cameraFailure.ts): every refusal is `blocked`, `document-blocked` or `dismissed`,
+  // so nothing is left for a "denied" branch.
+  const failure = read('src/components/products/scanning/cameraFailure.ts')
+  assert.match(failure, /if \(permissionDenied \|\| \/denied by system\/i\.test\(errorText\)\) return 'blocked'\s*\/\/[^\n]*\n\s*return inAppBrowser \? 'document-blocked' : 'dismissed'/)
 })
 
 if (failed > 0) process.exitCode = 1

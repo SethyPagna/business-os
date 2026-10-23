@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import Flashlight from 'lucide-react/dist/esm/icons/flashlight.js'
 import FlashlightOff from 'lucide-react/dist/esm/icons/flashlight-off.js'
@@ -43,16 +42,14 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
 
   const labels = useMemo(() => ({
     scanReady: tr('scan_ready', 'Point the camera at a barcode.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ។'),
-    scanUnsupported: tr('scan_unsupported', 'This browser cannot scan with the camera. Type the barcode instead.', 'កម្មវិធីរុករកនេះមិនអាចស្កេនដោយកាមេរ៉ាបានទេ។ សូមវាយបាកូដជំនួសវិញ។'),
-    cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
-    // Shown only after a start already happened and the stream was released
-    // (page backgrounded, the photo picker took over, or the scan sat idle).
-    // Opening the scanner never lands here.
+    scanUnsupported: tr('scan_unsupported', 'Camera scanning is not available here. Type the barcode instead.', 'ការស្កេនដោយកាមេរ៉ាមិនអាចប្រើបាននៅទីនេះទេ។ សូមវាយបាកូដជំនួសវិញ។'),
+    // Shown only after a start already worked and the stream was released (the
+    // photo picker took over, or the scan sat idle). Opening the scanner and
+    // coming back to the page never land here.
     cameraPaused: tr('camera_paused_resume', 'Camera paused. Tap Start camera to resume scanning.', 'កាមេរ៉ាត្រូវបានផ្អាក។ ចុច «ចាប់ផ្តើមកាមេរ៉ា» ដើម្បីបន្តស្កេន។'),
-    cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked. Allow it in your browser settings, or type the barcode instead.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬវាយបាកូដជំនួសវិញ។'),
-    cameraDocumentBlocked: tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular browser to scan, or type the barcode instead.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតា ដើម្បីស្កេន ឬវាយបាកូដជំនួសវិញ។'),
-    promptDismissed: tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Try again, or type the barcode instead.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ សាកម្តងទៀត ឬវាយបាកូដជំនួសវិញ។'),
-    requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
+    cameraDocumentBlocked: tr('camera_document_blocked', 'This view blocks the camera. Open the page in your browser, or type the barcode.', 'ទិដ្ឋភាពនេះបិទកាមេរ៉ា។ សូមបើកទំព័រក្នុងកម្មវិធីរុករក ឬវាយបាកូដ។'),
+    promptDismissed: tr('scan_prompt_dismissed', 'Camera not allowed yet. Try again, or type the barcode.', 'មិនទាន់អនុញ្ញាតកាមេរ៉ាទេ។ សាកម្តងទៀត ឬវាយបាកូដ។'),
+    cameraBusy: tr('scan_camera_busy', 'Another app is using the camera. Close it, then try again.', 'កម្មវិធីផ្សេងកំពុងប្រើកាមេរ៉ា។ សូមបិទវា រួចសាកម្តងទៀត។'),
     startCamera: tr('start_camera', 'Start camera', 'ចាប់ផ្តើមកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
     requestingCamera: tr('requesting_camera', 'Requesting camera access...', 'កំពុងស្នើសុំការអនុញ្ញាតកាមេរ៉ា...'),
@@ -67,12 +64,14 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
     torchOn: tr('scanner_torch_on', 'Turn on flashlight', 'បើកភ្លើងពិល'),
     torchOff: tr('scanner_torch_off', 'Turn off flashlight', 'បិទភ្លើងពិល'),
     torchFailed: tr('scanner_torch_failed', 'The flashlight could not be switched.', 'មិនអាចប្ដូរភ្លើងពិលបានទេ។'),
-    resetHints: {
+    // A blocked camera gets one line: the steps for the device in hand.
+    blockedSteps: {
       ios: tr('camera_permission_reset_hint_ios', 'On iPhone: Settings › Safari › Camera › Allow, then try again.', 'នៅលើ iPhone៖ ការកំណត់ › Safari › កាមេរ៉ា › អនុញ្ញាត រួចសាកម្តងទៀត។'),
-      android: tr('camera_permission_reset_hint_android', 'Tap the lock icon by the address, then Permissions › Camera › Allow.', 'ចុចរូបសោនៅជាប់អាសយដ្ឋាន រួចចូល សិទ្ធិ › កាមេរ៉ា › អនុញ្ញាត។'),
-      desktop: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
+      android: tr('camera_permission_reset_hint_android', 'Tap the lock icon (or App info), then Permissions › Camera › Allow.', 'ចុចរូបសោ (ឬព័ត៌មានកម្មវិធី) រួចចូល សិទ្ធិ › កាមេរ៉ា › អនុញ្ញាត។'),
+      desktop: tr('camera_permission_reset_hint', 'Click the lock icon in the address bar and set Camera to Allow.', 'ចុចរូបសោនៅរបារអាសយដ្ឋាន ហើយកំណត់កាមេរ៉ាជា «អនុញ្ញាត»។'),
     },
   }), [tr])
+  const blockedSteps = labels.blockedSteps[cameraResetPlatform(navigator.userAgent || '', navigator.maxTouchPoints || 0)]
 
   const {
     videoRef,
@@ -98,7 +97,8 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
     messages: {
       scanUnsupported: labels.scanUnsupported,
       cameraDocumentBlocked: labels.cameraDocumentBlocked,
-      cameraPermissionBlocked: labels.cameraPermissionBlocked,
+      cameraPermissionBlocked: blockedSteps,
+      cameraBusy: labels.cameraBusy,
       scanFailed: labels.scanFailed,
       scanPromptDismissed: labels.promptDismissed,
     },
@@ -141,20 +141,20 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
     requestCameraLabel,
     statusMessage,
     emptyStateMessage,
-    showResetHint,
     stateKind,
   } = deriveScannerPresentation({
     status,
     permissionState,
-    labels: { ...labels, error },
+    labels: { ...labels, cameraPermissionBlocked: blockedSteps, error },
     promptDismissedMessage: labels.promptDismissed,
   })
   const live = status === 'scanning' || status === 'starting'
   // With no camera to retry (this browser has none, or the view forbids it) the photo is the panel's one button.
   const photoIsPanelButton = !live && !showCameraAction
   const photoLabel = photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto
-  const PanelIcon = stateKind === 'blocked' ? ShieldAlert : stateKind === 'dismissed' ? AlertCircle : Camera
-  const resetHint = showResetHint ? labels.resetHints[cameraResetPlatform(navigator.userAgent || '', navigator.maxTouchPoints || 0)] : ''
+  // Red is for a true block (denied, or a view that forbids the camera) and nothing else: a dismissed prompt,
+  // a busy camera, a failed start and a paused camera are all the neutral camera icon.
+  const blocked = stateKind === 'blocked'
 
   return (
     <Modal title={title} onClose={closeScanner} size="sm" layer="nested" unsavedChanges="read-only" bare>
@@ -184,7 +184,7 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 pb-4 pt-14 text-center">
-            <PanelIcon className="h-9 w-9 flex-shrink-0" />
+            {blocked ? <ShieldAlert className="h-9 w-9 flex-shrink-0 text-red-400" /> : <Camera className="h-9 w-9 flex-shrink-0" />}
             <p className="max-w-sm text-sm leading-6 text-white/85">{emptyStateMessage}</p>
             {showCameraAction ? (
               <button
@@ -204,7 +204,6 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
                 {photoLabel}
               </button>
             )}
-            {resetHint ? <p className="max-w-sm text-xs leading-5 text-white/70">{resetHint}</p> : null}
           </div>
         )}
 

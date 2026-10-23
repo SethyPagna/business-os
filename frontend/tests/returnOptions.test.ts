@@ -292,7 +292,8 @@ runTest('K2: NewReturnModal wires the chooser and Replace', () => {
   assert.doesNotMatch(newReturnSource, /normName\(row\.name\) === normName\(name\)/)
   assert.match(newReturnSource, /<ScanSearchButton/)
   assert.match(newReturnSource, /getProductBatches\(productId, branchId, true\)/)
-  assert.match(newReturnSource, /replacement_items: replacements\.map/)
+  // 6.0.952: a row is posted as one line per price (the returned units at the sold price, the rest at the catalog price).
+  assert.match(newReturnSource, /replacement_items: replacements\.flatMap\(\(line\) => partsOf\(line\)\.map/)
   // 5.3: the overlay portals to document.body like the other returns modals
   assert.match(newReturnSource, /return createPortal\(/)
 })

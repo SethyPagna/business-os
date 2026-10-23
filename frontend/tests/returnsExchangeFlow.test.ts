@@ -97,6 +97,34 @@ assert.doesNotMatch(newReturn, /addReplacementFor\(item\)/, 'the replacement ent
 console.log('PASS the replacement sale is its own section with its own any-product search bar')
 
 // ---------------------------------------------------------------------------
+// 3b. 6.0.952 (owner, 22 Oct 2026): a replacement "can replace and also add items". No cap on its quantity, and only the units a returned
+//     unit covers default to the sold price; every other unit defaults to the catalog price.
+// ---------------------------------------------------------------------------
+const replacementSection = newReturn.slice(newReturn.indexOf('data-section="replacement-sale"'), newReturn.indexOf('{/* Reason */}'))
+assert.doesNotMatch(replacementSection, /type="number"[^>]*\bmax=/, 'the replacement quantity input has no max: replacing more than was returned is allowed')
+assert.doesNotMatch(newReturn, /Math\.min\([^)]*line\.quantity[^)]*returnQty|line\.quantity\s*>\s*[a-zA-Z.]*returnQty/, 'no check compares the replacement quantity with the returned quantity')
+assert.match(newReturn, /planReplacementParts\(/, 'the default price of every replacement unit is planned from the returned lines')
+assert.match(newReturn, /replacement_items: replacements\.flatMap\(\(line\) => partsOf\(line\)\.map/, 'a row with swapped and extra units is posted as one line of each')
+assert.doesNotMatch(newReturn, /priceUsd:\s*toNumber\(item\.applied_price_usd\)/, 'the straight-swap shortcut no longer pre-fills the sold price for every unit it is raised to')
+assert.doesNotMatch(newReturn, /interface ReplacementLine \{[^}]*\bprice_(usd|khr)\b/, 'a replacement row carries the catalog price only; its unit prices are derived')
+assert.match(newReturn, /catalog_usd: input\.catalogUsd/, 'a replacement row starts from the catalog price')
+console.log('PASS the replacement quantity is uncapped and only returned units default to the sold price')
+
+// 3c. 6.0.960 (release review c2f27dce6, P3-4): the "Same item" shortcut read /api/products for the catalog price, which needs the Products view,
+//     so a role with Returns alone was refused (403) and the shortcut was dead. The read goes through resolveSameItemCatalog, which leaves the extras'
+//     price unknown when it is refused (pinned in replacementPricing.test.ts) -- they post no price and the Worker prices them (6.0.958, P3-B); nothing may
+//     read it bare again, and nothing on the screen may name a figure the Worker has not charged.
+const sameItem = newReturn.slice(newReturn.indexOf('const addReplacementSameItem'), newReturn.indexOf('const updateReplacement'))
+assert.match(sameItem, /await resolveSameItemCatalog\(/, 'the shortcut resolves its catalog price through the fallback helper')
+assert.doesNotMatch(sameItem.replace(/await resolveSameItemCatalog\(async \(\) => \{[\s\S]*?\n      \}\)/, ''), /getProductsByIds/, 'the catalog read exists only inside the fallback helper call')
+assert.match(sameItem, /catalogUsd: catalog\.usd,\s*catalogKhr: catalog\.khr,/, 'the extras start from exactly what the catalog read returned (null when it failed), never a figure taken from the sale')
+assert.doesNotMatch(newReturn, /base_price_(usd|khr)/, 'the sale line snapshot is no longer a catalog price: a stale one would be shown, and posted, as if the Worker charged it')
+assert.match(newReturn, /\.\.\.\(part\.priceUsd != null \? \{ applied_price_usd: part\.priceUsd \} : \{\}\)/, 'the legacy payload leaves an unknown price out so the Worker fills the catalog price')
+assert.doesNotMatch(newReturn, /fmtUSD\((?:replacementTotalUsd|part\.priceUsd|replacementPartsTotalUsd)/, 'an amount that may be unknown is shown through usdOrCatalog, never fmtUSD directly')
+assert.match(newReturn, /exchangeQuote \? fmtUSD\(exchangeQuote\.total_usd\) : usdOrCatalog\(replacementTotalUsd\)/, 'the review shows the Worker quote once there is one, the catalog label until then')
+console.log('PASS the Same item shortcut survives a refused catalog read')
+
+// ---------------------------------------------------------------------------
 // 5. "for damaged products make sure it has a tag label, not editing the name"
 // ---------------------------------------------------------------------------
 for (const [label, source] of [
@@ -162,5 +190,10 @@ for (const key of ['replacement_items_label', 'replacement_items_short', 'add_re
   assert.ok(!(key in en), `en.json must drop the stale key ${key}`)
   assert.ok(!(key in km), `km.json must drop the stale key ${key}`)
 }
+
+// 6.0.964 (release review P2-4): the riel the screen shows for a give-back is figured at the quote's change rate -- the rate the Worker records it at --
+// and never at the sale's own rate, which differs whenever the shop sets a change rate.
+assert.match(newReturn, /changeRielRoundedDown\(overpaidUsd, exchangeQuote\.change_exchange_rate\)/, 'the give-back in riel uses the quote change rate')
+assert.doesNotMatch(newReturn, /changeRielRoundedDown\([^)]*exchangeQuote\.exchange_rate\)/, 'and never the sale rate')
 
 console.log('PASS returns exchange copy is translated in both packs and the superseded copy is retired')

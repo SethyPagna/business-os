@@ -75,6 +75,9 @@ import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
+import { parseOutstanding, takeBackReplacement, type ReplacementLine, type ReplacementOutstanding } from './helpers/returnReplacementCancel.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 import { RETURN_RECORDS_ADAPTER } from '../../utils/entityRecords.ts'
@@ -145,6 +148,10 @@ interface ReturnRow extends Record<string, unknown> {
   notes?: string | null
   total_refund_usd?: number | string | null
   total_refund_khr?: number | string | null
+  // The one-step exchange (6.0.958): the replacement sale this return opened, and what it came to.
+  replacement_sale_id?: number | string | null
+  replacement_receipt_number?: string | null
+  replacement_total_usd?: number | string | null
   supplier_compensation_usd?: number | string | null
   supplier_loss_usd?: number | string | null
   supplier_compensation_khr?: number | string | null
@@ -306,7 +313,7 @@ function countActiveFlags(flags: boolean[] = []): number {
 // keys, so chooser and file can never disagree.
 export const RETURN_EXPORT_KEYS = [
   'Return_Number', 'Scope', 'Date', 'Receipt', 'Customer', 'Supplier', 'Reason',
-  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
+  'Type', 'Settlement', 'Refund_USD', 'Replacement_Receipt', 'Replacement_USD', 'Compensation_USD', 'Compensation_KHR', 'Business_Loss_USD', 'Business_Loss_KHR', 'Status',
 ] as const
 
 function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts = false): Array<Record<string, unknown>> {
@@ -321,6 +328,8 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn, canViewCosts 
     Type: getReturnTypeLabel(ret, tr),
     Settlement: ret.supplier_settlement || '',
     Refund_USD: ret.total_refund_usd || 0,
+    Replacement_Receipt: ret.replacement_receipt_number || '',
+    Replacement_USD: ret.replacement_total_usd ?? '',
     ...(canViewCosts ? { Compensation_USD: ret.supplier_compensation_usd ?? '', Business_Loss_USD: ret.supplier_loss_usd ?? '', Compensation_KHR: ret.supplier_compensation_khr ?? '', Business_Loss_KHR: ret.supplier_loss_khr ?? '' } : {}),
     Status: ret.status || 'completed',
   }))
@@ -373,6 +382,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const canEditReturn = can('returns', 'edit')
   const canViewReturns = can('returns', 'view')
   const canBulkReturns = can('returns', 'bulk')
+  const canAddReturn = can('returns', 'add')
   const canExportReturns = can('returns', 'export')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
@@ -1325,6 +1335,55 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [actionHistory, bulkRetryKey, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
 
+  // The dry run behind the cancel dialog (6.0.964): sent before any replacement unit is taken back, it refuses what the real cancel would refuse -- the plan's
+  // size, the price floor, an exchange that gave change back -- and writes nothing, so a refused cancel never leaves a take-back standing.
+  const checkBulkAction = useCallback(async (request: ReturnBulkPayload): Promise<unknown> => {
+    try {
+      const { bulkUpdateReturns } = await loadReturnsWriteTransport()
+      return await withLoaderTimeout(() => bulkUpdateReturns(request), 'Bulk return check', RETURNS_HISTORY_RESTORE_TIMEOUT_MS)
+    } catch (error) {
+      notify(returnRefusalText(error, tr) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
+      throw error
+    }
+  }, [notify, tr])
+
+  // Cancelling a return that opened a replacement sale asks what happens to the replacement items still with the customer (owner, 22 Oct 2026).
+  // The look-up is the return's own detail read, fresh; taking units back is an ordinary return of the replacement sale (v1 through the same quote and
+  // frozen request the New Return screen uses), made before the cancel and linked to it.
+  const loadReplacementOutstanding = useCallback(async (returnId: number): Promise<ReplacementOutstanding | null> => {
+    const { getReturn } = await loadReturnsWriteTransport()
+    const detail = await withLoaderTimeout(() => getReturn(returnId, { fresh: true }), 'Return detail', RETURNS_DETAIL_TIMEOUT_MS) as { replacement_outstanding?: unknown } | null
+    return parseOutstanding(detail?.replacement_outstanding)
+  }, [])
+  const legacyTakeBackIdentities = useRef(new Map<string, { client_request_id: string; return_number: string }>())
+  const takeBackReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<number> => {
+    try {
+      const transport = await loadReturnsWriteTransport()
+      return await takeBackReplacement({
+        userId: user?.id,
+        reason: tr('return_cancel_replacement_reason', 'Replacement items cancelled with the return', 'ទំនិញជំនួសត្រូវបានបោះបង់ជាមួយការប្រគល់មកវិញ'),
+        getReturnQuoteV1: transport.getReturnQuoteV1,
+        prepareReturnCreateV1: transport.prepareReturnCreateV1 as never,
+        submitReturnCreateV1: transport.submitReturnCreateV1 as never,
+        clearPendingReturnCreateV1: transport.clearPendingReturnCreateV1 as never,
+        createReturn: transport.createReturn,
+        // One identity per (return, choice): a take-back retried after an unknown outcome is the same request, never a second return.
+        legacyIdentity: (returnId, signature) => {
+          const key = `${returnId}:${signature}`
+          const known = legacyTakeBackIdentities.current.get(key)
+          if (known) return known
+          const created = { client_request_id: createClientRequestId('return'), return_number: `RET-${businessDateTimeId()}` }
+          legacyTakeBackIdentities.current.set(key, created)
+          return created
+        },
+      }, outstanding, lines)
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code
+      notify(returnRefusalText(error, tr) ?? (code ? tr(code, error instanceof Error ? error.message : String(error || '')) : (error instanceof Error ? error.message : String(error || ''))), 'error')
+      throw error
+    }
+  }, [notify, tr, user?.id])
+
   useEffect(() => {
     if (!selectAllRef.current) return
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
@@ -1845,6 +1904,11 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             rows={bulkActionSnapshot.rows}
             scope={bulkActionSnapshot.scope}
             tr={tr}
+            fmtUSD={fmtUSD}
+            loadOutstanding={loadReplacementOutstanding}
+            takeBack={takeBackReplacementLines}
+            onCheck={checkBulkAction}
+            canTakeBack={canAddReturn}
             onClose={() => setBulkActionSnapshot(null)}
             onApply={applyBulkAction}
           />

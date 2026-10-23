@@ -1,6 +1,7 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
+import { canonicalExchangeExpected, canonicalExchangePayment, ReturnExchangeError, type ExchangeLineIntent } from './returnExchangeIntent'
 import type { SaleReturnState } from './saleStatusResolution'
 
 // A riel refund is part of the request; a dollar refund (the default) leaves
@@ -185,11 +186,30 @@ function canonicalV1Item(value: unknown, index: number): CanonicalV1Item {
     branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id'), ...damagedChoiceKeys(item) }
 }
 
+// A v1 replacement line is a product, a quantity, where it leaves from and (optionally) a price of the till's own. Its name and costs
+// are the catalogue's, read by the server; its price is quoted back in expected_exchange and checked against it.
+function canonicalV1ReplacementItem(value: unknown, index: number): ExchangeLineIntent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Replacement item ${index + 1} must be an object`)
+  const item = value as Record<string, unknown>
+  const productId = positiveId(item.product_id)
+  const quantity = finite(item.quantity)
+  if (!productId || !(quantity > 0)) throw new Error(`Replacement item ${index + 1} needs a product and positive quantity`)
+  return {
+    product_id: productId,
+    branch_id: positiveId(item.branch_id),
+    batch_id: positiveId(item.batch_id),
+    quantity,
+    applied_price_usd: optionalFinite(item.applied_price_usd),
+  }
+}
+
 function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.items) || body.items.length === 0) throw new Error('Return items required')
   if (body.items.length > RETURN_CREATE_MAX_ITEMS) throw new Error(`Return at most ${RETURN_CREATE_MAX_ITEMS} items at a time`)
-  if (body.replacement_items != null && (!Array.isArray(body.replacement_items) || body.replacement_items.length)) {
-    throw new Error('Money precision v1 does not support replacement items')
+  const replacements = body.replacement_items == null ? [] : body.replacement_items
+  if (!Array.isArray(replacements)) throw new Error('replacement_items must be an array')
+  if (replacements.length > RETURN_CREATE_MAX_REPLACEMENT_ITEMS) {
+    throw new Error(`Add at most ${RETURN_CREATE_MAX_REPLACEMENT_ITEMS} replacement items at a time`)
   }
   if (typeof body.sale_id !== 'number' || !Number.isSafeInteger(body.sale_id) || body.sale_id <= 0) {
     throw new Error('Money precision v1 requires an original sale')
@@ -220,9 +240,18 @@ function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<st
     notes: boundedText(body.notes, 2000),
     items,
     expected_quote: expected satisfies CustomerReturnExpectedQuoteV1,
-    replacement_items: [],
+    replacement_items: replacements.map(canonicalV1ReplacementItem),
+    // The exchange keys exist only when there are replacement lines: a plain v1 return keeps the exact digest bytes it always had.
+    ...(replacements.length ? exchangeIntentKeys(body) : {}),
     ...refundCurrencyKey(body),
   }
+}
+
+function exchangeIntentKeys(body: Record<string, unknown>): Record<string, unknown> {
+  if (Object.keys(refundCurrencyKey(body)).length) {
+    throw new ReturnExchangeError('return_exchange_refund_currency', 'An exchange is refunded in dollars; the difference is handed back as change.')
+  }
+  return { expected_exchange: canonicalExchangeExpected(body.expected_exchange), exchange_payment: canonicalExchangePayment(body.exchange_payment) }
 }
 
 // Only accepted client intent belongs in this digest input. Refund totals,
@@ -442,6 +471,73 @@ export function assertReturnCreateCapacity(
     throw new ReturnCapacityError(`Cannot return ${Number(extra)} additional unit(s) of product #${productId} — only the unreturned sold quantity is eligible`,
       capacityParams(lines.find((item) => String(item.product_name ?? '').trim())?.product_name, productId, exactSum([sold, extra]), Number(sold)))
   }
+}
+
+/**
+ * The predicate a customer-return batch opens with: nothing under this request id / return number / replacement receipt exists
+ * yet, and the sale, branch, products, customer, stock figures and (for money v1) the quote authority are exactly what the
+ * request read. The plain create and the one-step exchange share it, so the two cannot drift apart.
+ */
+export function returnCreatePreconditionSql(input: {
+  /** customerReturnAuthorityPredicate(): the v1 quote authority, or any predicate when there is none. */
+  authorityPredicate: string
+  /** customerReturnV1Plan.lineage.condition, or '1=1'. */
+  lineageCondition: string
+  /** branchEffectGuardPredicate('@effectsJson') when a redirect is in play. */
+  effectGuardPredicate: string | null
+}): string {
+  return `
+    NOT EXISTS(SELECT 1 FROM return_create_receipts WHERE actor_id=@actorId AND request_id=@requestId)
+    AND NOT EXISTS(SELECT 1 FROM returns WHERE client_request_id=@requestId OR return_number=@returnNumber)
+    AND (@replacementReceiptNumber IS NULL OR NOT EXISTS(
+      SELECT 1 FROM sales WHERE client_request_id=@replacementClientRequestId OR receipt_number=@replacementReceiptNumber
+    ))
+    AND (json_type(@guardJson,'$.sale')='null' OR EXISTS(
+      SELECT 1 FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+      WHERE s.id=json_extract(@guardJson,'$.sale.id')
+        AND COALESCE(v.revision,0)=json_extract(@guardJson,'$.sale.revision')
+        AND COALESCE(s.sale_status,'completed')=json_extract(@guardJson,'$.sale.status')
+        AND COALESCE(s.status_before_return,'')=json_extract(@guardJson,'$.sale.status_before_return')
+    ))
+    AND (json_type(@guardJson,'$.branch')='null' OR EXISTS(
+      SELECT 1 FROM branches b WHERE b.id=json_extract(@guardJson,'$.branch.id')
+        AND COALESCE(b.name,'')=json_extract(@guardJson,'$.branch.name')
+        AND COALESCE(b.is_active,0)=json_extract(@guardJson,'$.branch.is_active')
+    ))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.products') j
+      WHERE NOT EXISTS(SELECT 1 FROM products p WHERE p.id=json_extract(j.value,'$.id')
+        AND COALESCE(p.updated_at,'')=json_extract(j.value,'$.updated_at')
+        AND COALESCE(p.name,'')=json_extract(j.value,'$.name')
+        AND COALESCE(p.is_active,0)=json_extract(j.value,'$.is_active')
+        AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(p.is_active,0)=1)
+        AND p.cost_price_usd IS json_extract(j.value,'$.cost_price_usd')
+        AND p.cost_price_khr IS json_extract(j.value,'$.cost_price_khr')
+        AND COALESCE(p.selling_price_usd,0)=json_extract(j.value,'$.selling_price_usd')
+        AND COALESCE(p.selling_price_khr,0)=json_extract(j.value,'$.selling_price_khr')))
+    AND (json_type(@guardJson,'$.customer')='null' OR (
+      (json_extract(@guardJson,'$.customer.exists')=0 AND NOT EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+      )) OR (json_extract(@guardJson,'$.customer.exists')=1 AND EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+          AND COALESCE(c.is_anonymous,0)=json_extract(@guardJson,'$.customer.is_anonymous')
+          AND COALESCE(c.membership_number,'')=json_extract(@guardJson,'$.customer.membership_number')
+      ))
+    ))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.branch_stock') j
+      WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
+        AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.before'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.batch_stock') j
+      WHERE NOT EXISTS(SELECT 1 FROM product_batches pb LEFT JOIN branch_batch_stock bbs
+        ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(j.value,'$.branch_id')
+        WHERE pb.id=json_extract(j.value,'$.batch_id') AND pb.variant_product_id=json_extract(j.value,'$.product_id')
+          AND COALESCE(pb.is_active,0)=json_extract(j.value,'$.is_active')
+          AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(pb.is_active,0)=1)
+          AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
+          AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
+          AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
+    AND (@customerReturnAuthorityJson IS NULL OR ((${input.authorityPredicate})
+      AND (${input.lineageCondition})))${input.effectGuardPredicate ? ` AND ${input.effectGuardPredicate}` : ''}
+  `
 }
 
 export function returnCreateGuardStatement(

@@ -4,6 +4,7 @@
 // Run: node tests/scannerCameraChoice.test.ts
 import assert from 'node:assert/strict'
 import {
+  clearCameraChoice,
   listCameras,
   nextCameraId,
   readCameraChoice,
@@ -64,6 +65,22 @@ await runTest('the remembered camera is read back, and asked for as a preference
   })
 })
 
+await runTest('a remembered camera that can no longer be opened is forgotten, and a storage that refuses is not an error', () => {
+  const data = new Map<string, string>([['business-os-scanner-camera-v1', 'cam-unplugged']])
+  const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value) }, removeItem: (key: string) => { data.delete(key) } }
+  withGlobals({ window: storageWindow(storage) }, () => {
+    assert.equal(readCameraChoice(), 'cam-unplugged')
+    clearCameraChoice()
+    assert.equal(readCameraChoice(), null, 'the next scan asks for the default camera in one request')
+  })
+  withGlobals({ window: storageWindow({ removeItem: () => { throw new Error('storage blocked') } }) }, () => {
+    assert.doesNotThrow(() => clearCameraChoice())
+  })
+  withGlobals({ window: {} }, () => {
+    assert.doesNotThrow(() => clearCameraChoice(), 'no storage at all')
+  })
+})
+
 await runTest('storage that is missing, blocked or full never throws and means the default camera', () => {
   withGlobals({ window: {} }, () => {
     assert.equal(readCameraChoice(), null, 'no localStorage at all')
@@ -108,14 +125,17 @@ await runTest('the reset steps shown follow the device: Settings on iPhone and i
   assert.equal(cameraResetPlatform(''), 'desktop')
 })
 
-await runTest('the panel shows the reset hint only for a saved denial, not for an unsupported, blocked-by-view or dismissed camera', () => {
-  const hint = (status: string, permissionState: string) => deriveScannerPresentation({ status, permissionState, labels: {}, promptDismissedMessage: '' }).showResetHint
-  assert.equal(hint('blocked', 'denied'), true)
-  assert.equal(hint('manual', 'denied'), true)
-  assert.equal(hint('blocked', 'blocked'), false, 'the view forbids the camera: the lock icon cannot fix that')
-  assert.equal(hint('manual', 'unsupported'), false)
-  assert.equal(hint('dismissed', 'prompt'), false)
-  assert.equal(hint('scanning', 'granted'), false)
+await runTest('only a true block is the "blocked" kind (the one red): a saved denial or a view that forbids the camera, nothing else', () => {
+  const kind = (status: string, permissionState: string, error = '') => deriveScannerPresentation({ status, permissionState, labels: { error }, promptDismissedMessage: '' }).stateKind
+  assert.equal(kind('blocked', 'denied'), 'blocked')
+  assert.equal(kind('manual', 'denied'), 'blocked')
+  assert.equal(kind('blocked', 'blocked'), 'blocked', 'the view forbids the camera')
+  assert.equal(kind('manual', 'unsupported'), 'manual', 'no camera: neutral')
+  assert.equal(kind('dismissed', 'prompt'), 'dismissed', 'a dismissed prompt: neutral')
+  assert.equal(kind('manual', 'granted', 'Another app is using the camera.'), 'manual', 'a failed start: neutral')
+  assert.equal(kind('manual', 'prompt'), 'manual', 'a paused camera: neutral')
+  assert.equal(kind('starting', 'prompt'), 'starting', 'a slow start: neutral')
+  assert.equal(kind('scanning', 'granted'), 'scanning')
 })
 
 if (failed > 0) process.exitCode = 1

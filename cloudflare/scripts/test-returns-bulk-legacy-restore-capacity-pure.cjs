@@ -26,6 +26,8 @@ const cache = new Map()
 const actual = new Set(['branchEffect', 'branchRoles', 'sqlBinding', 'saleStatusResolution', 'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
   'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction', 'saleTransitions',
+  // 6.0.958: a cancel asks about replacement items (price floor for the units that stay) and a grouped action is sized against the plan.
+  'returnReplacementPrice', 'planTier',
   // Migration 0260: a status change splits a restored refund against the sale's debt.
   'returnRefundSplit', 'salesStatus', 'financialPrecision'])
 

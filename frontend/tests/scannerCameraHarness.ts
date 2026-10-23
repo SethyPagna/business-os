@@ -268,13 +268,19 @@ export interface CameraOptions {
   detector?: unknown
   capabilities?: Record<string, unknown>
   rejectTorch?: boolean
-  /** Makes getUserMedia reject once, with this error name (e.g. 'NotAllowedError'). */
+  /** Makes every getUserMedia call reject with this error name (e.g. 'NotAllowedError'). */
   rejectCamera?: string
+  /** Decides per call: the error name to reject with, or undefined to let the camera open. `call` counts from 1. */
+  failWith?: (constraints: unknown, call: number) => string | undefined
+  /** A rejection that is the person tapping Block: the browser holds a saved denial from then on. */
+  blockOnReject?: boolean
+  /** A browser with no Permissions API for the camera (older WebKit, Firefox): the page cannot read the state. */
+  noPermissionsApi?: boolean
 }
 
 export function installCamera(
   permissionState: 'granted' | 'prompt' | 'denied',
-  { native = true, detector, capabilities, rejectTorch = false, rejectCamera }: CameraOptions = {},
+  { native = true, detector, capabilities, rejectTorch = false, rejectCamera, failWith, blockOnReject = false, noPermissionsApi = false }: CameraOptions = {},
 ): CameraProbe {
   const probe: CameraProbe = { getUserMediaCalls: 0, tracks: [], requested: [], applied: [], permission: { state: permissionState, listeners: [] } }
   events.length = 0
@@ -288,7 +294,7 @@ export function installCamera(
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: {
-      permissions: {
+      permissions: noPermissionsApi ? undefined : {
         query: async () => ({
           get state() { return probe.permission.state },
           addEventListener(_type: string, listener: () => void) { probe.permission.listeners.push(listener) },
@@ -300,9 +306,11 @@ export function installCamera(
           probe.getUserMediaCalls += 1
           probe.requested.push(constraints)
           events.push('getUserMedia')
-          if (rejectCamera) {
-            const failure = new Error(rejectCamera)
-            failure.name = rejectCamera
+          const failName = rejectCamera ?? failWith?.(constraints, probe.getUserMediaCalls)
+          if (failName) {
+            if (blockOnReject) probe.permission.state = 'denied'
+            const failure = new Error(failName)
+            failure.name = failName
             throw failure
           }
           const cameraTrack: FakeTrack = {
@@ -474,14 +482,18 @@ export async function startStage(): Promise<void> {
         name: 'barcode-scanner-mocks',
         enforce: 'pre',
         resolveId(id) {
-          if (id.includes('lucide-react')) return '\0scanner-icon'
+          if (id.includes('lucide-react')) return '\0scanner-icon:' + (id.split('/').pop() ?? id).replace(/\.js$/, '')
           if (/shared\/Modal$/.test(id)) return '\0scanner-modal'
           // The decoder imports the retail readers by deep path (never the package root).
           if (id.startsWith(ZXING_DEEP_PREFIX)) return `\0scanner-zxing:${id.slice(ZXING_DEEP_PREFIX.length)}`
           return null
         },
         load(id) {
-          if (id === '\0scanner-icon') return 'export default function Icon() { return null }'
+          // An icon draws as <svg data-icon="shield-alert" class="...">, so a test can tell which icon the sheet shows and what colour class it carries.
+          if (id.startsWith('\0scanner-icon:')) {
+            return `import React from 'react'
+              export default function Icon({ className }) { return React.createElement('svg', { 'data-icon': ${JSON.stringify(id.slice('\0scanner-icon:'.length))}, className }) }`
+          }
           if (id === '\0scanner-modal') {
             // onClose is what the dialog's close button calls.
             return `import React from 'react'
