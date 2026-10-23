@@ -283,7 +283,7 @@ const statsRevenue = statsTotals.revenue_usd
 const statsPending = statsTotals.pending_revenue_usd
 const statsBlock = salesTs.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
 check('the /stats route delegates to the shared exact snapshot and reducer',
-  /readSalesReportSnapshot\(c\.env,\{\},false/.test(statsBlock)
+  /readSalesReportSnapshot\(c\.env,windowFilter,false/.test(statsBlock)
   && /salesTotalsFromSnapshot\(snapshot\)/.test(statsBlock)
   && /revenue_count: snapshot\.sales\.length/.test(statsBlock)
   && /revenue_usd: totals\.revenue_usd/.test(statsBlock)

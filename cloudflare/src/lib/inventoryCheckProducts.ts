@@ -204,8 +204,9 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
       FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN requested_ids wanted ON wanted.product_id=si.product_id
       WHERE ${saleWhere} AND ${identity} IS NOT NULL),
     product_metrics AS (SELECT c.*,COALESCE(l.qty_sold,0) AS qty_sold,
-      (SELECT COUNT(DISTINCT customer_id) FROM buyers buyer WHERE buyer.product_id=c.id) AS customer_count
-      FROM cohort c LEFT JOIN ledger l ON l.product_id=c.id),
+      COALESCE(bc.customer_count,0) AS customer_count
+      FROM cohort c LEFT JOIN ledger l ON l.product_id=c.id
+      LEFT JOIN (SELECT product_id,COUNT(DISTINCT customer_id) AS customer_count FROM buyers GROUP BY product_id) bc ON bc.product_id=c.id),
     family_buyers AS (SELECT c.family_key,COUNT(DISTINCT buyer.customer_id) AS customer_count FROM cohort c
       LEFT JOIN buyers buyer ON buyer.product_id=c.id GROUP BY c.family_key),
     family_metrics AS (SELECT c.family_key,MIN(COALESCE(c.parent_name,c.name)) AS name,SUM(c.qty_sold) AS qty_sold,MAX(fb.customer_count) AS customer_count,
