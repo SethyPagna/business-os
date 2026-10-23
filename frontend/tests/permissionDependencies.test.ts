@@ -111,6 +111,24 @@ await test('opening stock and stock quantities in product imports are controls t
   }
 })
 
+await test('stock quantities in inventory and stock-action imports are a control that needs Adjust / receive at Full, like the products import', () => {
+  // 6.0.949 (P3-2): since 6.0.946 the Worker refuses any inventory or stock-actions file that moves stock without Adjust / receive at
+  // Full, however Import is set (lib/importEngine.ts isStockAdjustImportType). The Import chip alone said "available".
+  const row = rowOf('inventory', 'import_stock')
+  assert.equal(row.follows, 'import', 'rides the inventory Import chip')
+  assert.equal(row.review, 'block')
+  assert.deepEqual(row.requires?.map((requirement) => requirement.key), ['inventory:adjust'])
+  assert.deepEqual(row.requires, rowOf('products', 'import_stock').requires, 'the same second grant as the products import control')
+  const base: Record<string, unknown> = { inventory: true, ...COSTS }
+  assert.equal(can(base, 'inventory', 'import_stock'), true, 'Inventory Full holds Adjust / receive')
+  assert.equal(can({ ...base, 'inventory:adjust': false }, 'inventory', 'import_stock'), false, 'Adjust / receive switched off: every file that moves stock is refused')
+  assert.equal(can({ ...base, 'inventory:adjust': false }, 'inventory', 'import'), true, 'the Import chip itself keeps its own answer')
+  assert.equal(can({ ...base, 'inventory:import': false }, 'inventory', 'import_stock'), false, 'follows Import: parent off')
+  assert.equal(can({ ...base, 'inventory:import_stock': false }, 'inventory', 'import_stock'), true, 'a control has no switch of its own: only its parent narrows it')
+  assert.equal(can({ inventory: 'review', ...COSTS }, 'inventory', 'import_stock'), false, 'Review never reaches it')
+  assert.equal(can({}, 'inventory', 'import_stock', 'admin'), true)
+})
+
 await test('Import for products, inventory and sales is unavailable without both cost grants', () => {
   for (const [section, base] of [['products', { products: true }], ['inventory', { inventory: true }], ['sales', { sales: true }]] as const) {
     assert.equal(can(base, section, 'import'), false, `${section}: no cost grant`)
@@ -251,6 +269,21 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
     assert.deepEqual(amberLines(surface, 'products'), [importLine(['perm_destructive_delete'], pack.perm_act_products_import_replace_all)], 'only the grant still missing is flagged')
   })
 
+  await test(`${name}: the inventory import's stock-quantity control names Adjust / receive until it is held, and the Import chip stays allowed`, async () => {
+    const line = importLine(['perm_act_inventory_adjust'], pack.perm_control_inventory_import_stock)
+    const held = await render(pack, { inventory: true, ...COSTS })
+    assert.equal(chip(held, 'inventory', 'import').getAttribute('data-perm-mark'), 'allow')
+    assert.equal(control(held, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'allow', 'Inventory Full holds Adjust / receive')
+    assert.ok(!amberLines(held, 'inventory').includes(line), 'nothing missing, nothing named')
+    const lacking = await render(pack, { inventory: true, 'inventory:adjust': false, ...COSTS })
+    assert.equal(chip(lacking, 'inventory', 'import').getAttribute('data-perm-mark'), 'allow', 'a file that moves no stock is still accepted')
+    assert.equal(control(lacking, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'needs')
+    assert.ok((control(lacking, 'inventory', 'import_stock').getAttribute('title') ?? '').includes(alsoNeeds(['perm_act_inventory_adjust'])), 'the tooltip names the grant')
+    assert.ok(amberLines(lacking, 'inventory').includes(line), 'the missing grant is named in an amber line under the chips')
+    const partial = await render(pack, { inventory: 'review' })
+    assert.equal(control(partial, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'fullOnly', 'a level that blocks the chip blocks the control')
+  })
+
   await test(`${name}: replace-all lists every second grant`, async () => {
     const surface = await render(pack, { products: true })
     const row = chip(surface, 'products', 'import_replace_all')
@@ -287,7 +320,7 @@ for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
     for (const key of ['relink_sales', 'rename_reasons', 'opening_stock', 'import_stock']) {
       assert.equal(surface.findAll((node) => node.getAttribute('data-perm-action') === key).length, 0, `${key} must not be a chip`)
     }
-    for (const [module, key] of [['contacts', 'relink_sales'], ['inventory', 'rename_reasons'], ['products', 'opening_stock'], ['products', 'import_stock']] as const) {
+    for (const [module, key] of [['contacts', 'relink_sales'], ['inventory', 'rename_reasons'], ['inventory', 'import_stock'], ['products', 'opening_stock'], ['products', 'import_stock']] as const) {
       assert.ok(control(surface, module, key), `${key} rides its parent chip`)
     }
     assert.ok(chip(surface, 'contacts', 'resolve_conflicts') && chip(surface, 'inventory', 'edit_reasons'), 'the chips they follow are rendered')

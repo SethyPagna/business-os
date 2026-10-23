@@ -564,6 +564,17 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
 const swap = telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-1', items: [{ product: 'A', quantity: 1 }], refundUsd: 0, refundKhr: 0 }).filter(Boolean)
 assert.ok(!swap.some((line) => line.startsWith('Refund:')), swap.join('\n'))
 assert.ok(!swap.some((line) => /^(INV|Customer|Branch|Reason|Type|Settlement|Loss|By):/.test(line)))
+// 6.0.952: a replacement is an exchange plus an optional extra purchase with no cap, so its quantity and its line count are
+// independent of the return's. One unit back, ten of the same product out, and more replacement lines than the list shows:
+// the quantity is printed as recorded, and the lines that do not fit are counted, not silently dropped.
+const exchange = telegram.formatReturnTelegramLines({
+  kind: 'customer', returnNumber: 'RET-2', items: [{ product: 'Rice 5kg', quantity: 1, refundUsd: 3 }], refundUsd: 3, refundKhr: 0,
+  replacements: Array.from({ length: 23 }, (_, i) => ({ product: i === 0 ? 'Rice 5kg' : `Extra ${i}`, quantity: i === 0 ? 10 : 1 })),
+}).filter(Boolean)
+assert.ok(exchange.includes('↔ Rice 5kg 10'), exchange.join('\n'))
+assert.equal(exchange.filter((line) => line.startsWith('↔ ')).length, 20, 'twenty replacement lines are shown')
+assert.ok(exchange.includes('+ 3 more item(s)'), 'the three that do not fit are counted')
+assert.ok(!swap.some((line) => /more item/.test(line)), 'a short list adds no remainder line')
 
 // --- supplier return: stock out + settlement money, loss only when there is one ---
 assert.deepEqual(telegram.formatReturnTelegramLines({

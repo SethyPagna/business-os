@@ -40,6 +40,10 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   supplier_return_failed: 'supplier_return_failed',
   return_edit_failed: 'return_edit_failed',
+  // An import file that would move stock, approved by a user without Adjust / receive at Full (6.0.926 / 6.0.946; the Worker's sentence word for word).
+  product_import_stock_adjust_required: 'product_import_stock_adjust_required',
+  // A changed default selling / wholesale price without products:price (PUT /products, the products import price gate).
+  product_price_edit_required: 'product_price_edit_required',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',

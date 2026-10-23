@@ -38,6 +38,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { planReplacementParts, replacementPartsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
@@ -84,6 +85,10 @@ interface SaleItemRow {
   quantity?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
+  // The catalog snapshot the sale line carries (the price before any manual cut): what the "Same item" shortcut prices the extra units at when
+  // the catalog itself cannot be read (a Returns-only role has no Products view).
+  base_price_usd?: number | string | null
+  base_price_khr?: number | string | null
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
@@ -150,8 +155,10 @@ interface ReplacementLine {
   batch_id: number | null
   batches: ProductBatch[]
   quantity: number
-  price_usd: number
-  price_khr: number
+  // The catalog price of one unit. What each unit actually goes out at is planned from this and the returned lines
+  // (planReplacementParts): the units a returned unit covers at the sold price, every other unit at this.
+  catalog_usd: number
+  catalog_khr: number | null
 }
 
 // One row of the receipt typeahead. The server answers with just enough to
@@ -396,6 +403,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [replacementPicking, setReplacementPicking] = useState<ReplacementCandidate | null>(null)
   const [replacementSearching, setReplacementSearching] = useState(false)
   const [replacementSearched, setReplacementSearched] = useState(false)
+  const [sameItemBusy, setSameItemBusy] = useState(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
   useEffect(() => {
     lifecycle.current.alive = true
@@ -501,8 +509,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     productName: string
     branchId: number | string | null
     quantity: number
-    priceUsd: number
-    priceKhr: number
+    catalogUsd: number
+    catalogKhr: number
     batchId?: number | null
   }) => {
     const branchId = input.branchId || foundSale?.branch_id || null
@@ -515,8 +523,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       batch_id: input.batchId ?? null,
       batches: [],
       quantity: Math.max(1, Math.floor(input.quantity) || 1),
-      price_usd: input.priceUsd,
-      price_khr: input.priceKhr,
+      catalog_usd: input.catalogUsd,
+      catalog_khr: input.catalogKhr > 0 ? input.catalogKhr : null,
     }])
     void loadReplacementBatches(key, input.productId, branchId)
   }
@@ -533,25 +541,40 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       // stock, and the sheet refuses the warehouse for them.
       branchId: selection?.branchId ?? (foundSale?.branch_id || null),
       quantity: 1,
-      priceUsd: toNumber(candidate.selling_price_usd),
-      priceKhr: toNumber(candidate.selling_price_khr),
+      catalogUsd: toNumber(candidate.selling_price_usd),
+      catalogKhr: toNumber(candidate.selling_price_khr),
       batchId: selection?.batch?.batchId ?? null,
     })
   }
 
-  // The straight swap -- same product back out, at the price it was sold for.
-  // It lives INSIDE the replacement section (not under the returned rows), so
-  // the section stays the one place a replacement is chosen.
-  const addReplacementSameItem = (item: SaleReturnItem) => {
-    if (!item.product_id) return
-    addReplacementLine({
-      productId: item.product_id as number | string,
-      productName: String(item.product_name || item.name || '').trim(),
-      branchId: item.branch_id || foundSale?.branch_id || null,
-      quantity: item.returnQty || 1,
-      priceUsd: toNumber(item.applied_price_usd),
-      priceKhr: toNumber(item.applied_price_khr),
-    })
+  // The straight swap -- the returned units back out as the same product. It lives INSIDE the replacement section (not under the
+  // returned rows), so the section stays the one place a replacement is chosen. The row starts at the returned quantity, and the
+  // returned units go out at the price the sale recorded; any units added beyond them are priced at the catalog price, which is
+  // read here. That read needs the Products view, which a role with Returns alone does not have (403), so it can never be what the
+  // shortcut depends on: when it is refused or fails, the extras fall back to the sale's own catalog snapshot (resolveSameItemCatalog).
+  const addReplacementSameItem = async (item: SaleReturnItem) => {
+    if (!item.product_id || sameItemBusy) return
+    setSameItemBusy(true)
+    try {
+      const catalog = await resolveSameItemCatalog(async () => {
+        const { getProductsByIds } = await import('../../api/productReadTransport.ts')
+        const payload = await getProductsByIds([item.product_id]) as { items?: ReplacementCandidate[] }
+        return Array.isArray(payload?.items) ? payload.items[0] : null
+      }, selectedItems, item.product_id)
+      if (!catalog) throw new Error(T('no_products_found', 'No products found. Try another name, SKU or barcode.'))
+      addReplacementLine({
+        productId: item.product_id as number | string,
+        productName: String(item.product_name || item.name || '').trim(),
+        branchId: item.branch_id || foundSale?.branch_id || null,
+        quantity: item.returnQty || 1,
+        catalogUsd: catalog.usd,
+        catalogKhr: catalog.khr,
+      })
+    } catch (error) {
+      notify(`${T('search_error', 'Search error')}: ${getLoaderErrorMessage(error, T('error', 'Error'))}`, 'error')
+    } finally {
+      setSameItemBusy(false)
+    }
   }
 
   const updateReplacement = (lineKey: string, patch: Partial<ReplacementLine>) => {
@@ -821,7 +844,15 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const unsupportedMoneyVersion = foundSale?.money_precision_version != null && ![0, 1].includes(Number(foundSale.money_precision_version))
   const totalRefund    = isV1Sale ? (quote?.total_refund_usd ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
-  const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
+  // What each replacement unit goes out at: the units a returned unit of the same product covers at the price the sale recorded,
+  // every other unit (extra units, another product) at the catalog price. A row with both kinds is sent as one line of each.
+  const replacementPlan = planReplacementParts(
+    replacements.map((line) => ({ key: line.key, productId: line.product_id, quantity: line.quantity, catalogUsd: line.catalog_usd, catalogKhr: line.catalog_khr })),
+    activeItems.map((it) => ({ productId: it.product_id, quantity: it.returnQty, soldUsd: it.applied_price_usd, soldKhr: it.applied_price_khr })),
+    toNumber(foundSale?.exchange_rate),
+  )
+  const partsOf = (line: ReplacementLine) => replacementPlan.get(line.key) ?? []
+  const replacementTotalUsd = replacements.reduce((s, line) => s + replacementPartsTotalUsd(partsOf(line)), 0)
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
   const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
   const quoteIntentRef = useRef(quoteIntent)
@@ -896,15 +927,16 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}),
           })),
           ...(replacements.length ? {
-            replacement_items: replacements.map((line) => ({
+            replacement_items: replacements.flatMap((line) => partsOf(line).map((part) => ({
               product_id: line.product_id,
               product_name: line.product_name,
               branch_id: line.branch_id,
               batch_id: line.batch_id,
-              quantity: line.quantity,
-              applied_price_usd: line.price_usd,
-              applied_price_khr: line.price_khr,
-            })),
+              quantity: part.quantity,
+              applied_price_usd: part.priceUsd,
+              // No riel price known (the sale line or the catalog has none): left out, and the Worker uses the catalog riel price.
+              ...(part.priceKhr != null ? { applied_price_khr: part.priceKhr } : {}),
+            }))),
             replacement_payment_method: replacementPaymentMethod,
           } : {}),
       }
@@ -1492,8 +1524,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       <button
                         key={`same_${item.id ?? item.product_id}_${index}`}
                         type="button"
-                        onClick={() => addReplacementSameItem(item)}
-                        className="rounded-full border border-emerald-300 px-2 py-0.5 text-xs leading-relaxed text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                        disabled={sameItemBusy}
+                        onClick={() => void addReplacementSameItem(item)}
+                        className="rounded-full border border-emerald-300 px-2 py-0.5 text-xs leading-relaxed text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
                       >
                         + {item.product_name || item.name}
                       </button>
@@ -1526,8 +1559,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             aria-label={T('quantity', 'Quantity')}
                             value={line.quantity}
                             onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-                          <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(line.price_usd * line.quantity)}</span>
+                          <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
                         </div>
+                        {partsOf(line).length > 1 ? (
+                          <div className="text-right text-xs leading-relaxed text-gray-400" data-replacement-parts="split">
+                            {partsOf(line).map((part) => `${part.quantity} × ${fmtUSD(part.priceUsd)}`).join(' + ')}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -1650,7 +1688,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 {replacements.map((line) => (
                   <div key={line.key} className="flex justify-between py-1 text-sm">
                     <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
-                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
                   </div>
                 ))}
                 <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">

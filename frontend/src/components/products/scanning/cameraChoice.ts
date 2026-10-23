@@ -22,6 +22,15 @@ export function saveCameraChoice(deviceId: string): void {
   }
 }
 
+/** Forgets the remembered camera, for when it can no longer be opened. */
+export function clearCameraChoice(): void {
+  try {
+    window.localStorage.removeItem(CAMERA_CHOICE_KEY)
+  } catch (_) {
+    // Nothing was stored that could be cleared.
+  }
+}
+
 /** The constraints with the remembered camera asked for instead of "the back one".
  * `ideal`, not `exact`: a camera that was unplugged since falls back to the default instead of failing the scan. */
 export function withRememberedCamera(constraints: MediaStreamConstraints): MediaStreamConstraints {

@@ -66,6 +66,10 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   return_replacement_price_forbidden: ['lib/returnReplacementPrice.ts', 'return_replacement_price_forbidden', 403],
   supplier_return_failed: ['routes/returns.ts', 'supplier_return_failed', 500],
   return_edit_failed: ['routes/returns.ts', 'return_edit_failed', 500],
+  // 6.0.949 (review P3-4): an import file that would move stock, approved without Adjust / receive at Full (403 at approve and at retry-as-apply).
+  product_import_stock_adjust_required: ['lib/importEngine.ts', 'product_import_stock_adjust_required', 403],
+  // 6.0.951: a changed default price without products:price. The Khmer is short on purpose (owner, 22 Oct): the essence, not a translation.
+  product_price_edit_required: ['lib/productDiscountGate.ts', 'product_price_edit_required', 403],
 }
 // idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
 // transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).
@@ -95,6 +99,23 @@ await runTest('the failed-save and price-floor texts are the Worker fixed senten
   // The two failed-save texts replaced an interpolated (error as Error).message: no database text is put into either response any more.
   assert.ok(!returns.includes('Failed to record supplier return items'), 'the raw supplier failure text is gone')
   assert.ok(!returns.includes('Failed to update return:'), 'the raw return-edit failure text is gone')
+})
+
+await runTest('the import stock-adjust refusal is the Worker coded 403 at approve and retry-as-apply, for products, inventory and stock-action files alike', async () => {
+  const engine = read(WORKER, 'lib', 'importEngine.ts')
+  assert.ok(engine.includes(`error: '${EN.product_import_stock_adjust_required}',`) && engine.includes("code: 'product_import_stock_adjust_required',"), 'PRODUCT_IMPORT_STOCK_REFUSAL is the pack English, word for word')
+  assert.ok(/export function isStockAdjustImportType\(type: string\): boolean \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions'\s*\}/.test(engine), 'the refusal is reachable from all three import types (inventory and stock actions since 6.0.946)')
+  const jobs = read(WORKER, 'routes', 'importJobs.ts')
+  assert.ok(jobs.includes('return c.json({ success: false, ...PRODUCT_IMPORT_STOCK_REFUSAL }, 403)'), 'refused with 403 before anything is queued')
+  assert.equal((jobs.match(/const stockDenied = await requireChangedProductImportStockAction\(c as any, job\)/g) || []).length, 2, 'at approve and at retry-as-apply')
+  uiLanguage = 'km'; packServed = KM
+  const error = refusal('product_import_stock_adjust_required', EN.product_import_stock_adjust_required, 403)
+  await lang.restateBranchRefusal(error)
+  assert.equal(error.message, KM.product_import_stock_adjust_required); assert.equal(error.code, 'product_import_stock_adjust_required'); assert.equal((error as { status?: number }).status, 403)
+  assert.equal(localizeBranchRuleError(error, key => KM[key]), KM.product_import_stock_adjust_required, 'a t() surface restates it by code too')
+  assert.match(KM.product_import_stock_adjust_required, /កែតម្រូវស្តុក/, 'it names adjusting stock in the term the pack already uses (perm_act_inventory_adjust)')
+  uiLanguage = 'en'
+  assert.equal((await lang.restateBranchRefusal(refusal('product_import_stock_adjust_required', EN.product_import_stock_adjust_required, 403))).message, EN.product_import_stock_adjust_required, 'an English screen keeps the Worker sentence')
 })
 
 await runTest('idempotency_conflict is restated for every request-id refusal with one sentence that names no internal field', async () => {

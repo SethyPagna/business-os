@@ -459,6 +459,18 @@ const FOLLOWED_CONTROLS = {
       /if \(!authority\.allowProductStockWrites\) \{[\s\S]{0,200}?importResultsChangeStock\(db, job\.type, results, job\.policy_json\)[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
     ],
   },
+  // 6.0.949 (P3-2): an inventory or stock-actions file that moves stock is refused the same way -- whole at approve
+  // (routes/importJobs.ts, proved in the import-types check below), and at apply for the user who authorized it: a whole
+  // inventory file, or each dispatched plan of a stock-actions file.
+  'inventory:import_stock': {
+    file: 'lib/importEngine.ts',
+    proof: [
+      /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/,
+      /const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/,
+      /if \(!authority\.allowProductStockWrites\) \{[\s\S]{0,200}?importResultsChangeStock\(db, job\.type, results, job\.policy_json\)[\s\S]{0,200}?ImportApplyAuthorizationError\('inventory:adjust'/,
+      /if \(stockWritesDenied && stockActionPlanChangesStock\(plan\)\) \{\s*throw new ImportApplyAuthorizationError\('inventory:adjust'/,
+    ],
+  },
 }
 // Second grants a row or followed control names (`requires`), each proved against the Worker code that demands it.
 const SALE_LINK_GRANTS = [
@@ -877,6 +889,54 @@ check('every import type the Worker treats as a cost import has an import row th
     }
   }
   assert.deepEqual(problems, [])
+})
+
+// The import types the Worker refuses, whole, to a user without Adjust / receive at Full when the file would move stock
+// (lib/importEngine.ts isStockAdjustImportType). Read from the source so a type added there is a type this test asks the
+// editor about.
+const stockAdjustImportTypes = () => {
+  const found = /export function isStockAdjustImportType\(type\) \{\s*return ((?:type === '[a-z_]+'(?: \|\| )?)+);?\s*\}/.exec(textOf('lib/importEngine.ts'))
+  assert.ok(found, 'lib/importEngine.ts no longer defines isStockAdjustImportType as a list of `type === \'x\'` tests')
+  return [...found[1].matchAll(/type === '([a-z_]+)'/g)].map((m) => m[1])
+}
+// The rows that can say "this import also needs inventory:adjust" for a section: its Import row, and a control riding it.
+const importRowsOf = (section) => [`${section}:import`, ...[...followedControl].filter(([pair, action]) => pair.startsWith(`${section}:`) && action.follows === 'import').map(([pair]) => pair)]
+const namesInventoryAdjust = (pair) => [...(allActions.get(pair)?.requires ?? [])].some((requirement) => requirement.key === 'inventory:adjust')
+
+check('every import type the Worker refuses without Adjust / receive has an import row, or a control riding it, that names inventory:adjust', () => {
+  const problems = []
+  const types = stockAdjustImportTypes()
+  assert.ok(types.length >= 3, `only ${types.length} stock-adjust import types found; the scan is broken`)
+  const sections = new Set()
+  for (const type of types) {
+    const section = importSectionFor(type)
+    sections.add(section)
+    if (!importRowsOf(section).some(namesInventoryAdjust)) {
+      problems.push(`import type '${type}' is refused by the Worker without inventory:adjust at Full, but neither ${section}:import nor a control riding it requires inventory:adjust, so the editor shows the import as available to a role every stock file is refused for`)
+    }
+  }
+  for (const [pair, action] of allActions) {
+    if (!namesInventoryAdjust(pair) || !(pair.endsWith(':import') || action.follows === 'import')) continue
+    if (!sections.has(pair.split(':')[0])) problems.push(`${pair} requires inventory:adjust but the Worker does not gate ${pair.split(':')[0]} imports on it (isStockAdjustImportType)`)
+  }
+  assert.deepEqual(problems, [], 'The role editor and the Worker disagree about what an import needs.\nAdd a `requires: [INVENTORY_ADJUST]` control that follows the section\'s Import row in PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts):')
+})
+
+check('the approve and retry gates of a stock-moving import are the ones the editor claims', () => {
+  const text = textOf('routes/importJobs.ts')
+  assert.match(text, /async function requireChangedProductImportStockAction\(c, job\) \{\s*if \(!isStockAdjustImportType\(String\(job\.type \|\| ''\)\) \|\| getActionTier\(c\.get\('user'\), 'inventory', 'adjust'\) === 'full'\)\s*return null;/, 'the approve gate no longer asks inventory:adjust at Full for the stock-adjust import types')
+  assert.match(text, /return c\.json\(\{ success: false, \.\.\.PRODUCT_IMPORT_STOCK_REFUSAL \}, 403\)/, 'the approve gate no longer refuses with PRODUCT_IMPORT_STOCK_REFUSAL')
+  assert.equal([...text.matchAll(/const stockDenied = await requireChangedProductImportStockAction\(c, job\);\s*if \(stockDenied\)\s*return stockDenied;/g)].length, 2, 'the gate must run at approve and at retry-as-apply')
+})
+
+check('the import-type scan reads the three stock types and their sections, and only the stock sections name Adjust', () => {
+  // A stock-adjust type the editor has no row for is caught by the check above; here the scan itself is exercised on its inputs.
+  assert.deepEqual(stockAdjustImportTypes().sort(), ['inventory', 'products', 'stock_actions'])
+  assert.deepEqual(['products', 'inventory', 'stock_actions'].map(importSectionFor), ['products', 'inventory', 'inventory'])
+  assert.equal(importSectionFor('sales'), 'sales')
+  assert.equal(importRowsOf('sales').some(namesInventoryAdjust), false, 'a section the Worker does not gate on Adjust names nothing, so adding sales to isStockAdjustImportType would fail the check above')
+  assert.equal(importRowsOf('inventory').some(namesInventoryAdjust), true)
+  assert.equal(importRowsOf('products').some(namesInventoryAdjust), true)
 })
 
 check('every followed control rides a row the Worker checks, is stricter than it, and is proved against its route', () => {
