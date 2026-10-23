@@ -24,6 +24,7 @@ import {
 } from './barcodeFrameDecoder.ts'
 import { clearCameraChoice, listCameras, nextCameraId, readCameraChoice, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
 import { acquireDecodeClient, type DecodeClient, type DecodeFrames } from './decodeWorkerClient.ts'
+import { allowCameraParking, parkCameraStream, releaseParkedCamera, shouldPauseOnClose, takeParkedCameraStream } from './cameraKeepAlive.ts'
 import { createScanIdlePolicy, scanIntervalMs } from './scanIdlePolicy.ts'
 import {
   getNativeBarcodeDetector,
@@ -107,6 +108,9 @@ function getScanErrorText(error: unknown): string {
  * iPhone ask again, after the sheet is gone. The first error is rethrown and
  * the caller, seeing the stale token, says nothing. */
 async function openCamera(startToken: number, currentToken: () => number): Promise<MediaStream> {
+  // On iPhone the last close left its stream paused (cameraKeepAlive): reuse it, no second ask.
+  const paused = takeParkedCameraStream()
+  if (paused) return paused
   try {
     return await navigator.mediaDevices.getUserMedia(withRememberedCamera(CAMERA_CONSTRAINTS))
   } catch (error) {
@@ -200,7 +204,9 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     return null
   }, [])
 
-  const cleanup = useCallback((): void => {
+  // `pause`: the sheet is closing, so on iPhone the stream is kept disabled for the next open
+  // (cameraKeepAlive) instead of stopped. Every other end of a scan stops it.
+  const cleanup = useCallback((pause = false): void => {
     startTokenRef.current = 0
     cancelFrameRef.current?.()
     cancelFrameRef.current = null
@@ -208,7 +214,8 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     idleRef.current = null
     clientRef.current?.terminate()
     clientRef.current = null
-    stopStream(streamRef.current)
+    const held = streamRef.current
+    if (!(pause && held && shouldPauseOnClose() && parkCameraStream(held))) stopStream(streamRef.current)
     streamRef.current = null
     trackRef.current = null
     detectorRef.current = null
@@ -244,7 +251,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
     detectionHandledRef.current = true
     markScanner('read')
-    cleanup()
+    cleanup(true)
     setReadOk(true)
     try {
       onDetected(nextValue)
@@ -388,6 +395,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     // Re-requesting cannot repair a saved browser denial. Stay blocked until
     // the user changes the site setting, avoiding a getUserMedia retry loop.
     if (nextPermissionState === 'denied') {
+      releaseParkedCamera()
       cleanup()
       setStatus('blocked')
       setError(messages.cameraPermissionBlocked)
@@ -508,7 +516,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   const closeScanner = useCallback((): void => {
     detectionHandledRef.current = true
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-    cleanup()
+    cleanup(true)
     onClose()
   }, [cleanup, onClose])
 
@@ -532,6 +540,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     if (!open) return undefined
     detectionHandledRef.current = false
     resumeOnReturnRef.current = false
+    allowCameraParking()
     setReadOk(false)
     // Owner rules (2026-09-14, 2026-10-22): pressing the scanner button opens
     // the camera directly, and an allowed camera is never asked for again. The
@@ -544,7 +553,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     return () => {
       detectionHandledRef.current = true
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-      cleanup()
+      cleanup(true)
       setStatus('idle')
       setError('')
       setPermissionState('unknown')
