@@ -243,7 +243,7 @@ await test('A6: under Review the Import chip says Full only and nothing says Hid
   await surface.unmount()
 })
 
-await test('A7: counting is one chip on its own row, and Inventory draws no chips at None', async () => {
+await test('A7: counting is one chip on its own row, Inventory draws no chips at None, and Inventory does not feed counting', async () => {
   const { surface } = await mountEditor({ inventory_checks: true })
   await openModule(surface, 'inventory')
   await openModule(surface, 'inventory_checks')
@@ -255,55 +255,35 @@ await test('A7: counting is one chip on its own row, and Inventory draws no chip
   await surface.unmount()
   const full = await mountEditor({ inventory: true, inventory_checks: true })
   await openModule(full.surface, 'inventory')
-  const count = inModule(full.surface, 'inventory', (node) => node.getAttribute('data-perm-action') === 'check')[0]
-  assert.equal(count.getAttribute('aria-label'), en.perm_set_by_count_sessions, 'Inventory\'s Count chip defers to the sessions row')
-  assert.equal(propsOf(count).disabled, true)
+  assert.equal(inModule(full.surface, 'inventory', (node) => node.getAttribute('data-perm-action') === 'check').length, 0, 'Inventory has no Count chip: counting is its own grant')
   await full.surface.unmount()
-  const follows = await mountEditor({ inventory: true })
-  assert.equal(cell(follows.surface, 'inventory_checks', 'full').getAttribute('aria-pressed'), 'false')
-  assert.equal(cell(follows.surface, 'inventory_checks', 'none').getAttribute('aria-pressed'), 'false', 'neither dot is pressed while counting only follows Inventory')
-  assert.ok((cell(follows.surface, 'inventory_checks', 'full').getAttribute('aria-label') ?? '').includes(en.perm_follows_inventory))
-  await follows.surface.unmount()
+  const feeds = await mountEditor({ inventory: true })
+  assert.equal(cell(feeds.surface, 'inventory_checks', 'full').getAttribute('aria-pressed'), 'false', 'Inventory alone does not grant counting')
+  assert.equal(cell(feeds.surface, 'inventory_checks', 'none').getAttribute('aria-pressed'), 'true')
+  assert.equal(feeds.surface.findAll((node) => node.getAttribute('data-perm-follow') !== null).length, 0, 'there is no follows-Inventory switch')
+  await feeds.surface.unmount()
 })
 
-await test('A7: the count-session row stores an explicit true or false, shows "Follows Inventory" only while the key is absent, and can return to following', async () => {
-  const followSwitch = (surface: MountedSurface) => surface.find((node) => node.getAttribute('data-perm-follow') === 'inventory_checks', 'follow switch')
-  // Following: the key is absent, so neither dot is pressed and the follow switch reads on and inert.
+await test('A7: the count-session row is a plain on/off grant: Full stores true, None removes the key, and a stored false equals absent', async () => {
   const first = await mountEditor({ inventory: true })
   await openModule(first.surface, 'inventory_checks')
-  assert.equal(followSwitch(first.surface).getAttribute('aria-checked'), 'true')
-  assert.equal(propsOf(followSwitch(first.surface)).disabled, true, 'nothing to drop while it already follows')
-  // None while following stores a false (it is not swallowed as "already none", and it does not delete anything).
-  await first.surface.click(cell(first.surface, 'inventory_checks', 'none'))
-  assert.deepEqual(first.state.changed, { inventory: true, inventory_checks: false })
+  await first.surface.click(cell(first.surface, 'inventory_checks', 'full'))
+  assert.deepEqual(first.state.changed, { inventory: true, inventory_checks: true }, 'Full stores a true')
   await first.surface.unmount()
-  // Explicit false: None is pressed, Follows Inventory is gone, and the switch can hand the row back to Inventory.
   const denied = await mountEditor({ inventory: true, inventory_checks: false })
-  await openModule(denied.surface, 'inventory_checks')
-  assert.equal(cell(denied.surface, 'inventory_checks', 'none').getAttribute('aria-pressed'), 'true', 'a stored false is a decision: None is pressed')
-  assert.equal(cell(denied.surface, 'inventory_checks', 'full').getAttribute('aria-pressed'), 'false')
-  assert.ok(!(cell(denied.surface, 'inventory_checks', 'full').getAttribute('aria-label') ?? '').includes(en.perm_follows_inventory), 'the ring and the words are only for an absent key')
-  assert.equal(followSwitch(denied.surface).getAttribute('aria-checked'), 'false')
-  assert.equal(propsOf(followSwitch(denied.surface)).disabled, false)
+  assert.equal(cell(denied.surface, 'inventory_checks', 'none').getAttribute('aria-pressed'), 'true', 'a stored false reads None')
   await denied.surface.click(cell(denied.surface, 'inventory_checks', 'full'))
-  assert.deepEqual(denied.state.changed, { inventory: true, inventory_checks: true }, 'Full stores a true')
-  await denied.surface.click(followSwitch(denied.surface))
-  assert.deepEqual(denied.state.changed, { inventory: true }, 'the follow switch deletes the key and keeps the rest')
+  assert.deepEqual(denied.state.changed, { inventory: true, inventory_checks: true })
   await denied.surface.unmount()
-  // Explicit true: Full is pressed, and no word claims it follows Inventory.
   const granted = await mountEditor({ inventory: true, inventory_checks: true })
-  await openModule(granted.surface, 'inventory_checks')
   assert.equal(cell(granted.surface, 'inventory_checks', 'full').getAttribute('aria-pressed'), 'true')
-  assert.equal(followSwitch(granted.surface).getAttribute('aria-checked'), 'false')
-  assert.ok(!granted.surface.text().includes(en.perm_follows_inventory) || followSwitch(granted.surface).getAttribute('aria-checked') === 'false')
   await granted.surface.click(cell(granted.surface, 'inventory_checks', 'none'))
-  assert.deepEqual(granted.state.changed, { inventory: true, inventory_checks: false })
+  assert.deepEqual(granted.state.changed, { inventory: true }, 'None removes the key and keeps the rest')
   await granted.surface.unmount()
-  // The Changed filter tells a stored false from an absent key, because the Worker does.
+  // A stored false and an absent key mean the same to the Worker now, so the Changed filter agrees.
   const changed = await mountEditor({ inventory: true, inventory_checks: false }, { baseline: { inventory: true } })
-  assert.equal(moduleNode(changed.surface, 'inventory_checks').getAttribute('data-perm-changed'), 'true')
+  assert.equal(moduleNode(changed.surface, 'inventory_checks').getAttribute('data-perm-changed'), null)
   await changed.surface.unmount()
-  // Administrator offers no follow switch: every row is locked.
   const admin = await mountEditor({ all: true })
   await openModule(admin.surface, 'inventory_checks')
   assert.equal(admin.surface.findAll((node) => node.getAttribute('data-perm-follow') !== null).length, 0)
@@ -352,7 +332,7 @@ await test('A10: nothing in the editor or its chips is smaller than 12px', async
 })
 
 await test('A11: the Costs field warns while View product costs is off, and not once it is held', async () => {
-  const lacking = await mountEditor({ inventory: true })
+  const lacking = await mountEditor({ inventory_checks: true })
   await openModule(lacking.surface, 'inventory_checks')
   const cost = lacking.surface.button(/Show costs when permitted/)
   assert.equal(cost.getAttribute('data-needs'), 'true')
@@ -360,7 +340,7 @@ await test('A11: the Costs field warns while View product costs is off, and not 
   assert.ok((cost.getAttribute('title') ?? '').includes(en.perm_product_cost_view))
   assert.equal(lacking.surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true').length, 1, 'only the Costs field warns')
   await lacking.surface.unmount()
-  const held = await mountEditor({ inventory: true, product_cost_view: true })
+  const held = await mountEditor({ inventory_checks: true, product_cost_view: true })
   await openModule(held.surface, 'inventory_checks')
   assert.equal(held.surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true').length, 0)
   assert.equal(held.surface.button(/Show costs when permitted/).getAttribute('data-needs'), null)
@@ -396,79 +376,60 @@ await test('the Website Editor row shows a half-filled Full dot for some grants 
   await surface.unmount()
 })
 
-await test('Settings Full shows every extra the Worker includes as locked on; only Security stays a separate switch', async () => {
-  const { surface } = await mountEditor({ settings: true })
+await test('Settings Full includes nothing: every extra, the Website Editor and the Library read off and take a tap', async () => {
+  const { surface, state } = await mountEditor({ settings: true })
   await openModule(surface, 'settings')
   const grant = (key: string) => surface.find((node) => node.getAttribute('data-perm-grant') === key, key)
   for (const key of ['business_identity', 'sales_policy', 'receipt_settings', 'drive_credentials']) {
-    assert.equal(grant(key).getAttribute('aria-checked'), 'true', `${key} is held`)
-    assert.equal(propsOf(grant(key)).disabled, true, `${key} cannot be switched off here`)
-    assert.ok((grant(key).getAttribute('title') ?? '').includes(en.perm_covered_by_full), `${key} says it is included`)
+    assert.equal(grant(key).getAttribute('aria-checked'), 'false', `${key} is not held`)
+    assert.notEqual(propsOf(grant(key)).disabled, true, `${key} is a normal switch`)
+    assert.ok(!(grant(key).getAttribute('title') ?? '').includes('Included'), `${key} claims no inclusion`)
   }
-  assert.equal(grant('security_settings').getAttribute('aria-checked'), 'false', 'Security stays separate: no Worker route grants it through Settings')
-  assert.notEqual(propsOf(grant('security_settings')).disabled, true)
-  assert.ok((cell(surface, 'settings', 'full').getAttribute('title') ?? '').includes(en.perm_full_includes_some))
-  await surface.unmount()
-})
-
-await test('Settings Full also holds the Website Editor and the Library: both rows read Full, locked, and say whose Full includes them', async () => {
-  const included = en.perm_covered_by_module.replace('{module}', en.perm_section_settings)
-  const { surface, state } = await mountEditor({ settings: true })
+  assert.equal(surface.findAll((node) => node.getAttribute('data-perm-grant') === 'security_settings').length, 0, 'the Security row is hidden: no Worker route reads it')
+  assert.ok((cell(surface, 'settings', 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only))
+  await surface.click(grant('drive_credentials'))
+  assert.deepEqual(state.changed, { settings: true, drive_credentials: true })
   for (const id of ['customer_portal', 'library']) {
-    assert.equal(cell(surface, id, 'full').getAttribute('aria-pressed'), 'true', `${id} reads Full`)
-    assert.equal(cell(surface, id, 'none').getAttribute('aria-pressed'), 'false', `${id} does not read None`)
-    for (const level of ['none', 'full']) {
-      assert.equal(propsOf(cell(surface, id, level)).disabled, true, `${id} ${level} is locked`)
-      assert.ok((cell(surface, id, level).getAttribute('title') ?? '').includes(included), `${id} ${level} says "${included}"`)
-    }
-    await surface.call(cell(surface, id, 'none'), 'onClick', [])
-    await surface.call(cell(surface, id, 'full'), 'onClick', [])
-  }
-  assert.equal(state.calls, 0, 'a locked dot changes nothing')
-  assert.ok(moduleNode(surface, 'library').textContent.includes(included), 'the Library has no words of its own, so its row says why it is Full')
-  await openModule(surface, 'customer_portal')
-  assert.ok(moduleNode(surface, 'customer_portal').textContent.includes(included), 'the open Website Editor panel says it too')
-  for (const key of ['portal_posts', 'portal_faq', 'portal_about', 'customer_portal']) {
-    const chip = surface.find((node) => node.getAttribute('data-perm-grant') === key, key)
-    assert.equal(chip.getAttribute('aria-checked'), 'true', `${key} is held`)
-    assert.equal(propsOf(chip).disabled, true, `${key} cannot be switched off while Settings is Full`)
-    assert.ok((chip.getAttribute('title') ?? '').includes(included), `${key} names the module whose Full includes it, not just 'Full'`)
+    assert.equal(cell(surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} reads None under Settings Full`)
+    assert.notEqual(propsOf(cell(surface, id, 'full')).disabled, true, `${id} takes a tap`)
   }
   await surface.unmount()
   const view = await mountEditor({ settings: 'view' })
-  for (const id of ['customer_portal', 'library']) {
-    assert.equal(cell(view.surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} is None under Settings View`)
-    assert.notEqual(propsOf(cell(view.surface, id, 'full')).disabled, true, `${id} is a normal row under Settings View`)
-  }
+  for (const id of ['customer_portal', 'library']) assert.equal(cell(view.surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} is None under Settings View`)
   await view.surface.unmount()
 })
 
-await test('in Khmer the included rows and chips use the Khmer words, with the module name filled in', async () => {
-  const included = km.perm_covered_by_module.replace('{module}', km.perm_section_settings)
-  const { surface } = await mountEditor({ settings: true }, { language: km })
-  assert.ok(included !== en.perm_covered_by_module && !/[A-Za-z]/.test(included), 'the Khmer note is Khmer')
-  assert.ok((cell(surface, 'library', 'full').getAttribute('title') ?? '').includes(included))
-  await openModule(surface, 'customer_portal')
-  assert.ok(moduleNode(surface, 'customer_portal').textContent.includes(included))
-  assert.ok(moduleNode(surface, 'library').textContent.includes(included))
-  await openModule(surface, 'settings')
-  assert.ok((surface.find((node) => node.getAttribute('data-perm-grant') === 'receipt_settings', 'receipts').getAttribute('title') ?? '').includes(km.perm_covered_by_full))
+await test('AI provider keys are a separate critical switch beside the Library, and Settings Full does not hold it', async () => {
+  const { surface, state } = await mountEditor({ settings: true })
+  await openModule(surface, 'library')
+  const ai = surface.find((node) => node.getAttribute('data-perm-grant') === 'ai_providers', 'ai_providers')
+  assert.equal(ai.getAttribute('aria-checked'), 'false')
+  assert.ok((ai.getAttribute('title') ?? '').includes(en.perm_ai_providers))
+  await surface.click(ai)
+  assert.deepEqual(state.changed, { settings: true, ai_providers: true })
   await surface.unmount()
 })
 
-await test('the gold dot follows a row held through Settings Full, which the save review also lists', async () => {
+await test('in Khmer the Full dot says in Khmer that the extras are separate switches', async () => {
+  const { surface } = await mountEditor({ settings: true }, { language: km })
+  assert.ok(km.perm_full_main_only && km.perm_full_main_only !== en.perm_full_main_only && !/[A-Za-z]/.test(km.perm_full_main_only), 'the Khmer note is Khmer')
+  assert.ok((cell(surface, 'settings', 'full').getAttribute('title') ?? '').includes(km.perm_full_main_only))
+  await surface.unmount()
+})
+
+await test('the gold dot follows what is stored: Settings View to Full moves only the Settings row', async () => {
   const { surface } = await mountEditor({ settings: true }, { baseline: { settings: 'view' } })
   const dotted = modules(surface).filter((node) => node.getAttribute('data-perm-changed') === 'true').map((node) => node.getAttribute('data-perm-module'))
-  assert.deepEqual(dotted, ['customer_portal', 'settings', 'library'], 'Settings moved, and so did the two rows it now includes (catalogue order)')
+  assert.deepEqual(dotted, ['settings'], 'the Website Editor and the Library do not move with Settings')
   await surface.unmount()
 })
 
 await test('every module with extras says on its Full dot that the extras are separate', async () => {
   const { surface } = await mountEditor({})
-  for (const id of ['products', 'contacts', 'dashboard', 'backup']) {
+  for (const id of ['products', 'contacts', 'dashboard', 'backup', 'library']) {
     assert.ok((cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id}: Full tooltip`)
   }
-  for (const id of ['pos', 'library', 'returns']) assert.ok(!(cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id} has no extras to mention`)
+  for (const id of ['pos', 'returns']) assert.ok(!(cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id} has no extras to mention`)
   await surface.unmount()
 })
 

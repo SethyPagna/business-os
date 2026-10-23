@@ -65,7 +65,7 @@ console.log('PASS receipt_settings keeps its avatar-dropdown entry point in addi
 const coreDataSource = readFileSync(new URL('../../cloudflare/src/lib/roleDefaults.ts', import.meta.url), 'utf8')
 const defaultRolePermissions = extractConst(coreDataSource, 'DEFAULT_ROLE_PERMISSIONS') as Record<string, Record<string, unknown>>
 assert.equal(defaultRolePermissions.employee?.receipt_settings, true, 'Employee must default to full receipt_settings access so front-line staff can change print modes')
-assert.equal(defaultRolePermissions.manager?.receipt_settings, undefined, "Manager stays seeded to {} like every other page -- this fix doesn't widen Manager's defaults")
+assert.equal(defaultRolePermissions.manager?.receipt_settings, true, 'the Manager seed lists receipt_settings explicitly: Settings Full no longer implies it (owner, 21 Oct 2026)')
 console.log('PASS Employee role defaults to full receipt_settings access; Manager is untouched')
 
 // --- effectivePermissions: an Employee-shaped grant set can use the page --

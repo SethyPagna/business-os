@@ -63,7 +63,8 @@ const requiredKeys = [
   'perm_backup_restore',
   'perm_business_identity',
   'perm_sales_policy',
-  'perm_security_settings',
+  'perm_ai_providers',
+  'perm_short_ai_providers',
   'perm_drive_credentials',
   'perm_destructive_delete',
   'permission_sensitive_critical',
@@ -226,7 +227,7 @@ assert.equal((source.match(/const renderActionChip = /g) || []).length, 1, 'one 
 assert.equal((source.match(/chipStates\(/g) || []).length, 1, 'one place asks the model for the chips of a row')
 assert.equal((source.match(/renderActionChip\(row, /g) || []).length, 1, 'one call draws every chip of every row')
 assert.match(summarySource, /const tier = actionTierOf\(row, perms\)/, 'the model reads an on/off module as Full and an off one as None')
-assert.match(summarySource, /perms\[row\.lead\.key\] === true \|\| isCoveredByFull\(row\.lead, perms\) \? 'full' : 'none'/, 'an on/off module reads Full when stored on or when another module\'s Full already grants it')
+assert.match(summarySource, /perms\[row\.lead\.key\] === true \? 'full' : 'none'/, 'an on/off module reads Full only when it is stored on: nothing is held by inclusion')
 // A chip carries its full words as the accessible name and the tooltip, so the short word on the chip loses nothing.
 assert.match(source, /aria-label=\{label\}/)
 assert.match(source, /<span aria-hidden="true">\{translate\(chip\.action\.shortTKey, chip\.action\.short\)\}<\/span>/, 'the chip shows the short word and hides it from the accessible name')

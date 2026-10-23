@@ -39,7 +39,6 @@ export function effectivePermissions(user: PermissionUser) {
     const normalized = String(key || '').trim().toLowerCase()
     if (!normalized || isAdmin) return true
     return merged[normalized] === true
-      || (['drive_credentials', 'business_identity', 'sales_policy'].includes(normalized) && merged.settings === true)
   }
   const meets = (requirement: string): boolean => {
     const [section, action] = requirement.split(':')

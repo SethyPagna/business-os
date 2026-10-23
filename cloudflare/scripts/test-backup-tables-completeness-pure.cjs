@@ -22,6 +22,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const EXCLUDED = {
   // Auth ephemera: a restore must not resurrect sessions, lockouts or
   // half-finished password resets (staff and storefront alike).
+  permission_extras_0270_state: 'migration 0270 audit ledger: read once by its own POST checks and by the restore twin, never restored',
+  permission_extras_0270_fix: 'migration 0270 audit ledger: read once by its own POST checks, never restored',
   user_sessions: 'auth ephemera',
   trusted_devices: 'auth ephemera',
   verification_codes: 'auth ephemera',

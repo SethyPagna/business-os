@@ -105,7 +105,8 @@ for (const sales of [false, 'view', true] as const) {
   assert.equal(authority.can('sales', 'status'), sales === true, 'override cannot widen the selected tier')
 }
 assert.equal(effectivePermissions(null).can('products', 'add'), false)
-assert.equal(effectivePermissions({ permissions: { settings: true } }).hasPermission(' BUSINESS_IDENTITY '), true)
+assert.equal(effectivePermissions({ permissions: { settings: true } }).hasPermission(' BUSINESS_IDENTITY '), false, 'Settings Full no longer implies Identity')
+assert.equal(effectivePermissions({ permissions: { business_identity: true } }).hasPermission(' BUSINESS_IDENTITY '), true)
 console.log('PASS strict effective-user/admin/action matrix, override precedence and reserved identities')
 
 const absent = Symbol('absent')

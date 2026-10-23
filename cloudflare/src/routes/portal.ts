@@ -2639,9 +2639,9 @@ app.post('/submissions', async (c) => {
 // queue + approve/reject belong to the storefront-config grant. Reading the
 // queue previously checked only requireAuth (any logged-in user could read the
 // moderation queue -- a gap); it now requires the same grant as acting on it.
-// `settings` (or admin) stays a superset so existing admins are unaffected.
-function canManagePortalSubmissions(user: SessionUser): boolean {
-  return hasPermission(user, 'customer_portal') || hasPermission(user, 'settings')
+// `settings` no longer stands in for it (migration 0270 granted customer_portal to every Settings Full holder).
+export function canManagePortalSubmissions(user: SessionUser): boolean {
+  return hasPermission(user, 'customer_portal')
 }
 
 app.get('/submissions/review', requireAuth, async (c) => {
