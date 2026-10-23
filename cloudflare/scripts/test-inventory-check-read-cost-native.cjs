@@ -103,7 +103,7 @@ const FIXTURE = [
   `INSERT INTO sale_items(sale_id,product_id,branch_id,quantity,total_usd,total_khr,cost_price_usd,cost_price_khr)
     SELECT id,1003+((id-900)*7)%300,1,1+(id-900)%2,8,32000,1.75,5000 FROM sales WHERE id BETWEEN 900 AND 911`,
   `INSERT OR REPLACE INTO roles(id,name,code,permissions) VALUES(910001,'Administrator','admin','{}'),
-    (910002,'Counter','employee','{"inventory":true,"inventory_check_show_stock":false}')`,
+    (910002,'Counter','employee','{"inventory":true,"inventory_checks":true,"inventory_check_show_price":true,"inventory_check_show_barcode":true,"inventory_check_show_category":true,"inventory_check_show_brand":true,"inventory_check_show_received":true,"inventory_check_show_sales":true,"inventory_check_show_customers":true,"inventory_check_show_stock":false}')`,
   "DELETE FROM system_flags WHERE key='stock_transaction_permit'",
   "INSERT INTO users(id,username,name,password,role_id,organization_id) VALUES(910001,'cost-admin','Cost admin','unused',910001,1),(910002,'cost-counter','Cost counter','unused',910002,1)",
 ]
