@@ -502,10 +502,10 @@ async function main() {
       })
     }
 
-    // ---- 10. what a cancel costs the database (the Paid plan here; test-return-exchange-cancel-free-native.cjs runs the Free plan's refusals) -------------------
-    // 1 line back / 1 line out, and 5 / 5, each cancelled with every replacement line taken back, then undone and redone. The counts are printed. A grouped
-    // action is one atomic batch that grows with its stock lines (about 6-7 statements a line, and the take-back lines double the undo), so the typical
-    // 1 / 1 exchange fits a Free invocation and 5 / 5 does not: the Free plan refuses it up front. Both are far inside the Paid plan's budget.
+    // ---- 10. what a cancel costs the database (the Paid plan here; test-return-exchange-cancel-free-native.cjs runs the Free plan) -------------------------------
+    // 1 line back / 1 line out, and 5 / 5, each cancelled with every replacement line taken back (here as ONE take-back return, which this plan allows), then
+    // undone and redone. The counts are printed. Since 6.0.966 a grouped action is one atomic batch whose size does not grow with its stock lines or the returns it
+    // links (set-based writes), so both sizes fit a Free invocation as well; the Free test runs the same 5 / 5 with its take-backs one line at a time.
     {
       const FREE = H.FREE_QUERY_LIMIT
       const countsOf = async (n) => {
@@ -533,10 +533,24 @@ async function main() {
         const got = await countsOf(n)
         console.log(`D1 statements, ${n} back / ${n} out: create ${got.createN}, cancel+take-back ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN} (Free limit ${FREE})`)
         r.check(`statements, ${n} back / ${n} out: cancel ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN} (Free limit ${FREE}, Paid limit ${H.PAID_QUERY_LIMIT})`, () => {
-          const limit = n === 1 ? FREE : H.PAID_QUERY_LIMIT
-          for (const [name, count] of [['cancel', got.cancelN], ['undo', got.undoN], ['redo', got.redoN]]) assert.ok(count > 0 && count <= limit, `${name} ${count} > ${limit}`)
+          for (const [name, count] of [['cancel', got.cancelN], ['undo', got.undoN], ['redo', got.redoN]]) assert.ok(count > 0 && count <= FREE, `${name} ${count} > ${FREE}`)
         })
       }
+    }
+
+    // The dry run tells the screen how to make the take-backs it announced: one return for all the lines on this plan (the Free test says one line at a time).
+    {
+      const sale = await makeSale([{ productId: 9710, quantity: 1, price: 10 }])
+      const out = await exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: 9730, quantity: 1 }])
+      const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', out.ret.id)
+      const line = await h.one('SELECT id FROM sale_items WHERE sale_id=? ORDER BY id', out.s2.id)
+      const dry = await h.call('POST', '/api/returns/bulk', { client_request_id: 'xc-dry-paid', field: 'status', source: 'completed', target: 'cancelled', dry_run: true,
+        items: [{ id: out.ret.id, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null,
+          replacement: { return_ids: [], planned: [{ sale_item_id: line.id, quantity: 1 }] } }] }, 'paid dry run')
+      r.check(`the dry run on the Paid plan passes (${dry.status}) and does not ask for one-line take-backs (takeBackPerLine ${dry.body.takeBackPerLine})`, () => {
+        assert.equal(dry.status, 200, JSON.stringify(dry.body))
+        assert.equal(dry.body.takeBackPerLine, false)
+      })
     }
 
     // ---- 11. a legacy (money v0) exchange asks the same question -------------------------------------------------------------------------------------------
