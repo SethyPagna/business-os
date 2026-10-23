@@ -82,6 +82,8 @@ for (const [file, units] of Object.entries(ROUTE_PENDING)) for (const unit of un
 //   it to c.executionCtx.waitUntil.
 // THREADED: takes an optional waitUntil from the route and awaits only when
 //   none is given (tests, non-request callers).
+// HANDLERS: a request handler split out of a route into lib/ (it takes the Hono context `c`; routes/ holds mounted routers only). Every one of its
+//   broadcasts is already handed to c.executionCtx.waitUntil on the same line, so the request never awaits one (checked below).
 // PENDING: request-path awaits outside this lane's scope, named so they are
 //   not forgotten. Remove an entry once its function is fixed.
 const QUEUE_ONLY = {
@@ -106,6 +108,10 @@ const THREADED = {
   'reviewApply.ts': ['notify'],
   'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }
+const HANDLERS = {
+  // 6.0.958: the one-step exchange create, called from inside POST /api/returns.
+  'returnExchangeCreate.ts': ['createExchangeReturnV1'],
+}
 const PENDING = {
   // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
   // UndoApplierContext carries no waitUntil yet.
@@ -115,7 +121,7 @@ const PENDING = {
   // (foldCreateWithStockInWrite) is threaded.
   'createFold.ts': ['foldCreateIntoExisting'],
 }
-const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, PENDING }
+const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, HANDLERS, PENDING }
 const classOf = (file, unit) => Object.keys(classes).find((name) => (classes[name][file] || []).includes(unit))
 
 const libDir = path.join(src, 'lib')
@@ -168,6 +174,21 @@ for (const [file, units] of Object.entries(THREADED)) {
     const body = unitText(lines, unit)
     assert.match(body, /if \(waitUntil\) waitUntil\(\w+\)\s*\n?\s*else await \w+/, `${file}:${unit} defers to waitUntil when one is given`)
   }
+}
+
+for (const [file, units] of Object.entries(HANDLERS)) {
+  const lines = libs.find((lib) => lib.file === file).lines
+  for (const unit of units) {
+    let broadcasts = 0
+    lines.forEach((line, i) => {
+      if (isComment(line) || !CALL.test(line) || unitOf(lines, i) !== unit) return
+      broadcasts += 1
+      assert.match(line, /c\.executionCtx\.waitUntil\(broadcast\(/, `lib/${file}:${i + 1} (${unit}) hands its broadcast to the request's waitUntil`)
+    })
+    assert.ok(broadcasts > 0, `handler ${file}:${unit} broadcasts nothing -- drop the entry`)
+  }
+  // ...and a route really calls it, so the entry is not dead.
+  for (const unit of units) assert.ok(routeText.some((route) => new RegExp(`\\b${escape(unit)}\\(`).test(route.text)), `a route calls handler ${file}:${unit}`)
 }
 
 // The routes that own a threaded function must actually pass the request's

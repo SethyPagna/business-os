@@ -8,7 +8,8 @@ export interface ReplacementPricingRow {
   key: string
   productId: number | string
   quantity: number
-  catalogUsd: number
+  /** The catalog price of one unit; null when this screen could not read it (the Worker then prices the row's extra units). */
+  catalogUsd: number | null
   catalogKhr: number | null
 }
 
@@ -20,10 +21,14 @@ export interface ReturnedUnitsLine {
   soldKhr: number | string | null | undefined
 }
 
-/** `quantity` units at one unit price; `swapped` when a returned unit covers them (priced at what the sale recorded). */
+/**
+ * `quantity` units at one unit price; `swapped` when a returned unit covers them (priced at what the sale recorded). A part that is not
+ * swapped is a purchase at the catalog price the Worker charges: `priceUsd` is that catalog price when the screen read it, and null when it
+ * could not (such a part is posted with no price and shown as "catalog price", never as a figure the Worker has not charged).
+ */
 export interface ReplacementPart {
   quantity: number
-  priceUsd: number
+  priceUsd: number | null
   priceKhr: number | null
   swapped: boolean
 }
@@ -73,57 +78,54 @@ export function planReplacementParts(
   return plan
 }
 
-export const replacementPartsTotalUsd = (parts: readonly ReplacementPart[]): number =>
-  parts.reduce((sum, part) => sum + part.priceUsd * part.quantity, 0)
-
-/** The price fields of one line of the sale being returned, as the sales read carries them. */
-export interface SaleLinePriceFields {
-  product_id?: number | string | null
-  base_price_usd?: number | string | null
-  base_price_khr?: number | string | null
-  applied_price_usd?: number | string | null
-  applied_price_khr?: number | string | null
+/** What the parts come to, or null when any part has no known price (the total is then only the Worker's to say). */
+export function replacementPartsTotalUsd(parts: readonly ReplacementPart[]): number | null {
+  let total = 0
+  for (const part of parts) {
+    if (part.priceUsd == null) return null
+    total += part.priceUsd * part.quantity
+  }
+  return total
 }
 
-/** What a "Same item" row starts its extras from: dollars, riel (0 when unknown), and whether it is the product's own catalog row. */
+/** The sum of several rows' totals; null as soon as one row's total is unknown. */
+export function replacementRowsTotalUsd(rowTotals: ReadonlyArray<number | null>): number | null {
+  let total = 0
+  for (const rowTotal of rowTotals) {
+    if (rowTotal == null) return null
+    total += rowTotal
+  }
+  return total
+}
+
+/**
+ * What a "Same item" row starts its extras from: dollars and riel, each null when this screen does not know it, and whether it is the
+ * product's own catalog row.
+ */
 export interface SameItemCatalog {
-  usd: number
-  khr: number
+  usd: number | null
+  khr: number | null
   fromCatalog: boolean
 }
 
 /**
  * The catalog price a "Same item" row prices its extra units at. Normally the product's own catalog row, but that read needs the Products
- * grant and a role with Returns alone is refused it (403) -- the shortcut must never depend on it. When the read is refused or fails, the
- * price falls back to what the SALE recorded for the product: the catalog snapshot on a sale line (base_price_*, the price before any manual
- * cut) when it holds one, else the price that line sold at -- the dearest such line of the product on the sale, so a free line (a
- * buy-2-get-1 at $0) never makes the extras free. The returned units themselves are priced from their own sale lines whichever way this
- * goes (planReplacementParts); only the extras lean on this, and the Worker still holds them to the real catalog / promotion price, so a
- * stale snapshot can at worst be refused, never undercharge. Resolves to null when the read worked and found no such product.
+ * grant and a role with Returns alone is refused it (403) -- the shortcut must never depend on it. When the read is refused or fails the
+ * price is UNKNOWN (null), not a guess from the sale: the extras are posted with no price at all, the Worker prices them at today's catalog
+ * price, and the screen names no figure for them until the review shows the Worker's quote. (A sale line's catalog snapshot is the
+ * price when it was sold; if the catalog has moved since, the screen would show -- and for a caller who may set prices, post -- a price the
+ * Worker would not have charged.) The returned units are priced from their own sale lines whichever way this goes (planReplacementParts).
+ * Resolves to null when the read worked and found no such product.
  */
 export async function resolveSameItemCatalog(
   readProduct: () => Promise<{ selling_price_usd?: unknown; selling_price_khr?: unknown } | null | undefined>,
-  saleLines: readonly SaleLinePriceFields[],
-  productId: number | string,
 ): Promise<SameItemCatalog | null> {
   let product: { selling_price_usd?: unknown; selling_price_khr?: unknown } | null | undefined
   try {
     product = await readProduct()
   } catch {
-    return saleLineCatalog(saleLines, productId)
+    return { usd: null, khr: null, fromCatalog: false }
   }
   if (!product) return null
   return { usd: recorded(product.selling_price_usd) ?? 0, khr: recorded(product.selling_price_khr) ?? 0, fromCatalog: true }
-}
-
-function saleLineCatalog(saleLines: readonly SaleLinePriceFields[], productId: number | string): SameItemCatalog {
-  const prices = saleLines.filter((line) => String(line.product_id) === String(productId)).map((line) => {
-    const baseUsd = recorded(line.base_price_usd)
-    const baseKhr = recorded(line.base_price_khr)
-    const usd = baseUsd != null && baseUsd > 0 ? baseUsd : recorded(line.applied_price_usd) ?? 0
-    const khr = baseKhr != null && baseKhr > 0 ? baseKhr : recorded(line.applied_price_khr) ?? 0
-    return { usd, khr }
-  })
-  const dearest = prices.reduce((best, price) => price.usd > best.usd ? price : best, { usd: 0, khr: 0 })
-  return { usd: dearest.usd, khr: dearest.khr, fromCatalog: false }
 }

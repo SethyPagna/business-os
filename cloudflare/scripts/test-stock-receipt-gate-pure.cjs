@@ -149,6 +149,9 @@ const LOT_WRITER_CLASSIFICATION = {
   // supplier_id, no supplier_name and no unit_cost_usd, so it states nothing
   // the gate could check and invents nothing either.
   'src/lib/productWrites.ts': 'not-a-receipt: records no supplier and no cost',
+  // The exchange return's set-based writer (6.0.958): the lot a returned unit with no recorded lot goes back into. That is the returns-restock
+  // correction the kernel exempts (a customer gave the unit back; nothing was received from a supplier), the same insert productBatches makes.
+  'src/lib/returnExchangeWrite.ts': 'not-a-receipt: a returned unit restocked into a fallback lot (a correction)',
   // A transfer clones immutable lot identity onto the destination product. It
   // does not receive goods, attribute a supplier, or establish a new cost.
   'src/lib/transferOperation.ts': 'not-a-receipt: preserves transferred lot provenance',

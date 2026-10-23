@@ -19,7 +19,7 @@ raw.exec(`CREATE TABLE returns(id INTEGER PRIMARY KEY,created_at TEXT,return_sco
   total_refund_usd REAL DEFAULT 0,total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT,supplier_compensation_usd REAL DEFAULT 0,
   supplier_compensation_khr REAL DEFAULT 0,supplier_loss_usd REAL DEFAULT 0,supplier_loss_khr REAL DEFAULT 0,
   reason TEXT,return_type TEXT,customer_id INTEGER,replacement_sale_id INTEGER,sale_id INTEGER);
-  CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT);
+  CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT,total_usd REAL);
   CREATE TABLE customers(id INTEGER PRIMARY KEY,is_anonymous INTEGER);
   CREATE TABLE return_items(id INTEGER PRIMARY KEY,return_id INTEGER,stock_action TEXT);
   INSERT INTO returns(id,created_at,return_scope,status,branch_id,total_refund_usd,reason,return_type) VALUES

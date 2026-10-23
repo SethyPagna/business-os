@@ -115,12 +115,23 @@ const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshotKernel,
   './saleMoneyPrecision': saleMoneyPrecision,
 })
+const returnExchangeIntentKernel = loadReal('lib/returnExchangeIntent.ts')
 const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
+  './returnExchangeIntent': returnExchangeIntentKernel,
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {} },
   './moneyPrecision': moneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
 })
+// 6.0.958: the quote-plan lib the route now imports, REAL over the same kernels; the exchange itself has its own native test.
+const customerReturnQuotePlanKernel = loadReal('lib/customerReturnQuotePlan.ts', {
+  './customerReturnEntitlement': customerReturnEntitlement, './productMergeLineage': productMergeLineage, './returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
+  './saleRecordEvents': { sha256Hex: async () => '' }, './saleMoneyPrecision': saleMoneyPrecision,
+})
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
+  '../lib/returnExchangeIntent': returnExchangeIntentKernel,
+  '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
+  '../lib/returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
@@ -168,7 +179,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, ReturnBulkError: class ReturnBulkError extends Error {} },
+  '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
   '../lib/saleBulkStatus': { bulkAssertion: () => ({ sql: 'SELECT 1', params: {} }), saleRevisionGuard: () => ({ sql: 'SELECT 1', params: {} }) },
   '../lib/saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }), SaleRecordEventError: class SaleRecordEventError extends Error {}, sha256Hex: async () => '' },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },

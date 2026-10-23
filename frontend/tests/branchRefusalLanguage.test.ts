@@ -64,6 +64,14 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   product_supplier_edit_required: ['lib/productSupplierGate.ts', 'product_supplier_edit_required'],
   // 6.0.926: a replacement line priced under the floor (403), and the two fixed texts that replaced the database's own message on a failed save (500).
   return_replacement_price_forbidden: ['lib/returnReplacementPrice.ts', 'return_replacement_price_forbidden', 403],
+  // 6.0.958: PATCH /returns/:id that would leave a recorded replacement under its floor; the pack says to record the extra unit as a separate return.
+  return_edit_replacement_floor: ['lib/returnReplacementPrice.ts', 'return_edit_replacement_floor', 403],
+  // 6.0.963: restoring an exchange return from the list after its cancel moved the refund credit to Not Paid; the sentence is the Worker's word for word.
+  return_restore_exchange_credit: ['lib/returnBulkAction.ts', 'return_restore_exchange_credit', 409],
+  // 6.0.964: cancelling an exchange that handed change back; the sentence is the Worker's word for word.
+  return_cancel_exchange_change: ['lib/returnBulkAction.ts', 'return_cancel_exchange_change', 409],
+  // 6.0.965: an exchange of a sale line with no lot; the sentence is the Worker's word for word.
+  return_exchange_line_no_lot: ['lib/returnExchangePlan.ts', 'return_exchange_line_no_lot', 409],
   supplier_return_failed: ['routes/returns.ts', 'supplier_return_failed', 500],
   return_edit_failed: ['routes/returns.ts', 'return_edit_failed', 500],
   // 6.0.949 (review P3-4): an import file that would move stock, approved without Adjust / receive at Full (403 at approve and at retry-as-apply).

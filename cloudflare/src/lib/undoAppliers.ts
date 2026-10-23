@@ -41,7 +41,7 @@ import {
 import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
-import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
+import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction, type ReturnBulkQueryBudget } from './returnBulkAction'
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard, samePrecisionCompatibleState } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession, type StockSessionQueryBudget } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
@@ -88,6 +88,7 @@ export interface UndoApplierContext {
   historyId?: number
   generation?: unknown
   stockSessionQueryBudget?: StockSessionQueryBudget
+  returnBulkQueryBudget?: ReturnBulkQueryBudget
 }
 
 export interface UndoApplierOutcome {
@@ -3588,7 +3589,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     permission: 'returns', action: 'bulk',
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
-      await replayReturnBulkAction(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+      await replayReturnBulkAction(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload, ctx.returnBulkQueryBudget)
     },
   },
   [SALE_SETTLEMENT_ACTION_KIND]: {

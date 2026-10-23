@@ -1,5 +1,6 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Banknote from 'lucide-react/dist/esm/icons/banknote.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
@@ -9,6 +10,7 @@ import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Repeat from 'lucide-react/dist/esm/icons/repeat.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
@@ -38,7 +40,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
-import { planReplacementParts, replacementPartsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
+import { planReplacementParts, replacementPartsTotalUsd, replacementRowsTotalUsd, resolveSameItemCatalog } from './helpers/replacementPricing.ts'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
@@ -46,7 +48,13 @@ import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
-import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
+import type { ExchangeQuoteV1, PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
+import SaleSettlementEditor from '../sales/SaleSettlementEditor.tsx'
+import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
+import {
+  changeRielRoundedDown, exchangeDue, exchangeOverpaymentUsd, exchangePaymentBody, exchangePaymentIssue, exchangeReplacementItems, initialExchangePayRows,
+  type ExchangeChangeCurrency,
+} from './helpers/returnExchange.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import StockActionIcon from './StockActionIcon.tsx'
@@ -85,10 +93,6 @@ interface SaleItemRow {
   quantity?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
-  // The catalog snapshot the sale line carries (the price before any manual cut): what the "Same item" shortcut prices the extra units at when
-  // the catalog itself cannot be read (a Returns-only role has no Products view).
-  base_price_usd?: number | string | null
-  base_price_khr?: number | string | null
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
@@ -156,8 +160,10 @@ interface ReplacementLine {
   batches: ProductBatch[]
   quantity: number
   // The catalog price of one unit. What each unit actually goes out at is planned from this and the returned lines
-  // (planReplacementParts): the units a returned unit covers at the sold price, every other unit at this.
-  catalog_usd: number
+  // (planReplacementParts): the units a returned unit covers at the sold price, every other unit at this. Null when the
+  // catalog could not be read here (a "Same item" shortcut for a role without the Products view): those units post no
+  // price and the Worker prices them, so nothing on this screen names a figure for them before the Worker's quote.
+  catalog_usd: number | null
   catalog_khr: number | null
 }
 
@@ -247,6 +253,8 @@ const useApp = useAppHook as () => {
   user?: AppUser | null
   t?: TranslateFn
   getPermissionTier?: (key: string) => string
+  settings?: Record<string, unknown> | null
+  fmtKHR?: (value: number | string) => string
 }
 
 type SalesTransportModule = typeof import('../../api/salesTransport.ts')
@@ -343,7 +351,7 @@ function lineReturnQuantities(item: SaleItemRow, recorded: number, v1: boolean):
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
-  const { user, t } = useApp()
+  const { user, t, settings, fmtKHR } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -364,6 +372,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
   const [quote, setQuote] = useState<ReturnQuoteV1 | null>(null)
+  // The replacement of a one-step exchange as the Worker priced and netted it, the customer's payment rows beside it, and the currency a
+  // give-back (or an overpayment) is handed out in. All three are dropped the moment anything on the form changes (quoteIntent below).
+  const [exchangeQuote, setExchangeQuote] = useState<ExchangeQuoteV1 | null>(null)
+  const [payRows, setPayRows] = useState<SettlementRow[]>([])
+  const [changeCurrency, setChangeCurrency] = useState<ExchangeChangeCurrency>('USD')
   const [quoteBusy, setQuoteBusy] = useState(false)
   const [pendingV1, setPendingV1] = useState<PendingReturnCreateV1 | null>(null)
   const [reviewedPendingBody, setReviewedPendingBody] = useState<string | null>(null)
@@ -509,8 +522,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     productName: string
     branchId: number | string | null
     quantity: number
-    catalogUsd: number
-    catalogKhr: number
+    catalogUsd: number | null
+    catalogKhr: number | null
     batchId?: number | null
   }) => {
     const branchId = input.branchId || foundSale?.branch_id || null
@@ -524,7 +537,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       batches: [],
       quantity: Math.max(1, Math.floor(input.quantity) || 1),
       catalog_usd: input.catalogUsd,
-      catalog_khr: input.catalogKhr > 0 ? input.catalogKhr : null,
+      catalog_khr: input.catalogKhr != null && input.catalogKhr > 0 ? input.catalogKhr : null,
     }])
     void loadReplacementBatches(key, input.productId, branchId)
   }
@@ -551,7 +564,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // returned rows), so the section stays the one place a replacement is chosen. The row starts at the returned quantity, and the
   // returned units go out at the price the sale recorded; any units added beyond them are priced at the catalog price, which is
   // read here. That read needs the Products view, which a role with Returns alone does not have (403), so it can never be what the
-  // shortcut depends on: when it is refused or fails, the extras fall back to the sale's own catalog snapshot (resolveSameItemCatalog).
+  // shortcut depends on: when it is refused or fails, the price of the extras is unknown here -- they are posted with no price, the Worker
+  // prices them at the catalog price, and the review shows its quote (resolveSameItemCatalog).
   const addReplacementSameItem = async (item: SaleReturnItem) => {
     if (!item.product_id || sameItemBusy) return
     setSameItemBusy(true)
@@ -560,7 +574,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         const { getProductsByIds } = await import('../../api/productReadTransport.ts')
         const payload = await getProductsByIds([item.product_id]) as { items?: ReplacementCandidate[] }
         return Array.isArray(payload?.items) ? payload.items[0] : null
-      }, selectedItems, item.product_id)
+      })
       if (!catalog) throw new Error(T('no_products_found', 'No products found. Try another name, SKU or barcode.'))
       addReplacementLine({
         productId: item.product_id as number | string,
@@ -852,13 +866,22 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     toNumber(foundSale?.exchange_rate),
   )
   const partsOf = (line: ReplacementLine) => replacementPlan.get(line.key) ?? []
-  const replacementTotalUsd = replacements.reduce((s, line) => s + replacementPartsTotalUsd(partsOf(line)), 0)
+  const replacementTotalUsd = replacementRowsTotalUsd(replacements.map((line) => replacementPartsTotalUsd(partsOf(line))))
+  // A price this screen does not know is never shown as a figure: the row says "Catalog price" and the Worker's quote names the amount.
+  const catalogPriceLabel = T('replacement_price_catalog', 'Catalog price')
+  const usdOrCatalog = (value: number | null) => value == null ? catalogPriceLabel : fmtUSD(value)
+  // A money-v1 sale carries its replacement in the same call as the return: the Worker prices these lines, nets them against the refund and
+  // takes the customer's payment (or hands the difference back) in one step. A part at the catalog price posts no price of its own.
+  const configuredMethods = configuredSettlementMethods(settings?.pos_payment_methods)
+  const replacementLinesV1 = isV1Sale ? exchangeReplacementItems(replacements, partsOf) : []
+  const exchangeActive = replacementLinesV1.length > 0
+  const exchangePayIssue = exchangeActive && exchangeQuote ? exchangePaymentIssue(payRows, exchangeQuote, configuredMethods) : null
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
   const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
   const quoteIntentRef = useRef(quoteIntent)
   quoteIntentRef.current = quoteIntent
   const reviewedIntentRef = useRef<string | null>(null)
-  useEffect(() => { setQuote(null); reviewedIntentRef.current = null }, [quoteIntent])
+  useEffect(() => { setQuote(null); setExchangeQuote(null); setPayRows([]); reviewedIntentRef.current = null }, [quoteIntent])
 
   // Every line that still owes an answer about WHICH lot. Restock is the only
   // action that puts units back on a shelf, so it is the only one that needs
@@ -933,9 +956,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               branch_id: line.branch_id,
               batch_id: line.batch_id,
               quantity: part.quantity,
-              applied_price_usd: part.priceUsd,
+              // No price known (the catalog could not be read for a "Same item" extra): none is posted and the Worker uses the catalog price.
+              ...(part.priceUsd != null ? { applied_price_usd: part.priceUsd } : {}),
               // No riel price known (the sale line or the catalog has none): left out, and the Worker uses the catalog riel price.
-              ...(part.priceKhr != null ? { applied_price_khr: part.priceKhr } : {}),
+              ...(part.priceUsd != null && part.priceKhr != null ? { applied_price_khr: part.priceKhr } : {}),
             }))),
             replacement_payment_method: replacementPaymentMethod,
           } : {}),
@@ -1005,7 +1029,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     }
     if (pendingV1 || sessionStale || unsupportedMoneyVersion) return
     if (isV1Sale) {
-      if (replacements.length) { notify(T('return_v1_replacements_unsupported', 'Create the replacement sale separately for this net-refund return.'), 'error'); return }
       if (pendingError) { notify(T(pendingError, 'The original return request could not be saved safely. No new request was sent.'), 'error'); return }
       if (!beginSingleAction(submitInFlightRef)) return
       const generation = lifecycle.current.generation
@@ -1016,9 +1039,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       try {
         const transport = await loadReturnsTransport()
         if (!current()) return
-        const next = await withLoaderTimeout(() => transport.getReturnQuoteV1(Number(foundSale?.id), activeItems.map(it => ({ sale_item_id: Number(it.id), quantity: it.returnQty }))), 'Return quote', RETURN_HISTORY_LOOKUP_TIMEOUT_MS)
+        const quoted = activeItems.map(it => ({ sale_item_id: Number(it.id), quantity: it.returnQty }))
+        const next = exchangeActive
+          ? await withLoaderTimeout(() => transport.getReturnExchangeQuoteV1(Number(foundSale?.id), quoted, replacementLinesV1), 'Return quote', RETURN_HISTORY_LOOKUP_TIMEOUT_MS)
+          : { quote: await withLoaderTimeout(() => transport.getReturnQuoteV1(Number(foundSale?.id), quoted), 'Return quote', RETURN_HISTORY_LOOKUP_TIMEOUT_MS), exchange: null }
         if (!current()) return
-        setQuote(next); reviewedIntentRef.current = intent; setStep('confirm')
+        setQuote(next.quote); setExchangeQuote(next.exchange); setPayRows(next.exchange ? initialExchangePayRows(next.exchange, configuredMethods) : [])
+        reviewedIntentRef.current = intent; setStep('confirm')
       } catch (error) {
         if (current()) { setQuote(null); notify(T((error as { code?: string })?.code || 'return_v1_review_required', getLoaderErrorMessage(error)), 'error') }
       } finally {
@@ -1043,7 +1070,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       setReviewedPendingBody(null)
       if (!pending) {
         if (!isV1Sale || !quote || reviewedIntentRef.current !== quoteIntent || pendingError) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
-        if (replacements.length || !activeItems.length || !finalReason || itemsMissingLot.length) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        if (!activeItems.length || !finalReason || itemsMissingLot.length || (exchangeActive && !exchangeQuote)) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        // The payment is checked before anything is frozen: a short or malformed tender is the operator's to fix on this screen, not a saved request.
+        if (exchangeActive && exchangePayIssue) throw Object.assign(new Error('return_exchange_payment'), { code: exchangePayIssue === 'short' ? 'return_exchange_payment_short' : 'return_exchange_payment_invalid' })
         pending = await transport.prepareReturnCreateV1(user?.id, {
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
@@ -1054,7 +1083,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               damaged_disposition: it.damaged_disposition,
             } : {}),
             ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}) })),
-        }, quote)
+        }, quote, exchangeActive && exchangeQuote
+          ? { quote: exchangeQuote, payment: exchangePaymentBody(payRows, exchangeQuote, configuredMethods, changeCurrency), lines: replacementLinesV1 }
+          : null)
         if (!current()) return
         setPendingV1(pending)
       }
@@ -1559,11 +1590,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             aria-label={T('quantity', 'Quantity')}
                             value={line.quantity}
                             onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-                          <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
+                          <span className={`${replacementPartsTotalUsd(partsOf(line)) == null ? 'max-w-[6rem] leading-tight' : 'w-16'} flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400`} data-replacement-total={replacementPartsTotalUsd(partsOf(line)) == null ? 'catalog' : 'amount'}>{usdOrCatalog(replacementPartsTotalUsd(partsOf(line)))}</span>
                         </div>
                         {partsOf(line).length > 1 ? (
                           <div className="text-right text-xs leading-relaxed text-gray-400" data-replacement-parts="split">
-                            {partsOf(line).map((part) => `${part.quantity} × ${fmtUSD(part.priceUsd)}`).join(' + ')}
+                            {partsOf(line).map((part) => `${part.quantity} × ${usdOrCatalog(part.priceUsd)}`).join(' + ')}
                           </div>
                         ) : null}
                       </div>
@@ -1576,8 +1607,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1"><Receipt className="h-4 w-4 shrink-0" aria-hidden="true" />{T('replacement_sale_new', 'New sale for these items')}</span>
-                      <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
+                      <span className="font-semibold">{usdOrCatalog(replacementTotalUsd)}</span>
                     </div>
+                    {isV1Sale ? (
+                      <div className="flex items-center justify-end">
+                        <InfoHint label={T('replacement_sale_new', 'New sale for these items')} text={T('return_exchange_net_hint', 'Review shows the refund against these items: the customer pays the difference, or is given it back, in this one step.')} />
+                      </div>
+                    ) : (
                     <div className="flex items-center gap-2">
                       <AppSelect
                         value={replacementPaymentMethod}
@@ -1591,6 +1627,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       />
                       <InfoHint label={T('replacement_sale_new', 'New sale for these items')} text={T('replacement_sale_hint', 'It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.')} />
                     </div>
+                    )}
                   </div>
                 </>
                 )}
@@ -1645,7 +1682,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div className="flex items-center gap-1"><Trash2 className="h-3 w-3 shrink-0" aria-hidden="true" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short', 'destroyed immediately (booked loss)')}</div>
                 )}
                 {replacements.length > 0 && (
-                  <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short', 'item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
+                  <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short', 'item(s) on the replacement sale receipt')} — {exchangeQuote ? fmtUSD(exchangeQuote.total_usd) : usdOrCatalog(replacementTotalUsd)}{exchangeQuote ? '' : ` · ${replacementPaymentMethod}`}</div>
                 )}
               </div>
             </div>
@@ -1685,18 +1722,78 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
 
             {replacements.length > 0 && (
               <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
-                {replacements.map((line) => (
+                {exchangeQuote ? exchangeQuote.lines.map((line, index) => (
+                  <div key={`${line.product_id}_${index}`} className="flex justify-between py-1 text-sm">
+                    <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.total_usd)}</span>
+                  </div>
+                )) : replacements.map((line) => (
                   <div key={line.key} className="flex justify-between py-1 text-sm">
                     <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
-                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(replacementPartsTotalUsd(partsOf(line)))}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{usdOrCatalog(replacementPartsTotalUsd(partsOf(line)))}</span>
                   </div>
                 ))}
                 <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                  <span>{T('replacement_sale_total', 'New sale total')} · {replacementPaymentMethod}</span>
-                  <span>{fmtUSD(replacementTotalUsd)}</span>
+                  <span>{T('replacement_sale_total', 'New sale total')}{exchangeQuote ? '' : ` · ${replacementPaymentMethod}`}</span>
+                  <span>{exchangeQuote ? fmtUSD(exchangeQuote.total_usd) : usdOrCatalog(replacementTotalUsd)}</span>
                 </div>
               </div>
             )}
+
+            {/* What the exchange comes to, in one line: the customer pays the difference, is given it back, or nothing moves. The payment is
+                taken here, with the same controls a sale uses, so there is no second screen and no way to be left with half an exchange. */}
+            {exchangeQuote ? (() => {
+              const due = exchangeDue(exchangeQuote)
+              const overpaidUsd = exchangeOverpaymentUsd(payRows, exchangeQuote)
+              // At the rate the Worker figures the give-back at (the shop's change rate, else the sale's), so the screen shows what is recorded.
+              const rielOut = changeRielRoundedDown(overpaidUsd, exchangeQuote.change_exchange_rate)
+              const tr = (key: string, english: string, khmer?: string): string => {
+                const value = typeof t === 'function' ? t(key) : undefined
+                return value && value !== key ? value : (/[\u1780-\u17FF]/.test(typeof t === 'function' ? String(t('cancel') || '') : '') ? (khmer || english) : english)
+              }
+              return (
+                <div data-section="exchange-net" className="space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                  <div className="flex items-center justify-between gap-2 text-sm font-semibold text-blue-800 dark:text-blue-200">
+                    <span className="flex items-center gap-1.5">
+                      {due.kind === 'pay' ? <Banknote className="h-4 w-4 shrink-0" aria-hidden="true" /> : due.kind === 'give' ? <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : <Repeat className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                      {due.kind === 'pay' ? T('return_exchange_customer_pays', 'Customer pays') : due.kind === 'give' ? T('return_exchange_give_back', 'Give back') : T('return_exchange_even', 'Even exchange')}
+                    </span>
+                    {due.kind === 'even' ? null : <span>{fmtUSD(due.usd)}</span>}
+                  </div>
+                  {exchangeQuote.not_paid ? (
+                    <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{T('return_exchange_not_paid_note', 'The original sale is Not Paid: the refund lowers its debt and the replacement stays Not Paid.')}</p>
+                  ) : null}
+                  {due.kind === 'pay' && !exchangeQuote.not_paid ? (
+                    <SaleSettlementEditor
+                      rows={payRows}
+                      configuredMethods={configuredMethods}
+                      exchangeRate={exchangeQuote.exchange_rate}
+                      totalUsd={due.usd}
+                      moneyPrecisionVersion={1}
+                      saving={submitting}
+                      error=""
+                      recordedIssue={null}
+                      translate={tr}
+                      fmtUSD={fmtUSD}
+                      fmtKHR={(value) => typeof fmtKHR === 'function' ? fmtKHR(value) : `${value}៛`}
+                      onChange={setPayRows}
+                    />
+                  ) : null}
+                  {overpaidUsd > 0 ? (
+                    <div role="radiogroup" aria-label={T('return_exchange_change_in', 'Hand back in')} className="flex items-center gap-1.5 text-xs">
+                      <span className="text-gray-500 dark:text-gray-400">{T('return_exchange_change_in', 'Hand back in')}</span>
+                      {([['USD', fmtUSD(overpaidUsd)], ['KHR', `${rielOut.toLocaleString()}៛`]] as Array<[ExchangeChangeCurrency, string]>).map(([currency, label]) => (
+                        <button key={currency} type="button" role="radio" aria-checked={changeCurrency === currency} disabled={submitting}
+                          onClick={() => setChangeCurrency(currency)}
+                          className={`min-h-8 rounded-lg border px-2 py-1 font-semibold ${changeCurrency === currency ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })() : null}
           </div>
         )}
 
@@ -1717,7 +1814,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             <button onClick={() => setStep('items')} disabled={submitting} className="btn-secondary inline-flex w-11 shrink-0 items-center justify-center px-0 disabled:opacity-50" aria-label={T('back', 'Back')} title={T('back', 'Back')}>
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent))}
+            <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent || (exchangeActive && (!exchangeQuote || !!exchangePayIssue))))}
               className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 text-sm disabled:opacity-50">
               {submitting
                 ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> {T('submitting', 'Processing…')}</>

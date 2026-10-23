@@ -38,6 +38,10 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // refusal (about fifteen Worker sentences), so its pack text is one operator-language sentence for the whole class, not any one of them.
   idempotency_conflict: 'idempotency_conflict',
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
+  return_edit_replacement_floor: 'return_edit_replacement_floor',
+  return_restore_exchange_credit: 'return_restore_exchange_credit',
+  return_cancel_exchange_change: 'return_cancel_exchange_change',
+  return_exchange_line_no_lot: 'return_exchange_line_no_lot',
   supplier_return_failed: 'supplier_return_failed',
   return_edit_failed: 'return_edit_failed',
   // An import file that would move stock, approved by a user without Adjust / receive at Full (6.0.926 / 6.0.946; the Worker's sentence word for word).
