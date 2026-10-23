@@ -69,7 +69,11 @@ async function main() {
     assert.match(core, /\['Employee', 'employee', 0, DEFAULT_ROLE_PERMISSIONS\.employee\]/)
     assert.match(core, /\['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS\.manager\]/)
     assert.deepEqual(SEED.admin, { all: true })
-    assert.deepEqual(SEED.manager, {})
+    const m = SEED.manager
+    assert.equal(m.settings, true)
+    for (const key of ['business_identity', 'sales_policy', 'receipt_settings', 'customer_portal', 'portal_posts', 'portal_faq', 'portal_about', 'library', 'inventory_checks']) assert.equal(m[key], true, `the Manager seed stores ${key} explicitly`)
+    for (const key of ['drive_credentials', 'ai_providers', 'security_settings', 'all']) assert.equal(Object.hasOwn(m, key), false, `the Manager seed leaves ${key} off`)
+    assert.equal(m.inventory_check_show_cost, false)
   })
 
   await check('the Employee default: details visible and editable, never cost, price or supplier; no stock writer; Contacts Full; no Dashboard', () => {

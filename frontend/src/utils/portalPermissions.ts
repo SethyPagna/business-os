@@ -8,8 +8,8 @@
 //   customer_portal -> every OTHER customer_portal_* key ("portal config":
 //                      branding, media, theme, catalog display, social, AI,
 //                      maps, translations, publish, loyalty, submissions)
-// Holding the broad `settings` grant (or admin) is a superset for all of them,
-// exactly as the backend encodes, so no existing Settings admin regresses.
+// Each area is its own grant (owner, 21 Oct 2026: Settings Full is main access only). Admin passes
+// inside hasPermission(); migration 0270 granted every area to existing Settings Full holders.
 //
 // Keep these three key sets identical to settings.ts's PORTAL_*_KEYS.
 
@@ -62,22 +62,26 @@ const SALES_POLICY_KEYS = new Set<string>([
   // they are not allowed to turn on.
   'currency_usd_symbol', 'currency_khr_symbol', 'exchange_rate', 'change_exchange_rate', 'tax_rate', 'tax_enabled',
   'display_currency', 'pos_show_item_discount', 'pos_payment_methods',
+  'sale_amendment_window_minutes',
   'pos_wholesale_auto_enabled', 'pos_wholesale_auto_min_qty',
+  'loyalty_points_enabled',
 ])
+const RECEIPT_SETTINGS_KEYS = new Set<string>(['receipt_template', 'receipt_footer', 'receipt_print_settings'])
 
 // The permission a given settings key requires, mirroring settings.ts's
 // settingsBucketPermissionFor(); null means the plain `settings` grant.
 export function settingsBucketForKey(key: string): string | null {
   if (BUSINESS_IDENTITY_KEYS.has(key)) return 'business_identity'
   if (SALES_POLICY_KEYS.has(key)) return 'sales_policy'
+  if (RECEIPT_SETTINGS_KEYS.has(key)) return 'receipt_settings'
   return portalBucketForKey(key)
 }
 
 // Whether `hasPermission` grants the write for a single settings key, mirroring
-// the backend's "bucket grant OR full settings" rule across ALL buckets. Admin
-// is already folded into hasPermission() upstream, so it is not special-cased.
+// the backend: a bucketed key needs its own grant, every other key needs `settings`.
+// Admin is already folded into hasPermission() upstream, so it is not special-cased.
 export function canWriteSettingKey(key: string, hasPermission: (p: string) => boolean): boolean {
   const bucket = settingsBucketForKey(key)
   if (!bucket) return hasPermission('settings')
-  return hasPermission(bucket) || hasPermission('settings')
+  return hasPermission(bucket)
 }

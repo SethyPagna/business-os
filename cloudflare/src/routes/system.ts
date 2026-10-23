@@ -1412,7 +1412,7 @@ app.post('/import-retention/orphans', async (c) => {
 // ---------------------------------------------------------------------------
 app.get('/verify-integrity', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'backup') && !hasPermission(user, 'settings')) {
+  if (!hasPermission(user, 'backup') && !hasPermission(user, 'drive_credentials')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   try {

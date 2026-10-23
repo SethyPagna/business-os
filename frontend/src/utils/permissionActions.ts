@@ -142,7 +142,6 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // routes/importJobs.ts for the import row.
   inventory: [
     { key: 'view', tKey: 'perm_act_inventory_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },
-    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', shortTKey: 'perm_short_count', short: 'Count', review: 'allow' },
     // PUT /reasons queues (maybeQueueForReview). The only Inventory write with
     // no live-state staleness risk, so the only one that queues.
     { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', shortTKey: 'reasons', short: 'Reasons', review: 'queue' },

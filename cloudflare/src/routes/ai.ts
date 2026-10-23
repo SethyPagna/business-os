@@ -28,8 +28,8 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 // AI provider configs hold encrypted third-party API keys -- gate every
-// route here behind the `settings` permission, matching legacy's
-// `requirePermission('settings')`. A permission system now exists in this
+// route here behind the separate `ai_providers` grant (owner, 21 Oct 2026: Settings Full is
+// main access only; migration 0270 granted it to every Settings Full holder). A permission system now exists in this
 // Worker (lib/permissions.ts, used by system.ts/compat.ts/users.ts/
 // lookups.ts) so the earlier "no permission helpers exist yet" rationale
 // for skipping this no longer applies -- was a real gap, any logged-in
@@ -37,7 +37,7 @@ app.use('*', requireAuth)
 // AI provider credentials.
 app.use('*', async (c, next) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'settings')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (!hasPermission(user, 'ai_providers')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })
 

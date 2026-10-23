@@ -319,6 +319,28 @@ export function migrationNumber(name: string | null | undefined): number | null 
   return match ? Number(match[1]) : null
 }
 
+// Migration 0270 wrote every permission the Worker used to imply (Settings Full => Drive, Identity, Policies, Receipts, the Website
+// Editor, the Library and AI keys; Inventory => count sessions) into roles.permissions and users.permissions. A backup taken before
+// it still holds the implicit-only shapes; restoring one as-is would strip those accounts, so the restore re-applies the mapping.
+export const PERMISSION_EXTRAS_MIGRATION = 270
+const PERMISSION_EXTRAS_CHUNK = 80
+
+async function materializeRestoredPermissionExtras(env: Env, restoreToken: string, source: string): Promise<number> {
+  // Loaded on demand: only a restore of a pre-0270 backup runs it, and every other caller of this module never needs it.
+  const { materializePermissionExtras } = await import('./permissionExtras')
+  const roles = (await env.DB.prepare('SELECT id, code, permissions FROM roles').all<{ id: number; code: string | null; permissions: string | null }>()).results || []
+  const users = (await env.DB.prepare('SELECT id, role_id, permissions FROM users').all<{ id: number; role_id: number | null; permissions: string | null }>()).results || []
+  const plan = materializePermissionExtras(roles, users)
+  const statements: D1PreparedStatement[] = [
+    ...plan.roles.map((row) => env.DB.prepare("UPDATE roles SET permissions = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?").bind(row.permissions, row.id)),
+    ...plan.users.map((row) => env.DB.prepare('UPDATE users SET permissions = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(row.permissions, row.id)),
+  ]
+  for (let i = 0; i < statements.length; i += PERMISSION_EXTRAS_CHUNK) {
+    await executeRawRestoreStockTransaction(env.DB, statements.slice(i, i + PERMISSION_EXTRAS_CHUNK), await restoreStockAuthority(env, restoreToken, source))
+  }
+  return statements.length
+}
+
 // Message shape sent to (and read back from) BACKUP_QUEUE. Kept minimal --
 // everything else needed to resume (which assets, which prefix, what's
 // been copied so far) lives on the manifest itself, read fresh by
@@ -1658,6 +1680,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
     }
     await flush()
+    // A backup older than migration 0270 (or one with no schema stamp) holds the implicit-only permission shapes.
+    const permissionRowsMaterialized = orderedTables.includes('roles') && orderedTables.includes('users')
+      && (backupMigrationNumber == null || backupMigrationNumber < PERMISSION_EXTRAS_MIGRATION)
+      ? await materializeRestoredPermissionExtras(env, restoreToken || '', source)
+      : 0
     await onProgress?.({ phase: 'assets' })
 
     // Restore whichever asset bytes this backup actually copied (best-effort;
@@ -1706,6 +1733,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       // New (S-uploads2a): copies not written back under uploads/.
       withheldAssets: withheldAssets.length ? withheldAssets : undefined,
       schemaMigration: backupMigration,
+      permissionRowsMaterialized: permissionRowsMaterialized || undefined,
       schemaMismatch: schemaMismatch || undefined,
       tablesNotInBackup: tablesNotInBackup.length ? tablesNotInBackup : undefined,
     }

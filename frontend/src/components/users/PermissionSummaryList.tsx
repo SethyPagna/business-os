@@ -46,7 +46,6 @@ const holdsOwnLevel = (row: ModuleRow, perms: PermissionState): boolean => (
 function levelText(row: ModuleRow, perms: PermissionState, tr: Translate): string | null {
   const state = moduleState(row, perms)
   if (state.partial) return tr('perm_n_of_total', '{n} of {total}').replace('{n}', String(state.partial.on)).replace('{total}', String(state.partial.total))
-  if (state.follows) return tr('perm_follows_inventory', 'Follows Inventory')
   if (row.group.length) return state.level === 'full' ? levelWord('full', tr) : null
   return levelWord(state.level, tr)
 }

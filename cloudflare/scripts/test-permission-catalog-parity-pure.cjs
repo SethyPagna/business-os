@@ -410,8 +410,6 @@ const BROWSER_ONLY = {
   'branches:export': { gates: [['frontend/src/components/branches/Branches.tsx', /can\('branches',\s*'export'\)/]], why: 'The export file is built from rows the page already loaded.' },
 }
 const PENDING_OWNER = {
-  security_settings: 'Owner decision pending: the row grants nothing today because no Worker route checks it; hide it or give it a feature.',
-  drive_credentials: 'Owner decision pending: the only trace is a fallback to the Settings grant in lib/permissions.ts; every Settings save is refused for it.',
 }
 const MASTER_KEY = { all: 'The administrator override, evaluated by isAdminControlUser in lib/permissions.ts.' }
 // Keys the Worker checks that the editor has no key for.
@@ -638,7 +636,7 @@ check('a listed Review refusal is still true', () => {
 })
 
 // ---------------------------------------------------------------------------
-// What a role that holds Settings Full is granted without holding the key itself
+// What a role that holds Settings Full is granted without holding the key itself: nothing (owner, 21 Oct 2026)
 // ---------------------------------------------------------------------------
 // The role editor says Full opens a module's main access, and shows any other grant as "Included in Full" (the
 // catalog's `coveredBy`) exactly when the Worker answers true for it because Settings is Full. A fallback with no
@@ -674,84 +672,54 @@ function settingsGrantSites(file, text) {
 //   main    Settings' own access (it has no row of its own), in words; `says` is what the Settings description must
 //           name so the grid does not understate it
 const SETTINGS_FULL_SITES = [
-  { site: 'lib/permissions.ts: business_identity falls back to permissions.settings', covers: ['business_identity'] },
-  { site: 'lib/permissions.ts: sales_policy falls back to permissions.settings', covers: ['sales_policy'] },
-  { site: 'lib/permissions.ts: drive_credentials falls back to permissions.settings', covers: ['drive_credentials'] },
-  { site: "routes/ai.ts: hasPermission(user, 'settings')", main: 'AI provider keys (the Settings AI section)', says: 'AI provider keys' },
-  { site: "routes/compat.ts: denyUnless(c, 'settings')", count: 4, covers: ['drive_credentials'], main: 'Drive connect, disconnect, preferences and forget-credentials' },
-  { site: "routes/compat.ts: denyUnless(c, 'backup', 'settings')", count: 6, covers: ['drive_credentials'], main: 'Drive status and sync jobs, system jobs, the integration doctor' },
-  { site: "routes/files.ts: hasPermission(user, 'settings')", covers: ['library'], main: 'hasFullLibraryAccess: upload, download, rename and delete (routes/sync.ts imports it)' },
-  { site: "routes/portal.ts: hasPermission(user, 'settings')", covers: ['customer_portal'], main: 'storefront submission moderation' },
-  { site: "routes/promotions.ts: WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal', 'settings']", covers: ['portal_posts', 'customer_portal'], main: 'announcement-strip writes' },
   { site: "routes/runtime.ts: hasPermission(user, 'settings')", main: 'GET /runtime/catalog-integrity (no screen calls it)', says: 'system checks' },
-  {
-    site: "routes/settings.ts: hasPermission(user, 'settings')",
-    count: 4,
-    covers: ['sales_policy', 'business_identity', 'receipt_settings', 'portal_posts', 'portal_faq', 'portal_about', 'customer_portal'],
-    main: 'payment-method writes (298), the bucket superset (928), every non-bucket key (929), and the admin-only branch (1355, which needs admin as well)',
-  },
+  { site: "routes/settings.ts: hasPermission(user, 'settings')", count: 2, main: 'every non-bucket setting key (a bucket key needs its own grant) and the admin-only branch' },
   { site: "routes/settings.ts: getPermissionTier(user, 'settings')", main: 'payment-method reads: Settings View or Full' },
-  { site: "routes/system.ts: hasPermission(user, 'settings')", main: 'GET /system/verify-integrity (backup or settings; no screen calls it)', says: 'system checks' },
   { site: "lib/settingsVisibility.ts: getPermissionTier(user, 'settings')", main: 'Settings View or Full reads every setting' },
 ]
 
-check('every place the Worker tests the Settings grant is listed with what it gives a Settings Full role', () => {
+check('every place the Worker tests the Settings grant is listed, and none of them is a fallback that grants a separate switch', () => {
   const found = new Map()
   for (const [file, text] of workerText) for (const site of settingsGrantSites(file, text)) found.set(site, (found.get(site) || 0) + 1)
   const listed = new Map(SETTINGS_FULL_SITES.map((entry) => [entry.site, entry.count || 1]))
-  assert.ok(found.size >= 10, `only ${found.size} Settings sites found; the scan is broken`)
   const problems = []
   for (const [site, count] of found) {
-    if (!listed.has(site)) problems.push(`${site}  <- not in SETTINGS_FULL_SITES. If it grants a role with Settings Full something the grid shows as a separate switch, mark that key \`coveredBy: 'settings'\` in permissionDefinitions.ts and list it here under \`covers\`; if it is Settings' own access, list it under \`main\`.`)
+    if (/falls back to permissions\.settings/.test(site)) problems.push(`${site}  <- a Settings fallback is gone for good: Full means main access only`)
+    else if (!listed.has(site)) problems.push(`${site}  <- not in SETTINGS_FULL_SITES. If it grants a Settings Full role something the grid shows as a separate switch, that is the fallback the owner removed; if it is Settings' own access, list it under main.`)
     else if (listed.get(site) !== count) problems.push(`${site}  <- ${count} call(s), SETTINGS_FULL_SITES says ${listed.get(site)}`)
   }
-  for (const site of listed.keys()) if (!found.has(site)) problems.push(`${site}  <- listed but no longer in the Worker; if the fallback is gone, delete the entry and the \`coveredBy\` mark it carried`)
+  for (const site of listed.keys()) if (!found.has(site)) problems.push(`${site}  <- listed but no longer in the Worker; delete the entry`)
   assert.deepEqual(problems, [])
+  for (const entry of SETTINGS_FULL_SITES) assert.equal(Object.hasOwn(entry, 'covers'), false, 'no site may cover a separate switch through Settings Full')
 })
 
-check('the keys the editor shows as included in Settings Full are exactly the keys the Worker grants through it', () => {
-  const served = [...new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))].sort()
-  const marked = [...definitionByKey.values()].filter((def) => def.coveredBy)
-  assert.deepEqual(marked.filter((def) => def.coveredBy !== 'settings').map((def) => `${def.key}<-${def.coveredBy}`), [], 'only Settings is modelled as a covering module')
-  const unmarked = served.filter((key) => !definitionByKey.get(key)?.coveredBy)
-  const unserved = marked.map((def) => def.key).filter((key) => !served.includes(key)).sort()
-  assert.deepEqual(unmarked, [], `The Worker grants these through Settings Full but permissionDefinitions.ts does not mark them \`coveredBy: 'settings'\`, so the grid shows them off for a role that has them:\n${unmarked.join('\n')}`)
-  assert.deepEqual(unserved, [], `permissionDefinitions.ts marks these \`coveredBy: 'settings'\` but no Worker site grants them through Settings Full, so the grid shows them on for a role that lacks them:\n${unserved.join('\n')}`)
-  const missingRows = served.filter((key) => !definitionByKey.has(key))
-  assert.deepEqual(missingRows, [], `SETTINGS_FULL_SITES covers keys the editor has no row for:\n${missingRows.join('\n')}`)
+check('no catalog row is marked as covered by another module, and the strict hasPermission has no fallback', () => {
+  assert.deepEqual([...definitionByKey.values()].filter((def) => def.coveredBy || def.defaultFromFull).map((def) => def.key), [], 'coveredBy / defaultFromFull are retired: Full = main access only')
+  const permissionsText = textOf('lib/permissions.ts')
+  assert.doesNotMatch(permissionsText, /permissions\.settings === true/, 'lib/permissions.ts hasPermission must not fall back to Settings')
+  assert.match(permissionsText, /return permissions\[normalized\] === true/, 'hasPermission is the strict stored-true test')
 })
 
-check('what the Worker names as a Settings bucket or strip key is covered, read from the source rather than the list', () => {
-  const served = new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))
+check('every Settings bucket and strip key needs its own stored grant, read from the source', () => {
   const settingsText = textOf('routes/settings.ts')
-  assert.match(settingsText, /!hasPermission\(user, bucket\) && !hasPermission\(user, 'settings'\)/, 'routes/settings.ts no longer lets Settings Full save a bucket key; update SETTINGS_FULL_SITES')
+  assert.match(settingsText, /!hasPermission\(user, bucket\)/, 'routes/settings.ts must demand the bucket key itself')
+  assert.doesNotMatch(settingsText, /!hasPermission\(user, bucket\) && !hasPermission\(user, 'settings'\)/, 'a bucket key must not be saveable through Settings Full')
   const buckets = [...new Set(sectionsReturnedBy(settingsText, 'settingsBucketPermissionFor'))]
   assert.ok(buckets.length >= 7, `only ${buckets.length} settings buckets found; the scan is broken`)
-  assert.deepEqual(buckets.filter((key) => !served.has(key)), [], 'a settings bucket the Worker lets Settings Full save is not in `covers`')
   const strip = /const WEBSITE_EDITOR_STRIP_KEYS = \[([^\]]*)\]/.exec(textOf('routes/promotions.ts'))
   assert.ok(strip, 'routes/promotions.ts no longer lists WEBSITE_EDITOR_STRIP_KEYS')
-  const stripKeys = [...strip[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).filter((key) => key !== 'settings')
-  assert.deepEqual(stripKeys.filter((key) => !served.has(key)), [], 'an announcement-strip key is not in `covers`')
+  assert.deepEqual([...strip[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), ['portal_posts', 'customer_portal'], 'the strip is writable by its own two grants only')
 })
 
-check('the Settings description does not call an included extra a separate switch, and names what has no row', () => {
+check('the Settings description says Identity, Policies, Receipts and Drive are separate switches, and claims no inclusion', () => {
   const settingsSection = PERMISSION_SECTIONS.find((section) => section.key === 'settings')
   const pack = JSON.parse(fs.readFileSync(path.join(ROOT, 'frontend', 'src', 'lang', 'en.json'), 'utf8'))
   const texts = { 'permissionDefinitions.ts description': settingsSection.description, 'en.json perm_section_settings_desc': pack[`${settingsSection.tKey}_desc`] }
-  // The words come from the keys the Worker serves, not from the catalog's marks, so a missing mark cannot hide a false claim.
-  const served = [...new Set(SETTINGS_FULL_SITES.flatMap((entry) => entry.covers || []))]
-  const included = served.map((key) => definitionByKey.get(key)).filter(Boolean).map((def) => def.short || def.label)
-  assert.ok(included.length >= 8, `only ${included.length} included extras found; the scan is broken`)
   const problems = []
   for (const [where, text] of Object.entries(texts)) {
     assert.equal(typeof text, 'string', `${where} is missing`)
-    for (const sentence of text.split(/(?<=[.!?])\s+/)) {
-      if (!/separate switch/i.test(sentence)) continue
-      for (const word of included) if (sentence.toLowerCase().includes(word.toLowerCase())) problems.push(`${where}: "${sentence}" calls "${word}" a separate switch, but Settings Full includes it`)
-    }
-    for (const says of new Set(SETTINGS_FULL_SITES.map((entry) => entry.says).filter(Boolean))) {
-      if (!text.toLowerCase().includes(says.toLowerCase())) problems.push(`${where} does not mention "${says}", which Settings Full grants and the grid has no row for`)
-    }
+    if (!/separate switches/i.test(text)) problems.push(`${where} does not say the extras are separate switches`)
+    if (/include/i.test(text.replace(/includes? no/i, ''))) problems.push(`${where} claims an inclusion: "${text}"`)
   }
   assert.deepEqual(problems, [])
 })
@@ -1026,8 +994,8 @@ check('control: the scan sees known checks and misses a known gap', () => {
   assert.ok(workerActions.has('products:import_replace_all') && workerActions.has('sales:import'), 'import sections')
   assert.ok(!workerActions.has('products:export'), 'products:export is browser-only, never checked by the Worker')
   assert.ok(workerChecksKey('backup_restore') && workerChecksKey('contacts_suppliers') && workerChecksKey('product_cost_view'), 'check calls and table lookups')
-  assert.equal(workerChecksKey('security_settings'), null, 'security_settings has no Worker check')
-  assert.equal(workerChecksKey('drive_credentials'), null, 'drive_credentials has no Worker check')
+  assert.ok(workerChecksKey('drive_credentials') && workerChecksKey('ai_providers'), 'drive_credentials and ai_providers are checked by the Worker')
+  assert.equal(workerChecksKey('security_settings'), null, 'security_settings has no Worker check (its row is hidden)')
 })
 
 if (SHOW_TABLE) {
