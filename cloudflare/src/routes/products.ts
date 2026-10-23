@@ -1557,6 +1557,18 @@ function catalogVocabularyDenialReason(user: SessionUser): string | null {
   return 'You do not have permission to view the product catalog'
 }
 
+// Read-mostly catalog metadata is cached on the versions of everything it reads (6.0.970), so a repeat costs no
+// D1 rows until a product, stock, settings or promotion write moves a version. The cached body is actor-neutral;
+// every permission check and per-role projection still runs on each request, after the cache.
+async function catalogReadVersion(env: Env, namespaces: readonly string[]): Promise<string> {
+  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
+}
+const PRODUCT_FILTERS_VERSIONS = ['products', 'stock', 'settings', 'promotions'] as const
+// Promotion rules are active by date, which no write announces: the TTL bounds how long a rule that just started
+// (or ended) can be missing from the vocabulary.
+const PRODUCT_FILTERS_TTL_SECONDS = 300
+
 app.get('/filters', async (c) => {
   const denial = catalogVocabularyDenialReason(c.get('user'))
   if (denial) return c.json({ error: denial }, 403)
@@ -1564,7 +1576,11 @@ app.get('/filters', async (c) => {
   const imageOnly = isImageOnlyVocabularyUser(user)
   // An image-only reader's filter query is ignored: any narrowing parameter would
   // let the option lists answer questions about fields the role cannot see.
-  const vocabulary = await loadProductFilters(c.env, imageOnly ? {} : c.req.query())
+  const filtersQuery = imageOnly ? {} : c.req.query()
+  const filtersUrl = new URL(c.req.url)
+  if (imageOnly) filtersUrl.search = ''
+  const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery))
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
@@ -6219,7 +6235,8 @@ app.get('/possible-duplicates', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const clusters = await findPossiblySameProductClusters(getDb(c.env))
+  const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
   return c.json({ success: true, clusters })
 })
 
@@ -6238,6 +6255,8 @@ app.post('/possible-duplicates/dismiss', async (c) => {
     ON CONFLICT(cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
   `).run({ type, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
+  // The cached possible-duplicates list hides dismissed clusters.
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   return c.json({ success: true })
 })
 
