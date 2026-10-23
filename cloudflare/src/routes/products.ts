@@ -1629,7 +1629,7 @@ app.get('/:id/detail-report', async (c) => {
       MAX(pb.received_at) AS last_received_at
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
@@ -1649,7 +1649,7 @@ app.get('/:id/detail-report', async (c) => {
            ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
     ORDER BY pb.received_at DESC, pb.id DESC
@@ -1733,7 +1733,7 @@ app.get('/:id/supplier-purchases', async (c) => {
            ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
