@@ -19,6 +19,7 @@ const MUTANTS = {
   'floor-todays-catalog': [{ file: BULK, from: 'catalog_usd: recordedCatalog(row.sale_items_json, info.lines.length) ??', to: 'catalog_usd:' }],
   'dry-run-ignores-planned': [{ file: BULK, from: 'line.quantity = Math.max(0, Number(subtractDecimalSum(line.quantity, [planned.quantity])))', to: 'void 0' }],
   'fifo-before-restock': [{ file: 'src/lib/returnExchangePlan.ts', from: 'fifoLotsFor(ctx, line.productId, line.branchId, ownRestocks)', to: 'fifoLotsFor(ctx, line.productId, line.branchId)' }],
+  'lotless-line-generic-refusal': [{ file: 'src/lib/returnExchangePlan.ts', from: "if (lotPlans.some((plan, index) => plan.plainQuantity > 0 && input.returnLines[index].stock_action === 'restock')) {", to: 'if (false) {' }],
   'quote-sale-rate': [{ file: 'src/lib/returnExchange.ts', from: 'change_exchange_rate: resolveChangeExchangeRate(input.changeRateSetting, input.exchangeRate),', to: 'change_exchange_rate: input.exchangeRate,' }],
 }
 
@@ -315,6 +316,28 @@ async function main() {
       const sale2 = await makeSale([{ productId: 9801, quantity: 1, price: 10 }])
       const y = await exchange(sale2, [{ item: 0, quantity: 1 }], [{ product_id: 9802, quantity: 1 }], { payment: { details: [], change_currency: 'KHR' } })
       r.check(`P2-4: with no setting the change rate is the sale's (${y.quote.exchange.change_exchange_rate} = ${y.quote.exchange.exchange_rate})`, () => assert.equal(y.quote.exchange.change_exchange_rate, y.quote.exchange.exchange_rate))
+    }
+
+    // ---- 6.0.965: a sale line with no lot cannot be exchanged here, and the refusal says so (a retry can never succeed) -----------------------------------------
+    {
+      await H.seedProduct(h, 9820, 'RV U', 5, 3, 1)
+      await h.db.batch([h.db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),
+        h.db.prepare('DELETE FROM branch_batch_stock WHERE batch_id=14820'), h.db.prepare('DELETE FROM product_batches WHERE id=14820'),
+        h.db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'")])
+      const sold = await H.createSale(h, { key: 'rv-lotless-sale', status: 'completed', lines: [{ productId: 9820, quantity: 1 }], paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+        extra: { items: [{ product_id: 9820, quantity: 1, branch_id: 1, client_line_key: 'rv-lotless-line-1', pricing_source: 'selling', pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } }] } })
+      assert.equal(sold.status, 200, JSON.stringify(sold.body))
+      const lotless = { id: sold.body.id, items: await h.all('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id', sold.body.id) }
+      const same = await exchange(lotless, [{ item: 0, quantity: 1 }], [{ product_id: 9820, quantity: 1 }], { allowRefusal: true })
+      const other = await exchange(lotless, [{ item: 0, quantity: 1 }], [{ product_id: 9802, quantity: 1 }], { allowRefusal: true, payment: { details: [{ method: 'Cash', amount_usd: 1.48, amount_khr: 0 }], change_currency: 'USD' } })
+      r.check(`6.0.965: exchanging a sale line that has no lot says what to do (same item ${same.refused && same.refused.status} ${same.refused && same.refused.body.code}; another item ${other.refused && other.refused.status} ${other.refused && other.refused.body.code}), not "reload and try again"`, () => {
+        for (const refused of [same.refused, other.refused]) {
+          assert.ok(refused, 'the exchange is refused')
+          assert.equal(refused.status, 409)
+          assert.equal(refused.body.code, 'return_exchange_line_no_lot')
+          assert.doesNotMatch(refused.body.error, /Reload/i)
+        }
+      })
     }
 
     // ---- P3: a link to another exchange's take-back -----------------------------------------------------------------------------------------------------

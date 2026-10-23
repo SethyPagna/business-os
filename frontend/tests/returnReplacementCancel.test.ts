@@ -347,7 +347,7 @@ const km = JSON.parse(read('..', 'src', 'lang', 'km.json')) as Record<string, st
 await runTest('5. every new sentence exists in English and Khmer, and the inline fallbacks are the pack\'s', () => {
   const keys = ['return_cancel_replacement_also', 'return_cancel_replacement_checking', 'return_cancel_replacement_load_failed', 'return_cancel_replacement_hint', 'return_cancel_replacement_need_add',
     'return_cancel_replacement_pick_one', 'return_cancel_replacement_taken', 'return_cancel_replacement_reason', 'return_cancel_replacement_changed',
-    'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_bulk_over_plan_budget', 'return_cancel_replacement_not_paid', 'return_restore_exchange_credit', 'return_cancel_exchange_change', 'refund_credit']
+    'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_bulk_over_plan_budget', 'return_cancel_replacement_not_paid', 'return_restore_exchange_credit', 'return_cancel_exchange_change', 'return_exchange_line_no_lot', 'refund_credit']
   for (const key of keys) {
     assert.ok(String(en[key] || '').trim(), `en.${key}`)
     assert.match(String(km[key] || ''), /[ក-៿]/, `km.${key} is Khmer`)

@@ -854,7 +854,7 @@ async function planCreditReversals(request: BulkRequest, members: Member[], repl
     // The change handed out beside the credit is cash that left the drawer against a sale the credit no longer pays: the debt would have to carry it and
     // every settlement path keep it. Until it does, cancelling such an exchange is refused whole (6.0.964, release review P1-1).
     if (sale.change_usd > 0 || sale.change_khr > 0) {
-      fail('This exchange gave change back to the customer, so its return cannot be cancelled here: the cash handed out would no longer be accounted for. Nothing was changed.', 409, 'return_cancel_exchange_change')
+      fail('This exchange gave change back. Cancel its replacement sale in Sales first, then cancel this return.', 409, 'return_cancel_exchange_change')
     }
     const credit = Number(rows[index].amount_usd) || 0
     const rest = rows.filter((_, position) => position !== index)

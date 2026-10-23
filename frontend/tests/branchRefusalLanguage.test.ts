@@ -70,6 +70,8 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   return_restore_exchange_credit: ['lib/returnBulkAction.ts', 'return_restore_exchange_credit', 409],
   // 6.0.964: cancelling an exchange that handed change back; the sentence is the Worker's word for word.
   return_cancel_exchange_change: ['lib/returnBulkAction.ts', 'return_cancel_exchange_change', 409],
+  // 6.0.965: an exchange of a sale line with no lot; the sentence is the Worker's word for word.
+  return_exchange_line_no_lot: ['lib/returnExchangePlan.ts', 'return_exchange_line_no_lot', 409],
   supplier_return_failed: ['routes/returns.ts', 'supplier_return_failed', 500],
   return_edit_failed: ['routes/returns.ts', 'return_edit_failed', 500],
   // 6.0.949 (review P3-4): an import file that would move stock, approved without Adjust / receive at Full (403 at approve and at retry-as-apply).

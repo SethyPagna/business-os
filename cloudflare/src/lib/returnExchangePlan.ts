@@ -134,6 +134,12 @@ export function planExchangeStock(input: {
     return { splits: [...merged].map(([batchId, quantity]) => ({ batchId, quantity })), plainQuantity: plan.plainQuantity }
   })
 
+  // A returned line whose sale line has no lot (and no pick) can only go back into a fresh dated lot of its own, which the replacement cannot draw from: the write
+  // is always refused later. Say so now, with what to do instead, rather than the "reload and try again" of a race that a retry can never beat (6.0.965).
+  if (lotPlans.some((plan, index) => plan.plainQuantity > 0 && input.returnLines[index].stock_action === 'restock')) {
+    return refuse(409, { error: 'This item has no received date, so it can be returned but not exchanged here. Record the return, then sell the replacement at the POS.', code: 'return_exchange_line_no_lot' })
+  }
+
   // ---- the replacement units: explicit lots must belong to the product, the rest leave the oldest lots first ----------------
   const fifo = new Map<string, FifoLotAvailability[]>()
   const replacementTakes: ExchangeLotTake[][] = []
