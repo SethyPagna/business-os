@@ -440,12 +440,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
       requestsInFlightRef.current += 1
-      let stream: MediaStream
-      try {
-        stream = await openCamera(startToken, () => startTokenRef.current)
-      } finally {
-        requestsInFlightRef.current -= 1
-      }
+      const stream = await openCamera(startToken, () => startTokenRef.current).finally(() => { requestsInFlightRef.current -= 1 })
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
         settleRequest()
