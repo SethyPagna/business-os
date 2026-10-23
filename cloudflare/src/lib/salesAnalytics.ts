@@ -1045,8 +1045,12 @@ async function readReportSaleItems(
   itemSelectSql: string,
 ): Promise<ReportScalarRow[]> {
   if (!reportFilterHasDateWindow(f)) return reportKeysetRows(db, itemSelectSql, 'si.id', primary.params, rowBudget)
+  // The band only has to CONTAIN the matching items (the walk below still filters by primary.sql), so it is read
+  // from the report filter alone. Including a caller's scope subquery here nested it inside an expression that is
+  // already near SQLite's depth limit (the Sales stats search) and made D1 refuse the statement.
+  const bandWhere = whereActiveSales('s', f)
   const band = await db.prepare(`SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si
-    WHERE si.sale_id IN (SELECT s.id FROM sales s WHERE ${primary.sql})`).get<{ lo: number | null; hi: number | null }>(primary.params)
+    WHERE si.sale_id IN (SELECT s.id FROM sales s WHERE ${bandWhere.sql})`).get<{ lo: number | null; hi: number | null }>(bandWhere.params)
   const lo = Number(band?.lo), hi = Number(band?.hi)
   if (band?.lo == null || band?.hi == null) return []
   if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi) || lo < 1 || hi < lo) throw new ReportMoneyPrecisionError('unsupported_row')

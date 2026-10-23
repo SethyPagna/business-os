@@ -51,10 +51,11 @@ const sales = [
   [9, '2026-09-10 09:30:00', 'completed', 1, 19, 19], // inside, returned later
   [10, '2026-09-04 09:30:00', 'completed', 1, 20, 20], // outside, return dated inside window
   [11, '2026-09-15 09:30:00', 'completed', 1, 21, 21],
+  [12, '2026-09-10 10:00:00', 'completed', 1, 22, 22, null, 2], // sale in branch 1, its item in branch 2 (inside the window)
 ]
-for (const [id, at, status, branch, total, paid, upd] of sales) {
+for (const [id, at, status, branch, total, paid, upd, itemBranch] of sales) {
   insertSale.run({ id, rn: `R${id}`, at, upd: upd || at, status, branch, total, paid })
-  insertItem.run(id, `P${id}`, total, branch)
+  insertItem.run(id, `P${id}`, total, itemBranch || branch)
 }
 insertReturn.run(1, 'RT1', 9, 5, '2026-09-12 03:00:00'); insertReturnItem.run(1, 9, 'P9', 5)
 insertReturn.run(2, 'RT2', 10, 7, '2026-09-10 03:00:00'); insertReturnItem.run(2, 10, 'P10', 7)
@@ -102,6 +103,7 @@ const cases = {
   'day + time of day': { startDate: '2026-09-10', endDate: '2026-09-10', startTime: '10:00', endTime: '23:59' },
   'overnight time window': { startDate: '2026-09-05', endDate: '2026-09-15', startTime: '22:00', endTime: '03:00' },
   'day + branch filter': { startDate: '2026-09-10', endDate: '2026-09-10', branchId: '2' },
+  'day + item-branch filter (item in another branch than its sale)': { startDate: '2026-09-10', endDate: '2026-09-10', branchId: '2' },
   'day + Not Paid status': { startDate: '2026-09-10', endDate: '2026-09-10', status: 'awaiting_payment' },
   'day + cancelled status': { startDate: '2026-09-10', endDate: '2026-09-10', status: 'cancelled' },
   'empty window': { startDate: '2027-01-01', endDate: '2027-01-02' },
@@ -124,7 +126,7 @@ const cases = {
     const q = cases['one local day']
     const { where, params } = build(q)
     const snap = await lib.readSalesReportSnapshot({}, windowOf(q), false, lib.salesListFilterReportScope(where, params))
-    assert.deepEqual(snap.sales.map((r) => r.id).sort((a, b) => a - b), [2, 3, 4, 5, 9])
+    assert.deepEqual(snap.sales.map((r) => r.id).sort((a, b) => a - b), [2, 3, 4, 5, 9, 12])
     assert.deepEqual(snap.voidSales.map((r) => r.id), [7])
     assert.deepEqual(snap.returns.map((r) => r.sale_id).sort((a, b) => a - b), [3, 9], 'a return dated later follows its sale; a return on an outside sale is excluded')
     const totals = lib.salesTotalsFromSnapshot(snap)
@@ -142,6 +144,25 @@ const cases = {
     captured.length = 0
     await lib.readSalesReportSnapshot({}, {}, false, lib.salesListFilterReportScope(where, params))
     assert.ok(!captured.some((c) => /MIN\(si\.id\)/.test(c.query)), 'control: the old call had no band read')
+  })
+
+  await check('item-branch control: branch 2 matches the sale whose ITEM is in branch 2', async () => {
+    const q = { startDate: '2026-09-10', endDate: '2026-09-10', branchId: '2' }
+    const { where, params } = build(q)
+    const snap = await lib.readSalesReportSnapshot({}, windowOf(q), false, lib.salesListFilterReportScope(where, params))
+    assert.deepEqual(snap.sales.map((r) => r.id).sort((a, b) => a - b), [3, 12])
+  })
+
+  await check('regression (binding-limit shape): the item band is scope-free, so a deep search scope cannot nest it past the depth limit', async () => {
+    const q = { startDate: '2026-09-10', endDate: '2026-09-10' }
+    const where = ['1=1', bdw.localDateAtOrAfter('s.created_at'), bdw.localDateAtOrBefore('s.created_at'), '(' + Array.from({ length: 40 }, (_, i) => `s.customer_name LIKE @t${i}`).join(' OR ') + ')']
+    const params = { startDate: q.startDate, endDate: q.endDate, ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`t${i}`, `%nomatch${i}%`])) }
+    captured.length = 0
+    const wide = await lib.readSalesReportSnapshot({}, windowOf(q), false, lib.salesListFilterReportScope(where, params))
+    assert.equal(wide.sales.length, 0)
+    const band = captured.find((c) => /MIN\(si\.id\)/.test(c.query))
+    assert.ok(band, 'band read ran')
+    assert.ok(!/matched_sale|LIKE/.test(band.query), 'band statement carries no scope subquery')
   })
 
   await check('route passes the window and only the window', async () => {
