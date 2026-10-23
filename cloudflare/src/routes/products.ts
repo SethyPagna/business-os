@@ -6185,7 +6185,7 @@ app.post('/merge-duplicates', async (c) => {
   const complete = remainingProducts === 0
   const stalled = !complete && !onlyRefusedCasesRemain && remainingProducts != null && remainingProducts > 0 && !madeProgress
 
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({
@@ -6256,7 +6256,7 @@ app.post('/possible-duplicates/dismiss', async (c) => {
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
   `).run({ type, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
   // The cached possible-duplicates list hides dismissed clusters.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   return c.json({ success: true })
 })
 
@@ -8981,7 +8981,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     review = await readProductConflictActionReview(db, user.id, review.id) || { ...review, status: 'completed' }
   }
   if (processedFolds > 0 || deltaRemovals.some((row) => row.status === 'undo_ready')) {
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   }
@@ -9353,7 +9353,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
   await db.prepare(`UPDATE product_conflict_merge_runs SET status=@status,result_json=@result,updated_at=CURRENT_TIMESTAMP WHERE id=@runId`)
     .run({ status: complete && !undoPending.length ? 'completed' : interruptionCode ? 'interrupted' : 'running', result: JSON.stringify(response), runId: run.id })
   if (madeProgress) {
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   }
@@ -9807,7 +9807,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     return c.json(mergeFailedBody(errorId), 409)
   }
 
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   const { reversal: _reversal, reparentedSaleItemIds: _si, reparentedMovementIds: _mi, ...publicStats } = stats
