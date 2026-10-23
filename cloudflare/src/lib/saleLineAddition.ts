@@ -602,6 +602,9 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
   if (anyPrecision && (!hasPrecision || !Object.prototype.hasOwnProperty.call(money, 'calculated_total_usd') || !Object.prototype.hasOwnProperty.call(money, 'rounding_adjustment_usd')))
     throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
   validateSaleMoneySnapshot(money)
+  // The two status columns are written only when the snapshot carries a status (a paid sale raised above its tender, see
+  // lib/saleRaisedAfterPayment.ts); every other snapshot leaves them out of the statement entirely.
+  const hasStatus = typeof money.sale_status === 'string' && money.sale_status !== ''
   return {
     sql: `UPDATE sales SET exchange_rate = CASE WHEN @has_exchange_rate=1 THEN @exchange_rate ELSE exchange_rate END,
             subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
@@ -616,15 +619,12 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
             tax_khr = CASE WHEN @has_tax_khr=1 THEN @tax_khr ELSE tax_khr END,
             delivery_fee_khr = CASE WHEN @has_delivery_fee_khr=1 THEN @delivery_fee_khr ELSE delivery_fee_khr END,
             membership_discount_khr = CASE WHEN @has_membership_discount_khr=1 THEN @membership_discount_khr ELSE membership_discount_khr END,
-            sale_status = CASE WHEN @has_sale_status=1 THEN @sale_status ELSE sale_status END,
-            delivery_pending = CASE WHEN @has_sale_status=1 THEN @delivery_pending ELSE delivery_pending END,
+${hasStatus ? 'sale_status = @sale_status, delivery_pending = @delivery_pending,' : ''}
             updated_at = COALESCE(@updated_at, CURRENT_TIMESTAMP)
           WHERE id = @sale_id`,
     params: {
       sale_id: saleId,
-      has_sale_status: typeof money.sale_status === 'string' && money.sale_status ? 1 : 0,
-      sale_status: money.sale_status ?? null,
-      delivery_pending: money.delivery_pending === 1 ? 1 : 0,
+      ...(hasStatus ? { sale_status: money.sale_status, delivery_pending: money.delivery_pending === 1 ? 1 : 0 } : {}),
       has_precision: hasPrecision ? 1 : 0,
       money_precision_version: money.money_precision_version ?? 0,
       calculated_total_usd: money.calculated_total_usd ?? null,
@@ -926,4 +926,21 @@ export function recomputeSaleMoneyAfterLineChange(input: {
     subtotalUsd,
     subtotalKhr: convertedKhr(subtotalUsd, exchangeRate,input.moneyPrecisionVersion) ?? 0,
   }
+}
+
+// Lives here, not in saleRaisedAfterPayment.ts, because lib/undoAppliers.ts already imports this module (lane 6.0.967).
+/** The status columns a money snapshot may carry (all optional: older snapshots have none). */
+export type SaleStatusSnapshotFields = { sale_status?: string; delivery_pending?: 0 | 1 }
+
+/**
+ * The status a replay finds the sale in before it writes: Undo finds what the addition left, Redo what Undo restored.
+ * A snapshot with no sale_status (recorded before this rule) did not move the status, so both directions expect the status
+ * the sale had when the lines were added.
+ */
+export function expectedSaleStatusForReplay(
+  direction: 'undo' | 'redo',
+  reversal: { saleStatus?: unknown; moneyBefore?: SaleStatusSnapshotFields | null; moneyAfter?: SaleStatusSnapshotFields | null },
+): string {
+  const snapshot = direction === 'undo' ? reversal.moneyAfter : reversal.moneyBefore
+  return String(snapshot?.sale_status ?? reversal.saleStatus ?? 'completed')
 }

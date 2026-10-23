@@ -35,8 +35,8 @@ type MoneyAfter = {
   calculated_total_usd?: unknown
 }
 
-/** The status columns a money snapshot may carry (all optional: older snapshots have none). */
-export type SaleStatusSnapshotFields = { sale_status?: string; delivery_pending?: 0 | 1 }
+import type { SaleStatusSnapshotFields } from './saleLineAddition'
+export type { SaleStatusSnapshotFields }
 
 type SaleStatusRow = RecordedSaleMoney & { sale_status?: unknown; delivery_pending?: unknown; status_before_return?: unknown; return_state?: unknown }
 
@@ -81,17 +81,4 @@ export function markSaleNotPaidAfterRaise(sale: SaleStatusRow, moneyBefore: obje
   Object.assign(moneyBefore, move.before)
   Object.assign(moneyAfter, move.after)
   return true
-}
-
-/**
- * The status a replay finds the sale in before it writes: Undo finds what the addition left, Redo what Undo restored.
- * A snapshot with no sale_status (recorded before this rule) did not move the status, so both directions expect the status
- * the sale had when the lines were added.
- */
-export function expectedSaleStatusForReplay(
-  direction: 'undo' | 'redo',
-  reversal: { saleStatus?: unknown; moneyBefore?: SaleStatusSnapshotFields | null; moneyAfter?: SaleStatusSnapshotFields | null },
-): string {
-  const snapshot = direction === 'undo' ? reversal.moneyAfter : reversal.moneyBefore
-  return String(snapshot?.sale_status ?? reversal.saleStatus ?? 'completed')
 }

@@ -229,7 +229,7 @@ async function run() {
   assert.deepEqual(retired, { before: { sale_status: 'awaiting_delivery', delivery_pending: 0 }, after: { sale_status: 'awaiting_payment', delivery_pending: 1 } }, 'the retired awaiting_delivery word becomes the delivery tag')
   assert.equal(move({ ...base, amount_paid_usd: 0, amount_paid_khr: 40000 }, 12) !== null, true, 'a riel tender is measured at the sale rate')
   assert.equal(move({ ...base, amount_paid_usd: 0, amount_paid_khr: 40000 }, 10), null)
-  const first = raised.expectedSaleStatusForReplay
+  const first = h.load('lib/saleLineAddition.ts').expectedSaleStatusForReplay
   assert.equal(first('undo', { saleStatus: 'completed', moneyAfter: { sale_status: 'awaiting_payment' }, moneyBefore: { sale_status: 'completed' } }), 'awaiting_payment')
   assert.equal(first('redo', { saleStatus: 'completed', moneyAfter: { sale_status: 'awaiting_payment' }, moneyBefore: { sale_status: 'completed' } }), 'completed')
   assert.equal(first('undo', { saleStatus: 'completed', moneyAfter: {}, moneyBefore: {} }), 'completed')

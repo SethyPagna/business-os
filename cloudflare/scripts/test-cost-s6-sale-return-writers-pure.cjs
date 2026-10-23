@@ -28,7 +28,7 @@ const currentAdmission = withProductStockGuard(require)('./stockTransaction')
 const root = process.env.COST_S6_SRC_ROOT ? path.resolve(process.env.COST_S6_SRC_ROOT) : path.join(__dirname, '..')
 const REAL = new Set([
   'salesStatus', 'productBatches', 'receivingBranch', 'batchCode', 'sqlBinding', 'moneyPrecision', 'saleTotals',
-  'saleMoneyPrecision', 'financialPrecision', 'saleLineAddition', 'saleItemPricing', 'promotionRules', 'saleTransitions',
+  'saleMoneyPrecision', 'financialPrecision', 'saleLineAddition','saleRaisedAfterPayment', 'saleItemPricing', 'promotionRules', 'saleTransitions',
   'saleAmendments', 'returnsStock', 'stockCondition', 'productDelete', 'actorSnapshot',
 ])
 const cache = new Map()

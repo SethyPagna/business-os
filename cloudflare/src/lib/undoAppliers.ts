@@ -32,6 +32,7 @@ import {
   plannedLineFromRecord,
   saleLineKhrSnapshotStatement,
   saleMoneyUpdateStatement,
+  expectedSaleStatusForReplay,
   type SaleAddItemsReversal,
 } from './saleLineAddition'
 // S4-30: an undo/redo of an addition appends a compensating entry to the sale's
@@ -39,7 +40,6 @@ import {
 // it rather than around it. Never a rewrite -- migration 0115's triggers refuse
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
-import { expectedSaleStatusForReplay } from './saleRaisedAfterPayment'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction, type ReturnBulkQueryBudget } from './returnBulkAction'

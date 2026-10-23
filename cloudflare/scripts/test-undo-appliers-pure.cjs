@@ -127,6 +127,10 @@ const guardExports = {}
 new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(guardExports)
+const replayDeclaration = additionAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'expectedSaleStatusForReplay')
+new Function('exports', ts.transpileModule(replayDeclaration.getText(additionAst), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(guardExports)
 // undoAppliers.ts now imports the exact sale money kernel (depends only on
 // moneyPrecision, which loadModule already maps).
 const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
@@ -186,6 +190,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // test-sale-add-items-pure.cjs, which is where that applier is proved.
   if (id === './saleLineAddition') return {
     planUnlottedSaleLineGuards: guardExports.planUnlottedSaleLineGuards,
+    expectedSaleStatusForReplay: guardExports.expectedSaleStatusForReplay,
     buildAllocationStatements: () => [],
     buildOperationAllocationStatements: (_lines, operationId) => exerciseAtomicSaleItems ? [{
       sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,quantity)
