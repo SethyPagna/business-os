@@ -167,6 +167,16 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   const nextScanAtRef = useRef(0)
   // The page was hidden while the camera ran: coming back starts it again by itself.
   const resumeOnReturnRef = useRef(false)
+  // The start that came back from a hide (not a tap, not the open). While its request is pending the page may
+  // be hidden again: that start was a camera that was running, so it still counts as one.
+  const nextStartIsResumeRef = useRef(false)
+  const resumeTokenRef = useRef(0)
+  // Camera requests this hook has made and not yet seen answered, however stale their start became.
+  const requestsInFlightRef = useRef(0)
+  // The page came back while such a request was still unanswered: asking again would stack a second prompt, so
+  // the resume waits for that answer (settleRequest) and asks once then.
+  const resumeAfterRequestRef = useRef(false)
+  const startCameraRef = useRef<() => Promise<void>>(async () => {})
   // Seeded from `open` rather than 'idle': the modal is only ever mounted by
   // the tap on a scanner button, and that tap already starts the camera (see
   // the open effect). An 'idle' first frame would flash the paused-camera
@@ -357,8 +367,27 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     cancelFrameRef.current = onNextFrame(video, scanFrame)
   }, [parkCamera, scanFrame])
 
+  // The answer to a request whose start was already over has arrived (its stream, if any, is stopped). If the page
+  // came back meanwhile and a camera that was running is waiting for it, ask now: exactly one request is open.
+  const settleRequest = useCallback((): void => {
+    if (!resumeAfterRequestRef.current || requestsInFlightRef.current > 0 || startTokenRef.current !== 0) return
+    resumeAfterRequestRef.current = false
+    if (detectionHandledRef.current) return
+    if (document.visibilityState === 'hidden') {
+      // Gone again before the answer: the intent waits for the next return.
+      resumeOnReturnRef.current = true
+      return
+    }
+    nextStartIsResumeRef.current = true
+    void startCameraRef.current()
+  }, [])
+
   const startCamera = useCallback(async (): Promise<void> => {
     const startToken = ++startSequenceRef.current
+    resumeAfterRequestRef.current = false
+    resumeOnReturnRef.current = false
+    if (nextStartIsResumeRef.current) resumeTokenRef.current = startToken
+    nextStartIsResumeRef.current = false
     cleanup()
     startTokenRef.current = startToken
     setStatus('starting')
@@ -410,9 +439,16 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // the 446 KB ZXing chunk -- the prompt arrived a download later than the
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
-      const stream = await openCamera(startToken, () => startTokenRef.current)
+      requestsInFlightRef.current += 1
+      let stream: MediaStream
+      try {
+        stream = await openCamera(startToken, () => startTokenRef.current)
+      } finally {
+        requestsInFlightRef.current -= 1
+      }
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
+        settleRequest()
         return
       }
       markScanner('stream')
@@ -467,7 +503,13 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     } catch (scanError) {
       // A start that was closed or replaced has nothing left to report; this also keeps the AbortError
       // video.play() throws when its stream is released from being read as a busy camera.
-      if (startTokenRef.current !== startToken) return
+      if (startTokenRef.current !== startToken) {
+        // A resume that waited for this answer is dropped when the answer was a refusal: no loop on denial.
+        const refused = classifyCameraFailure(getScanErrorText(scanError), { permissionDenied: false, inAppBrowser: false })
+        if (refused === 'blocked' || refused === 'dismissed') resumeAfterRequestRef.current = false
+        settleRequest()
+        return
+      }
       cleanup()
       // What the browser holds NOW: tapping Block on this very request is a saved denial from here on,
       // and the person should be told so at once, not after a second try.
@@ -492,6 +534,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     messages.scanFailed,
     messages.scanPromptDismissed,
     messages.scanUnsupported,
+    settleRequest,
     waitForVideoElement,
   ])
 
@@ -525,13 +568,13 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   // the ONLY thing that can trigger a start: a parent re-render must never
   // restart a live stream mid-scan, which with a one-tap start would read as a
   // camera that keeps re-prompting.
-  const startCameraRef = useRef(startCamera)
   useEffect(() => { startCameraRef.current = startCamera }, [startCamera])
 
   useEffect(() => {
     if (!open) return undefined
     detectionHandledRef.current = false
     resumeOnReturnRef.current = false
+    resumeAfterRequestRef.current = false
     setReadOk(false)
     // Owner rules (2026-09-14, 2026-10-22): pressing the scanner button opens
     // the camera directly, and an allowed camera is never asked for again. The
@@ -570,19 +613,47 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
-        resumeOnReturnRef.current = running && streamRef.current !== null && !detectionHandledRef.current
-        if (running) parkCamera()
+        if (running) {
+          // A camera that was running: a stream is held, or a pagehide already let it go (the status still says
+          // running), or the start in flight is itself a resume. A first request that never produced a camera is none.
+          const resumeStillPending = resumeTokenRef.current !== 0 && startTokenRef.current === resumeTokenRef.current
+          resumeOnReturnRef.current = !detectionHandledRef.current && (streamRef.current !== null || resumeOnReturnRef.current || resumeStillPending)
+          parkCamera()
+        } else if (!resumeAfterRequestRef.current) {
+          resumeOnReturnRef.current = false
+        }
       } else if (resumeOnReturnRef.current) {
-        resumeOnReturnRef.current = false
-        void startCameraRef.current()
+        resumeOnReturn()
       }
     }
-    const handlePageHide = () => cleanup()
+    // The camera comes back by itself. A request still unanswered from before is waited for, never doubled.
+    function resumeOnReturn() {
+      resumeOnReturnRef.current = false
+      if (detectionHandledRef.current) return
+      if (requestsInFlightRef.current > 0) {
+        resumeAfterRequestRef.current = true
+        return
+      }
+      nextStartIsResumeRef.current = true
+      void startCameraRef.current()
+    }
+    // The page leaving lets the camera go at once and remembers that it was running, so coming back (a visible page,
+    // or a page restored from the back-forward cache) starts it again.
+    const handlePageHide = () => {
+      const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
+      if (running && streamRef.current !== null && !detectionHandledRef.current) resumeOnReturnRef.current = true
+      cleanup()
+    }
+    const handlePageShow = () => {
+      if (resumeOnReturnRef.current && document.visibilityState !== 'hidden') resumeOnReturn()
+    }
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('pageshow', handlePageShow)
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('pageshow', handlePageShow)
     }
   }, [cleanup, open, parkCamera])
 
