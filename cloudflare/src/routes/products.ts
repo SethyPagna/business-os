@@ -1557,6 +1557,18 @@ function catalogVocabularyDenialReason(user: SessionUser): string | null {
   return 'You do not have permission to view the product catalog'
 }
 
+// Read-mostly catalog metadata is cached on the versions of everything it reads (6.0.970), so a repeat costs no
+// D1 rows until a product, stock, settings or promotion write moves a version. The cached body is actor-neutral;
+// every permission check and per-role projection still runs on each request, after the cache.
+async function catalogReadVersion(env: Env, namespaces: readonly string[]): Promise<string> {
+  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
+}
+const PRODUCT_FILTERS_VERSIONS = ['products', 'stock', 'settings', 'promotions'] as const
+// Promotion rules are active by date, which no write announces: the TTL bounds how long a rule that just started
+// (or ended) can be missing from the vocabulary.
+const PRODUCT_FILTERS_TTL_SECONDS = 300
+
 app.get('/filters', async (c) => {
   const denial = catalogVocabularyDenialReason(c.get('user'))
   if (denial) return c.json({ error: denial }, 403)
@@ -1564,7 +1576,11 @@ app.get('/filters', async (c) => {
   const imageOnly = isImageOnlyVocabularyUser(user)
   // An image-only reader's filter query is ignored: any narrowing parameter would
   // let the option lists answer questions about fields the role cannot see.
-  const vocabulary = await loadProductFilters(c.env, imageOnly ? {} : c.req.query())
+  const filtersQuery = imageOnly ? {} : c.req.query()
+  const filtersUrl = new URL(c.req.url)
+  if (imageOnly) filtersUrl.search = ''
+  const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery))
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
@@ -1629,7 +1645,7 @@ app.get('/:id/detail-report', async (c) => {
       MAX(pb.received_at) AS last_received_at
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
@@ -1649,7 +1665,7 @@ app.get('/:id/detail-report', async (c) => {
            ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
     ORDER BY pb.received_at DESC, pb.id DESC
@@ -1733,7 +1749,7 @@ app.get('/:id/supplier-purchases', async (c) => {
            ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
-      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id = @productId) GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
@@ -6169,7 +6185,7 @@ app.post('/merge-duplicates', async (c) => {
   const complete = remainingProducts === 0
   const stalled = !complete && !onlyRefusedCasesRemain && remainingProducts != null && remainingProducts > 0 && !madeProgress
 
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({
@@ -6219,7 +6235,8 @@ app.get('/possible-duplicates', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const clusters = await findPossiblySameProductClusters(getDb(c.env))
+  const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
   return c.json({ success: true, clusters })
 })
 
@@ -6238,6 +6255,8 @@ app.post('/possible-duplicates/dismiss', async (c) => {
     ON CONFLICT(cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
   `).run({ type, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
+  // The cached possible-duplicates list hides dismissed clusters.
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   return c.json({ success: true })
 })
 
@@ -8962,7 +8981,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     review = await readProductConflictActionReview(db, user.id, review.id) || { ...review, status: 'completed' }
   }
   if (processedFolds > 0 || deltaRemovals.some((row) => row.status === 'undo_ready')) {
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   }
@@ -9334,7 +9353,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
   await db.prepare(`UPDATE product_conflict_merge_runs SET status=@status,result_json=@result,updated_at=CURRENT_TIMESTAMP WHERE id=@runId`)
     .run({ status: complete && !undoPending.length ? 'completed' : interruptionCode ? 'interrupted' : 'running', result: JSON.stringify(response), runId: run.id })
   if (madeProgress) {
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   }
@@ -9788,7 +9807,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     return c.json(mergeFailedBody(errorId), 409)
   }
 
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products') // awaited: the duplicates review re-reads the cached list right after this response
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   const { reversal: _reversal, reparentedSaleItemIds: _si, reparentedMovementIds: _mi, ...publicStats } = stats

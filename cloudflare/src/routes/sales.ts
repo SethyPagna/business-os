@@ -6193,7 +6193,12 @@ app.get('/stats', async (c) => {
   // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const snapshot=await readSalesReportSnapshot(c.env,{},false,salesListFilterReportScope(where,params))
+    // The same date/time window the list scope already enforces, handed to the reader too so its keyset
+    // walks and item band start inside the window instead of at row 1 (6.0.970). Pure intersection: the
+    // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
+    // search stay scope-only (the list's branch rule also matches item branches).
+    const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
+    const snapshot=await readSalesReportSnapshot(c.env,windowFilter,false,salesListFilterReportScope(where,params))
     const totals=salesTotalsFromSnapshot(snapshot)
     const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))

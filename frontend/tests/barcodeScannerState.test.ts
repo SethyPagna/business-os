@@ -184,7 +184,7 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   assert.match(source, /\{showCameraAction \? \([\s\S]*?onClick=\{\(\) => startCamera\(\)\}/, 'the retry button stays for the states a mount cannot resolve')
   assert.doesNotMatch(source + hook, /camera_permission_ready/, 'the two-step "start the camera when you are ready" copy is retired')
 
-  assert.match(hook, /const closeScanner[\s\S]*?cleanup\(\)[\s\S]*?onClose\(\)/, 'closing the scanner must stop tracks before dismissing the modal')
+  assert.match(hook, /const closeScanner[\s\S]*?cleanup\(true\)[\s\S]*?onClose\(\)/, 'closing the scanner must stop (iPhone: pause, see cameraKeepAlive) tracks before dismissing the modal')
   assert.match(hook, /const completeDetection = useCallback\([\s\S]*?detectionHandledRef\.current[\s\S]*?onDetected\(nextValue\)[\s\S]*?finally[\s\S]*?setTimeout\(onClose, closeDelayMs\)/, 'every successful detection must publish once and then close the scanner, after the flash window')
   assert.match(hook, /expectedStartToken\?\: number[\s\S]*?startTokenRef\.current !== expectedStartToken/, 'a stale decoder result must not publish after a new camera start or close')
   assert.match(hook, /const scanToken = startTokenRef\.current[\s\S]*?detector\.detect\(video\)[\s\S]*?startTokenRef\.current !== scanToken/, 'native detection must reject a result from an obsolete camera session')

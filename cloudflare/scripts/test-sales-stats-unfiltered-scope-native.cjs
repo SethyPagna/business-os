@@ -103,7 +103,7 @@ async function check(name, fn) {
   await check('GET /stats builds its scope through salesListFilterReportScope', async () => {
     const src = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
     const block = src.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
-    assert.match(block, /readSalesReportSnapshot\(c\.env,\{\},false,salesListFilterReportScope\(where,params\)\)/)
+    assert.match(block, /readSalesReportSnapshot\(c\.env,windowFilter,false,salesListFilterReportScope\(where,params\)\)/)
     assert.ok(!/matched_sale/.test(block), 'the route must not build its own copy of the scope')
   })
 

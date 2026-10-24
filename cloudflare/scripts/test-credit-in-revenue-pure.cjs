@@ -227,7 +227,7 @@ check(`/stats revenue_usd includes the credit sale (${statsRevenue} == ${IN.reve
 check(`/stats revenue_count counts the credit sale (5 non-cancelled, not 4)`,
   statsSnapshot.sales.length === 5)
 check('/stats delegates money to the exact snapshot/reducer without a local aggregate',
-  statsBlock.includes('readSalesReportSnapshot(c.env,{},false')
+  statsBlock.includes('readSalesReportSnapshot(c.env,windowFilter,false')
   && statsBlock.includes('salesTotalsFromSnapshot(snapshot)')
   && statsBlock.includes('revenue_count: snapshot.sales.length')
   && statsBlock.includes('revenue_usd: totals.revenue_usd')
