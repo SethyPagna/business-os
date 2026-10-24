@@ -455,9 +455,19 @@ export function allocatePaymentsToGroups(input: {
     paid[index] = linked[index] < need[index] ? linked[index] : need[index]
     pool += linked[index] - paid[index]
   })
-  if (pool < 0n) pool = 0n
 
   const fillOrder = [...groups.keys()].sort((a, b) => (groups[a].id === null ? 0 : 1) - (groups[b].id === null ? 0 : 1) || a - b)
+  // A negative pool is an unlinked correction out larger than the unlinked money. It is taken back from the
+  // groups that were paid, newest first and the POS group last (the reverse of the fill order), so the lines
+  // owe what the status owes. Only a shortfall larger than everything paid is clamped: no line can owe more than it needs.
+  for (let at = fillOrder.length - 1; at >= 0 && pool < 0n; at--) {
+    const index = fillOrder[at]
+    const back = paid[index] < -pool ? paid[index] : -pool
+    paid[index] -= back
+    pool += back
+  }
+  if (pool < 0n) pool = 0n
+
   for (const index of fillOrder) {
     const take = pool < need[index] - paid[index] ? pool : need[index] - paid[index]
     paid[index] += take

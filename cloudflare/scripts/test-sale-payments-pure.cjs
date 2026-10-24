@@ -287,7 +287,7 @@ check('an out event that names the event it reverses inherits its group (P3-2); 
   const groups = [POS(10), { id: 'g1', amountUsd: 3 }]
   const linkedIn = ev('in', 3, 'g1', 0, { event_id: 'a' })
   assert.deepEqual(view(alloc(groups, [linkedIn, ev('out', 3, null, 0, { event_id: 'b', reverses_event_id: 'a' })])), ['pos:unpaid:0/10', 'g1:unpaid:0/3'])
-  assert.deepEqual(view(alloc(groups, [linkedIn, ev('out', 3, null, 0, { event_id: 'b' })])), ['pos:unpaid:0/10', 'g1:paid:3/0'], 'control: an out with no link and no target is a pool reversal and leaves the addition Paid')
+  assert.deepEqual(view(alloc(groups, [linkedIn, ev('out', 3, null, 0, { event_id: 'b' })])), ['pos:unpaid:0/10', 'g1:unpaid:0/3'], 'control: an out with no link and no target comes out of the pool, and with nothing in the pool out of the paid group (P3-D1): the sale owes $13 either way')
   assert.throws(() => alloc(groups, [ev('out', 3, null, 0, { event_id: 'b', reverses_event_id: 'missing' })]), /reverses an event that is not in the list/)
 })
 
@@ -306,6 +306,43 @@ check('a group that lowered the total needs nothing and reads Paid; duplicate or
   assert.throws(() => alloc([POS(10), POS(5)], []), /one POS/)
   assert.throws(() => alloc([{ id: 'g1', amountUsd: 1 }, { id: 'g1', amountUsd: 1 }], []), /unique/)
   assert.throws(() => alloc([POS(10)], [ev('in', 10)], 0, { exchange_rate: 0 }))
+})
+
+check('a negative pool is taken back from the paid groups, newest first, so lines and status agree (P3-D1)', () => {
+  // X1: POS $0 + a $10 addition paid by a linked $10, then an unlinked correction out of $5. The sale owes $5.
+  const x1 = alloc([POS(0), { id: 'g1', amountUsd: 10 }], [ev('in', 10, 'g1'), ev('out', 5, null, 0, { event_id: 'c' })], 0, { total_usd: 10 })
+  assert.deepEqual(view(x1), ['pos:paid:0/0', 'g1:part_paid:5/5'], 'was pos:paid + g1:paid on a sale the status calls Not Paid')
+  assert.deepEqual(derive({ total_usd: 10 }, { usd: 5 }), { saleStatus: 'awaiting_payment', owedUsd: 5, covered: false, partPaid: true })
+  // X2: the owes of the lines sum to the owes of the sale.
+  const x2 = alloc([POS(10), { id: 'g1', amountUsd: 3 }], [ev('in', 10), ev('in', 3, 'g1'), ev('out', 12)], 0, { total_usd: 13 })
+  assert.equal(x2.groups.reduce((sum, group) => sum + group.owedUsd, 0), derive({ total_usd: 13 }, { usd: 1 }).owedUsd)
+  assert.deepEqual(view(x2), ['pos:unpaid:0/10', 'g1:part_paid:1/2'])
+  // The newest group loses money first; the POS group is the last.
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }, { id: 'g2', amountUsd: 4 }], [ev('in', 3, 'g1'), ev('in', 4, 'g2'), ev('in', 10), ev('out', 12)], 0, { total_usd: 17 })), ['pos:unpaid:0/10', 'g1:paid:3/0', 'g2:part_paid:2/2'])
+  // Status and tags agree on every cell of a small sweep.
+  for (const out of [0, 1, 4, 5, 9, 10, 13]) {
+    const result = alloc([POS(0), { id: 'g1', amountUsd: 10 }], [ev('in', 10, 'g1'), ev('out', out)], 0, { total_usd: 10 })
+    const status = derive({ total_usd: 10 }, { usd: 10 - out }).saleStatus
+    assert.equal(result.groups.every(group => group.tag === 'paid'), status === 'completed', `out ${out}`)
+  }
+})
+
+check('v0 and v1 differ on one rate: 39,980 riel at 4000.00004 covers a $10 sale under v0 (rate quantised to 4000) and not under v1 (P3-D2)', () => {
+  const rate = { exchange_rate: 4000.00004 }
+  assert.equal(derive({ ...rate, money_precision_version: 0 }, { khr: 39980 }).saleStatus, 'completed')
+  assert.equal(derive({ ...rate, money_precision_version: 1 }, { khr: 39980 }).saleStatus, 'awaiting_payment')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 0 }).groups[0].tag, 'paid')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 1 }).groups[0].tag, 'part_paid')
+})
+
+check('displayed paid and owed round half-up, not down (P3-D3)', () => {
+  // 2 riel at 3000 is $0.000666..., shown as $0.0007 (truncation gives $0.0006); 3 riel at 7 is $0.428571, shown $0.4286.
+  const a = alloc([POS(10)], [ev('in', 0, null, 2)], 0, { exchange_rate: 3000 }).groups[0]
+  assert.deepEqual([a.paidUsd, a.owedUsd], [0.0007, 9.9993])
+  const b = alloc([POS(10)], [ev('in', 0, null, 3)], 0, { exchange_rate: 7 }).groups[0]
+  assert.deepEqual([b.paidUsd, b.owedUsd], [0.4286, 9.5714])
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 1)], 0, { exchange_rate: 3000 }).groups[0].paidUsd, 0.0003, 'control: a third rounds down')
+  assert.equal(alloc([POS(10)], [ev('in', 12.00006)], 0).unallocatedUsd, 2.0001, 'unallocated rounds the same way')
 })
 
 console.log(`\n${passed} checks passed`)
