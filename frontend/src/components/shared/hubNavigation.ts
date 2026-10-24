@@ -18,7 +18,7 @@ export type HubDestination = { id: string; key: string; label: string }
 export function getHubDestinations(page: string, access: HubAccess): HubDestination[] {
   const can = (key: string) => access.can ? access.can(key, 'view') : access.getPermissionTier(key) !== 'none'
   const act = (key: string, action: string) => access.can ? access.can(key, action) : false
-  const inventoryChecks = access.canAccessPage ? access.canAccessPage('inventory') : can('inventory_checks') || can('inventory')
+  const inventoryChecks = access.canAccessPage ? access.canAccessPage('inventory') : can('inventory_checks')
   const rows: Array<[string, string, string, boolean]> = page === 'branches' ? [
     ['overview', 'overview', 'Overview', can('branches')],
     ['transfers', 'transfer', 'Transfer', can('branches')],

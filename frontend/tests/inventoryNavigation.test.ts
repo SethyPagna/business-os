@@ -66,13 +66,21 @@ test('Inventory access is independent of Branches while legacy RFID grants survi
   assert.equal(checkerAccess('inventory'), true)
   assert.equal(checkerAccess('branches'), false, 'a count-only grant never opens the physical stock host')
   for (const grant of [true, 'review']) {
+    // Physical Inventory (any tier) opens the RFID doorway on Branches but NOT the count pages: counting is its own grant
+    // (owner, 21 Oct 2026: Full = main access only; migration 0270 wrote inventory_checks for every role that counted).
     const user = { permissions: { inventory: grant } }
     const authority = effectivePermissions(user)
     const canAccess = actualCallback(source, 'canAccessPage', { user, ...authority, PAGE_PERMISSIONS: permissions })
-    assert.equal(canAccess('inventory'), true)
+    assert.equal(canAccess('inventory'), false, 'Inventory alone no longer implies the count pages')
     assert.equal(canAccess('branches'), true, 'existing RFID doorway stays open')
     assert.deepEqual(hubs.getHubDestinations('branches', authority).map(item => item.id), ['rfid'])
-    assert.deepEqual(hubs.getHubDestinations('inventory', authority).map(item => item.id), ['products', 'sessions', 'issues'])
+    assert.deepEqual(hubs.getHubDestinations('inventory', authority).map(item => item.id), [])
+    const both = { permissions: { inventory: grant, inventory_checks: true } }
+    const bothAuthority = effectivePermissions(both)
+    const bothAccess = actualCallback(source, 'canAccessPage', { user: both, ...bothAuthority, PAGE_PERMISSIONS: permissions })
+    assert.equal(bothAccess('inventory'), true)
+    assert.equal(bothAccess('branches'), true)
+    assert.deepEqual(hubs.getHubDestinations('inventory', bothAuthority).map(item => item.id), ['products', 'sessions', 'issues'])
   }
   for (const user of [null, { permissions: {} }, { permissions: { branches: true } }, { permissions: { inventory: true, 'inventory:view': false } }]) {
     const authority = effectivePermissions(user)

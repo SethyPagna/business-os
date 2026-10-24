@@ -1323,9 +1323,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const aliveRef = useRef(true)
 
   // Part 557 slice 8: the storefront editor is broken into per-area write
-  // grants. A grant is satisfied by the specific key OR the broad `settings`
-  // grant (admin folds into hasPermission upstream), mirroring the backend.
-  const canWritePortalArea = (permission: string) => !publicView && (hasPermission(permission) || hasPermission('settings'))
+  // grants. A grant is the specific key only (admin folds into hasPermission upstream), mirroring the backend.
+  const canWritePortalArea = (permission: string) => !publicView && hasPermission(permission)
   const canEditConfig = canWritePortalArea('customer_portal')
   const canEditPosts = canWritePortalArea('portal_posts')
   const canEditFaq = canWritePortalArea('portal_faq')
@@ -1597,13 +1596,16 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     nextProducts: CatalogProduct[],
   ) {
     try {
-      const providers = await withLoaderTimeout(
-        () => getCatalogApi().getAiProviders(),
-        'Portal AI providers',
-        CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
-      )
-      if (!isPortalLoadCurrent(requestId)) return
-      setAiProviders(Array.isArray(providers?.items) ? providers.items : [])
+      // The provider list is behind its own grant (ai_providers); asking without it is a certain 403.
+      if (hasPermission('ai_providers')) {
+        const providers = await withLoaderTimeout(
+          () => getCatalogApi().getAiProviders(),
+          'Portal AI providers',
+          CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
+        )
+        if (!isPortalLoadCurrent(requestId)) return
+        setAiProviders(Array.isArray(providers?.items) ? providers.items : [])
+      }
     } catch {
       if (!isPortalLoadCurrent(requestId)) return
     }

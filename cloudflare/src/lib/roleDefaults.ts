@@ -3,8 +3,8 @@
 // seed and the editor's "reset to defaults" can never describe two different Employees.
 //
 // Default posture (progress.md "Permissions -- default posture"): every page's default permission tier
-// is None unless the role is Admin. Manager seeds to `{}` (nothing granted), matching what
-// PermissionEditor.tsx's own "new role" form defaults to. Employee receives only the explicitly
+// is None unless the role is Admin. Manager seeds to the explicit Manager preset below (owner, 21 Oct 2026; it used to be `{}`, which made
+// the editor's "Reset to Manager defaults" a no-op). Employee receives only the explicitly
 // approved front-line defaults below; unrelated page grants remain absent. Admin is `{all: true}`.
 //
 // Seeding only inserts Manager/Employee when the code does not exist yet, so an existing
@@ -14,7 +14,46 @@
 export type DefaultRolePermissionValue = boolean | 'review' | 'view'
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermissionValue>> = {
   admin: { all: true },
-  manager: {},
+  manager: {
+    // The Manager preset the role editor offers (frontend rolePresetDefaults.ts), made the ONE seed
+    // (owner, 21 Oct 2026: "make it consistent"). Settings Full is main access only, so every extra a
+    // Manager used to get implicitly is listed here: the Website Editor areas, Business identity,
+    // Sales policy, Receipt settings and the count-session grants. drive_credentials and ai_providers
+    // are deliberately NOT included: Drive control and AI provider keys are a separate, critical grant.
+    dashboard: true,
+    dashboard_export: true,
+    customer_portal: true,
+    portal_posts: true,
+    portal_faq: true,
+    portal_about: true,
+    pos: true,
+    products: true,
+    inventory: true,
+    inventory_checks: true,
+    inventory_check_show_price: true,
+    inventory_check_show_barcode: true,
+    inventory_check_show_category: true,
+    inventory_check_show_brand: true,
+    inventory_check_show_stock: true,
+    inventory_check_show_received: true,
+    inventory_check_show_sales: true,
+    inventory_check_show_customers: true,
+    inventory_check_show_cost: false,
+    branches: true,
+    sales: true,
+    returns: true,
+    fees: true,
+    contacts: true,
+    contacts_suppliers: true,
+    library: true,
+    audit_log: true,
+    review: true,
+    backup: true,
+    settings: true,
+    business_identity: true,
+    sales_policy: true,
+    receipt_settings: true,
+  },
   employee: {
     pos: true,
     inventory_checks: true,

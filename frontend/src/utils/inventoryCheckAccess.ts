@@ -1,5 +1,4 @@
-import { effectivePermissions, isAdminControlUser, parsePermissionMap, type PermissionUser } from './permissions.ts'
-import { isActionOverriddenOff } from './permissionActions.ts'
+import { effectivePermissions, isAdminControlUser, type PermissionUser } from './permissions.ts'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess.ts'
 
 export const INVENTORY_CHECK_FIELDS = ['price', 'barcode', 'category', 'brand', 'stock', 'received', 'sales', 'customers', 'cost'] as const
@@ -13,19 +12,17 @@ export type InventoryCheckAccess = {
 
 export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAccess {
   const authority = effectivePermissions(user)
-  const permissions = { ...parsePermissionMap(user?.role_permissions), ...parsePermissionMap(user?.permissions) }
+  const permissions = authority.merged
   const admin = isAdminControlUser(user)
-  const dedicated = Object.hasOwn(permissions, 'inventory_checks')
-  const canView = admin || (dedicated ? authority.can('inventory_checks', 'view') : authority.can('inventory', 'view'))
-  const tier = authority.getPermissionTier('inventory')
+  // Counting is its own grant (owner, 21 Oct 2026); Inventory Full / Review no longer implies it.
+  const canView = admin || authority.can('inventory_checks', 'view')
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
-    const explicit = permissions[`inventory_check_show_${field}`]
-    return [field, canView && (admin || (typeof explicit === 'boolean' ? explicit : tier === 'full'))]
+    return [field, canView && (admin || permissions[`inventory_check_show_${field}`] === true)]
   })) as Record<InventoryCheckField, boolean>
   fields.cost = fields.cost && canViewAcquisitionCosts(user)
   return {
     canView,
-    canCheck: admin || canView && (dedicated ? authority.can('inventory_checks', 'check') : (tier === 'full' || tier === 'review') && !isActionOverriddenOff(permissions, 'inventory', 'check')),
+    canCheck: admin || canView && authority.can('inventory_checks', 'check'),
     canViewCustomerDetails: fields.customers && authority.can('contacts', 'view'),
     fields,
   }

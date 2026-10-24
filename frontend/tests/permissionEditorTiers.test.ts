@@ -189,7 +189,7 @@ await test('one vocabulary: None / View / Review / Full on the dots, no "Custom"
 })
 
 await test('field rows collapse to one toggle chip row with accessible pressed state', async () => {
-  const { surface, state } = await mountEditor({ inventory: true, inventory_check_show_stock: false, products_image_only: true, products_image_only_show_price: true })
+  const { surface, state } = await mountEditor({ inventory: true, inventory_checks: true, inventory_check_show_stock: false, products_image_only: true, products_image_only_show_price: true })
   await openAll(surface)
   const groups = surface.findAll((node) => node.getAttribute('role') === 'group' && node.getAttribute('aria-label') === 'Fields shown')
   assert.equal(groups.length, 2, 'inventory checks and image-only role each get one row')

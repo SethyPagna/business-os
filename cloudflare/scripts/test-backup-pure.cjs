@@ -90,8 +90,23 @@ Module._load = function patchedLoad(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain)
 }
 const backupModuleObj = { exports: {} }
+// A restore of a pre-0270 backup loads lib/permissionExtras.ts on demand (a dynamic import); give it the real module and the real
+// permissions helpers it reads, since this require outlives the one-off load patch above.
+let permissionExtrasModule = null
+function loadPermissionExtras() {
+  if (permissionExtrasModule) return permissionExtrasModule
+  const load = (relPath, requires) => {
+    const compiled = transpile(relPath)
+    const mod = { exports: {} }
+    new Function('exports', 'require', 'module', compiled.outputText)(mod.exports, (id) => requires[id], mod)
+    return mod.exports
+  }
+  permissionExtrasModule = load('lib/permissionExtras.ts', { './permissions': load('lib/permissions.ts', { './db': {} }) })
+  return permissionExtrasModule
+}
+const backupRequire = (id) => (id === './permissionExtras' ? loadPermissionExtras() : require(id))
 new Function('exports', 'require', 'module', '__filename', '__dirname', backup.outputText)(
-  backupModuleObj.exports, require, backupModuleObj, backup.sourcePath, path.dirname(backup.sourcePath),
+  backupModuleObj.exports, backupRequire, backupModuleObj, backup.sourcePath, path.dirname(backup.sourcePath),
 )
 Module._load = originalLoad
 

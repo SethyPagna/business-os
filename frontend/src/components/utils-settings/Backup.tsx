@@ -232,6 +232,8 @@ interface GoogleDriveSyncSectionProps {
   active?: boolean
   actionHistory?: ActionHistoryValue | null
   canRestore?: boolean
+  /** The Drive credentials grant: connect, disconnect, forget and the sync preferences need it (routes/compat.ts). */
+  canControl?: boolean
   onRestoreStaged?: (backupKey: string) => void
 }
 
@@ -1012,7 +1014,7 @@ function minutesToSyncSeconds(minutes: unknown): number {
   return safeMinutes * 60
 }
 
-function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null, canRestore = false, onRestoreStaged }: GoogleDriveSyncSectionProps) {
+function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null, canRestore = false, canControl = true, onRestoreStaged }: GoogleDriveSyncSectionProps) {
   const copy = useCopy(t)
   const { askToConfirm: askDriveConfirm, confirmDialog: driveConfirmDialog } = useConfirmDialog()
   const [busy, setBusy] = useState<BackupAction>('')
@@ -1693,13 +1695,17 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} onCancel={cancelActiveJob} />
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <PrimaryActionButton data-testid="backup-drive-save" onClick={savePreferences} disabled={!!busy}>
-          {busy === 'save' ? copy('saving', 'Saving...') : copy('save', 'Save')}
-        </PrimaryActionButton>
-        <PathActionButton data-testid="backup-drive-connect" onClick={connectGoogleDrive} disabled={!!busy}>
-          <Link2 className="h-4 w-4" />
-          {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
-        </PathActionButton>
+        {canControl ? (
+          <PrimaryActionButton data-testid="backup-drive-save" onClick={savePreferences} disabled={!!busy}>
+            {busy === 'save' ? copy('saving', 'Saving...') : copy('save', 'Save')}
+          </PrimaryActionButton>
+        ) : null}
+        {canControl ? (
+          <PathActionButton data-testid="backup-drive-connect" onClick={connectGoogleDrive} disabled={!!busy}>
+            <Link2 className="h-4 w-4" />
+            {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
+          </PathActionButton>
+        ) : null}
         <PathActionButton data-testid="backup-drive-sync-now" onClick={syncNow} disabled={!!busy || activeDriveJobRunning || !status?.connected}>
           <RefreshCw className="h-4 w-4" />
           {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
@@ -1710,16 +1716,18 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             {busy === 'stage-restore' ? copy('working', 'Working...') : copy('drive_restore_stage', 'Stage latest for restore')}
           </PathActionButton>
         ) : null}
-        {status?.connected ? (
+        {canControl && status?.connected ? (
           <PathActionButton data-testid="backup-drive-disconnect" onClick={disconnect} disabled={!!busy}>
             <Link2Off className="h-4 w-4" />
             {busy === 'disconnect' ? copy('disconnecting', 'Disconnecting...') : copy('disconnect', 'Disconnect')}
           </PathActionButton>
         ) : null}
-        <PathActionButton data-testid="backup-drive-forget" onClick={forgetCredentials} disabled={!!busy}>
-          <Link2Off className="h-4 w-4" />
-          {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
-        </PathActionButton>
+        {canControl ? (
+          <PathActionButton data-testid="backup-drive-forget" onClick={forgetCredentials} disabled={!!busy}>
+            <Link2Off className="h-4 w-4" />
+            {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
+          </PathActionButton>
+        ) : null}
       </div>
       {driveConfirmDialog}
     </div>
@@ -2219,6 +2227,7 @@ export default function Backup() {
             active={isActive}
             actionHistory={actionHistory}
             canRestore={hasPermission('backup_restore')}
+            canControl={hasPermission('drive_credentials')}
             onRestoreStaged={handleDriveRestoreStaged}
           />
         ) : null}

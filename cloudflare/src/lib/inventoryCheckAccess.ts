@@ -1,4 +1,4 @@
-import { getActionTier, getMergedPermissions, getPermissionTier, isAdminControlUser, type PermissionUser } from './permissions'
+import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess'
 
 export const INVENTORY_CHECK_FIELDS = ['price', 'barcode', 'category', 'brand', 'stock', 'received', 'sales', 'customers', 'cost'] as const
@@ -10,21 +10,21 @@ export type InventoryCheckAccess = {
   fields: Record<InventoryCheckField, boolean>
 }
 
+// Counting is its own grant (owner, 21 Oct 2026: Full = main access only). Inventory Full / Review
+// no longer implies it: the `inventory_checks` key, its :view / :check overrides and the nine
+// inventory_check_show_* fields are read strictly. Migration 0270 wrote every previously implied
+// value out, so no existing principal changed.
 export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAccess {
   const permissions = getMergedPermissions(user)
   const admin = isAdminControlUser(user)
-  const dedicated = Object.hasOwn(permissions, 'inventory_checks')
-  const canView = admin || (dedicated ? getActionTier(user, 'inventory_checks', 'view') === 'full' : getActionTier(user, 'inventory', 'view') !== 'none')
-  const tier = getPermissionTier(user, 'inventory')
+  const canView = admin || getActionTier(user, 'inventory_checks', 'view') === 'full'
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
-    const explicit = permissions[`inventory_check_show_${field}`]
-    return [field, canView && (admin || (typeof explicit === 'boolean' ? explicit : tier === 'full'))]
+    return [field, canView && (admin || permissions[`inventory_check_show_${field}`] === true)]
   })) as Record<InventoryCheckField, boolean>
   fields.cost = fields.cost && canViewAcquisitionCosts(user)
-  const checkTier = getActionTier(user, 'inventory', 'check')
   return {
     canView,
-    canCheck: admin || canView && (dedicated ? getActionTier(user, 'inventory_checks', 'check') === 'full' : checkTier === 'full' || checkTier === 'review'),
+    canCheck: admin || canView && getActionTier(user, 'inventory_checks', 'check') === 'full',
     canViewCustomerDetails: fields.customers && getActionTier(user, 'contacts', 'view') !== 'none',
     fields,
   }
