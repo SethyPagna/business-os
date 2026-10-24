@@ -873,18 +873,22 @@ export async function readReplacementOutstanding(db: D1Compat, returnIds: number
 const impliedChoices = new WeakSet<object>()
 
 /**
- * The record of which take-backs belong to an exchange is the database's, never the dialog's (6.0.966). Cancelling an exchange return links EVERY active
- * customer return of its replacement sale that came after it -- the ones the request names and any it does not (a closed and reopened dialog, a second
- * device, a retry that lost its memory) -- so each is re-split, debt first (the 6.0.963 rule), exactly as if it had been named. A request is never allowed
- * to leave one standing unsplit. Only a request that cancels returns is touched; the stored request (idempotency) is the one the caller sent.
+ * The record of which take-backs belong to an exchange is the database's, never the dialog's (6.0.966). Cancelling an exchange return links every active
+ * TAKE-BACK of it -- the ones the request names and any it does not (a closed and reopened dialog, a second device, a retry that lost its memory) -- so each
+ * is re-split, debt first (the 6.0.963 rule), exactly as if it had been named. A take-back is a return the cancel flow itself made: its stored
+ * client_request_id starts with 'rtb-<exchange return id>_', a mark POST /returns accepts only for a return of that exchange's replacement sale (routes/returns.ts,
+ * take_back_marker_invalid), so no ordinary return carries it. An ordinary return of a replacement line (a "Defective" at the till) is neither re-split nor
+ * cancelled by the cancel or its undo. An exchange that is already cancelled finds nothing (the selection reports it unchanged). Only a request that cancels
+ * returns is touched; the stored request (idempotency) is the one the caller sent.
  */
 async function withFoundTakeBacks(db: D1Compat, request: BulkRequest): Promise<BulkRequest> {
   if (request.field !== 'status' || request.target !== 'cancelled') return request
   const ids = request.items.map((item) => item.id)
   const found = await rowsForIds<{ parent: number; id: number }>(db, ids, (marks) => `
     SELECT r.id AS parent,t.id AS id FROM returns r JOIN returns t ON t.sale_id=r.replacement_sale_id
-    WHERE r.id IN (${marks}) AND r.replacement_sale_id IS NOT NULL AND t.id>r.id AND COALESCE(t.status,'completed')='completed'
-      AND COALESCE(t.return_scope,'customer')='customer' AND t.replacement_sale_id IS NULL ORDER BY r.id,t.id`)
+    WHERE r.id IN (${marks}) AND r.replacement_sale_id IS NOT NULL AND COALESCE(r.status,'completed')='completed'
+      AND COALESCE(t.status,'completed')='completed' AND COALESCE(t.return_scope,'customer')='customer' AND t.replacement_sale_id IS NULL
+      AND substr(t.client_request_id,1,length('rtb-'||r.id||'_'))='rtb-'||r.id||'_' ORDER BY r.id,t.id`)
   if (!found.length) return request
   const items = request.items.map((item) => {
     const extra = found.filter((row) => Number(row.parent) === item.id).map((row) => Number(row.id)).filter((id) => !(item.replacement?.return_ids ?? []).includes(id))

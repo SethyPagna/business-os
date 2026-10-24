@@ -146,6 +146,12 @@ export interface TakeBackDeps {
   loadPendingReturnCreateV1?(actorId: unknown): { bodyJson: string } | null
 }
 
+/** The request id of a take-back: the mark ('rtb-<exchange return id>_') by which the Worker finds an exchange's take-backs itself, whatever the dialog remembers. */
+export function takeBackRequestId(exchangeReturnId: number): string {
+  const unique = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  return `rtb-${exchangeReturnId}_${unique}`
+}
+
 const money2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
 
 /** A signature of exactly which lines (and units) a take-back covers, so a retry of the same choice is recognised and a changed choice is not. */
@@ -214,6 +220,7 @@ export async function takeBackReplacement(deps: TakeBackDeps, outstanding: Repla
     if (!created) {
       const quote = await deps.getReturnQuoteV1(outstanding.sale_id, items)
       const pending = await deps.prepareReturnCreateV1(deps.userId, {
+        client_request_id: takeBackRequestId(outstanding.return_id),
         reason: deps.reason, return_type: 'restock', notes: null, branch_id: lines[0].branch_id,
         items: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity, stock_action: 'restock', ...(line.branch_id != null ? { branch_id: line.branch_id } : {}) })),
       }, quote as never) as { bodyJson: string }

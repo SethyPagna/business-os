@@ -75,8 +75,7 @@ import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
-import { parseOutstanding, takeBackReplacement, validateTakeBack, type ReplacementLine, type ReplacementOutstanding, type TakeBackDeps } from './helpers/returnReplacementCancel.ts'
-import { createClientRequestId } from '../../api/requestIds.ts'
+import { parseOutstanding, takeBackReplacement, takeBackRequestId, validateTakeBack, type ReplacementLine, type ReplacementOutstanding, type TakeBackDeps } from './helpers/returnReplacementCancel.ts'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
@@ -1372,7 +1371,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         const key = `${returnId}:${signature}`
         const known = legacyTakeBackIdentities.current.get(key)
         if (known) return known
-        const created = { client_request_id: createClientRequestId('return'), return_number: `RET-${businessDateTimeId()}` }
+        const created = { client_request_id: takeBackRequestId(returnId), return_number: `RET-${businessDateTimeId()}` }
         legacyTakeBackIdentities.current.set(key, created)
         return created
       },
