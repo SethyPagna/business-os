@@ -90,7 +90,7 @@ const fixture = String.raw`
   }
   window.history.replaceState(null, '', '/inventory#hub:inventory:' + (params.get('section') || 'products'))
   const app = { ...FALLBACK_APP_CONTEXT, t, language, page: 'inventory', authReady: true, canWriteToServer: true, notify: (message, kind) => { window.__notices = window.__notices || []; window.__notices.push([message, kind]) }, settings: { navigation_mode: 'sections' }, AccessDenied: () => null,
-    user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true } },
+    user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true } },
     navigateTo: (page, anchor) => { window.history.pushState(null, '', '/inventory#' + (anchor || '')); window.dispatchEvent(new CustomEvent('bos:navigate', { detail: { page, path: '/inventory', anchor } })) } }
   createRoot(document.getElementById('root')).render(<AppContext.Provider value={app}><div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><InventoryChecksPage /></div></AppContext.Provider>)
 `

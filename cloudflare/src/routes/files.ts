@@ -30,9 +30,8 @@ app.use('*', requireAuth)
 // authenticated user, no `library` grant needed at all -- "can show by
 // default... click to view." Uploading ("import"), downloading ("export"),
 // renaming, and deleting are all management actions and now require real
-// Full Access to `library` (or the legacy `settings` full grant, same
-// transitional OR Part 156 already established, kept so no existing
-// installation is locked out the moment this ships). Review Required tier
+// Full Access to `library` (the legacy `settings` fallback was removed by migration 0270,
+// which wrote `library: true` for every Settings Full holder). Review Required tier
 // no longer grants any of upload/rename/delete either -- narrower than the
 // old spec, on purpose, per this session's explicit "only with full
 // permission" instruction.
@@ -52,7 +51,7 @@ app.use('*', requireAuth)
 // sync entry point had nothing to share and silently omitted the check. files.ts
 // stays the single owner of the rule; sync.ts imports it rather than re-deriving.
 export function hasFullLibraryAccess(user: SessionUser): boolean {
-  return getPermissionTier(user, 'library') === 'full' || hasPermission(user, 'settings')
+  return getPermissionTier(user, 'library') === 'full'
 }
 function canChangeProductImages(user: SessionUser): boolean {
   return getActionTier(user, 'products', 'image') === 'full' || hasPermission(user, 'products_image_only')

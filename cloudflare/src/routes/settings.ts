@@ -295,7 +295,7 @@ type PaymentMethodContext = Context<{ Bindings: Env; Variables: { user: SessionU
 
 function denyUnlessPaymentMethodPermission(c: PaymentMethodContext) {
   const user = c.get('user')
-  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  if (!hasPermission(user, 'sales_policy')) return c.json({ error: 'No permission' }, 403)
   return null
 }
 
@@ -873,9 +873,9 @@ app.post('/payment-methods/replace', async (c) => {
 // the areas it should manage. Posts/FAQ/About each get their own key; every
 // OTHER customer_portal_* key (branding, theme, catalog display, social, AI,
 // maps, translations, publish, loyalty, submissions) falls under the catch-all
-// `customer_portal` "portal config" grant. Like the buckets above, holding the
-// broad `settings` grant (or admin) satisfies any of these, so no existing
-// Settings admin regresses.
+// `customer_portal` "portal config" grant. Each bucket is its own grant: the broad
+// `settings` grant no longer satisfies them (migration 0270 wrote each bucket for every
+// Settings Full holder, so no existing Settings admin regressed).
 const PORTAL_POSTS_KEYS = new Set([
   'customer_portal_promo_items',
   'customer_portal_promotions_title',
@@ -896,7 +896,7 @@ const PORTAL_ABOUT_KEYS = new Set([
   'customer_portal_about_image_alt',
 ])
 
-function settingsBucketPermissionFor(key: string): string | null {
+export function settingsBucketPermissionFor(key: string): string | null {
   if (BUSINESS_IDENTITY_KEYS.has(key)) return 'business_identity'
   if (SALES_POLICY_KEYS.has(key)) return 'sales_policy'
   if (RECEIPT_SETTINGS_KEYS.has(key)) return 'receipt_settings'
@@ -921,17 +921,17 @@ const SETTINGS_BUCKET_LABELS: Record<string, string> = {
 }
 
 // The 403 text for the first key the user may not save, or null when every
-// key is allowed. A bucket key passes on its own grant or on full `settings`.
-function settingsPermissionRefusal(user: SessionUser, keys: string[]): string | null {
+// key is allowed. A bucket key needs its own grant; `settings` Full does not stand in for it.
+export function settingsPermissionRefusal(user: SessionUser, keys: string[]): string | null {
   const missing = keys.find((key) => {
     const bucket = settingsBucketPermissionFor(key)
-    if (bucket) return !hasPermission(user, bucket) && !hasPermission(user, 'settings')
+    if (bucket) return !hasPermission(user, bucket)
     return !hasPermission(user, 'settings')
   })
   if (!missing) return null
   const bucket = settingsBucketPermissionFor(missing)
   return bucket
-    ? `You do not have permission to change "${missing}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
+    ? `You do not have permission to change "${missing}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access).`
     : 'You do not have permission to perform this action'
 }
 
@@ -1054,11 +1054,9 @@ app.post('/', async (c) => {
   // includes one field the caller can't touch is rejected outright, named
   // by permission bucket, matching the app's own "no silent partial
   // writes" standard elsewhere. A key with its own bucket permission
-  // (`business_identity`/`sales_policy`) is allowed through by holding
-  // EITHER that specific grant OR the broader `settings` grant (holding
-  // `settings` implies every narrower settings permission, same as
-  // lib/permissions.ts's hasPermission() already encodes for these two
-  // keys). A key with no bucket falls back to requiring plain `settings`.
+  // (`business_identity`/`sales_policy`/receipt/portal buckets) needs exactly that grant
+  // (the `settings` grant implies none of them since migration 0270 wrote each one out
+  // explicitly). A key with no bucket requires plain `settings`.
   const permissionRefusal = settingsPermissionRefusal(user, attemptedKeys)
   if (permissionRefusal) return c.json({ error: permissionRefusal }, 403)
 

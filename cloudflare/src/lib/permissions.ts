@@ -114,12 +114,13 @@ export function isAdminControlUser(user: PermissionUser): boolean {
   return roleCode === 'admin' || merged.all === true
 }
 
-// Mirrors the original's special-cased aliases for the *settings* sub-
-// permissions -- a few settings sub-permissions fall back to the general
-// "settings" permission, since routes/settings.ts's single POST endpoint
-// doesn't differentiate by key and only ever checks 'settings' itself.
-// backup_restore deliberately does NOT fall back from 'backup' (unlike
-// those settings sub-keys) -- 'backup' (export, sensitivity: high) and
+// There are NO fallbacks between keys (owner, 21 Oct 2026: "Full = main access only; extras are
+// separate"). 'settings' Full grants the Settings page and nothing else: Drive, Business
+// identity, Sales policy, Receipt settings, the Website Editor areas, Library management and AI
+// provider keys are each their own explicit grant. Migration 0270 wrote every grant that used to
+// be implied into roles.permissions / users.permissions so no existing principal changed.
+// backup_restore deliberately does NOT fall back from 'backup' --
+// 'backup' (export, sensitivity: high) and
 // 'backup_restore' (restore/reset, sensitivity: critical) are meant to be
 // independently grantable, since exporting a backup is safe to hand to
 // more people than overwriting the live database is. See routes/backups.ts
@@ -136,11 +137,7 @@ export function hasPermission(user: PermissionUser, key: string | null | undefin
   // and 'review' must NOT count as full access here -- callers that need to
   // treat Review Required as "allowed, but queue it" must use
   // getPermissionTier()/isReviewRequired() below instead of this function.
-  if (permissions[normalized] === true) return true
-  if (normalized === 'drive_credentials' && permissions.settings === true) return true
-  if (normalized === 'business_identity' && permissions.settings === true) return true
-  if (normalized === 'sales_policy' && permissions.settings === true) return true
-  return false
+  return permissions[normalized] === true
 }
 
 export function hasAnyPermission(user: PermissionUser, keys: string[]): boolean {
@@ -310,6 +307,7 @@ export const SENSITIVE_PERMISSION_KEYS = new Set([
   'users',
   'backup_restore',
   'drive_credentials',
+  'ai_providers',
   'security_settings',
   'business_identity',
   'sales_policy',

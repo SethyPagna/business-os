@@ -51,7 +51,7 @@ const db = {
 const audits = []
 const overrides = {
   '../lib/db': { getDb: () => db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 7, username: 'manager', name: 'Manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 7, username: 'manager', name: 'Manager', permissions: JSON.stringify({ settings: true, ai_providers: true }), role_code: null, role_permissions: null }); return next() } },
   '../lib/audit': { audit: async (_env, userId, userName, action, entity, entityId, details) => { audits.push({ action, entityId, details }) } },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '203.0.113.9' },
 }

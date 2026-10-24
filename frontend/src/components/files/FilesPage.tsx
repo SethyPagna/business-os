@@ -664,10 +664,11 @@ export default function FilesPage() {
   // authenticated user who can reach this page at all, no `library` grant
   // needed. Upload ("import"), bulk download ("export"), rename, and
   // delete are all management actions and need real Full Access to
-  // `library` -- same legacy `settings`-full fallback the backend still
-  // honors, kept here so the button doesn't disappear for an admin whose
-  // role predates the `library` key existing.
-  const canManageLibrary = getPermissionTier('library') === 'full' || hasPermission('settings')
+  // `library` -- the backend no longer
+  // honors the legacy `settings` fallback (migration 0270 wrote `library` for those roles).
+  const canManageLibrary = getPermissionTier('library') === 'full'
+  // The AI provider keys and saved AI answers are behind their own grant (routes/ai.ts gates every route on it).
+  const canUseAiProviders = hasPermission('ai_providers')
   // Wiring library photos onto products is a PRODUCTS write, not a library
   // one -- it changes product rows and touches nothing in the library. So
   // it is gated on the same action the per-product image uploader uses,
@@ -677,7 +678,8 @@ export default function FilesPage() {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('files')
   const filesApi = useMemo(() => getFilesApi(), [])
-  const [activeTab, setActiveTab] = useState<FilesTab>('assets')
+  const [activeTabState, setActiveTab] = useState<FilesTab>('assets')
+  const activeTab: FilesTab = canUseAiProviders ? activeTabState : 'assets'
   const [wireImagesOpen, setWireImagesOpen] = useState(false)
   const [wireImagesBusy, setWireImagesBusy] = useState(false)
 
@@ -1519,8 +1521,8 @@ export default function FilesPage() {
         actions={(
           <div className="inline-flex min-w-0 items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
-          {tabButton('providers', tr('library_ai_providers', 'AI Providers', 'AI Providers'), KeyRound)}
-          {tabButton('responses', tr('library_ai_responses', 'AI Responses', 'ចម្លើយ AI'), History)}
+          {canUseAiProviders ? tabButton('providers', tr('library_ai_providers', 'AI Providers', 'AI Providers'), KeyRound) : null}
+          {canUseAiProviders ? tabButton('responses', tr('library_ai_responses', 'AI Responses', 'ចម្លើយ AI'), History) : null}
           </div>
         )}
       />

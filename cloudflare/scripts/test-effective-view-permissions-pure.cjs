@@ -237,7 +237,7 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
   const hiddenImports = await request('/import-jobs', staff({ products: true }, { 'products:view': false }))
   assert.equal(hiddenImports.status, 200)
   assert.equal(reads, 0, 'financial imports without explicit cost-view grant are not read')
-  await reachesData('/system/drive-sync/status', staff({ settings: true }, { 'settings:view': false }))
+  await reachesData('/system/drive-sync/status', staff({ settings: true, drive_credentials: true }, { 'settings:view': false }))
   assert.equal((await request('/returns', null)).status, 401)
   console.log(`PASS ${checks} real Hono requests: effective read denials, admin matrix, alternate grants, domain isolation and independent writes`)
 })().catch(error => { console.error(error); process.exitCode = 1 })

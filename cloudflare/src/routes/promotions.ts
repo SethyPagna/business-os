@@ -34,11 +34,11 @@ const requireKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: 
 // The announcement-strip WRITES (POST /, PUT /:id, PUT /reorder/all, DELETE /:id) publish
 // public storefront content, including an outside https link. Holding the Products section is
 // not the right gate (the Employee seed holds it): they need a Website Editor grant -- the
-// posts & promos area, or portal config -- or full Settings, the same "bucket OR settings"
-// superset routes/settings.ts applies to the customer_portal_* keys. Admin passes inside
+// posts & promos area or portal config, the same bucket grants routes/settings.ts applies to the
+// customer_portal_* keys (full Settings no longer stands in for them). Admin passes inside
 // hasPermission. Reads (GET /) keep the products gate. Mirrored in the UI by
 // CatalogEditorSurface's canEditConfig || canEditPosts.
-const WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal', 'settings'] as const
+const WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal'] as const
 const requireWebsiteEditor: MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> = async (c, next) => {
   const user = c.get('user')
   if (!WEBSITE_EDITOR_STRIP_KEYS.some((key) => hasPermission(user, key))) return c.json({ error: 'You do not have permission to perform this action' }, 403)

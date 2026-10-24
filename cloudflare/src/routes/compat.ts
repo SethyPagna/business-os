@@ -750,7 +750,7 @@ app.get('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c
 app.post('/system/integration-doctor', requireAuth, (c) => runIntegrationDoctor(c, true))
 
 async function runIntegrationDoctor(c: any, deep: boolean) {
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   let ok = true
 
@@ -887,18 +887,18 @@ app.get('/system/scale-migration/status', (c) => c.json({ item: null }))
 // existing R2 backup snapshot into Drive) vs. what's explicitly still out
 // of scope (a continuous bi-directional per-file mirror).
 app.get('/system/drive-sync/status', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   return c.json(await driveSyncStatus(c.env))
 })
 // P1-2: connecting a Drive destination, or leaving sync switched on, decides
 // where every scheduled FULL backup (costs included) is uploaded -- so both
 // need what taking a backup copy home needs: `backup` plus cost-view (see
-// lib/driveSyncAuthority.ts). Switching sync OFF stays a plain settings
-// action, so anyone who may manage settings can still stop the uploads.
+// lib/driveSyncAuthority.ts). Switching sync OFF stays a plain
+// Drive-credentials action, so anyone holding the Drive credentials grant can still stop the uploads.
 const DRIVE_SYNC_AUTHORITY_ERROR = { error: 'Backup and cost-view permission are required to connect or enable Google Drive sync.', code: 'drive_sync_authority_required' }
 app.post('/system/drive-sync/preferences', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'settings')
+  const denied = denyUnless(c, 'drive_credentials')
   if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   // updateDrivePreferences stores enabled='1' unless the body says
@@ -907,7 +907,7 @@ app.post('/system/drive-sync/preferences', requireAuth, async (c) => {
   return c.json(await updateDrivePreferences(c.env, body))
 })
 app.post('/system/drive-sync/oauth/start', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'settings')
+  const denied = denyUnless(c, 'drive_credentials')
   if (denied) return denied
   if (!canAuthorizeDriveSync(c.get('user'))) return c.json(DRIVE_SYNC_AUTHORITY_ERROR, 403)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
@@ -959,20 +959,20 @@ app.get('/system/drive-sync/oauth/callback', async (c) => {
   return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message, status }), result.success ? 200 : 400)
 })
 app.post('/system/drive-sync/disconnect', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'settings')
+  const denied = denyUnless(c, 'drive_credentials')
   if (denied) return denied
   await disconnectDrive(c.env)
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'settings')
+  const denied = denyUnless(c, 'drive_credentials')
   if (denied) return denied
   await disconnectDrive(c.env)
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
   if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Cost-view permission is required to export database backups.', code: 'product_cost_view_required' }, 403)
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   try {
     const job = await enqueueDriveSyncJob(c.env, 'manual')
@@ -1004,20 +1004,20 @@ app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
   }
 })
 app.get('/system/jobs', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   const limit = c.req.query('limit')
   return c.json({ items: await listSystemJobs(c.env, limit ? Number(limit) : 25) })
 })
 app.get('/system/jobs/:id', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   const jobId = c.req.param('id') || ''
   const job = await getSystemJob(c.env, jobId)
   return c.json({ item: job || { id: jobId, status: 'unknown', progress: 0 } })
 })
 app.post('/system/jobs/:id/cancel', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
+  const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   const jobId = c.req.param('id') || ''
   const existing = await getSystemJob(c.env, jobId)
