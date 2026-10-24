@@ -1384,9 +1384,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [notify, tr])
   // Each take-back is one complete return of the replacement sale; the cancel dialog asks every one of them (validateReplacementLines, a quote that writes
   // nothing) before it makes the first, then makes them one step at a time.
-  const takeBackReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[], prepared?: unknown): Promise<number> => {
+  const takeBackReplacementLines = useCallback(async (outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<number> => {
     try {
-      return await takeBackReplacement(await takeBackDeps(), outstanding, lines, prepared)
+      return await takeBackReplacement(await takeBackDeps(), outstanding, lines)
     } catch (error) {
       reportTakeBackFailure(error)
       throw error

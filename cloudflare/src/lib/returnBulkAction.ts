@@ -352,13 +352,14 @@ function stockStatements(members: readonly Member[], direction: 1 | -1, user: Se
     const productRows = JSON.stringify([...products].map(([id, q]) => ({ id, q })))
     const pairRows = JSON.stringify([...pairs.values()])
     const batchRows = JSON.stringify([...batches.values()])
+    const lotProducts = JSON.stringify([...new Set(plain.filter((row) => row.batch).map((row) => `${row.batch}:${row.product}`))].map((pair) => { const [batch, product] = pair.split(':').map(Number); return { batch, product } }))
     const branchIds = JSON.stringify([...new Set(plain.map((row) => row.branch))])
     out.push(guard(`NOT EXISTS(SELECT 1 FROM json_each(@products) x WHERE NOT EXISTS(SELECT 1 FROM products WHERE id=${j('id')} AND stock_quantity+${j('q')}>=0))
       AND NOT EXISTS(SELECT 1 FROM json_each(@branches) x WHERE NOT EXISTS(SELECT 1 FROM branches WHERE id=x.value))
       AND NOT EXISTS(SELECT 1 FROM json_each(@pairs) x WHERE ${j('q')}<0 AND NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=${j('product')} AND branch_id=${j('branch')} AND quantity+${j('q')}>=0))
-      AND NOT EXISTS(SELECT 1 FROM json_each(@batches) x WHERE NOT EXISTS(SELECT 1 FROM product_batches WHERE id=${j('batch')} AND variant_product_id=${j('product')})
-        OR (${j('q')}<0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=${j('batch')} AND branch_id=${j('branch')} AND quantity+${j('q')}>=0)))`,
-    { products: productRows, branches: branchIds, pairs: pairRows, batches: batchRows }))
+      AND NOT EXISTS(SELECT 1 FROM json_each(@lotProducts) x WHERE NOT EXISTS(SELECT 1 FROM product_batches WHERE id=${j('batch')} AND variant_product_id=${j('product')}))
+      AND NOT EXISTS(SELECT 1 FROM json_each(@batches) x WHERE ${j('q')}<0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=${j('batch')} AND branch_id=${j('branch')} AND quantity+${j('q')}>=0))`,
+    { products: productRows, branches: branchIds, pairs: pairRows, batches: batchRows, lotProducts }))
     // A proposed row must pass CHECK(quantity >= 0) before SQLite looks for the conflict, so a negative net rides in as 0 and the conflict branch adds the real figure.
     out.push({
       sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
@@ -868,6 +869,35 @@ export async function readReplacementOutstanding(db: D1Compat, returnIds: number
  * would be for a sale with no return behind them (nothing returned), so a caller without the POS price grant cannot cancel the return out from
  * under a replacement that was only discounted because of it (release review, P3-3).
  */
+// Items whose `replacement` was synthesized from take-backs found in the database, not sent by the caller.
+const impliedChoices = new WeakSet<object>()
+
+/**
+ * The record of which take-backs belong to an exchange is the database's, never the dialog's (6.0.966). Cancelling an exchange return links EVERY active
+ * customer return of its replacement sale that came after it -- the ones the request names and any it does not (a closed and reopened dialog, a second
+ * device, a retry that lost its memory) -- so each is re-split, debt first (the 6.0.963 rule), exactly as if it had been named. A request is never allowed
+ * to leave one standing unsplit. Only a request that cancels returns is touched; the stored request (idempotency) is the one the caller sent.
+ */
+async function withFoundTakeBacks(db: D1Compat, request: BulkRequest): Promise<BulkRequest> {
+  if (request.field !== 'status' || request.target !== 'cancelled') return request
+  const ids = request.items.map((item) => item.id)
+  const found = await rowsForIds<{ parent: number; id: number }>(db, ids, (marks) => `
+    SELECT r.id AS parent,t.id AS id FROM returns r JOIN returns t ON t.sale_id=r.replacement_sale_id
+    WHERE r.id IN (${marks}) AND r.replacement_sale_id IS NOT NULL AND t.id>r.id AND COALESCE(t.status,'completed')='completed'
+      AND COALESCE(t.return_scope,'customer')='customer' AND t.replacement_sale_id IS NULL ORDER BY r.id,t.id`)
+  if (!found.length) return request
+  const items = request.items.map((item) => {
+    const extra = found.filter((row) => Number(row.parent) === item.id).map((row) => Number(row.id)).filter((id) => !(item.replacement?.return_ids ?? []).includes(id))
+    if (!extra.length) return item
+    const returnIds = [...(item.replacement?.return_ids ?? []), ...extra].sort((a, b) => a - b)
+    if (returnIds.length > REPLACEMENT_RETURNS_PER_ITEM) fail('This exchange has more take-backs than one action can carry.', 400, 'return_cancel_replacement_invalid')
+    const next = { ...item, replacement: { ...(item.replacement ?? {}), return_ids: returnIds } }
+    if (!item.replacement) impliedChoices.add(next)
+    return next
+  })
+  return { ...request, items }
+}
+
 async function planReplacementChoices(db: D1Compat, request: BulkRequest, returns: Row[], user: SessionUser | undefined): Promise<Map<number, ReplacementInfo>> {
   const cancelling = request.items.filter((item) => {
     const row = returns.find((candidate) => Number(candidate.id) === item.id)
@@ -887,7 +917,8 @@ async function planReplacementChoices(db: D1Compat, request: BulkRequest, return
     const info = infos.get(item.id)
     const kept = info ? info.lines.filter((line) => line.quantity > 0) : []
     if (item.replacement?.return_ids.length && !info) fail(`Return ${item.id} has no replacement items to cancel.`, 400, 'return_cancel_replacement_invalid')
-    return kept.length && !item.replacement ? [{ info: info!, kept }] : []
+    // A choice the Worker filled in from the take-backs it found itself is not an answer about the units still with the customer.
+    return kept.length && (!item.replacement || impliedChoices.has(item)) ? [{ info: info!, kept }] : []
   })
   if (undecided.length) {
     fail('A return being cancelled has replacement items still with the customer. Say whether they are cancelled too.', 409, 'return_cancel_replacement_choice_required', undefined, {
@@ -1026,7 +1057,8 @@ async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, re
   }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
+async function buildMembers(db: D1Compat, sent: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
+  const request = await withFoundTakeBacks(db, sent)
   const ids = request.items.map((item) => item.id)
   // The returns the till made to take replacement units back are read, guarded and stocked together with the selected ones.
   const linkedIds = [...new Set(request.items.flatMap((item) => item.replacement?.return_ids ?? []))].sort((a, b) => a - b)

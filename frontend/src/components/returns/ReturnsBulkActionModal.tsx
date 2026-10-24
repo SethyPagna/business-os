@@ -27,7 +27,7 @@ interface Props {
   fmtUSD?: (value: number) => string
   /** Cancelling a return that opened a replacement sale asks about the replacement items (owner, 22 Oct 2026); these are the reads and the write behind it. */
   loadOutstanding?: (returnId: number) => Promise<ReplacementOutstanding | null>
-  takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[], prepared?: unknown) => Promise<number>
+  takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<number>
   /** Asks whether one take-back would be accepted, writing nothing: every take-back is asked before the first is made. */
   validateTakeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<unknown>
   /** A dry run of the cancel, sent BEFORE any take-back is made: it refuses what the real cancel would refuse (budget, price floor, change), writing nothing. */

@@ -160,7 +160,8 @@ function takeBackItems(lines: readonly ReplacementLine[]): Array<{ sale_item_id:
 
 /**
  * Asks the server whether this take-back would be accepted, writing nothing (the money-v1 quote runs the return's own admission: plan size, quantities,
- * the refund). Answers the quote, which the take-back then reuses; null for a legacy replacement sale, which has no quote. Throws with the server's refusal.
+ * the refund). A validation pass ONLY: the answer is never reused, because the quote is bound to the replacement sale's revision and every step before it
+ * moves that revision -- each step reads its own quote right before its create. Null for a legacy replacement sale, which has no quote. Throws with the refusal.
  */
 export async function validateTakeBack(deps: TakeBackDeps, outstanding: ReplacementOutstanding, lines: readonly ReplacementLine[]): Promise<unknown> {
   const items = takeBackItems(lines)
@@ -181,25 +182,44 @@ function resumablePending(deps: TakeBackDeps, outstanding: ReplacementOutstandin
   } catch { return null }
 }
 
+// The server's authoritative refusal of a stale quote: the create did NOT land, so the frozen request can be dropped and the step quoted again.
+const quoteRefused = (error: unknown): boolean => {
+  const failure = error as { code?: unknown; returnV1QuoteRejected?: unknown } | null
+  return failure?.code === 'customer_return_quote_stale' || failure?.returnV1QuoteRejected === true
+}
+
 /**
  * Takes the given replacement lines back as ONE ordinary return of the replacement sale and answers its id. A money-v1 replacement sale goes
- * through the same quote -> frozen request -> create the New Return screen uses (`prepared` is the quote validateTakeBack already read); a legacy one
- * posts the legacy body with the recorded line prices. All units still with the customer on each line are taken back (the question is which lines, not how many units).
+ * through the same quote -> frozen request -> create the New Return screen uses, the quote read FRESH right before this create (the quote carries the
+ * replacement sale's revision, which an earlier step has moved); a legacy one posts the legacy body with the recorded line prices. All units still with
+ * the customer on each line are taken back (the question is which lines, not how many units).
+ * A frozen request left by an attempt whose outcome was not seen is resubmitted as it was (its request id makes the create idempotent), unless the server
+ * answers that its quote is stale: that refusal means nothing landed, so the request is dropped and the step is quoted and made again.
  */
-export async function takeBackReplacement(deps: TakeBackDeps, outstanding: ReplacementOutstanding, lines: readonly ReplacementLine[], prepared?: unknown): Promise<number> {
+export async function takeBackReplacement(deps: TakeBackDeps, outstanding: ReplacementOutstanding, lines: readonly ReplacementLine[]): Promise<number> {
   const items = takeBackItems(lines)
-  let created: CreatedReturn | null
+  let created: CreatedReturn | null = null
   if (outstanding.money_precision_version === 1) {
-    let pending = resumablePending(deps, outstanding, items)
-    if (!pending) {
-      const quote = prepared ?? await deps.getReturnQuoteV1(outstanding.sale_id, items)
-      pending = await deps.prepareReturnCreateV1(deps.userId, {
+    const resumed = resumablePending(deps, outstanding, items)
+    if (resumed) {
+      try {
+        created = await deps.submitReturnCreateV1(deps.userId, resumed as never) as CreatedReturn | null
+        await deps.clearPendingReturnCreateV1(deps.userId, resumed as never)
+      } catch (error) {
+        if (!quoteRefused(error)) throw error
+        await deps.clearPendingReturnCreateV1(deps.userId, resumed as never)
+        created = null
+      }
+    }
+    if (!created) {
+      const quote = await deps.getReturnQuoteV1(outstanding.sale_id, items)
+      const pending = await deps.prepareReturnCreateV1(deps.userId, {
         reason: deps.reason, return_type: 'restock', notes: null, branch_id: lines[0].branch_id,
         items: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity, stock_action: 'restock', ...(line.branch_id != null ? { branch_id: line.branch_id } : {}) })),
       }, quote as never) as { bodyJson: string }
+      created = await deps.submitReturnCreateV1(deps.userId, pending as never) as CreatedReturn | null
+      await deps.clearPendingReturnCreateV1(deps.userId, pending as never)
     }
-    created = await deps.submitReturnCreateV1(deps.userId, pending as never) as CreatedReturn | null
-    await deps.clearPendingReturnCreateV1(deps.userId, pending as never)
   } else {
     created = await deps.createReturn({
       ...deps.legacyIdentity(outstanding.return_id, takeBackSignature(lines)),
@@ -286,10 +306,10 @@ export async function composeCancelPayload(input: {
   outstanding: ReadonlyMap<number, ReplacementOutstanding>
   answers: ReadonlyMap<number, ReplacementAnswer>
   taken: Map<number, TakenBack>
-  takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[], prepared?: unknown) => Promise<number>
+  takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<number>
   /** Sends the dry run; throws with the Worker's refusal. Absent in callers that do not need it. */
   check?: (payload: ReturnBulkPayload) => Promise<unknown>
-  /** Asks whether one take-back would be accepted, writing nothing; throws with the refusal. Answers what `takeBack` reuses. */
+  /** Asks whether one take-back would be accepted, writing nothing; throws with the refusal. A validation pass: its answer is not reused. */
   validateTakeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<unknown>
   makeRequestId?: () => string
 }): Promise<ReturnBulkPayload> {
@@ -301,17 +321,14 @@ export async function composeCancelPayload(input: {
     const dry = dryRunCancelPayload({ payload: input.payload, outstanding: input.outstanding, answers: input.answers, taken: input.taken, clientRequestId: (input.makeRequestId ?? makeReturnBulkRequestId)() })
     if (dry) perLine = takeBackPerLine(await input.check(dry))
   }
-  const prepared = new Map<string, unknown>()
   if (input.validateTakeBack) {
     for (const [returnId, outstanding] of input.outstanding) {
       const lines = pickedLines(outstanding, input.answers.get(returnId) ?? defaultAnswer(outstanding))
-      for (const step of stepsFor(lines, input.taken.get(returnId), perLine)) prepared.set(stepKey(returnId, step), await input.validateTakeBack(outstanding, step))
+      for (const step of stepsFor(lines, input.taken.get(returnId), perLine)) await input.validateTakeBack(outstanding, step)
     }
   }
-  return withReplacementChoices(input.payload, await resolveReplacementChoices({ outstanding: input.outstanding, answers: input.answers, taken: input.taken, takeBack: input.takeBack, perLine, prepared }))
+  return withReplacementChoices(input.payload, await resolveReplacementChoices({ outstanding: input.outstanding, answers: input.answers, taken: input.taken, takeBack: input.takeBack, perLine }))
 }
-
-const stepKey = (returnId: number, step: readonly ReplacementLine[]): string => `${returnId}:${step.map((line) => line.id).join(',')}`
 
 /** The local half of the checks, for every exchange before any of them writes: every answer is ready, and none was changed after units were taken back. */
 function planAnswers(
@@ -335,11 +352,9 @@ export async function resolveReplacementChoices(input: {
   outstanding: ReadonlyMap<number, ReplacementOutstanding>
   answers: ReadonlyMap<number, ReplacementAnswer>
   taken: Map<number, TakenBack>
-  takeBack(outstanding: ReplacementOutstanding, lines: ReplacementLine[], prepared?: unknown): Promise<number>
+  takeBack(outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<number>
   /** One return per line (the plan is small) instead of one return for all the picked lines. */
   perLine?: boolean
-  /** What validateTakeBack answered, by step, for takeBack to reuse. */
-  prepared?: ReadonlyMap<string, unknown>
 }): Promise<Map<number, number[]>> {
   planAnswers(input.outstanding, input.answers, input.taken)
   const choices = new Map<number, number[]>()
@@ -348,7 +363,7 @@ export async function resolveReplacementChoices(input: {
     if (!lines.length) { choices.set(returnId, []); continue }
     let made = input.taken.get(returnId)
     for (const step of stepsFor(lines, made, input.perLine === true)) {
-      const id = await input.takeBack(outstanding, step, input.prepared?.get(stepKey(returnId, step)))
+      const id = await input.takeBack(outstanding, step)
       if (!made) { made = { signature: takeBackSignature(lines), parts: [] }; input.taken.set(returnId, made) }
       made.parts.push({ lines: step.map((line) => line.id), id })
     }
