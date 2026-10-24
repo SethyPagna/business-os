@@ -211,6 +211,8 @@ export const BACKUP_TABLES = [
   'product_conflict_merge_run_cases',
   'sale_amendments',
   'sale_write_revisions',
+  // 0271 payment ledger: append-only like sale_amendments, no FK, children of the sale ids restored above.
+  'sale_payment_events',
   // Durable monetary-mutation receipts reference action_history above; their
   // members are children of the receipt. sale_mutation_guards is transient.
   'sale_mutation_receipts',
