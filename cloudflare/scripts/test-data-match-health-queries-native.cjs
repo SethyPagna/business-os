@@ -392,6 +392,28 @@ async function main() {
       v1(23, 5, 7, 0, 7, 28700, { is_delivery: 1, delivery_fee_usd: 2, delivery_fee_paid_by: null }),         // a missing payer reads as the customer (saleTotals.ts customerBilledDeliveryFeeUsd)
       v0(24, 10, { sale_status: 'awaiting_payment', amount_paid_usd: 0 }),                                   // Not Paid whose returns lowered the whole debt: owes 0, tender covers nothing
     ])
+    // payment_events_mismatch (0271): version 1 sales whose events (in minus out) differ from what the sale says was paid.
+    // Imported rows, so no other column moves. 25 and 28 are the controls: a version 0 sale needs no events, and the match is signed.
+    const pv1 = (id, extra) => v0(id, 5, { legacy_receipt_number: `0000${id}@2026-01-01`, payments_version: 1, ...extra })
+    insert(db, 'sales', [
+      pv1(25, { amount_paid_usd: 5 }), pv1(26, { amount_paid_usd: 5 }), pv1(27, { amount_paid_usd: 5 }), pv1(28, { amount_paid_usd: 5 }),
+      pv1(29, { amount_paid_usd: 0, amount_paid_khr: 40000 }), pv1(30, { amount_paid_usd: 0, amount_paid_khr: 40000 }),
+      pv1(31, { amount_paid_usd: 5 }), pv1(32, { amount_paid_usd: 0, sale_status: 'awaiting_payment' }),
+      v0(33, 5, { legacy_receipt_number: '000033@2026-01-01', amount_paid_usd: 5 }),
+    ])
+    const pev = (saleId, n, direction, usd, khr = 0) => ({ event_id: `t${saleId}-${n}`, sale_id: saleId, direction, origin: direction === 'out' ? 'undo' : 'collect',
+      payment_method: 'Cash', payment_details: '[]', amount_paid_usd: usd, amount_paid_khr: khr, exchange_rate: 4100, received_at: '2026-10-25 03:00:00' })
+    insert(db, 'sale_payment_events', [
+      pev(25, 1, 'in', 5),                                    // matches
+      pev(26, 1, 'in', 5), pev(26, 2, 'out', 2),              // 3 against 5 paid: mismatch
+      pev(27, 1, 'in', 3),                                    // 3 against 5 paid: mismatch
+      pev(28, 1, 'in', 10), pev(28, 2, 'out', 5),             // signed: 5 against 5 paid, matches
+      pev(29, 1, 'in', 0, 40000),                             // riel matches
+      pev(30, 1, 'in', 0, 39999),                             // riel differs by one: mismatch
+      pev(31, 1, 'in', 5.00004),                              // inside the 4 dp tolerance: matches
+      // 32: version 1, nothing paid, no event: matches. 27 above, and a paid version 1 sale with no event, are the mismatches:
+    ])
+    insert(db, 'sales', pv1(34, { amount_paid_usd: 5 }))     // paid $5, no event at all: mismatch
     db.exec('DROP TRIGGER sales_money_precision_insert')
     db.exec('DROP TRIGGER sales_money_precision_update_0161')
     insert(db, 'sales', v1(7, 3.2351, 3.2351, -0.0051, 3.23, 13243))
@@ -407,6 +429,7 @@ async function main() {
     assert.deepEqual(one(db, 'health-sale-money'), {
       v1_sales: 8, v1_subtotal_ne_lines: 1, v1_calc_ne_components: 1, v1_payable_equation: 1, v1_khr_twin: 1, v0_header_drift: 1,
       completed_short: 3, not_paid_but_covered: 2, system_sales_without_lines: 1, negative_totals: 1, bad_rate: 1,
+      payment_events_mismatch: 4,
     })
   })
 

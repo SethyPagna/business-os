@@ -47,11 +47,21 @@
  * (lib/paymentMethodRegistry.ts), never from a literal method name -- see the
  * long note there on why renaming "Cash" used to empty the drawer silently.
  *
- * Attribution invariant (not a collection-time ledger): sale tender and
- * courier payouts belong to sale.created_at. Settling an older Not Paid sale
- * later therefore updates its original shift's report; it does not move cash
- * into the later shift. Returns and fees use their own created_at. Changing
- * this requires an explicit collection-time business rule and event source.
+ * Attribution, by the sale's payments_version (migration 0271, owner rule of
+ * 21 Oct: a later payment counts in the shift that took it, old sales stay as
+ * they are):
+ *   * payments_version 0 (every sale today, every imported one): sale tender
+ *     and courier payouts belong to sale.created_at, as they always did.
+ *     Settling such a sale later updates its original shift's report; it does
+ *     not move cash into the later shift.
+ *   * payments_version 1: the tender is read from sale_payment_events by
+ *     received_at, branch and drawer_effect = 1, 'in' added and 'out'
+ *     subtracted, so a collect taken in a later shift lands in that shift. A
+ *     late-recorded payment (drawer_effect = 0) is in no drawer. The 'opening'
+ *     event of a sale that moved to version 1 is dated at its created_at, so
+ *     no past shift changes.
+ * Courier payouts stay on sale.created_at. Returns and fees use their own
+ * created_at.
  *
  * Everything above `loadShiftReconciliation` is pure so
  * scripts/test-shift-reconciliation-pure.cjs can execute the arithmetic
@@ -59,7 +69,7 @@
  */
 import { getDb } from './db'
 import { resolveStoredNativeSaleChange } from './nativeSaleChange'
-import { deliveryActualCostExpr, getSalesTotals, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
+import { deliveryActualCostExpr, getSalesTotals, shiftWindowBound, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
 import {
   hasConfiguredCashMethod, isCashPaymentMethod, parseConfiguredMethods, parsePaymentMethodKinds,
   PAYMENT_METHOD_KINDS_SETTING, type PaymentMethodKindMap,
@@ -401,7 +411,54 @@ export async function expenseRowsWhere(env: Env, clauses: string[], params: Reco
   return { ...total, details }
 }
 
-/** Cash tendered on sales rung in the window, minus the change handed back. */
+type ShiftPaymentEventRow = ShiftTenderRow & { id?: unknown; sale_id?: unknown; direction?: unknown }
+
+/**
+ * Net tender of payment events: what came in, less what went out. The incoming rows go through the same
+ * summarizeShiftCashDetail as a sale (so change, cash kind and review codes are one implementation); the
+ * outgoing rows through it as well, without the configured-method rename guard, which only means something
+ * for money that came in. An undo or correction never carries change (buildPaymentEvent), so it is subtracted whole.
+ */
+export function summarizeShiftCashEvents(rows: ShiftPaymentEventRow[], options: ShiftCashOptions = {}): ShiftCashResult {
+  const incoming = summarizeShiftCashDetail(rows.filter((row) => row.direction !== 'out'), options)
+  const outgoing = summarizeShiftCashDetail(rows.filter((row) => row.direction === 'out'), { kinds: options.kinds })
+  const codes = [...new Set([...incoming.reviewCodes, ...outgoing.reviewCodes])].sort()
+  return {
+    usd: round2(incoming.usd - outgoing.usd), khr: roundKhr(incoming.khr - outgoing.khr),
+    digital: { usd: round2(incoming.digital.usd - outgoing.digital.usd), khr: roundKhr(incoming.digital.khr - outgoing.digital.khr) },
+    needsReview: codes.length > 0, reviewCodes: codes,
+  }
+}
+
+/** The payments_version 1 events received inside the shift's window, one row per event. */
+async function shiftPaymentEventRows(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number,
+  limit: number,
+  keepCancelled = false,
+): Promise<ShiftPaymentEventRow[]> {
+  const filters = shiftFilters(shift, nowMs)
+  const clauses = ['sales.payments_version = 1', 'e.drawer_effect = 1']
+  const params: Record<string, unknown> = {}
+  const from = shiftWindowBound(filters.createdFrom)
+  if (from) { clauses.push('datetime(e.received_at) >= @createdFrom'); params.createdFrom = from }
+  const to = shiftWindowBound(filters.createdTo)
+  if (to) { clauses.push('datetime(e.received_at) < @createdTo'); params.createdTo = to }
+  // The cashier who TOOK the money, not the one who rang the sale: a later collect is that cashier's shift.
+  if (filters.cashierId != null && String(filters.cashierId).trim() !== '') { clauses.push('e.cashier_id = @cashierId'); params.cashierId = Number(filters.cashierId) }
+  if (shift.branch_id) { clauses.push('e.branch_id = @branchId'); params.branchId = shift.branch_id }
+  if (!keepCancelled) clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
+  return getDb(env).prepare(`SELECT e.id, e.sale_id, e.direction, e.payment_method, e.payment_details, e.amount_paid_usd, e.amount_paid_khr,
+      e.change_usd, e.change_khr, e.change_is_actual, e.change_exchange_rate, e.exchange_rate, sales.sale_status
+    FROM sale_payment_events e JOIN sales ON sales.id = e.sale_id
+    WHERE ${clauses.join(' AND ')} ORDER BY e.id LIMIT ${limit}`).all<ShiftPaymentEventRow>(params)
+}
+
+/**
+ * Cash tendered inside the window, minus the change handed back: the version 0 sales by when they were rung
+ * (tenderWhere, unchanged) plus the version 1 payment events by when they were received.
+ */
 export async function shiftCashSales(
   env: Env,
   shift: ShiftReconciliationSession,
@@ -410,7 +467,18 @@ export async function shiftCashSales(
 ): Promise<ShiftCashResult> {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  return tenderWhere(env, clauses, params, options)
+  clauses.push('sales.payments_version = 0')
+  const created = await tenderWhere(env, clauses, params, options)
+  const eventRows = await shiftPaymentEventRows(env, shift, nowMs, 5001)
+  // No version 1 money in the window: the version 0 answer, untouched.
+  if (!eventRows.length) return created
+  const received = summarizeShiftCashEvents(eventRows.slice(0, 5000), options)
+  const codes = [...new Set([...created.reviewCodes, ...received.reviewCodes, ...(eventRows.length > 5000 ? [SHIFT_REVIEW.limit] : [])])].sort()
+  return {
+    usd: round2(created.usd + received.usd), khr: roundKhr(created.khr + received.khr),
+    digital: { usd: round2(created.digital.usd + received.digital.usd), khr: roundKhr(created.digital.khr + received.digital.khr) },
+    needsReview: codes.length > 0, reviewCodes: codes,
+  }
 }
 
 /** Recorded tender on the sales `clauses` select (alias `sales`), cancelled sales always excluded. */
@@ -890,13 +958,26 @@ export async function shiftSaleTenders(
 ): Promise<ShiftSaleTender[] | null> {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
+  clauses.push('sales.payments_version = 0')
   const rows = await getDb(env).prepare(`SELECT id, payment_method, payment_details, amount_paid_usd, amount_paid_khr,
       change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
     FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT ${SHIFT_CLOSE_SALE_CAP + 1}`)
     .all<ShiftTenderRow & { id: number }>(params)
   if (rows.length > SHIFT_CLOSE_SALE_CAP) return null
   const config = options ?? await readCashConfig(env)
-  return rows.map((row) => shiftSaleTenderEntry(row, config))
+  const entries = rows.map((row) => shiftSaleTenderEntry(row, config))
+  const eventRows = await shiftPaymentEventRows(env, shift, nowMs, SHIFT_CLOSE_SALE_CAP + 1, true)
+  if (!eventRows.length) return entries
+  if (eventRows.length > SHIFT_CLOSE_SALE_CAP) return null
+  // Version 1: one entry per sale, the net of the events it received inside the window (a cancelled sale as zeros).
+  const bySale = new Map<number, ShiftPaymentEventRow[]>()
+  for (const row of eventRows) bySale.set(Number(row.sale_id), [...(bySale.get(Number(row.sale_id)) ?? []), row])
+  for (const [id, saleRows] of bySale) {
+    if (isCancelledSale((saleRows[0] as { sale_status?: unknown }).sale_status)) { entries.push([id, 0, 0, 0, 0]); continue }
+    const cash = summarizeShiftCashEvents(saleRows, config)
+    entries.push([id, cash.usd, cash.khr, cash.digital.usd, cash.digital.khr])
+  }
+  return entries.sort((a, b) => a[0] - b[0])
 }
 
 function sumOtherTenders(sales: ShiftSaleTender[] | null): ShiftMoney | null {
