@@ -48,7 +48,7 @@ function reset(schema = true) {
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
   if (schema) db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0259_inventory_check_sessions.sql'), 'utf8'))
   db.exec(`INSERT OR REPLACE INTO roles(id,name,code,permissions) VALUES
-    (900001,'Counter','employee','{"inventory":true}'),(900002,'Viewer','viewer','{"inventory":true,"inventory:check":false}'),
+    (900001,'Counter','employee','{"inventory":true,"inventory_checks":true,"inventory_check_show_price":true,"inventory_check_show_barcode":true,"inventory_check_show_category":true,"inventory_check_show_brand":true,"inventory_check_show_stock":true,"inventory_check_show_received":true,"inventory_check_show_sales":true,"inventory_check_show_customers":true}'),(900002,'Viewer','viewer','{"inventory":true,"inventory_checks":true,"inventory_check_show_price":true,"inventory_check_show_barcode":true,"inventory_check_show_category":true,"inventory_check_show_brand":true,"inventory_check_show_stock":true,"inventory_check_show_received":true,"inventory_check_show_sales":true,"inventory_check_show_customers":true,"inventory_checks:check":false}'),
     (900003,'Administrator','admin','{}');
     INSERT INTO users(id,username,name,password,role_id,organization_id) VALUES
     (900001,'counter-one','Counter One','unused',900001,1),(900002,'counter-two','Counter Two','unused',900001,1),
@@ -167,7 +167,7 @@ async function main() {
     assert.equal((await request('PATCH',`/sessions/${id}/items/900001`,{...patch,expectedRevision:1,requestId:'late-close-01'})).status,409)
     const reopened=await request('PATCH',`/sessions/${id}`,{action:'resume',expectedRevision:1,requestId:'resume-request-01'})
     assert.equal(reopened.status,200)
-    let before=metadata(); beforeCommit=()=>db.exec("UPDATE users SET permissions='{\"inventory\":false}' WHERE id=900001")
+    let before=metadata(); beforeCommit=()=>db.exec("UPDATE users SET permissions='{\"inventory_checks\":false}' WHERE id=900001")
     assert.equal((await request('PATCH',`/sessions/${id}/items/900001`,{...patch,expectedRevision:1,expectedSessionRevision:2,requestId:'revoke-edit-01'})).status,403)
     assert.deepEqual(metadata(),before)
     db.exec("UPDATE users SET permissions='{}' WHERE id=900001")

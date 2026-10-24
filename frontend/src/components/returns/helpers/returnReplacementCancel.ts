@@ -142,6 +142,14 @@ export interface TakeBackDeps {
   createReturn(payload: Record<string, unknown>): Promise<unknown>
   /** A request identity kept by the caller for the life of the cancel dialog, so a retried take-back is the same request, never a second return. */
   legacyIdentity(returnId: number, signature: string): { client_request_id: string; return_number: string }
+  /** The frozen request a failed attempt left behind, if any (the same read the New Return screen resumes from). */
+  loadPendingReturnCreateV1?(actorId: unknown): { bodyJson: string } | null
+}
+
+/** The request id of a take-back: the mark ('rtb-<exchange return id>_') by which the Worker finds an exchange's take-backs itself, whatever the dialog remembers. */
+export function takeBackRequestId(exchangeReturnId: number): string {
+  const unique = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  return `rtb-${exchangeReturnId}_${unique}`
 }
 
 const money2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
@@ -151,23 +159,74 @@ export function takeBackSignature(lines: readonly ReplacementLine[]): string {
   return JSON.stringify(lines.map((line) => [line.id, line.sale_item_id, line.quantity]))
 }
 
+function takeBackItems(lines: readonly ReplacementLine[]): Array<{ sale_item_id: number; quantity: number }> {
+  if (!lines.length || lines.some((line) => line.sale_item_id == null)) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+  return lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity }))
+}
+
 /**
- * Takes the picked replacement lines back as ONE ordinary return of the replacement sale and answers its id. A money-v1 replacement sale goes
- * through the same quote -> frozen request -> create the New Return screen uses; a legacy one posts the legacy body with the recorded line prices.
- * All units still with the customer on each picked line are taken back (the question is which lines, not how many units).
+ * Asks the server whether this take-back would be accepted, writing nothing (the money-v1 quote runs the return's own admission: plan size, quantities,
+ * the refund). A validation pass ONLY: the answer is never reused, because the quote is bound to the replacement sale's revision and every step before it
+ * moves that revision -- each step reads its own quote right before its create. Null for a legacy replacement sale, which has no quote. Throws with the refusal.
+ */
+export async function validateTakeBack(deps: TakeBackDeps, outstanding: ReplacementOutstanding, lines: readonly ReplacementLine[]): Promise<unknown> {
+  const items = takeBackItems(lines)
+  return outstanding.money_precision_version === 1 ? deps.getReturnQuoteV1(outstanding.sale_id, items) : null
+}
+
+// A frozen request left by an attempt whose outcome was not seen: the SAME take-back resumes from it (its request id makes the create idempotent);
+// any other pending request is not ours to resume, and preparing a new one reports it.
+function resumablePending(deps: TakeBackDeps, outstanding: ReplacementOutstanding, items: Array<{ sale_item_id: number; quantity: number }>): { bodyJson: string } | null {
+  let saved: { bodyJson: string } | null = null
+  try { saved = deps.loadPendingReturnCreateV1?.(deps.userId) ?? null } catch { return null }
+  if (!saved) return null
+  try {
+    const body = JSON.parse(saved.bodyJson) as { sale_id?: unknown; items?: Array<{ sale_item_id?: unknown; quantity?: unknown }>; replacement_items?: unknown }
+    const same = Number(body.sale_id) === outstanding.sale_id && !body.replacement_items && Array.isArray(body.items) && body.items.length === items.length
+      && items.every((item) => body.items!.some((candidate) => Number(candidate.sale_item_id) === item.sale_item_id && Number(candidate.quantity) === item.quantity))
+    return same ? saved : null
+  } catch { return null }
+}
+
+// The server's authoritative refusal of a stale quote: the create did NOT land, so the frozen request can be dropped and the step quoted again.
+const quoteRefused = (error: unknown): boolean => {
+  const failure = error as { code?: unknown; returnV1QuoteRejected?: unknown } | null
+  return failure?.code === 'customer_return_quote_stale' || failure?.returnV1QuoteRejected === true
+}
+
+/**
+ * Takes the given replacement lines back as ONE ordinary return of the replacement sale and answers its id. A money-v1 replacement sale goes
+ * through the same quote -> frozen request -> create the New Return screen uses, the quote read FRESH right before this create (the quote carries the
+ * replacement sale's revision, which an earlier step has moved); a legacy one posts the legacy body with the recorded line prices. All units still with
+ * the customer on each line are taken back (the question is which lines, not how many units).
+ * A frozen request left by an attempt whose outcome was not seen is resubmitted as it was (its request id makes the create idempotent), unless the server
+ * answers that its quote is stale: that refusal means nothing landed, so the request is dropped and the step is quoted and made again.
  */
 export async function takeBackReplacement(deps: TakeBackDeps, outstanding: ReplacementOutstanding, lines: readonly ReplacementLine[]): Promise<number> {
-  if (!lines.length || lines.some((line) => line.sale_item_id == null)) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
-  const items = lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity }))
-  let created: CreatedReturn | null
+  const items = takeBackItems(lines)
+  let created: CreatedReturn | null = null
   if (outstanding.money_precision_version === 1) {
-    const quote = await deps.getReturnQuoteV1(outstanding.sale_id, items)
-    const pending = await deps.prepareReturnCreateV1(deps.userId, {
-      reason: deps.reason, return_type: 'restock', notes: null, branch_id: lines[0].branch_id,
-      items: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity, stock_action: 'restock', ...(line.branch_id != null ? { branch_id: line.branch_id } : {}) })),
-    }, quote as never)
-    created = await deps.submitReturnCreateV1(deps.userId, pending as never) as CreatedReturn | null
-    await deps.clearPendingReturnCreateV1(deps.userId, pending as never)
+    const resumed = resumablePending(deps, outstanding, items)
+    if (resumed) {
+      try {
+        created = await deps.submitReturnCreateV1(deps.userId, resumed as never) as CreatedReturn | null
+        await deps.clearPendingReturnCreateV1(deps.userId, resumed as never)
+      } catch (error) {
+        if (!quoteRefused(error)) throw error
+        await deps.clearPendingReturnCreateV1(deps.userId, resumed as never)
+        created = null
+      }
+    }
+    if (!created) {
+      const quote = await deps.getReturnQuoteV1(outstanding.sale_id, items)
+      const pending = await deps.prepareReturnCreateV1(deps.userId, {
+        client_request_id: takeBackRequestId(outstanding.return_id),
+        reason: deps.reason, return_type: 'restock', notes: null, branch_id: lines[0].branch_id,
+        items: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity, stock_action: 'restock', ...(line.branch_id != null ? { branch_id: line.branch_id } : {}) })),
+      }, quote as never) as { bodyJson: string }
+      created = await deps.submitReturnCreateV1(deps.userId, pending as never) as CreatedReturn | null
+      await deps.clearPendingReturnCreateV1(deps.userId, pending as never)
+    }
   } else {
     created = await deps.createReturn({
       ...deps.legacyIdentity(outstanding.return_id, takeBackSignature(lines)),
@@ -186,11 +245,34 @@ export async function takeBackReplacement(deps: TakeBackDeps, outstanding: Repla
   return id
 }
 
-export interface TakenBack { signature: string; id: number }
+/**
+ * The take-backs made for one exchange return, step by step. Each part is one COMPLETE return of the replacement sale (the replacement lines it covers, its
+ * id): a state the business can stand in on its own, so a cancel that stops after any step leaves nothing half-written. A retry continues from the parts
+ * that exist -- only the lines no part covers are made, and a part that exists is never made twice.
+ */
+export interface TakenPart { lines: number[]; id: number }
+export interface TakenBack { signature: string; parts: TakenPart[] }
+
+const takenIds = (made: TakenBack | undefined): number[] => made ? made.parts.map((part) => part.id) : []
+const coveredLines = (made: TakenBack | undefined): Set<number> => new Set(made ? made.parts.flatMap((part) => part.lines) : [])
+
+/** The lines of a take-back still to be made, grouped into the returns that will make them: all in one, or one return per line when the plan is small. */
+function stepsFor(lines: readonly ReplacementLine[], made: TakenBack | undefined, perLine: boolean): ReplacementLine[][] {
+  const covered = coveredLines(made)
+  const remaining = lines.filter((line) => !covered.has(line.id))
+  if (!remaining.length) return []
+  return perLine ? remaining.map((line) => [line]) : [remaining]
+}
+
+/** Whether the server said the take-backs must be made one line at a time (its dry run answers `takeBackPerLine`: a plan too small for a longer return). */
+export function takeBackPerLine(checked: unknown): boolean {
+  return !!checked && typeof checked === 'object' && (checked as { takeBackPerLine?: unknown }).takeBackPerLine === true
+}
 
 /**
- * The cancel as a dry run: each return that is about to have units taken back says which (the take-back does not exist yet); a take-back already made on an
- * earlier attempt is linked as it will be. null when no take-back is still to be made -- the cancel alone is atomic, so there is nothing to check first.
+ * The cancel as a dry run: each return that is about to have units taken back says which (the take-back does not exist yet); the take-backs already made on an
+ * earlier attempt are named as they will be linked. null when no take-back is still to be made -- the cancel alone is atomic, so there is nothing to check first.
+ * One request covers EVERY selected exchange, so one refusal speaks for the whole selection before anything is written.
  */
 export function dryRunCancelPayload(input: {
   payload: ReturnBulkPayload
@@ -206,17 +288,25 @@ export function dryRunCancelPayload(input: {
     const lines = pickedLines(outstanding, input.answers.get(item.id) ?? defaultAnswer(outstanding))
     if (!lines.length) return { ...item, replacement: { return_ids: [] } }
     const made = input.taken.get(item.id)
-    if (made && made.signature === takeBackSignature(lines)) return { ...item, replacement: { return_ids: [made.id] } }
+    const covered = made && made.signature === takeBackSignature(lines) ? coveredLines(made) : new Set<number>()
+    const ids = made && covered.size ? takenIds(made) : []
+    const remaining = lines.filter((line) => !covered.has(line.id))
+    if (!remaining.length) return { ...item, replacement: { return_ids: ids } }
     pending = true
-    return { ...item, replacement: { return_ids: [], planned: lines.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity })) } }
+    return { ...item, replacement: { return_ids: ids, planned: remaining.map((line) => ({ sale_item_id: Number(line.sale_item_id), quantity: line.quantity })) } }
   })
   return pending ? { ...input.payload, client_request_id: input.clientRequestId, items, dry_run: true } : null
 }
 
 /**
  * The cancel request the dialog sends: the frozen bulk payload plus, for every exchange return that has replacement items left, the answer. Without a
- * take-back (the caller may not add returns) every answer is "keep". The returns taken back are made here, before anything is sent -- and only after
- * `check` (a dry run of the cancel) has said the cancel will be accepted, so a refused cancel never leaves a take-back behind.
+ * take-back (the caller may not add returns) every answer is "keep". Everything that can be refused is asked BEFORE the first write, for every selected
+ * exchange together:
+ *   1. the answers themselves (a ticked box needs a ticked line; a changed choice after units are back);
+ *   2. the cancel, as one dry run (the plan's budget, the price floor of what stays, the change refusal, the permissions) -- it also says whether the plan needs the
+ *      take-backs one line at a time;
+ *   3. each take-back's own admission (`validateTakeBack`, a quote that writes nothing).
+ * Only then are the take-backs made, one complete return per step; whatever was made stays in `taken`, so a failure part-way is continued, never repeated.
  */
 export async function composeCancelPayload(input: {
   payload: ReturnBulkPayload
@@ -226,41 +316,65 @@ export async function composeCancelPayload(input: {
   takeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<number>
   /** Sends the dry run; throws with the Worker's refusal. Absent in callers that do not need it. */
   check?: (payload: ReturnBulkPayload) => Promise<unknown>
+  /** Asks whether one take-back would be accepted, writing nothing; throws with the refusal. A validation pass: its answer is not reused. */
+  validateTakeBack?: (outstanding: ReplacementOutstanding, lines: ReplacementLine[]) => Promise<unknown>
   makeRequestId?: () => string
 }): Promise<ReturnBulkPayload> {
   if (!input.outstanding.size) return input.payload
   if (!input.takeBack) return withReplacementChoices(input.payload, new Map([...input.outstanding.keys()].map((id) => [id, [] as number[]])))
+  planAnswers(input.outstanding, input.answers, input.taken)
+  let perLine = false
   if (input.check) {
     const dry = dryRunCancelPayload({ payload: input.payload, outstanding: input.outstanding, answers: input.answers, taken: input.taken, clientRequestId: (input.makeRequestId ?? makeReturnBulkRequestId)() })
-    if (dry) await input.check(dry)
+    if (dry) perLine = takeBackPerLine(await input.check(dry))
   }
-  return withReplacementChoices(input.payload, await resolveReplacementChoices({ outstanding: input.outstanding, answers: input.answers, taken: input.taken, takeBack: input.takeBack }))
+  if (input.validateTakeBack) {
+    for (const [returnId, outstanding] of input.outstanding) {
+      const lines = pickedLines(outstanding, input.answers.get(returnId) ?? defaultAnswer(outstanding))
+      for (const step of stepsFor(lines, input.taken.get(returnId), perLine)) await input.validateTakeBack(outstanding, step)
+    }
+  }
+  return withReplacementChoices(input.payload, await resolveReplacementChoices({ outstanding: input.outstanding, answers: input.answers, taken: input.taken, takeBack: input.takeBack, perLine }))
+}
+
+/** The local half of the checks, for every exchange before any of them writes: every answer is ready, and none was changed after units were taken back. */
+function planAnswers(
+  outstanding: ReadonlyMap<number, ReplacementOutstanding>, answers: ReadonlyMap<number, ReplacementAnswer>, taken: ReadonlyMap<number, TakenBack>,
+): void {
+  for (const [returnId, info] of outstanding) {
+    const answer = answers.get(returnId) ?? defaultAnswer(info)
+    if (!answerReady(info, answer)) throw Object.assign(new Error('return_cancel_replacement_pick_one'), { code: 'return_cancel_replacement_pick_one' })
+    const lines = pickedLines(info, answer)
+    const made = taken.get(returnId)
+    if (lines.length && made && made.signature !== takeBackSignature(lines)) throw Object.assign(new Error('return_cancel_replacement_changed'), { code: 'return_cancel_replacement_changed' })
+  }
 }
 
 /**
- * Turns the operator's answers into the `replacement` choices of the bulk request, making the take-back returns it needs. `taken` remembers a
- * take-back already made for a return: a second Apply after a refused cancel links the SAME return instead of taking the units back twice.
- * Throws on the first failure; whatever was made before it stays in `taken`, and the cancel is not sent.
+ * Turns the operator's answers into the `replacement` choices of the bulk request, making the take-back returns it needs. `taken` remembers the take-backs
+ * already made for a return, part by part: a second Apply after a refused or interrupted cancel links the SAME returns and makes only what is missing.
+ * Every answer is checked before the first take-back is made; a take-back that fails stops the rest, and whatever was made before it stays in `taken`.
  */
 export async function resolveReplacementChoices(input: {
   outstanding: ReadonlyMap<number, ReplacementOutstanding>
   answers: ReadonlyMap<number, ReplacementAnswer>
   taken: Map<number, TakenBack>
   takeBack(outstanding: ReplacementOutstanding, lines: ReplacementLine[]): Promise<number>
+  /** One return per line (the plan is small) instead of one return for all the picked lines. */
+  perLine?: boolean
 }): Promise<Map<number, number[]>> {
+  planAnswers(input.outstanding, input.answers, input.taken)
   const choices = new Map<number, number[]>()
   for (const [returnId, outstanding] of input.outstanding) {
-    const answer = input.answers.get(returnId) ?? defaultAnswer(outstanding)
-    const lines = pickedLines(outstanding, answer)
-    if (!answerReady(outstanding, answer)) throw Object.assign(new Error('return_cancel_replacement_pick_one'), { code: 'return_cancel_replacement_pick_one' })
+    const lines = pickedLines(outstanding, input.answers.get(returnId) ?? defaultAnswer(outstanding))
     if (!lines.length) { choices.set(returnId, []); continue }
-    const signature = takeBackSignature(lines)
-    const made = input.taken.get(returnId)
-    if (made && made.signature === signature) { choices.set(returnId, [made.id]); continue }
-    if (made) throw Object.assign(new Error('return_cancel_replacement_changed'), { code: 'return_cancel_replacement_changed' })
-    const id = await input.takeBack(outstanding, lines)
-    input.taken.set(returnId, { signature, id })
-    choices.set(returnId, [id])
+    let made = input.taken.get(returnId)
+    for (const step of stepsFor(lines, made, input.perLine === true)) {
+      const id = await input.takeBack(outstanding, step)
+      if (!made) { made = { signature: takeBackSignature(lines), parts: [] }; input.taken.set(returnId, made) }
+      made.parts.push({ lines: step.map((line) => line.id), id })
+    }
+    choices.set(returnId, takenIds(made))
   }
   return choices
 }

@@ -578,7 +578,7 @@ try {
         await show()
         assert.equal(requests.length, 1, `cycle ${cycle + 1}: coming back asks nothing more`)
       }
-      await act(async () => { requests[0].grant(); await settle(40) })
+      await act(async () => { requests[0].grant(); await settle(100) })
       assert.deepEqual(trackStates(probe), [[1, 'ended']], 'the stream that arrives after the page was hidden is stopped on arrival')
       assert.equal(requests.length, 1, 'and its arrival starts nothing')
       assert.equal(mounted.container.textContent.trim(), pausedPanel, 'the sheet shows the neutral paused panel, one tap from a camera that is allowed by now')
@@ -603,7 +603,7 @@ try {
     const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
     try {
       await hide()
-      await act(async () => { requests[0].grant(); await settle(40) })
+      await act(async () => { requests[0].grant(); await settle(100) })
       assert.deepEqual(trackStates(probe), [[1, 'ended']], 'the camera that arrives while the page is hidden is not left on')
       await show()
       assert.equal(requests.length, 1, 'returning does not ask again for a request that never produced a camera')
@@ -624,6 +624,107 @@ try {
       }
       assert.equal(running.probe.getUserMediaCalls, 3, 'one request to open, one per return')
       assert.deepEqual(trackStates(running.probe), [[1, 'ended'], [1, 'ended'], [0, 'live']])
+    } finally {
+      await running.mounted.unmount()
+    }
+  })
+
+  // 6.0.966 (review db2440bb9 P3-C): a camera that WAS running comes back by itself in every event order, with the 6.0.961 guarantees kept:
+  // never a second request while one is unanswered, no stream left on after a close, no loop on a refusal.
+  const live = (probe: ReturnType<typeof installCamera>) => probe.tracks.filter((track) => track.readyState === 'live').length
+
+  await runTest('running, hidden, shown (the resume request is still pending), hidden, shown: still one open request, and the camera comes back when it is answered', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted', {})
+    const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
+    try {
+      await settle(60)
+      const requests = holdRequests()
+      await hide()
+      await show()
+      assert.equal(requests.length, 1, 'the first return asked once')
+      await hide()
+      await show()
+      assert.equal(requests.length, 1, 'the second return does not stack a second request on the unanswered one')
+      await act(async () => { requests[0].grant(); await settle(10) })
+      await waitFor(() => requests.length === 2, 80, 25)
+      assert.equal(requests.length, 2, 'the answer arrived for a start that was over: its stream is stopped and ONE new request is made')
+      await act(async () => { requests[1].grant(); await settle(10) })
+      await waitFor(() => live(probe) === 1, 80, 25)
+      await settle(30)
+      assert.equal(live(probe), 1, 'a camera that was running is running again, with no tap')
+      assert.equal(mounted.container.textContent.trim(), '', 'quiet, not the paused panel')
+      assert.deepEqual(trackStates(probe).map((state) => (state as unknown[])[1]), ['ended', 'ended', 'live'])
+    } finally {
+      await mounted.unmount()
+    }
+    assert.equal(live(probe), 0, 'closing leaves nothing on')
+  })
+
+  await runTest('the same, closed while the resume waits for the unanswered request: nothing is asked or left on', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted', {})
+    const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
+    await settle(60)
+    const requests = holdRequests()
+    await hide()
+    await show()
+    await hide()
+    await show()
+    await mounted.unmount()
+    await act(async () => { requests[0].grant(); await settle(100) })
+    assert.equal(requests.length, 1, 'no request after the sheet closed')
+    assert.equal(live(probe), 0, 'and no stream left on')
+  })
+
+  await runTest('the same, but the unanswered request is refused: no further request (no loop on denial)', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted', {})
+    const mounted = await mountComponent(MODAL, { open: true, title: 'Scan barcode', onClose() {}, onDetected() {}, t: enT })
+    try {
+      await settle(60)
+      const requests = holdRequests()
+      await hide()
+      await show()
+      await hide()
+      await show()
+      await act(async () => { requests[0].fail('NotAllowedError'); await settle(40) })
+      assert.equal(requests.length, 1, 'a refusal is not asked again')
+      await hide()
+      await show()
+      assert.equal(requests.length, 1, 'and coming back later does not either')
+      assert.equal(live(probe), 0)
+    } finally {
+      await mounted.unmount()
+    }
+  })
+
+  await runTest('running, pagehide, hidden, shown: the camera comes back by itself', async () => {
+    const running = await openProbe('granted')
+    try {
+      await act(async () => { fire('window', 'pagehide') })
+      await settle(20)
+      assert.equal(live(running.probe), 0, 'pagehide lets the camera go at once')
+      await hide()
+      await show()
+      await waitFor(() => /^scanning\|/.test(running.mounted.container.textContent))
+      assert.equal(running.probe.getUserMediaCalls, 2)
+      assert.equal(live(running.probe), 1)
+    } finally {
+      await running.mounted.unmount()
+    }
+  })
+
+  await runTest('running, pagehide, then the page is restored (pageshow) with no visibility change: the camera comes back; a page that was not running does not', async () => {
+    const running = await openProbe('granted')
+    try {
+      await act(async () => { fire('window', 'pagehide') })
+      await act(async () => { fire('window', 'pageshow') })
+      await waitFor(() => /^scanning\|/.test(running.mounted.container.textContent))
+      assert.equal(running.probe.getUserMediaCalls, 2)
+      await act(async () => { fire('window', 'pageshow') })
+      await settle(30)
+      assert.equal(running.probe.getUserMediaCalls, 2, 'a pageshow with nothing to resume asks nothing')
     } finally {
       await running.mounted.unmount()
     }

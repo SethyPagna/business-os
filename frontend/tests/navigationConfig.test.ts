@@ -107,7 +107,8 @@ await runTest('destinations retain section permission gates and never expose uns
   // Owner, 6 Oct 2026: a product discount is a price change, so the Discounts tile needs Edit product and the price
   // action; a caller that cannot answer for actions is not offered it (asserted with real actions below).
   assert.deepEqual(ids('promotions', { products: 'review' }), [])
-  assert.deepEqual(ids('inventory', { inventory: 'full' }), ['products', 'sessions', 'issues'])
+  assert.deepEqual(ids('inventory', { inventory: 'full' }), [], 'Inventory Full no longer opens the count pages')
+  assert.deepEqual(ids('inventory', { inventory_checks: 'full' }), ['products', 'sessions', 'issues'])
 
   // Products' four sections are the compact navigation's only route into
   // them (N7). Three are gated on a per-ACTION grant inside the page (Stock

@@ -61,7 +61,7 @@ function load(rel) {
 }
 
 const app = load('routes/settings.ts').default
-const SETTINGS_USER = { id: 11, username: 'manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }
+const SETTINGS_USER = { id: 11, username: 'manager', permissions: JSON.stringify({ settings: true, business_identity: true, sales_policy: true, receipt_settings: true, portal_posts: true, portal_faq: true, portal_about: true, customer_portal: true }), role_code: null, role_permissions: null }
 const ADMIN = { id: 12, username: 'owner', permissions: JSON.stringify({ all: true }), role_code: null, role_permissions: null }
 
 async function save(user, body) {

@@ -137,7 +137,9 @@ await runTest('3. a money-v1 replacement is taken back through the same quote ->
   assert.deepEqual(log.map(([step]) => step), ['quote', 'prepare', 'submit', 'clear'], 'quote first, the frozen request next, and the request is cleared once it is recorded')
   assert.deepEqual(log[0][1], { saleId: 77, items: [{ sale_item_id: 501, quantity: 1 }, { sale_item_id: 502, quantity: 2 }] }, 'all outstanding units of both lines, on the REPLACEMENT sale')
   const prepared = (log[1][1] as { payload: Record<string, unknown>; quote: unknown })
-  assert.deepEqual(prepared.payload, { reason: 'Replacement items cancelled with the return', return_type: 'restock', notes: null, branch_id: 1,
+  const { client_request_id: takeBackId, ...preparedBody } = prepared.payload as Record<string, unknown>
+  assert.match(String(takeBackId), /^rtb-10_.{8,}$/, 'the take-back carries the mark the Worker finds the take-backs of an exchange by')
+  assert.deepEqual(preparedBody, { reason: 'Replacement items cancelled with the return', return_type: 'restock', notes: null, branch_id: 1,
     items: [{ sale_item_id: 501, quantity: 1, stock_action: 'restock', branch_id: 1 }, { sale_item_id: 502, quantity: 2, stock_action: 'restock', branch_id: 1 }] })
   assert.deepEqual(prepared.quote, { quote: true }, 'the request is frozen against the quote just read')
   assert.deepEqual((log[2][1] as { pending: unknown }).pending, { pending: true })
@@ -324,7 +326,7 @@ await runTest('4. the question is part of the shared review: no second confirm, 
   assert.match(canApply, /answersReady/, 'and for every answer to be ready')
   assert.doesNotMatch(canApply, /failed/, 'a failed look-up does not block Apply: the Worker names the lines itself')
   assert.match(modalSource, /const fresh = outstandingFromRefusal\(error\)\s+if \(fresh\) \{ absorb\(fresh\); setLookup\('ready'\) \}/, 'a refused cancel brings its lines into the dialog')
-  assert.match(modalSource, /composeCancelPayload\(\{ payload, outstanding, answers, taken: taken\.current, takeBack: canTakeBack \? takeBack : undefined, check: onCheck \}\)/, 'the request is composed by the tested helper, after the dry run')
+  assert.match(modalSource, /composeCancelPayload\(\{ payload, outstanding, answers, taken: taken\.current, takeBack: canTakeBack \? takeBack : undefined, validateTakeBack, check: onCheck \}\)/, 'the request is composed by the tested helper: the dry run and every take-back admission first')
   assert.match(modalSource, /await onApply\(payload\)\s+onClose\(\)/, 'the dialog closes only after the cancel is recorded')
 })
 
@@ -335,6 +337,7 @@ await runTest('4. the page wires the look-up to the return\'s fresh detail and t
   assert.match(pageSource, /canTakeBack=\{canAddReturn\}/)
   assert.match(pageSource, /loadOutstanding=\{loadReplacementOutstanding\}/)
   assert.match(pageSource, /takeBack=\{takeBackReplacementLines\}/)
+  assert.match(pageSource, /validateTakeBack=\{validateReplacementLines\}/, 'every take-back is asked before the first is made (6.0.966)')
   assert.match(pageSource, /legacyIdentity: \(returnId, signature\) =>/, 'a legacy take-back keeps one request identity per choice')
   const transportSource = read('..', 'src', 'api', 'returnsTransport.ts')
   assert.match(transportSource, /return apiFetch\('POST', '\/api\/returns\/bulk', payload\)/, 'the cancel is still the one grouped request')

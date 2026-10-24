@@ -54,10 +54,10 @@ for (const [name, language] of [['English', en], ['Khmer', km]] as const) {
 }
 
 for (const [name, language] of [['English', en], ['Khmer', km]] as const) {
-  await test(`${name} user detail: a role with Settings Full also reads Full in the Website Editor and the Library, which the Worker includes`, async () => {
+  await test(`${name} user detail: a role reads Full in the Website Editor and the Library only for the grants it stores; Settings Full adds neither`, async () => {
     const props = {
       user: { id: 8, name: 'Sok', username: 'sok', role_id: 4, is_active: 1, permissions: '{}' },
-      roles: [{ id: 4, name: 'Manager', permissions: JSON.stringify({ settings: true }) }],
+      roles: [{ id: 4, name: 'Manager', permissions: JSON.stringify({ settings: true, customer_portal: true, portal_posts: true, portal_faq: true, portal_about: true, library: true }) }],
       t: pack(language),
     }
     const surface = await harness.mount({ component: 'components/users/UserDetailSheet.tsx', props, app: { t: pack(language) }, doubles: {} })

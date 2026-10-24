@@ -78,7 +78,7 @@ assert.match(editor, /if \(toggled === perms\) return/, 'a refused toggle does n
 // The access grid draws the chip; the lock decision lives in the pure summary model so the editor cannot drift from it.
 const summary = readFileSync(new URL('../src/components/users/permissionSummary.ts', import.meta.url), 'utf8')
 assert.match(summary, /const viewLocked = outcome !== 'block' && isViewImpliedByWrite\(/, 'the View chip locks only when the level offers it')
-assert.match(summary, /canToggle: !blocked && !viewLocked && !setBy/, 'a locked chip cannot be toggled')
+assert.match(summary, /canToggle: !blocked && !viewLocked/, 'a locked chip cannot be toggled')
 assert.match(editor, /disabled=\{!chip\.canToggle\}/, 'the editor disables the chip the model locks')
 assert.match(editor, /chip\.viewLocked\) parts\.push\(translate\('perm_view_implied'/, 'the locked chip carries the tooltip')
 {

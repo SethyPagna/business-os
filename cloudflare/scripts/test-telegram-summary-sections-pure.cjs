@@ -564,7 +564,7 @@ async function settingsRouteEnforcesTheSwitchRule() {
     return mod.exports
   }
   const app = load('routes/settings.ts').default
-  const manager = { id: 21, username: 'synthetic-manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }
+  const manager = { id: 21, username: 'synthetic-manager', permissions: JSON.stringify({ settings: true, business_identity: true, sales_policy: true, receipt_settings: true, portal_posts: true, portal_faq: true, portal_about: true, customer_portal: true }), role_code: null, role_permissions: null }
   const save = async (body) => {
     sessionUser = manager
     const res = await app.request('/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: db }, { waitUntil() {}, passThroughOnException() {} })

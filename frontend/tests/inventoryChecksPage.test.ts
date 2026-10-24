@@ -7,6 +7,8 @@ import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
+// Counting is its own grant and so is every field it shows (owner, 21 Oct 2026): Inventory Full no longer implies them.
+const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true }
 
 const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
 const uuidDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID')
@@ -50,7 +52,7 @@ let delayBootstrap = false
 const bootstrapReads: Array<{ params: Record<string, unknown>; resolve: (value: unknown) => void }> = []
 const response = () => ({ items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [{ product_id: 12, branch_id: 1, session_id: 'check-1', session_title: 'Test check', created_by: 7, reason: 'All-session issue reason', revision: 1, state: 'issue', counted_quantity: 37 }] })
 const app = {
-  user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_show_cost: false } as Record<string, boolean> },
+  user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_cost: false } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => SORT_WORDS[key] ?? key,
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
@@ -387,7 +389,7 @@ try {
   productTotal = 1
 
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')
-  app.user = { ...app.user, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, contacts: true } }
+  app.user = { ...app.user, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, contacts: true } }
   const beforeRanking = productRequests.length
   const ranking = await mount()
   assert.ok(productRequests.slice(beforeRanking).every(request => request.customerRanking === undefined), 'customer identities are not requested before explicit opt-in')
@@ -407,13 +409,13 @@ try {
   assert.ok(!ranking.text().includes('Opt-in customer identity'), 'toggle-off removes customer names while the next bounded request loads')
   await ranking.click(customersToggle())
   assert.ok(ranking.text().includes('Opt-in customer identity'))
-  app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, contacts: false } }
+  app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, contacts: false } }
   await ranking.render({})
   assert.equal(ranking.findAll(node => node.tagName === 'BUTTON' && (node.textContent.includes('top_customers') || node.getAttribute('aria-label') === 'top_customers')).length, 0, 'Contacts denial immediately removes customer ranking controls')
   assert.ok(!ranking.text().includes('Opt-in customer identity'))
   await ranking.unmount()
 
-  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true } }
+  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } }
   selected = { ...selected, progress: { total: 2, done: 0, issue: 1, unstarted: 1 } }
   memberOverride = [
     { ...observation, product_id: 901, state: 'issue', reason: 'Saved original issue', counted_quantity: 37, baseline_quantity: 19283, current_quantity: null, current_product_available: false, current_product_name: null, product_snapshot: { id: 901, name: 'Removed original', cost_price_usd: 913.27, selling_price_usd: 777.13 } },
@@ -441,7 +443,7 @@ try {
   await members.click(members.button('refresh'))
   assert.equal(members.findAll(node => node.getAttribute('data-inventory-check-row') !== null).length, 2, 'all removed originals remain visible with zero current products')
   assert.equal(members.findAll(node => node.getAttribute('data-check-action') !== null).length, 0)
-  app.user = { ...app.user, id: 8, permissions: { inventory: true, inventory_checks: true, inventory_check_show_stock: false, inventory_check_show_price: false, inventory_check_show_cost: false } }
+  app.user = { ...app.user, id: 8, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_stock: false, inventory_check_show_price: false, inventory_check_show_cost: false } }
   await members.render({})
   await openSession(members)
   assert.ok(members.text().includes('Removed original'))
@@ -450,7 +452,7 @@ try {
   await members.unmount()
   productOverride = null
   memberOverride = null
-  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true } }
+  app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } }
   selected = { ...selected, started_at: '2026-10-19 18:05:00', progress: undefined, branch_name: null, creator_name: undefined }
   for (const language of ['en', 'km']) {
     const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>

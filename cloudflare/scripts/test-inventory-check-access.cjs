@@ -71,15 +71,16 @@ check('page/action authority, explicit false and independent aggregate grants', 
     assert.equal(access.canCheck, false)
     assert.ok(Object.values(access.fields).every(value => value === false))
   }
-  const full = worker.getInventoryCheckAccess(user({ inventory: true }))
+  const full = worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_sales: true, inventory_check_show_customers: true }))
+  for (const inventory of [true, 'review']) assert.equal(worker.getInventoryCheckAccess(user({ inventory })).canView, false, 'Inventory Full or Review no longer opens counting')
   assert.ok(full.canView && full.canCheck && full.fields.sales && full.fields.customers)
   assert.equal(full.fields.cost, false)
   assert.equal(full.canViewCustomerDetails, false)
-  const actor = user({ inventory: true, inventory_check_show_stock: true }, { inventory_check_show_stock: false, 'inventory:check': false })
+  const actor = user({ inventory_checks: true, inventory_check_show_stock: true }, { inventory_check_show_stock: false, 'inventory_checks:check': false })
   assert.equal(worker.getInventoryCheckAccess(actor).fields.stock, false)
   assert.equal(worker.getInventoryCheckAccess(actor).canCheck, false)
-  assert.equal(worker.getInventoryCheckAccess(user({ inventory: true, 'inventory:view': false })).canView, false)
-  assert.equal(worker.getInventoryCheckAccess(user({ inventory: 'review', inventory_check_show_cost: true, product_cost_view: true })).fields.cost, true)
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:view': false })).canView, false)
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, true)
 })
 const product = {
   id: 4, name: 'Example', image_path: '/image.webp', unit: 'piece', parent_id: 2, is_group: 0,
@@ -91,7 +92,7 @@ const product = {
   branch_stock_json: '[{"quantity":12}]', audit: { cost: 3 }, arbitrary: { secrets: [1] },
 }
 check('whitelist projection drops nested/account/PII and ungranted derived fields without mutating source', () => {
-  const actor = user({ inventory: 'review', inventory_check_show_price: true })
+  const actor = user({ inventory_checks: true, inventory_check_show_price: true })
   const output = worker.projectInventoryCheckProduct(product, worker.getInventoryCheckAccess(actor))
   assert.deepEqual(output, { id: 4, name: 'Example', image_path: '/image.webp', unit: 'piece', parent_id: 2, is_group: 0, selling_price_usd: 8, selling_price_khr: 32000, wholesale_price_usd: 7 })
   assert.equal(product.cost_price_usd, 3)
@@ -103,7 +104,7 @@ check('whitelist projection drops nested/account/PII and ungranted derived field
   assert.equal(all.stock_value_usd, 30)
   assert.equal(all.qty_sold, 8)
   assert.equal(all.customer_count, 5)
-  const partialStockValue = worker.projectInventoryCheckProduct(product, worker.getInventoryCheckAccess(user({ inventory: 'review', inventory_check_show_cost: true, product_cost_view: true })))
+  const partialStockValue = worker.projectInventoryCheckProduct(product, worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })))
   assert.equal('stock_value_usd' in partialStockValue, false, 'stock value requires both stock and cost')
   assert.deepEqual(worker.projectInventoryCheckProduct({ id: 4, name: { cost: 3 }, image_path: ['private'], stock_quantity: Infinity }, worker.getInventoryCheckAccess(user({}, {}, 'admin'))), { id: 4 })
 })
@@ -114,7 +115,7 @@ check('next expiry is projected for the received field only', () => {
   for (const permissions of [{}, { inventory_check_show_stock: true }, { inventory_check_show_received: false }]) assert.equal(Object.hasOwn(project(permissions), 'next_expiry_date'), false, JSON.stringify(permissions))
 })
 check('hidden field sort/filter inference is refused, including barcode search', () => {
-  const access = worker.getInventoryCheckAccess(user({ inventory: 'review' }))
+  const access = worker.getInventoryCheckAccess(user({ inventory_checks: true }))
   for (const [key, value] of [['stockState', 'low_stock'], ['brand', 'B'], ['category', 'A'], ['barcode', '123'], ['barcode', 'all'], ['sortBy', 'stock'], ['sortBy', 'qty_sold'], ['sortBy', 'customer_count'], ['sortBy', 'received_date'], ['sortBy', 'price'], ['sortBy', 'cost'], ['searchFields', 'barcode']]) {
     assert.throws(() => worker.validateInventoryCheckQuery({ [key]: value }, access), error => error.status === 403 && error.code === 'inventory_check_field_hidden', `${key}=${value}`)
   }

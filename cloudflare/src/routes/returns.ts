@@ -1358,6 +1358,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   if (occupiedRequestId != null) {
     return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
   }
+  // A request id 'rtb-<exchange return id>_...' marks a TAKE-BACK of that exchange (6.0.966): the cancel of the exchange finds its take-backs by this mark
+  // (lib/returnBulkAction.ts withFoundTakeBacks). The server only sets it for what it is: a return of the replacement sale of that completed exchange, with
+  // no replacement lines of its own. Anything else with the mark is refused, so an ordinary return can never be mistaken for a take-back.
+  if (clientRequestId.startsWith('rtb-')) {
+    const exchangeId = Number(/^rtb-(\d{1,12})_/.exec(clientRequestId)?.[1])
+    const owner = Number.isSafeInteger(exchangeId) && exchangeId > 0 && !(Array.isArray(body.replacement_items) && body.replacement_items.length)
+      ? await db.prepare("SELECT id FROM returns WHERE id=? AND replacement_sale_id=? AND COALESCE(status,'completed')='completed' AND COALESCE(return_scope,'customer')='customer'").get<{ id: number }>([exchangeId, requestedSaleId])
+      : undefined
+    if (!owner) return c.json({ error: 'This take-back does not belong to that exchange.', code: 'take_back_marker_invalid' }, 400)
+  }
 
   // A money-v1 return with replacement lines is the one-step exchange (owner, 22 Oct 2026). It reads once and writes set-based so a Free
   // invocation can carry it; everything it needs from here on lives in lib/returnExchangeCreate.ts.

@@ -79,7 +79,7 @@ const POSTS_ONLY = { id: 22, username: 'posts', permissions: JSON.stringify({ po
 // A signed-in account with no grant at all.
 const NO_GRANTS = { id: 23, username: 'cashier', permissions: JSON.stringify({}), role_code: null, role_permissions: null }
 // The broad Settings grant covers every settings bucket.
-const SETTINGS_HOLDER = { id: 24, username: 'manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }
+const SETTINGS_HOLDER = { id: 24, username: 'manager', permissions: JSON.stringify({ settings: true, business_identity: true, sales_policy: true, receipt_settings: true, portal_posts: true, portal_faq: true, portal_about: true, customer_portal: true }), role_code: null, role_permissions: null }
 
 async function save(user, body) {
   sessionUser = user
