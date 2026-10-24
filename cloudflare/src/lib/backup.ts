@@ -1223,10 +1223,17 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'transfer_operation_receipts', 'transfer_operation_members', 'stock_transfers',
 ] as const
 
+// Bundle members a document may legitimately LACK: a backup taken before the table existed. A backup always
+// carries them (the writer skips a table the database does not have yet); a restore of a document without
+// one does not refuse, it CLEARS the live table, because its rows describe the sales the restore is rolling
+// back. sale_payment_events (0271): after a Sales restore its rows would otherwise sit against sales whose
+// payments_version has gone back to 0, and the next money write's opening:<sale_id> event would collide.
+export const SALE_REPLAY_OPTIONAL_TABLES = ['sale_payment_events'] as const
+
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
-  if (SALE_REPLAY_RESTORE_BUNDLE.some((table) => requested.has(table))) {
-    for (const table of SALE_REPLAY_RESTORE_BUNDLE) requested.add(table)
+  if ([...SALE_REPLAY_RESTORE_BUNDLE, ...SALE_REPLAY_OPTIONAL_TABLES].some((table) => requested.has(table))) {
+    for (const table of [...SALE_REPLAY_RESTORE_BUNDLE, ...SALE_REPLAY_OPTIONAL_TABLES]) requested.add(table)
   }
   return requested
 }
@@ -1264,7 +1271,8 @@ function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlyS
   const restored = new Set([...liveTables].filter(table => documentTables.has(table)))
   if (restored.size === liveTables.size) return null
   const missing = new Set<string>()
-  if (SALE_REPLAY_RESTORE_BUNDLE.some(table => restored.has(table))) {
+  if ([...SALE_REPLAY_RESTORE_BUNDLE, ...SALE_REPLAY_OPTIONAL_TABLES].some(table => restored.has(table))) {
+    // An optional member the document lacks is cleared by the restore itself, so it is not a missing dependency.
     for (const table of SALE_REPLAY_RESTORE_BUNDLE) {
       if (liveTables.has(table) && !restored.has(table)) missing.add(table)
     }
@@ -1553,7 +1561,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // ledger describing stock the restored branch_stock no longer has. Refuse
   // unsafe dependency gaps below; report any unrelated omitted tables rather
   // than letting a scoped restore read as complete.
-  const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
+  // A document that restores the sales replay bundle but lacks an optional member (a pre-0271 backup) clears the
+  // live table in the delete plan below instead of leaving its rows against rolled-back sales.
+  const clearedOptionalTables = (SALE_REPLAY_OPTIONAL_TABLES as readonly string[]).filter((t) => liveSchema.tables.has(t) && !documentTables.has(t)
+    && SALE_REPLAY_RESTORE_BUNDLE.some((table) => documentTables.has(table)))
+  const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t) && !clearedOptionalTables.includes(t))
 
   // Recheck against the live schema even if the caller already validated the
   // document. This MUST precede progress callbacks and every DELETE/write.
@@ -1578,6 +1590,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   try {
     let statementCount = 0
     const deletes: D1PreparedStatement[] = []
+    for (const table of clearedOptionalTables) deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     for (const table of [...orderedTables].reverse()) {
       if (table === 'products') {
         // This is the existing snapshot-replacement path: child ledgers have

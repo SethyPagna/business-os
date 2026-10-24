@@ -204,7 +204,7 @@ async function main() {
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
-    const replayBundleTables = backup.BACKUP_TABLES.filter(table => backup.SALE_REPLAY_RESTORE_BUNDLE.includes(table))
+    const replayBundleTables = backup.BACKUP_TABLES.filter(table => backup.SALE_REPLAY_RESTORE_BUNDLE.includes(table) || backup.SALE_REPLAY_OPTIONAL_TABLES.includes(table))
     const replayBundleBefore = snap(replayBundleTables)
     const scopedCreated = await backup.createSectionBackup(f.env, ['products', 'sales', 'return_mutation_receipts', 'sale_record_events'], 'manual')
     const scopedDocument = JSON.parse(f.env.ASSETS._store.get(scopedCreated.key).body)
@@ -242,6 +242,30 @@ async function main() {
       'legacy backup omits 0127 columns so schema defaults restore 0/NULL without inference',
     )
 
+    // 0271 sale_payment_events rides the replay bundle as an OPTIONAL member: a document carrying it restores it, and a
+    // pre-0271 document (no such table) still restores and CLEARS the live ledger, so no event survives against rolled-back sales.
+    const event = (id) => f.sql.prepare(`INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,payment_method,payment_details,amount_paid_usd,exchange_rate,received_at)
+      VALUES(?,1,'in','collect','Cash','[{"method":"Cash","amount_usd":1,"amount_khr":0}]',1,4000,'2026-10-25 01:00:00')`).run(id)
+    const eventIds = () => f.sql.prepare('SELECT event_id FROM sale_payment_events ORDER BY id').all().map(row => row.event_id)
+    event('kept-before-backup')
+    const withEvents = await backup.createCloudflareBackup(f.env, 'manual')
+    assert.ok(JSON.parse(f.env.ASSETS._store.get(withEvents.key).body).tables.sale_payment_events, 'a backup of a post-0271 database carries the ledger')
+    event('written-after-backup')
+    assert.deepEqual(eventIds(), ['kept-before-backup', 'written-after-backup'])
+    await restoreOwned(f.env, withEvents.key)
+    assert.deepEqual(eventIds(), ['kept-before-backup'], 'a document with the ledger replaces it')
+    const pre0271 = structuredClone(JSON.parse(f.env.ASSETS._store.get(withEvents.key).body))
+    delete pre0271.tables.sale_payment_events
+    pre0271.summary.tableCount = Object.keys(pre0271.tables).length
+    pre0271.summary.rowCount = Object.values(pre0271.tables).reduce((n, t) => n + t.rows.length, 0)
+    const pre0271Key = 'backups/cloudflare/pre-0271-no-payment-events.json'
+    await f.env.ASSETS.put(pre0271Key, JSON.stringify(pre0271), { customMetadata: { format: document.format } })
+    const legacyValidation = await backup.validateCloudflareBackup(f.env, pre0271Key)
+    assert.equal(legacyValidation.restorable, true, 'a pre-0271 backup is still restorable')
+    await restoreOwned(f.env, pre0271Key)
+    assert.deepEqual(eventIds(), [], 'a pre-0271 document clears the live ledger instead of leaving events against rolled-back sales')
+    assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
+    console.log('PASS sale_payment_events restores from a document that carries it and is cleared by one that predates it')
     console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
 
     const dependencyOwner = await maintenance.beginMaintenance(f.env, { backupKey: 'dependency-fixture.json', startedBy: 'legacy restore fixture' })

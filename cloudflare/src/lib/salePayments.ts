@@ -31,6 +31,8 @@ import { exactDecimalRatio, financialCalculationUnits, formatScaledUnits, type F
 import {
   NOT_PAID_STATUS,
   PAID_STATUS_SHORTFALL_TOLERANCE_UNITS,
+  rateRatio,
+  recordedMoneyPrecisionVersion,
   recordedSaleOutstandingUsd,
   saleStoredState,
   type RecordedSaleMoney,
@@ -80,6 +82,7 @@ export type PaymentEventErrorCode =
   | 'payment_event_late_drawer'
   | 'payment_event_time_required'
   | 'payment_event_note_too_long'
+  | 'payment_event_link_mismatch'
 
 export class PaymentEventError extends Error {
   readonly code: PaymentEventErrorCode
@@ -121,6 +124,8 @@ export type BuildPaymentEventInput = {
   coversOperationId?: string | null
   operationId?: string | null
   reversesEventId?: string | null
+  /** The event this one reverses: its id and group link are inherited, and a conflicting explicit value is refused. */
+  reversedEvent?: { event_id: string; covers_operation_id: string | null }
   change?: { usd: number; khr: number; isActual: boolean; exchangeRate: number | null }
   /** Defaults to 1 (the money is in the drawer); a late record is always 0 and refuses an explicit 1. */
   drawerEffect?: 0 | 1
@@ -142,7 +147,16 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventIn
   if (input.direction !== 'in' && input.direction !== 'out') fail('payment_event_direction_invalid', 'A payment event is money in or money out.')
   if (input.direction === 'out' && input.origin !== 'undo' && input.origin !== 'correction') fail('payment_event_direction_invalid', 'Only an undo or a correction takes money out.')
   if ((input.origin === 'undo' && input.direction !== 'out') || (input.origin === 'redo' && input.direction !== 'in')) fail('payment_event_direction_invalid', 'An undo takes money out and a redo puts it back.')
-  const reverses = String(input.reversesEventId || '').trim() || null
+  const reversed = input.reversedEvent
+  const explicitReverses = String(input.reversesEventId || '').trim() || null
+  const explicitCovers = String(input.coversOperationId || '').trim() || null
+  const reversedId = reversed ? String(reversed.event_id || '').trim() || null : null
+  const reversedCovers = reversed ? String(reversed.covers_operation_id || '').trim() || null : null
+  const reverses = explicitReverses ?? reversedId
+  const covers = explicitCovers ?? reversedCovers
+  if (reversed && ((explicitReverses && explicitReverses !== reversedId) || (explicitCovers && explicitCovers !== reversedCovers))) {
+    fail('payment_event_link_mismatch', 'A reversal covers the same group as the event it reverses.')
+  }
   if (input.origin === 'undo' && !reverses) fail('payment_event_reversal_target_required', 'An undo names the event it reverses.')
   if (!input.tender.length) fail('payment_event_tender_required', 'A payment needs at least one tender row.')
   if (!String(input.receivedAt || '').trim()) fail('payment_event_time_required', 'A payment records when it was received.')
@@ -179,7 +193,7 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventIn
     sale_id: input.saleId,
     direction: input.direction,
     origin: input.origin,
-    covers_operation_id: String(input.coversOperationId || '').trim() || null,
+    covers_operation_id: covers,
     operation_id: String(input.operationId || '').trim() || null,
     reverses_event_id: reverses,
     payment_method: methods.join(' + '),
@@ -347,13 +361,18 @@ export type PaymentGroupTag = 'paid' | 'part_paid' | 'unpaid'
 export type PaymentAllocationGroup = {
   /** The sale_amendments.group_id of an addition; null is the POS checkout group (at most one). */
   id: string | null
-  /** What the group added to the sale: the sum of total_after - total_before over its amendments; the checkout group's own total. */
+  /**
+   * What the group added to the sale: the sum of total_after - total_before over its amendments; the checkout group's own total.
+   * A lowering group is negative: it is credit, not a free group (see allocatePaymentsToGroups).
+   */
   amountUsd: FinancialDecimalInput
 }
 
 export type PaymentAllocationEvent = PaymentEventMoney & {
+  event_id?: string | null
   covers_operation_id?: string | null
-  exchange_rate: unknown
+  /** An out event that names the event it reverses inherits that event's group when it carries no link of its own. */
+  reverses_event_id?: string | null
 }
 
 export type PaymentAllocationResult = {
@@ -362,48 +381,69 @@ export type PaymentAllocationResult = {
   unallocatedUsd: number
 }
 
-/** An event's money in dollar units at its own rate: dollars plus riel / rate, half-up. */
-function usdEquivalentUnits(event: PaymentAllocationEvent): bigint {
-  const usd = financialCalculationUnits(Number(event.amount_paid_usd) || 0)
-  const khr = financialCalculationUnits(Number(event.amount_paid_khr) || 0)
-  if (khr === 0n) return usd
-  const { numerator, denominator } = exactDecimalRatio(Number(event.exchange_rate))
-  return usd + (2n * khr * denominator + numerator) / (2n * numerator)
-}
+/** Round a non-negative scaled figure (calculation units times the rate numerator) to dollar units, half-up. */
+const scaledToUnits = (scaled: bigint, numerator: bigint): bigint => (2n * scaled + numerator) / (2n * numerator)
 
 /**
  * Which group of a sale each payment paid, so every line can read Paid, Part paid or Unpaid without a
  * stored flag that could drift from the money (a flag per line would be a second ledger).
  *   1. Money an event is linked to (covers_operation_id) goes to that group first; anything above what
  *      the group needs, and linked money of a group the caller did not list, joins the shared pool.
+ *      An out event that names the event it reverses (reverses_event_id) takes that event's link when it
+ *      has none; a reversal naming an event that is not in the list is refused, not guessed.
  *   2. The shared pool is the unlinked money (checkout, later payments) net of unlinked money paid out,
- *      plus the debt returns lowered ("a return lowers the debt first").
+ *      plus the debt returns lowered ("a return lowers the debt first") and the credit of lowering groups
+ *      (a negative amount: the sale owes less, so the money that would have paid it pays the others).
  *   3. The pool pays the POS group first, then the other groups oldest first (the order given).
- * A group is Paid when it is covered within half a cent, Part paid when some money reached it, else Unpaid.
+ * ONE BASIS WITH THE STATUS: riel converts at the SALE's rate and precision version (the same rateRatio
+ * deriveSalePaymentState's coverage runs on), and everything is compared as exact integers scaled by the
+ * rate, so a sale the status calls Completed never shows a Part paid line. A group is Paid when nothing
+ * is owed on it, or when the whole sale is covered within half a cent (the tolerance is the sale's, taken
+ * once: three groups each short $0.004 are $0.012 short and none of them is Paid); Part paid when some
+ * money reached it; else Unpaid.
+ * Throws on an unreadable sale rate, like the status.
  */
 export function allocatePaymentsToGroups(input: {
+  sale: RecordedSaleMoney
   groups: readonly PaymentAllocationGroup[]
   events: readonly PaymentAllocationEvent[]
   debtLoweredUsd?: FinancialDecimalInput
 }): PaymentAllocationResult {
+  const { numerator, denominator } = rateRatio(input.sale.exchange_rate as FinancialDecimalInput, recordedMoneyPrecisionVersion(input.sale))
   const groups = input.groups
-  if (groups.filter((group) => group.id === null).length > 1) throw new RangeError('A sale has one POS checkout group.')
-  if (new Set(groups.filter((group) => group.id !== null).map((group) => group.id)).size !== groups.filter((group) => group.id !== null).length) {
-    throw new RangeError('Group ids must be unique.')
-  }
+  const listed = groups.filter((group) => group.id !== null)
+  if (groups.length - listed.length > 1) throw new RangeError('A sale has one POS checkout group.')
+  if (new Set(listed.map((group) => group.id)).size !== listed.length) throw new RangeError('Group ids must be unique.')
+
+  let credit = 0n
   const need = groups.map((group) => {
     const units = financialCalculationUnits(group.amountUsd)
-    return units > 0n ? units : 0n
+    if (units < 0n) credit += -units * numerator
+    return units > 0n ? units * numerator : 0n
   })
   const known = new Map<string, number>()
   groups.forEach((group, index) => { if (group.id !== null) known.set(group.id, index) })
+  const byId = new Map<string, PaymentAllocationEvent>()
+  for (const event of input.events) if (event.event_id) byId.set(String(event.event_id), event)
+
+  const linkOf = (event: PaymentAllocationEvent): string | null => {
+    if (event.covers_operation_id != null && event.covers_operation_id !== '') return String(event.covers_operation_id)
+    if (event.reverses_event_id) {
+      const target = byId.get(String(event.reverses_event_id))
+      if (!target) throw new RangeError('A payment event reverses an event that is not in the list.')
+      return target.covers_operation_id != null && target.covers_operation_id !== '' ? String(target.covers_operation_id) : null
+    }
+    return null
+  }
 
   const paid = groups.map(() => 0n)
   const linked = groups.map(() => 0n)
-  let pool = financialCalculationUnits(input.debtLoweredUsd ?? 0)
+  let pool = financialCalculationUnits(input.debtLoweredUsd ?? 0) * numerator + credit
   for (const event of input.events) {
-    const signed = (event.direction === 'out' ? -1n : 1n) * usdEquivalentUnits(event)
-    const index = event.covers_operation_id != null ? known.get(String(event.covers_operation_id)) : undefined
+    const money = financialCalculationUnits(Number(event.amount_paid_usd) || 0) * numerator + financialCalculationUnits(Number(event.amount_paid_khr) || 0) * denominator
+    const signed = event.direction === 'out' ? -money : money
+    const link = linkOf(event)
+    const index = link !== null ? known.get(link) : undefined
     if (index === undefined) pool += signed
     else linked[index] += signed
   }
@@ -424,12 +464,19 @@ export function allocatePaymentsToGroups(input: {
     pool -= take
   }
 
+  const owed = groups.map((_, index) => need[index] - paid[index])
+  const saleCovered = owed.reduce((sum, value) => sum + value, 0n) <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
   return {
     groups: groups.map((group, index) => {
-      const owed = need[index] - paid[index]
-      const tag: PaymentGroupTag = owed <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS ? 'paid' : paid[index] > 0n ? 'part_paid' : 'unpaid'
-      return { id: group.id, amountUsd: unitsToNumber(need[index]), paidUsd: unitsToNumber(paid[index]), owedUsd: unitsToNumber(owed), tag }
+      const tag: PaymentGroupTag = saleCovered || owed[index] === 0n ? 'paid' : paid[index] > 0n ? 'part_paid' : 'unpaid'
+      return {
+        id: group.id,
+        amountUsd: unitsToNumber(scaledToUnits(need[index], numerator)),
+        paidUsd: unitsToNumber(scaledToUnits(paid[index], numerator)),
+        owedUsd: unitsToNumber(scaledToUnits(owed[index], numerator)),
+        tag,
+      }
     }),
-    unallocatedUsd: unitsToNumber(pool),
+    unallocatedUsd: unitsToNumber(scaledToUnits(pool, numerator)),
   }
 }

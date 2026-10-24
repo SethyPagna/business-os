@@ -164,7 +164,7 @@ export type SaleCoverageInput = {
  * refuses it for V1): with a zero numerator every tender would "cover" every
  * total, which is the one answer this formula must never give by accident.
  */
-function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVersion: number | undefined): { numerator: bigint; denominator: bigint } {
+export function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVersion: number | undefined): { numerator: bigint; denominator: bigint } {
   if (moneyPrecisionVersion === 1) return exactDecimalRatio(exchangeRate)
   const numerator = financialCalculationUnits(exchangeRate)
   if (numerator <= 0n) throw new RangeError('The exchange rate must be positive.')
@@ -311,6 +311,11 @@ function statusWord(status: unknown): string {
   return String(status || 'completed').trim().toLowerCase()
 }
 
+/** The precision basis a stored sale was written with: 1 for recorded V1 money, 0 for legacy. */
+export function recordedMoneyPrecisionVersion(sale: RecordedSaleMoney): 0 | 1 {
+  return Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0
+}
+
 /**
  * A stored sale's money as the coverage formula takes it, read on the basis
  * the sale was written with: V1 when it carries recorded V1 money (the same
@@ -325,7 +330,7 @@ function recordedTender(sale: RecordedSaleMoney): AmountTender {
     totalUsd: formatScaledUnits(financialCalculationUnits(storedAmount(sale.total_usd, false))
       - financialCalculationUnits(storedAmount(sale.refund_usd, true)), 4),
     exchangeRate: storedAmount(sale.exchange_rate, false),
-    moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
+    moneyPrecisionVersion: recordedMoneyPrecisionVersion(sale),
   }
 }
 
