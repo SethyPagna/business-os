@@ -61,12 +61,15 @@ async function main() {
       return { ret, s2: await h.one('SELECT * FROM sales WHERE id=?', ret.replacement_sale_id) }
     }
     // The replacement lines taken back, [from, to) of them, as one ordinary return of the replacement sale.
-    const takeBack = async (s2, from, to, key) => {
+    // A take-back is marked the way the dialog marks it: 'rtb-<exchange return id>_...' (the Worker finds an exchange's take-backs by it). { ordinary: true }
+    // makes the same return WITHOUT the mark -- an independent return of a replacement line at the till.
+    const takeBack = async (s2, from, to, key, options = {}) => {
+      const exchangeId = Number((await h.one('SELECT id FROM returns WHERE replacement_sale_id=?', s2.id)).id)
       const lines = (await h.all('SELECT id,product_id FROM sale_items WHERE sale_id=? ORDER BY id', s2.id)).slice(from, to)
       const quote = await h.call('POST', '/api/returns/quote', { sale_id: s2.id, items: lines.map(line => ({ sale_item_id: line.id, quantity: 1 })) }, `quote ${key}`)
       if (quote.status !== 200) return { status: quote.status, body: quote.body }
       const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = quote.body
-      const request = { client_request_id: key, money_precision_version: 1, sale_id: s2.id, reason: 'CF take back', expected_quote: expected,
+      const request = { client_request_id: options.ordinary ? key : `rtb-${exchangeId}_${key}`, money_precision_version: 1, sale_id: s2.id, reason: options.reason || 'CF take back', expected_quote: expected,
         items: lines.map(line => ({ sale_item_id: line.id, product_id: line.product_id, quantity: 1, stock_action: 'restock', branch_id: 1 })) }
       const created = await h.call('POST', '/api/returns', request, `take back ${key}`)
       return { status: created.status, body: created.body, id: created.body.id, request }
@@ -371,6 +374,155 @@ async function main() {
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
         assert.equal(cancelledShelf, completedShelf - 1, 'cancelling takes the take-back off the shelf again')
         assert.deepEqual([undoneStatus, undoneShelf, redoneStatus], ['completed', completedShelf, 'cancelled'])
+      })
+    }
+
+    // ---- 7. the order the dialog really uses: a quote is bound to the replacement sale's revision (6.0.966 review P1-1) ----------------------------------------
+    // The dialog asks every admission first (a quote per step, writing nothing), then makes the steps. A quote read BEFORE step 1 is stale for step 2: step 1
+    // moves the replacement sale's revision and the Worker refuses the stale one. So each step reads its own quote right before its create.
+    {
+      const x = await exchange(await makeSale([9810, 9812, 9813]), 3)
+      const lines = await h.all('SELECT id,product_id FROM sale_items WHERE sale_id=? ORDER BY id', x.s2.id)
+      const quoteLine = async (i, label) => {
+        const q = await h.call('POST', '/api/returns/quote', { sale_id: x.s2.id, items: [{ sale_item_id: lines[i].id, quantity: 1 }] }, label)
+        assert.equal(q.status, 200, JSON.stringify(q.body))
+        const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = q.body
+        return expected
+      }
+      const createLine = (i, key, expected) => h.call('POST', '/api/returns', { client_request_id: key, money_precision_version: 1, sale_id: x.s2.id, reason: 'CF take back', expected_quote: expected,
+        items: [{ sale_item_id: lines[i].id, product_id: lines[i].product_id, quantity: 1, stock_action: 'restock', branch_id: 1 }] }, `create ${key}`)
+      const validation0 = await quoteLine(0, 'validate 0')
+      const validation1 = await quoteLine(1, 'validate 1')
+      const step0 = await createLine(0, 'cf-order-0', validation0)
+      const staleStep1 = await createLine(1, 'cf-order-1', validation1)
+      const staleReturns = Number((await h.one('SELECT COUNT(*) AS n FROM returns WHERE sale_id=?', x.s2.id)).n)
+      const freshStep1 = await createLine(1, 'cf-order-1b', await quoteLine(1, 'fresh 1'))
+      const freshStep2 = await createLine(2, 'cf-order-2', await quoteLine(2, 'fresh 2'))
+      r.check(`a quote read before step 1 is refused for step 2 (${staleStep1.status} ${staleStep1.body.code}, nothing written); a quote read right before each create lands all three (${step0.status}, ${freshStep1.status}, ${freshStep2.status})`, () => {
+        assert.equal(step0.status, 200, JSON.stringify(step0.body))
+        assert.equal(staleStep1.status, 409)
+        assert.equal(staleStep1.body.code, 'customer_return_quote_stale')
+        assert.equal(staleReturns, 1)
+        assert.equal(freshStep1.status, 200, JSON.stringify(freshStep1.body))
+        assert.equal(freshStep2.status, 200, JSON.stringify(freshStep2.body))
+      })
+      const linked = [step0.body.id, freshStep1.body.id, freshStep2.body.id]
+      const done = await cancel(x.ret.id, 'cf-order-cancel', linked)
+      r.check(`...and the cancel links the three steps (${done.status}, ${statementsOf(`cancel ${x.ret.id}`)} statements)`, () => {
+        assert.equal(done.status, 200, JSON.stringify(done.body))
+        assert.ok(statementsOf(`cancel ${x.ret.id}`) <= H.FREE_QUERY_LIMIT)
+      })
+    }
+
+    // ---- 8. the Worker, not the dialog, knows which take-backs belong to the exchange (6.0.966 review P2-1) -------------------------------------------------------
+    // Cancelling an exchange links EVERY active return of its replacement sale, whether or not the request names it, and splits each one again, debt first.
+    // A dialog that was closed and reopened (it names none) must leave exactly the money a dialog that named them would.
+    {
+      const figures = async (x, takeBacks) => ({
+        takeBacks: await Promise.all(takeBacks.map(async id => { const row = await h.one('SELECT status,owed_reduction_usd,refund_currency,total_refund_usd FROM returns WHERE id=?', id); return [row.status, row.owed_reduction_usd, row.refund_currency, row.total_refund_usd] })),
+        exchange: (await h.one('SELECT status FROM returns WHERE id=?', x.ret.id)).status,
+        sale: await h.one('SELECT sale_status,payment_method,payment_details,amount_paid_usd,amount_paid_khr FROM sales WHERE id=?', x.s2.id),
+      })
+      const pair = async (skus, tag) => {
+        const x = await exchange(await makeSale(skus), skus.length)
+        const taken = []
+        for (let i = 0; i < skus.length - 1; i += 1) { const one = await takeBack(x.s2, i, i + 1, `cf-${tag}-take-${i}`); assert.equal(one.status, 200, JSON.stringify(one.body)); taken.push(one.id) }
+        return { x, taken }
+      }
+      const named = await pair([9813, 9814, 9815], 'named')
+      const omitted = await pair([9816, 9817, 9818], 'omitted')
+      const partial = await pair([9819, 9810, 9812], 'partial')
+      const namedDone = await cancel(named.x.ret.id, 'cf-named', named.taken)
+      const omittedDone = await cancel(omitted.x.ret.id, 'cf-omitted', [])
+      const partialDone = await cancel(partial.x.ret.id, 'cf-partial', partial.taken.slice(0, 1))
+      const fNamed = await figures(named.x, named.taken)
+      const fOmitted = await figures(omitted.x, omitted.taken)
+      const fPartial = await figures(partial.x, partial.taken)
+      r.check(`an exchange cancelled naming its two take-backs, naming none, and naming one of two: all ${namedDone.status}/${omittedDone.status}/${partialDone.status}`, () => {
+        for (const done of [namedDone, omittedDone, partialDone]) assert.equal(done.status, 200, JSON.stringify(done.body))
+      })
+      r.check('...the omitted take-backs are split again exactly like the named ones: owed (debt) and cash figures, currency, the exchange and the replacement sale all match', () => {
+        assert.deepEqual(fOmitted, fNamed)
+        assert.deepEqual(fPartial, fNamed)
+        assert.ok(fNamed.takeBacks.every(([status, owed]) => status === 'completed' && Number(owed) > 0), 'the refund became debt reduction (Not Paid), not cash: ' + JSON.stringify(fNamed.takeBacks))
+        assert.equal(fNamed.sale.sale_status, 'awaiting_payment')
+      })
+      // Undo of the cancel that named none moves the found take-backs with it.
+      const undone = await H.historyStep(h, omittedDone.body.actionHistoryId, 'undo', await generationOf(omittedDone.body.actionHistoryId), 'cf undo omitted')
+      const afterUndo = await Promise.all(omitted.taken.map(statusOf))
+      r.check(`...and undoing the cancel that named none (${undone.status}) cancels the take-backs it found: ${afterUndo.join(', ')}`, () => {
+        assert.equal(undone.status, 200, JSON.stringify(undone.body))
+        assert.deepEqual(afterUndo, omitted.taken.map(() => 'cancelled'))
+      })
+      // A request that gives NO answer is still asked about the units that remain: the found take-backs do not stand in for the choice.
+      const asked = await pair([9812, 9813, 9814], 'asked')
+      const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', asked.x.ret.id)
+      const refused = await h.call('POST', '/api/returns/bulk', { client_request_id: 'cf-asked', field: 'status', source: 'completed', target: 'cancelled',
+        items: [{ id: asked.x.ret.id, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null }] }, 'cancel unanswered')
+      r.check(`a cancel with no answer, take-backs present: still ${refused.status} ${refused.body.code} for the units left; the exchange stays completed`, () => {
+        assert.equal(refused.status, 409)
+        assert.equal(refused.body.code, 'return_cancel_replacement_choice_required')
+      })
+      assert.equal(await statusOf(asked.x.ret.id), 'completed')
+    }
+
+    // ---- 9. only TAKE-BACKS follow the cancel (6.0.966 delta review N1, N2) ------------------------------------------------------------------------------------------
+    // An ordinary return of a replacement line (a "Defective" cash refund made at the till days later) is not a take-back the cancel flow made: the cancel does
+    // not re-split it and the undo of the cancel does not cancel it. Take-backs are marked by the server-checked request id 'rtb-<exchange>_...'.
+    {
+      const x = await exchange(await makeSale([9814, 9815]), 2)
+      const ordinary = await takeBack(x.s2, 0, 1, 'cf-defective', { ordinary: true, reason: 'Defective' })
+      assert.equal(ordinary.status, 200, JSON.stringify(ordinary.body))
+      const shelfOf = async id => Number((await h.one('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=1', id)).quantity)
+      const ordinaryRow = async () => { const row = await h.one('SELECT status,reason,owed_reduction_usd,refund_currency,total_refund_usd FROM returns WHERE id=?', ordinary.id); return [row.status, row.reason, Number(row.owed_reduction_usd), row.refund_currency, Number(row.total_refund_usd)] }
+      const moneyOf = async () => ({ shelf: await shelfOf(9830), ordinary: await ordinaryRow() })
+      const before = await moneyOf()
+      const done = await cancel(x.ret.id, 'cf-defective-cancel', [])
+      const afterCancel = await moneyOf()
+      const label = (await h.one('SELECT label FROM action_history WHERE id=?', done.body.actionHistoryId)).label
+      const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId), 'cf undo defective')
+      const afterUndo = await moneyOf()
+      const redone = await H.historyStep(h, done.body.actionHistoryId, 'redo', await generationOf(done.body.actionHistoryId), 'cf redo defective')
+      const afterRedo = await moneyOf()
+      r.check(`an ordinary return of a replacement line: the cancel (${done.status}), its undo (${undone.status}) and redo (${redone.status}) leave it completed with its stock, cash refund and owed untouched`, () => {
+        assert.equal(done.status, 200, JSON.stringify(done.body))
+        assert.equal(undone.status, 200, JSON.stringify(undone.body))
+        assert.equal(redone.status, 200, JSON.stringify(redone.body))
+        assert.deepEqual([before.ordinary[0], before.ordinary[1], before.ordinary[2], before.ordinary[4]], ['completed', 'Defective', 0, 10], 'it starts as a plain cash refund')
+        assert.deepEqual(afterCancel, before)
+        assert.deepEqual(afterUndo, before)
+        assert.deepEqual(afterRedo, before)
+        assert.doesNotMatch(label, /taken back with it/, 'the action does not claim the ordinary return: ' + label)
+      })
+      // The mark is the server's to give: a marked request for anything that is not a return of that exchange's replacement sale is refused.
+      const other = await makeSale([9816])
+      const otherLine = (await h.all('SELECT id,product_id FROM sale_items WHERE sale_id=?', other.id))[0]
+      const quote = await h.call('POST', '/api/returns/quote', { sale_id: other.id, items: [{ sale_item_id: otherLine.id, quantity: 1 }] }, 'quote other')
+      const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = quote.body
+      const forged = await h.call('POST', '/api/returns', { client_request_id: `rtb-${x.ret.id}_forged`, money_precision_version: 1, sale_id: other.id, reason: 'forged', expected_quote: expected,
+        items: [{ sale_item_id: otherLine.id, product_id: otherLine.product_id, quantity: 1, stock_action: 'restock', branch_id: 1 }] }, 'forged mark')
+      const forgedGone = await h.one('SELECT COUNT(*) AS n FROM returns WHERE client_request_id=?', `rtb-${x.ret.id}_forged`)
+      r.check(`a return of another sale that claims to be a take-back is refused (${forged.status} ${forged.body.code}) and nothing is written`, () => {
+        assert.equal(forged.status, 400)
+        assert.equal(forged.body.code, 'take_back_marker_invalid')
+        assert.equal(forgedGone.n, 0)
+      })
+
+      // N2: a selection that holds an exchange that is already cancelled is not refused whole: the cancelled one is unchanged, the rest is cancelled.
+      const y = await exchange(await makeSale([9817, 9818]), 2)
+      const mark = await takeBack(y.s2, 0, 1, 'cf-mixed-take')
+      assert.equal(mark.status, 200, JSON.stringify(mark.body))
+      const first = await cancel(y.ret.id, 'cf-mixed-first', [mark.id])
+      const plain = await exchange(await makeSale([9819]), 1)
+      const itemFor = async (id, replacement) => { const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', id); return { id, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null, ...(replacement ? { replacement } : {}) } }
+      const mixed = await h.call('POST', '/api/returns/bulk', { client_request_id: 'cf-mixed', field: 'status', source: 'completed', target: 'cancelled', items: [await itemFor(y.ret.id), await itemFor(plain.ret.id, { return_ids: [] })] }, 'mixed')
+      const mixedStatus = [await statusOf(y.ret.id), await statusOf(plain.ret.id), await statusOf(mark.id)]
+      r.check(`a selection holding an already-cancelled exchange (with its take-back) and a live one: ${mixed.status}; the live one is cancelled, the cancelled one is unchanged`, () => {
+        assert.equal(first.status, 200, JSON.stringify(first.body))
+        assert.equal(mixed.status, 200, JSON.stringify(mixed.body))
+        assert.deepEqual(mixed.body.unchangedIds, [y.ret.id])
+        assert.deepEqual(mixed.body.changedIds, [plain.ret.id])
+        assert.deepEqual(mixedStatus, ['cancelled', 'cancelled', 'completed'])
       })
     }
   } finally {

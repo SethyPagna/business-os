@@ -137,7 +137,9 @@ await runTest('3. a money-v1 replacement is taken back through the same quote ->
   assert.deepEqual(log.map(([step]) => step), ['quote', 'prepare', 'submit', 'clear'], 'quote first, the frozen request next, and the request is cleared once it is recorded')
   assert.deepEqual(log[0][1], { saleId: 77, items: [{ sale_item_id: 501, quantity: 1 }, { sale_item_id: 502, quantity: 2 }] }, 'all outstanding units of both lines, on the REPLACEMENT sale')
   const prepared = (log[1][1] as { payload: Record<string, unknown>; quote: unknown })
-  assert.deepEqual(prepared.payload, { reason: 'Replacement items cancelled with the return', return_type: 'restock', notes: null, branch_id: 1,
+  const { client_request_id: takeBackId, ...preparedBody } = prepared.payload as Record<string, unknown>
+  assert.match(String(takeBackId), /^rtb-10_.{8,}$/, 'the take-back carries the mark the Worker finds the take-backs of an exchange by')
+  assert.deepEqual(preparedBody, { reason: 'Replacement items cancelled with the return', return_type: 'restock', notes: null, branch_id: 1,
     items: [{ sale_item_id: 501, quantity: 1, stock_action: 'restock', branch_id: 1 }, { sale_item_id: 502, quantity: 2, stock_action: 'restock', branch_id: 1 }] })
   assert.deepEqual(prepared.quote, { quote: true }, 'the request is frozen against the quote just read')
   assert.deepEqual((log[2][1] as { pending: unknown }).pending, { pending: true })

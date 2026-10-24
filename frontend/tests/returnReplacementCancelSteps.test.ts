@@ -107,14 +107,14 @@ await runTest('3. several exchanges together: one refused take-back leaves nothi
   await assert.rejects(composeCancelPayload({ payload: frozen(), outstanding, answers, taken, takeBack, check, validateTakeBack }), (error: { code?: string }) => error.code === 'customer_return_over_plan_budget')
   assert.deepEqual(order, ['check', 'validate 10:1001', 'validate 10:1002', 'validate 12:1201', 'validate 12:1202'], 'the cancel first, then every take-back; the refusal stops it before any is made')
   assert.equal(taken.size, 0, 'nothing is remembered because nothing was made')
-  // The same selection with every admission accepted makes them all, after the checks, and hands the quotes it read to the steps.
+  // The same selection with every admission accepted makes them all, after the checks. The admissions are a validation pass: no step is handed their answers.
   order.length = 0
-  const quotes: unknown[] = []
+  const handed: unknown[][] = []
   const accepted = await composeCancelPayload({ payload: frozen(), outstanding, answers, taken, check,
-    takeBack: async (o, lines, prepared) => { order.push(`make ${o.return_id}:${lines[0].id}`); quotes.push(prepared); return 900 + lines[0].id },
+    takeBack: async (o, lines, ...rest) => { order.push(`make ${o.return_id}:${lines[0].id}`); handed.push(rest); return 900 + lines[0].id },
     validateTakeBack: async (o, lines) => ({ quote: `${o.return_id}:${lines[0].id}` }) })
   assert.deepEqual(order, ['check', 'make 10:1001', 'make 10:1002', 'make 12:1201', 'make 12:1202'])
-  assert.deepEqual(quotes, [{ quote: '10:1001' }, { quote: '10:1002' }, { quote: '12:1201' }, { quote: '12:1202' }], 'each step reuses the quote its own admission read')
+  assert.deepEqual(handed, [[], [], [], []], 'a step reads its own quote right before its create')
   assert.deepEqual(accepted.items.map((item) => item.replacement), [{ return_ids: [1901, 1902] }, { return_ids: [1201, 1202].map((id) => 900 + id) }])
 })
 
@@ -171,21 +171,96 @@ await runTest('4. a frozen request left by an unseen outcome is resumed (same re
   }
 })
 
-await runTest('4. the quote the admission read is reused; validateTakeBack asks the quote only for a money-v1 sale and writes nothing', async () => {
+await runTest('4. a step quotes freshly right before its create; validateTakeBack asks the quote only for a money-v1 sale and writes nothing', async () => {
   const exchange = info(10, 77, 2)
   const log: string[] = []
   const deps = v1Deps({}, log)
   const quote = await steps.validateTakeBack(deps, exchange, exchange.lines)
   assert.deepEqual([quote, log], [{ quote: true }, ['quote']])
   log.length = 0
-  await takeBackReplacement(deps, exchange, exchange.lines, quote)
-  assert.deepEqual(log, ['prepare', 'submit {"fresh":true}', 'clear'], 'no second quote')
+  await takeBackReplacement(deps, exchange, exchange.lines)
+  assert.deepEqual(log, ['quote', 'prepare', 'submit {"fresh":true}', 'clear'], 'the quote is read again for the create, never carried over from the validation')
   const legacy = info(12, 78, 1, { money_precision_version: 0 })
   log.length = 0
   assert.equal(await steps.validateTakeBack(deps, legacy, legacy.lines), null, 'a legacy replacement sale has no quote to ask')
   assert.deepEqual(log, [])
   await assert.rejects(steps.validateTakeBack(deps, exchange, [{ ...line(1), sale_item_id: null }]), (error: { code?: string }) => error.code === 'return_v1_review_required')
   await assert.rejects(steps.validateTakeBack(deps, exchange, []), (error: { code?: string }) => error.code === 'return_v1_review_required')
+})
+
+// ---- the Worker's revision rule, as a stub ------------------------------------------------------------------------------------------------------------
+// A money-v1 quote is bound to the replacement sale's revision, and every return of that sale moves it (the Worker answers 409 customer_return_quote_stale to
+// a create whose quote is not the current one: routes/returns.ts, the expected_quote comparison). This stub enforces exactly that, so the order the dialog uses
+// is run against the rule that broke 6.0.966's first screen.
+function revisionStub(options: { failSubmitAt?: number; bumpBehind?: () => boolean } = {}) {
+  const state = { revision: 8, made: [] as number[], saved: null as { bodyJson: string } | null, submits: 0, quotes: 0, requestIds: [] as string[] }
+  const deps: TakeBackDeps = {
+    userId: 7, reason: 'r',
+    getReturnQuoteV1: async () => { state.quotes += 1; return { sale_revision: state.revision } },
+    prepareReturnCreateV1: async (_actor, payload, quote) => {
+      if (state.saved) throw Object.assign(new Error('pending'), { code: 'return_v1_pending' })
+      const body = { client_request_id: `req-${state.requestIds.length + 1}`, sale_id: 77, items: (payload as { items: unknown[] }).items, expected_quote: quote }
+      state.requestIds.push(body.client_request_id)
+      state.saved = { bodyJson: JSON.stringify(body) }
+      return state.saved
+    },
+    submitReturnCreateV1: async (_actor, pending) => {
+      state.submits += 1
+      const body = JSON.parse((pending as { bodyJson: string }).bodyJson) as { expected_quote: { sale_revision: number } }
+      if (options.failSubmitAt === state.submits) throw Object.assign(new Error('offline'), { code: 'return_v1_unavailable' })
+      if (body.expected_quote.sale_revision !== state.revision) throw Object.assign(new Error('stale'), { code: 'customer_return_quote_stale', returnV1QuoteRejected: true })
+      state.revision += 4
+      state.made.push(state.made.length + 1)
+      return { id: 1000 + state.made.length }
+    },
+    clearPendingReturnCreateV1: async () => { state.saved = null },
+    loadPendingReturnCreateV1: () => state.saved,
+    createReturn: async () => ({ id: 1 }),
+    legacyIdentity: (returnId, signature) => ({ client_request_id: `c-${returnId}-${signature.length}`, return_number: 'RET' }),
+  }
+  return { state, deps }
+}
+// Whatever the dialog hands a step beyond (outstanding, lines) is forwarded, so a build that carries a quote across steps would be caught here.
+const stubTakeBack = (deps: TakeBackDeps) => (o: ReplacementOutstanding, lines: ReplacementLine[], ...rest: unknown[]) => (takeBackReplacement as (...args: unknown[]) => Promise<number>)(deps, o, lines, ...rest)
+
+await runTest('5. Free, 3 lines, the dialog\'s real order against the revision rule: every admission first, then each step quotes freshly and all three land in ONE Apply', async () => {
+  const exchange = info(10, 77, 3)
+  const { state, deps } = revisionStub()
+  const taken = new Map<number, TakenBack>()
+  const payload = await composeCancelPayload({ payload: frozen(), outstanding: new Map([[10, exchange]]), answers: new Map([[10, everything(exchange)]]), taken,
+    check: async () => ({ takeBackPerLine: true }), validateTakeBack: (o, lines) => steps.validateTakeBack(deps, o, lines), takeBack: stubTakeBack(deps) })
+  assert.deepEqual(state.made, [1, 2, 3], 'three steps landed')
+  assert.equal(state.revision, 8 + 12)
+  assert.equal(state.quotes, 6, 'three validation quotes, three fresh quotes')
+  assert.deepEqual(payload.items[0].replacement, { return_ids: [1001, 1002, 1003] })
+})
+
+await runTest('5. a step whose outcome was not seen keeps its request id on retry (the create did not land, the quote is still current)', async () => {
+  const exchange = info(10, 77, 3)
+  const { state, deps } = revisionStub({ failSubmitAt: 2 })
+  const taken = new Map<number, TakenBack>()
+  const base = { payload: frozen(), outstanding: new Map([[10, exchange]]), answers: new Map([[10, everything(exchange)]]), taken, check: async () => ({ takeBackPerLine: true }), takeBack: stubTakeBack(deps) }
+  await assert.rejects(composeCancelPayload(base), /offline/)
+  assert.deepEqual(state.made, [1], 'step one landed')
+  assert.ok(state.saved, 'step two left its frozen request')
+  const quotesBefore = state.quotes
+  const done = await composeCancelPayload({ ...base, payload: frozen() })
+  assert.deepEqual(state.made, [1, 2, 3])
+  assert.deepEqual(state.requestIds, ['req-1', 'req-2', 'req-3'], 'step two kept req-2: it was resubmitted, not re-prepared')
+  assert.equal(state.quotes - quotesBefore, 1, 'only step three needed a new quote')
+  assert.deepEqual(done.items[0].replacement, { return_ids: [1001, 1002, 1003] })
+})
+
+await runTest('5. a frozen request made stale (the sale moved) is refused, dropped, and the step is quoted and made again; no stale body is ever resent', async () => {
+  const exchange = info(10, 77, 2)
+  const { state, deps } = revisionStub({ failSubmitAt: 1 })
+  await assert.rejects(takeBackReplacement(deps, exchange, [exchange.lines[0]]), /offline/)
+  assert.ok(state.saved)
+  state.revision += 4 // another return of the sale landed meanwhile
+  const id = await takeBackReplacement(deps, exchange, [exchange.lines[0]])
+  assert.equal(id, 1001)
+  assert.equal(state.saved, null)
+  assert.deepEqual(state.requestIds, ['req-1', 'req-2'], 'a new request id: the refused one never landed')
 })
 
 if (failed > 0) process.exitCode = 1
