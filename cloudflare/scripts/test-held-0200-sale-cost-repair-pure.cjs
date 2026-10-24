@@ -421,15 +421,24 @@ const mixedAdditiveUnread = (text, repairText) => {
 // SELECT CASE ... json_extract assertions. It changes no row and no column the
 // repair reads or writes, so both orders agree. Any other statement fails it.
 const schemaOnlyUnread = (text, repairText) => {
-  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
   const named = namedIn(repairText)
+  // 0271 (lane 6.0.972): a NEW ledger table also carries guard triggers (append-only, revision bump). They are inert in both
+  // orders: the file inserts no row, so no trigger fires inside it. Accepted only on a table this file creates and the repair never names.
+  const created = new Set([...sqlCode(text).matchAll(/\bCREATE TABLE (?:IF NOT EXISTS )?(\w+) \(/gi)].map((m) => m[1].toLowerCase()))
+  let triggersOk = true
+  const withoutTriggers = sqlCode(text).replace(/\bCREATE TRIGGER \w+\s+(?:BEFORE|AFTER)\s+(?:INSERT|UPDATE|DELETE)\s+ON\s+(\w+)\b[\s\S]*?\bEND\s*;/gi, (_all, table) => {
+    if (!created.has(table.toLowerCase()) || named(table)) triggersOk = false
+    return ' '
+  })
+  if (!triggersOk) return false
+  const statements = withoutTriggers.split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
   let added = 0
   for (const statement of statements) {
     let match
     if ((match = /^ALTER TABLE \w+ ADD COLUMN (\w+) /i.exec(`${statement} `))) {
       if (named(match[1])) return false
       added++
-    } else if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
+    } else if ((match = /^CREATE TABLE (?:IF NOT EXISTS )?(\w+) \(/i.exec(statement))) {
       if (named(match[1])) return false
     } else if (!/^CREATE (UNIQUE )?INDEX /i.test(statement)
       && !(/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
@@ -929,6 +938,19 @@ check('held: outside deploy chain, after dependencies including0195; independent
     for (const wrong of [`${tags}\nUPDATE sales SET return_state = 'full';`, `${tags}\nALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`,
       `${tags}\nCREATE TABLE IF NOT EXISTS sale_items (id INTEGER);`, `${tags}\nSELECT CASE WHEN (SELECT 1) THEN 1 ELSE json_extract('[]','$[x]') END; DELETE FROM sale_items;`,
       'CREATE INDEX i ON sale_items(id);']) assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  }
+  if (chain.includes('0271_sale_payment_events.sql')) {
+    const events = chainText('0271_sale_payment_events.sql')
+    assert.ok(schemaOnlyUnread(events, migrationText), 'control: the schema-only 0271 (new ledger table, its guard triggers) is independent')
+    for (const wrong of [`${events}
+UPDATE sales SET payments_version = 1;`, `${events}
+INSERT INTO sale_payment_events(event_id) VALUES('x');`,
+      `${events}
+CREATE TRIGGER sale_items_t AFTER INSERT ON sale_items BEGIN SELECT 1; END;`,
+      `${events}
+CREATE TRIGGER sales_t AFTER UPDATE ON sales BEGIN SELECT 1; END;`, `${events}
+ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
+      assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
   }
   const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
   if (chain.includes(feeIndexes)) {
