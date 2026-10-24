@@ -64,6 +64,8 @@ CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id I
  payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
  change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,
  exchange_rate REAL NOT NULL, drawer_effect INTEGER NOT NULL DEFAULT 1, received_at TEXT NOT NULL, branch_id INTEGER, cashier_id INTEGER);
+CREATE INDEX idx_sale_payment_events_received ON sale_payment_events(received_at, branch_id);
+CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
  label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
@@ -95,8 +97,10 @@ INSERT INTO fees(id,created_at,branch_id,sale_id,fee_type,label,amount_usd,amoun
  (7,'2026-09-06 01:59:59',2,NULL,'expense','Before opening',55,0,7);
 `)
 
+const seen = []
 const db = {
   prepare(query) {
+    seen.push(query)
     const bind = (params = {}) => {
       const values = []
       const text = query.replace(/@(\w+)/g, (_, key) => { values.push(params[key] ?? null); return '?' })
@@ -495,6 +499,103 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   const tendersB = await recon.shiftSaleTenders({}, B, NOW, config)
   assert.deepEqual(tendersB, [[SALE_V1, 30, 0, 0, 0], [34, 9, 0, 0, 0]], 'shift B fingerprint: one entry per version 1 sale that received money in B')
   const tendersA = await recon.shiftSaleTenders({}, A, NOW, config)
-  assert.deepEqual(tendersA, [[SALE_V1, 10, 0, 0, 0], [31, 0, 0, 0, 0], [32, 0, 12000, 20, 0]], 'shift A: the cancelled sale is a zero entry, sale 33 received nothing inside A')
+  assert.deepEqual(tendersA, [[SALE_V1, 10, 0, 0, 0], [31, 0, 0, 0, 0], [32, 0, 12000, 20, 0], [33, 0, 0, 0, 0], [34, 0, 0, 0, 0]],
+    'shift A: every version 1 sale rung in A keeps its entry (E1): the cancelled sale and sale 34 (collected later) are zeros, sale 33 received nothing inside A')
   console.log('PASS version 1: the per-sale fingerprint follows received_at')
+
+  // --- 5. review exceptions E1-E5 (lane 6.0.974) ------------------------------
+  const salePayments = load('lib/salePayments.ts', { './financialPrecision': financialPrecision, './saleStatusResolution': load('lib/saleStatusResolution.ts', { './financialPrecision': financialPrecision }) })
+  const openingInsert = sql.prepare(`INSERT INTO sale_payment_events(sale_id,direction,origin,payment_method,payment_details,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
+    change_is_actual,change_exchange_rate,exchange_rate,drawer_effect,received_at,branch_id,cashier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  const insertRaw = sql.prepare(`INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,payment_details,amount_paid_usd,amount_paid_khr,total_usd,exchange_rate)
+    VALUES (?,?,?,?,?,?,?,?,?,?,4000)`)
+  const convert = (saleId) => {
+    // What S4's first money write does to a version 0 sale: its opening event, then payments_version 1.
+    const row = sql.prepare('SELECT * FROM sales WHERE id = ?').get(saleId)
+    const opening = salePayments.buildOpeningPaymentEvent(row)
+    if (opening) openingInsert.run(opening.sale_id, opening.direction, opening.origin, opening.payment_method, opening.payment_details, opening.amount_paid_usd, opening.amount_paid_khr,
+      opening.change_usd, opening.change_khr, opening.change_is_actual, opening.change_exchange_rate, opening.exchange_rate, opening.drawer_effect, opening.received_at, opening.branch_id, opening.cashier_id)
+    sql.prepare('UPDATE sales SET payments_version = 1 WHERE id = ?').run(saleId)
+    return opening
+  }
+  const all = async (shift) => JSON.stringify([await recon.shiftCashSales({}, shift, NOW, config), await recon.shiftSaleTenders({}, shift, NOW, config)])
+  const day = (d, userId, extra = {}) => ({ scope_mode: 'per_account', user_id: userId, branch_id: 7, opened_at: `2026-09-${d}T02:00:00.000Z`, closed_at: `2026-09-${d}T06:00:00.000Z`,
+    opening_float_usd: 0, opening_float_khr: 0, ...extra })
+  const D = day('14', 31)
+  const D2 = day('15', 32)
+  insertRaw.run(150, '2026-09-14 03:00:00', 'awaiting_payment', 7, 31, 'Cash', null, 0, 0, 20)             // Not Paid, nothing taken
+  insertRaw.run(151, '2026-09-14 03:10:00', 'completed', 7, 31, 'Cash', null, 10, 0, 10)                   // a normal paid sale
+  insertRaw.run(152, '2026-09-14 03:20:00', 'completed', 7, 31, 'Cash', '', 10, 0, 10)                     // payment_details is the empty string (E4)
+  insertRaw.run(153, '2026-09-14 03:30:00', 'completed', 7, 31, 'Cash', '{bad json', 10, 0, 10)            // malformed details (E4)
+  insertRaw.run(154, '2026-09-14 03:40:00', 'completed', 7, 31, '', null, 10, 0, 10)                       // no method name at all (E4)
+  insertRaw.run(155, '2026-09-14 03:50:00', 'completed', 7, 31, 'ABA', '[{"method":"ABA","amount_usd":6,"amount_khr":0}]', 6, 0, 6)
+  const beforeD = await all(D)
+  const cashBefore = await recon.shiftCashSales({}, D, NOW, config)
+  assert.deepEqual([cashBefore.usd, cashBefore.digital.usd], [10, 6], 'v0: only the valid cash sale (151) and the ABA sale count; the three unreadable ones count nothing')
+  assert.equal(cashBefore.needsReview, true, 'v0 flags the unreadable tenders')
+  const unreadableOpenings = [152, 153, 154].map(convert)
+  assert.deepEqual(unreadableOpenings.map((e) => e.drawer_effect), [0, 0, 0])
+  for (const id of [150, 151, 155]) convert(id)
+  assert.deepEqual(await all(D), beforeD,
+    'converting every sale to version 1 moves nothing in the closed shift: cash, review codes and the per-sale fingerprint are identical (E1 zero entry, E4 unreadable details)')
+  assert.ok(JSON.parse(beforeD)[1].some((entry) => entry[0] === 150), 'control: the zero-deposit Not Paid sale is in the fingerprint')
+
+  // The collect that finishes sale 50 in the next shift moves cash there and nothing in D.
+  event(150, 'in', 'collect', 'Cash', 20, 0, '2026-09-15 04:00:00', 32, { branch: 7 })
+  assert.deepEqual(await all(D), beforeD, 'a later collect does not touch the closed shift (no "Changed after close")')
+  assert.deepEqual(net(await recon.shiftCashSales({}, D2, NOW, config)), [20, 0, 0, 0], 'it lands in the shift that took it')
+  // The unconverted-fingerprint control: a reader that dropped version 1 sales created in the window would have lost entry 50.
+  const withoutV1 = JSON.parse(beforeD)[1].filter((entry) => ![150, 151, 152, 153, 154, 155].includes(entry[0]))
+  assert.notDeepEqual(withoutV1, JSON.parse(beforeD)[1])
+  console.log('PASS E1/E4: converting v0 sales, empty/malformed/unnamed details included, and collecting later moves no closed shift')
+
+  // E2: the close-time digest sees events.
+  const digestOf = (shift) => { const d = recon.shiftCloseInputsDigestSql(shift, NOW); return db.prepare(`SELECT ${d.expr} AS digest`).get(d.params).digest }
+  const E = day('16', 41, { branch_id: 8 })
+  const d0 = digestOf(E)
+  event(160, 'in', 'collect', 'Cash', 5, 0, '2026-09-16 05:00:00', 41, { branch: 8 })
+  insertSale.run(160, '2026-09-01 03:00:00', 'awaiting_payment', 8, 41, 'Cash', 5, 0, 5, 1)
+  const d1 = digestOf(E)
+  assert.notEqual(d1, d0, 'a collect received inside the open shift changes the digest, so a close that read the figures before it is refused')
+  event(161, 'in', 'collect', 'Cash', 5, 0, '2026-09-17 05:00:00', 41, { branch: 8 })
+  event(162, 'in', 'collect', 'Cash', 5, 0, '2026-09-16 05:00:00', 41, { branch: 9 })
+  insertSale.run(161, '2026-09-01 03:00:00', 'awaiting_payment', 8, 41, 'Cash', 5, 0, 5, 1)
+  insertSale.run(162, '2026-09-01 03:00:00', 'awaiting_payment', 9, 41, 'Cash', 5, 0, 5, 1)
+  assert.equal(digestOf(E), d1, 'control: an event outside the window or in another branch leaves the digest alone')
+  sql.prepare('INSERT INTO sale_write_revisions(sale_id, revision) VALUES (160, 3)').run()
+  assert.notEqual(digestOf(E), d1, 'a write to the sale behind an in-window event (a cancel) changes the digest too')
+  console.log('PASS E2: the close-inputs digest covers payment events')
+
+  // E3: the last money record of a shift counts events.
+  const F = day('06', 151, { branch_id: 10 })
+  assert.equal(await recon.shiftLastActivityMs({}, F, NOW), null, 'control: nothing in the branch')
+  insertSale.run(170, '2026-09-01 03:00:00', 'awaiting_payment', 10, 151, 'Cash', 5, 0, 5, 1)
+  event(170, 'in', 'late_record', 'Cash', 5, 0, '2026-09-06 03:00:00', 151, { branch: 10, drawer: 0 })
+  assert.equal(await recon.shiftLastActivityMs({}, F, NOW), null, 'a late record is in no drawer, so it is not a drawer record')
+  event(170, 'in', 'collect', 'Cash', 5, 0, '2026-09-06 04:00:00', 151, { branch: 10 })
+  assert.equal(await recon.shiftLastActivityMs({}, F, NOW), Date.parse('2026-09-06T04:00:00Z'), 'a collect received in the window is the latest money record')
+  console.log('PASS E3: the last-money-record check counts events')
+
+  // E5: the events are read through the received_at index, with one scan of sales.
+  const planOf = (queryText, params) => {
+    const values = []
+    const text = queryText.replace(/@(\w+)/g, (_, key) => { values.push(params[key] ?? null); return '?' })
+    return sql.prepare(`EXPLAIN QUERY PLAN ${text}`).all(...values).map((row) => row.detail)
+  }
+  for (const analyzed of [false, true]) {
+    if (analyzed) sql.exec('ANALYZE')
+    seen.length = 0
+    await recon.shiftCashSales({}, A, NOW, config)
+    const eventQuery = seen.find((text) => text.includes('FROM sale_payment_events e'))
+    assert.ok(eventQuery, 'the event query ran')
+    const window = shiftOn('08', 21)
+    const plan = planOf(eventQuery, { createdFrom: '2026-09-08 02:00:00', createdTo: '2026-09-08 06:00:00', cashierId: 21, branchId: 5 })
+    assert.ok(plan.some((line) => /SEARCH e USING (COVERING )?INDEX idx_sale_payment_events_received/.test(line)), `${analyzed ? 'after ANALYZE ' : ''}events use the received_at index: ${plan.join(' | ')}`)
+    assert.ok(!plan.some((line) => /^SCAN (sales|e)\b/.test(line)), `no table scan: ${plan.join(' | ')}`)
+    assert.ok(window)
+  }
+  seen.length = 0
+  await recon.shiftSaleTenders({}, A, NOW, config)
+  assert.equal(seen.filter((text) => /FROM sales WHERE/.test(text)).length, 1, 'the fingerprint scans sales once')
+  console.log('PASS E5: events are read through idx_sale_payment_events_received, sales is scanned once')
 })().catch((error) => { console.error(error); process.exitCode = 1 }).finally(() => sql.close())

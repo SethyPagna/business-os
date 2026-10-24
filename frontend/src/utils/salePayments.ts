@@ -206,7 +206,7 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventIn
     change_exchange_rate: change && change.exchangeRate != null ? change.exchangeRate : null,
     exchange_rate: Number(input.exchangeRate),
     drawer_effect: input.origin === 'late_record' ? 0 : input.drawerEffect === 0 ? 0 : 1,
-    received_at: String(input.receivedAt),
+    received_at: canonicalEventTime(input.receivedAt),
     branch_id: input.branchId ?? null,
     cashier_id: input.cashierId ?? null,
     cashier_name: input.cashierName ?? null,
@@ -230,6 +230,35 @@ export type OpeningEventSale = {
   branch_id?: unknown
   cashier_id?: unknown
   cashier_name?: unknown
+}
+
+/**
+ * The instant as the canonical 'YYYY-MM-DD HH:MM:SS' UTC text every shift window compares against (the format
+ * shiftWindowBound produces). Events are stored in this one shape so a reader can compare received_at as plain text
+ * and use idx_sale_payment_events_received; a stored 'T'/'Z' shape would sort wrongly against the bounds.
+ * A time without an offset is UTC, like shiftWindowBound. Throws on a missing or unreadable time.
+ */
+export function canonicalEventTime(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  const parsed = raw ? new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`) : new Date(Number.NaN)
+  if (!Number.isFinite(parsed.getTime())) fail('payment_event_time_required', 'A payment records when it was received.')
+  return parsed.toISOString().slice(0, 19).replace('T', ' ')
+}
+
+/**
+ * True when the shift reader of a payments_version 0 sale counts NOTHING for this payment_details (it cannot parse
+ * the text, or it is not an array): the empty string, malformed JSON, a JSON object. Such a sale's opening event is
+ * written with drawer_effect 0 so converting it to version 1 moves no closed shift (see buildOpeningPaymentEvent).
+ */
+export function legacyDetailsUnreadable(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value !== 'string') return !Array.isArray(value)
+  try {
+    const parsed = JSON.parse(value)
+    return parsed != null && !Array.isArray(parsed)
+  } catch {
+    return true
+  }
 }
 
 function numberOrZero(value: unknown): number {
@@ -266,7 +295,12 @@ export function buildOpeningPaymentEvent(sale: OpeningEventSale): PaymentEventIn
   const rate = numberOrZero(sale.exchange_rate)
   if (rate <= 0) fail('payment_event_rate_invalid', 'The sale has no readable exchange rate to open its payments at.')
   const method = String(sale.payment_method || '').trim() || 'Cash'
-  const details = storedDetails(sale.payment_details) ?? JSON.stringify([{ method, amount_usd: usd, amount_khr: khr }])
+  const stored = storedDetails(sale.payment_details)
+  const details = stored ?? JSON.stringify([{ method, amount_usd: usd, amount_khr: khr }])
+  // The version 0 reader counts nothing for details it cannot parse, nor for a tender with no method name
+  // (summarizeShiftCashDetail), and flags the shift. The opening event must reproduce exactly that, so such a sale is
+  // opened outside the drawer; the shift reader gives an opening event outside the drawer the same flag.
+  const unreadable = legacyDetailsUnreadable(sale.payment_details) || (stored === null && !String(sale.payment_method ?? '').trim())
   return {
     event_id: `opening:${sale.id}`,
     sale_id: sale.id,
@@ -284,8 +318,8 @@ export function buildOpeningPaymentEvent(sale: OpeningEventSale): PaymentEventIn
     change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
     change_exchange_rate: nullableNumber(sale.change_exchange_rate),
     exchange_rate: rate,
-    drawer_effect: 1,
-    received_at: String(sale.created_at ?? ''),
+    drawer_effect: unreadable ? 0 : 1,
+    received_at: canonicalEventTime(sale.created_at),
     branch_id: nullableNumber(sale.branch_id),
     cashier_id: nullableNumber(sale.cashier_id),
     cashier_name: sale.cashier_name == null ? null : String(sale.cashier_name),
@@ -379,6 +413,11 @@ export type PaymentAllocationResult = {
   groups: Array<{ id: string | null; amountUsd: number; paidUsd: number; owedUsd: number; tag: PaymentGroupTag }>
   /** Money left after every group is covered (an overpayment, or a debt lowered past the total). */
   unallocatedUsd: number
+  /**
+   * Money paid out beyond everything that had come in (an out larger than the paid groups hold), in dollars; 0 for a
+   * consistent ledger. It is owed by the sale, so it counts against the half-cent band and no line reads Paid on it.
+   */
+  shortfallUsd: number
 }
 
 /** Round a non-negative scaled figure (calculation units times the rate numerator) to dollar units, half-up. */
@@ -466,6 +505,7 @@ export function allocatePaymentsToGroups(input: {
     paid[index] -= back
     pool += back
   }
+  const shortfall = pool < 0n ? -pool : 0n
   if (pool < 0n) pool = 0n
 
   for (const index of fillOrder) {
@@ -475,7 +515,7 @@ export function allocatePaymentsToGroups(input: {
   }
 
   const owed = groups.map((_, index) => need[index] - paid[index])
-  const saleCovered = owed.reduce((sum, value) => sum + value, 0n) <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
+  const saleCovered = owed.reduce((sum, value) => sum + value, 0n) + shortfall <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
   return {
     groups: groups.map((group, index) => {
       const tag: PaymentGroupTag = saleCovered || owed[index] === 0n ? 'paid' : paid[index] > 0n ? 'part_paid' : 'unpaid'
@@ -488,5 +528,6 @@ export function allocatePaymentsToGroups(input: {
       }
     }),
     unallocatedUsd: unitsToNumber(scaledToUnits(pool, numerator)),
+    shortfallUsd: unitsToNumber(scaledToUnits(shortfall, numerator)),
   }
 }

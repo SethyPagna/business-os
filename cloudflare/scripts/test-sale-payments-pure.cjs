@@ -345,4 +345,38 @@ check('displayed paid and owed round half-up, not down (P3-D3)', () => {
   assert.equal(alloc([POS(10)], [ev('in', 12.00006)], 0).unallocatedUsd, 2.0001, 'unallocated rounds the same way')
 })
 
+check('an opening event is outside the drawer exactly when the version 0 reader counts nothing for the sale (E4)', () => {
+  const base = { id: 1, payment_method: 'Cash', amount_paid_usd: 4, amount_paid_khr: 0, exchange_rate: 4000, created_at: '2026-09-01 02:00:00' }
+  const effect = (overrides) => core.buildOpeningPaymentEvent({ ...base, ...overrides }).drawer_effect
+  for (const unreadable of ['', ' ', 'not json', '{"a":1}', '5', '"x"']) assert.equal(effect({ payment_details: unreadable }), 0, JSON.stringify(unreadable))
+  for (const readable of [undefined, null, '[]', 'null', '[{"method":"Cash","amount_usd":4,"amount_khr":0}]']) assert.equal(effect({ payment_details: readable }), 1, JSON.stringify(readable))
+  assert.equal(effect({ payment_details: null, payment_method: '' }), 0, 'no method name and no list: the v0 reader skips the tender')
+  assert.equal(effect({ payment_details: '[{"method":"Cash","amount_usd":4,"amount_khr":0}]', payment_method: '' }), 1, 'a named method inside the list counts')
+  assert.equal(core.legacyDetailsUnreadable(''), true)
+  assert.equal(core.legacyDetailsUnreadable('[]'), false)
+})
+
+check('event times are stored in the one canonical shape the windows compare as text (E5)', () => {
+  assert.equal(core.canonicalEventTime('2026-09-01T02:00:00.123Z'), '2026-09-01 02:00:00')
+  assert.equal(core.canonicalEventTime('2026-09-01 02:00:00'), '2026-09-01 02:00:00')
+  assert.equal(core.canonicalEventTime('2026-09-01T09:00:00+07:00'), '2026-09-01 02:00:00')
+  assert.equal(event({ receivedAt: '2026-10-25T03:00:00Z' }).received_at, '2026-10-25 03:00:00')
+  assert.equal(core.buildOpeningPaymentEvent({ id: 2, payment_method: 'Cash', amount_paid_usd: 1, exchange_rate: 4000, created_at: '2026-09-01T02:00:00.000Z' }).received_at, '2026-09-01 02:00:00')
+  assert.equal(code(() => core.canonicalEventTime('')), 'payment_event_time_required')
+  assert.equal(code(() => core.canonicalEventTime('yesterday')), 'payment_event_time_required')
+})
+
+check('more paid out than ever came in leaves the sale owing, even inside the half-cent band (E7a)', () => {
+  // The reviewer's case: a $0.004 sale, $5 in, $10 out. The status says Not Paid owing $5.004; no line may read Paid.
+  const result = alloc([POS(0.004)], [ev('in', 5), ev('out', 10)], 0, { total_usd: 0.004 })
+  assert.equal(derive({ total_usd: 0.004 }, { usd: -5 }).saleStatus, 'awaiting_payment')
+  assert.deepEqual(view(result), ['pos:unpaid:0/0.004'])
+  assert.equal(result.shortfallUsd, 5)
+  // Control: a consistent ledger on the same sale is Paid and has no shortfall.
+  const ok = alloc([POS(0.004)], [ev('in', 5), ev('out', 4.999)], 0, { total_usd: 0.004 })
+  assert.deepEqual(view(ok), ['pos:paid:0.001/0.003'])
+  assert.equal(ok.shortfallUsd, 0)
+  assert.equal(alloc([POS(10)], [ev('in', 4), ev('out', 9)]).shortfallUsd, 5, 'the earlier clamp case reports its shortfall')
+})
+
 console.log(`\n${passed} checks passed`)
