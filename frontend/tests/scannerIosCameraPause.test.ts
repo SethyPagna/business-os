@@ -16,6 +16,7 @@ import {
   installCamera,
   mountComponent,
   setVisibility,
+  settle,
   stage,
   startStage,
   stopStage,
@@ -249,7 +250,65 @@ try {
     assert.match(app, /useEffect\(\(\) => releaseAllParkedCamera, \[\]\)/)
     assert.match(app, /if \(!user\) releaseAllParkedCamera\(\)/)
     const hook = readFileSync(new URL('../src/components/products/scanning/useBarcodeCamera.ts', import.meta.url), 'utf8')
-    assert.match(hook, /allowCameraParking\(\)\s+setReadOk\(false\)/)
+    assert.match(hook, /resumeAfterRequestRef\.current = false\s+allowCameraParking\(\)\s+setReadOk\(false\)/, '6.0.966 and 6.0.968 both reset on open')
+  })
+
+  // 6.0.966 (come back by itself) meets 6.0.968 (park on close): the three ways a hide can meet the scanner.
+  const hideThenShow = async (between: () => Promise<void> | void = () => {}) => {
+    await act(async () => { setVisibility('hidden'); fire('document', 'visibilitychange') })
+    await between()
+    await act(async () => { setVisibility('visible'); fire('document', 'visibilitychange') })
+  }
+
+  await runTest('iOS, scanner OPEN when the page hides: the camera is let go at once and comes back by itself with one fresh request', async () => {
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    await hideThenShow(async () => {
+      assert.equal(run.track().stopCount, 1, 'a hidden page never holds a running or parked camera')
+    })
+    await waitFor(() => run.probe.getUserMediaCalls === 2 && /^scanning\|/.test(run.mounted.container.textContent))
+    assert.equal(run.probe.getUserMediaCalls, 2, 'nothing was parked, so the return starts fresh, once')
+    await run.mounted.unmount()
+    fire('window', 'pagehide')
+  })
+
+  await runTest('the auto-resume is an ordinary start: a parked stream is taken before any request is made, and a resume never parks', async () => {
+    // The harness loads the hook in its own module graph, so a stream parked from here is invisible to it; the reuse
+    // itself is proved above (reopening makes no second getUserMedia). What is pinned here is the wiring: the resume
+    // reaches openCamera through startCamera, whose first act is to take the parked stream.
+    const hook = readFileSync(new URL('../src/components/products/scanning/useBarcodeCamera.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    assert.match(hook, /async function openCamera\([^)]*\)[^{]*\{\n(?:\s*\/\/[^\n]*\n)*\s*const paused = takeParkedCameraStream\(\)\n\s*if \(paused\) return paused\n\s*try \{\n\s*return await navigator\.mediaDevices\.getUserMedia/, 'a parked stream is taken before getUserMedia')
+    assert.match(hook, /nextStartIsResumeRef\.current = true\n\s*void startCameraRef\.current\(\)/, 'the resume goes through startCamera')
+    assert.match(hook, /const stream = await openCamera\(startToken/, 'and startCamera goes through openCamera')
+    assert.equal((hook.match(/cleanup\(true\)/g) || []).length, 3, 'only completeDetection, closeScanner and the unmount of an open scanner park; a hide or a resume never does')
+    assert.match(hook, /const parkCamera = useCallback\(\(\): void => \{\n\s*cleanup\(\)\n/, 'the hide path stops the camera')
+    assert.match(hook, /const handlePageHide = \(\) => \{[\s\S]*?\n\s*cleanup\(\)\n\s*\}/, 'pagehide stops the camera')
+  })
+
+  await runTest('iOS, scanner CLOSED when the page hides: the parked stream is released and nothing resumes', async () => {
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    await act(async () => { run.camera().closeScanner() })
+    await run.mounted.unmount()
+    assert.equal(run.track().stopCount, 0, 'closed: paused, not stopped')
+    await hideThenShow(async () => {
+      assert.equal(run.track().stopCount, 1, 'the hidden page released the parked stream')
+    })
+    await settle(60)
+    assert.equal(run.probe.getUserMediaCalls, 1, 'a closed scanner is never reopened by a return')
+    await act(async () => { fire('window', 'pageshow') })
+    await settle(30)
+    assert.equal(run.probe.getUserMediaCalls, 1, 'nor by a back-forward-cache restore')
+  })
+
+  await runTest('iOS, hidden while open and closed before the return: the return never reopens the camera', async () => {
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    await act(async () => { setVisibility('hidden'); fire('document', 'visibilitychange') })
+    await act(async () => { run.camera().closeScanner() })
+    await run.mounted.unmount()
+    await act(async () => { setVisibility('visible'); fire('document', 'visibilitychange'); fire('window', 'pageshow') })
+    await settle(60)
+    assert.equal(run.probe.getUserMediaCalls, 1, 'closed while away: no request on return')
+    assert.ok(run.probe.tracks.every((track) => track.stopCount === 1 || track.readyState === 'ended'), 'and no camera left on')
+    fire('window', 'pagehide')
   })
 } finally {
   await stopStage()

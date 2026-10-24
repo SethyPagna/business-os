@@ -30,11 +30,11 @@ import {
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
 
-// The plan's D1 queries per invocation (50 on Free) is shared by the whole request. A grouped return action runs one atomic batch whose size grows
-// with the stock lines it moves, so the batch is checked against what the request has already spent BEFORE it is sent: a selection that cannot fit
-// is refused whole with a sentence, never cut off part-way through the invocation. reserveStatements is what the route still needs after the batch.
-// An undo or redo is a request of its own and is sized the same way. Measured on Free (test-return-exchange-cancel-free-native.cjs) a cancel's own
-// bookkeeping is the larger of the two, so a cancel that fits can be undone; the replay check keeps that true if the bookkeeping ever shifts.
+// The plan's D1 queries per invocation (50 on Free) is shared by the whole request. A grouped return action runs one atomic batch, which is checked against
+// what the request has already spent BEFORE it is sent: a selection that cannot fit is refused whole with a sentence, never cut off part-way through the
+// invocation. reserveStatements is what the route still needs after the batch. Since 6.0.966 the batch does not grow with the stock lines it moves or the
+// replacement returns it links (set-based writes, merged guards); it grows with the number of returns selected together (a credit move and a sale tag each).
+// An undo or redo is a request of its own and is sized the same way (measured in test-return-exchange-cancel-free-native.cjs).
 export type ReturnBulkQueryBudget = { statementsUsed(): number; reserveStatements: number }
 const RETURN_BULK_MOVEMENT_LIMIT = 256
 
@@ -216,7 +216,8 @@ function parseReplacementChoice(value: unknown, field: ReturnField, target: stri
   let planned: ReplacementChoice['planned']
   if (choice.planned !== undefined) {
     const list = choice.planned
-    if (!Array.isArray(list) || list.length > 50 || ids.length) fail('The replacement choice is invalid.', 400)
+    // A retry after part of the take-backs were made names those (return_ids) and announces the rest (planned).
+    if (!Array.isArray(list) || list.length > 50) fail('The replacement choice is invalid.', 400)
     planned = (list as unknown[]).map((entry) => {
       const line = entry as Row
       const saleItemId = Number(line?.sale_item_id)
@@ -308,44 +309,95 @@ function statusMovementType(scope: Member['scope'], quantity: number): string {
   return quantity > 0 ? 'return' : 'return_reversal'
 }
 
-function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
-  const out: Statement[] = []
-  for (const delta of member.stock) {
-    const quantity = delta.quantity * direction
-    const params = {
-      product: delta.productId,
-      branch: delta.branchId,
-      batch: delta.batchId,
-      lot: delta.damagedLotId,
-      quantity,
-      stamp,
+// 6.0.966: the stock of every member moves in a FIXED number of statements (about eight), however many lines and linked take-backs the action carries.
+// A Free invocation allows 50 D1 queries and the old shape spent 6-7 on every stock line, so a cancel of a 5-line exchange could not fit. Each statement
+// is one set-based write over a JSON array of the deltas, grouped to the key it writes (product, product + branch, lot + branch); the movements stay one
+// row per delta. The guards check the END state of each key (stock + the net delta >= 0), which is what the one-by-one order was enforcing. Damaged-stock
+// lots are rare and keep their own per-lot statements.
+const roundQuantity = (value: number): number => Math.round(value * 1e9) / 1e9
+const j = (path: string, alias = 'x'): string => `json_extract(${alias}.value,'$.${path}')`
+
+function stockStatements(members: readonly Member[], direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
+  type Plain = { product: number; name: string | null; branch: number; branchName: string | null; addressed: string | null; batch: number | null; q: number; usd: number | null; khr: number | null; type: string; returnId: number }
+  const plain: Plain[] = []
+  const lots: Array<{ member: Member; delta: StockDelta; quantity: number }> = []
+  for (const member of members) {
+    for (const delta of member.stock) {
+      const quantity = delta.quantity * direction
+      if (delta.damagedLotId) { lots.push({ member, delta, quantity }); continue }
+      plain.push({ product: Number(delta.productId), name: delta.productName, branch: Number(delta.branchId), branchName: delta.addressed ? delta.branchName ?? null : null, addressed: delta.addressed ?? null,
+        batch: delta.batchId ? Number(delta.batchId) : null, q: quantity, usd: delta.costUsd, khr: delta.costKhr, type: statusMovementType(member.scope, quantity), returnId: member.id })
     }
-    if (quantity > 0) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
-    if (delta.damagedLotId) {
-      out.push(guard('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND return_id=@returnId AND product_id=@product AND branch_id IS @branch AND (batch_id IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=damaged_stock_lots.batch_id AND variant_product_id=@product)) AND quantity_remaining+@quantity BETWEEN 0 AND quantity)', { ...params, returnId: member.id }))
-      out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@quantity, updated_at=@stamp WHERE id=@lot', params })
-    } else {
-      out.push(guard('EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity+@quantity>=0) AND EXISTS(SELECT 1 FROM branches WHERE id=@branch) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=0))', params))
-      out.push({
-        sql: quantity < 0
-          ? 'UPDATE branch_stock SET quantity=quantity+@quantity WHERE product_id=@product AND branch_id=@branch'
-          : 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@quantity) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+@quantity',
-        params,
-      })
-      out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@quantity, updated_at=@stamp WHERE id=@product', params })
-      if (delta.batchId) {
-        out.push(guard('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@quantity>=0))', params))
-        // Customer restores and supplier-return reversals must make the exact
-        // archived lot selectable before adding stock, including undo/redo.
-        if (quantity > 0) out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batch AND variant_product_id=@product AND is_active IS NOT 1', params })
-        out.push({
-          sql: quantity < 0
-            ? 'UPDATE branch_batch_stock SET quantity=quantity+@quantity,updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch'
-            : 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@quantity) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+@quantity,updated_at=@stamp',
-          params,
-        })
+  }
+  const positive = new Set<number>()
+  for (const row of plain) if (row.q > 0) positive.add(row.product)
+  for (const lot of lots) if (lot.quantity > 0) positive.add(Number(lot.delta.productId))
+  const out: Statement[] = []
+  if (positive.size) out.push(productStockGuardStatement([...positive], 'active'))
+  if (plain.length) {
+    const products = new Map<number, number>()
+    const pairs = new Map<string, { product: number; branch: number; q: number }>()
+    const batches = new Map<string, { batch: number; product: number; branch: number; q: number; raise: number }>()
+    for (const row of plain) {
+      products.set(row.product, roundQuantity((products.get(row.product) ?? 0) + row.q))
+      const pairKey = `${row.product}:${row.branch}`
+      const pair = pairs.get(pairKey) ?? { product: row.product, branch: row.branch, q: 0 }
+      pair.q = roundQuantity(pair.q + row.q); pairs.set(pairKey, pair)
+      if (row.batch) {
+        const batchKey = `${row.batch}:${row.branch}`
+        const lot = batches.get(batchKey) ?? { batch: row.batch, product: row.product, branch: row.branch, q: 0, raise: 0 }
+        lot.q = roundQuantity(lot.q + row.q); if (row.q > 0) lot.raise = 1; batches.set(batchKey, lot)
       }
     }
+    const productRows = JSON.stringify([...products].map(([id, q]) => ({ id, q })))
+    const pairRows = JSON.stringify([...pairs.values()])
+    const batchRows = JSON.stringify([...batches.values()])
+    const branchIds = JSON.stringify([...new Set(plain.map((row) => row.branch))])
+    out.push(guard(`NOT EXISTS(SELECT 1 FROM json_each(@products) x WHERE NOT EXISTS(SELECT 1 FROM products WHERE id=${j('id')} AND stock_quantity+${j('q')}>=0))
+      AND NOT EXISTS(SELECT 1 FROM json_each(@branches) x WHERE NOT EXISTS(SELECT 1 FROM branches WHERE id=x.value))
+      AND NOT EXISTS(SELECT 1 FROM json_each(@pairs) x WHERE ${j('q')}<0 AND NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=${j('product')} AND branch_id=${j('branch')} AND quantity+${j('q')}>=0))
+      AND NOT EXISTS(SELECT 1 FROM json_each(@batches) x WHERE NOT EXISTS(SELECT 1 FROM product_batches WHERE id=${j('batch')} AND variant_product_id=${j('product')})
+        OR (${j('q')}<0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=${j('batch')} AND branch_id=${j('branch')} AND quantity+${j('q')}>=0)))`,
+    { products: productRows, branches: branchIds, pairs: pairRows, batches: batchRows }))
+    // A proposed row must pass CHECK(quantity >= 0) before SQLite looks for the conflict, so a negative net rides in as 0 and the conflict branch adds the real figure.
+    out.push({
+      sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
+        SELECT ${j('product')},${j('branch')},MAX(${j('q')},0) FROM json_each(@pairs) x WHERE ${j('q')}<>0
+        ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=branch_stock.quantity+(SELECT ${j('q', 'd')} FROM json_each(@pairs) d WHERE ${j('product', 'd')}=excluded.product_id AND ${j('branch', 'd')}=excluded.branch_id)`,
+      params: { pairs: pairRows },
+    })
+    out.push({
+      sql: `UPDATE products SET stock_quantity=stock_quantity+(SELECT ${j('q', 'd')} FROM json_each(@products) d WHERE ${j('id', 'd')}=products.id), updated_at=@stamp
+        WHERE id IN (SELECT ${j('id', 'd')} FROM json_each(@products) d)`,
+      params: { products: productRows, stamp },
+    })
+    if (batches.size) {
+      // Customer restores and supplier-return reversals must make the exact archived lot selectable before adding stock, including undo/redo.
+      if ([...batches.values()].some((lot) => lot.raise)) {
+        out.push({
+          sql: `UPDATE product_batches SET is_active=1 WHERE is_active IS NOT 1 AND id IN (SELECT ${j('batch', 'd')} FROM json_each(@batches) d WHERE ${j('raise', 'd')}=1)`,
+          params: { batches: batchRows },
+        })
+      }
+      out.push({
+        sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity,updated_at)
+          SELECT ${j('batch')},${j('branch')},MAX(${j('q')},0),@stamp FROM json_each(@batches) x WHERE ${j('q')}<>0
+          ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=branch_batch_stock.quantity+(SELECT ${j('q', 'd')} FROM json_each(@batches) d WHERE ${j('batch', 'd')}=excluded.batch_id AND ${j('branch', 'd')}=excluded.branch_id), updated_at=@stamp`,
+        params: { batches: batchRows, stamp },
+      })
+    }
+    out.push({
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,addressed_branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+        SELECT ${j('product', 'm')},${j('name', 'm')},${j('branch', 'm')},${j('branchName', 'm')},${j('addressed', 'm')},${j('type', 'm')},${j('q', 'm')},${j('usd', 'm')},${j('khr', 'm')},
+          ROUND(${j('usd', 'm')}*ABS(${j('q', 'm')}),4),ROUND(${j('khr', 'm')}*ABS(${j('q', 'm')}),4),@reason,${j('returnId', 'm')},@userId,@userName,${j('batch', 'm')}
+        FROM json_each(@movements) m ORDER BY CAST(m.key AS INTEGER)`,
+      params: { movements: JSON.stringify(plain), reason: `${direction > 0 ? 'Apply' : 'Undo'} grouped return status`, userId: user.id ?? null, userName: actorSnapshot(user) },
+    })
+  }
+  for (const { member, delta, quantity } of lots) {
+    const params = { product: delta.productId, branch: delta.branchId, batch: delta.batchId, lot: delta.damagedLotId, quantity, stamp }
+    out.push(guard('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND return_id=@returnId AND product_id=@product AND branch_id IS @branch AND (batch_id IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=damaged_stock_lots.batch_id AND variant_product_id=@product)) AND quantity_remaining+@quantity BETWEEN 0 AND quantity)', { ...params, returnId: member.id }))
+    out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@quantity, updated_at=@stamp WHERE id=@lot', params })
     out.push({
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
             VALUES(@product,@name,@branch${delta.addressed ? ',@branchName,@addressed' : ''},@type,@quantity,@usd,@khr,ROUND(@usd*ABS(@quantity),4),ROUND(@khr*ABS(@quantity),4),@reason,@returnId,@userId,@userName,@batch)`,
@@ -354,7 +406,7 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
         name: delta.productName,
         branch: delta.branchId,
         ...(delta.addressed ? { branchName: delta.branchName ?? null, addressed: delta.addressed } : {}),
-        type: delta.damagedLotId ? (quantity > 0 ? 'damage_in' : 'damage_reversal') : statusMovementType(member.scope, quantity),
+        type: quantity > 0 ? 'damage_in' : 'damage_reversal',
         quantity,
         usd: delta.costUsd,
         khr: delta.costKhr,
@@ -385,31 +437,78 @@ function mergeGuard(statement: Statement, predicate: string, params: Row): void 
   Object.assign(statement.params, params)
 }
 
-function creditStatements(member: Member, direction: 1 | -1, stamp: string): Statement[] {
-  const credit = member.credit
-  if (!credit) return []
-  const to = direction > 0 ? credit.after : credit.before
-  return [{ sql: 'UPDATE sales SET payment_method=@pm,payment_details=@pd,amount_paid_usd=@pu,amount_paid_khr=@pk,sale_status=@st,updated_at=@stamp WHERE id=@saleId',
-    params: { saleId: credit.saleId, pd: to.payment_details, pm: to.payment_method, pu: to.amount_paid_usd, pk: to.amount_paid_khr, st: to.sale_status, stamp } }]
+// The credit move of every exchange return in the group: ONE write of the replacement sales' payment columns (each row is the exact stored state on the side
+// being written), however many exchanges are cancelled together.
+function creditStatements(members: readonly Member[], direction: 1 | -1, stamp: string): Statement[] {
+  const rows = members.flatMap((member) => {
+    const credit = member.credit
+    if (!credit) return []
+    const to = direction > 0 ? credit.after : credit.before
+    return [{ saleId: credit.saleId, pm: to.payment_method, pd: to.payment_details, pu: to.amount_paid_usd, pk: to.amount_paid_khr, st: to.sale_status }]
+  })
+  if (!rows.length) return []
+  const pick = (path: string) => `(SELECT json_extract(u.value,'$.${path}') FROM json_each(@rows) u WHERE json_extract(u.value,'$.saleId')=sales.id)`
+  return [{ sql: `UPDATE sales SET payment_method=${pick('pm')},payment_details=${pick('pd')},amount_paid_usd=${pick('pu')},amount_paid_khr=${pick('pk')},sale_status=${pick('st')},updated_at=@stamp
+      WHERE id IN (SELECT json_extract(u.value,'$.saleId') FROM json_each(@rows) u)`, params: { rows: JSON.stringify(rows), stamp } }]
 }
 
-function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, applying = false): Statement[] {
-  // A linked replacement return is already completed when the cancel is applied: nothing to write on the way in, everything on undo and redo.
-  if (!member.changed) return []
-  // The take-back return is already completed when the cancel is applied; only its debt/cash split can move (the credit it was refunded against is gone).
-  if (applying && member.linked) {
-    return member.money ? [{ sql: 'UPDATE returns SET owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,updated_at=@stamp WHERE id=@id', params: { ...member.money.after, stamp, id: member.id } }] : []
+// What a replay or an apply writes for its members, in a count that does not grow with them: ONE stock group for all, the credit move of each exchange return
+// (one per exchange), and ONE update of the returns rows. A linked replacement return is already completed when the cancel is applied: nothing to write on
+// the way in except its debt/cash split (the credit it was refunded against is gone); on undo and redo it is written like any other member.
+function memberGroupStatements(members: readonly Member[], direction: 1 | -1, user: SessionUser, stamp: string, applying = false): Statement[] {
+  const written = members.filter((member) => member.changed && !(applying && member.linked))
+  const out: Statement[] = [...stockStatements(written, direction, user, stamp)]
+  out.push(...creditStatements(written, direction, stamp))
+  type ReturnRow = { id: number; full: 0 | 1; status?: string; returnType?: string; settlement?: string; money: 0 | 1; owed: number | null; currency: string | null }
+  const rows = members.filter((member) => member.changed).flatMap((member): ReturnRow[] => {
+    if (applying && member.linked) {
+      return member.money ? [{ id: member.id, full: 0, money: 1, owed: member.money.after.owed_reduction_usd, currency: member.money.after.refund_currency }] : []
+    }
+    const target = direction > 0 ? member.after : member.before
+    const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
+    return [{ id: member.id, full: 1, status: target.status, returnType: target.return_type, settlement: target.supplier_settlement, money: money ? 1 : 0, owed: money?.owed_reduction_usd ?? null, currency: money?.refund_currency ?? null }]
+  })
+  if (rows.length) {
+    const pick = (path: string) => `(SELECT json_extract(u.value,'$.${path}') FROM json_each(@rows) u WHERE json_extract(u.value,'$.id')=returns.id)`
+    out.push({
+      sql: `UPDATE returns SET
+          status=CASE WHEN ${pick('full')}=1 THEN ${pick('status')} ELSE status END,
+          return_type=CASE WHEN ${pick('full')}=1 THEN ${pick('returnType')} ELSE return_type END,
+          supplier_settlement=CASE WHEN ${pick('full')}=1 THEN ${pick('settlement')} ELSE supplier_settlement END,
+          owed_reduction_usd=CASE WHEN ${pick('money')}=1 THEN ${pick('owed')} ELSE owed_reduction_usd END,
+          refund_currency=CASE WHEN ${pick('money')}=1 THEN ${pick('currency')} ELSE refund_currency END,
+          updated_at=@stamp
+        WHERE id IN (SELECT json_extract(u.value,'$.id') FROM json_each(@rows) u)`,
+      params: { rows: JSON.stringify(rows), stamp },
+    })
   }
-  const target = direction > 0 ? member.after : member.before
-  const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
-  return [
-    ...stockStatements(member, direction, user, stamp),
-    ...creditStatements(member, direction, stamp),
-    {
-      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,${money ? 'owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency,' : ''}updated_at=@stamp WHERE id=@id`,
-      params: { ...target, ...(money ?? {}), stamp, id: member.id },
-    },
-  ]
+  return out
+}
+
+// The guards of a group are one statement, or a few when their parameters would pass the 100 a D1 statement may bind: every guard is a statement of its own
+// otherwise, and each counts against a Free invocation. Parameters are renamed per guard so equal names with different values cannot collide.
+const GUARD_SQL = /^INSERT INTO return_bulk_guards\(guard_value\) SELECT CASE WHEN \(([\s\S]*)\) THEN 1 ELSE 0 END$/
+const MERGED_GUARD_PARAMETER_LIMIT = 80
+function mergeGuards(statements: readonly Statement[]): Statement[] {
+  const out: Statement[] = []
+  let predicates: string[] = []
+  let params: Row = {}
+  let counter = 0
+  const flush = () => {
+    if (predicates.length) out.push(guard(predicates.map((predicate) => `(${predicate})`).join(' AND '), params))
+    predicates = []; params = {}
+  }
+  for (const statement of statements) {
+    const match = GUARD_SQL.exec(statement.sql)
+    if (!match) { flush(); out.push(statement); continue }
+    const names = Object.keys(statement.params)
+    if (Object.keys(params).length + names.length > MERGED_GUARD_PARAMETER_LIMIT) flush()
+    const tag = `g${counter++}_`
+    predicates.push(match[1].replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (all, name: string) => name in statement.params ? `@${tag}${name}` : all))
+    for (const name of names) params[`${tag}${name}`] = statement.params[name]
+  }
+  flush()
+  return out
 }
 
 /**
@@ -1136,16 +1235,28 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
 }
 
 /**
- * The take-back the till announces is an ordinary return of the replacement sale, made in ONE invocation before the cancel. On a plan that runs few D1 queries
- * per invocation (Free: 50) only a one-line return fits -- test-return-exchange-cancel-free-native.cjs measures it: a 2-line return is refused by its own
- * admission -- so a longer take-back is refused here, BEFORE any of it is made (release review P3). A plan with room (Paid: 1000) takes up to the return maximum.
+ * The take-back the till announces is made BEFORE the cancel, in invocations of its own. On a plan that runs few D1 queries per invocation (Free: 50) one
+ * return fits only one line (the return's own admission, test-return-exchange-cancel-free-native.cjs), so the till makes one single-line return per ticked line
+ * -- each a complete return of the replacement sale, with its own request id -- and the cancel links them all in one batch whose size no longer grows with them
+ * (6.0.966). A plan with room (Paid: 1000) takes all the lines as ONE return. The dry run therefore counts the returns the till will make, and refuses, before
+ * anything is made, a selection that would link more returns than one action may carry.
  */
 const SMALL_PLAN_QUERY_LIMIT = 200
+function takeBackPerLine(env: Env): boolean {
+  return getPlanLimits(env).d1QueriesPerInvocation < SMALL_PLAN_QUERY_LIMIT
+}
 function assertTakeBackFitsPlan(env: Env, request: BulkRequest): void {
-  const allowed = getPlanLimits(env).d1QueriesPerInvocation >= SMALL_PLAN_QUERY_LIMIT ? 50 : 1
-  if (request.items.some((item) => (item.replacement?.planned?.length ?? 0) > allowed)) {
-    fail('This return is too large for the current plan. Return fewer items or received dates, then try again.', 400, 'customer_return_over_plan_budget')
+  const perLine = takeBackPerLine(env)
+  let announced = 0
+  for (const item of request.items) {
+    const lines = item.replacement?.planned?.length ?? 0
+    const returns = (item.replacement?.return_ids.length ?? 0) + (perLine ? lines : Math.min(lines, 1))
+    if (returns > REPLACEMENT_RETURNS_PER_ITEM) {
+      fail('This return is too large for the current plan. Return fewer items or received dates, then try again.', 400, 'customer_return_over_plan_budget')
+    }
+    announced += perLine ? lines : Math.min(lines, 1)
   }
+  if (request.items.length + announced > RETURN_BULK_LIMIT) fail(`Select between 1 and ${RETURN_BULK_LIMIT} returns including their replacement returns.`, 400)
 }
 
 export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<Row> {
@@ -1215,10 +1326,10 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     })),
   }
   const statements: Statement[] = [
-    ...guards,
+    ...mergeGuards(guards),
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
-  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp, true))
+  statements.push(...memberGroupStatements(members, 1, user, stamp, true))
   for (const row of saleRows) statements.push(saleTagStatement(row, stamp, entitlement.exactTags))
   const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
@@ -1234,17 +1345,24 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     params: { id: operationId, label: `${changedIds.length} returns: ${request.field} ${request.source} → ${request.target}; ${unchangedIds.length} unchanged${members.some(member => member.linked) ? `; ${members.filter(member => member.linked).length} replacement return(s) taken back with it` : ''}${members.some(member => member.credit) ? `; refund credit of ${members.filter(member => member.credit).length} replacement sale(s) moved to Not Paid` : ''}`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: RETURN_BULK_ACTION_KIND, field: request.field, source: request.source, target: request.target, changed: changedIds.length, unchanged: unchangedIds.length, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE return_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
-  for (const member of members.filter((candidate) => candidate.changed)) {
-    statements.push({ sql: `INSERT INTO return_bulk_members(operation_id,return_id,revision,sale_id,sale_revision,stock_fingerprint) VALUES(@operation,@id,COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),@saleId,CASE WHEN @saleId IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0) END,${movementFingerprint('@id')})`, params: { operation: operationId, id: member.id, saleId: member.saleId } })
+  const changedMembers = members.filter((candidate) => candidate.changed)
+  if (changedMembers.length) {
+    const memberId = "json_extract(j.value,'$.id')"
+    const memberSale = "json_extract(j.value,'$.saleId')"
+    statements.push({ sql: `INSERT INTO return_bulk_members(operation_id,return_id,revision,sale_id,sale_revision,stock_fingerprint)
+      SELECT @operation,${memberId},COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=${memberId}),0),${memberSale},
+        CASE WHEN ${memberSale} IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=${memberSale}),0) END,${movementFingerprint(memberId)}
+      FROM json_each(@members) j ORDER BY CAST(j.key AS INTEGER)`, params: { operation: operationId, members: JSON.stringify(changedMembers.map((member) => ({ id: member.id, saleId: member.saleId }))) } })
   }
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   if (request.dry_run) {
-    // Each take-back the till announces becomes one linked member: its guard, its debt/cash split update and its membership row.
-    const announced = request.items.filter((item) => item.replacement?.planned?.length).length * 3
+    // A take-back the till announces becomes a linked member of this action: its guard, its split update and its membership row ride in the statements above.
+    const announced = request.items.filter((item) => item.replacement?.planned?.length).length
     if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length + announced) : statements.length + announced, queryBudget.reserveStatements)
-    return { receipt: { dryRun: true, ok: true, statements: statements.length + announced }, wrote: false }
+    // takeBackPerLine tells the till how to make the take-backs it announced: one return per line on a plan this small, one return for all the lines otherwise.
+    return { receipt: { dryRun: true, ok: true, statements: statements.length + announced, takeBackPerLine: takeBackPerLine(env) }, wrote: false }
   }
   if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
@@ -1284,15 +1402,17 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
+  const replayGuards: Statement[] = []
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     const replayGuard = guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id })
     if (member.credit) {
       const check = creditStatePredicate(directionSign > 0 ? member.credit.before : member.credit.after, member.credit.saleId)
       mergeGuard(replayGuard, check.predicate, check.params)
     }
-    statements.push(replayGuard)
+    replayGuards.push(replayGuard)
   }
-  for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
+  statements.push(...mergeGuards(replayGuards))
+  statements.push(...memberGroupStatements(snapshot.members, directionSign, user, stamp))
   // The tag is derived again from the returns as the replay leaves them, never copied from the snapshot:
   // snapshots written before 0263 carry retired status words.
   const replaySales = snapshot.tagged
@@ -1303,7 +1423,8 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const nextGeneration = Number(generation) + 1
   const recordEvents = returnSaleRecordEvents(snapshot, nextGeneration, direction, user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
-  for (const member of snapshot.members.filter((candidate) => candidate.changed)) statements.push({ sql: `UPDATE return_bulk_members SET revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),sale_revision=CASE WHEN sale_id IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_write_revisions.sale_id=return_bulk_members.sale_id),0) END,stock_fingerprint=${movementFingerprint('@id')} WHERE operation_id=@operation AND return_id=@id`, params: { operation: operation.id, id: member.id } })
+  const replayedIds = snapshot.members.filter((candidate) => candidate.changed).map((member) => member.id)
+  if (replayedIds.length) statements.push({ sql: `UPDATE return_bulk_members SET revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=return_bulk_members.return_id),0),sale_revision=CASE WHEN sale_id IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_write_revisions.sale_id=return_bulk_members.sale_id),0) END,stock_fingerprint=${movementFingerprint('return_bulk_members.return_id')} WHERE operation_id=@operation AND return_id IN (SELECT value FROM json_each(@ids))`, params: { operation: operation.id, ids: JSON.stringify(replayedIds) } })
   statements.push({ sql: 'UPDATE return_bulk_operations SET generation=generation+1 WHERE id=@operation', params: { operation: operation.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: operation.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } })
   statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: nextStatus, stamp, generation: Number(generation) + 1 } })
