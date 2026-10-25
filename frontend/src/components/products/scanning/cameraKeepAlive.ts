@@ -1,22 +1,49 @@
-// iPhone and iPad only: the scanner's camera stream outlives the sheet, paused.
+// iPhone and iPad only, and OFF (6.0.978): the scanner's camera stream outlives the sheet, paused.
 //
-// WebKit caches a camera grant in memory per page and drops it about ten minutes
-// after the last capture STOPS (Records/Consolidation/2026-10-23/
-// RESEARCH-IOS-CAMERA-REPROMPT.md). Stopping every track when the sheet closes
-// starts that clock, so a tap a few minutes later asked again. Here the tracks
-// are only disabled (no frames) and the stream is kept, so the next tap reuses
-// the grant and the camera without a second getUserMedia.
+// WebKit caches a camera grant in memory per page and drops it after the last capture
+// STOPS. The idea (6.0.968) was to keep the stream with its tracks disabled so the next
+// tap reuses the grant. The WebKit source study (Records/Consolidation/2026-10-25/
+// RESEARCH-IOS-CAMERA-INDICATOR.md) shows it cannot work: track.enabled = false only
+// flips a flag and never reaches the capture source, so the camera keeps capturing and
+// the green in-use indicator stays on. That breaks the owner's hard rule (never leave the
+// camera on when the scanner is not showing), and the owner has no iPhone to catch it.
 //
-// Unverified on a device: whether iOS hides the camera-in-use dot while tracks
-// are disabled but not stopped. If it does not, set IOS_CAMERA_PAUSE_ENABLED to
-// false; every close then stops the tracks as on Android and desktop.
+// So IOS_CAMERA_PAUSE_ENABLED is false: closing the scanner stops every track at once on
+// every platform. The grant survives anyway: 24 h while capture is active, then 10 minutes
+// after it stops for a getUserMedia made from a tap (1 minute on iPhone without a tap), so
+// a reopen within 10 minutes does not ask. The parking code below stays behind the flag.
 //
-// A parked stream is let go of (tracks stopped) when the page is hidden or
+// A parked stream (flag on) is let go of (tracks stopped) when the page is hidden or
 // leaves, after PARKED_CAMERA_IDLE_MS, when any track ends, and when the app
 // shell unmounts or signs out (releaseParkedCamera).
 
-export const IOS_CAMERA_PAUSE_ENABLED = true
+export const IOS_CAMERA_PAUSE_ENABLED = false
 export const PARKED_CAMERA_IDLE_MS = 5 * 60 * 1000
+
+/** iPhone WebKit refuses the cached grant to a getUserMedia made WITHOUT a tap once capture stopped more than a
+ * minute ago (it prompts instead). The page coming back from hidden restarts the camera with no tap, so on iOS it
+ * does that only when the page was hidden for less than this (a margin under the 60 s); otherwise the paused panel
+ * shows and the person's tap restarts it, with the 10-minute grant window. */
+export const IOS_AUTO_RESUME_MAX_HIDDEN_MS = 50 * 1000
+
+/** Whether the camera may restart by itself after the page was hidden for `hiddenMs`. Only iOS WebKit is limited. */
+export function shouldAutoResume(hiddenMs: number, nav: Parameters<typeof isIosWebKit>[0] = globalThis.navigator): boolean {
+  return !isIosWebKit(nav) || hiddenMs < IOS_AUTO_RESUME_MAX_HIDDEN_MS
+}
+
+/** Which one-line permission tip fits a failed start, or null. iOS Safari only (Chrome, Firefox, Edge and Opera on
+ * iPhone have no such page menu), and only when the PROMPT WAS DISMISSED: a blocked camera already shows its own
+ * red instruction (the Settings line), and a second route beside it would contradict it. A Home Screen app has no
+ * per-site setting, so it gets the other line. */
+export function iosPermissionTip(
+  status: string,
+  nav: (Parameters<typeof isIosWebKit>[0] & { standalone?: boolean }) | undefined = globalThis.navigator,
+): 'safari' | 'homescreen' | null {
+  if (!isIosWebKit(nav)) return null
+  if (/CriOS|FxiOS|EdgiOS|OPiOS/i.test(nav?.userAgent || '')) return null
+  if (status !== 'dismissed') return null
+  return nav?.standalone === true ? 'homescreen' : 'safari'
+}
 
 /** iPhone, iPad and iPod WebKit, including iPadOS asking for the desktop site (a Mac UA with a touch screen). */
 export function isIosWebKit(nav: Pick<Navigator, 'userAgent' | 'platform' | 'maxTouchPoints'> | undefined = globalThis.navigator): boolean {

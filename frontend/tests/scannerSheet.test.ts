@@ -380,7 +380,9 @@ try {
           else assert.doesNotMatch(sheet.container.textContent, hint, `${platform} does not see the ${hintFor} hint`)
         }
         assert.equal(byLabel(sheet.container, 'Scan from photo').length, 1, 'the photo is still one tap away, as the corner icon')
-        assert.equal(sheet.probe.getUserMediaCalls, 0, 'a saved denial never asks the camera again')
+        // 6.0.978: the request is made inside the tap, ahead of the saved-denial read; the browser answers a saved denial
+        // at once without a prompt and whatever comes back is stopped.
+        assert.ok(sheet.probe.getUserMediaCalls <= 1 && sheet.probe.tracks.every((track) => track.readyState === 'ended'), 'a saved denial never leaves a camera on or loops')
       } finally {
         await sheet.unmount()
       }
