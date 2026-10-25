@@ -109,14 +109,18 @@ await runTest('both copies add instalments and reverse an out event identically'
 await runTest('both copies allocate payments to operation groups identically, linked first then POS then oldest', async () => {
   const worker = await loadWorkerCopy()
   const groups = [{ id: 'g1', amountUsd: 3 }, { id: null, amountUsd: 10 }, { id: 'g2', amountUsd: 4 }]
-  const event = (usd: number, covers: string | null = null, khr = 0) => ({ direction: 'in' as const, amount_paid_usd: usd, amount_paid_khr: khr, covers_operation_id: covers, exchange_rate: 4000 })
-  const cases: Array<{ name: string; events: ReturnType<typeof event>[]; expect: string[] }> = [
+  type Ev = { direction: 'in' | 'out'; amount_paid_usd: number; amount_paid_khr: number; covers_operation_id: string | null; event_id?: string; reverses_event_id?: string }
+  const event = (usd: number, covers: string | null = null, khr = 0): Ev => ({ direction: 'in', amount_paid_usd: usd, amount_paid_khr: khr, covers_operation_id: covers })
+  const cases: Array<{ name: string; groups?: typeof groups; events: Ev[]; expect: string[] }> = [
     { name: 'linked money pays its own group, the pool pays POS before the oldest', events: [event(4, 'g2'), event(11)], expect: ['g1:part_paid:1/2', 'pos:paid:10/0', 'g2:paid:4/0'] },
-    { name: 'riel pays the POS group first', events: [event(0, null, 40000)], expect: ['g1:unpaid:0/3', 'pos:paid:10/0', 'g2:unpaid:0/4'] },
+    { name: 'riel pays the POS group first, at the sale rate', events: [event(0, null, 40000)], expect: ['g1:unpaid:0/3', 'pos:paid:10/0', 'g2:unpaid:0/4'] },
+    { name: 'a lowering group carries its credit', groups: [{ id: null, amountUsd: 10 }, { id: 'g1', amountUsd: -2 }], events: [event(8)], expect: ['pos:paid:10/0', 'g1:paid:0/0'] },
+    { name: 'the half-cent tolerance is the whole sale tolerance', groups: [{ id: null, amountUsd: 1 }, { id: 'g1', amountUsd: 1 }, { id: 'g2', amountUsd: 1 }], events: [event(0.996), event(0.996, 'g1'), event(0.996, 'g2')], expect: ['pos:part_paid:0.996/0.004', 'g1:part_paid:0.996/0.004', 'g2:part_paid:0.996/0.004'] },
+    { name: 'a reversal inherits the group of the event it reverses', events: [{ ...event(3, 'g1'), event_id: 'a' }, { ...event(3), direction: 'out', event_id: 'b', reverses_event_id: 'a' }], expect: ['g1:unpaid:0/3', 'pos:unpaid:0/10', 'g2:unpaid:0/4'] },
   ]
   for (const fixture of cases) {
     for (const [label, copy] of [['UI', uiCopy], ['Worker', worker]] as const) {
-      const result = copy.allocatePaymentsToGroups({ groups, events: fixture.events })
+      const result = copy.allocatePaymentsToGroups({ sale: sale({ total_usd: 17 }), groups: fixture.groups ?? groups, events: fixture.events })
       assert.deepEqual(result.groups.map((g) => `${g.id ?? 'pos'}:${g.tag}:${g.paidUsd}/${g.owedUsd}`), fixture.expect, `${label}: ${fixture.name}`)
     }
   }

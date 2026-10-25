@@ -193,8 +193,9 @@ check('the opening event synthesises details when the stored list is empty, inva
 })
 
 // --- allocation to operation groups ---
-const alloc = (groups, events, debtLoweredUsd = 0) => core.allocatePaymentsToGroups({ groups, events, debtLoweredUsd })
-const ev = (direction, usd, covers = null, khr = 0, rate = 4000) => ({ direction, amount_paid_usd: usd, amount_paid_khr: khr, covers_operation_id: covers, exchange_rate: rate })
+// The sale is what fixes the riel basis (its rate and precision), exactly as for the status; an event's own exchange_rate is not read.
+const alloc = (groups, events, debtLoweredUsd = 0, saleOverrides = {}) => core.allocatePaymentsToGroups({ sale: sale(saleOverrides), groups, events, debtLoweredUsd })
+const ev = (direction, usd, covers = null, khr = 0, extra = {}) => ({ direction, amount_paid_usd: usd, amount_paid_khr: khr, covers_operation_id: covers, ...extra })
 const POS = (amountUsd) => ({ id: null, amountUsd })
 const view = (result) => result.groups.map(group => `${group.id ?? 'pos'}:${group.tag}:${group.paidUsd}/${group.owedUsd}`)
 
@@ -218,11 +219,30 @@ check('an out event linked to a group reverses it; an unlinked out reduces the s
   assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }], [ev('in', 13), ev('out', 5)])), ['pos:part_paid:8/2', 'g1:unpaid:0/3'])
 })
 
-check('riel money counts at its own event rate, and a partly paid group is Part paid', () => {
-  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 40000, 4000)])), ['pos:paid:10/0'])
-  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 20500, 4100)])), ['pos:part_paid:5/5'])
-  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 39980, 4000)])), ['pos:paid:9.995/0.005'], 'inside the half-cent band is Paid')
+check('riel is converted at the SALE rate, not the event rate (P2-1): the event rate on the row changes nothing', () => {
+  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 40000, { exchange_rate: 4100 })])), ['pos:paid:10/0'], 'booked 4000, event rate 4100: still paid, as the status says')
+  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 40000, { exchange_rate: 3900 })])), ['pos:paid:10/0'])
+  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 20500)], 0, { exchange_rate: 4100 })), ['pos:part_paid:5/5'], 'a sale booked at 4100 converts at 4100')
+  assert.deepEqual(view(alloc([POS(10)], [ev('in', 0, null, 39980)])), ['pos:paid:9.995/0.005'], 'inside the half-cent band is Paid')
   assert.deepEqual(view(alloc([POS(10)], [ev('in', 9.9949)])), ['pos:part_paid:9.9949/0.0051'])
+})
+
+check('tags and status agree on one basis across rates, precision versions and a sweep of riel amounts around the band (P2-1)', () => {
+  let paidSeen = 0
+  let notPaidSeen = 0
+  for (const rate of [4000, 4100, 4123.45678, 3999.99995]) {
+    for (const version of [0, 1]) {
+      const exactKhr = Math.round(10 * rate)
+      for (let khr = exactKhr - 40; khr <= exactKhr + 2; khr++) {
+        const overrides = { exchange_rate: rate, money_precision_version: version }
+        const status = derive(overrides, { khr }).saleStatus
+        const tag = alloc([POS(10)], [ev('in', 0, null, khr)], 0, overrides).groups[0].tag
+        assert.equal(tag === 'paid', status === 'completed', `rate ${rate} v${version} ${khr} riel: status ${status}, tag ${tag}`)
+        status === 'completed' ? paidSeen++ : notPaidSeen++
+      }
+    }
+  }
+  assert.ok(paidSeen > 10 && notPaidSeen > 10, 'control: the sweep crosses the boundary on both sides')
 })
 
 check('debt lowered by a return counts as credit before cash: a $13 sale with $10 paid and $3 lowered is all Paid', () => {
@@ -235,13 +255,128 @@ check('overpaying a group spills its excess to the pool; money linked to an unli
   assert.deepEqual(view(spill), ['pos:part_paid:2/8', 'g1:paid:3/0'])
   assert.deepEqual(view(alloc([POS(10)], [ev('in', 10, 'ghost')])), ['pos:paid:10/0'])
   assert.equal(alloc([POS(10)], [ev('in', 12)]).unallocatedUsd, 2)
-  assert.equal(alloc([POS(10)], [ev('in', 4), ev('out', 9)]).unallocatedUsd, 0, 'a pool never goes negative')
 })
 
-check('a group that lowered the total needs nothing and reads Paid; duplicate or double POS groups are refused', () => {
+check('a pool never goes negative: more unlinked money out than in leaves every group unpaid, not paid -$5', () => {
+  const over = alloc([POS(10)], [ev('in', 4), ev('out', 9)])
+  assert.deepEqual(view(over), ['pos:unpaid:0/10'])
+  assert.equal(over.unallocatedUsd, 0)
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }], [ev('in', 4), ev('out', 9)])), ['pos:unpaid:0/10', 'g1:unpaid:0/3'])
+})
+
+check('a lowering group carries its credit (P2-2): POS $10 + a -$2 lowering on a $8 sale paid $8 is all Paid, not $2 short', () => {
+  const lowered = alloc([POS(10), { id: 'g1', amountUsd: -2 }], [ev('in', 8)])
+  assert.deepEqual(view(lowered), ['pos:paid:10/0', 'g1:paid:0/0'])
+  assert.equal(derive({ total_usd: 8 }, { usd: 8 }, 'amendment').saleStatus, 'completed', 'the status says the same')
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: -2 }], [ev('in', 7)])), ['pos:part_paid:9/1', 'g1:paid:0/0'], 'one dollar short on the $8 sale is one dollar short on the line')
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }, { id: 'g2', amountUsd: -2 }], [ev('in', 11)])), ['pos:paid:10/0', 'g1:paid:3/0', 'g2:paid:0/0'], 'the credit pays the addition')
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }, { id: 'g2', amountUsd: -2 }], [ev('in', 10)])), ['pos:paid:10/0', 'g1:part_paid:2/1', 'g2:paid:0/0'], 'control: $10 on a $11 sale leaves the addition $1 short')
+})
+
+check('the half-cent tolerance is the whole sale\'s, taken once (P3-1): three groups each $0.004 short are not all Paid', () => {
+  const groups = [POS(1), { id: 'g1', amountUsd: 1 }, { id: 'g2', amountUsd: 1 }]
+  const events = [ev('in', 0.996), ev('in', 0.996, 'g1'), ev('in', 0.996, 'g2')]
+  const result = alloc(groups, events, 0, { total_usd: 3 })
+  assert.deepEqual(view(result), ['pos:part_paid:0.996/0.004', 'g1:part_paid:0.996/0.004', 'g2:part_paid:0.996/0.004'])
+  assert.equal(derive({ total_usd: 3 }, { usd: 2.988 }).saleStatus, 'awaiting_payment', 'the status agrees: $0.012 short')
+  assert.deepEqual(view(alloc([POS(1), { id: 'g1', amountUsd: 1 }], [ev('in', 0.998), ev('in', 0.998, 'g1')], 0, { total_usd: 2 })), ['pos:paid:0.998/0.002', 'g1:paid:0.998/0.002'], 'control: $0.004 short in all is inside the band')
+  assert.equal(derive({ total_usd: 2 }, { usd: 1.996 }).saleStatus, 'completed')
+})
+
+check('an out event that names the event it reverses inherits its group (P3-2); an unresolvable target is refused', () => {
+  const groups = [POS(10), { id: 'g1', amountUsd: 3 }]
+  const linkedIn = ev('in', 3, 'g1', 0, { event_id: 'a' })
+  assert.deepEqual(view(alloc(groups, [linkedIn, ev('out', 3, null, 0, { event_id: 'b', reverses_event_id: 'a' })])), ['pos:unpaid:0/10', 'g1:unpaid:0/3'])
+  assert.deepEqual(view(alloc(groups, [linkedIn, ev('out', 3, null, 0, { event_id: 'b' })])), ['pos:unpaid:0/10', 'g1:unpaid:0/3'], 'control: an out with no link and no target comes out of the pool, and with nothing in the pool out of the paid group (P3-D1): the sale owes $13 either way')
+  assert.throws(() => alloc(groups, [ev('out', 3, null, 0, { event_id: 'b', reverses_event_id: 'missing' })]), /reverses an event that is not in the list/)
+})
+
+check('buildPaymentEvent inherits the reversed event\'s group and refuses a conflicting link (P3-2)', () => {
+  const reversed = { event_id: 'a', covers_operation_id: 'g1' }
+  const undo = event({ origin: 'undo', direction: 'out', reversedEvent: reversed })
+  assert.deepEqual([undo.reverses_event_id, undo.covers_operation_id], ['a', 'g1'])
+  assert.equal(code(() => event({ origin: 'undo', direction: 'out', reversedEvent: reversed, coversOperationId: 'g2' })), 'payment_event_link_mismatch')
+  assert.equal(code(() => event({ origin: 'undo', direction: 'out', reversedEvent: reversed, reversesEventId: 'zzz' })), 'payment_event_link_mismatch')
+  assert.equal(event({ origin: 'undo', direction: 'out', reversedEvent: { event_id: 'a', covers_operation_id: null } }).covers_operation_id, null)
+  assert.equal(event({ origin: 'undo', direction: 'out', reversedEvent: reversed, coversOperationId: 'g1' }).covers_operation_id, 'g1')
+})
+
+check('a group that lowered the total needs nothing and reads Paid; duplicate or double POS groups are refused; an unreadable rate throws', () => {
   assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: -2 }], [ev('in', 10)])), ['pos:paid:10/0', 'g1:paid:0/0'])
   assert.throws(() => alloc([POS(10), POS(5)], []), /one POS/)
   assert.throws(() => alloc([{ id: 'g1', amountUsd: 1 }, { id: 'g1', amountUsd: 1 }], []), /unique/)
+  assert.throws(() => alloc([POS(10)], [ev('in', 10)], 0, { exchange_rate: 0 }))
+})
+
+check('a negative pool is taken back from the paid groups, newest first, so lines and status agree (P3-D1)', () => {
+  // X1: POS $0 + a $10 addition paid by a linked $10, then an unlinked correction out of $5. The sale owes $5.
+  const x1 = alloc([POS(0), { id: 'g1', amountUsd: 10 }], [ev('in', 10, 'g1'), ev('out', 5, null, 0, { event_id: 'c' })], 0, { total_usd: 10 })
+  assert.deepEqual(view(x1), ['pos:paid:0/0', 'g1:part_paid:5/5'], 'was pos:paid + g1:paid on a sale the status calls Not Paid')
+  assert.deepEqual(derive({ total_usd: 10 }, { usd: 5 }), { saleStatus: 'awaiting_payment', owedUsd: 5, covered: false, partPaid: true })
+  // X2: the owes of the lines sum to the owes of the sale.
+  const x2 = alloc([POS(10), { id: 'g1', amountUsd: 3 }], [ev('in', 10), ev('in', 3, 'g1'), ev('out', 12)], 0, { total_usd: 13 })
+  assert.equal(x2.groups.reduce((sum, group) => sum + group.owedUsd, 0), derive({ total_usd: 13 }, { usd: 1 }).owedUsd)
+  assert.deepEqual(view(x2), ['pos:unpaid:0/10', 'g1:part_paid:1/2'])
+  // The newest group loses money first; the POS group is the last.
+  assert.deepEqual(view(alloc([POS(10), { id: 'g1', amountUsd: 3 }, { id: 'g2', amountUsd: 4 }], [ev('in', 3, 'g1'), ev('in', 4, 'g2'), ev('in', 10), ev('out', 12)], 0, { total_usd: 17 })), ['pos:unpaid:0/10', 'g1:paid:3/0', 'g2:part_paid:2/2'])
+  // Status and tags agree on every cell of a small sweep.
+  for (const out of [0, 1, 4, 5, 9, 10, 13]) {
+    const result = alloc([POS(0), { id: 'g1', amountUsd: 10 }], [ev('in', 10, 'g1'), ev('out', out)], 0, { total_usd: 10 })
+    const status = derive({ total_usd: 10 }, { usd: 10 - out }).saleStatus
+    assert.equal(result.groups.every(group => group.tag === 'paid'), status === 'completed', `out ${out}`)
+  }
+})
+
+check('v0 and v1 differ on one rate: 39,980 riel at 4000.00004 covers a $10 sale under v0 (rate quantised to 4000) and not under v1 (P3-D2)', () => {
+  const rate = { exchange_rate: 4000.00004 }
+  assert.equal(derive({ ...rate, money_precision_version: 0 }, { khr: 39980 }).saleStatus, 'completed')
+  assert.equal(derive({ ...rate, money_precision_version: 1 }, { khr: 39980 }).saleStatus, 'awaiting_payment')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 0 }).groups[0].tag, 'paid')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 1 }).groups[0].tag, 'part_paid')
+})
+
+check('displayed paid and owed round half-up, not down (P3-D3)', () => {
+  // 2 riel at 3000 is $0.000666..., shown as $0.0007 (truncation gives $0.0006); 3 riel at 7 is $0.428571, shown $0.4286.
+  const a = alloc([POS(10)], [ev('in', 0, null, 2)], 0, { exchange_rate: 3000 }).groups[0]
+  assert.deepEqual([a.paidUsd, a.owedUsd], [0.0007, 9.9993])
+  const b = alloc([POS(10)], [ev('in', 0, null, 3)], 0, { exchange_rate: 7 }).groups[0]
+  assert.deepEqual([b.paidUsd, b.owedUsd], [0.4286, 9.5714])
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 1)], 0, { exchange_rate: 3000 }).groups[0].paidUsd, 0.0003, 'control: a third rounds down')
+  assert.equal(alloc([POS(10)], [ev('in', 12.00006)], 0).unallocatedUsd, 2.0001, 'unallocated rounds the same way')
+})
+
+check('an opening event is outside the drawer exactly when the version 0 reader counts nothing for the sale (E4)', () => {
+  const base = { id: 1, payment_method: 'Cash', amount_paid_usd: 4, amount_paid_khr: 0, exchange_rate: 4000, created_at: '2026-09-01 02:00:00' }
+  const effect = (overrides) => core.buildOpeningPaymentEvent({ ...base, ...overrides }).drawer_effect
+  for (const unreadable of ['', ' ', 'not json', '{"a":1}', '5', '"x"']) assert.equal(effect({ payment_details: unreadable }), 0, JSON.stringify(unreadable))
+  for (const readable of [undefined, null, '[]', 'null', '[{"method":"Cash","amount_usd":4,"amount_khr":0}]']) assert.equal(effect({ payment_details: readable }), 1, JSON.stringify(readable))
+  assert.equal(effect({ payment_details: null, payment_method: '' }), 0, 'no method name and no list: the v0 reader skips the tender')
+  assert.equal(effect({ payment_details: '[{"method":"Cash","amount_usd":4,"amount_khr":0}]', payment_method: '' }), 1, 'a named method inside the list counts')
+  assert.equal(core.legacyDetailsUnreadable(''), true)
+  assert.equal(core.legacyDetailsUnreadable('[]'), false)
+})
+
+check('event times are stored in the one canonical shape the windows compare as text (E5)', () => {
+  assert.equal(core.canonicalEventTime('2026-09-01T02:00:00.123Z'), '2026-09-01 02:00:00')
+  assert.equal(core.canonicalEventTime('2026-09-01 02:00:00'), '2026-09-01 02:00:00')
+  assert.equal(core.canonicalEventTime('2026-09-01T09:00:00+07:00'), '2026-09-01 02:00:00')
+  assert.equal(event({ receivedAt: '2026-10-25T03:00:00Z' }).received_at, '2026-10-25 03:00:00')
+  assert.equal(core.buildOpeningPaymentEvent({ id: 2, payment_method: 'Cash', amount_paid_usd: 1, exchange_rate: 4000, created_at: '2026-09-01T02:00:00.000Z' }).received_at, '2026-09-01 02:00:00')
+  assert.equal(code(() => core.canonicalEventTime('')), 'payment_event_time_required')
+  assert.equal(code(() => core.canonicalEventTime('yesterday')), 'payment_event_time_required')
+})
+
+check('more paid out than ever came in leaves the sale owing, even inside the half-cent band (E7a)', () => {
+  // The reviewer's case: a $0.004 sale, $5 in, $10 out. The status says Not Paid owing $5.004; no line may read Paid.
+  const result = alloc([POS(0.004)], [ev('in', 5), ev('out', 10)], 0, { total_usd: 0.004 })
+  assert.equal(derive({ total_usd: 0.004 }, { usd: -5 }).saleStatus, 'awaiting_payment')
+  assert.deepEqual(view(result), ['pos:unpaid:0/0.004'])
+  assert.equal(result.shortfallUsd, 5)
+  // Control: a consistent ledger on the same sale is Paid and has no shortfall.
+  const ok = alloc([POS(0.004)], [ev('in', 5), ev('out', 4.999)], 0, { total_usd: 0.004 })
+  assert.deepEqual(view(ok), ['pos:paid:0.001/0.003'])
+  assert.equal(ok.shortfallUsd, 0)
+  assert.equal(alloc([POS(10)], [ev('in', 4), ev('out', 9)]).shortfallUsd, 5, 'the earlier clamp case reports its shortfall')
 })
 
 console.log(`\n${passed} checks passed`)

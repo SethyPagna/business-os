@@ -90,6 +90,11 @@ function database() {
       delivery_actual_cost_khr REAL, is_delivery INTEGER, source_return_id INTEGER,
       customer_id INTEGER, delivery_contact_id INTEGER, delivery_contact_name TEXT
     );
+ALTER TABLE sales ADD COLUMN payments_version INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, direction TEXT NOT NULL, origin TEXT NOT NULL,
+ payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
+ change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,
+ exchange_rate REAL NOT NULL, drawer_effect INTEGER NOT NULL DEFAULT 1, received_at TEXT NOT NULL, branch_id INTEGER, cashier_id INTEGER);
     CREATE TABLE sale_amendments(id INTEGER PRIMARY KEY, sale_id INTEGER);
     CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE sale_items (

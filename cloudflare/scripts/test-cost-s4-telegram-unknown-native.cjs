@@ -63,6 +63,11 @@ db.exec(`
     change_usd REAL, change_khr REAL, change_is_actual INTEGER, change_exchange_rate REAL, exchange_rate REAL DEFAULT 4100,
     source_return_id INTEGER
   );
+ALTER TABLE sales ADD COLUMN payments_version INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, direction TEXT NOT NULL, origin TEXT NOT NULL,
+ payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
+ change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,
+ exchange_rate REAL NOT NULL, drawer_effect INTEGER NOT NULL DEFAULT 1, received_at TEXT NOT NULL, branch_id INTEGER, cashier_id INTEGER);
   CREATE TABLE sale_amendments(id INTEGER PRIMARY KEY, sale_id INTEGER);
   CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
     total_usd REAL, branch_id INTEGER, product_id INTEGER, product_name TEXT,
