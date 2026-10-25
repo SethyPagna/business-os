@@ -23,6 +23,7 @@ const PERSONAL_COLUMN = /(^|_)(name|phone|address|email|note|notes)$/
 const MAX_CANONICAL_CHARS = 12000
 const SALE_LIST = 'forensics-completed-short-rows'
 const CATALOG_LIST = 'forensics-catalog-mirror-drift-rows'
+const EVENTS_LIST = 'forensics-payment-events-mismatch-rows'
 
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'health-drilldown-'))
 const TEMPLATE = path.join(SCRATCH, 'migrated.sqlite')
@@ -110,7 +111,7 @@ async function main() {
 
   await check('both lists pass the guard as bounded row lists, return no personal column, and run on the bare migrated schema', () => {
     const db = migratedDatabase()
-    for (const name of [SALE_LIST, CATALOG_LIST]) {
+    for (const name of [SALE_LIST, CATALOG_LIST, EVENTS_LIST]) {
       const query = guard.loadQuery(name)
       assert.equal(query.rules.minRows, 0, `${name}: min-rows`)
       assert.equal(query.rules.maxRows, 200, `${name}: max-rows`)
@@ -365,7 +366,43 @@ async function main() {
       return plan.filter((row) => /^SCAN \w+$/.test(row.detail) && names.has(row.detail.slice(5)) && underCorrelated(row)).map((row) => row.detail)
     }
     assert.deepEqual(correlatedScans('SELECT (SELECT COUNT(*) FROM sale_amendments a WHERE a.amount_delta_usd = s.total_usd) FROM sales s'), ['SCAN a'], 'the detector sees an aliased correlated scan')
-    for (const name of [SALE_LIST, CATALOG_LIST]) assert.deepEqual(correlatedScans(sql(name)), [], name)
+    for (const name of [SALE_LIST, CATALOG_LIST, EVENTS_LIST]) assert.deepEqual(correlatedScans(sql(name)), [], name)
+  })
+
+  await check('payment-events list: the health CTE and predicate are the health query own text, and the list is exactly the rows payment_events_mismatch counts', () => {
+    const health = sql('health-sale-money')
+    const list = sql(EVENTS_LIST)
+    const pe = /(pe AS MATERIALIZED \(.*?\)) SELECT \(SELECT COUNT\(\*\) FROM s WHERE mpv = 1\)/.exec(health)
+    assert.ok(pe, 'health-sale-money lost its pe CTE')
+    assert.ok(list.includes(pe[1]), 'the list lost the pe CTE of health-sale-money (events in minus out per version 1 sale)')
+    const end = health.indexOf(') AS payment_events_mismatch')
+    const start = health.lastIndexOf('(SELECT COUNT(*) FROM pe WHERE ', end)
+    assert.ok(end > 0 && start >= 0, 'health-sale-money lost payment_events_mismatch')
+    const predicate = health.slice(start + '(SELECT COUNT(*) FROM pe WHERE '.length, end)
+    assert.ok(list.includes(` FROM pe WHERE ${predicate} )`), 'the list does not select with the payment_events_mismatch predicate')
+
+    const db = migratedDatabase()
+    const sale = (id, extra = {}) => ({ id, total_usd: 5, subtotal_usd: 5, exchange_rate: 4100, amount_paid_usd: 5, legacy_receipt_number: `0000${id}@2026-01-01`, payments_version: 1, created_at: '2026-10-01 03:00:00', ...extra })
+    insert(db, 'sales', [
+      sale(1), sale(2), sale(3), sale(4, { amount_paid_usd: 0, amount_paid_khr: 40000 }), sale(5, { amount_paid_usd: 5, payments_version: 0 }), sale(6),
+    ])
+    const ev = (saleId, n, direction, usd, khr = 0, at = '2026-10-02 03:00:00') => ({ event_id: `e${saleId}-${n}`, sale_id: saleId, direction, origin: direction === 'out' ? 'undo' : 'collect',
+      payment_method: 'Cash', payment_details: '[]', amount_paid_usd: usd, amount_paid_khr: khr, exchange_rate: 4100, received_at: at })
+    insert(db, 'sale_payment_events', [
+      ev(1, 1, 'in', 5),                                  // control: matches
+      ev(2, 1, 'in', 5), ev(2, 2, 'out', 5, 0, '2026-10-03 04:00:00'), // undone: 0 against 5 paid, mismatch
+      ev(3, 1, 'in', 2),                                  // 2 against 5 paid
+      ev(4, 1, 'in', 0, 40000),                           // control: riel matches
+      ev(5, 1, 'in', 9),                                  // control: a version 0 sale is not compared
+    ])
+    const rows = rowsOf(db, EVENTS_LIST)
+    assert.equal(rows.length, one(db, 'health-sale-money').payment_events_mismatch, 'the list is the column')
+    assert.deepEqual(rows.map((r) => r.sale_id), [2, 3, 6])
+    const by = Object.fromEntries(rows.map((r) => [r.sale_id, r]))
+    assert.deepEqual(pick(by[2], ['paid_usd', 'ev_usd', 'gap_usd', 'event_count', 'in_count', 'out_count', 'first_event_at', 'last_event_at', 'last_origin']),
+      { paid_usd: 5, ev_usd: 0, gap_usd: 5, event_count: 2, in_count: 1, out_count: 1, first_event_at: '2026-10-02 03:00:00', last_event_at: '2026-10-03 04:00:00', last_origin: 'undo' })
+    assert.deepEqual(pick(by[6], ['ev_usd', 'gap_usd', 'event_count', 'last_origin']), { ev_usd: 0, gap_usd: 5, event_count: 0, last_origin: null }, 'a paid version 1 sale with no event at all is listed')
+    assert.deepEqual(pick(by[3], ['ev_usd', 'gap_usd']), { ev_usd: 2, gap_usd: 3 })
   })
 
   if (process.exitCode) console.error(`test-health-drilldown-rows-native: FAILED (${passed} passed)`)

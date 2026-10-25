@@ -71,6 +71,11 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
  change_usd REAL, change_khr REAL, change_is_actual INTEGER, change_exchange_rate REAL,
  total_usd REAL DEFAULT 0, exchange_rate REAL DEFAULT 4100,
  delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL);
+ALTER TABLE sales ADD COLUMN payments_version INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, direction TEXT NOT NULL, origin TEXT NOT NULL,
+ payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
+ change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,
+ exchange_rate REAL NOT NULL, drawer_effect INTEGER NOT NULL DEFAULT 1, received_at TEXT NOT NULL, branch_id INTEGER, cashier_id INTEGER);
 CREATE TABLE sale_amendments(id INTEGER PRIMARY KEY, sale_id INTEGER);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
  label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);

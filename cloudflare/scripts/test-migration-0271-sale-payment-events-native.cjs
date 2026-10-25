@@ -33,6 +33,7 @@ function seed(db) {
 }
 const withoutNew = db => ({
   sales: db.prepare('SELECT * FROM sales ORDER BY id').all().map(({ payments_version, ...row }) => row),
+  sale_items: db.prepare('SELECT * FROM sale_items ORDER BY id').all().map(({ added_operation_id, ...row }) => row),
 })
 const event = (overrides = {}) => ({
   event_id: 'e-1', sale_id: 1, direction: 'in', origin: 'checkout', payment_method: 'Cash',
@@ -57,16 +58,19 @@ check('the file is LF-only and carries its PRE, POST and RECOVERY notes', () => 
   for (const word of ['PRE:', 'POST:', 'RECOVERY:']) assert.ok(sql.includes(word), word)
 })
 
-check('PRE/POST: row counts and every existing column of every sales row are identical; the new columns read "no events"', () => {
+check('PRE/POST: row counts and every existing column of every sales and sale_items row are identical; the new columns read "no events"', () => {
   const db = new Database(schema)
   seed(db)
+  for (const [sale, name, quantity] of [[1, 'Line A', 1], [1, 'Line B', 2], [2, 'Line C', 3]]) db.prepare('INSERT INTO sale_items(sale_id,product_name,quantity) VALUES(?,?,?)').run(sale, name, quantity)
   const before = withoutNew(db)
   db.exec(sql)
+  assert.equal(before.sale_items.length, 3, 'control: the fixture really has sale_items rows to compare')
   assert.deepEqual(withoutNew(db), before)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM sale_items WHERE added_operation_id IS NOT NULL').get().n, 0)
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sales WHERE payments_version <> 0').get().n, 0)
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sale_payment_events').get().n, 0)
   db.prepare("INSERT INTO sale_items(sale_id,product_name,quantity) VALUES(1,'P',1)").run()
-  assert.equal(db.prepare('SELECT added_operation_id v FROM sale_items').get().v, null)
+  assert.equal(db.prepare('SELECT added_operation_id v FROM sale_items ORDER BY id DESC').get().v, null)
   db.close()
 })
 

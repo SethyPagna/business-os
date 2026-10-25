@@ -2,7 +2,8 @@
 -- (DATA-MATCH DM-07, DM-08). v1 = money_precision_version 1, written by
 -- lib/saleTotals.ts computeSaleTotalsV1 and checked by
 -- lib/saleMoneyPrecision.ts validateSaleMoneySnapshot, so every v1_* column must be 0.
--- Needs migrations 0158 and 0260 (returns.refund_currency / owed_reduction_usd).
+-- Needs migrations 0158, 0260 (returns.refund_currency / owed_reduction_usd) and 0271 (sales.payments_version,
+-- sale_payment_events).
 -- The payment state is the two-status reading of lib/saleStatusResolution.ts
 -- saleStoredState: awaiting_payment, or a retired return label (partial_return,
 -- returned; live rows keep them until the held 0264) whose status_before_return
@@ -24,6 +25,10 @@
 --   not_paid_but_covered   Not Paid sales the TENDER alone already covers (a return that
 --                          lowered the debt to 0 leaves a legitimate Not Paid sale owing 0)
 --   system_sales_without_lines, negative_totals, bad_rate
+--   payment_events_mismatch  payments_version 1 sales whose sale_payment_events (in minus out) differ from
+--                          amount_paid_usd (more than 0.00005) or amount_paid_khr (more than half a riel);
+--                          a version 1 sale with no event and money paid counts. Drill-down:
+--                          forensics-payment-events-mismatch-rows.sql. 0 until a Worker writes events.
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
@@ -51,6 +56,16 @@ s AS MATERIALIZED (
     CASE WHEN COALESCE(x.legacy_receipt_number, '') <> '' OR (x.client_request_id >= 'sales-import:' AND x.client_request_id < 'sales-import;') THEN 1 ELSE 0 END AS imported,
     COALESCE(r.lowered, 0) AS lowered
   FROM sales x LEFT JOIN li l ON l.sale_id = x.id LEFT JOIN rr r ON r.sale_id = x.id
+),
+pe AS MATERIALIZED (
+  SELECT x.id, COALESCE(x.amount_paid_usd, 0) AS paid_usd, COALESCE(x.amount_paid_khr, 0) AS paid_khr,
+    COALESCE(e.usd, 0) AS ev_usd, COALESCE(e.khr, 0) AS ev_khr
+  FROM sales x LEFT JOIN (
+    SELECT sale_id, SUM(CASE WHEN direction = 'out' THEN -amount_paid_usd ELSE amount_paid_usd END) AS usd,
+      SUM(CASE WHEN direction = 'out' THEN -amount_paid_khr ELSE amount_paid_khr END) AS khr
+    FROM sale_payment_events GROUP BY sale_id
+  ) e ON e.sale_id = x.id
+  WHERE x.payments_version = 1
 )
 SELECT
   (SELECT COUNT(*) FROM s WHERE mpv = 1) AS v1_sales,
@@ -68,4 +83,5 @@ SELECT
      AND total - paid_usd - paid_khr / rate <= 0.005000001) AS not_paid_but_covered,
   (SELECT COUNT(*) FROM s WHERE imported = 0 AND n_lines = 0 AND pay <> 'cancelled') AS system_sales_without_lines,
   (SELECT COUNT(*) FROM s WHERE total < 0 OR subtotal < 0) AS negative_totals,
-  (SELECT COUNT(*) FROM s WHERE rate IS NULL OR rate <= 0) AS bad_rate
+  (SELECT COUNT(*) FROM s WHERE rate IS NULL OR rate <= 0) AS bad_rate,
+  (SELECT COUNT(*) FROM pe WHERE ABS(ev_usd - paid_usd) > 0.00005 OR ABS(ev_khr - paid_khr) > 0.5) AS payment_events_mismatch
