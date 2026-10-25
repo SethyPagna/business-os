@@ -13,6 +13,7 @@ import { cameraResetPlatform, deriveScannerPresentation } from './barcodeScanner
 import { PhotoScanError, scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
 import { SCAN_GUIDE_BOX } from './barcodeFrameDecoder.ts'
 import { SCAN_CLOSE_DELAY_MS, signalScanSuccess } from './scanFeedback.ts'
+import { iosPermissionTip } from './cameraKeepAlive.ts'
 import { useBarcodeCamera } from './useBarcodeCamera.ts'
 
 // The overlay outlines exactly the area the frame grabber decodes.
@@ -64,6 +65,11 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
     torchOn: tr('scanner_torch_on', 'Turn on flashlight', 'បើកភ្លើងពិល'),
     torchOff: tr('scanner_torch_off', 'Turn off flashlight', 'បិទភ្លើងពិល'),
     torchFailed: tr('scanner_torch_failed', 'The flashlight could not be switched.', 'មិនអាចប្ដូរភ្លើងពិលបានទេ។'),
+    // After a start that failed on the permission, iOS only: how to stop the asking (a Home Screen app has no setting).
+    iosTips: {
+      safari: tr('camera_ios_allow_tip', 'Stop camera prompts: aA › Website Settings › Camera › Allow', 'កុំឱ្យសួរម្ដងទៀត៖ aA › ការកំណត់គេហទំព័រ › កាមេរ៉ា › អនុញ្ញាត'),
+      homescreen: tr('camera_ios_homescreen_tip', 'The Home Screen app asks once each time it opens.', 'កម្មវិធីលើអេក្រង់ដើមសួរម្ដងរាល់ពេលបើក។'),
+    },
     // A blocked camera gets one line: the steps for the device in hand.
     blockedSteps: {
       ios: tr('camera_permission_reset_hint_ios', 'On iPhone: Settings › Safari › Camera › Allow, then try again.', 'នៅលើ iPhone៖ ការកំណត់ › Safari › កាមេរ៉ា › អនុញ្ញាត រួចសាកម្តងទៀត។'),
@@ -155,6 +161,8 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
   // Red is for a true block (denied, or a view that forbids the camera) and nothing else: a dismissed prompt,
   // a busy camera, a failed start and a paused camera are all the neutral camera icon.
   const blocked = stateKind === 'blocked'
+  // Only a start that failed on the permission, and only on iOS; neutral, never red.
+  const iosTipKind = iosPermissionTip(status, permissionState, navigator)
 
   return (
     <Modal title={title} onClose={closeScanner} size="sm" layer="nested" unsavedChanges="read-only" bare>
@@ -186,6 +194,7 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 pb-4 pt-14 text-center">
             {blocked ? <ShieldAlert className="h-9 w-9 flex-shrink-0 text-red-400" /> : <Camera className="h-9 w-9 flex-shrink-0" />}
             <p className="max-w-sm text-sm leading-6 text-white/85">{emptyStateMessage}</p>
+            {iosTipKind ? <p className="max-w-sm text-xs leading-6 text-white/60">{labels.iosTips[iosTipKind]}</p> : null}
             {showCameraAction ? (
               <button
                 type="button"

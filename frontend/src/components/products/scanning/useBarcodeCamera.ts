@@ -24,7 +24,7 @@ import {
 } from './barcodeFrameDecoder.ts'
 import { clearCameraChoice, listCameras, nextCameraId, readCameraChoice, saveCameraChoice, withRememberedCamera } from './cameraChoice.ts'
 import { acquireDecodeClient, type DecodeClient, type DecodeFrames } from './decodeWorkerClient.ts'
-import { allowCameraParking, parkCameraStream, releaseParkedCamera, shouldPauseOnClose, takeParkedCameraStream } from './cameraKeepAlive.ts'
+import { allowCameraParking, parkCameraStream, releaseParkedCamera, shouldAutoResume, shouldPauseOnClose, takeParkedCameraStream } from './cameraKeepAlive.ts'
 import { createScanIdlePolicy, scanIntervalMs } from './scanIdlePolicy.ts'
 import {
   getNativeBarcodeDetector,
@@ -171,6 +171,9 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   const nextScanAtRef = useRef(0)
   // The page was hidden while the camera ran: coming back starts it again by itself.
   const resumeOnReturnRef = useRef(false)
+  // When the page last went hidden (0 = visible). On iOS WebKit a return after too long a stay does not restart by
+  // itself (shouldAutoResume): the paused panel shows and the person's tap restarts it.
+  const hiddenAtRef = useRef(0)
   // The start that came back from a hide (not a tap, not the open). While its request is pending the page may
   // be hidden again: that start was a camera that was running, so it still counts as one.
   const nextStartIsResumeRef = useRef(false)
@@ -418,22 +421,54 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       return
     }
 
-    const nextPermissionState = await readCameraPermissionState()
+    // The camera is requested HERE, synchronously, before any await: WebKit treats a getUserMedia made inside the
+    // person's tap as a user-gesture request (the cached grant then lasts 10 minutes after capture stops; without a
+    // gesture only 1 minute on iPhone, after which it asks again). Every way in (the open effect the tap mounts, the
+    // Try camera again and Start camera buttons) reaches this line with nothing awaited before it. The permission
+    // read and the wait for the <video> run beside the request, never ahead of it.
+    requestsInFlightRef.current += 1
+    const request = openCamera(startToken, () => startTokenRef.current).finally(() => { requestsInFlightRef.current -= 1 })
+    request.catch(() => {}) // every path below awaits or discards it; this only keeps an abandoned refusal from being reported unhandled
+    const permissionRead = readCameraPermissionState()
+    // A request this start no longer wants: its stream is stopped on arrival and, if the page came back meanwhile,
+    // the resume that waited for the answer goes ahead (settleRequest).
+    const discardRequest = (): void => {
+      request.then(
+        (stream) => { stopStream(stream) },
+        (refusal) => {
+          // A resume that waited for this answer is dropped when the answer was a refusal: no loop on denial.
+          const refused = classifyCameraFailure(getScanErrorText(refusal), { permissionDenied: false, inAppBrowser: false })
+          if (refused === 'blocked' || refused === 'dismissed') resumeAfterRequestRef.current = false
+        },
+      ).then(settleRequest)
+    }
+
+    const nextPermissionState = await permissionRead
+    if (startTokenRef.current !== startToken) {
+      discardRequest()
+      return
+    }
     setPermissionState(nextPermissionState)
 
     // Re-requesting cannot repair a saved browser denial. Stay blocked until
     // the user changes the site setting, avoiding a getUserMedia retry loop.
+    // (A browser holding a saved denial answers the request above at once, without a prompt; whatever it
+    // returns is stopped.)
     if (nextPermissionState === 'denied') {
       releaseParkedCamera()
       cleanup()
       setStatus('blocked')
       setError(messages.cameraPermissionBlocked)
+      discardRequest()
       return
     }
 
     try {
       const video = await waitForVideoElement(startToken)
-      if (!video || startTokenRef.current !== startToken) return
+      if (!video || startTokenRef.current !== startToken) {
+        discardRequest()
+        return
+      }
       video.setAttribute('playsinline', 'true')
 
       // The worker boots (its script, then ZXing) while the camera permission
@@ -441,14 +476,13 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
       // camera never waits behind the decoder.
       clientRef.current = openDecodeClient()
 
-      // The camera is acquired FIRST, before either decoder is chosen. WebKit
+      // The camera was requested FIRST (above), before either decoder is chosen. WebKit
       // ships no BarcodeDetector, so on iOS this used to fall through to
       // decodeFromConstraints, which reaches getUserMedia only AFTER awaiting
       // the 446 KB ZXing chunk -- the prompt arrived a download later than the
       // tap that asked for it. One acquisition, immediately after the tap, on
       // every browser.
-      requestsInFlightRef.current += 1
-      const stream = await openCamera(startToken, () => startTokenRef.current).finally(() => { requestsInFlightRef.current -= 1 })
+      const stream = await request
       if (startTokenRef.current !== startToken) {
         stopStream(stream)
         settleRequest()
@@ -614,8 +648,24 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   // paused panel, one tap from a camera that is by then allowed.
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined
+    const markHidden = () => { if (hiddenAtRef.current === 0) hiddenAtRef.current = Date.now() }
+    // The page is visible again. A camera that was running restarts by itself, unless this is iOS WebKit and the
+    // page was away long enough that a request made without a tap would prompt again: then the camera stays paused
+    // and one tap (a user gesture, so the longer grant window applies) starts it.
+    const returned = () => {
+      const hiddenMs = hiddenAtRef.current === 0 ? 0 : Date.now() - hiddenAtRef.current
+      hiddenAtRef.current = 0
+      if (!resumeOnReturnRef.current) return
+      if (shouldAutoResume(hiddenMs)) {
+        resumeOnReturn()
+        return
+      }
+      resumeOnReturnRef.current = false
+      parkCamera()
+    }
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
+        markHidden()
         const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
         if (running) {
           // A camera that was running: a stream is held, or a pagehide already let it go (the status still says
@@ -626,8 +676,8 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
         } else if (!resumeAfterRequestRef.current) {
           resumeOnReturnRef.current = false
         }
-      } else if (resumeOnReturnRef.current) {
-        resumeOnReturn()
+      } else {
+        returned()
       }
     }
     // The camera comes back by itself. A request still unanswered from before is waited for, never doubled.
@@ -646,10 +696,11 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     const handlePageHide = () => {
       const running = statusRef.current === 'starting' || statusRef.current === 'scanning'
       if (running && streamRef.current !== null && !detectionHandledRef.current) resumeOnReturnRef.current = true
+      markHidden()
       cleanup()
     }
     const handlePageShow = () => {
-      if (resumeOnReturnRef.current && document.visibilityState !== 'hidden') resumeOnReturn()
+      if (document.visibilityState !== 'hidden') returned()
     }
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('pagehide', handlePageHide)

@@ -1177,6 +1177,8 @@
   "camera_document_blocked": "This view blocks the camera. Open the page in your browser, or type the barcode.",
   "camera_permission_reset_hint": "Click the lock icon in the address bar and set Camera to Allow.",
   "camera_permission_reset_hint_ios": "On iPhone: Settings › Safari › Camera › Allow, then try again.",
+  "camera_ios_allow_tip": "Stop camera prompts: aA › Website Settings › Camera › Allow",
+  "camera_ios_homescreen_tip": "The Home Screen app asks once each time it opens.",
   "camera_permission_reset_hint_android": "Tap the lock icon (or App info), then Permissions › Camera › Allow.",
   "cancel": "Cancel",
   "cancelUpload": "Cancel upload",
