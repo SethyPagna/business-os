@@ -141,22 +141,27 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   // (starting it is not awaited), and only after the camera is open does the
   // fallback wait for the worker to be ready.
   const startBlock = hook.slice(hook.indexOf('const startCamera'), hook.indexOf('const switchCamera'))
-  const acquisitions = startBlock.match(/await openCamera\(/g) || []
+  const acquisitions = startBlock.match(/openCamera\(startToken/g) || []
   assert.equal(acquisitions.length, 1, 'both decoders must share ONE camera request')
   const requestBlock = hook.slice(hook.indexOf('async function openCamera'), hook.indexOf('function stopStream'))
   assert.equal((requestBlock.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'the request, and its one fallback for a remembered camera that is gone')
   // 6.0.961 (release review c2f27dce6, P3-1): the fallback is a request like any other, so it is made only for a start that is still current
   // (the behaviour is in scannerCameraScenarios.test.ts); the token the start was given is what openCamera is handed.
-  assert.match(startBlock, /await openCamera\(startToken, \(\) => startTokenRef\.current\)/, 'openCamera is handed the start token and a way to read the current one')
+  assert.match(startBlock, /openCamera\(startToken, \(\) => startTokenRef\.current\)/, 'openCamera is handed the start token and a way to read the current one')
+  // 6.0.978: getUserMedia is reached inside the tap. Between the top of startCamera and its first await there is
+  // only synchronous work, and the request is in it (the permission read and the <video> wait run beside it).
+  const startFn = startBlock.slice(startBlock.indexOf('const startCamera = useCallback'))
+  const beforeFirstAwait = startFn.slice(0, startFn.indexOf('await '))
+  assert.match(beforeFirstAwait, /openCamera\(startToken/, 'the camera is requested before startCamera awaits anything')
   assert.match(requestBlock, /if \(currentToken\(\) !== startToken\) throw error\s+clearCameraChoice\(\)\s+return navigator\.mediaDevices\.getUserMedia\(CAMERA_CONSTRAINTS\)/, 'the fallback request is skipped, and the saved choice left alone, once the start is over')
   assert.equal((hook.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []).length, 2, 'and no other part of the scanner opens a camera')
-  const acquireAt = startBlock.indexOf('await openCamera(')
+  const acquireAt = startBlock.indexOf('openCamera(startToken')
   const chooseDecoderAt = startBlock.indexOf('const NativeBarcodeDetector = getNativeBarcodeDetector()')
   const startWorkerAt = startBlock.indexOf('clientRef.current = openDecodeClient()')
   const waitForWorkerAt = startBlock.indexOf('await client.ready')
   assert.ok(acquireAt > 0 && chooseDecoderAt > acquireAt, 'the camera must be acquired BEFORE the native/fallback decision, not inside one branch')
-  assert.ok(startWorkerAt > 0 && startWorkerAt < acquireAt, 'the decoder worker boots in parallel with the camera request')
-  assert.doesNotMatch(startBlock.slice(startWorkerAt, startBlock.indexOf('const stream = await openCamera(')).replace(/\/\/.*$/gm, ''), /await/, 'starting the worker is never awaited ahead of the camera')
+  assert.ok(startWorkerAt > acquireAt, 'the camera request is made first (inside the tap); the decoder worker boots beside it, after')
+  assert.doesNotMatch(startBlock.slice(startWorkerAt - 8, startWorkerAt + 40), /await/, 'starting the worker is never awaited')
   assert.ok(waitForWorkerAt > acquireAt, 'the fallback waits for the worker only after the camera is already open')
   assert.doesNotMatch(source + hook, /decodeFromConstraints\(/, 'decodeFromConstraints hides getUserMedia behind the decoder import; it must not be called again')
   assert.match(hook, /const CAMERA_CONSTRAINTS: MediaStreamConstraints/, 'the shared constraints belong in one hoisted object')
@@ -176,7 +181,8 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   // 6.0.961 (release review c2f27dce6, P3-2): "running" means a stream was actually held -- a start whose request is still pending has nothing to resume,
   // and asking again from every return would stack a new request on the one still waiting (the behaviour is in scannerCameraScenarios.test.ts).
   assert.match(visibilityBlock, /const running = statusRef\.current === 'starting' \|\| statusRef\.current === 'scanning'[\s\S]*?resumeOnReturnRef\.current = !detectionHandledRef\.current && \(streamRef\.current !== null \|\| resumeOnReturnRef\.current \|\| resumeStillPending\)/, 'only a camera that was running (a stream held, one a pagehide already released, or a resume still pending) and not already read is remembered')
-  assert.match(visibilityBlock, /else if \(resumeOnReturnRef\.current\) \{\s*resumeOnReturn\(\)/, 'coming back restarts it, once')
+  assert.match(visibilityBlock, /\} else \{\s*returned\(\)\s*\}/, 'coming back goes through returned(), which restarts it once -- or, on iOS after too long away, leaves the paused panel (6.0.978)')
+  assert.match(visibilityBlock, /const returned = \(\) => \{[\s\S]*?if \(!resumeOnReturnRef\.current\) return\s+if \(shouldAutoResume\(hiddenMs\)\) \{\s*resumeOnReturn\(\)\s*return\s*\}\s*resumeOnReturnRef\.current = false\s*parkCamera\(\)/, 'the restart is gated by shouldAutoResume; refusing it parks on the paused panel')
   assert.match(visibilityBlock, /function resumeOnReturn\(\) \{\s*resumeOnReturnRef\.current = false[\s\S]*?if \(requestsInFlightRef\.current > 0\) \{\s*resumeAfterRequestRef\.current = true\s*return\s*\}[\s\S]*?void startCameraRef\.current\(\)/, 'through the guarded start, and never on top of a request that is still unanswered (6.0.966)')
   assert.match(visibilityBlock, /const handlePageHide = \(\) => \{[\s\S]*?resumeOnReturnRef\.current = true[\s\S]*?cleanup\(\)/, 'a pagehide remembers that the camera was running before it lets it go (6.0.966)')
   assert.match(openEffect, /resumeOnReturnRef\.current = false/, 'a newly opened scanner starts with nothing to resume')
@@ -284,7 +290,7 @@ try {
     try {
       assert.equal(mounted.probe.getUserMediaCalls, 1, 'the fallback path must open the camera itself, exactly once')
       const trace = mounted.events.join(' -> ')
-      assert.ok(mounted.events.indexOf('worker-created') >= 0 && mounted.events.indexOf('worker-created') < mounted.events.indexOf('getUserMedia'), `the worker boots beside the camera request, got: ${trace}`)
+      assert.ok(mounted.events.indexOf('worker-created') >= 0 && mounted.events.indexOf('getUserMedia') >= 0 && mounted.events.indexOf('getUserMedia') < mounted.events.indexOf('worker-created'), `the camera is requested first and the worker boots beside it, got: ${trace}`)
       assert.equal(FakeWorker.instances.length, 1, 'one decode worker for the session')
 
       await mounted.unmount()
@@ -314,10 +320,13 @@ try {
     assert.equal(probe.tracks[0].stopCount, 1, 'closing still releases the camera')
   })
 
-  await runTest('opening the modal with a saved denial shows the retry state and never calls getUserMedia', async () => {
+  await runTest('opening the modal with a saved denial shows the retry state, leaves no camera on and does not loop', async () => {
     const mounted = await mountScanner('denied')
     try {
-      assert.equal(mounted.probe.getUserMediaCalls, 0, 'a saved browser denial must short-circuit before any getUserMedia retry loop')
+      // 6.0.978: the request is made inside the tap, ahead of the denial read; a saved denial is answered at once
+      // without a prompt and whatever comes back is stopped.
+      assert.ok(mounted.probe.getUserMediaCalls <= 1, 'a saved browser denial is never asked again in a loop')
+      assert.ok(mounted.probe.tracks.every((track) => track.readyState === 'ended'), 'and no camera is left on under the block screen')
       assert.equal(FakeWorker.instances.length, 0, 'and must not start a decoder worker it cannot use')
       assert.match(mounted.text, /lock icon in the address bar/, 'a blocked camera must explain itself (one line of steps) instead of showing a blank video')
       assert.match(mounted.text, /Try camera again/, 'the explicit retry button survives exactly for this state')

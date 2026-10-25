@@ -1177,6 +1177,8 @@
   "camera_document_blocked": "ទិដ្ឋភាពនេះបិទកាមេរ៉ា។ សូមបើកទំព័រក្នុងកម្មវិធីរុករក ឬវាយបាកូដ។",
   "camera_permission_reset_hint": "ចុចរូបសោនៅរបារអាសយដ្ឋាន ហើយកំណត់កាមេរ៉ាជា «អនុញ្ញាត»។",
   "camera_permission_reset_hint_ios": "នៅលើ iPhone៖ ការកំណត់ › Safari › កាមេរ៉ា › អនុញ្ញាត រួចសាកម្តងទៀត។",
+  "camera_ios_allow_tip": "កុំឱ្យសួរម្ដងទៀត៖ ម៉ឺនុយទំព័រ (Page Menu: aA ឬ ⋯) › ការកំណត់គេហទំព័រ (Website Settings) › កាមេរ៉ា (Camera) › អនុញ្ញាត (Allow)",
+  "camera_ios_homescreen_tip": "កម្មវិធីលើអេក្រង់ដើមសួរម្ដងរាល់ពេលបើក។",
   "camera_permission_reset_hint_android": "ចុចរូបសោ (ឬព័ត៌មានកម្មវិធី) រួចចូល សិទ្ធិ › កាមេរ៉ា › អនុញ្ញាត។",
   "cancel": "បោះបង់",
   "cancelUpload": "បោះបង់ការផ្ទុកឡើង",

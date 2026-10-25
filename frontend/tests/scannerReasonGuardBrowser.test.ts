@@ -11,7 +11,7 @@
 //
 // Run: node tests/scannerReasonGuardBrowser.test.ts
 import assert from 'node:assert/strict'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -75,9 +75,14 @@ function CountPage() {
   )
 }
 
+// open() hands back the id of the view it asked for, and w.__mounted becomes that id only once the view's own effects
+// have run (children first, so the wedge listener is registered). The test waits for that, not for a selector: the
+// previous case's view can have the very same selector, and a slow machine renders the swap late.
+let viewSeq = 0
 function Host() {
   const [view, setView] = useState({ id: 0, kind: 'hook' })
-  w.__open = (options) => setView((current) => ({ id: current.id + 1, ...options }))
+  w.__open = (options) => { viewSeq += 1; const id = viewSeq; setView({ id, ...options }); return id }
+  React.useEffect(() => { w.__mounted = view.id }, [view.id])
   if (view.kind === 'hook') return <HookPage key={view.id} />
   if (view.kind === 'count') return <CountPage key={view.id} />
   return (
@@ -102,8 +107,10 @@ w.__ready = true
 `
 
 const srcAppContext = resolve(root, 'src', 'AppContext.tsx').replace(/\\/g, '/').toLowerCase()
-// Its own dependency cache: node_modules/.vite is shared (a junction) with every other session's dev server.
-const cacheDir = join(tmpdir(), 'business-os-scanner-reason-guard-940-vite')
+// Its own dependency cache, new for every run: node_modules/.vite is shared (a junction) with every other session's dev server,
+// and a fixed temp name is shared by two runs of this file at once (another lane, a retry); the loser's page then gets
+// "504 Outdated Optimize Dep" mid-test.
+const cacheDir = mkdtempSync(join(tmpdir(), 'business-os-scanner-reason-guard-'))
 const server = await createServer({
   root, cacheDir, logLevel: 'error', server: { host: '127.0.0.1', port: 0, fs: { allow: [root, cacheDir, realpathSync(join(root, 'node_modules'))] } },
   plugins: [{
@@ -151,7 +158,8 @@ try {
   // Every transport gets an empty answer: no product search results, no lots, no saved reasons.
   await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
   const cdp = await page.context().newCDPSession(page)
-  await page.goto(`http://127.0.0.1:${address.port}/reason-guard`)
+  // The first load transforms the whole module graph cold; a loaded machine needs longer than Playwright's 30 s default.
+  await page.goto(`http://127.0.0.1:${address.port}/reason-guard`, { timeout: 120000 })
   const waitReady = (): Promise<unknown> => page.waitForFunction(() => (window as any).__ready === true, null, { timeout: 120000 })
   await waitReady().catch((error: Error) => { throw new Error([error.message, ...problems].join('\n')) })
 
@@ -167,15 +175,17 @@ try {
   const gun = (code: string, layout: (digit: string) => Key = khmerDigit): Key[] => [...[...code].map(layout), ENTER]
   const open = async (kind: 'hook' | 'session' | 'count'): Promise<void> => {
     for (let attempt = 0; ; attempt += 1) {
-      await page.evaluate((view) => {
+      const id = await page.evaluate((view) => {
         localStorage.clear()
         const w = window as any
         w.__notices.length = 0
         w.__scans.length = 0
         w.__submits = 0
-        w.__open({ kind: view })
+        return w.__open({ kind: view }) as number
       }, kind)
       try {
+        await page.waitForFunction((want) => (window as any).__mounted === want, id, { timeout: 8000 })
+        // The previous view is gone and this one is mounted: only now is a selector this view's element.
         await page.waitForSelector(kind === 'session' ? '[data-stock-session-entry]' : kind === 'count' ? '#reason-1' : '#guarded', { timeout: 8000 })
         break
       } catch (error) {
@@ -233,8 +243,9 @@ try {
   await test('hook: a person typing into an opted-in field is untouched, however many digits', async () => {
     await open('hook')
     await page.focus('#guarded')
-    await typeKeys([...CODE].map(asciiDigit), 120)
-    await typeKeys([ENTER], 120)
+    // Enter in the same run, 120 ms after the last digit: typeKeys pauses 2 s at its end, so a separate Enter would be
+    // a lone key whatever the gap threshold is, and this case could not tell 35 ms from 200 ms.
+    await typeKeys([...[...CODE].map(asciiDigit), ENTER], 120)
     assert.equal(await page.inputValue('#guarded'), CODE, 'human speed is not a burst')
     assert.deepEqual(await scans(), [])
   })
@@ -282,8 +293,7 @@ try {
     await open('session')
     await page.fill('input[aria-label="Qty"]', '5')
     await page.focus('input[aria-label="Reason"]')
-    await typeKeys([letter('o'), letter('k')], 120)
-    await typeKeys([ENTER], 120)
+    await typeKeys([letter('o'), letter('k'), ENTER], 120)
     await page.waitForFunction(() => !!document.body.textContent?.includes('Gun fixture'), null, { timeout: 5000 })
     assert.equal(await lineAdded(), true)
     assert.deepEqual(await notices(), [])
@@ -304,8 +314,7 @@ try {
   await test('count: a person typing a reason and pressing Enter still saves the issue', async () => {
     await open('count')
     await page.focus('#reason-1')
-    await typeKeys([letter('o'), letter('k')], 120)
-    await typeKeys([ENTER], 120)
+    await typeKeys([letter('o'), letter('k'), ENTER], 120)
     assert.equal(await page.inputValue('#reason-1'), 'ok')
     assert.equal(await submits(), 1)
     assert.deepEqual(await scans(), [])
@@ -328,6 +337,7 @@ try {
 } finally {
   await browser?.close()
   await server.close()
+  rmSync(cacheDir, { recursive: true, force: true })
 }
 if (failed > 0) process.exitCode = 1
 process.exit(failed > 0 ? 1 : 0)
