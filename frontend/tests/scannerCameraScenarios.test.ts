@@ -257,7 +257,7 @@ try {
     for (const [userAgent, hint] of [[IPHONE, en.camera_permission_reset_hint_ios], [ANDROID, en.camera_permission_reset_hint_android], [DESKTOP, en.camera_permission_reset_hint]] as const) {
       await withSheet('denied', { userAgent, t: enT }, (sheet) => {
         assertDeniedLeavesNoCamera(sheet, 'a saved denial is never asked again in a loop')
-        assertPanel(sheet, { line: hint, action: en.try_camera_again, red: true, tip: userAgent === IPHONE ? en.camera_ios_allow_tip : '' }, `denied on ${userAgent.slice(13, 25)}`)
+        assertPanel(sheet, { line: hint, action: en.try_camera_again, red: true }, `denied on ${userAgent.slice(13, 25)}`)
       })
     }
   })
@@ -271,7 +271,7 @@ try {
   await runTest('tapping Block on the browser prompt is told as a block at once, not as a dismissed prompt', async () => {
     await withSheet('prompt', { userAgent: IPHONE, rejectCamera: 'NotAllowedError', blockOnReject: true, t: enT }, (sheet) => {
       assert.equal(sheet.probe.getUserMediaCalls, 1, 'one request, no retry loop')
-      assertPanel(sheet, { line: en.camera_permission_reset_hint_ios, action: en.try_camera_again, red: true, tip: en.camera_ios_allow_tip }, 'Block tapped')
+      assertPanel(sheet, { line: en.camera_permission_reset_hint_ios, action: en.try_camera_again, red: true }, 'Block tapped')
     })
   })
 
@@ -279,12 +279,28 @@ try {
   await runTest('iPhone, prompt dismissed: the failure panel adds the Safari tip, neutral; the Home Screen app gets its own line instead', async () => {
     await withSheet('prompt', { userAgent: IPHONE, rejectCamera: 'NotAllowedError', t: enT }, (sheet) => {
       assertPanel(sheet, { line: en.scan_prompt_dismissed, action: en.try_camera_again, red: false, tip: en.camera_ios_allow_tip }, 'Safari tab')
-      assert.equal(en.camera_ios_allow_tip, 'Stop camera prompts: aA › Website Settings › Camera › Allow')
+      assert.equal(en.camera_ios_allow_tip, 'Stop camera prompts: page menu (aA or ⋯) › Website Settings › Camera › Allow')
     })
     await withSheet('prompt', { userAgent: IPHONE, rejectCamera: 'NotAllowedError', t: enT, standalone: true }, (sheet) => {
       assertPanel(sheet, { line: en.scan_prompt_dismissed, action: en.try_camera_again, red: false, tip: en.camera_ios_homescreen_tip }, 'Home Screen app')
       assert.equal(en.camera_ios_homescreen_tip, 'The Home Screen app asks once each time it opens.')
     })
+  })
+
+  await runTest('a BLOCKED camera on iPhone shows its one red Settings line and no tip, in a Safari tab or the Home Screen app', async () => {
+    for (const standalone of [false, true]) {
+      await withSheet('denied', { userAgent: IPHONE, standalone, t: enT }, (sheet) => {
+        assertPanel(sheet, { line: en.camera_permission_reset_hint_ios, action: en.try_camera_again, red: true }, `blocked, standalone=${standalone}`)
+      })
+    }
+  })
+
+  await runTest('Chrome / Firefox / Edge on iPhone have no Safari page menu: no tip', async () => {
+    for (const browser of ['CriOS/130.0 Mobile/15E148 Safari/604.1', 'FxiOS/130.0 Mobile/15E148 Safari/605.1.15', 'EdgiOS/130.0 Mobile/15E148 Safari/605.1.15']) {
+      await withSheet('prompt', { userAgent: `${IPHONE} ${browser}`, rejectCamera: 'NotAllowedError', t: enT }, (sheet) => {
+        assertPanel(sheet, { line: en.scan_prompt_dismissed, action: en.try_camera_again, red: false }, browser.slice(0, 6))
+      })
+    }
   })
 
   await runTest('the tip is in Khmer too, and is not red', async () => {
@@ -499,7 +515,7 @@ try {
       sheet.probe.permission.state = 'denied'
       await show()
       assertDeniedLeavesNoCamera(sheet, 'a saved denial is never asked again', 1)
-      assertPanel(sheet, { line: en.camera_permission_reset_hint_ios, action: en.try_camera_again, red: true, tip: en.camera_ios_allow_tip }, 'revoked while away')
+      assertPanel(sheet, { line: en.camera_permission_reset_hint_ios, action: en.try_camera_again, red: true }, 'revoked while away')
     })
   })
 

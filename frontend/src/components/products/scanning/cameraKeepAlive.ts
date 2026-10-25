@@ -31,17 +31,17 @@ export function shouldAutoResume(hiddenMs: number, nav: Parameters<typeof isIosW
   return !isIosWebKit(nav) || hiddenMs < IOS_AUTO_RESUME_MAX_HIDDEN_MS
 }
 
-/** Which one-line permission tip fits a failed start, or null. iOS only, and only when the start failed because the
- * prompt was dismissed or the camera is blocked (never the document policy of an in-app view, which a setting cannot
- * fix). A Home Screen app has no per-site setting, so it gets the other line. */
+/** Which one-line permission tip fits a failed start, or null. iOS Safari only (Chrome, Firefox, Edge and Opera on
+ * iPhone have no such page menu), and only when the PROMPT WAS DISMISSED: a blocked camera already shows its own
+ * red instruction (the Settings line), and a second route beside it would contradict it. A Home Screen app has no
+ * per-site setting, so it gets the other line. */
 export function iosPermissionTip(
   status: string,
-  permissionState: string,
   nav: (Parameters<typeof isIosWebKit>[0] & { standalone?: boolean }) | undefined = globalThis.navigator,
 ): 'safari' | 'homescreen' | null {
   if (!isIosWebKit(nav)) return null
-  const permissionFailure = status === 'dismissed' || (status === 'blocked' && permissionState === 'denied')
-  if (!permissionFailure) return null
+  if (/CriOS|FxiOS|EdgiOS|OPiOS/i.test(nav?.userAgent || '')) return null
+  if (status !== 'dismissed') return null
   return nav?.standalone === true ? 'homescreen' : 'safari'
 }
 

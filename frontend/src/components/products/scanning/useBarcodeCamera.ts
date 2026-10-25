@@ -174,6 +174,9 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   // When the page last went hidden (0 = visible). On iOS WebKit a return after too long a stay does not restart by
   // itself (shouldAutoResume): the paused panel shows and the person's tap restarts it.
   const hiddenAtRef = useRef(0)
+  // True while the scanner is open (the open effect below). A start that arrives after the close -- the switch-camera
+  // button awaits the camera list, then starts -- must not turn the camera on under a sheet that is gone.
+  const scannerOpenRef = useRef(false)
   // The start that came back from a hide (not a tap, not the open). While its request is pending the page may
   // be hidden again: that start was a camera that was running, so it still counts as one.
   const nextStartIsResumeRef = useRef(false)
@@ -393,6 +396,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   }, [])
 
   const startCamera = useCallback(async (): Promise<void> => {
+    if (!scannerOpenRef.current) return
     const startToken = ++startSequenceRef.current
     resumeAfterRequestRef.current = false
     resumeOnReturnRef.current = false
@@ -581,6 +585,8 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     const cameras = await listCameras()
     const nextId = nextCameraId(cameras.map((camera) => camera.deviceId), trackRef.current?.getSettings?.().deviceId)
     if (!nextId || cameras.length < 2) return
+    // Closed while the list was coming back: nothing is saved and nothing is started.
+    if (!scannerOpenRef.current) return
     saveCameraChoice(nextId)
     await startCamera()
   }, [startCamera])
@@ -610,6 +616,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
   useEffect(() => {
     if (!open) return undefined
     detectionHandledRef.current = false
+    scannerOpenRef.current = true
     resumeOnReturnRef.current = false
     resumeAfterRequestRef.current = false
     allowCameraParking()
@@ -623,6 +630,7 @@ export function useBarcodeCamera({ open, messages, onDetected, onClose, closeDel
     // ask (the Try camera again button).
     void startCameraRef.current()
     return () => {
+      scannerOpenRef.current = false
       detectionHandledRef.current = true
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
       cleanup(true)

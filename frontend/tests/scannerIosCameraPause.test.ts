@@ -50,11 +50,18 @@ type Camera = ReturnType<typeof useBarcodeCamera>
 type PausableTrack = CameraProbe['tracks'][number] & { enabled?: boolean; muted?: boolean; addEventListener?: (type: string, fn: () => void) => void }
 
 let failed = 0
+// A test that exercises the pause (the switch is off since 6.0.978) says SKIP, never PASS, when it has nothing to run.
+class Skip extends Error {}
+const skipUnlessPauseOn = (): void => { if (!IOS_CAMERA_PAUSE_ENABLED) throw new Skip('IOS_CAMERA_PAUSE_ENABLED is false') }
 async function runTest(name: string, fn: () => void | Promise<void>) {
   try {
     await fn()
     console.log(`PASS ${name}`)
   } catch (error) {
+    if (error instanceof Skip) {
+      console.log(`SKIP ${name} (${error.message})`)
+      return
+    }
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
@@ -139,7 +146,7 @@ try {
   })
 
   await runTest('iOS: pagehide, a hidden page, and the idle timeout each stop the paused tracks', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     for (const how of ['pagehide', 'hidden', 'idle'] as const) {
       const realSetTimeout = globalThis.setTimeout
       const idle: Array<() => void> = []
@@ -176,7 +183,7 @@ try {
   })
 
   await runTest('iOS: an ended track (event, or found dead on reopen) falls back to a fresh getUserMedia', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     // Found dead on reopen, no event delivered.
     const quiet = await open(IPHONE_UA, 'iPhone', 5)
     await act(async () => { quiet.camera().closeScanner() })
@@ -203,7 +210,7 @@ try {
     fire('window', 'pagehide')
   })
   await runTest('iOS: a saved denial releases the paused stream', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     const run = await open(IPHONE_UA, 'iPhone', 5)
     await act(async () => { run.camera().closeScanner() })
     assert.equal(run.track().stopCount, 0)
@@ -215,7 +222,7 @@ try {
   })
 
   await runTest('iOS: the torch is switched off when the camera is parked', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     const run = await open(IPHONE_UA, 'iPhone', 5)
     const applied: unknown[] = []
     run.track().applyConstraints = async (next: unknown) => { applied.push(next) }
@@ -227,7 +234,7 @@ try {
   })
 
   await runTest('iOS: a muted (interrupted) parked track is not reused', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     const run = await open(IPHONE_UA, 'iPhone', 5)
     await act(async () => { run.camera().closeScanner() })
     run.track().muted = true
@@ -298,7 +305,7 @@ try {
   })
 
   await runTest('iOS, scanner CLOSED when the page hides: the parked stream is released and nothing resumes', async () => {
-    if (!IOS_CAMERA_PAUSE_ENABLED) return
+    skipUnlessPauseOn()
     const run = await open(IPHONE_UA, 'iPhone', 5)
     await act(async () => { run.camera().closeScanner() })
     await run.mounted.unmount()
@@ -464,18 +471,63 @@ try {
     fire('window', 'pagehide')
   })
 
-  await runTest('permission tip: iOS only, only after a permission failure; Safari tab versus Home Screen app', () => {
+  await runTest('permission tip: iOS Safari only, only for a dismissed prompt; Safari tab versus Home Screen app', () => {
     const iphone = { userAgent: IPHONE_UA, platform: 'iPhone', maxTouchPoints: 5 }
     const standalone = { ...iphone, standalone: true }
     const android = { userAgent: ANDROID_UA, platform: 'Linux armv8l', maxTouchPoints: 5 }
-    assert.equal(iosPermissionTip('dismissed', 'unknown', iphone), 'safari')
-    assert.equal(iosPermissionTip('blocked', 'denied', iphone), 'safari')
-    assert.equal(iosPermissionTip('dismissed', 'unknown', standalone), 'homescreen')
-    assert.equal(iosPermissionTip('blocked', 'denied', standalone), 'homescreen')
-    assert.equal(iosPermissionTip('dismissed', 'unknown', android), null, 'not on Android')
-    assert.equal(iosPermissionTip('blocked', 'blocked', iphone), null, 'an in-app view that forbids the camera is not a setting')
-    for (const status of ['idle', 'starting', 'scanning', 'manual']) assert.equal(iosPermissionTip(status, 'granted', iphone), null, `${status}: no tip on a success path`)
-    assert.equal(iosPermissionTip('manual', 'unknown', iphone), null, 'a busy or failed camera is not a permission problem')
+    assert.equal(iosPermissionTip('dismissed', iphone), 'safari')
+    assert.equal(iosPermissionTip('dismissed', standalone), 'homescreen')
+    assert.equal(iosPermissionTip('blocked', iphone), null, 'a block keeps its one red Settings line, in a Safari tab')
+    assert.equal(iosPermissionTip('blocked', standalone), null, 'and in the Home Screen app: never the "asks once" line')
+    assert.equal(iosPermissionTip('dismissed', android), null, 'not on Android')
+    for (const browser of ['CriOS/130.0', 'FxiOS/130.0', 'EdgiOS/130.0', 'OPiOS/16.0']) {
+      assert.equal(iosPermissionTip('dismissed', { ...iphone, userAgent: `${IPHONE_UA} ${browser}` }), null, `${browser} has no Safari page menu`)
+    }
+    for (const status of ['idle', 'starting', 'scanning', 'manual']) assert.equal(iosPermissionTip(status, iphone), null, `${status}: no tip on a success path or a non-permission failure`)
+  })
+
+  // ---- review fixes: nothing starts after the scanner is closed; the discard when the video never appears ----
+
+  await runTest('P3-1 a start that arrives after the close does not turn the camera on', async () => {
+    const run = await open(IPHONE_UA, 'iPhone', 5)
+    const startLate = run.camera().startCamera
+    await act(async () => { run.camera().closeScanner() })
+    await run.mounted.unmount()
+    void startLate()
+    await settle(1500)
+    assert.equal(run.probe.getUserMediaCalls, 1, 'no request after the close')
+    assert.ok(run.probe.tracks.every((track) => track.readyState === 'ended'), 'and no camera left on')
+  })
+
+  await runTest('P3-1 the real path: switch camera tapped, X tapped, THEN the camera list comes back', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted')
+    setNavigatorIdentity(ANDROID_UA, 'Linux armv8l', 5)
+    const media = (globalThis as unknown as { navigator: { mediaDevices: { enumerateDevices?: () => Promise<unknown[]> } } }).navigator.mediaDevices
+    let release: (devices: unknown[]) => void = () => {}
+    media.enumerateDevices = () => new Promise((resolve) => { release = resolve })
+    let camera: Camera | null = null
+    const mounted = await mountComponent('/tests/scannerHookProbe.ts', { open: true, onDetected: () => {}, onClose: () => {}, onCamera: (next: Camera) => { camera = next } })
+    await waitFor(() => probe.tracks.length > 0 && /^scanning\|/.test(mounted.container.textContent))
+    const switching = (camera as unknown as Camera).switchCamera()
+    await act(async () => { (camera as unknown as Camera).closeScanner() })
+    await mounted.unmount()
+    release([{ kind: 'videoinput', deviceId: 'a' }, { kind: 'videoinput', deviceId: 'b' }])
+    await switching
+    await settle(1500)
+    assert.equal(probe.getUserMediaCalls, 1, 'the list resolving after the close starts nothing')
+    assert.ok(probe.tracks.every((track) => track.readyState === 'ended'), 'no camera left on')
+  })
+
+  await runTest('P3-3 the <video> never appears: the request already made is discarded and its stream stopped', async () => {
+    stage.liveVideoFrames = true
+    const probe = installCamera('granted')
+    setNavigatorIdentity(IPHONE_UA, 'iPhone', 5)
+    const mounted = await mountComponent('/tests/scannerHookNoVideoProbe.ts', { open: true, onCamera: () => {} })
+    await waitFor(() => probe.getUserMediaCalls === 1 && probe.tracks.length === 1)
+    await waitFor(() => probe.tracks.every((track) => track.readyState === 'ended'), 120, 25)
+    assert.equal(probe.tracks[0].stopCount, 1, 'stopped exactly once, not left on behind a missing video')
+    await mounted.unmount()
   })
 } finally {
   await stopStage()

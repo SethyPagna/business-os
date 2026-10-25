@@ -67,7 +67,7 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
     torchFailed: tr('scanner_torch_failed', 'The flashlight could not be switched.', 'មិនអាចប្ដូរភ្លើងពិលបានទេ។'),
     // After a start that failed on the permission, iOS only: how to stop the asking (a Home Screen app has no setting).
     iosTips: {
-      safari: tr('camera_ios_allow_tip', 'Stop camera prompts: aA › Website Settings › Camera › Allow', 'កុំឱ្យសួរម្ដងទៀត៖ aA › ការកំណត់គេហទំព័រ › កាមេរ៉ា › អនុញ្ញាត'),
+      safari: tr('camera_ios_allow_tip', 'Stop camera prompts: page menu (aA or ⋯) › Website Settings › Camera › Allow', 'កុំឱ្យសួរម្ដងទៀត៖ ម៉ឺនុយទំព័រ (Page Menu: aA ឬ ⋯) › ការកំណត់គេហទំព័រ (Website Settings) › កាមេរ៉ា (Camera) › អនុញ្ញាត (Allow)'),
       homescreen: tr('camera_ios_homescreen_tip', 'The Home Screen app asks once each time it opens.', 'កម្មវិធីលើអេក្រង់ដើមសួរម្ដងរាល់ពេលបើក។'),
     },
     // A blocked camera gets one line: the steps for the device in hand.
@@ -161,8 +161,8 @@ export default function BarcodeScannerModal({ open, title, onClose, onDetected, 
   // Red is for a true block (denied, or a view that forbids the camera) and nothing else: a dismissed prompt,
   // a busy camera, a failed start and a paused camera are all the neutral camera icon.
   const blocked = stateKind === 'blocked'
-  // Only a start that failed on the permission, and only on iOS; neutral, never red.
-  const iosTipKind = iosPermissionTip(status, permissionState, navigator)
+  // Only a dismissed prompt, only in iOS Safari; neutral, never red. A block keeps its one red Settings line.
+  const iosTipKind = iosPermissionTip(status, navigator)
 
   return (
     <Modal title={title} onClose={closeScanner} size="sm" layer="nested" unsavedChanges="read-only" bare>
