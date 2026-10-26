@@ -275,8 +275,9 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
           {extraButtons.map((button) => (
             <button key={button.label} type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={button.onClick}>{button.label}</button>
           ))}
-          <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={onEdit}>{t?.('edit') || 'Edit'}</button>
-          <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap border-red-300 px-2 py-0 text-xs text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button>
+          {/* A handler is withheld when the role lacks the action; render no control rather than a dead one. */}
+          {onEdit ? <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={onEdit}>{t?.('edit') || 'Edit'}</button> : null}
+          {onDelete ? <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap border-red-300 px-2 py-0 text-xs text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button> : null}
           <button type="button" className="btn-primary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={onClose}>{t?.('close') || 'Close'}</button>
         </div>
       </div>

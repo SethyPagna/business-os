@@ -270,6 +270,10 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
   if (overrideSection === 'contacts' && isActionBlocked(user, 'contacts', 'bulk')) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'contacts:bulk' }, 403)
   }
+  // A contacts file creates (needs Add) and updates (needs Edit) per row; with both off it can do neither.
+  if (overrideSection === 'contacts' && isActionBlocked(user, 'contacts', 'add') && isActionBlocked(user, 'contacts', 'edit')) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'contacts:add' }, 403)
+  }
   if (overrideSection && isActionBlocked(user, overrideSection, 'import')) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: `${overrideSection}:import` }, 403)
   }

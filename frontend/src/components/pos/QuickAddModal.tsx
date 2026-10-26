@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 
 type QuickAddModalProps = {
   title: ReactNode
@@ -8,10 +11,18 @@ type QuickAddModalProps = {
   onClose: () => void
   saving?: boolean
   saveDisabled?: boolean
+  // S4-21: the form values the fields edit. REQUIRED so a new caller cannot
+  // ship an unguarded quick-add; the baseline is the first render (the modal
+  // only mounts while open), so a prefilled field is not "dirty".
+  formValue: unknown
   t?: (key: string) => string
 }
 
-export default function QuickAddModal({ title, children, onSave, onClose, saving = false, saveDisabled = false, t }: QuickAddModalProps) {
+export default function QuickAddModal({ title, children, onSave, onClose, saving = false, saveDisabled = false, formValue, t }: QuickAddModalProps) {
+  const { dirty } = useFormDirty(formValue)
+  // The X and Cancel share one guarded close; saving blocks both already.
+  const guard = useCloseGuard({ dirty }, onClose)
+  const requestClose = guard.requestClose
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key) : fallback)
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -20,7 +31,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
           <h2 className="text-base font-bold text-gray-900 dark:text-white">{title}</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={saving}
             aria-label={T('close', 'Close')}
             className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -39,7 +50,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
             <button
               type="button"
               className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={onClose}
+              onClick={requestClose}
               disabled={saving}
             >
               {T('cancel', 'Cancel')}
@@ -47,6 +58,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
           </div>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={guard} />
     </div>
   )
 }

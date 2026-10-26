@@ -1,6 +1,7 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import type { ComponentProps } from 'react'
@@ -493,12 +494,18 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   // is narrowed server-side to the name column only -- see
   // utils/permissionActions.ts, where edit is 'limited' rather than
   // 'block'.
+  // Add and Edit imply View (owner, 30 Sep 2026), so a role with either one
+  // still reaches this tab; the Worker refuses POST/PUT without the matching
+  // action, so the controls are withheld rather than rendered and 403'd.
+  const contactWrite = contactWriteAccess(can)
+  const { canAdd: canAddContact, canEdit: canEditContact } = contactWrite
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
-  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  // Import creates (Add) and updates (Edit) rows; the Worker decides per row, so offer it to a role that can do either.
+  const canImportContacts = canBulkContacts && can('contacts', 'import') && (canAddContact || canEditContact)
   const canImportContactsRef = useRef(canImportContacts)
   canImportContactsRef.current = canImportContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
@@ -1144,6 +1151,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           ] as PortalMenuItem[])}
         />
         ) : null}
+        {canAddContact ? (
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1153,6 +1161,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           <Plus className="h-4 w-4 shrink-0" />
           <span className="truncate">{tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}</span>
         </button>
+        ) : null}
       </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
@@ -1307,7 +1316,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(contact)}>{fmtDateTime24(contact.created_at)}</td>
             <td className="px-2 py-1.5 text-right" onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
+              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={canEditContact ? () => { setSelected(contact); setModal('form') } : undefined} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
             </td>
           </tr>
           )
@@ -1400,7 +1409,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         }}
       />
 
-      {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
+      {modal === 'form' && isContactFormAllowed(contactWrite, selected) && <DeliveryForm contact={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
       {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Delivery contacts after import' })} />
@@ -1423,7 +1432,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               [t('col_added')||'Added', fmtDateTime24(selected.created_at)],
             ]
           })()}
-          onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
+          onEdit={canEditContact ? () => setModal('form') : undefined} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
           extraButtons={[
             ...(canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []),
             ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Records'), onClick: () => setModal('records') }] : []),
