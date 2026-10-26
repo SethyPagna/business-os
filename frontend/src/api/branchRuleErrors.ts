@@ -291,7 +291,7 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
   // saying nothing was applied (the confirm and target-changed answers normally open the merge dialog instead).
   if (code === 'review_merge_confirm_required') return t('review_merge_confirm_required') || 'Approving this request merges two products. Review the merge and confirm to continue.'
   if (code === 'review_merge_target_changed') {
-    return t('review_merge_target_changed') || 'The product this request would merge into is no longer the one you confirmed. Nothing was applied. Approve again to review the merge as it is now.'
+    return t('review_merge_target_changed') || 'The merge changed since you reviewed it. Nothing was applied. Review it as it is now and confirm again.'
   }
   if (code === 'review_merge_permission_required') {
     return t('review_merge_permission_required') || 'Approving this request merges products. Only someone who can merge products can approve it. Nothing was applied.'
@@ -317,7 +317,14 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
 }
 
 /** The merge an approval is waiting for the approver to confirm (409 review_merge_confirm_required / _target_changed). */
-export type ReviewMergePreview = { survivorId: number; survivorName: string; stockMoved: number; priceAfter: number; sessionsClosing: number; changed: boolean }
+export type ReviewMergePreview = {
+  survivorId: number; survivorName: string; stockMoved: number; priceAfter: number; sessionsClosing: number
+  // The queued fields the merge will NOT apply to the kept product, shown before the approver confirms.
+  restUnapplied: string[]
+  // Sent back with the confirmation: the Worker refuses it (review_merge_target_changed) when either product changed since.
+  fingerprint: string
+  changed: boolean
+}
 
 /**
  * The merge preview carried by a refused approval, or null when the error is anything else. The approver confirms
@@ -336,6 +343,8 @@ export function reviewMergePreview(error: unknown): ReviewMergePreview | null {
   return {
     survivorId, survivorName: typeof p.survivorName === 'string' ? p.survivorName : '',
     stockMoved: num(p.stockMoved), priceAfter: num(p.priceAfter), sessionsClosing: Math.max(0, Math.trunc(num(p.sessionsClosing))),
+    restUnapplied: Array.isArray(p.restUnapplied) ? p.restUnapplied.filter((field): field is string => typeof field === 'string') : [],
+    fingerprint: typeof p.fingerprint === 'string' ? p.fingerprint : '',
     changed: code === 'review_merge_target_changed',
   }
 }

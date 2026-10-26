@@ -31,6 +31,7 @@ const SLOTS: Record<string, string[]> = {
   review_merge_permission_required: [],
   review_merge_state_conflict: [],
   review_merge_group_row: [],
+  review_merge_confirm_rest_unapplied: [],
 }
 const slotsOf = (value: string): string[] => [...new Set(value.match(/\{[a-zA-Z0-9_]+\}/g) ?? [])].sort()
 const KHMER = /[ក-៿]/

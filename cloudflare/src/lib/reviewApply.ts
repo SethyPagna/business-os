@@ -24,7 +24,7 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput, PRODUCT_MONEY_VERSION } from './productWrites'
+import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput, PRODUCT_MONEY_VERSION, PRODUCT_SKIP_KEYS, IMAGE_ONLY_METADATA_KEYS } from './productWrites'
 import { foldCreateIntoExisting, foldCreateWithStockInWrite, type FoldDuplicate } from './createFold'
 import type { RedirectTarget } from './branchRedirectWrite'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
@@ -55,6 +55,8 @@ export interface ReviewerInfo {
   // The product id the approver confirmed as the survivor of a queued rename that now matches an existing product
   // (approve body { confirm_merge_into }). Absent = not confirmed, and the approval is refused with the survivor named.
   confirmMergeInto?: number
+  // The preview fingerprint the approver saw (preview.fingerprint). A confirmation with another fingerprint is stale.
+  confirmFingerprint?: string
 }
 
 export type ReviewApplyOutcome = {
@@ -375,13 +377,16 @@ async function applyApprovedIdentityMerge(
     throw new ReviewCodedRefusal('review_merge_permission_required', 403,
       'Approving this request merges the product into an existing one. Only someone who can merge products can approve it.')
   }
-  if (reviewer.confirmMergeInto !== twin.id) {
-    // Nothing is written. The preview is what the approver confirms: the kept product, the stock that moves onto it,
-    // the price it ends with and the stock-in sessions whose Undo the merge closes.
-    const preview = await identityMergePreview(env, id, twin)
-    throw reviewer.confirmMergeInto === undefined
-      ? new ReviewCodedRefusal('review_merge_confirm_required', 409, 'Approving this request merges two products. Review the merge and confirm to continue.', { preview })
-      : new ReviewCodedRefusal('review_merge_target_changed', 409, 'The product this request would merge into is no longer the one you confirmed. Nothing was applied. Approve again to review the merge as it is now.', { preview })
+  // Nothing is written until the approver has confirmed exactly what the preview showed: the kept product, the stock that
+  // moves onto it, the price it ends with, the sessions whose Undo closes and the queued changes that are not applied.
+  // The fingerprint covers the survivor's id, revision, price and stock and the same figures of the renamed product, so a
+  // change to either since the preview is a new preview (review_merge_target_changed), not a silent merge.
+  const preview = await identityMergePreview(env, id, twin, body)
+  if (reviewer.confirmMergeInto === undefined) {
+    throw new ReviewCodedRefusal('review_merge_confirm_required', 409, 'Approving this request merges two products. Review the merge and confirm to continue.', { preview })
+  }
+  if (reviewer.confirmMergeInto !== twin.id || reviewer.confirmFingerprint !== preview.fingerprint) {
+    throw new ReviewCodedRefusal('review_merge_target_changed', 409, 'The merge changed since you reviewed it. Nothing was applied. Review it as it is now and confirm again.', { preview })
   }
   const requester = await loadPendingRequester(env, row.requested_by)
   if (!requester || getActionTier(requester, 'products', 'merge_duplicates') === 'none') {
@@ -404,9 +409,7 @@ async function applyApprovedIdentityMerge(
   // What else the request changed on the renamed product. None of it is applied to the kept product (the merge keeps
   // its own values, as the create-fold does); it is named in the audit record and in the answer, so the approver can
   // edit the kept product. Only fields that differ from the stored row count: a whole-form save repeats the rest.
-  const stored = await db.prepare('SELECT * FROM products WHERE id = @id').get<Record<string, unknown>>({ id }) ?? {}
-  const notApplied = Object.keys(body).filter(key => !key.startsWith('_') && !['name', 'barcode', 'expected_updated_at', 'client_request_id', 'stock_quantity', PRODUCT_MONEY_VERSION].includes(key)
-    && (!(key in stored) || String(body[key] ?? '') !== String(stored[key] ?? '')))
+  const notApplied = preview.restUnapplied
   // The fold requires both rows to carry the same identity already, so the edited identity is written first -- after
   // every refusal above, never before one -- and put back if the merge writes nothing.
   await db.batch([productStockGuardStatement([id, twin.id], 'active'), {
@@ -459,21 +462,37 @@ async function applyApprovedIdentityMerge(
 }
 
 // What the approver is asked to confirm. Read only; product names and quantities, nothing about a person.
-async function identityMergePreview(env: Env, sourceId: number, twin: { id: number; name: string | null }): Promise<Record<string, unknown>> {
+// The queued fields the merge does not write to the kept product: not request metadata (device info, tokens: the key lists
+// productWrites.ts already keeps), not internal markers, and only those that differ from the stored row (a whole-form save
+// repeats the rest).
+function restUnappliedFields(body: Record<string, unknown>, stored: Record<string, unknown>): string[] {
+  return Object.keys(body).filter(key => !key.startsWith('_') && !['name', 'barcode', 'stock_quantity', PRODUCT_MONEY_VERSION].includes(key)
+    && !PRODUCT_SKIP_KEYS.has(key) && !IMAGE_ONLY_METADATA_KEYS.has(key)
+    && (!(key in stored) || String(body[key] ?? '') !== String(stored[key] ?? '')))
+}
+
+async function identityMergePreview(env: Env, sourceId: number, twin: { id: number; name: string | null }, body: Record<string, unknown>): Promise<{
+  survivorId: number; survivorName: string | null; stockMoved: number; priceAfter: number; sessionsClosing: number; restUnapplied: string[]; fingerprint: string
+}> {
   const db = getDb(env)
-  const prices = await db.prepare('SELECT id, selling_price_usd FROM products WHERE id IN (@a, @b)')
-    .all<{ id: number; selling_price_usd: number | null }>({ a: sourceId, b: twin.id })
-  const priceOf = (productId: number) => Number(prices.find(row => Number(row.id) === productId)?.selling_price_usd) || 0
-  const moved = await db.prepare('SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock WHERE product_id = @id').get<{ n: number }>({ id: sourceId })
+  const rows = await db.prepare('SELECT * FROM products WHERE id IN (@a, @b)').all<Record<string, unknown>>({ a: sourceId, b: twin.id })
+  const rowOf = (productId: number) => rows.find(row => Number(row.id) === productId) ?? {}
+  const priceOf = (productId: number) => Number(rowOf(productId).selling_price_usd) || 0
+  const stock = async (productId: number) => Number((await db.prepare('SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock WHERE product_id = @id').get<{ n: number }>({ id: productId }))?.n) || 0
+  const moved = await stock(sourceId)
+  const kept = await stock(twin.id)
   const { readOpenStockSessions } = await import('./undoAppliers')
   const sessions = await readOpenStockSessions(db, [sourceId, twin.id])
+  const priceAfter = Math.max(priceOf(sourceId), priceOf(twin.id))
   return {
     survivorId: twin.id,
     survivorName: twin.name,
-    stockMoved: Number(moved?.n) || 0,
+    stockMoved: moved,
     // The standing merge rule: the highest selling price of the merged products stays.
-    priceAfter: Math.max(priceOf(sourceId), priceOf(twin.id)),
+    priceAfter,
     sessionsClosing: sessions.length,
+    restUnapplied: restUnappliedFields(body, rowOf(sourceId)),
+    fingerprint: [sourceId, rowOf(sourceId).updated_at ?? '', moved, priceOf(sourceId), twin.id, rowOf(twin.id).updated_at ?? '', kept, priceOf(twin.id), sessions.length].join('|'),
   }
 }
 

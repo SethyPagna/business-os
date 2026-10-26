@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import EntityLink from '../shared/EntityLink.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog'
+import ReviewMergeDialog from './ReviewMergeDialog.tsx'
 import { getHubDestinations, hubAnchor } from '../shared/hubNavigation.ts'
 import { REVIEW_TIER_KEYS } from '../../utils/permissions.ts'
 import { entityFieldLabel } from '../../utils/entityRecords.ts'
@@ -276,7 +277,7 @@ export default function ReviewQueue() {
     }
   }
 
-  const handleApprove = async (row: PendingActionRow, confirmMergeInto?: number) => {
+  const handleApprove = async (row: PendingActionRow, confirmMergeInto?: number, confirmFingerprint?: string) => {
     if (!canReview) { notify(tr('perm_view_only_generic', 'View access: you do not have permission to make this change.'), 'error'); return }
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       await handleProductCreateApprove(row)
@@ -286,7 +287,7 @@ export default function ReviewQueue() {
     setBusyId(row.id)
     try {
       const response: ApprovePendingActionResult = await withLoaderTimeout(
-        () => approvePendingAction(row.id, confirmMergeInto),
+        () => approvePendingAction(row.id, confirmMergeInto, confirmFingerprint),
         'review:approve',
         REVIEW_MUTATION_TIMEOUT_MS,
       )
@@ -501,27 +502,16 @@ export default function ReviewQueue() {
       )}
 
       {mergeDraft ? (
-        <ConfirmDialog
+        <ReviewMergeDialog
           t={t}
-          title={tr('review_merge_confirm_title', 'Approve and merge')}
-          message={mergeDraft.preview.changed
-            ? tr('review_merge_target_changed', 'The product this request would merge into is no longer the one you confirmed. Nothing was applied. Approve again to review the merge as it is now.')
-            : tr('review_merge_confirm_required', 'Approving this request merges two products. Review the merge and confirm to continue.')}
-          items={[
-            { label: tr('review_merge_confirm_survivor', 'Kept product'), value: mergeDraft.preview.survivorName || '#' + mergeDraft.preview.survivorId },
-            { label: tr('review_merge_confirm_stock_moved', 'Stock moved onto the kept product'), value: String(mergeDraft.preview.stockMoved) },
-            { label: tr('review_merge_confirm_price_after', 'Price after the merge'), value: fmtUSD ? fmtUSD(mergeDraft.preview.priceAfter) : String(mergeDraft.preview.priceAfter) },
-          ]}
-          note={mergeDraft.preview.sessionsClosing > 0
-            ? tr('review_merge_confirm_sessions_closing', 'Approving closes Undo for {n} stock-in session(s) that include these products.').replace('{n}', String(mergeDraft.preview.sessionsClosing))
-            : undefined}
-          confirmLabel={tr('confirm', 'Confirm')}
-          cancelLabel={tr('back', 'Back')}
+          tr={tr}
+          fmtUSD={fmtUSD}
+          preview={mergeDraft.preview}
           working={busyId === mergeDraft.row.id}
           onConfirm={() => {
             const draft = mergeDraft
             setMergeDraft(null)
-            void handleApprove(draft.row, draft.preview.survivorId)
+            void handleApprove(draft.row, draft.preview.survivorId, draft.preview.fingerprint)
           }}
           onClose={() => setMergeDraft(null)}
         />

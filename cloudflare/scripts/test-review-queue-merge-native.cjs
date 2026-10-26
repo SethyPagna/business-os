@@ -8,7 +8,7 @@
 //   M5           createPendingAction is idempotent on client_request_id: one row, one alert
 //   M6           ?fields= is 400 when empty, repeated or unknown
 // Run (from cloudflare/):  node scripts/test-review-queue-merge-native.cjs [--only=M1,M5] [--wrong=<mutant>]
-//   mutants: no-confirm-check no-merge-permission mark-outside-batch no-audit-context dedupe-off alert-on-replay fields-first-value
+//   mutants: no-confirm-check no-fingerprint device-fields-listed idem-no-conflict no-merge-permission mark-outside-batch no-audit-context dedupe-off alert-on-replay fields-first-value
 // ============================================================================================
 const assert = require('node:assert/strict')
 const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
@@ -290,7 +290,7 @@ const PENDING = 'src/lib/pendingActions.ts'
 const QUEUE = 'src/routes/reviewQueue.ts'
 const PATCHES = {
   'no-confirm-check': [
-    { name: 'no-confirm-check', file: APPLY, from: '  if (reviewer.confirmMergeInto !== twin.id) {\n', to: '  if (false) {\n' },
+    { name: 'no-confirm-check', file: APPLY, from: '  if (reviewer.confirmMergeInto === undefined) {\n', to: '  if (false) {\n' },
   ],
   'no-merge-permission': [
     { name: 'no-merge-permission', file: APPLY, from: "  if (!reviewerUser || getActionTier(reviewerUser, 'products', 'merge_duplicates') !== 'full') {", to: '  if (!reviewerUser) {' },
@@ -301,6 +301,15 @@ const PATCHES = {
   ],
   'no-audit-context': [
     { name: 'no-audit-context', file: APPLY, from: "          source: 'review_identity_fold',\n          pending_action_id: row.id,", to: "          source: 'review_identity_fold',\n          pending_action_id: null," },
+  ],
+  'no-fingerprint': [
+    { name: 'no-fingerprint', file: APPLY, from: ' || reviewer.confirmFingerprint !== preview.fingerprint', to: '' },
+  ],
+  'device-fields-listed': [
+    { name: 'device-fields-listed', file: APPLY, from: ' && !PRODUCT_SKIP_KEYS.has(key) && !IMAGE_ONLY_METADATA_KEYS.has(key)', to: '' },
+  ],
+  'idem-no-conflict': [
+    { name: 'idem-no-conflict', file: PENDING, from: '    if (existing && payloadFingerprint(existing.payload_json) !== payloadFingerprint(payloadJson)) throw new PendingActionIdempotencyError()\n', to: '' },
   ],
   'dedupe-off': [
     { name: 'dedupe-off', file: PENDING, from: "  return trimmed && trimmed.length <= 200 ? trimmed : null\n", to: '  return null\n' },
@@ -348,14 +357,37 @@ async function main() {
       const r = await H.api('PUT', '/api/products/' + s.x, { name: s.nameY, barcode: s.barY, ...extra }, { as })
       return { ...r, pendingId: r.body && r.body.pendingActionId }
     }
+    // The approver's confirmation: what the Review page does -- ask once, read the preview, send back its id and fingerprint.
+    const confirmFor = async (pendingId, as = 'dara') => {
+      const r = await H.api('POST', '/api/review/' + pendingId + '/approve', undefined, { as })
+      const preview = r.body && r.body.preview
+      return preview ? { confirm_merge_into: preview.survivorId, confirm_fingerprint: preview.fingerprint } : { confirm_merge_into: undefined }
+    }
+    // Stock, a lot and a sale on the renamed product, so a merge has real data to carry.
+    const stockAndSale = async (s, qty = 4) => {
+      const receipt = 'RQ-R-' + s.x
+      await executeRawStockTransaction(H.db, [
+        H.db.prepare('UPDATE products SET stock_quantity = ? WHERE id = ?').bind(qty, s.x),
+        H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').bind(s.x, qty),
+        H.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,'2026-09-02',1,3,1)").bind(s.x, 'K' + s.x, 'K' + s.x),
+        H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES((SELECT id FROM product_batches WHERE variant_product_id = ?),1,?)').bind(s.x, qty),
+        H.db.prepare("INSERT INTO sales(receipt_number,total_usd) VALUES(?,4)").bind(receipt),
+        H.db.prepare('INSERT INTO sale_items(sale_id,product_id,product_name,quantity,applied_price_usd,total_usd) VALUES((SELECT id FROM sales WHERE receipt_number = ?),?,?,1,4,4)').bind(receipt, s.x, s.nameX),
+      ])
+    }
     const approve = (pendingId, body, as = 'dara') => H.api('POST', '/api/review/' + pendingId + '/approve', body, { as })
 
     await check('M1', 'REVQ-A: approving a queued rename with confirm_merge_into merges the product (survivor kept, source retired, request approved, one audit row with before/after, one undoable history row, one Merged alert)', 'high', async t => {
       const s = await pair(H)
-      const queued = await queueRename(s, 'sokha', { description: 'queued note', selling_price_usd: 9 })
+      await stockAndSale(s, 4)
+      // The Products page puts its device info into every PUT (productWriteTransport.ts getDevicePayload): request metadata, not product data.
+      const queued = await queueRename(s, 'sokha', { description: 'queued note', selling_price_usd: 9, clientTime: '2026-10-26T01:00:00Z', deviceTz: 'Asia/Phnom_Penh', deviceName: 'Till 1', client_time: 'x', device_tz: 'y', device_name: 'z', client_request_id: 'rq-m1-' + s.x })
       t.eq('the rename is queued (202)', queued.status, 202)
       await H.tg.reset()
-      const r = await approve(queued.pendingId, { confirm_merge_into: s.y })
+      const r = await approve(queued.pendingId, await confirmFor(queued.pendingId))
+      t.eq('the stock moved onto the kept product (total and lot)', [(await H.q1('SELECT stock_quantity q FROM products WHERE id = ?', s.y)).q, (await H.q1('SELECT COALESCE(SUM(quantity),0) q FROM branch_stock WHERE product_id = ?', s.y)).q, (await H.q1('SELECT COALESCE(SUM(bbs.quantity),0) q FROM branch_batch_stock bbs JOIN product_batches b ON b.id = bbs.batch_id WHERE b.variant_product_id = ?', s.y)).q], [4, 4, 4])
+      t.eq('the sale line now points at the kept product', [(await H.q1('SELECT COUNT(*) n FROM sale_items WHERE product_id = ?', s.y)).n, (await H.q1('SELECT COUNT(*) n FROM sale_items WHERE product_id = ?', s.x)).n], [1, 0])
+      t.eq('the retired product holds no stock', (await H.q1('SELECT COALESCE(SUM(quantity),0) q FROM branch_stock WHERE product_id = ?', s.x)).q, 0)
       t.eq('approval status', r.status, 200)
       t.eq('the answer names the kept product', r.body && r.body.merged_into, { id: s.y, name: s.nameY })
       t.eq('and the changes it did not apply', r.body && [...r.body.rest_unapplied].sort(), ['description', 'selling_price_usd'])
@@ -386,8 +418,13 @@ async function main() {
       await executeRawStockTransaction(H.db, [H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,3)').bind(s.x), H.db.prepare('UPDATE products SET stock_quantity=3, selling_price_usd=4 WHERE id=?').bind(s.x), H.db.prepare('UPDATE products SET selling_price_usd=6 WHERE id=?').bind(s.y)])
       const queued = await queueRename(s)
       const auditsBefore = await mergeAudits(H)
+      const known = await H.api('POST', '/api/review/' + queued.pendingId + '/approve', {}, { as: 'dara' })
+      const fp = known.body.preview.fingerprint
+      t.ok('the preview lists no request metadata and carries a fingerprint', typeof fp === 'string' && fp.length > 0 && known.body.preview.restUnapplied.every(f => !/^(clientTime|deviceTz|deviceName)$/.test(f)), known.body.preview)
       for (const [label, body, code] of [['no body', {}, 'review_merge_confirm_required'], ['a string that is not an id', { confirm_merge_into: 'abc' }, 'review_merge_confirm_required'],
-        ['a different product', { confirm_merge_into: s.x }, 'review_merge_target_changed']]) {
+        ['a different product', { confirm_merge_into: s.x, confirm_fingerprint: fp }, 'review_merge_target_changed'],
+        ['the right product without its fingerprint', { confirm_merge_into: s.y }, 'review_merge_target_changed'],
+        ['a stale fingerprint', { confirm_merge_into: s.y, confirm_fingerprint: 'stale' }, 'review_merge_target_changed']]) {
         const r = await approve(queued.pendingId, body)
         t.eq(label + ': 409 ' + code, [r.status, r.body && r.body.code], [409, code])
         const p = r.body && r.body.preview
@@ -396,6 +433,15 @@ async function main() {
       t.eq('request still open', (await pendingOf(H, queued.pendingId)).status, 'open')
       t.eq('both products untouched', [(await product(H, s.x)).name, (await product(H, s.x)).is_active, (await product(H, s.y)).is_active], [s.nameX, 1, 1])
       t.eq('no merge audit row', await mergeAudits(H), auditsBefore)
+      // The survivor changed after the preview (its price, then its stock): the same id and the old fingerprint is a new preview, not a merge.
+      await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE products SET selling_price_usd = 99 WHERE id = ?').bind(s.y)])
+      const afterPrice = await approve(queued.pendingId, { confirm_merge_into: s.y, confirm_fingerprint: fp })
+      t.eq('survivor price changed since the preview: 409 review_merge_target_changed with the new price', [afterPrice.status, afterPrice.body.code, afterPrice.body.preview && afterPrice.body.preview.priceAfter], [409, 'review_merge_target_changed', 99])
+      const fp2 = afterPrice.body.preview.fingerprint
+      await executeRawStockTransaction(H.db, [H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,2)').bind(s.y), H.db.prepare('UPDATE products SET stock_quantity = 2 WHERE id = ?').bind(s.y)])
+      const afterStock = await approve(queued.pendingId, { confirm_merge_into: s.y, confirm_fingerprint: fp2 })
+      t.eq('survivor stock changed since the preview: 409 review_merge_target_changed', [afterStock.status, afterStock.body.code], [409, 'review_merge_target_changed'])
+      t.eq('still open, still two active products', [(await pendingOf(H, queued.pendingId)).status, (await product(H, s.x)).is_active], ['open', 1])
     })
 
     await check('M3', 'REVQ-A: the merge permission is checked against the approver (merge switched off: 403, nothing written, request open); a reviewer with it succeeds', 'high', async t => {
@@ -403,13 +449,14 @@ async function main() {
       const queued = await queueRename(s)
       const auditsBefore = await mergeAudits(H)
       await H.tg.reset()
-      const r = await approve(queued.pendingId, { confirm_merge_into: s.y }, 'nomerge')
+      const confirmation = await confirmFor(queued.pendingId, 'dara')
+      const r = await approve(queued.pendingId, confirmation, 'nomerge')
       t.eq('refused 403 review_merge_permission_required', [r.status, r.body && r.body.code], [403, 'review_merge_permission_required'])
       t.eq('request still open', (await pendingOf(H, queued.pendingId)).status, 'open')
       t.eq('the product was not renamed or retired', [(await product(H, s.x)).name, (await product(H, s.x)).is_active], [s.nameX, 1])
       t.eq('no merge audit row', await mergeAudits(H), auditsBefore)
       t.eq('no alert for a refusal', (await H.tg.calls()).length, 0)
-      const ok = await approve(queued.pendingId, { confirm_merge_into: s.y }, 'dara')
+      const ok = await approve(queued.pendingId, confirmation, 'dara')
       t.eq('the same request approved by a reviewer who can merge', ok.status, 200)
     })
 
@@ -417,8 +464,9 @@ async function main() {
       const s = await pair(H)
       const queued = await queueRename(s)
       await H.tg.reset()
-      const first = await approve(queued.pendingId, { confirm_merge_into: s.y })
-      const second = await approve(queued.pendingId, { confirm_merge_into: s.y })
+      const confirmation = await confirmFor(queued.pendingId)
+      const first = await approve(queued.pendingId, confirmation)
+      const second = await approve(queued.pendingId, confirmation)
       t.eq('first 200, second 409', [first.status, second.status], [200, 409])
       t.eq('one merge audit row for this product', await count(H, "SELECT COUNT(*) n FROM audit_logs WHERE action = 'merge_duplicate' AND entity_id = ?", String(s.x)), 1)
       t.eq('one alert', (await H.tg.calls()).length, 1)
@@ -451,6 +499,23 @@ async function main() {
       t.eq('a late retry still answers with the same row', a3.body && a3.body.pendingActionId, a1.body.pendingActionId)
     })
 
+    await check('M5b', 'F5: the same key with a DIFFERENT request is 409 idempotency_conflict (create and edit), and a retried queued product edit is one row', 'high', async t => {
+      const base = await count(H, "SELECT COUNT(*) n FROM pending_actions")
+      const mk = (name, key) => ({ name, barcode: '88514' + String(800000 + key), selling_price_usd: 3, client_request_id: 'rq-conf-' + key })
+      const a = await H.api('POST', '/api/products', mk('RQ Conf A', 1), { as: 'sokha' })
+      const b = await H.api('POST', '/api/products', mk('RQ Conf B', 1), { as: 'sokha' })
+      t.eq('first request queued, a different request with the same key refused', [a.status, b.status, b.body && b.body.code], [202, 409, 'idempotency_conflict'])
+      t.eq('one row queued, holding the first request', [(await count(H, "SELECT COUNT(*) n FROM pending_actions")) - base, JSON.parse((await pendingOf(H, a.body.pendingActionId)).payload_json).name], [1, 'RQ Conf A'])
+      const s = await pair(H)
+      await H.tg.reset()
+      const edit = { name: s.nameY + ' new', barcode: s.barX, client_request_id: 'rq-edit-' + s.x }
+      const e1 = await H.api('PUT', '/api/products/' + s.x, edit, { as: 'sokha' })
+      const e2 = await H.api('PUT', '/api/products/' + s.x, edit, { as: 'sokha' })
+      t.eq('an edit retried with its key: both 202, the same row, one alert', [e1.status, e2.status, e1.body.pendingActionId === e2.body.pendingActionId, (await H.tg.calls()).length], [202, 202, true, 1])
+      const e3 = await H.api('PUT', '/api/products/' + s.x, { ...edit, name: s.nameY + ' other' }, { as: 'sokha' })
+      t.eq('the same key for another edit is refused', [e3.status, e3.body && e3.body.code], [409, 'idempotency_conflict'])
+    })
+
     await check('M6', 'F3: ?fields= answers 400 invalid_fields when empty, repeated or unknown on both lists; absent and targets are accepted', 'high', async t => {
       for (const [list, as] of [['/api/review', 'dara'], ['/api/review/mine', 'sokha']]) {
         for (const query of ['?fields=', '?fields=targets&fields=targets', '?fields=targets&fields=', '?fields=&fields=targets', '?fields=all', '?fields=Targets']) {
@@ -467,7 +532,7 @@ async function main() {
     await check('M7', 'REVQ-A: undo of an approved merge restores the retired product and its history row; the survivor is unchanged', 'high', async t => {
       const s = await pair(H)
       const queued = await queueRename(s)
-      const approved = await approve(queued.pendingId, { confirm_merge_into: s.y })
+      const approved = await approve(queued.pendingId, await confirmFor(queued.pendingId))
       t.eq('approved', approved.status, 200)
       const row = (await H.q("SELECT id,status FROM action_history WHERE entity = 'product' AND entity_id = ? ORDER BY id DESC", String(s.x)))[0]
         || (await H.q("SELECT id,status FROM action_history WHERE entity = 'product' ORDER BY id DESC"))[0]
@@ -486,8 +551,9 @@ async function main() {
       const queued = await queueRename(s)
       const auditsBefore = await mergeAudits(H)
       await H.tg.reset()
+      const confirmation = await confirmFor(queued.pendingId)
       await H.hook('SET is_active = 0', "UPDATE pending_actions SET status='rejected', reject_reason='race', reviewed_by=23, reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=" + queued.pendingId)
-      const r = await approve(queued.pendingId, { confirm_merge_into: s.y })
+      const r = await approve(queued.pendingId, confirmation)
       t.ok('the decision really landed in the middle', await H.hookFired())
       await H.hook(null)
       t.eq('approval answered 409', r.status, 409)
@@ -498,6 +564,28 @@ async function main() {
       t.eq('the survivor is untouched', [y.is_active, y.name], [1, s.nameY])
       t.eq('no merge audit row', await mergeAudits(H), auditsBefore)
       t.eq('no Merged alert', (await H.tg.calls()).length, 0)
+    })
+
+    await check('M10', 'REVQ-A: an approver without products:image cannot approve a merge that moves an image (403, nothing written); one with it can', 'high', async t => {
+      const s = await pair(H)
+      await executeRawStockTransaction(H.db, [H.db.prepare("UPDATE products SET image_path = '/uploads/rq-' || id || '.jpg' WHERE id = ?").bind(s.x)])
+      const queued = await queueRename(s)
+      const confirmation = await confirmFor(queued.pendingId, 'dara')
+      const r = await approve(queued.pendingId, confirmation, 'noimage')
+      t.eq('refused 403 review_action_full_required naming the image grant', [r.status, r.body && r.body.code, r.body && r.body.permission], [403, 'review_action_full_required', 'products:image'])
+      t.eq('request open, product not merged', [(await pendingOf(H, queued.pendingId)).status, (await product(H, s.x)).is_active, (await product(H, s.x)).name], ['open', 1, s.nameX])
+      const ok = await approve(queued.pendingId, confirmation, 'dara')
+      t.eq('an approver with the image grant merges it', ok.status, 200)
+    })
+
+    await check('M11', 'REVQ-A: a requester whose merge grant was revoked after queueing cannot be approved (409 request_permission_revoked, nothing written)', 'high', async t => {
+      const s = await pair(H)
+      const queued = await queueRename(s, 'sokha2')
+      const confirmation = await confirmFor(queued.pendingId)
+      await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE users SET permissions = ? WHERE id = 27').bind(JSON.stringify({ products: 'review', fees: 'review', 'products:merge_duplicates': false }))])
+      const r = await approve(queued.pendingId, confirmation)
+      t.eq('refused 409 request_permission_revoked', [r.status, r.body && r.body.code], [409, 'request_permission_revoked'])
+      t.eq('request open, product not merged and not renamed', [(await pendingOf(H, queued.pendingId)).status, (await product(H, s.x)).is_active, (await product(H, s.x)).name], ['open', 1, s.nameX])
     })
 
     await check('M8', 'REVQ-A: a request that is a plain edit (no collision) still applies without any confirmation', 'medium', async t => {

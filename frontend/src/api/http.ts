@@ -479,8 +479,9 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // confirm the merge into exactly that product (api/reviewQueueTransport.ts approvePendingAction confirmMergeInto).
   // 409 review_merge_confirm_required / review_merge_target_changed carry the merge preview the approver confirms.
   error.preview = parsed?.preview && typeof parsed.preview === 'object' && !Array.isArray(parsed.preview) ? parsed.preview : null
-  error.existingProduct = Number.isSafeInteger(parsed?.existing_product_id) && Number(parsed.existing_product_id) > 0
-    ? { id: Number(parsed.existing_product_id), name: typeof parsed.existing_product_name === 'string' ? parsed.existing_product_name : null }
+  const existingProductId = Number(parsed?.existing_product_id)
+  error.existingProduct = Number.isSafeInteger(existingProductId) && existingProductId > 0
+    ? { id: existingProductId, name: typeof parsed?.existing_product_name === 'string' ? parsed.existing_product_name : null }
     : null
   // RET-D: the record that blocked a stock Revert / Undo / line edit, and
   // where to open it (cloudflare/src/lib/stockRefusalBlocker.ts ->

@@ -66,6 +66,7 @@ import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
+import { PendingActionIdempotencyError } from './lib/pendingActions'
 
 export type Env = {
   DB: D1Database
@@ -231,6 +232,7 @@ app.onError((error, c) => {
   if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
   const stockRefusal = productStockGuardError(error)
   if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
+  if (error instanceof PendingActionIdempotencyError) return c.json({ success: false, error: error.message, code: error.code }, 409)
   if (error instanceof ReportMoneyPrecisionError) {
     const mapped = reportMoneyHttpError(error)
     return c.json({

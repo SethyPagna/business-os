@@ -314,9 +314,12 @@ app.post('/:id/approve', async (c) => {
     const stated = confirmBody?.confirm_merge_into
     const confirmed = typeof stated === 'number' ? stated : typeof stated === 'string' && /^\d+$/.test(stated.trim()) ? Number(stated.trim()) : NaN
     const confirmMergeInto = Number.isSafeInteger(confirmed) && confirmed > 0 ? confirmed : undefined
+    const stampedFingerprint = confirmBody && typeof (confirmBody as { confirm_fingerprint?: unknown }).confirm_fingerprint === 'string'
+      ? (confirmBody as { confirm_fingerprint: string }).confirm_fingerprint.slice(0, 400) : undefined
     const reviewer: ReviewerInfo & { confirmMergeInto?: number } = {
       id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c),
       ...(confirmMergeInto !== undefined ? { confirmMergeInto } : {}),
+      ...(stampedFingerprint !== undefined ? { confirmFingerprint: stampedFingerprint } : {}),
     }
     const outcome = await applyApprovedPendingAction(c.env, row, reviewer, user, (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })

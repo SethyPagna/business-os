@@ -61,7 +61,8 @@ export function getPendingAction(id: number): Promise<{ data: PendingActionRow }
 // same as every other write in this codebase.
 //
 // confirmMergeInto: the product the approver confirmed as the survivor of a queued rename that now matches it
-// (409 review_identity_conflict names it). The Worker merges only into exactly that id; absent = not confirmed.
+// (409 review_merge_confirm_required names it). The Worker merges only into exactly that id, and only if the preview's
+// fingerprint is still current; absent = not confirmed.
 export type ApprovePendingActionResult = {
   success: boolean
   data: PendingActionRow
@@ -71,11 +72,11 @@ export type ApprovePendingActionResult = {
   rest_unapplied?: string[]
 }
 
-export function approvePendingAction(id: number, confirmMergeInto?: number): Promise<ApprovePendingActionResult> {
+export function approvePendingAction(id: number, confirmMergeInto?: number, confirmFingerprint?: string): Promise<ApprovePendingActionResult> {
   return route(
     'review:approve',
     () => apiFetch('POST', `/api/review/${encodeURIComponent(String(id))}/approve`,
-      confirmMergeInto === undefined ? undefined : { confirm_merge_into: confirmMergeInto }),
+      confirmMergeInto === undefined ? undefined : { confirm_merge_into: confirmMergeInto, ...(confirmFingerprint ? { confirm_fingerprint: confirmFingerprint } : {}) }),
     null,
     true,
   ) as Promise<ApprovePendingActionResult>

@@ -73,6 +73,33 @@ function pendingRequestKey(input: CreatePendingActionInput): string | null {
 // row the first attempt queued and reports created=false, so the caller sends no second alert. The existence test and
 // the insert are ONE statement (INSERT ... SELECT ... WHERE NOT EXISTS), so two retries racing each other cannot both
 // insert; no unique index (and so no migration) is needed. A request without a key is always a new row.
+// The same retry key used for a different request (another payload): refused, never answered with the first request.
+export class PendingActionIdempotencyError extends Error {
+  readonly code = 'idempotency_conflict'
+  constructor() {
+    super('This request id was already used for a different request.')
+    this.name = 'PendingActionIdempotencyError'
+  }
+}
+
+// The payload as the retry key sees it: server-added markers (a leading underscore, the money-policy version) are not part
+// of what the client sent, and key order is not significant.
+function payloadFingerprint(json: string): string {
+  try {
+    const parsed = JSON.parse(json) as unknown
+    const strip = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(strip)
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+          .filter(([key]) => !key.startsWith('_') && key !== 'product_money_policy_version')
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, part]) => [key, strip(part)]))
+      }
+      return value
+    }
+    return JSON.stringify(strip(parsed))
+  } catch { return json }
+}
+
 export async function createPendingActionOnce(env: Env, input: CreatePendingActionInput): Promise<{ id: number; created: boolean }> {
   const db = getDb(env)
   const payloadJson = JSON.stringify(input.payload ?? {})
@@ -108,9 +135,10 @@ export async function createPendingActionOnce(env: Env, input: CreatePendingActi
           entity_id: params.entity_id, requested_by: params.requested_by, request_key: requestKey })
       return { id: row?.id ?? 0, created: true }
     }
-    const existing = await db.prepare(`SELECT id FROM pending_actions WHERE ${sameRequest} ORDER BY id ASC LIMIT 1`)
-      .get<{ id: number }>({ section: params.section, action_type: params.action_type, entity_type: params.entity_type,
+    const existing = await db.prepare(`SELECT id, payload_json FROM pending_actions WHERE ${sameRequest} ORDER BY id ASC LIMIT 1`)
+      .get<{ id: number; payload_json: string }>({ section: params.section, action_type: params.action_type, entity_type: params.entity_type,
         entity_id: params.entity_id, requested_by: params.requested_by, request_key: requestKey })
+    if (existing && payloadFingerprint(existing.payload_json) !== payloadFingerprint(payloadJson)) throw new PendingActionIdempotencyError()
     return { id: existing?.id ?? 0, created: false }
   }
   const result = await db.prepare(`

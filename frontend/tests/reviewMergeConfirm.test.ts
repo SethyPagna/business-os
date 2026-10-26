@@ -6,15 +6,20 @@
 // Run: node tests/reviewMergeConfirm.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { reviewApprovalRefusalText, reviewMergePreview } from '../src/api/branchRuleErrors.ts'
 
 const read = (rel: string): string => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const pack = (language: 'en' | 'km') => JSON.parse(read(`../src/lang/${language}.json`)) as Record<string, string>
 
 // --- the preview the Worker sends is read exactly, and nothing else is mistaken for one -------------------------------
-const preview = { survivorId: 7, survivorName: 'Rice 5kg', stockMoved: 3, priceAfter: 6, sessionsClosing: 2 }
+const preview = { survivorId: 7, survivorName: 'Rice 5kg', stockMoved: 3, priceAfter: 6, sessionsClosing: 2, restUnapplied: ['description'], fingerprint: 'fp-1' }
 assert.deepEqual(reviewMergePreview({ code: 'review_merge_confirm_required', preview }),
-  { survivorId: 7, survivorName: 'Rice 5kg', stockMoved: 3, priceAfter: 6, sessionsClosing: 2, changed: false })
+  { survivorId: 7, survivorName: 'Rice 5kg', stockMoved: 3, priceAfter: 6, sessionsClosing: 2, restUnapplied: ['description'], fingerprint: 'fp-1', changed: false })
 assert.equal(reviewMergePreview({ code: 'review_merge_target_changed', preview })?.changed, true, 'a changed target is flagged')
 for (const unusable of [
   null, undefined, 'x', {}, { code: 'review_merge_confirm_required' }, { code: 'review_merge_confirm_required', preview: null },
@@ -48,17 +53,57 @@ for (const language of ['en', 'km'] as const) {
 }
 console.log('PASS every approval-merge refusal the Worker raises reads in EN and KM')
 
-// --- the page and the transport carry the confirmation ---------------------------------------------------------------
+// --- the transport and the page carry the confirmation ---------------------------------------------------------------
 const transport = read('../src/api/reviewQueueTransport.ts')
-assert.match(transport, /approvePendingAction\(id: number, confirmMergeInto\?: number\)/, 'the transport takes the confirmed product id')
-assert.match(transport, /\{ confirm_merge_into: confirmMergeInto \}/, 'and sends it as confirm_merge_into, the field the Worker reads')
+assert.match(transport, /approvePendingAction\(id: number, confirmMergeInto\?: number, confirmFingerprint\?: string\)/, 'the transport takes the confirmed product id and fingerprint')
+assert.match(transport, /confirm_merge_into: confirmMergeInto, \.\.\.\(confirmFingerprint \? \{ confirm_fingerprint: confirmFingerprint \}/, 'and sends them as the fields the Worker reads')
 assert.match(transport, /confirmMergeInto === undefined \? undefined :/, 'an approval that confirms nothing sends no body')
 const worker = read('../../cloudflare/src/routes/reviewQueue.ts')
 assert.match(worker, /\.confirm_merge_into/, 'the Worker reads the same field name')
+assert.match(worker, /confirm_fingerprint/, 'and the same fingerprint field')
 const page = read('../src/components/review/ReviewQueue.tsx')
 assert.match(page, /reviewMergePreview\(error\)/, 'the page turns a merge refusal into the dialog')
-assert.match(page, /handleApprove\(draft\.row, draft\.preview\.survivorId\)/, 'confirming approves again naming the previewed product, never another')
+assert.match(page, /handleApprove\(draft\.row, draft\.preview\.survivorId, draft\.preview\.fingerprint\)/, 'confirming approves again naming the previewed product and its fingerprint, never another')
 assert.match(page, /review_merge_rest_unapplied/, 'the page says which queued changes the merge did not apply')
-assert.match(page, /<ConfirmDialog[^>]*\n\s+t=\{t\}\n\s+title=\{tr\('review_merge_confirm_title'/, 'the shared compact dialog is used, never window.confirm')
-assert.ok(!/window\.confirm|[^.\w]confirm\(/.test(page), 'no native confirm()')
-console.log('PASS the Review page confirms the previewed product through the shared dialog and the transport sends it')
+assert.ok(!/window\.confirm|[^.\w]confirm\(/.test(page + read('../src/components/review/ReviewMergeDialog.tsx')), 'no native confirm()')
+const writes = read('../src/api/productWriteTransport.ts')
+assert.match(writes, /updateProduct[\s\S]{0,900}ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product-edit'\)/, 'a product edit carries a client_request_id, so a queued edit can be retried safely')
+console.log('PASS the transport sends the confirmed product and fingerprint; the page and product edits are wired to it')
+
+// --- the dialog, rendered ---------------------------------------------------------------------------------------------
+const SHELL = `import React from 'react'
+export default function Dialog(p) { return React.createElement('section', null,
+  React.createElement('h1', null, p.title), React.createElement('p', {className: 'message'}, p.message),
+  React.createElement('dl', null, (p.items || []).map((i, n) => React.createElement('div', {key: n}, React.createElement('dt', null, i.label), React.createElement('dd', null, i.value)))),
+  p.note ? React.createElement('small', null, p.note) : null,
+  React.createElement('button', null, p.confirmLabel), React.createElement('button', null, p.cancelLabel)) }`
+const bundle = await build({
+  entryPoints: [fileURLToPath(new URL('../src/components/review/ReviewMergeDialog.tsx', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', write: false,
+  external: ['react', 'react-dom'],
+  plugins: [{ name: 'dialog-shell', setup(builder) {
+    // The shared dialog's modal chrome needs the whole app; its content API (title, message, items, note, labels) is what is under test.
+    builder.onResolve({ filter: /ConfirmDialog(?:\.tsx)?$/ }, () => ({ path: 'dialog', namespace: 'merge-test' }))
+    builder.onLoad({ filter: /.*/, namespace: 'merge-test' }, () => ({ loader: 'js', contents: SHELL }))
+  } }],
+})
+const dialogModule = { exports: {} as { default: React.ComponentType<any> } }
+new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), dialogModule, dialogModule.exports)
+const Dialog = dialogModule.exports.default
+for (const language of ['en', 'km'] as const) {
+  const strings = pack(language)
+  const tr = (key: string, fallback: string) => strings[key] || fallback
+  const base = { preview: { ...preview, restUnapplied: ['selling_price_usd', 'description'], fingerprint: 'fp', changed: false }, tr, t: (key: string) => strings[key], fmtUSD: (v: unknown) => '$' + v, working: false, onConfirm() {}, onClose() {} }
+  const html = renderToStaticMarkup(React.createElement(Dialog, base))
+  assert.ok(html.includes('Rice 5kg') && html.includes('>3<') && html.includes('$6'), `${language}: kept product, stock moved and price after are on screen`)
+  assert.ok(html.includes(strings.review_merge_confirm_rest_unapplied), `${language}: the not-applied list is labelled before the approver confirms`)
+  assert.ok(html.includes(strings.review_merge_confirm_required) && !html.includes(strings.review_merge_target_changed), `${language}: first ask uses the confirm sentence`)
+  assert.ok(html.includes(strings.review_merge_confirm_sessions_closing.replace('{n}', '2')), `${language}: sessions closing is stated`)
+  assert.ok(html.includes(strings.confirm) && html.includes(strings.back), `${language}: Confirm and Back`)
+  const none = renderToStaticMarkup(React.createElement(Dialog, { ...base, preview: { ...base.preview, restUnapplied: [], sessionsClosing: 0 } }))
+  assert.ok(!none.includes(strings.review_merge_confirm_rest_unapplied), `${language}: no not-applied row when nothing is dropped`)
+  assert.ok(!none.includes('<small'), `${language}: no sessions note when none close`)
+  const changed = renderToStaticMarkup(React.createElement(Dialog, { ...base, preview: { ...base.preview, changed: true } }))
+  assert.ok(changed.includes(strings.review_merge_target_changed), `${language}: a changed merge says so`)
+  assert.ok(!/approve again/i.test(strings.review_merge_target_changed), `${language}: the changed-merge sentence does not send the approver back to Approve (Confirm in this dialog already merges)`)
+}
+console.log('PASS the merge dialog renders the preview, the not-applied list and the right sentence in EN and KM')
