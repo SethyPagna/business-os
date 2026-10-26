@@ -766,6 +766,59 @@ function assertImportRefused(result) {
     }
   })
 
+  // ---- 6.0.993: a version rollback must not run when the cron set changed
+  const NEW_CRONS = read('cloudflare', 'wrangler.toml')
+  const OLD_TOML = NEW_CRONS.replace(/^crons = \[.*\]$/m, 'crons = ["0 */6 * * *"]')
+  const PREV = 'a'.repeat(40)
+  async function runWorkerRollback({ prevToml, previousSha = PREV, ci = true }) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-rollback-cron-'))
+    fs.mkdirSync(path.join(tmp, 'cloudflare'))
+    fs.writeFileSync(path.join(tmp, 'cloudflare', 'wrangler.toml'), NEW_CRONS)
+    fs.writeFileSync(path.join(tmp, 'cloudflare', 'wrangler.free.toml'), read('cloudflare', 'wrangler.free.toml'))
+    const ran = []
+    const ctx = { sha: SHA, ci, dryRun: false, releaseDir: tmp, recordDir: tmp, args: { target: 'worker', previousSha }, state: { snapshot: { previousVersionId: V_BEFORE } } }
+    try {
+      const out = await withStubs({
+        gitRead: (args) => (args[0] === 'show' ? (prevToml(args[1]) || '') : ''),
+        confirm: async (_ctx, gate) => ({ ok: true, gate }),
+        runSpec: async (spec, _ctx, approval) => { lib.assertApproved(spec, approval); ran.push(spec.id); return { code: 0, out: '' } },
+      }, () => COMMANDS.rollback(ctx))
+      return { ok: out.result, text: out.text, ran }
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
+  }
+  await checkAsync('rollback pure guard compares both plan tomls and fails closed', async () => {
+    const live = { 'wrangler.toml': NEW_CRONS, 'wrangler.free.toml': read('cloudflare', 'wrangler.free.toml') }
+    assert.deepStrictEqual(lib.parseCrons(NEW_CRONS), ['*/15 * * * *', '*/5 * * * *', '17 */3 * * *'])
+    assert.ok(lib.cronRollbackCheck(live, live).ok)
+    assert.ok(!lib.cronRollbackCheck(live, { ...live, 'wrangler.toml': OLD_TOML }).ok, 'paid toml cron difference')
+    assert.ok(!lib.cronRollbackCheck(live, { ...live, 'wrangler.free.toml': OLD_TOML }).ok, 'free toml cron difference')
+    assert.ok(!lib.cronRollbackCheck(live, { 'wrangler.toml': '', 'wrangler.free.toml': '' }).ok, 'unreadable target is not equal')
+    assert.ok(!lib.cronRollbackCheck({ 'wrangler.toml': '', 'wrangler.free.toml': '' }, live).ok, 'unreadable current is not equal')
+    assert.ok(/deploy\.yml/.test(lib.ROLLBACK_REDEPLOY_ADVICE))
+  })
+  await checkAsync('worker rollback is refused when the target sha has different crons, and nothing runs', async () => {
+    const r = await runWorkerRollback({ prevToml: () => OLD_TOML })
+    assert.strictEqual(r.ok, false)
+    assert.deepStrictEqual(r.ran, [], 'no rollback command may run')
+    assert.ok(/Redeploy the previous sha through deploy\.yml/.test(r.text) && /crons differ/.test(r.text))
+  })
+  await checkAsync('worker rollback is refused without a previous sha or when the target toml cannot be read', async () => {
+    const a = await runWorkerRollback({ prevToml: () => NEW_CRONS, previousSha: '' })
+    assert.strictEqual(a.ok, false); assert.deepStrictEqual(a.ran, [])
+    const b = await runWorkerRollback({ prevToml: () => '' })
+    assert.strictEqual(b.ok, false); assert.deepStrictEqual(b.ran, [])
+  })
+  await checkAsync('worker rollback proceeds (control) when the crons are identical', async () => {
+    const r = await runWorkerRollback({ prevToml: (spec) => read('cloudflare', spec.endsWith('free.toml') ? 'wrangler.free.toml' : 'wrangler.toml') })
+    assert.strictEqual(r.ok, true)
+    assert.deepStrictEqual(r.ran, ['rollback-worker'])
+  })
+  check('the rollback workflow and guide state the cron rule', () => {
+    const wf = read('.github', 'workflows', 'deploy-rollback.yml')
+    assert.ok(/previous_sha/.test(wf) && /-PreviousSha/.test(wf) && /fetch-depth: 0/.test(wf) && /Cron triggers are NOT part of a Worker version/.test(wf))
+    assert.ok(/previous_sha/.test(read('docs', 'setup', 'release-setup-guide.md')) && /refuses/.test(read('docs', 'setup', 'release-setup-guide.md')))
+  })
+
   if (process.exitCode) {
     console.error(`test-deploy-kit-pure: FAILED (${passed} passed)`)
   } else {

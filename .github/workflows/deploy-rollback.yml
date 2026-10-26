@@ -5,7 +5,13 @@
 # look-alike letter passes).
 #
 #   worker   - put the website back to an earlier Worker version
-#              (empty version id = the version before the current one)
+#              (empty version id = the version before the current one).
+#              Cron triggers are NOT part of a Worker version, so this
+#              refuses to run unless the cron triggers of previous_sha (the
+#              full sha being returned to) equal the ones in the checked-out
+#              release, for both wrangler.toml and wrangler.free.toml. When
+#              they differ, redeploy the previous sha through deploy.yml
+#              instead: it applies that sha's own tomls.
 #   database - put a D1 database back to a Time Travel restore point
 #              (from the Deploy run's summary). Every write made after that
 #              point is lost.
@@ -26,6 +32,11 @@ on:
           - database
       version_id:
         description: Worker version id (worker only; empty = the previous version)
+        required: false
+        default: ''
+        type: string
+      previous_sha:
+        description: Full 40-character sha being returned to (worker only; required, its cron triggers are compared)
         required: false
         default: ''
         type: string
@@ -78,6 +89,7 @@ jobs:
         with:
           path: release
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -97,10 +109,12 @@ jobs:
           RELEASE_CONFIRM: ${{ inputs.confirm }}
           TARGET: ${{ inputs.target }}
           VERSION_ID: ${{ inputs.version_id }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
           DATABASE: ${{ inputs.database }}
           BOOKMARK: ${{ inputs.bookmark }}
         run: |
           $kitArgs = @('rollback', '-CI', '-ReleaseDir', 'release', '-Records', "${{ runner.temp }}/records", '-Target', $env:TARGET)
           if ($env:TARGET -eq 'worker' -and $env:VERSION_ID) { $kitArgs += @('-VersionId', $env:VERSION_ID) }
+          if ($env:TARGET -eq 'worker' -and $env:PREVIOUS_SHA) { $kitArgs += @('-PreviousSha', $env:PREVIOUS_SHA) }
           if ($env:TARGET -eq 'database') { $kitArgs += @('-Db', $env:DATABASE, '-Bookmark', $env:BOOKMARK) }
           node release/ops/scripts/deploy-kit/release.cjs @kitArgs
