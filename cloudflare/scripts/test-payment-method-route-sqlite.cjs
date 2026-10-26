@@ -11,6 +11,7 @@ const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const PASSWORD = 'test-password'
 const db = openDb(loadAll())
 const cache = new Map()
 const USER = { id: 91, username: 'payments', name: 'Payment Admin', permissions: JSON.stringify({ settings: true, sales_policy: true }) }
@@ -24,6 +25,12 @@ const overrides = {
   '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
+  // A linked rename asks for the caller's current password first (the real check is covered by
+  // test-payment-method-replace-step-up-native.cjs). This stand-in refuses with the same 403 unless
+  // the body carries PASSWORD, so the route test can pin the order: the step-up runs before any read.
+  '../lib/destructiveStepUp': {
+    denyUnlessCurrentPassword: async (c, body, status) => (body.currentPassword === PASSWORD ? null : c.json({ success: false, code: 'current_password_required' }, status)),
+  },
 }
 
 function load(rel) {
@@ -49,11 +56,19 @@ const app = load('routes/settings.ts').default
 const executionCtx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 
 async function request(pathname, method = 'GET', body, env = { DB: db }) {
+  // Every linked rename in this file is a legitimate attempt, so it carries the password; the one
+  // that must not goes through requestWithoutPassword.
+  if (pathname === '/payment-methods/replace' && body && body.scope === 'linked' && body.currentPassword === undefined) body = { ...body, currentPassword: PASSWORD }
   const response = await app.request(pathname, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   }, env, executionCtx)
+  return { status: response.status, body: await response.json() }
+}
+
+async function requestWithoutPassword(pathname, body) {
+  const response = await app.request(pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: db }, executionCtx)
   return { status: response.status, body: await response.json() }
 }
 
@@ -99,6 +114,12 @@ const auditRows = captureAuditBaseline(db)
   assert.equal(blockedPreview.body.live_snapshots.malformed_sales, 2)
   assert.deepEqual(blockedPreview.body.malformed_sale_ids, [103, 104])
 
+  // Order: the password is asked for first, so even this unreadable request is a 403 without it ...
+  const unauthorised = await requestWithoutPassword('/payment-methods/replace', { from: 'Fcb', to: 'FCB', scope: 'linked', expected_updated_at: INITIAL_STAMP })
+  assert.equal(unauthorised.status, 403)
+  assert.equal(unauthorised.body.code, 'current_password_required')
+  assert.equal(get("SELECT value FROM settings WHERE key='pos_payment_methods'").value, JSON.stringify(['Cash', 'Fcb', 'ABA']))
+  // ... and with it the malformed allocation is refused with 409 and nothing changes.
   const blocked = await request('/payment-methods/replace', 'POST', {
     from: 'Fcb', to: 'FCB', scope: 'linked', expected_updated_at: INITIAL_STAMP,
   })

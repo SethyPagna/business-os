@@ -61,6 +61,8 @@ export function useConfirmDialog(t?: Translate) {
   const passwordRef = useRef('')
   const [passwordError, setPasswordError] = useState('')
   const [passwordWorking, setPasswordWorking] = useState(false)
+  // The guard reads this, not the render closure: two submits in one tick (Enter then a click) both see the old state.
+  const workingRef = useRef(false)
   const passwordInputRef = useRef<HTMLInputElement | null>(null)
 
   const settle = useCallback((confirmed: boolean) => {
@@ -70,6 +72,7 @@ export function useConfirmDialog(t?: Translate) {
     setPending(null)
     setPassword('')
     setPasswordError('')
+    workingRef.current = false
     setPasswordWorking(false)
     current?.resolve(confirmed)
   }, [])
@@ -95,6 +98,7 @@ export function useConfirmDialog(t?: Translate) {
     passwordRef.current = ''
     setPassword('')
     setPasswordError('')
+    workingRef.current = false
     setPasswordWorking(false)
     const next = { ...request, resolve, attempt }
     pendingRef.current = next
@@ -114,6 +118,8 @@ export function useConfirmDialog(t?: Translate) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
+      // Mid-attempt the write may still commit, so Escape must not report "cancelled" (the X and Cancel are disabled too).
+      if (workingRef.current) return
       settle(false)
     }
     document.addEventListener('keydown', onKeyDown)
@@ -123,13 +129,15 @@ export function useConfirmDialog(t?: Translate) {
   const submitPassword = async () => {
     const current = pendingRef.current
     const typed = passwordRef.current
-    if (!current?.attempt || !typed || passwordWorking) return
+    if (!current?.attempt || !typed || workingRef.current) return
+    workingRef.current = true
     setPasswordWorking(true)
     setPasswordError('')
     let refusal: string | null = null
     try { refusal = await current.attempt(typed) } catch (error) { refusal = error instanceof Error && error.message ? error.message : 'Failed' }
     if (pendingRef.current !== current) return
     if (refusal === null) { settle(true); return }
+    workingRef.current = false
     passwordRef.current = ''
     setPassword('')
     setPasswordError(refusal)
