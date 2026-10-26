@@ -539,6 +539,12 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     A child variant pointing at the discarded row would be left rooted on a
 //     deactivated parent (familyPagination.ts joins `parent.id = p.parent_id`),
 //     so the fold moves the children onto the keeper and records their ids.
+//   product_conflict_marks -- Conflicts decisions (migration 0273: "Confirm $0 cost", "no barcode"). Each is
+//     bound to the VALUE it confirmed on that row (a $0 cost, an empty barcode), and a merge changes the
+//     survivor's cost and barcode. Folding the loser's mark onto the survivor could therefore hide a real new
+//     conflict on it, so marks do not move: the loser is deactivated (the Conflicts lists skip inactive rows, so
+//     its marks are inert) and undo reactivates it with its decisions intact. The survivor's own marks stay as
+//     they were. Pinned in scripts/test-merge-identity-fk-pure.cjs ("conflict marks stay with the row").
 //   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
