@@ -161,6 +161,16 @@ export interface FamilyPaginationOptions {
   // search/filter match" (that's still `whereSql`'s job, for deciding
   // which *families* qualify and how they're paged/ranked).
   familyMemberBaseWhereSql?: string
+  // Opt-in read-cost mode (GET /api/products/search). The default statement pair reads the whole filtered
+  // catalogue three times per page: the COUNT, the ranking, and a second walk of `matched` joined to the ranking
+  // to pick the page's rows (about 9 rows read per product at 8.6k products, every cache miss). With this set:
+  //  - ONE statement ranks the families once and carries the family count on every page row
+  //    (COUNT(*) OVER (), the same number the COUNT statement returned);
+  //  - the page's rows are fetched by key, not by a second walk: the page's family keys are turned into the ids
+  //    that can belong to them (name_key / parent_id index seeks), and only those ids are read.
+  // Result, order, total and totalPages are identical to the default path; callers that do not pass it are
+  // untouched. A page past the end returns no rows, so only then does a COUNT statement still run.
+  seekPage?: boolean
 }
 
 export interface FamilyPaginationResult<T> {
@@ -171,7 +181,7 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'> & { inlineFamilies?: boolean }) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
   // this helper dependency-free). When matchRankSql reads its rank column,
@@ -217,13 +227,67 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       ${rankJoin}
       ${opts.whereSql}
     ),
-    families AS (
+    families AS ${opts.inlineFamilies ? 'NOT MATERIALIZED ' : ''}(
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
              MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}
       FROM matched
       GROUP BY __family_root_id
     )${familyMembersCte}
+  `
+}
+
+// The seekPage statement (see FamilyPaginationOptions.seekPage).
+//
+// Why a key can be turned into candidate ids without reading the catalogue: a row's family key is
+//   COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent.id, p.id))
+// so a row with key K is one of
+//   (a) p.name_key = K            (no parent, or a parent without a name_key)
+//   (b) a child of a row whose name_key = K
+//   (c) K = 'id:N' and p.id = N   (blank name, no parent)
+//   (d) K = 'id:N' and p.parent_id = N
+// Each is an index seek (idx_products_name_key_pg, idx_products_parent_pg, the primary key). The union is only a
+// SUPERSET filter: the rows it admits still go through the caller's own WHERE and the exact
+// `__family_root_id = page_families.family_root_id` join, so a stray candidate (a product literally named "id:5") can never
+// reach the page.
+function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string, intraFamilyOrderSql: string): string {
+  const { selectColumns, joinSql, whereSql, matchRankSql, familyMemberBaseWhereSql } = opts
+  const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
+  // `matched` and `families` exactly as the default statement builds them; family_members is replaced by page_rows.
+  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true })
+  // Parenthesised so the appended id restriction can never bind into one arm of an OR in the caller's clause.
+  const rowsWhere = familyMemberBaseWhereSql
+    ? familyMemberBaseWhereSql
+    : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
+  const rowsJoins = familyMemberBaseWhereSql ? joinSql : `${joinSql}
+      ${rankJoin}`
+  return `
+    ${ctes},
+    page_families AS MATERIALIZED (
+      SELECT *, COUNT(*) OVER () AS family_total
+      FROM families
+      ORDER BY ${familyOrderSql}, family_root_id ASC
+      LIMIT @__familyPageSize OFFSET @__familyOffset
+    ),
+    page_candidates AS MATERIALIZED (
+      SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')
+    ),
+    page_rows AS (
+      SELECT ${selectColumns},
+             ${FAMILY_ROOT_KEY_SQL} AS __family_root_id
+      FROM page_candidates pc
+      CROSS JOIN products p ON p.id = pc.id
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      ${rowsJoins}
+      WHERE (${rowsWhere})
+    )
+    SELECT page_rows.*, page_families.family_total AS __family_total
+    FROM page_rows
+    JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
+    ORDER BY ${familyOrderSql}, page_families.family_root_id ASC, ${intraFamilyOrderSql}
   `
 }
 
@@ -265,7 +329,26 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // instead of two sequential prepare().get()/prepare().all() calls -- same
   // "independent reads, one batch" shape as
   // productMergeSnapshot.ts's runProductMergeReadBatch.
-  const pageParams = { ...params, __familyOffset: offset, __familyOffsetEnd: offset + pageSize }
+  const pageParams = { ...params, __familyOffset: offset, __familyOffsetEnd: offset + pageSize, __familyPageSize: pageSize }
+  if (opts.seekPage) {
+    const rows = await db.prepare(buildSeekPageSql(opts, familyOrderSql, intraFamilyOrderSql)).all<Record<string, unknown>>(pageParams)
+    let total = Number(rows[0]?.__family_total) || 0
+    // An empty first page means no family at all; any later empty page only says the page is past the end.
+    if (!rows.length && page > 1) {
+      const counted = await db.prepare(`${countCtes} SELECT COUNT(*) AS count FROM families`).get<{ count?: number }>(params)
+      total = Number(counted?.count) || 0
+    }
+    return {
+      items: rows.map((row) => {
+        const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __family_total, __family_rank, ...rest } = row
+        return rest as unknown as T
+      }),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    }
+  }
   const [countResult, pageResult] = await db.batch([
     { sql: `${countCtes} SELECT COUNT(*) AS count FROM families`, params },
     {
