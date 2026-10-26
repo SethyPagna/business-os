@@ -19,7 +19,7 @@
 // and tier for the whole call, listing every product that crossed (capped), not one message per product.
 import type { Env } from '../index'
 import { getDb } from './db'
-import { effectiveLowStockThreshold, loadLowStockConfig, type LowStockConfig } from './lowStockSettings'
+import { effectiveLowStockThreshold, LOW_STOCK_SETTING_KEYS, resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
 import { sendTelegramEvent } from './telegram'
 
@@ -151,11 +151,17 @@ export type RecordCrossingsInput = {
 }
 export type RecordCrossingsResult = { crossings: number; claimed: number; sent: number }
 
-type StateRow = { product_id: number; branch_id: number; name: string | null; low_stock_threshold: unknown; out_of_stock_threshold: unknown; quantity: number }
+type StateRow = { settings_json: string | null; product_id: number; branch_id: number; name: string | null; low_stock_threshold: unknown; out_of_stock_threshold: unknown; quantity: number }
 
-/** The branch quantity of every touched product NOW, with its thresholds: one read for the whole call. */
-async function readStates(env: Env, lines: readonly StockSaleLine[]): Promise<StockLineState[]> {
-  const rows = await getDb(env).prepare(`SELECT p.id AS product_id, bs.branch_id AS branch_id, p.name AS name,
+/**
+ * The branch quantity of every touched product NOW, with its thresholds AND the low-stock settings: ONE statement for the
+ * whole call (the settings ride along as a scalar subselect), because this runs in the request's waitUntil and every D1
+ * statement counts against the Free plan's per-request budget (the exchange-return budget test).
+ */
+async function readStates(env: Env, lines: readonly StockSaleLine[]): Promise<{ states: StockLineState[]; config: LowStockConfig }> {
+  // sql-bound-params: the keys are the fixed three-key LOW_STOCK_SETTING_KEYS enum, never data.
+  const settingKeys = LOW_STOCK_SETTING_KEYS.map((key) => `'${key}'`).join(',')
+  const rows = await getDb(env).prepare(`SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN (${settingKeys})) AS settings_json, p.id AS product_id, bs.branch_id AS branch_id, p.name AS name,
       p.low_stock_threshold AS low_stock_threshold, p.out_of_stock_threshold AS out_of_stock_threshold, COALESCE(bs.quantity, 0) AS quantity
     FROM products p JOIN branch_stock bs ON bs.product_id = p.id
     WHERE p.id IN (SELECT value FROM json_each(@productIds)) AND bs.branch_id IN (SELECT value FROM json_each(@branchIds))`)
@@ -163,13 +169,16 @@ async function readStates(env: Env, lines: readonly StockSaleLine[]): Promise<St
       productIds: JSON.stringify([...new Set(lines.map((line) => line.productId))]),
       branchIds: JSON.stringify([...new Set(lines.map((line) => line.branchId))]),
     })
+  let settings: Record<string, unknown> = {}
+  try { settings = rows.length && rows[0].settings_json ? JSON.parse(rows[0].settings_json) : {} } catch { settings = {} }
+  const config = resolveLowStockConfig(settings)
   const byKey = new Map(rows.map((row) => [`${row.branch_id}:${row.product_id}`, row]))
   const states: StockLineState[] = []
   for (const line of lines) {
     const row = byKey.get(`${line.branchId}:${line.productId}`)
     if (row) states.push({ ...line, after: line.after !== undefined ? line.after : Number(row.quantity) || 0, name: String(row.name || `#${line.productId}`), lowThreshold: row.low_stock_threshold, outThreshold: row.out_of_stock_threshold })
   }
-  return states
+  return { states, config }
 }
 
 /**
@@ -182,11 +191,12 @@ export async function recordStockCrossings(env: Env, input: RecordCrossingsInput
   try {
     const lines = mergeSaleLines(input.lines)
     if (!lines.length) return result
-    const [config, available] = await Promise.all([loadLowStockConfig(env), stockCrossingTableAvailable(env)])
-    if (!available) return result
-    const crossings = detectCrossings(await readStates(env, lines), config)
-    result.crossings = crossings.length
+    const { states, config } = await readStates(env, lines)
+    const crossings = detectCrossings(states, config)
     if (!crossings.length) return result
+    // The table probe waits until there IS a crossing: the common sale crosses nothing and pays one statement in all.
+    if (!(await stockCrossingTableAvailable(env))) return result
+    result.crossings = crossings.length
     const db = getDb(env)
     const claimed: Array<{ crossing: StockCrossing; key: string }> = []
     for (const crossing of crossings) {

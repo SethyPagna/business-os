@@ -488,11 +488,14 @@ const MONEY_PRECISION_REVIEW_NEEDED = {
 
 /** The sale's recorded money precision version, or null when there is no such
  * sale (a manual return with no sale_id has no version to inherit). */
-async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown): Promise<number | null> {
+/** The sale row this request already read: the status rides along on the precision read so assertReturnableItems does not read it again (one D1 statement saved on every return; the exchange return sits at the Free 50-statement budget). */
+type SeenSaleStatus = { saleId: number; saleStatus: string | null }
+async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown, seen?: { sale?: SeenSaleStatus }): Promise<number | null> {
   const id = Number(saleId)
   if (!Number.isSafeInteger(id) || id <= 0) return null
-  const row = await db.prepare('SELECT money_precision_version FROM sales WHERE id=? LIMIT 1')
-    .get<{ money_precision_version: number | null }>([id])
+  const row = await db.prepare('SELECT money_precision_version, sale_status FROM sales WHERE id=? LIMIT 1')
+    .get<{ money_precision_version: number | null; sale_status: string | null }>([id])
+  if (seen && row) seen.sale = { saleId: id, saleStatus: row.sale_status }
   return row ? Number(row.money_precision_version) || 0 : null
 }
 
@@ -505,6 +508,7 @@ async function assertReturnableItems(
   saleId: number | null,
   items: ReturnItemInput[],
   excludeReturnId: number | null = null,
+  seenSale?: SeenSaleStatus,
 ): Promise<void> {
   for (const item of items) {
     const qty = Number(item.quantity)
@@ -512,7 +516,9 @@ async function assertReturnableItems(
   }
   if (!saleId) return
 
-  const sale = await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
+  const sale = seenSale && seenSale.saleId === Number(saleId)
+    ? { id: seenSale.saleId, sale_status: seenSale.saleStatus }
+    : await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
   if (!sale) throw new Error('Original sale not found')
   // A cancelled sale's stock was already ADDED BACK by the cancellation
   // itself (routes/sales.ts PATCH /:id/status) -- recording a return on
@@ -1497,12 +1503,13 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return row?.return_id == null ? undefined : { ...row, return_id: row.return_id }
   }
   const priorReceipt = await readReceipt()
+  const seenSaleRead: { sale?: SeenSaleStatus } = {}
   // The sale decides. A body that is not explicitly v1 (absent, or 0) may not
   // open a return against a v1 sale -- refused here, above canonicalisation, so
   // an explicit 0 gets the same reviewable code as an absent one instead of the
   // canonicaliser's generic 400.
   if (!priorReceipt && body.money_precision_version !== 1
-    && (await saleMoneyPrecisionVersion(db, body.sale_id)) === 1) {
+    && (await saleMoneyPrecisionVersion(db, body.sale_id, seenSaleRead)) === 1) {
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
   let canonicalIntent: Record<string, unknown>
@@ -1576,7 +1583,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const replacementInputsRaw = Array.isArray(body.replacement_items) ? body.replacement_items : []
   if (!isMoneyV1) {
     try {
-      await assertReturnableItems(db, requestedSaleId, body.items)
+      await assertReturnableItems(db, requestedSaleId, body.items, null, seenSaleRead.sale)
     } catch (error) {
       if (error instanceof ReturnCreateBudgetError) throw error
       const stockGuard = productStockGuardError(error)
