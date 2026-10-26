@@ -6,7 +6,7 @@
 // Run: node tests/returnLegacyConvert.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { canConvertLegacyReturns, isLegacyReturnOnExactSale, legacyConvertAccess, legacyConvertReasonText } from '../src/components/returns/helpers/returnLegacyConvert.ts'
+import { canConvertLegacyReturns, isLegacyReturnOnExactSale, legacyConvertAccess, legacyConvertFailureText, legacyConvertReasonText } from '../src/components/returns/helpers/returnLegacyConvert.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 
@@ -45,9 +45,17 @@ const T = (key: string, fallback: string) => ({ return_convert_amount_changed: '
 assert.equal(legacyConvertReasonText('return_convert_amount_changed', { before: 30.03, after: 10.01 }, T, { usd: (v) => `$${v.toFixed(2)}` }),
   'KM $30.03 -> $10.01', 'the pack sentence, with the amounts formatted')
 assert.match(legacyConvertReasonText('return_convert_riel_changed', { before: 40040, after: 40000 }, (_k, f) => f, { khr: (v) => `${v} ៛` }), /40040 ៛/)
-assert.match(legacyConvertReasonText('return_convert_sale_blocked', { return_number: 'RET-1' }, (_k, f) => f), /RET-1/)
+assert.match(legacyConvertReasonText('return_convert_report_changed', { before: 18.9067, after: 16.6833 }, (_k, f) => f, { usd: (v) => '$' + v }), /\$18\.9067 to \$16\.6833/)
+assert.match(legacyConvertReasonText('return_convert_sale_amended', null, (_k, f) => f), /Record a new return/)
+// Every failure code the Worker sends resolves to a pack key (a Khmer session never shows the Worker's English).
+const seen: string[] = []
+const spy = (key: string, fallback: string) => { seen.push(key); return fallback }
+for (const code of ['return_convert_forbidden', 'return_convert_preview_stale', 'return_convert_changed', 'return_convert_not_found',
+  'maintenance_active', 'return_convert_uncertain', 'return_convert_invalid', 'client_request_id_required', '']) legacyConvertFailureText(code, spy)
+assert.deepEqual([...new Set(seen)].sort(), ['return_convert_admin_only', 'return_convert_failed', 'return_convert_not_found', 'return_convert_paused',
+  'return_convert_stale', 'return_convert_uncertain'], 'each failure maps to its own sentence, never the raw message')
 assert.match(legacyConvertReasonText('something_new', null, (_k, f) => f), /cannot be converted/, 'an unknown code still reads as a reason with a way through')
-for (const code of ['return_convert_amount_changed', 'return_convert_line_changed', 'return_convert_riel_changed', 'return_convert_line_unlinked', 'return_convert_quote_refused']) {
+for (const code of ['return_convert_amount_changed', 'return_convert_line_changed', 'return_convert_riel_changed', 'return_convert_line_unlinked', 'return_convert_quote_refused', 'return_convert_report_changed']) {
   assert.match(legacyConvertReasonText(code, {}, (_k, f) => f), /cancel this return and record it again|Cancel this return and record it again/i,
     `${code} names the way through, never a dead end`)
 }
@@ -81,6 +89,9 @@ assert.match(panel, /useConfirmDialog/, 'the shared compact confirm dialog, neve
 assert.ok(!/window\.confirm\(|\bconfirm\(/.test(panel.replace(/askToConfirm\(/g, '')), 'no native confirm')
 assert.match(panel, /access === 'convert' \?[\s\S]*?<RefreshCcw[\s\S]*?T\('return_convert_action', 'Convert'\)[\s\S]*?: \([\s\S]*?T\('return_convert_admin_only'/, 'main action: icon + one word; others read the admin hint')
 
+assert.ok(!/notify\(String\(/.test(panel), 'no raw Worker message reaches the toast')
+const tag = panel.slice(panel.indexOf('export function ReturnLegacyLockTag'))
+assert.match(tag, /data-return-legacy-lock="convert"[\s\S]*?<RefreshCcw /, 'the row Convert uses the same icon as the panel and the bulk bar')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 const keys = [...new Set([...panel.matchAll(/\bT\('([a-z0-9_]+)'/g), ...read('../src/components/returns/helpers/returnLegacyConvert.ts').matchAll(/\bT\('([a-z0-9_]+)'/g)]
@@ -90,5 +101,7 @@ for (const key of keys) {
   assert.ok(en[key], `en.json has ${key}`)
   assert.ok(km[key] && /[ក-៿]/.test(km[key]) && km[key] !== en[key], `km.json has Khmer for ${key}`)
 }
+assert.equal(en.return_convert_partial_note, "Returns that can't be converted stay as they are.")
+assert.ok(!('return_convert_sale_blocked' in en) && !('return_convert_sale_blocked' in km), 'the retired all-or-nothing sentence is gone from both packs')
 assert.equal(en.return_convert_admin_only, 'An admin can review and convert it.', 'matches the refusal copy: "an admin can review and convert it"')
 console.log('PASS the lock reaches the Edit form, both list rows and the bulk bar, in both languages')

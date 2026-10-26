@@ -1097,7 +1097,7 @@ app.post('/legacy-convert/preview', async (c) => {
     if (!canConvertLegacyReturns(c.get('user'))) {
       return c.json({ error: 'Only an admin with Returns Edit can convert a return to the current format.', code: 'return_convert_forbidden' }, 403)
     }
-    const plan = await planLegacyReturnConversion(getDb(c.env), body.return_ids)
+    const plan = await planLegacyReturnConversion(c.env, body.return_ids)
     c.header('Cache-Control', 'no-store')
     return c.json({ digest: plan.digest, rows: plan.rows, convertible: plan.members.map((member) => member.id) })
   } catch (error) { return legacyConvertFailure(c, error) }
@@ -1105,7 +1105,7 @@ app.post('/legacy-convert/preview', async (c) => {
 app.post('/legacy-convert', async (c) => {
   const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   try {
-    const result = await applyLegacyReturnConversion(getDb(c.env), c.get('user'), body)
+    const result = await applyLegacyReturnConversion(c.env, c.get('user'), body)
     if (result.converted.length && !result.replayed) c.executionCtx.waitUntil(notifyLegacyReturnConversion(c.env))
     return c.json(result)
   } catch (error) { return legacyConvertFailure(c, error) }

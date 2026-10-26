@@ -522,7 +522,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
     const legacyConvertReplay = parseJson(existing.undo_payload)?.applier === RETURN_LEGACY_CONVERT_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !mergeCostReplay) {
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !legacyConvertReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
 
@@ -660,7 +660,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         applied: true,
         item: row ? await mapRow(row, user, c.env) : null,
         payload,
-        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay || mergeCostReplay
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay || legacyConvertReplay || mergeCostReplay
           ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
           : {}),
       }, user))

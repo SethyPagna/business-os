@@ -5,7 +5,7 @@
 //
 // Locks, in order:
 //   1. the lock is real before conversion: PATCH refuses (money_precision_review_needed), a new v1 quote on the sale is
-//      refused, and cancelling the sale's own v1 return is refused;
+//      refused;
 //   2. a non-admin (Returns Full + Edit) is refused preview and apply, writing nothing;
 //   3. a legacy row whose stored refund is the gross price on a discounted sale is REFUSED, with the reason, nothing written;
 //   4. the preview names every old-format return on the sale (active, a product-only line, a cancelled one) with before/after;
@@ -186,10 +186,7 @@ async function main() {
     assert.equal(lockedEdit.body.code, 'money_precision_review_needed')
     assert.notEqual((await send('POST', '/api/returns/quote', { sale_id: 1, items: [{ sale_item_id: 11, quantity: 1 }] })).status, 200,
       'an old-format row closes the whole sale to new returns')
-    const v1Row = await one('SELECT status,return_type,updated_at FROM returns WHERE id=?', v1Id)
-    const lockedCancel = await send('POST', '/api/returns/bulk', { client_request_id: 'cancel-v1-locked', field: 'status', source: 'completed', target: 'cancelled',
-      items: [{ id: v1Id, expected_status: 'completed', expected_method: v1Row.return_type, expected_updated_at: v1Row.updated_at }] })
-    assert.equal(lockedCancel.status, 409, `cancelling the sale's own v1 return is refused while an old-format row sits on it: ${JSON.stringify(lockedCancel.body)}`)
+    // (Cancelling the sale's own v1 return is no longer refused here: test-return-legacy-convert-mixed-native.cjs.)
 
     const baseBytes = await exactBytes()
     const baseShift = await shift()
@@ -293,7 +290,13 @@ async function main() {
     }
     assert.deepEqual(await shift(), baseShift)
     assert.equal(await ledgers(), baseLedgers)
-    const redo = await send('POST', `/api/action-history/${historyId}/redo`, { require_applied: true, expected_generation: 1 })
+    // A retry of the same undo after its response was lost answers 200 and writes nothing (the applier sees its own
+    // generation already applied; the route does not refuse it as a stale status).
+    const undoneBytes = await exactBytes()
+    const retry = await send('POST', `/api/action-history/${historyId}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(retry.status, 200, `undo retry is idempotent: ${JSON.stringify(retry.body)}`)
+    assert.equal(await exactBytes(), undoneBytes, 'the retried undo changed nothing')
+    const redo =await send('POST', `/api/action-history/${historyId}/redo`, { require_applied: true, expected_generation: 1 })
     assert.equal(redo.status, 200, JSON.stringify(redo.body))
     const redone = JSON.parse(await exactBytes())
     const converted = JSON.parse(convertedBytes)

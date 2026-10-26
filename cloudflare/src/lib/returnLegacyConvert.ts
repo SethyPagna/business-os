@@ -9,9 +9,13 @@
 // Converting writes the v1 shape the current app would have written for the SAME return -- and only when that shape keeps
 // every amount the shop already recorded. The v1 quote (lib/customerReturnEntitlement.ts) is run for the return's own
 // lines against the sale's captured receipt allocation; the conversion is refused, with the reason, unless:
-//   - the quote's payout equals the stored total_refund_usd to the cent (revenue, the Not Paid debt and cash stay put);
+//   - the quote's payout equals the stored total_refund_usd to the cent (the Not Paid debt and cash stay put);
 //   - every line's quoted refund is within half a cent of the stored line (four-place detail only);
-//   - the riel figure is unchanged, or moves by less than one 100-riel step on a refund that paid no riel cash.
+//   - the riel figure is unchanged, or moves by less than one 100-riel step on a refund that paid no riel cash (a restored
+//     v1 return must carry total_refund_khr = total x sale rate, so it cannot simply be left; the preview shows the move);
+//   - the sales report reducer gives the same totals for the sale before and after at four places (revenue, profit,
+//     refund basis...): an old-format refund is valued on a different basis, so equal payouts are not enough;
+//   - a cancelled return's sale lines have no amendment recorded after the return (the "no restore after reprice" rule).
 // Migration 0160 deliberately did not backfill snapshots because an old unit-price refund cannot be reclassified without
 // the receipt allocation evidence. A v1 sale HAS that evidence (its pricing snapshots); the equality checks above are
 // what make the reclassification provably value-preserving instead of a re-pricing.
@@ -22,8 +26,8 @@
 // each line's total_usd (within half a cent), refund_snapshot_json, and sale_item_id when it was empty and exactly one
 // line of the sale sells that product.
 //
-// The unit is the SALE: all active old-format returns on it are converted together (the v1 cohort is a set; one left
-// behind keeps the sale locked) or none is. A cancelled old-format return converts on its own, against the active set.
+// Per return: each convertible return converts on its own, quoted against the sale's exact returns and the ones converted
+// before it; one that cannot convert no longer blocks its siblings (see planLegacyReturnConversion).
 // Undo/redo: one action_history row whose server applier replays the recorded before/after exactly, refused when any
 // return on the sale changed since (its write revision moved), so an undo never restores a shape a later write relied on.
 import { getDb, type D1Compat } from './db'
@@ -33,6 +37,7 @@ import { getActionTier, isAdminControlUser } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4, roundMoney2, subtractMoney4 } from './moneyPrecision'
 import { customerReturnQuotePlanFromRows, readCustomerReturnQuoteRows } from './customerReturnQuotePlan'
+import { readSalesReportSnapshot, salesTotalsFromSnapshot } from './salesAnalytics'
 import { sha256Hex } from './saleRecordEvents'
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -194,7 +199,7 @@ function previewRow(legacy: LegacyReturn, outcome: ConvertPreviewRow['outcome'],
 }
 
 const RETURN_COLUMNS = `r.id,r.return_number,r.receipt_number,r.sale_id,r.status,r.return_scope,r.money_precision_version,r.calculated_refund_usd,
-  r.rounding_adjustment_usd,r.total_refund_usd,r.total_refund_khr,r.refund_currency,r.owed_reduction_usd,r.updated_at`
+  r.rounding_adjustment_usd,r.total_refund_usd,r.total_refund_khr,r.refund_currency,r.owed_reduction_usd,r.updated_at,r.created_at`
 
 async function readItems(db: D1Compat, ids: number[]): Promise<Map<number, Row[]>> {
   const map = new Map<number, Row[]>()
@@ -205,8 +210,70 @@ async function readItems(db: D1Compat, ids: number[]): Promise<Map<number, Row[]
   return map
 }
 
+// ---- the report basis ---------------------------------------------------------------------------------------------
+// The sales report values an old-format refund on the legacy basis (refund paid x net / subtotal, lib/salesAnalytics.ts)
+// and a current-format refund on its net entitlement. On a sale with a receipt or membership discount, or tax, the two
+// differ even when the payout is identical, so a conversion would restate a closed period's revenue. Each conversion is
+// therefore also judged by the REAL report reducer (salesTotalsFromSnapshot over readSalesReportSnapshot rows) for the
+// sale, before and after, and refused unless every report total is equal at four places. A cancelled return is judged
+// as it would count if it were restored, so a later restore cannot restate the period either.
+type ReportSnapshot = Awaited<ReturnType<typeof readSalesReportSnapshot>>
+const REPORT_RETURN_COLUMNS = `r.id,r.sale_id,r.total_refund_usd,'completed' AS status,r.return_scope,r.owed_reduction_usd,r.refund_currency,
+  r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd`
+async function readSaleReport(env: Env, saleId: number, cancelledIds: number[]): Promise<ReportSnapshot | null> {
+  try {
+    const snapshot = await readSalesReportSnapshot(env, {}, false, (alias) => ({ sql: `${alias}.id=@reportScope_saleId`, params: { reportScope_saleId: saleId } }))
+    if (!cancelledIds.length) return snapshot
+    const db = getDb(env)
+    const ids = JSON.stringify(cancelledIds)
+    const returns = await db.prepare(`SELECT ${REPORT_RETURN_COLUMNS} FROM returns r WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id`).all<Row>({ ids })
+    const returnItems = await db.prepare(`SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri.total_usd,ri.refund_snapshot_json
+      FROM return_items ri WHERE ri.return_id IN (SELECT value FROM json_each(@ids)) ORDER BY ri.id`).all<Row>({ ids })
+    return { ...snapshot, returns: [...snapshot.returns, ...returns] as ReportSnapshot['returns'], returnItems: [...snapshot.returnItems, ...returnItems] as ReportSnapshot['returnItems'] }
+  } catch { return null }
+}
+/** The snapshot with these returns in their converted shape. */
+function withConverted(snapshot: ReportSnapshot, converted: Array<{ id: number; after: MemberState }>): ReportSnapshot {
+  const headers = new Map(converted.map(member => [member.id, member.after.header]))
+  const lines = new Map(converted.flatMap(member => member.after.lines.map(line => [line.id, line] as const)))
+  return {
+    ...snapshot,
+    returns: snapshot.returns.map(row => {
+      const header = headers.get(Number(row.id))
+      return header ? { ...row, money_precision_version: header.v, calculated_refund_usd: header.c, rounding_adjustment_usd: header.a } : row
+    }),
+    returnItems: snapshot.returnItems.map(row => {
+      const line = lines.get(Number(row.id))
+      return line ? { ...row, sale_item_id: line.s, total_usd: line.u, refund_snapshot_json: line.j } : row
+    }),
+  }
+}
+function reportTotals(snapshot: ReportSnapshot): Record<string, unknown> | null {
+  try { return { ...salesTotalsFromSnapshot(snapshot, 4) } } catch { return null }
+}
+function sameReport(left: Record<string, unknown> | null, right: Record<string, unknown> | null): boolean {
+  return !!left && !!right && JSON.stringify(left) === JSON.stringify(right)
+}
+
+// ---- the amendment ledger (finding G, "no restore after reprice") ---------------------------------------------------
+// A cancelled old-format return is judged at restore by the sale amendment ledger (a quantity or price change recorded for
+// its line after the return was entered refuses the restore). Converting writes a snapshot from today's pricing, which
+// would let that restore through, so such a return is not converted. Read straight from the ledger, the same kinds the
+// restore rule reads, so this holds whichever lane merges first.
+const LEDGER_LINE_KINDS = ['line_quantity_increased', 'line_quantity_decreased', 'line_updated']
+const stampMs = (value: unknown): number => Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(value)) ? String(value).replace(' ', 'T') : `${String(value).replace(' ', 'T')}Z`)
+async function amendedAfter(db: D1Compat, legacy: LegacyReturn, saleItemIds: number[]): Promise<boolean> {
+  if (!saleItemIds.length) return false
+  const returnedAt = stampMs(legacy.created_at)
+  const ledger = await db.prepare(`SELECT created_at FROM sale_amendments WHERE sale_item_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))
+    AND kind IN (${LEDGER_LINE_KINDS.map(kind => `'${kind}'`).join(',')}) LIMIT 1001`).all<{ created_at: string | null }>({ ids: JSON.stringify(saleItemIds) })
+  // An unreadable return time is treated as "before every amendment": refuse rather than guess.
+  return ledger.some(entry => !Number.isFinite(returnedAt) || stampMs(entry.created_at) > returnedAt)
+}
+
 /** Read-only. What converting `ids` would write, per return, and why any return cannot be converted. */
-export async function planLegacyReturnConversion(db: D1Compat, rawIds: unknown): Promise<ConvertPlan> {
+export async function planLegacyReturnConversion(env: Env, rawIds: unknown): Promise<ConvertPlan> {
+  const db = getDb(env)
   const ids = parseConvertIds(rawIds)
   const selected = await db.prepare(`SELECT ${RETURN_COLUMNS},s.money_precision_version AS sale_money_precision_version
     FROM returns r LEFT JOIN sales s ON s.id=r.sale_id WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id`).all<Row>({ ids: JSON.stringify(ids) })
@@ -232,37 +299,40 @@ export async function planLegacyReturnConversion(db: D1Compat, rawIds: unknown):
       AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.money_precision_version,0)<>1 ORDER BY r.id`).all<Row>({ saleId })
     const items = await readItems(db, legacyRows.map(row => Number(row.id)))
     const legacies = legacyRows.map(row => ({ ...row, id: Number(row.id), items: items.get(Number(row.id)) || [] }) as LegacyReturn)
-    if (!quoteRows) {
-      for (const legacy of legacies) rows.push(previewRow(legacy, 'refused', 'return_convert_quote_refused', { detail: 'customer_return_sale_invalid' }, null))
+    const isCancelled = (legacy: LegacyReturn) => String(legacy.status || 'completed') === 'cancelled'
+    const report = quoteRows ? await readSaleReport(env, saleId, legacies.filter(isCancelled).map(legacy => legacy.id)) : null
+    const reportBefore = report ? reportTotals(report) : null
+    if (!quoteRows || !report || !reportBefore) {
+      const detail = quoteRows ? 'report_unreadable' : 'customer_return_sale_invalid'
+      for (const legacy of legacies) rows.push(previewRow(legacy, 'refused', 'return_convert_quote_refused', { detail }, null))
       continue
     }
-    const v1Priors = quoteRows.previousRows.filter(row => Number(row.money_precision_version) === 1)
-    const active = legacies.filter(row => String(row.status || 'completed') !== 'cancelled')
-    const cancelled = legacies.filter(row => String(row.status || 'completed') === 'cancelled')
-    const converted: Array<{ legacy: LegacyReturn; after: MemberState }> = []
-    const priors = [...v1Priors]
-    let blocker: { legacy: LegacyReturn; code: string; params: Record<string, unknown> } | null = null
-    for (const legacy of active) {
-      const result = await compareWithQuote(db, saleId, legacy, quoteRows, priors)
-      if (!result.ok) { blocker = { legacy, code: result.code, params: result.params }; break }
-      converted.push({ legacy, after: result.after })
-      priors.push(...result.priorRows)
-    }
-    if (blocker) {
-      // The cohort is a set: converting only part of it leaves the sale exactly as locked, so nothing on this sale converts.
-      for (const legacy of legacies) {
-        if (legacy.id === blocker.legacy.id) rows.push(previewRow(legacy, 'refused', blocker.code, blocker.params, null))
-        else rows.push(previewRow(legacy, 'refused', 'return_convert_sale_blocked', { return_number: blocker.legacy.return_number ?? null }, null))
+    // Per return, not all-or-nothing. The v1 cohort is a SET (customerReturnEntitlement.ts): each conversion is quoted with
+    // the sale's exact returns plus the ones already converted here as its priors, so every converted member satisfies the
+    // cohort caps (per-line entitlement plus residue, cent payout) together with every exact member that exists after it.
+    // That is the invariant the earlier all-or-nothing rule protected; the priors chain keeps it. An old-format return that
+    // cannot convert stays old-format (it keeps the sale closed to new returns) but no longer blocks its siblings, and it
+    // can be cancelled: returnBulkAction.ts judges a cancel by the exact members it leaves.
+    const priors = quoteRows.previousRows.filter(row => Number(row.money_precision_version) === 1)
+    const accepted: Array<{ id: number; after: MemberState }> = []
+    for (const legacy of [...legacies.filter(row => !isCancelled(row)), ...legacies.filter(isCancelled)]) {
+      const cancelled = isCancelled(legacy)
+      const saleItemIds = [...new Set(legacy.items.map(item => Number(item.sale_item_id)).filter(id => Number.isSafeInteger(id) && id > 0))]
+      if (cancelled && await amendedAfter(db, legacy, saleItemIds)) {
+        rows.push(previewRow(legacy, 'refused', 'return_convert_sale_amended', null, null)); continue
       }
-      continue
-    }
-    for (const { legacy, after } of converted) {
-      rows.push(previewRow(legacy, 'convert', null, null, after))
-      members.push({ id: legacy.id, return_number: legacy.return_number == null ? null : String(legacy.return_number), sale_id: saleId, before: beforeState(legacy), after })
-    }
-    for (const legacy of cancelled) {
       const result = await compareWithQuote(db, saleId, legacy, quoteRows, priors)
       if (!result.ok) { rows.push(previewRow(legacy, 'refused', result.code, result.params, null)); continue }
+      const beforeTotals = accepted.length ? reportTotals(withConverted(report, accepted)) : reportBefore
+      const afterTotals = reportTotals(withConverted(report, [...accepted, { id: legacy.id, after: result.after }]))
+      if (!sameReport(beforeTotals, afterTotals)) {
+        rows.push(previewRow(legacy, 'refused', 'return_convert_report_changed', {
+          before: beforeTotals?.revenue_usd ?? null, after: afterTotals?.revenue_usd ?? null }, null))
+        continue
+      }
+      accepted.push({ id: legacy.id, after: result.after })
+      // Only an active return joins the priors: a cancelled one is outside the cohort until it is restored.
+      if (!cancelled) priors.push(...result.priorRows)
       rows.push(previewRow(legacy, 'convert', null, null, result.after))
       members.push({ id: legacy.id, return_number: legacy.return_number == null ? null : String(legacy.return_number), sale_id: saleId, before: beforeState(legacy), after: result.after })
     }
@@ -334,8 +404,9 @@ function receipt(stored: Stored, row: SnapshotRow, replayed: boolean) {
     status: row.status === 'reversed' ? 'reversed' as const : 'applied' as const, converted: stored.members.map(member => member.id) }
 }
 
-export async function applyLegacyReturnConversion(db: D1Compat, userInput: SessionUser | null | undefined, body: Record<string, unknown>) {
+export async function applyLegacyReturnConversion(env: Env, userInput: SessionUser | null | undefined, body: Record<string, unknown>) {
   const user = authorize(userInput)
+  const db = getDb(env)
   const requestId = String(body.client_request_id ?? '').trim().slice(0, 120)
   if (!requestId) fail('Preview the conversion again before confirming it.', 400, 'client_request_id_required')
   const operationId = `${user.id}:${requestId}`
@@ -344,7 +415,7 @@ export async function applyLegacyReturnConversion(db: D1Compat, userInput: Sessi
     if (Number(existing.created_by_id) !== Number(user.id)) fail('Conversion not found.', 404, 'return_convert_not_found')
     return { ...receipt(readStored(existing), existing, true), rows: [] as ConvertPreviewRow[] }
   }
-  const plan = await planLegacyReturnConversion(db, body.return_ids)
+  const plan = await planLegacyReturnConversion(env, body.return_ids)
   if (typeof body.expected_digest !== 'string' || body.expected_digest !== plan.digest) {
     fail('These returns changed since the preview. Nothing was converted. Open the preview again.', 409, 'return_convert_preview_stale')
   }

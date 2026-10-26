@@ -3,7 +3,8 @@
 //                             by the Edit Return lock panel, the list row and the bulk bar, so all three say the same.
 //   ReturnLegacyLockPanel  -- replaces the Edit Return form for a locked return: the reason, then Convert (admin) or
 //                             "an admin can review and convert it" (everyone else).
-//   ReturnLegacyLockTag    -- the list row's lock icon; for an admin it is the Convert button itself.
+//   ReturnLegacyLockTag    -- the list row's lock icon with the reason; for an admin, the Convert button (same RefreshCcw
+//                             icon as the panel and the bulk bar).
 import { useCallback, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
@@ -15,6 +16,7 @@ import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { apiFetch, confirmServerReachable } from '../../api/http.ts'
 import {
   legacyConvertAccess,
+  legacyConvertFailureText,
   legacyConvertReasonText,
   type LegacyConvertPreview,
   type LegacyConvertResult,
@@ -88,12 +90,17 @@ export function useLegacyReturnConvert({ notify, onConverted }: { notify: Notify
       }
       const confirmed = await askToConfirm({
         title: T('return_convert_title', 'Convert to current format'),
-        message: T('return_convert_message', 'Refunds, riel, debt and stock stay the same. Undo is in History.'),
+        message: T('return_convert_message', 'Refunds, cash, debt, stock and report totals stay the same. Undo is in History.'),
         items: [
           ...convertible.map((row) => ({ label: row.return_number || `#${row.id}`, value: describe(row) })),
           ...refused.map((row) => ({ label: row.return_number || `#${row.id}`, value: legacyConvertReasonText(row.code, row.params, T, { usd, khr }) })),
         ],
-        note: refused.length ? T('return_convert_partial_note', 'Returns with a reason stay as they are.') : undefined,
+        // The riel figure of a dollar refund may be restated at the sale's rate (a current-format return must carry it); say so when it moves.
+        note: [
+          convertible.some((row) => row.after && row.after.total_refund_khr !== row.before.total_refund_khr)
+            ? T('return_convert_riel_note', 'The riel figure of a dollar refund is restated at the sale rate, as shown. No riel cash changes.') : '',
+          refused.length ? T('return_convert_partial_note', "Returns that can't be converted stay as they are.") : '',
+        ].filter(Boolean).join(' ') || undefined,
         confirmLabel: T('return_convert_action', 'Convert'),
       })
       if (!confirmed) return null
@@ -104,11 +111,7 @@ export function useLegacyReturnConvert({ notify, onConverted }: { notify: Notify
       return null
     } catch (error) {
       const code = String((error as { code?: unknown })?.code || '')
-      notify(code === 'return_convert_forbidden'
-        ? T('return_convert_admin_only', 'An admin can review and convert it.')
-        : code === 'return_convert_preview_stale' || code === 'return_convert_changed'
-          ? T('return_convert_stale', 'These returns changed. Nothing was converted. Try again.')
-          : String((error as { message?: unknown })?.message || error), 'error')
+      notify(legacyConvertFailureText(code, T), 'error')
       return null
     } finally {
       busyRef.current = false
@@ -169,7 +172,7 @@ export function ReturnLegacyLockTag({ ret, onConvert }: { ret: LegacyLockReturn;
       <button type="button" data-return-legacy-lock="convert" aria-label={label} title={label}
         className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
         onClick={(event: MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); onConvert(Number(ret.id)) }}>
-        <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+        <RefreshCcw className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     )
   }

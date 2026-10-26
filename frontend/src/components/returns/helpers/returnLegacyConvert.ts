@@ -66,8 +66,10 @@ export function legacyConvertReasonText(code: string | null, rawParams: Record<s
       return fill(T('return_convert_line_changed', 'A line refund ({before}) differs from what the sale allows ({after}), so converting would change money. To correct it, cancel this return and record it again.'), params)
     case 'return_convert_riel_changed':
       return fill(T('return_convert_riel_changed', 'The riel refund ({before}) would change. Cancel this return and record it again to correct it.'), params)
-    case 'return_convert_sale_blocked':
-      return fill(T('return_convert_sale_blocked', 'Another return on this sale ({return_number}) cannot be converted, so none on this sale is converted.'), params)
+    case 'return_convert_report_changed':
+      return fill(T('return_convert_report_changed', 'Converting would change this sale in the sales report (revenue {before} to {after}). To correct it, cancel this return and record it again.'), params)
+    case 'return_convert_sale_amended':
+      return T('return_convert_sale_amended', 'The sale was changed after this return was recorded, so it cannot be converted. Record a new return instead.')
     case 'return_convert_line_unlinked':
     case 'return_convert_line_split':
     case 'return_convert_no_lines':
@@ -78,5 +80,19 @@ export function legacyConvertReasonText(code: string | null, rawParams: Record<s
       return T('return_convert_supplier', 'Supplier returns are not converted.')
     default:
       return T('return_convert_quote_refused', 'This sale cannot price this return today, so it cannot be converted. Cancel this return and record it again.')
+  }
+}
+
+/** The operator's-language text for a failed preview or convert request: every Worker code has a pack sentence, so a
+ * Khmer session never shows the Worker's English. */
+export function legacyConvertFailureText(code: string, T: Translate): string {
+  switch (code) {
+    case 'return_convert_forbidden': return T('return_convert_admin_only', 'An admin can review and convert it.')
+    case 'return_convert_preview_stale':
+    case 'return_convert_changed': return T('return_convert_stale', 'These returns changed. Nothing was converted. Try again.')
+    case 'return_convert_not_found': return T('return_convert_not_found', 'This return no longer exists. Refresh the list.')
+    case 'maintenance_active': return T('return_convert_paused', 'Saving is paused for maintenance. Nothing was converted.')
+    case 'return_convert_uncertain': return T('return_convert_uncertain', 'The result is not confirmed. Check the return before trying again.')
+    default: return T('return_convert_failed', 'Nothing was converted. Try again.')
   }
 }
