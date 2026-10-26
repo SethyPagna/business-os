@@ -515,7 +515,7 @@ app.use('/api/*', async (c, next) => {
 // overview whose queue send was unavailable is sent by the next API read
 // after it falls due. Background work shares the invocation's D1 allowance,
 // so writes keep their budget for committing stock and recording receipts.
-// The 6-hourly cron is the backstop for a quiet shop.
+// The every-5-minutes cron (CRON_TELEGRAM) is the backstop for a quiet shop.
 const SHIFT_OVERVIEW_DRAIN_INTERVAL_MS = 20_000
 let lastShiftOverviewDrainMs = 0
 app.use('/api/*', async (c, next) => {
@@ -621,6 +621,15 @@ export { SyncUploadSession } from './durable-objects/syncUploadSession'
 export { BroadcastHub } from './durable-objects/broadcastHub'
 
 /**
+ * These four steps have no interval gate of their own (they used to ride the
+ * 6-hourly tick, about 4 runs a day). The rotation now comes round every ~3.25 h,
+ * so each is held to the old cadence or slower by the rotation's own record
+ * of its last OK run (no extra D1 read). 5 h, not 6 h, so jitter between
+ * visits cannot make it skip every second round.
+ */
+const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
+
+/**
  * The rotation, in order. Order matters only where noted: stalled imports are
  * reaped before the import retention that prunes them. Each entry is one
  * bounded job; the heavy ones keep their own interval gates and answer
@@ -628,7 +637,7 @@ export { BroadcastHub } from './durable-objects/broadcastHub'
  * (GET /api/runtime/cron-health) -- renaming one restarts its history.
  */
 export function cronRotationSteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
-  const step = (id: string, run: () => Promise<unknown>): RotationStep => ({ id, run: label(id, run) })
+  const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
     step('backup', () => maybeRunScheduledBackup(env)),
     step('drive-sync', async () => {
@@ -645,13 +654,13 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
       return enqueueDriveSyncJob(env, 'scheduled')
     }),
     step('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env)),
-    step('reap-stalled-imports', () => reapStalledImportJobs(env)),
+    step('reap-stalled-imports', () => reapStalledImportJobs(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('import-retention', () => maybeRunScheduledImportRetention(env)),
-    step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env)),
-    step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true })),
+    step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env), UNGATED_STEP_MIN_INTERVAL_MS),
+    step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }), UNGATED_STEP_MIN_INTERVAL_MS),
     ...EPHEMERAL_RETENTION_GROUPS.map((group) => step(`ephemeral-retention:${group}`, () => maybeRunScheduledEphemeralRetention(env, group))),
     // Last on purpose: it is the only one of these optional to the business.
-    step('image-audit', () => maybeRunScheduledImageAudit(env)),
+    step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }
 

@@ -158,6 +158,8 @@ function loadRuntimeRoute(products) {
     '../lib/permissions': load('lib/permissions.ts'),
     '../lib/catalogText': load('lib/catalogText.ts'),
     '../lib/buildStamp': { getBuildStamp: () => ({ revision: 'test', sourceHash: 'test', builtAt: '2026-09-14T00:00:00Z' }) },
+    '../lib/cronRotation': load('lib/cronRotation.ts'),
+    '../lib/cronStepIds': load('lib/cronStepIds.ts'),
     '../index': {},
   })
   const app = new Hono()

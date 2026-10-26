@@ -490,7 +490,7 @@ export function isTrustedDriveUploadSession(value: string): boolean {
   }
 }
 
-// Called from index.ts's `scheduled()` cron handler (runs every 6h, same
+// Called from index.ts's `scheduled()` cron handler (the rotating cron, same
 // trigger as maybeRunScheduledBackup in lib/backup.ts). The legacy Docker
 // backend ran a real setInterval loop checking every 30s whether
 // `syncIntervalSeconds` had elapsed since the last Drive sync; Workers have
@@ -498,7 +498,7 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 // coarser than the old 30s poll, but the Settings UI already only offers
 // interval choices of 1h+ (`updateDrivePreferences` clamps to
 // 3600-86400s), and the underlying Cloudflare backup this pushes to Drive
-// is itself only refreshed on the same 6h cron -- so nothing is lost by
+// is itself only refreshed on the same rotating cron -- so nothing is lost by
 // checking due-ness at cron granularity instead of continuously.
 //
 // `driveSyncScheduleDue` is intentionally separate from executing the upload:

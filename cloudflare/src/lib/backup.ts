@@ -1103,7 +1103,7 @@ export async function maybeRunScheduledBackup(env: Env) {
   // It used to run only after a new backup was successfully created, which
   // meant it did not run at all in the two cases that matter most:
   //
-  //   1. The skip path below returned early, so a 6-hourly cron that found a
+  //   1. The skip path below returned early, so a cron visit that found a
   //      5-hour-old backup pruned nothing.
   //   2. createCloudflareBackup threw -- and it threw for a long time with
   //      "Exceeded Memory Limit" on a large database. Every one of those

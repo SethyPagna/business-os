@@ -11,7 +11,7 @@ export const DEFAULT_AUDIT_LOG_RETENTION_DAYS = 21
 const AUDIT_LOG_RETENTION_SETTING_KEY = 'audit_log_retention_days'
 const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // Deleting is a full-table scan on created_at, so the scheduled worker
-// (which ticks every 6h per wrangler.toml's cron trigger) only actually
+// (the rotating cron, one step per 15-minute tick) only actually
 // performs a delete pass once per day -- frequent enough that the log table
 // never grows much past the configured retention window, infrequent enough
 // to not do needless work on every tick.
@@ -465,7 +465,7 @@ export async function getAuditLogRetentionDays(env: Env): Promise<number> {
 
 // Runs on the scheduled worker tick. Deletes audit_logs rows older than the
 // configured retention window (default 21 days, see DEFAULT_AUDIT_LOG_RETENTION_DAYS),
-// throttled to at most once per day so a 6h cron tick doesn't re-scan the
+// throttled to at most once per day so the rotating cron's visits (every ~3 h) don't re-scan the
 // table for nothing.
 export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number; more?: boolean }> {
   const lastRunRaw = await getSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY)

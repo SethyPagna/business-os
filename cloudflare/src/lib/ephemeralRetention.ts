@@ -30,8 +30,8 @@ import { deleteObjectsBulk } from './r2'
 import type { Env } from '../index'
 
 const LAST_RUN_KEY = 'ephemeral_retention_last_run'
-// 5h (not 6h) so ordinary jitter between 6h ticks can never make every second
-// tick skip -- same reasoning as importRetention's interval.
+// 5h so ordinary jitter between rotation visits (~3.25 h apart) can never make
+// every second visit skip -- same reasoning as importRetention's interval.
 const MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 
 // Retention windows (days). Deliberately conservative for anything a person

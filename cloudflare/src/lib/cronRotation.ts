@@ -53,16 +53,25 @@ export interface RotationState {
   resumeStreak: number
   steps: Record<string, StepState>
   updatedAt: string | null
+  /** Bumped by every successful save; the store only writes over the version it was loaded at. */
+  version: number
 }
 
 export interface RotationStore {
   load(): Promise<RotationState | null>
-  save(state: RotationState): Promise<void>
+  /**
+   * Compare-and-set: write only if the stored state is still at
+   * `expectedVersion` (null = no row yet). Resolves false when another tick
+   * got there first -- the caller must not treat its view as current.
+   */
+  save(state: RotationState, expectedVersion: number | null): Promise<boolean>
 }
 
 export interface RotationStep {
   id: string
   run(): Promise<unknown>
+  /** Skip the visit when this step last finished OK less than this long ago. */
+  minIntervalMs?: number
 }
 
 export interface TickResult {
@@ -70,12 +79,14 @@ export interface TickResult {
   ok: boolean
   more: boolean
   error?: string
+  /** Not run: gated by minIntervalMs, or another tick took this position. */
+  skipped?: 'recent' | 'lost-race'
 }
 
 const emptyStep = (): StepState => ({ startedAt: null, finishedAt: null, okAt: null, error: null, failures: 0, killed: 0, runs: 0 })
 
 export function emptyRotationState(): RotationState {
-  return { cursor: 0, resumeStreak: 0, steps: {}, updatedAt: null }
+  return { cursor: 0, resumeStreak: 0, steps: {}, updatedAt: null, version: 0 }
 }
 
 function sanitize(raw: unknown): RotationState {
@@ -85,6 +96,7 @@ function sanitize(raw: unknown): RotationState {
   base.cursor = Number.isInteger(src.cursor) && (src.cursor as number) >= 0 ? (src.cursor as number) : 0
   base.resumeStreak = Number.isInteger(src.resumeStreak) && (src.resumeStreak as number) >= 0 ? (src.resumeStreak as number) : 0
   base.updatedAt = typeof src.updatedAt === 'string' ? src.updatedAt : null
+  base.version = Number.isInteger(src.version) && (src.version as number) >= 0 ? (src.version as number) : 0
   if (src.steps && typeof src.steps === 'object') {
     for (const [id, value] of Object.entries(src.steps)) {
       const v = (value || {}) as Partial<StepState>
@@ -121,11 +133,38 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   let state: RotationState | null = null
   let persisted = true
   try { state = await store.load() } catch { persisted = false }
+  // null = there is no row yet (the first ever write inserts it).
+  let expected: number | null = state ? sanitize(state).version : null
   const current = state ? sanitize(state) : emptyRotationState()
   // No readable cursor: derive one from the clock so rotation still advances.
   const index = persisted ? current.cursor % steps.length : Math.floor(nowMs / CRON_ROTATION_TICK_MS) % steps.length
   const step = steps[index]
   const record = current.steps[step.id] ?? emptyStep()
+  // Write the state over the version we read. A false answer means another
+  // overlapping tick moved the cursor first: this one must neither rewind it
+  // nor run the step that tick already claimed (a scheduled paid backup must
+  // not run twice). A thrown save is only a missing health row, not a reason
+  // to skip the job.
+  const commit = async (): Promise<boolean> => {
+    if (!persisted) { try { await store.save(current, null) } catch { /* best effort */ } return true }
+    current.version = (expected ?? -1) + 1
+    try {
+      const won = await store.save(current, expected)
+      if (won) expected = current.version
+      return won
+    } catch { return true }
+  }
+  // Gated step, visited too soon: advance past it and do nothing else.
+  if (step.minIntervalMs && record.okAt && nowMs - Date.parse(record.okAt) < step.minIntervalMs) {
+    current.cursor = (index + 1) % steps.length
+    current.resumeStreak = 0
+    current.updatedAt = nowIso
+    record.startedAt = nowIso
+    record.finishedAt = nowIso
+    current.steps[step.id] = record
+    await commit()
+    return { stepId: step.id, ok: true, more: false, skipped: 'recent' }
+  }
   // Started on an earlier visit and never finished: the isolate was killed.
   if (record.startedAt && (!record.finishedAt || record.finishedAt < record.startedAt)) {
     record.killed += 1
@@ -137,7 +176,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   // Advance first; fixed up below if the step asks to be resumed.
   current.cursor = (index + 1) % steps.length
   current.updatedAt = nowIso
-  try { await store.save(current) } catch { /* health is best effort; the step still runs */ }
+  if (!(await commit())) return { stepId: step.id, ok: true, more: false, skipped: 'lost-race' }
 
   let ok = true
   let more = false
@@ -159,7 +198,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   } else {
     current.resumeStreak = 0
   }
-  try { await store.save(current) } catch { /* see above */ }
+  await commit() // losing here only drops this visit's health row; the cursor never rewinds
   return { stepId: step.id, ok, more, ...(error ? { error } : {}) }
 }
 

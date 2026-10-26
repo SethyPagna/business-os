@@ -1,5 +1,8 @@
 // Settings-table persistence for the rotating cron (lib/cronRotation.ts).
-// One row, written twice per tick (before the step, after it).
+// One row, written twice per tick (before the step, after it), always as a
+// compare-and-set on the state's version so two overlapping ticks (a tick that
+// outlives 15 minutes, or the old and new triggers firing together while a
+// deploy propagates) cannot rewind the cursor or both claim the same step.
 
 import { getDb } from './db'
 import { CRON_STATE_KEY, parseRotationState, type RotationState, type RotationStore } from './cronRotation'
@@ -7,17 +10,29 @@ import type { Env } from '../index'
 
 export async function loadRotationState(env: Env): Promise<RotationState | null> {
   const row = await getDb(env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: CRON_STATE_KEY })
-  return row?.value ? parseRotationState(row.value) : null
+  return row ? parseRotationState(row.value) : null
 }
 
 export function settingsRotationStore(env: Env): RotationStore {
   return {
     load: () => loadRotationState(env),
-    async save(state) {
-      await getDb(env).prepare(`
-        INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-      `).run({ key: CRON_STATE_KEY, value: JSON.stringify(state) })
+    async save(state, expectedVersion) {
+      const db = getDb(env)
+      const value = JSON.stringify(state)
+      if (expectedVersion === null) {
+        // First ever write: lose cleanly to a concurrent first writer.
+        const inserted = await db.prepare(`
+          INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO NOTHING
+        `).run({ key: CRON_STATE_KEY, value })
+        return (inserted.changes ?? 0) > 0
+      }
+      // A row with no version (or unparseable JSON) counts as version 0.
+      const updated = await db.prepare(`
+        UPDATE settings SET value = @value, updated_at = CURRENT_TIMESTAMP
+        WHERE key = @key AND COALESCE(CASE WHEN json_valid(value) THEN json_extract(value, '$.version') END, 0) = @expected
+      `).run({ key: CRON_STATE_KEY, value, expected: expectedVersion })
+      return (updated.changes ?? 0) > 0
     },
   }
 }

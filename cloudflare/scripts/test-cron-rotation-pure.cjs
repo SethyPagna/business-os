@@ -78,13 +78,20 @@ function makeInvocation() {
   return inv
 }
 // Store over a plain object; once the isolate is killed, nothing more persists.
+// Same contract as the settings store: write only over the version loaded.
+function casSave(box, state, expected) {
+  const stored = box.text ? rot.parseRotationState(box.text).version : null
+  if (stored !== expected) return false
+  box.text = JSON.stringify(state)
+  return true
+}
 function makeStore(box, inv) {
   return {
     async load() { return box.text ? rot.parseRotationState(box.text) : null },
-    async save(state) {
-      if (inv.dead) return // process is gone: later writes never happen
+    async save(state, expected) {
+      if (inv.dead) return true // process is gone: later writes never happen
       inv.spend(BOOKKEEPING / 2)
-      box.text = JSON.stringify(state)
+      return casSave(box, state, expected)
     },
   }
 }
@@ -120,6 +127,8 @@ async function oldDesign(invocations) {
   }
   return done
 }
+
+function stepsSrcOf(index) { return index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export default {')) }
 
 async function main() {
   // 1. all steps complete over N invocations, none starved
@@ -158,7 +167,7 @@ async function main() {
   const cursorBox = { text: null }
   let seen
   await rot.runRotationTick([{ id: 'a', run: async () => { seen = JSON.parse(cursorBox.text).cursor } }, { id: 'b', run: async () => {} }],
-    { load: async () => null, save: async (s) => { cursorBox.text = JSON.stringify(s) } }, 0)
+    { load: async () => null, save: async (s, e) => casSave(cursorBox, s, e) }, 0)
   assert.strictEqual(seen, 1, 'cursor already advanced while the step runs')
   const broken = await rot.runRotationTick([{ id: 'a', run: async () => ({ more: false }) }],
     { load: async () => { throw new Error('d1 down') }, save: async () => { throw new Error('d1 down') } }, 0)
@@ -166,7 +175,7 @@ async function main() {
   const ran = []
   for (let i = 0; i < 4; i += 1) {
     await rot.runRotationTick([{ id: 'a', run: async () => { ran.push('a') } }, { id: 'b', run: async () => { ran.push('b') } }],
-      { load: async () => { throw new Error('x') }, save: async () => {} }, i * rot.CRON_ROTATION_TICK_MS)
+      { load: async () => { throw new Error('x') }, save: async () => true }, i * rot.CRON_ROTATION_TICK_MS)
   }
   assert.ok(ran.includes('a') && ran.includes('b'), 'unreadable cursor still rotates by clock')
   ok()
@@ -174,7 +183,7 @@ async function main() {
   // 5. resume: a step with work left is re-run at most MAX_RESUME_STREAK times in a row, then rotation continues
   const order = []
   const rbox = { text: null }
-  const rstore = { load: async () => (rbox.text ? rot.parseRotationState(rbox.text) : null), save: async (s) => { rbox.text = JSON.stringify(s) } }
+  const rstore = { load: async () => (rbox.text ? rot.parseRotationState(rbox.text) : null), save: async (s, e) => casSave(rbox, s, e) }
   const rsteps = [{ id: 'big', run: async () => { order.push('big'); return { more: true } } }, { id: 'next', run: async () => { order.push('next') } }]
   for (let i = 0; i < 6; i += 1) await rot.runRotationTick(rsteps, rstore, i * 1000)
   assert.deepStrictEqual(order.slice(0, 4), ['big', 'big', 'big', 'next'], 'resumes twice, then moves on')
@@ -185,6 +194,44 @@ async function main() {
   assert.strictEqual(later.stale, true); assert.strictEqual(later.healthy, false)
   assert.ok(later.steps.every((r) => r.status === 'starved'))
   assert.strictEqual(rot.evaluateCronHealth(rot.emptyRotationState(), ids, t).healthy, false, 'no state at all is unhealthy')
+  ok()
+
+  // 6b. P3-4: overlapping ticks. Two ticks read the same state; only one may
+  // claim the step, and the loser must not rewind the cursor or run the job.
+  const obox = { text: null }
+  const ostore = { load: async () => (obox.text ? rot.parseRotationState(obox.text) : null), save: async (s, e) => casSave(obox, s, e) }
+  const ranOverlap = []
+  const osteps = ['a', 'b', 'c'].map((id) => ({ id, run: async () => { ranOverlap.push(id) } }))
+  await rot.runRotationTick(osteps, ostore, 0) // a; cursor -> 1
+  let release
+  const gate = new Promise((r) => { release = r })
+  const slowLoad = { load: async () => { const st = await ostore.load(); await gate; return st }, save: ostore.save }
+  const loser = rot.runRotationTick(osteps, slowLoad, 1000) // loaded cursor 1, then waits
+  const winner = await rot.runRotationTick(osteps, ostore, 1000) // takes b
+  release()
+  const lost = await loser
+  assert.strictEqual(winner.stepId, 'b'); assert.strictEqual(lost.skipped, 'lost-race')
+  assert.deepStrictEqual(ranOverlap, ['a', 'b'], 'the step both ticks wanted ran once')
+  assert.strictEqual(rot.parseRotationState(obox.text).cursor, 2, 'cursor was not rewound by the late tick')
+  ok()
+
+  // 6c. P3-2: a gated step is skipped inside its interval, runs after it, and rotation still advances
+  const gbox = { text: null }
+  const gstore = { load: async () => (gbox.text ? rot.parseRotationState(gbox.text) : null), save: async (s, e) => casSave(gbox, s, e) }
+  let gated = 0
+  const gsteps = [{ id: 'g', minIntervalMs: 5 * 3600 * 1000, run: async () => { gated += 1 } }, { id: 'n', run: async () => {} }]
+  const at = Date.parse('2026-10-26T00:00:00Z')
+  for (let i = 0; i < 8; i += 1) await rot.runRotationTick(gsteps, gstore, at + i * 15 * 60 * 1000) // 2 h of 15-minute ticks
+  assert.strictEqual(gated, 1, 'inside 5 h the gated step ran once')
+  const skipped = await rot.runRotationTick(gsteps, gstore, at + 16 * 15 * 60 * 1000)
+  assert.strictEqual(skipped.skipped, 'recent')
+  for (let i = 0; i < 4; i += 1) await rot.runRotationTick(gsteps, gstore, at + (21 + i) * 15 * 60 * 1000 + 5 * 3600 * 1000)
+  assert.ok(gated >= 2, 'after the interval it runs again')
+  const ungated = stepsSrcOf(read('src/index.ts'))
+  for (const id of ['reap-stalled-imports', 'import-incoming-sweep', 'orphan-staging-cleanup', 'image-audit']) {
+    const line = ungated.split('\n').find((l) => l.includes(`step('${id}'`))
+    assert.ok(line && line.includes('UNGATED_STEP_MIN_INTERVAL_MS'), id + ' keeps a min interval')
+  }
   ok()
 
   // 7. Telegram timing preserved: dedicated, frequent trigger; rotation excludes it
@@ -248,6 +295,53 @@ async function main() {
     assert.strictEqual(auth.skipped, false)
     assert.ok(!('rate_limit_events' in auth.deleted), 'a slice touches only its own tables')
   } finally { Date.now = real }
+  ok()
+
+  // 9b. P3-1: audit-log retention takes at most 3 batches of 5000 per visit,
+  // is NOT stamped while rows remain, and is stamped once it has drained.
+  const auditMod = load(path.join(SRC, 'lib/audit.ts'))
+  const insAudit = rawDb.prepare("INSERT INTO audit_logs (action, entity, created_at) VALUES ('zz_cron_test', 'zz_cron_test', '2020-01-01 00:00:00')")
+  rawDb.exec('BEGIN')
+  for (let i = 0; i < 16000; i += 1) insAudit.run([])
+  rawDb.exec('COMMIT')
+  const auditLeft = () => rawDb.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'zz_cron_test'").get().n
+  const auditStamp = () => rawDb.prepare("SELECT value FROM settings WHERE key = 'audit_log_retention_last_run'").get()
+  const a1 = await auditMod.maybeRunScheduledAuditLogRetention({})
+  assert.strictEqual(a1.more, true); assert.strictEqual(auditLeft(), 1000, 'one visit deletes at most 3 x 5000')
+  assert.ok(!auditStamp(), 'not stamped while rows remain')
+  const a2 = await auditMod.maybeRunScheduledAuditLogRetention({})
+  assert.ok(!a2.more); assert.strictEqual(auditLeft(), 0)
+  assert.ok(auditStamp(), 'stamped once drained')
+  ok()
+
+  // 9c. P3-1: in a scheduled slice the auth tables share the visit, one
+  // bounded statement each (only a single-table slice gets the full bound).
+  const farFuture = '2000-01-01 00:00:00'
+  const insSess = rawDb.prepare("INSERT INTO user_sessions (user_id, token_hash, expires_at, revoked_at) VALUES (1, ?, ?, ?)")
+  rawDb.exec('BEGIN')
+  for (let i = 0; i < 2500; i += 1) insSess.run([`h${i}`, farFuture, farFuture])
+  rawDb.exec('COMMIT')
+  const sessLeft = () => rawDb.prepare('SELECT COUNT(*) AS n FROM user_sessions').get().n
+  const sliceEnv = { ASSETS: { async delete() {} }, PLAN_TIER: 'free' }
+  rawDb.prepare("DELETE FROM settings WHERE key = 'ephemeral_retention_last_run:auth'").run([])
+  const authRun = await retention.maybeRunScheduledEphemeralRetention(sliceEnv, 'auth')
+  assert.strictEqual(sessLeft(), 1500, 'auth slice: ONE batch of 1000 for a table')
+  assert.strictEqual(authRun.more, true)
+  ok()
+
+  // 9d. P3-4: the settings store really is compare-and-set (real SQL).
+  const storeMod = load(path.join(SRC, 'lib/cronRotationStore.ts'))
+  const real9 = storeMod.settingsRotationStore({})
+  const st = (version, cursor) => ({ ...rot.emptyRotationState(), version, cursor })
+  rawDb.prepare("DELETE FROM settings WHERE key = 'cron_rotation_state'").run([])
+  assert.strictEqual(await real9.save(st(0, 1), null), true, 'first write inserts')
+  assert.strictEqual(await real9.save(st(0, 2), null), false, 'a second first-writer loses')
+  assert.strictEqual(await real9.save(st(1, 2), 0), true, 'matching version wins')
+  assert.strictEqual(await real9.save(st(1, 0), 0), false, 'a stale version cannot rewind')
+  assert.strictEqual((await real9.load()).cursor, 2)
+  rawDb.prepare("UPDATE settings SET value = '' WHERE key = 'cron_rotation_state'").run([])
+  assert.strictEqual((await real9.load()).version, 0, 'a blank row reads as version 0, not as no row')
+  assert.strictEqual(await real9.save(st(1, 5), 0), true, 'and can be written over')
   ok()
 
   console.log(`ALL ${passed} CHECK GROUPS PASSED`)

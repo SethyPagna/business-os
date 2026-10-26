@@ -217,7 +217,7 @@ check('the audit cannot break the backup chain', async () => {
   const scheduled = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export default {'))
   const backupAt = scheduled.indexOf("step('backup', () => maybeRunScheduledBackup(env))")
   const retentionAt = scheduled.indexOf("step('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))")
-  const auditAt = scheduled.indexOf("step('image-audit', () => maybeRunScheduledImageAudit(env))")
+  const auditAt = scheduled.indexOf("step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS)")
   assert.ok(backupAt >= 0, 'the backup must be in the scheduled rotation')
   assert.ok(retentionAt > backupAt, 'audit-log retention must run after the backup')
   assert.ok(auditAt > retentionAt, 'the image audit must run last')
