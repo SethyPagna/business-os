@@ -45,7 +45,7 @@ CREATE TABLE product_conflict_marks (
   marked_by_name TEXT,
   marked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (product_id, mark)
-) WITHOUT ROWID;
+);
 
 CREATE INDEX idx_products_unknown_cost ON products(is_active, id) WHERE cost_price_usd IS NULL AND is_active = 1;
 

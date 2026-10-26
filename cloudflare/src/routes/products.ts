@@ -6293,7 +6293,7 @@ app.post('/data-gaps/marks', async (c) => {
     const result = await setProductConflictMark(getDb(c.env), { id: actorId(user), name: actorSnapshot(user) }, input)
     if (result.changed) {
       await bumpVersion(c.env, 'products') // awaited: the Conflicts list re-reads right after this response
-      await broadcast(c.env, 'products', { action: 'update', id: input.product_id })
+      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: input.product_id }))
     }
     return c.json({ success: true, ...result })
   } catch (error) {

@@ -9,8 +9,6 @@ import type { ProductDataGapKind, ProductDataGapRow } from '../../api/productWri
 
 type TranslateFn = (key: string) => string | undefined
 
-const fill = (template: string, values: Record<string, unknown>): string => template.replace(/\{(\w+)\}/g, (_m, key) => String(values[key] ?? ''))
-
 export function ProductDataGapRowCard({ row, kind, t, onOpen, onConfirmZero, onMarkNoBarcode }: {
   row: ProductDataGapRow
   kind: ProductDataGapKind
@@ -27,8 +25,8 @@ export function ProductDataGapRowCard({ row, kind, t, onOpen, onConfirmZero, onM
     for (const reason of row.reasons || []) {
       if (reason === 'catalog_unknown') reasons.push(t('conflict_unknown_cost_catalog') || 'Product cost unknown')
       else if (reason === 'zero_unconfirmed') reasons.push(t('cost_zero_unconfirmed') || '$0 not confirmed')
-      else if (reason === 'lots_unknown') reasons.push(fill(t('conflict_unknown_cost_lots') || '{count} received date(s), {units} pcs with unknown cost', { count: row.unknown_lot_count, units: row.unknown_units }))
-      else if (reason === 'held_unknown') reasons.push(fill(t('conflict_unknown_cost_held') || '{units} pcs held as damaged with unknown cost', { units: row.held_unknown_units }))
+      else if (reason === 'lots_unknown') reasons.push((t('conflict_unknown_cost_lots') || '{count} received date(s), {units} pcs with unknown cost').replace('{count}', String(row.unknown_lot_count ?? 0)).replace('{units}', String(row.unknown_units ?? 0)))
+      else if (reason === 'held_unknown') reasons.push((t('conflict_unknown_cost_held') || '{units} pcs held as damaged with unknown cost').replace('{units}', String(row.held_unknown_units ?? 0)))
     }
   } else {
     reasons.push(kind === 'placeholder_barcode' ? t('conflict_type_placeholder_barcode') || 'Barcode 0' : t('conflict_type_empty_barcode') || 'No barcode')

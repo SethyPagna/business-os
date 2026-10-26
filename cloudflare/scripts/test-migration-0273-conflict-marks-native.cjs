@@ -63,6 +63,16 @@ check('applying it stores the highest product id as the watermark and leaves eve
   db.close()
 })
 
+check('the marks table is an ordinary rowid table: backup, export, restore and reset all read rowid (a WITHOUT ROWID table broke them)', () => {
+  assert.equal(/WITHOUT\s+ROWID/i.test(sql.replace(/--[^\n]*/g, '')), false)
+  const db = seeded()
+  db.exec(sql)
+  db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'no_barcode')").run()
+  assert.equal(db.prepare('SELECT rowid AS r FROM product_conflict_marks').get().r, 1)
+  assert.throws(() => db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'no_barcode')").run(), /UNIQUE|PRIMARY/, 'the natural key stays unique')
+  db.close()
+})
+
 check('an empty catalog stores the watermark 0', () => {
   const db = new Database(schema)
   db.exec(sql)

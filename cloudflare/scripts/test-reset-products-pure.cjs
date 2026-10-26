@@ -700,7 +700,8 @@ async function main() {
     const ownerEnv = { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' }
     const durableFlagsBefore = rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all()
     assert.deepStrictEqual(durableFlagsBefore.map(flag => flag.key), [
-      'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+      // cost_zero_watermark (0273, Conflicts): a durable boundary like the others; a reset must not move it.
+      'cost_zero_watermark', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
     ])
     assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
 
@@ -743,7 +744,7 @@ async function main() {
       'sale_not_paid_stock_recovery_reset_guard','stock_transaction_permit'
     )`).n, 0, 'short-lived reset authority and stock permit cannot survive the atomic batch')
     assert.deepStrictEqual(rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all(), durableFlagsBefore,
-      'all four durable boundaries, including the exact stock epoch, survive factory reset unchanged')
+      'all five durable boundaries, including the exact stock epoch, survive factory reset unchanged')
   })
 
   await check('mode=products clears current scoped Set operations and supports the optional-table-absent schema', async () => {
