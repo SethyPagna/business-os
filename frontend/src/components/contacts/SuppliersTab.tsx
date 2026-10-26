@@ -495,6 +495,11 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   // is narrowed server-side to the name column only -- see
   // utils/permissionActions.ts, where edit is 'limited' rather than
   // 'block'.
+  // Add and Edit imply View (owner, 30 Sep 2026), so a role with either one
+  // still reaches this tab; the Worker refuses POST/PUT without the matching
+  // action, so the controls are withheld rather than rendered and 403'd.
+  const canAddContact = can('contacts', 'add')
+  const canEditContact = can('contacts', 'edit')
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
   const canBulkContacts = can('contacts', 'bulk')
@@ -1224,6 +1229,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           ] as PortalMenuItem[])}
         />
         ) : null}
+        {canAddContact ? (
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1233,6 +1239,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           <Plus className="h-4 w-4 shrink-0" />
           <span className="truncate">{tr('add_supplier', 'Add Supplier', 'បន្ថែមអ្នកផ្គត់ផ្គង់')}</span>
         </button>
+        ) : null}
       </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
@@ -1401,7 +1408,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}>{fmtDateTime24(supplier.created_at)}</td>
             <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
+              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={canEditContact ? () => { setSelected(supplier); setModal('form') } : undefined} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
             </td>
           </tr>
           )
@@ -1510,7 +1517,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       </>
       )}
 
-      {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
+      {modal === 'form' && (selected ? canEditContact : canAddContact) ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
       {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
@@ -1541,7 +1548,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               [t('col_added') || t('added_on') || 'Added', fmtDateTime24(selected.created_at)],
             ]
           })()}
-          onEdit={() => setModal('form')}
+          onEdit={canEditContact ? () => setModal('form') : undefined}
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}

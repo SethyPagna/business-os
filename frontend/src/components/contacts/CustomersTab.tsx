@@ -317,6 +317,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // is narrowed server-side to the name column only -- see
   // utils/permissionActions.ts, where edit is 'limited' rather than
   // 'block'.
+  // Add and Edit imply View (owner, 30 Sep 2026), so a role with either one
+  // still reaches this tab; the Worker refuses POST/PUT without the matching
+  // action, so the controls are withheld rather than rendered and 403'd.
+  const canAddContact = can('contacts', 'add')
+  const canEditContact = can('contacts', 'edit')
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
   const canBulkContacts = can('contacts', 'bulk')
@@ -1126,6 +1131,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           ] as PortalMenuItem[])}
         />
         ) : null}
+        {canAddContact ? (
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1135,6 +1141,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           <Plus className="h-4 w-4 shrink-0" />
           <span className="truncate">{tr(t, 'add_customer', 'Add Customer')}</span>
         </button>
+        ) : null}
       </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
@@ -1329,7 +1336,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 )}
               </td>
               <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
-                <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={() => { setSelected(customerRow); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(customerRow) : undefined} />
+                <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={canEditContact ? () => { setSelected(customerRow); setModal('form') } : undefined} onDelete={canDeleteContact ? () => handleDelete(customerRow) : undefined} />
               </td>
             </tr>
           )
@@ -1437,7 +1444,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       </>
       )}
 
-      {modal === 'form' ? (
+      {modal === 'form' && (selected ? canEditContact : canAddContact) ? (
         <Suspense fallback={null}>
           <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} savingBlockedText={savingGate.reason} t={t} />
         </Suspense>
@@ -1487,7 +1494,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             [tr(t, 'notes', 'Notes'), selected.notes],
             [tr(t, 'col_added', 'Added'), fmtDateTime24(selected.created_at)],
           ]}
-          onEdit={() => setModal('form')}
+          onEdit={canEditContact ? () => setModal('form') : undefined}
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
