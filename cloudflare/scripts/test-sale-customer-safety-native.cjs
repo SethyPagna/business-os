@@ -20,6 +20,8 @@ async function main() {
   const required = new Set(['sales','returns','sale_items','return_items','customers','users','roles','branches','settings','promotion_rules','inventory_movements','sale_write_revisions','sale_bulk_guards','sale_bulk_operations','sale_bulk_members','sale_record_events','undo_snapshots','action_history','audit_logs','system_flags','customer_receivables','loyalty_point_adjustments','customer_share_submissions'])
   required.add('return_write_revisions')
   required.add('sale_mutation_guards')
+  // 0271: checkout writes its payment event, and the sale revision counts every event (its triggers are copied below).
+  required.add('sale_payment_events')
   for(const name of ['products','product_batches','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots']) required.add(name)
   for (const name of required) for (const fk of f.sql.prepare(`PRAGMA foreign_key_list(${name})`).all()) required.add(fk.table)
   const objects = f.sql.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all().filter(o => required.has(o.tbl_name) && o.name !== 'sqlite_sequence')
@@ -33,7 +35,7 @@ async function main() {
       inserts.push(db.prepare(`INSERT INTO ${name}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`).bind(...Object.values(row)))
     }
     await db.batch([db.prepare('PRAGMA defer_foreign_keys=ON'),...inserts])
-    await db.batch(objects.filter(o=>o.type==='index'||(o.type==='trigger'&&['sales','returns','sale_items','return_items','sale_record_events','undo_snapshots','sale_bulk_operations','sale_bulk_members'].includes(o.tbl_name))).map(o=>db.prepare(o.sql)))
+    await db.batch(objects.filter(o=>o.type==='index'||(o.type==='trigger'&&['sales','returns','sale_items','return_items','sale_record_events','undo_snapshots','sale_bulk_operations','sale_bulk_members','sale_payment_events'].includes(o.tbl_name))).map(o=>db.prepare(o.sql)))
     const birthGuardSql=f.sql.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='loyalty_sale_birth_immutable'").get().sql
     // Synthetic accounting cases need distinct birth states; every request keeps the full guard.
     const fixtureSql=async sql=>{
