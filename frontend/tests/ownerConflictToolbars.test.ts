@@ -46,7 +46,9 @@ let activePage=value.page,actor=1;export function setFixtureIdentity(page,id){ac
 const subscribe=fn=>{window.addEventListener('fixture-app',fn);return()=>window.removeEventListener('fixture-app',fn)};
 export const useApp=()=>{React.useSyncExternalStore(subscribe,()=>activePage+':'+actor);return{...value,page:activePage,user:{...value.user,id:actor}}};export const useSync=()=>({});export const AppContext=React.createContext(value);export const FALLBACK_APP_CONTEXT=value;export const isBrokenLocalizedString=()=>false;` 
 const productRead = `export * from ${JSON.stringify(path.join(root, 'src/api/productWriteTransport.ts'))};
-export async function getPossiblySameProducts(){window.calls.push({kind:'products'});return{clusters:[{type:'barcode',value:'00123',severity:'leading_zero',products:[{id:1,name:'Synthetic rice',barcode:'00123',stock_quantity:1},{id:2,name:'Synthetic rice',barcode:'123',stock_quantity:1}]}]}};`
+export async function getPossiblySameProducts(){window.calls.push({kind:'products'});return{clusters:[{type:'barcode',value:'00123',severity:'leading_zero',products:[{id:1,name:'Synthetic rice',barcode:'00123',stock_quantity:1},{id:2,name:'Synthetic rice',barcode:'123',stock_quantity:1}]}]}};
+export async function getProductDataGaps(){return{items:[],has_more:false,next_after:null}};
+export async function getProductDataGapCounts(){return{unknown_cost:0,empty_barcode:0,placeholder_barcode:0}};`
 const contactRead = `export * from ${JSON.stringify(path.join(root, 'src/components/contacts/contactDuplicates.ts'))};
 export async function getContactDuplicateClusters(table,opts){window.calls.push({kind:'contacts',table,...opts});return[]};
 export async function getSaleLinkConflicts(opts){window.calls.push({kind:'links',...opts});return{mismatches:[],missing:[]}};`
