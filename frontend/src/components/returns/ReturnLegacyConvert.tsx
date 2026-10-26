@@ -6,10 +6,9 @@
 //   ReturnLegacyLockTag    -- the list row's lock icon with the reason; for an admin, the Convert button (same RefreshCcw
 //                             icon as the panel and the bulk bar).
 import { useCallback, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
+import Modal from '../shared/Modal.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
@@ -129,17 +128,14 @@ export function ReturnLegacyLockPanel({ ret, onClose, fmtUSD, notify, onConverte
   const T = useTranslate()
   const access = legacyConvertAccess(ret, user as never)
   const [refusal, setRefusal] = useState<string | null>(null)
-  const { startConvert, busy, dialog } = useLegacyReturnConvert({ notify, onConverted: () => { onConverted?.(); onClose() } })
-  return createPortal(
-    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
-      <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} data-return-legacy-lock={access || ''}
-        className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}{ret.return_number ? ` · ${ret.return_number}` : ''}</h2>
-          <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-700"
-            onClick={onClose} aria-label={T('close', 'Close')} title={T('close', 'Close')}><X className="h-4 w-4" aria-hidden="true" /></button>
-        </div>
-        <p className="my-3 flex items-start gap-2 text-sm leading-relaxed" role="status">
+  const { startConvert, busy, dialog: confirmDialog } = useLegacyReturnConvert({ notify, onConverted: () => { onConverted?.(); onClose() } })
+  // The shared Modal (guarded close, keyboard contract). 'read-only': the panel holds no typed input -- only the reason
+  // and the Convert action, whose own confirm dialog renders inside it.
+  return (
+    <Modal title={`${T('edit_return', 'Edit Return')}${ret.return_number ? ` · ${ret.return_number}` : ''}`} onClose={onClose} size="sm" keyboard
+      closeDisabled={busy} unsavedChanges="read-only">
+      <div data-return-legacy-lock={access || ''}>
+        <p className="mb-3 flex items-start gap-2 text-sm leading-relaxed" role="status">
           <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
           <span>{T('return_legacy_lock_reason', 'This return was saved in an older money format than its sale, so it cannot be edited as it is.')}</span>
         </p>
@@ -154,8 +150,8 @@ export function ReturnLegacyLockPanel({ ret, onClose, fmtUSD, notify, onConverte
           <p className="text-sm text-gray-600 dark:text-gray-300">{T('return_convert_admin_only', 'An admin can review and convert it.')}</p>
         )}
       </div>
-      {dialog}
-    </div>, document.body,
+      {confirmDialog}
+    </Modal>
   )
 }
 
