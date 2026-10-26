@@ -18,7 +18,7 @@ const WORKER = `
   export default { async fetch(request, env, ctx) {
     const { method = 'GET', path, sql: probe, raw: rawSql } = await request.json(), log = [], raw = env.DB
     if (probe) { const r = await raw.prepare(probe).all(); return Response.json({ results: r.results, rows: r.meta?.rows_read }) }
-    const record = (sql, result) => { log.push({ rows: result.meta?.rows_read || 0, sql: sql.replace(/\\s+/g, ' ').slice(0, 8000) }); return result }
+    const record = (sql, result) => { log.push({ ms: result.meta?.duration || 0, rows: result.meta?.rows_read || 0, sql: sql.replace(/\\s+/g, ' ').slice(0, 8000) }); return result }
     const statement = sql => { const prepared = raw.prepare(sql); return { bind(...values) { const bound = prepared.bind(...values)
       return { inner: bound, sql, async all() { return record(sql, await bound.all()) }, async run() { return record(sql, await bound.run()) },
         async raw() { return (await bound.raw()) }, async first() { const result = record(sql, await bound.all()); return result.results[0] ?? null } } } } }

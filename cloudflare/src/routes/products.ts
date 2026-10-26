@@ -912,6 +912,8 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
   return items.filter(item => liveById.has(Number(item.id))).map(normalProductRow)
 }
 
+const SEEK_PAGE_MIN_RANKED_IDS = 300
+
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -960,6 +962,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
   const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
+  // The keyed page fetch pays for itself on catalogue-wide reads and on long ranked-id lists. A by-id read or a short
+  // ranked-id hydration (the till's per-keystroke lookup) is already tiny, and the extra CTEs cost it 4-8 ms of SQL
+  // time (lab medians: 8 ids 2 -> 7 ms, 60 ids 4 -> 9 ms, 300 ids 13 vs 16 ms, 1,500 ids 130 vs 120 ms), so it keeps
+  // the default statements below SEEK_PAGE_MIN_RANKED_IDS.
+  const rankedIdCount = parseRankedIds(query.rankIds, query.rankTiers)?.ids.length ?? 0
+  const seekPageRead = !Object.hasOwn(params, 'byId0') && (rankedIdCount === 0 || rankedIdCount >= SEEK_PAGE_MIN_RANKED_IDS)
   const promotedRankSql = options.imageOnly ? undefined : `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -1047,7 +1055,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // keeps the prior per-row-filtered behavior; nothing reported there.
     familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
     // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
-    seekPage: true,
+    seekPage: seekPageRead,
   })
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's

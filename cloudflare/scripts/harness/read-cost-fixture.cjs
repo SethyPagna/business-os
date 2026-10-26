@@ -34,6 +34,31 @@ function catalogFixture(P, customers) {
             (${1001 + P},' ','8850000009992','SKU-BLANK-2',2,3,12000,1,4000,1,'2026-09-01 00:00:00','2026-09-02 00:00:00')`,
     // children of a blank-name parent: their family key is 'id:<parent id>', the only key shape with no name_key
     `UPDATE products SET parent_id=${1000 + P}, updated_at='2026-09-01 00:00:00' WHERE id IN (1005,1006,1007)`,
+    // ~40 more blank-named rows with the SAME created_at: every family ties on name and date, so only the family key
+    // (the terminal ORDER BY key) decides order, and the ties straddle page boundaries at every page size used
+    `WITH RECURSIVE n(j) AS (SELECT 0 UNION ALL SELECT j+1 FROM n WHERE j<39)
+      INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,updated_at,created_at)
+      SELECT ${1010 + P}+j,'','885000100'||printf('%04d',j),'SKU-TIE-'||j,0,3,12000,1,4000,1,'2026-09-01 00:00:00','2026-09-03 00:00:00' FROM n`,
+    // 20 more ties whose ids change length (9990-9999, then 10001-10010): the family key is the STRING 'id:<id>', so key
+    // order ('id:10001' < 'id:9990') disagrees with id order, and only the terminal family_root_id key puts them right
+    `WITH RECURSIVE n(j) AS (SELECT 0 UNION ALL SELECT j+1 FROM n WHERE j<19)
+      INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,updated_at,created_at)
+      SELECT CASE WHEN j<10 THEN 9990+j ELSE 10001+j-10 END,'','885000200'||printf('%04d',j),'SKU-TIE-LONG-'||j,0,3,12000,1,4000,1,'2026-09-01 00:00:00','2026-09-03 00:00:00' FROM n`,
+    // Khmer names (one same-name family of two, one with a Latin word) and their search
+    `INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,brand,category,updated_at,created_at) VALUES
+      (${1100 + P},'ក្រែមលាបមុខ','8850002000001','SKU-KM-1',0,4,16000,1,4000,1,'ម៉ាក','ថែរក្សាស្បែក','2026-09-01 00:00:00','2026-09-04 00:00:00'),
+      (${1101 + P},'ក្រែមលាបមុខ','8850002000002','SKU-KM-2',0,5,20000,1,4000,1,'ម៉ាក','ថែរក្សាស្បែក','2026-09-01 00:00:00','2026-09-04 00:00:00'),
+      (${1102 + P},'ក្រែមកក់ Serum','8850002000003','SKU-KM-3',0,6,24000,1,4000,1,'ម៉ាក','ថែរក្សាស្បែក','2026-09-01 00:00:00','2026-09-04 00:00:00'),
+      (${1103 + P},'សាប៊ូ','8850002000004','SKU-KM-4',0,2,8000,1,4000,1,'ម៉ាក','ថែរក្សាស្បែក','2026-09-01 00:00:00','2026-09-04 00:00:00')`,
+    // inactive rows: a family member (1009 shares its name with 1008), a parent whose children stay active (1050 is the
+    // parent of 1061/1062), and loose inactive products. Stock is cleared first (stock never sits on an inactive product).
+    `DELETE FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (1009,1050))`,
+    `DELETE FROM branch_stock WHERE product_id IN (1009,1050)`,
+    `UPDATE products SET stock_quantity=0 WHERE id IN (1009,1050)`,
+    `UPDATE products SET is_active=0 WHERE id IN (1009,1050)`,
+    `INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,updated_at,created_at) VALUES
+      (${1200 + P},'Retired Serum','8850003000001','SKU-OFF-1',0,3,12000,1,4000,0,'2026-09-01 00:00:00','2026-09-05 00:00:00'),
+      (${1201 + P},'','8850003000002','SKU-OFF-2',0,3,12000,1,4000,0,'2026-09-01 00:00:00','2026-09-05 00:00:00')`,
     `INSERT INTO promotion_rules(id,title,rule_type,percent_off,scope_type,category,is_active,created_at,updated_at) VALUES(1,'Cat1 sale','percent_off',5,'category','Cat1',1,'2026-09-01 00:00:00','2026-09-01 00:00:00')`,
     "DELETE FROM system_flags WHERE key='stock_transaction_permit'",
   ]

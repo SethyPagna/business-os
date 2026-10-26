@@ -255,7 +255,6 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
   const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
   // `matched` and `families` exactly as the default statement builds them; family_members is replaced by page_rows.
   const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true })
-  // Parenthesised so the appended id restriction can never bind into one arm of an OR in the caller's clause.
   const rowsWhere = familyMemberBaseWhereSql
     ? familyMemberBaseWhereSql
     : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
@@ -340,7 +339,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
     }
     return {
       items: rows.map((row) => {
-        const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __family_total, __family_rank, ...rest } = row
+        const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __family_total, ...rest } = row
         return rest as unknown as T
       }),
       total,
