@@ -37,18 +37,18 @@ runTest('the Worker asks for the current password for a linked rename, before an
 runTest('the browser sends the password under the key the Worker reads, only for a linked rename', () => {
   assert.match(transport, /currentPassword\?: string/)
   assert.match(transport, /payload\.scope === 'linked' && !payload\.currentPassword\) throw/)
-  assert.match(settings, /const currentPassword = scope === 'linked' \? await askForPassword\(/)
-  assert.match(settings, /if \(scope === 'linked' && !currentPassword\) return/)
-  assert.match(settings, /\.\.\.\(currentPassword \? \{ currentPassword \} : \{\}\)/)
+  assert.match(settings, /await askForPassword\(request, async \(currentPassword\) => \{/)
+  assert.match(settings, /replacePaymentMethod\(\{ from, to, scope, expected_updated_at: expectedUpdatedAt, currentPassword \}\)/)
+  assert.match(settings, /const refusal = stepUpRefusalText\(attemptError, t\)\s*if \(refusal\) return refusal/)
 })
 
 runTest('the shared dialog hook offers a password field that gates Confirm and resolves null on every other outcome', () => {
   assert.match(hook, /askForPassword = useCallback/)
-  assert.match(hook, /confirmDisabled=\{pending\.resolvePassword \? !password : false\}/)
+  assert.match(hook, /confirmDisabled=\{pending\.attempt \? !password : false\}/)
   assert.match(hook, /type="password"/)
   assert.match(hook, /autoComplete="current-password"/)
-  assert.match(hook, /pending\?\.resolvePassword\?\.\(null\)/)
-  assert.match(hook, /resolvePassword\?\.\(confirmed && typed \? typed : null\)/)
+  assert.match(hook, /askForPassword = useCallback\(\(request: ConfirmRequest, attempt: PasswordAttempt\)/)
+  assert.match(hook, /<p role="alert"/)
 })
 
 runTest('the refusal codes the Worker answers with are translated in both packs', () => {
@@ -56,7 +56,7 @@ runTest('the refusal codes the Worker answers with are translated in both packs'
     assert.ok(en[code], `en has ${code}`)
     assert.ok(km[code], `km has ${code}`)
   }
-  assert.match(settings, /stepUpCodes = \['current_password_required', 'incorrect_password', 'current_password_rate_limited'\]/)
+  assert.match(settings, /STEP_UP_REFUSAL_CODES = \['current_password_required', 'incorrect_password', 'current_password_rate_limited'\]/)
 })
 
 if (failed) {

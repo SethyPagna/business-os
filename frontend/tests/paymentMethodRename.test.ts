@@ -23,7 +23,7 @@ assert.match(settingsSource, /const isCaseOnlyRename = to\.toLocaleLowerCase\(\)
 assert.match(settingsSource, /const scope: PaymentMethodRenameScope = isCaseOnlyRename \|\| linked > 0 \? 'linked' : 'settings_only'/)
 // FX-ui: the linked-rename question is the shared ConfirmDialog (before/after),
 // never window.confirm; declining still returns before replacePaymentMethod.
-assert.match(settingsSource, /const currentPassword = scope === 'linked' \? await askForPassword\(\{[\s\S]*?\}\) : ''\s*if \(scope === 'linked' && !currentPassword\) return[\s\S]*?await replacePaymentMethod\(\{[^}]*currentPassword/)
+assert.match(settingsSource, /if \(scope === 'linked'\) \{[\s\S]*?await askForPassword\(request, async \(currentPassword\) => \{[\s\S]*?await replacePaymentMethod\(\{[^}]*currentPassword/)
 assert.doesNotMatch(settingsSource, /window\.confirm\(/)
 
 // Configured choices keep one case-insensitive identity. A cashier cannot add
