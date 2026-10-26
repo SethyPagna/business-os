@@ -5036,6 +5036,7 @@
   "received_date_not_recorded": "Received date not recorded",
   "customer_state_conflict": "The selected customer changed before the sale was saved. Review the customer and try again.",
   "sale_settlement_failed": "Unable to record this payment. Review the sale and try again.",
+  "sale_refund_credit_row_required": "The exchange refund credit must stay unchanged. Change only the money the customer paid.",
   "sort_by_total": "Total",
   "sales_strip_expenses_whole_days": "Expenses · whole days",
   "sales_strip_expenses_time_hint": "Expenses cover the full selected dates; the time filter does not apply. Expenses stay separate from gross profit.",

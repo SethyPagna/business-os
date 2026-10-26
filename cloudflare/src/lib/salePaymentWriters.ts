@@ -27,6 +27,7 @@ import {
 } from './salePayments'
 import { paymentMethodKey } from './paymentMethodRegistry'
 import { tenderRowMarkers } from './paymentSettlement'
+import { financialCalculationUnits } from './financialPrecision'
 
 type Statement = { sql: string; params: Record<string, unknown> }
 
@@ -376,6 +377,50 @@ export function storedTenderRows(raw: unknown): StoredTenderRow[] | null {
     return rows
   } catch {
     return null
+  }
+}
+
+
+/**
+ * A payment correction on a sale that holds an exchange's refund credit (release review 6.0.982 P2, owner: a credit
+ * is not money the customer handed over). The credit rows are carried through unchanged; only the customer's tender
+ * is replaced. Returns the credit rows and the customer's tender as the sale's own columns minus the credit (the
+ * correction out mirrors exactly that, so the ledger nets to the new columns even when the other rows were mis-keyed).
+ * Null when the stored rows are unreadable while holding a credit, or the credit exceeds the recorded totals: the
+ * caller refuses rather than guess.
+ */
+export function splitRefundCredit<T extends Record<string, unknown> & { id: number }>(sale: T):
+  { creditRows: StoredTenderRow[]; creditUsd: number; creditKhr: number; customerSale: T } | null {
+  const rows = storedTenderRows(sale.payment_details)
+  if (rows === null) return typeof sale.payment_details === 'string' && sale.payment_details.includes('refund_credit') ? null : { creditRows: [], creditUsd: 0, creditKhr: 0, customerSale: sale }
+  const creditRows = rows.filter((row) => row.refund_credit === true)
+  if (!creditRows.length) return { creditRows: [], creditUsd: 0, creditKhr: 0, customerSale: sale }
+  const rest = rows.filter((row) => row.refund_credit !== true)
+  let creditUsd: bigint
+  let creditKhr: bigint
+  let usd: bigint
+  let khr: bigint
+  try {
+    creditUsd = creditRows.reduce((sum, row) => sum + financialCalculationUnits(row.amount_usd), 0n)
+    creditKhr = creditRows.reduce((sum, row) => sum + financialCalculationUnits(row.amount_khr), 0n)
+    usd = financialCalculationUnits(Number(sale.amount_paid_usd) || 0) - creditUsd
+    khr = financialCalculationUnits(Number(sale.amount_paid_khr) || 0) - creditKhr
+  } catch {
+    return null
+  }
+  if (usd < 0n || khr < 0n) return null
+  const methods: string[] = []
+  const seen = new Set<string>()
+  for (const row of rest) {
+    const key = paymentMethodKey(row.method)
+    if (!seen.has(key)) { seen.add(key); methods.push(row.method) }
+  }
+  const units = (value: bigint): number => Number(value) / 10_000
+  return {
+    creditRows,
+    creditUsd: units(creditUsd),
+    creditKhr: units(creditKhr),
+    customerSale: { ...sale, payment_details: JSON.stringify(rest), payment_method: methods.join(' + '), amount_paid_usd: units(usd), amount_paid_khr: units(khr) },
   }
 }
 

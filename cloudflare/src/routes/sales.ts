@@ -48,6 +48,7 @@ import {
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
+  settlementReceiptState,
   readSaleSettlementState,
   saleSettlementRecordEvent,
   saleMutationGuard,
@@ -72,6 +73,7 @@ import {
   storedTenderRows,
   type StoredTenderRow,
   type CorrectionAnchor,
+  splitRefundCredit,
 } from '../lib/salePaymentWriters'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
 import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
@@ -2099,11 +2101,6 @@ export function saleStatusReceiptCanonical(id: number, body: Record<string, unkn
  * extra revision bump of each payment event is counted, never assumed), the Sales Records event and the audit row.
  * The history row is first: the receipt takes its id from last_insert_rowid().
  */
-function auditMoneyState(state: SaleSettlementState): Omit<SaleSettlementState, 'search_normalized'> {
-  const { search_normalized: _personal, ...money } = state
-  return money
-}
-
 function saleSettlementCommitStatements(input: {
   user: SessionUser
   snapshot: SaleSettlementSnapshot
@@ -2148,7 +2145,7 @@ function saleSettlementCommitStatements(input: {
             )`,
       params: {
         operation: snapshot.operationId, actor: user.id, saleId: snapshot.saleId, request: input.requestId, digest: input.digest,
-        requestJson: input.requestJson, beforeJson: JSON.stringify(snapshot.before), afterJson: JSON.stringify(snapshot.after),
+        requestJson: input.requestJson, beforeJson: JSON.stringify(settlementReceiptState(snapshot.before)), afterJson: JSON.stringify(settlementReceiptState(snapshot.after)),
         responseJson: JSON.stringify(input.response), stamp: input.stamp,
       },
     }, recordEvent.statement, {
@@ -2162,8 +2159,8 @@ function saleSettlementCommitStatements(input: {
           operationId: snapshot.operationId,
           ...input.auditDetails,
           // Ids and money only: search_normalized folds the customer's name and phone into the row (release review P3).
-          before: auditMoneyState(snapshot.before),
-          after: auditMoneyState(snapshot.after),
+          before: settlementReceiptState(snapshot.before),
+          after: settlementReceiptState(snapshot.after),
           record_event: { source_kind: 'sale_settlement', source_id: snapshot.operationId, generation: 0, sale_id: snapshot.saleId },
         }),
       },
@@ -2672,15 +2669,23 @@ app.patch('/:id/status', async (c) => {
     if (reviewedRate !== latestRate) {
       return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
     }
+    // A correction replaces the customer's tender only: an exchange refund credit is carried through unchanged (release
+    // review 6.0.982 P2), so the planner sees exactly the credit rows as the recorded payment the request must repeat.
+    const creditSplit = paymentCorrection ? splitRefundCredit(sale as Record<string, unknown> & { id: number }) : null
+    if (paymentCorrection && !creditSplit) {
+      return c.json({ error: 'The sale has invalid stored payment details and cannot be corrected safely.', code: 'stored_payment_invalid' }, 400)
+    }
+    const keptCredit = creditSplit && creditSplit.creditRows.length ? creditSplit : null
+
     let settlementPlan
     try {
       settlementPlan = planSaleSettlement({
         moneyPrecisionVersion: recordedMoney ? 1 : 0,
         configuredMethodsRaw: settingMap.pos_payment_methods,
         paymentDetailsRaw: body.payment_details,
-        existingPaidUsd: paymentCorrection ? 0 : sale.amount_paid_usd,
-        existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
-        existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
+        existingPaidUsd: paymentCorrection ? (keptCredit ? keptCredit.creditUsd : 0) : sale.amount_paid_usd,
+        existingPaidKhr: paymentCorrection ? (keptCredit ? keptCredit.creditKhr : 0) : sale.amount_paid_khr,
+        existingPaymentDetailsRaw: paymentCorrection ? (keptCredit ? JSON.stringify(keptCredit.creditRows) : null) : sale.payment_details,
         existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
         totalUsd: Number(saleMoney.refund_usd) > 0 ? subtractMoney4(sale.total_usd as number | string, saleMoney.refund_usd as string) : sale.total_usd,
         exchangeRate: latestRate,
@@ -2719,7 +2724,8 @@ app.patch('/:id/status', async (c) => {
           : storedPaymentEvents(await db.prepare(`SELECT ${PAYMENT_EVENT_SELECT_SQL} FROM sale_payment_events WHERE sale_id=@id ORDER BY id`).all<Record<string, unknown>>({ id: Number(id) }))
         const latest = correctionAnchor(recorded, null)
         // The tender being replaced, as the sale's own columns (the opening builder copies them without re-summing).
-        anchor = latest ? correctionAnchor(recorded, saleTenderEvent(sale, latest.event.received_at)) : null
+        // The credit stays recorded, so only the customer's tender goes out (none when the credit was the whole payment).
+        anchor = latest ? correctionAnchor(recorded, saleTenderEvent(keptCredit ? keptCredit.customerSale : sale, latest.event.received_at)) : null
       }
       if (opening.kind === 'open' && opening.event) settlementOpeningStatements.push(paymentEventInsertStatement(opening.event, { onlyWhileVersion0: true }))
       try {

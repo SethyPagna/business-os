@@ -147,6 +147,12 @@ const flagged = planSaleSettlement({ configuredMethodsRaw: '["Cash","ABA"]', exi
 assert.deepEqual(flagged.paymentDetails, [{ refund_credit: true, method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 11, amount_khr: 0 }])
 assert.deepEqual(flagged.addedDetails, [{ method: 'ABA', amount_usd: 11, amount_khr: 0 }])
 console.log('PASS a repeated refund_credit row keeps its flag through a settlement')
+// Release review 6.0.982 P2: dropping or altering the credit row is refused with its own code (red: partial_payment_reduced or accepted).
+const creditBase = { configuredMethodsRaw: '["Cash","ABA"]', existingPaidUsd: 5, existingPaidKhr: 0, totalUsd: 16, exchangeRate: 4000,
+  existingPaymentDetailsRaw: '[{"method":"Cash","amount_usd":5,"amount_khr":0,"refund_credit":true}]' }
+assert.throws(() => planSaleSettlement({ ...creditBase, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 16, amount_khr: 0 }] }), error => error.code === 'refund_credit_row_required')
+assert.throws(() => planSaleSettlement({ ...creditBase, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 4, amount_khr: 0 }, { method: 'Cash', amount_usd: 12, amount_khr: 0 }] }), error => error.code === 'refund_credit_row_required')
+console.log('PASS a settlement that drops or alters the refund credit row is refused (refund_credit_row_required)')
 
 const legacyKhr = planSaleSettlement({
   configuredMethodsRaw: '["Cash"]',

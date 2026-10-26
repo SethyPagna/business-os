@@ -1356,7 +1356,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ? translateOr('write_outcome_unknown', 'The request did not finish. Its result may be unknown. Check the sale and Records before retrying.', 'សំណើមិនទាន់បញ្ចប់។ លទ្ធផលអាចមិនទាន់ប្រាកដ។ សូមពិនិត្យការលក់ និងកំណត់ត្រា មុនសាកល្បងម្ដងទៀត។')
           : code === 'customer_state_conflict'
             ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
-            : saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
+            : code === 'refund_credit_row_required'
+              ? translateOr('sale_refund_credit_row_required', 'The exchange refund credit must stay unchanged. Change only the money the customer paid.', 'ឥណទានពីការប្ដូរទំនិញ ត្រូវរក្សាដដែល។ កែបានតែប្រាក់ដែលអតិថិជនបានបង់។')
+              : saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
         return { settlementError: detail }
       }
       if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {

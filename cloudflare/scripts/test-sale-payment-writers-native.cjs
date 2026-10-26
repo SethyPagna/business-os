@@ -30,6 +30,10 @@
 //   correction_dated_now      a correction is dated now (L1 must go red)
 //   credit_without_event      an exchange cancel moves the credit in the columns only (X must go red)
 //   credit_flag_dropped       a settle drops the refund_credit marker of a repeated row (X must go red)
+//   credit_dropped_on_correction  a payment correction replaces the credit row with plain cash (X4/X5 must go red)
+//   correction_change_from_columns  the correction takes back the sale's change columns, not the events' net (M1 must go red)
+//   receipt_keeps_search      the settlement receipt stores search_normalized (P4 must go red)
+//   search_from_snapshot      the replay writes the snapshot's search text instead of recomputing it (P4 must go red)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -54,6 +58,15 @@ const MUTATIONS = {
     from: 'return [creditPaymentEventStatement(members, direction), {', to: 'return [{' }],
   credit_flag_dropped: [{ name: 'credit_flag_dropped', file: 'src/lib/paymentSettlement.ts',
     from: '      ...(preserved ? preserved.markers : {}),\n', to: '' }],
+  credit_dropped_on_correction: [{ name: 'credit_dropped_on_correction', file: 'src/routes/sales.ts',
+    from: 'const keptCredit = creditSplit && creditSplit.creditRows.length ? creditSplit : null', to: 'const keptCredit = null as any' }],
+  correction_change_from_columns: [{ name: 'correction_change_from_columns', file: 'src/lib/salePaymentWriters.ts',
+    from: 'return latest ? { event: latest, tender: tender ? { ...tender, ...netEventChange(events) } : null } : null', to: 'return latest ? { event: latest, tender } : null' }],
+  receipt_keeps_search: [{ name: 'receipt_keeps_search', file: 'src/routes/sales.ts',
+    from: 'beforeJson: JSON.stringify(settlementReceiptState(snapshot.before)), afterJson: JSON.stringify(settlementReceiptState(snapshot.after)),',
+    to: 'beforeJson: JSON.stringify(snapshot.before), afterJson: JSON.stringify(snapshot.after),' }],
+  search_from_snapshot: [{ name: 'search_from_snapshot', file: 'src/lib/saleSettlementAction.ts',
+    from: 'search_normalized: settlementSearchNormalized(eventRows[0] ?? {}, target.payment_method)', to: 'search_normalized: target.search_normalized ?? null' }],
   overpay_accepted: [{ name: 'overpay_accepted', file: 'src/routes/sales.ts',
     from: "if (!statedChange && error.code === 'invalid_actual_change_total') {", to: "if (false) {" }],
 }
@@ -411,10 +424,97 @@ async function main() {
       assert.deepEqual([xsCancelled.status, xsCancelled.paid, xsCancelled.owes, xsMismatch], ['awaiting_payment', 11, 5, 0])
     })
 
+    // ---- X4/X5: a payment correction keeps the credit and replaces only the customer's money (release review 6.0.982 P2) --
+    const plainRows = (rows) => rows.map((row) => ({ method: row.method, amount_usd: row.amount_usd, amount_khr: row.amount_khr }))
+    const xc = await exchange('pay-x-correct')
+    const xcStored = JSON.parse((await sale(xc.saleId)).payment_details)
+    const xcSettle = await settle(xc.saleId, [...plainRows(xcStored), { method: 'ABA', amount_usd: 11, amount_khr: 0 }], {}, 'settle the replacement sale $11 ABA (to be corrected)')
+    const xcReopen = await h.call('PATCH', `/api/sales/${xc.saleId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-x-correct-reopen' }, 'reopen the replacement sale')
+    const xcEventsBefore = (await events(xc.saleId)).length
+    const xcRevBefore = await revision(xc.saleId)
+    const xcDropped = await settle(xc.saleId, [{ method: 'Cash', amount_usd: 16, amount_khr: 0 }], { replace_existing_payment: true }, 'correction that folds the credit into cash')
+    const xcAltered = await settle(xc.saleId, [{ method: 'Cash', amount_usd: 4, amount_khr: 0 }, { method: 'Cash', amount_usd: 12, amount_khr: 0 }], { replace_existing_payment: true }, 'correction that changes the credit amount')
+    const xcAfterRefusals = [(await events(xc.saleId)).length, await revision(xc.saleId)]
+    r.check(`X5 a correction that drops or alters the credit row is refused and writes nothing (${xcDropped.status} ${xcDropped.body.code}, ${xcAltered.status} ${xcAltered.body.code})`, () => {
+      assert.deepEqual([xcSettle.status, xcReopen.status], [200, 200])
+      assert.deepEqual([xcDropped.status, xcDropped.body.code, xcAltered.status, xcAltered.body.code], [400, 'refund_credit_row_required', 400, 'refund_credit_row_required'])
+      assert.deepEqual(xcAfterRefusals, [xcEventsBefore, xcRevBefore])
+    })
+    const xcShiftBefore = await recentShift()
+    const xcCorrect = await settle(xc.saleId, [...plainRows(xcStored), { method: 'Cash', amount_usd: 11, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the $11 ABA to cash, credit kept')
+    const xcRows = JSON.parse((await sale(xc.saleId)).payment_details)
+    const xcPair = (await events(xc.saleId)).filter((e) => e.origin === 'correction' && !String(e.note || '').startsWith('exchange'))
+    const xcShiftMid = await recentShift()
+    const xcCorrected = await owing(xc.saleId)
+    const xcCancel = await cancelExchange(xc.returnId, 'pay-x-cancel-3')
+    const xcCancelled = await owing(xc.saleId)
+    const xcShiftAfter = await recentShift()
+    const xcMismatch = await mismatch()
+    r.check(`X4 credit -> settle -> correction keeps the credit; cancelling the exchange then leaves paid 11, Not Paid, owing 5 (correct ${xcCorrect.status} ${xcCorrect.body.code || ''}; rows ${JSON.stringify(xcRows)}; pair ${JSON.stringify(xcPair.map((e) => [e.direction, e.payment_method, e.amount_paid_usd]))}; cash ${xcShiftBefore.usd} -> ${xcShiftMid.usd} -> ${xcShiftAfter.usd}, ABA ${xcShiftBefore.digital.usd} -> ${xcShiftMid.digital.usd}; cancel ${xcCancel.status} -> ${JSON.stringify(xcCancelled)}; mismatch ${xcMismatch})`, () => {
+      assert.equal(xcCorrect.status, 200, JSON.stringify(xcCorrect.body).slice(0, 200))
+      assert.deepEqual(xcRows.map((row) => [row.method, row.amount_usd, row.refund_credit === true]), [['Cash', 5, true], ['Cash', 11, false]])
+      // Only the customer's $11 goes out (ABA) and comes back in (cash); the $5 credit is not touched.
+      assert.deepEqual(xcPair.map((e) => [e.direction, e.payment_method, e.amount_paid_usd]), [['out', 'ABA', 11], ['in', 'Cash', 11]])
+      assert.deepEqual([xcCorrected.status, xcCorrected.paid, xcCorrected.owes], ['completed', 16, 0])
+      assert.deepEqual([Number((xcShiftMid.usd - xcShiftBefore.usd).toFixed(2)), Number((xcShiftMid.digital.usd - xcShiftBefore.digital.usd).toFixed(2))], [11, -11])
+      assert.equal(xcCancel.status, 200, JSON.stringify(xcCancel.body).slice(0, 200))
+      assert.deepEqual([xcCancelled.status, xcCancelled.paid, xcCancelled.owes, xcMismatch], ['awaiting_payment', 11, 5, 0])
+      assert.equal(Number((xcShiftMid.usd - xcShiftAfter.usd).toFixed(2)), 5, 'the credit leaves the drawer, nothing else does')
+    })
+    const xcHistory = Number(xcCancel.body.actionHistoryId || (await h.one("SELECT id FROM action_history WHERE label LIKE '%refund credit%' ORDER BY id DESC LIMIT 1")).id)
+    const xcUndo = await H.historyStep(h, xcHistory, 'undo', 0, 'undo the exchange cancel after the correction')
+    const xcRestored = [await owing(xc.saleId), await mismatch(), await recentShift()]
+    const xcRedo = await H.historyStep(h, xcHistory, 'redo', 1, 'redo the exchange cancel after the correction')
+    const xcRedone = [await owing(xc.saleId), await mismatch(), await recentShift()]
+    r.check(`X6 undo and redo of that cancel: 16/0 then 11/5, the drawer follows the credit, mismatch 0 (undo ${xcUndo.status} ${JSON.stringify(xcRestored)}; redo ${xcRedo.status} ${JSON.stringify(xcRedone)})`, () => {
+      assert.equal(xcUndo.status, 200, JSON.stringify(xcUndo.body).slice(0, 200))
+      assert.deepEqual([xcRestored[0].status, xcRestored[0].paid, xcRestored[0].owes, xcRestored[1]], ['completed', 16, 0, 0])
+      assert.equal(xcRestored[2].usd, xcShiftMid.usd)
+      assert.equal(xcRedo.status, 200, JSON.stringify(xcRedo.body).slice(0, 200))
+      assert.deepEqual([xcRedone[0].status, xcRedone[0].paid, xcRedone[0].owes, xcRedone[1]], ['awaiting_payment', 11, 5, 0])
+      assert.equal(xcRedone[2].usd, xcShiftAfter.usd)
+    })
+
+    // ---- M. the correction takes back the change the events handed out, net (release review 6.0.982 P3) --------
+    // Two payments that both gave change: a $4 instalment re-keyed in the fixture as $5 handed over with $1 back (the
+    // instalment route only states change on a covering payment; restore mode is the only way to write that row), then a
+    // covering instalment of $8 with $2 back, both stated as actual change so the drawer counts them. The sale's change
+    // columns hold only the last payment's $2; the events hold $3.
+    const mSale = await H.createSale(h, { key: 'pay-m-change', status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], label: 'Not Paid $10 for the change case' })
+    const mId = Number(mSale.body.id)
+    const mPay = await pay(mId, [{ method: 'Cash', amount_usd: 4, amount_khr: 0 }], {}, 'instalment $4 (re-keyed below as $5, $1 back)')
+    const mSettle = await pay(mId, [{ method: 'Cash', amount_usd: 8, amount_khr: 0 }], { body: { change_is_actual: true, change_usd: 2, change_khr: 0 } }, 'covering instalment $8 cash with $2 back')
+    const mFirst = (await events(mId)).find((event) => event.origin === 'collect')
+    const { id: _mId, created_at: _mCreated, ...mColumns } = mFirst
+    const mRekeyed = { ...mColumns, amount_paid_usd: 5, payment_details: JSON.stringify([{ method: 'Cash', amount_usd: 5, amount_khr: 0 }]), change_usd: 1, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 }
+    await h.db.batch([
+      h.db.prepare(permit),
+      h.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')"),
+      h.db.prepare('DELETE FROM sale_payment_events WHERE id=?').bind(mFirst.id),
+      h.db.prepare(`INSERT INTO sale_payment_events(${Object.keys(mRekeyed).join(',')}) VALUES(${Object.keys(mRekeyed).map(() => '?').join(',')})`).bind(...Object.values(mRekeyed)),
+      h.db.prepare("DELETE FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')"),
+      h.db.prepare(`UPDATE sales SET amount_paid_usd=13, payment_details='[{"method":"Cash","amount_usd":13,"amount_khr":0}]' WHERE id=?`).bind(mId),
+    ])
+    const mColumnsChange = (await sale(mId)).change_usd
+    const mShiftBefore = await recentShift()
+    const mReopen = await h.call('PATCH', `/api/sales/${mId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-m-reopen' }, 'reopen the change sale')
+    const mCorrect = await settle(mId, [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the whole payment to $10 ABA')
+    const mOut = (await events(mId)).find((event) => event.origin === 'correction' && event.direction === 'out')
+    const mShiftAfter = await recentShift()
+    const mMismatch = await mismatch()
+    r.check(`M1 the correction out takes back $3 change (both payments), not the $2 in the sale's columns; the drawer loses exactly the $10 net cash (pay ${mPay.status}, settle ${mSettle.status}, columns ${mColumnsChange}, reopen ${mReopen.status}, correct ${mCorrect.status} ${mCorrect.body.code || ''}; out ${JSON.stringify(mOut && [mOut.amount_paid_usd, mOut.change_usd])}; cash ${mShiftBefore.usd} -> ${mShiftAfter.usd}; mismatch ${mMismatch})`, () => {
+      assert.deepEqual([mPay.status, mSettle.status, mColumnsChange, mReopen.status], [200, 200, 2, 200])
+      assert.equal(mCorrect.status, 200, JSON.stringify(mCorrect.body).slice(0, 200))
+      assert.deepEqual([mOut.amount_paid_usd, mOut.change_usd], [13, 3])
+      assert.equal(Number((mShiftBefore.usd - mShiftAfter.usd).toFixed(2)), 10)
+      assert.equal(mMismatch, 0)
+    })
+
     // ---- P3: audit rows of the money writers carry no personal fields -----------------------------------------
     const named = await H.createSale(h, { key: 'pay-p3-named', status: 'awaiting_payment', lines: [{ productId: 402, quantity: 1 }], extra: { customer_name: 'Payprobe Person', customer_phone: '012999888' }, label: 'Not Paid $2 with a customer name and phone' })
     await pay(Number(named.body.id), [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], {}, 'instalment on the named sale')
-    await settle(Number(named.body.id), [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }, { method: 'Cash', amount_usd: 1, amount_khr: 0 }], {}, 'settle the named sale')
+    const namedSearchBefore = (await h.one('SELECT search_normalized FROM sales WHERE id=?', named.body.id)).search_normalized
+    const namedSettle = await settle(Number(named.body.id), [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }, { method: 'Cash', amount_usd: 1, amount_khr: 0 }], {}, 'settle the named sale')
     const namedAudit = await h.all("SELECT details FROM audit_logs WHERE action='sale_settlement' AND entity_id=?", String(named.body.id))
     r.check(`P3 the settle and instalment audit rows hold ids and money only (${namedAudit.length} rows)`, () => {
       assert.equal(namedAudit.length, 2)
@@ -422,6 +522,16 @@ async function main() {
         assert.ok(!/payprobe|012999888|search_normalized/i.test(row.details), row.details.slice(0, 300))
         assert.ok(/amount_paid_usd/.test(row.details))
       }
+    })
+    const namedReceipts = await h.all("SELECT before_json,after_json FROM sale_mutation_receipts WHERE mutation_kind='settlement' AND sale_id=?", Number(named.body.id))
+    const namedUndo = await H.historyStep(h, Number(namedSettle.body.actionHistoryId), 'undo', 0, 'undo the named settle')
+    const namedSearchUndone = (await h.one('SELECT search_normalized FROM sales WHERE id=?', named.body.id)).search_normalized
+    r.check(`P4 the undo receipts hold no search text, and an undo recomputes it from the sale (${namedReceipts.length} receipts; undo ${namedUndo.status}; ${JSON.stringify([namedSearchBefore, namedSearchUndone])})`, () => {
+      assert.equal(namedReceipts.length, 2)
+      for (const row of namedReceipts) assert.ok(!/payprobe|012999888|search_normalized/i.test(row.before_json + row.after_json), row.before_json.slice(0, 300))
+      assert.equal(namedUndo.status, 200, JSON.stringify(namedUndo.body).slice(0, 200))
+      assert.ok(namedSearchBefore && /payprobe/i.test(namedSearchBefore), 'fixture: the sale is searchable by its customer')
+      assert.equal(namedSearchUndone, namedSearchBefore)
     })
 
     // ---- H. permissions -------------------------------------------------------------------------------------

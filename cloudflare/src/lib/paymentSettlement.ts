@@ -46,6 +46,7 @@ export type SettlementErrorCode =
   | 'stored_payment_invalid'
   | 'partial_payment_reduced'
   | 'insufficient_payment'
+  | 'refund_credit_row_required'
 
 export class SettlementValidationError extends Error {
   readonly statusCode = 400
@@ -276,6 +277,11 @@ export function planSaleSettlement(input: {
     if (!preserved) addedDetails.push({ ...row })
   }
 
+  // An exchange's refund credit is not money the customer handed over: a settlement or a payment correction carries it
+  // through unchanged (same method, same amounts) and replaces only the customer's rows (release review 6.0.982 P2).
+  if (existingRows.some((row) => !row.matched && row.markers.refund_credit === true)) {
+    fail('The exchange refund credit must stay in the payment unchanged. Change only the money the customer paid.', 'refund_credit_row_required')
+  }
   if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
     fail('Every previously recorded payment row must remain in the settlement unchanged.', 'partial_payment_reduced')
   }

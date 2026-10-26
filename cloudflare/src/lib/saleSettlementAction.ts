@@ -80,8 +80,31 @@ export type SaleSettlementState = {
   change_khr: number | null
   change_is_actual: number
   change_exchange_rate: number | null
-  search_normalized: string | null
+  /**
+   * Derived search text (it folds the customer's name and phone in). Held in memory to write the row; never stored in
+   * a settlement receipt (settlementReceiptState) and recomputed from the sale on replay. Receipts saved before
+   * 6.0.982 still carry it: it is ignored when comparing and replaced when writing.
+   */
+  search_normalized?: string | null
   lines: SaleSettlementLineMoney[]
+}
+
+/** A settlement state as stored in a receipt or an audit row: ids and money, no personal search text (release review P3). */
+export function settlementReceiptState(state: SaleSettlementState): Omit<SaleSettlementState, 'search_normalized'> {
+  const { search_normalized: _personal, ...money } = state
+  return money
+}
+
+/** The sale's search text after a settlement: the identity columns of the sale plus the payment method it is left with. */
+export function settlementSearchNormalized(sale: Record<string, unknown>, paymentMethod: string | null): string {
+  return normalizeSearchText([
+    sale.receipt_number,
+    sale.cashier_name,
+    sale.customer_name,
+    sale.customer_phone,
+    sale.branch_name,
+    paymentMethod,
+  ].filter(Boolean).join(' '))
 }
 
 export type SaleSettlementSnapshot = {
@@ -234,7 +257,8 @@ export function sameSettlementState(current: SaleSettlementState, expected: Sale
 }
 
 function comparableState(state: SaleSettlementState): object {
-  const { sale_status: _status, status_before_return: _beforeReturn, return_state: _returnState, delivery_pending: _deliveryPending, lines, ...money } = state
+  // search_normalized is derived text, not money: receipts no longer hold it, and a customer edit since must not block an undo.
+  const { sale_status: _status, status_before_return: _beforeReturn, return_state: _returnState, delivery_pending: _deliveryPending, search_normalized: _search, lines, ...money } = state
   return { ...money, lines, state: saleStoredState(state) }
 }
 
@@ -277,14 +301,7 @@ export function buildSaleSettlementAfterState(
     change_khr: plan.changeKhr,
     change_is_actual: change.isActual,
     change_exchange_rate: change.exchangeRate,
-    search_normalized: normalizeSearchText([
-      sale.receipt_number,
-      sale.cashier_name,
-      sale.customer_name,
-      sale.customer_phone,
-      sale.branch_name,
-      plan.paymentMethod,
-    ].filter(Boolean).join(' ')),
+    search_normalized: settlementSearchNormalized(sale, plan.paymentMethod),
     lines: before.lines.map(line => ({...line})),
   }
 }
@@ -393,7 +410,8 @@ export async function replaySaleSettlementAction(
   // Payment events (0271, slice S4): the replay never edits an event; it appends the reversal of the events this
   // operation's current generation wrote. One read: the sale's branch and version with every event of the sale.
   const eventRows = await db.prepare(`
-    SELECT s.branch_id AS sale_branch_id, s.payments_version AS sale_payments_version, ${PAYMENT_EVENT_SELECT_SQL.split(',').map((column) => `e.${column}`).join(',')}
+    SELECT s.branch_id AS sale_branch_id, s.payments_version AS sale_payments_version,
+           s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, ${PAYMENT_EVENT_SELECT_SQL.split(',').map((column) => `e.${column}`).join(',')}
     FROM sales s LEFT JOIN sale_payment_events e ON e.sale_id=s.id
     WHERE s.id=@id ORDER BY e.id
   `).all<Record<string, unknown>>({ id: saleId })
@@ -440,7 +458,8 @@ export async function replaySaleSettlementAction(
         AND r.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=r.sale_id),0)
         AND h.status=@historyStatus
     )`, { operation: operation.id, history: historyId, generation, historyStatus: expectedHistoryStatus }),
-    ...saleSettlementStateStatements(saleId, target, stamp, { previous: current }),
+    // The search text is the sale's own identity now plus the method it is left with (receipts do not store it).
+    ...saleSettlementStateStatements(saleId, { ...target, search_normalized: settlementSearchNormalized(eventRows[0] ?? {}, target.payment_method) }, stamp, { previous: current }),
     ...replayEvents.map((event) => paymentEventInsertStatement(event)),
     recordEvent.statement,
     {

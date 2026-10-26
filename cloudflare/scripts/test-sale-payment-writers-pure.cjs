@@ -112,4 +112,18 @@ check('the change a correction takes back is the net change of the events, not t
   assert.equal(anchor.tender.change_usd, 3)
 })
 
+check('a correction carries the refund credit: the customer tender is the sale minus the credit (red: whole tender or credit lost)', () => {
+  const sale = { id: 9, amount_paid_usd: 16, amount_paid_khr: 0, payment_method: 'Cash + ABA', exchange_rate: 4000, created_at: '2026-10-01 03:00:00',
+    payment_details: '[{"method":"Cash","amount_usd":5,"amount_khr":0,"refund_credit":true},{"method":"ABA","amount_usd":11,"amount_khr":0}]' }
+  const split = W.splitRefundCredit(sale)
+  assert.deepEqual([split.creditUsd, split.creditKhr, split.creditRows.length, split.creditRows[0].refund_credit], [5, 0, 1, true])
+  assert.deepEqual([split.customerSale.amount_paid_usd, split.customerSale.payment_method, JSON.parse(split.customerSale.payment_details)], [11, 'ABA', [{ method: 'ABA', amount_usd: 11, amount_khr: 0 }]])
+  const tender = W.saleTenderEvent(split.customerSale, '2026-10-01 03:00:00')
+  assert.equal(tender.amount_paid_usd, 11)
+  // No credit: the sale passes through unchanged. A credit larger than the recorded total is refused (null), never clamped.
+  const plain = { ...sale, payment_details: '[{"method":"Cash","amount_usd":16,"amount_khr":0}]' }
+  assert.equal(W.splitRefundCredit(plain).customerSale, plain)
+  assert.equal(W.splitRefundCredit({ ...sale, amount_paid_usd: 4 }), null)
+})
+
 console.log(`${passed} checks passed`)
