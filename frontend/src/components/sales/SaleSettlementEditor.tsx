@@ -84,18 +84,23 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
       </div>
 
       <div className="mt-3 space-y-2">
-        {rows.map((row, index) => (
+        {rows.map((row, index) => {
+          // A refund credit row is locked in every mode, payment corrections included (allowRecordedEdits).
+          const locked = row.refundCredit === true || (row.id.startsWith('recorded-') && !allowRecordedEdits)
+          return (
           <div key={row.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800/80">
             <div className="mb-2 flex min-h-11 items-center justify-between gap-2">
               <span className="min-w-0 detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">
                 {row.method || translate('payment_method', 'Payment method', 'វិធីទូទាត់')}
-                {row.id.startsWith('recorded-') ? <span className="ml-2 text-xs font-normal text-gray-400">{translate('recorded', 'Recorded', 'បានកត់ត្រា')}</span> : null}
+                {row.refundCredit === true
+                  ? <span className="ml-2 text-xs font-normal text-gray-400" data-refund-credit-label>{translate('sale_refund_credit_row', 'Refund credit', 'ឥណទានសងវិញ')}</span>
+                  : row.id.startsWith('recorded-') ? <span className="ml-2 text-xs font-normal text-gray-400">{translate('recorded', 'Recorded', 'បានកត់ត្រា')}</span> : null}
               </span>
               <button
                 type="button"
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-900/20"
                 aria-label={`${translate('remove', 'Remove', 'ដក')} ${row.method}`}
-                disabled={saving || (!allowRecordedEdits && (rows.length === 1 || row.id.startsWith('recorded-')))}
+                disabled={saving || row.refundCredit === true || (!allowRecordedEdits && (rows.length === 1 || row.id.startsWith('recorded-')))}
                 onClick={() => onChange(rows.filter((entry) => entry.id !== row.id))}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -108,10 +113,10 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                   className="input mt-1 h-11 w-full text-sm"
                   type="number"
                   min="0"
-                  step={row.id.startsWith('recorded-') && !allowRecordedEdits ? 'any' : '0.01'}
+                  step={locked ? 'any' : '0.01'}
                   inputMode="decimal"
                   aria-label={`${row.method} USD ${index + 1}`}
-                  disabled={saving || (row.id.startsWith('recorded-') && !allowRecordedEdits)}
+                  disabled={saving || locked}
                   value={row.usd}
                   onChange={(event) => patchRow(row.id, { usd: event.target.value })}
                 />
@@ -125,14 +130,15 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                   step="1"
                   inputMode="numeric"
                   aria-label={`${row.method} KHR ${index + 1}`}
-                  disabled={saving || (row.id.startsWith('recorded-') && !allowRecordedEdits)}
+                  disabled={saving || locked}
                   value={row.khr}
                   onChange={(event) => patchRow(row.id, { khr: event.target.value })}
                 />
               </label>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <dl className="mt-3 grid gap-1 rounded-lg bg-white/80 p-3 text-xs dark:bg-gray-900/40">
