@@ -4002,6 +4002,23 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     action: 'delete',
     run: replayProductRemove,
   },
+  // Conflicts decisions (lib/productDataGaps.ts): "Confirm $0" and "no barcode" are rows in product_conflict_marks. The payload is the
+  // mark itself ({ product_id, mark, set }); undo/redo is the compensating write. Gated like the forward route: products edit at the
+  // full tier, and a $0 confirmation also needs the cost-entry permission (checked in the replay).
+  'product.conflict_mark': {
+    permission: 'products',
+    action: 'edit',
+    run: async (payload, ctx) => {
+      if (!ctx.user) throw new UndoConflictError('The signed-in user is required to replay this action.')
+      const { replayProductConflictMark } = await import('./productDataGaps')
+      const { canEditAcquisitionCosts } = await import('./acquisitionCostAccess')
+      const { actorId } = await import('./actorSnapshot')
+      const productId = await replayProductConflictMark(getDb(ctx.env), { id: actorId(ctx.user), name: actorSnapshot(ctx.user) }, canEditAcquisitionCosts(ctx.user), ctx.direction, payload)
+      const { bumpVersion } = await import('./cache')
+      await bumpVersion(ctx.env, 'products')
+      await broadcast(ctx.env, 'products', { action: 'update', id: productId })
+    },
+  },
   // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
   // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).
   // Gated by the products edit action (attributing a lot's supplier IS a product

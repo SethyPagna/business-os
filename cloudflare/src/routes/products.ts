@@ -33,7 +33,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
-import { countProductDataGaps, listProductDataGaps, parseProductDataGapKind } from '../lib/productDataGaps'
+import { countProductDataGaps, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, ProductConflictMarkError, setProductConflictMark } from '../lib/productDataGaps'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -6241,28 +6241,60 @@ app.get('/possible-duplicates', async (c) => {
   return c.json({ success: true, clusters })
 })
 
-// Conflicts' other two sections: products whose cost was never recorded and products with no barcode
-// (lib/productDataGaps.ts holds the rule). Same gate as the sweep above, which is what shows the tab. The counts are
-// cached on the products version (one pass over the table); a page is a keyset read that stops when it is full.
-app.get('/data-gaps/counts', async (c) => {
+// Conflicts' other sections: products with an unknown cost (catalog, received dates, held damaged lots, unproven old $0), no barcode and
+// placeholder "0" barcodes (lib/productDataGaps.ts holds the rules). Same gate as the sweep above, which is what shows the tab; the
+// unknown-cost list and count are cost data, so they also need product_cost_view (a role without it gets the barcode counts only).
+// The counts are cached on the products+stock version; a page reads index entries after the cursor.
+function denyDataGaps(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
+  return null
+}
+
+app.get('/data-gaps/counts', async (c) => {
+  const denied = denyDataGaps(c)
+  if (denied) return denied
   const counts = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env)))
-  return c.json({ success: true, counts })
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true))
+  if (canViewAcquisitionCosts(c.get('user'))) return c.json({ success: true, counts })
+  const { unknown_cost: _hidden, ...visible } = counts
+  return c.json({ success: true, counts: visible })
 })
 
 app.get('/data-gaps', async (c) => {
-  const user = c.get('user')
-  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+  const denied = denyDataGaps(c)
+  if (denied) return denied
+  const kind = parseProductDataGapKind(c.req.query('kind'))
+  if (!kind) return c.json({ success: false, error: 'kind (unknown_cost|empty_barcode|placeholder_barcode) is required' }, 400)
+  if (kind === 'unknown_cost' && !canViewAcquisitionCosts(c.get('user'))) {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const kind = parseProductDataGapKind(c.req.query('kind'))
-  if (!kind) return c.json({ success: false, error: 'kind (unknown_cost|empty_barcode) is required' }, 400)
   const page = await listProductDataGaps(getDb(c.env), kind, { after: c.req.query('after'), limit: c.req.query('limit') })
   return c.json({ success: true, ...page })
+})
+
+// "Confirm $0" and "This product has no barcode" (and taking either back). A mark changes no cost, stock, lot or sale; each change is one
+// batch with its audit row and its undo record. Setting a mark is a products edit (full tier, a review-tier user is refused rather than
+// queued: a mark is a decision, not a field edit); a $0 confirmation also needs the cost-entry permission.
+app.post('/data-gaps/marks', async (c) => {
+  const user = c.get('user')
+  try {
+    const input = parseProductConflictMarkInput(await c.req.json().catch(() => null))
+    if (getActionTier(user, 'products', 'edit') !== 'full' || (input.mark === 'zero_cost_confirmed' && !canEditAcquisitionCosts(user))) {
+      return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+    }
+    const result = await setProductConflictMark(getDb(c.env), { id: actorId(user), name: actorSnapshot(user) }, input)
+    if (result.changed) {
+      await bumpVersion(c.env, 'products') // awaited: the Conflicts list re-reads right after this response
+      await broadcast(c.env, 'products', { action: 'update', id: input.product_id })
+    }
+    return c.json({ success: true, ...result })
+  } catch (error) {
+    if (error instanceof ProductConflictMarkError) return c.json({ success: false, error: error.message, code: error.code }, error.statusCode)
+    throw error
+  }
 })
 
 app.post('/possible-duplicates/dismiss', async (c) => {

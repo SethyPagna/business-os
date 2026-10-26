@@ -757,6 +757,13 @@ await check('merge replay image authority is required only for saved cover/galle
   sharedDb = null
 })
 
+await check('the product.conflict_mark applier (Confirm $0, no-barcode mark) is registered and gated on the products edit action', () => {
+  assert.ok(registeredUndoAppliers().includes('product.conflict_mark'), 'product.conflict_mark must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'product.conflict_mark', product_id: 1, mark: 'no_barcode', set: true })
+  assert.strictEqual(resolved?.permission, 'products')
+  assert.strictEqual(resolved?.action, 'edit')
+})
+
 await check('the supplier.backfill applier is registered and gated on the products edit action', () => {
   assert.ok(registeredUndoAppliers().includes('supplier.backfill'), 'supplier.backfill must be a registered applier')
   const resolved = resolveUndoApplier({ applier: 'supplier.backfill', snapshot_id: 1 })
