@@ -11,7 +11,7 @@ async function main() {
   try {
     const before = snapshot(current.raw)
     await assert.rejects(begin(current), error => error.code === 'branch_cutover_parent_capability'
-      && error.message === 'unclassified_scalar_reference:inventory_check_items.branch_id;unclassified_scalar_reference:inventory_check_sessions.branch_id;unclassified_scalar_reference:sale_payment_events.branch_id')
+      && error.message === 'unclassified_scalar_reference:inventory_check_items.branch_id;unclassified_scalar_reference:inventory_check_sessions.branch_id;unclassified_scalar_reference:sale_payment_events.branch_id;unclassified_scalar_reference:stock_crossing_alerts.branch_id')
     assert.equal(current.stats.batches, 0, 'the archived cutover refuses new immutable count references before writing')
     assert.deepEqual(snapshot(current.raw), before)
     console.log('PASS archived cutover refuses the additive Inventory schema before any write')

@@ -262,7 +262,7 @@ async function main() {
     const schema = await capture.readCutoverCaptureSchema(new D1Compat({ prepare: prepared, batch: async () => { throw Error('read only') } }))
     assert.deepEqual(schema.capabilities.filter((c) => c.code === 'unclassified_scalar_reference'), [])
     assert.deepEqual(schema.capabilities.filter(c => c.code === 'historical_scalar_reference_restricted').map(c => c.detail).sort(),
-      ['inventory_check_items.branch_id', 'inventory_check_sessions.branch_id', 'sale_payment_events.branch_id'])
+      ['inventory_check_items.branch_id', 'inventory_check_sessions.branch_id', 'sale_payment_events.branch_id', 'stock_crossing_alerts.branch_id'])
     for (const [table, column] of capture.RESTRICTED_HISTORICAL_BRANCH_REFERENCES) {
       assert.ok(!capture.BRANCH_SCALAR_REFERENCES.some(([name, field]) => name === table && field === column))
       assert.ok(!capture.CAPTURE_STREAMS.includes(table), 'immutable count baselines never join the generic capture/reparent streams')

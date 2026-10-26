@@ -40,6 +40,7 @@ import { SaleMoneyContractError } from './saleMoneyPrecision'
 import { buildSaleRecordEventsInsert, sha256Hex } from './saleRecordEvents'
 import { normalizeSearchText } from './searchMatch'
 import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from './stockTransaction'
+import { recordStockCrossings } from './stockCrossingAlert'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from './stockCondition'
 import { formatSaleTelegramLines, sendReturnTelegramEvent } from './telegram'
 
@@ -654,6 +655,8 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  // The replacement lines deduct stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: priced.lines.map((line) => ({ productId: line.product_id, branchId: line.branch_id, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
   const cashRefundUsd = refundCashOut({ total_refund_usd: refundUsd, total_refund_khr: refundKhr, owed_reduction_usd: owedReductionUsd, refund_currency: 'USD' }).usd
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {

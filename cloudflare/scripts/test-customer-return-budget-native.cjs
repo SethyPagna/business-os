@@ -215,11 +215,13 @@ async function main() {
     const m = meter(enabled.raw, replacement ? 1000 : 50, 10, { transient: true })
     const response = await request(m.db, '/', enabled.body, enabled.env)
     assert.equal(response.status, 200, JSON.stringify(response))
-    assert.equal(sends - beforeSends, replacement ? 2 : 1)
+    // A replacement takes stock like a sale, so the replacement product (1 unit) sold out raises the out-of-stock alert too (6.0.991).
+    assert.equal(sends - beforeSends, replacement ? 3 : 1)
     const notificationReads = m.events.filter(event => event.kind === 'read' && /FROM return_items ri LEFT JOIN|FROM return_replacement_items|FROM settings WHERE key IN/.test(event.sql)).length
     // 6.0.905: the return alert reads its lines and replacements in ONE statement after the settings read, and the
     // replacement sale's alert shares that settings read (was 6 / 7 attempts with transient retries).
-    assert.equal(notificationReads, 4)
+    // + 2 for the replacement's own stock alert (6.0.991): the low-stock settings read and the Telegram settings read, in waitUntil.
+    assert.equal(notificationReads, replacement ? 6 : 4)
     console.log(`PASS enabled actual notifications replacement${replacement}: ${notificationReads} SQL attempts, ${sends - beforeSends} fake external sends`)
     if (replacement) {
       const separate = meter(enabled.raw, 1000, 0, { settingsEach: true })

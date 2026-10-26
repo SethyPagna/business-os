@@ -33,7 +33,7 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
 // restored -- get their own switch and their own forum topic. Until then a
 // customer return was sent as a `sales` event, into the Sale invoices topic.
-export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews'
+export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews' | 'stock_alert'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
@@ -106,7 +106,7 @@ export function isTelegramSwitchValue(raw: string): boolean {
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
-  'telegram_shift_overview_enabled', 'telegram_products_enabled', 'telegram_reviews_enabled',
+  'telegram_shift_overview_enabled', 'telegram_products_enabled', 'telegram_reviews_enabled', 'telegram_stock_alert_enabled',
   ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -297,6 +297,8 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
       // Owner, 5 Oct 2026: a non-admin's product edit is always announced unless this switch is set off.
       products: isEnabled(values.telegram_products_enabled, true),
       reviews: isEnabled(values.telegram_reviews_enabled, true),
+      // Owner, 6 Oct 2026: low / out-of-stock alerts fire when a sale crosses the threshold (lib/stockCrossingAlert.ts). Unset means on.
+      stock_alert: isEnabled(values.telegram_stock_alert_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
   }
@@ -434,7 +436,7 @@ async function deliverTelegramEvent(config: TelegramConfig, event: TelegramEvent
   const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
     sales: 'telegram_topic_sales', status: 'telegram_topic_status', returns: 'telegram_topic_returns',
     fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
-    products: 'telegram_topic_alerts', reviews: 'telegram_topic_alerts',
+    products: 'telegram_topic_alerts', reviews: 'telegram_topic_alerts', stock_alert: 'telegram_topic_alerts',
   }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
   // the composed line (rather than in each builder) means the one route that

@@ -70,6 +70,7 @@ import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLi
 import type { CustomerReturnQuoteV1 } from '../lib/customerReturnEntitlement'
 import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { createExchangeReturnV1 } from '../lib/returnExchangeCreate'
+import { recordStockCrossings } from '../lib/stockCrossingAlert'
 import { RETURN_EXCHANGE_MAX_LINES, ReturnExchangeError, type ExchangeLineIntent } from '../lib/returnExchangeIntent'
 import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
 import type { ExchangeCatalogProduct } from '../lib/returnExchangeContext'
@@ -2424,6 +2425,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
+  if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,

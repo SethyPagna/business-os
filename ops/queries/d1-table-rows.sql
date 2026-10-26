@@ -182,5 +182,6 @@ SELECT
     'product_cost_mirror_0269', (SELECT COUNT(*) FROM product_cost_mirror_0269),
     'permission_extras_0270_state', (SELECT COUNT(*) FROM permission_extras_0270_state),
     'permission_extras_0270_fix', (SELECT COUNT(*) FROM permission_extras_0270_fix),
-    'sale_payment_events', (SELECT COUNT(*) FROM sale_payment_events)
+    'sale_payment_events', (SELECT COUNT(*) FROM sale_payment_events),
+    'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts)
   ) AS rows_10;

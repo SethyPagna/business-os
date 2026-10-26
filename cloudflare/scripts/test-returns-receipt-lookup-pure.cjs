@@ -170,6 +170,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [] },
+  '../lib/stockCrossingAlert': { recordStockCrossings: async () => ({ crossings: 0, claimed: 0, sent: 0 }) },
   '../lib/permissions': permissions,
   '../lib/conflictControl': {
     assertUpdatedAtMatch: () => {},

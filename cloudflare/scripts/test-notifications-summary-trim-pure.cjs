@@ -380,6 +380,58 @@ async function main() {
     }
   })
 
+  // ---- the expiry statement uses migration 0228's index and must list exactly what the removed full scan listed ------
+  await check('expiry: the index-assisted statement lists exactly what the removed full scan listed, boundaries and a legacy inactive-with-stock row included', async () => {
+    const visible = load('lib/productStockGuard.ts').stockVisibleProductSql()
+    const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10)
+    // A product that is inactive but still holds stock cannot be written any more (migration 0242), but production
+    // holds such legacy rows and the old rule listed them. Seed one by lifting the guard for this one statement.
+    seedStockFixture(raw.db, () => {
+      const insert = raw.db.prepare('INSERT INTO products (name, stock_quantity, out_of_stock_threshold, low_stock_threshold, is_active, expiry_date) VALUES (?, ?, 0, 10, ?, ?)')
+      insert.run('Exp past', 20, 1, '2020-01-01')
+      insert.run('Exp edge in', 20, 1, day(30))
+      insert.run('Exp edge out', 20, 1, day(32))
+      insert.run('Exp timed in', 20, 1, day(29) + ' 23:30:00')
+      insert.run('Exp timed out', 20, 1, day(30) + ' 23:59:00')
+      insert.run('Exp blank', 20, 1, '   ')
+      insert.run('Exp junk', 20, 1, 'not a date')
+      insert.run('Exp retired empty', 0, 0, '2020-03-03')
+      insert.run('Exp null empty', 0, null, '2020-05-05')
+      insert.run('Exp legacy stocked', 5, 1, '2020-02-02')
+      insert.run('Exp legacy null stocked', 5, 1, '2020-02-03')
+      // is_active has no CHECK, so every storable value is covered: 2 (above 1), a fraction and a negative (below 1), text, and an EMPTY one of each kind.
+      for (const [name, value, stocked] of [['Exp legacy two', 2, 5], ['Exp legacy half', 0.5, 5], ['Exp legacy neg', -1, 5], ['Exp legacy text', 'x', 5], ['Exp empty two', 2, 0]]) {
+        insert.run(name, stocked, 1, '2020-02-0' + (4 + [...'abcde'].length % 3))
+      }
+      const triggers = raw.db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('product_deactivate_stock_0242', 'product_cache_stock_0242')").all()
+      for (const trigger of triggers) raw.db.exec(`DROP TRIGGER ${trigger.name}`)
+      raw.db.prepare("UPDATE products SET is_active = 0 WHERE name = 'Exp legacy stocked'").run()
+      raw.db.prepare("UPDATE products SET is_active = NULL WHERE name = 'Exp legacy null stocked'").run()
+      for (const [name, value] of [['Exp legacy two', 2], ['Exp legacy half', 0.5], ['Exp legacy neg', -1], ['Exp legacy text', 'x'], ['Exp empty two', 2]]) {
+        if (name === 'Exp empty two') raw.db.prepare('UPDATE products SET stock_quantity = 0 WHERE name = ?').run(name)
+        raw.db.prepare('UPDATE products SET is_active = ? WHERE name = ?').run(value, name)
+      }
+      for (const trigger of triggers) raw.db.exec(trigger.sql)
+    })
+    const removedFullScan = (days) => raw.db.prepare(`SELECT id FROM products p
+      WHERE ${visible} AND expiry_date IS NOT NULL AND trim(expiry_date) != '' AND julianday(expiry_date) - julianday('now') <= @days
+      ORDER BY expiry_date ASC LIMIT 50`).all({ days }).map((row) => row.id)
+    for (const days of [0, 7, 30, 90]) {
+      seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('notifications_expiry_days', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(days)))
+      await cacheModule.bumpVersion(env, 'settings')
+      const listed = (section(await summary(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
+      assert.deepEqual(listed, removedFullScan(days), `days=${days}: same rows in the same order`)
+    }
+    const names = (section(await summary(), 'expiry')?.items || []).map((item) => item.label)
+    assert.ok(names.includes('Exp past') && names.includes('Exp legacy stocked') && names.includes('Exp legacy null stocked'), 'the legacy inactive rows with stock are listed: ' + names.join(','))
+    for (const name of ['Exp legacy two', 'Exp legacy half', 'Exp legacy neg', 'Exp legacy text']) assert.ok(names.includes(name), `${name}: any is_active other than 1, holding stock, is visible exactly as the old rule said: ` + names.join(','))
+    assert.ok(!names.includes('Exp empty two'), 'an empty product with is_active 2 is not')
+    assert.ok(!names.includes('Exp retired empty') && !names.includes('Exp null empty'), 'empty inactive rows are not')
+    const plan = raw.db.prepare("EXPLAIN QUERY PLAN SELECT id FROM products p WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+30 day')").all().map((row) => row.detail).join(' | ')
+    assert.match(plan, /idx_products_active_expiry_day/, plan)
+  })
+
+
   const failures = []
   const loyaltyCheck = async (name, fn) => {
     try { await check(name, fn) } catch (error) { failures.push(name); console.error(`FAIL ${name}: ${error.message}`) }
