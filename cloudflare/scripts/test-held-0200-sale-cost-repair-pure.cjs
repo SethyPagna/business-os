@@ -933,7 +933,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     const code = sqlCode(text)
     const statements = code.split(';').map((v) => v.replace(/\s+/g, ' ').trim()).filter(Boolean)
     const written = repairWrites(migrationText)
-    if (written.some((table) => new RegExp('\b' + table + '\b', 'i').test(code))) return false
+    if (written.some((table) => new RegExp('\\b' + table + '\\b', 'i').test(code))) return false
     if (namedIn(migrationText)('system_flags') || namedIn(migrationText)('product_conflict_marks') || written.includes('products')) return false
     return statements.length > 0 && statements.every((statement) => /^CREATE TABLE product_conflict_marks \(/i.test(statement)
       || /^CREATE INDEX \w+ ON \w+\([\w, ]+\) WHERE /i.test(statement)
@@ -976,6 +976,8 @@ ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
       assert.equal(conflictMarksFile(marks + '\n' + extra), false, 'control: still a dependency: ' + extra)
     }
     assert.equal(conflictMarksFile(marks.replace('CURRENT_TIMESTAMP FROM products;', 'CURRENT_TIMESTAMP FROM sale_items;')), false, 'control: a mark read from a table the repair writes is a dependency')
+    // A PRE/POST assertion that reads a table the repair writes is a dependency too (this one is only caught by the word-boundary match).
+    assert.equal(conflictMarksFile(marks + '\nSELECT CASE WHEN (SELECT COUNT(*) FROM sale_items) >= 0 THEN 1 ELSE json_extract(\'[]\',\'$[conflict_marks_x]\') END;'), false, 'control: an assertion reading sale_items is a dependency')
   }
   const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
   if (chain.includes(feeIndexes)) {
