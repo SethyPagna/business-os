@@ -20,6 +20,8 @@ const MUTANTS = {
   'cursor-bound-ignored': [{ from: "cursor ? buildFilter('<= @cursorAt') : filter", to: 'filter' }],
   // The OLD membership test: two raw text ranges, which admit the other shape's rows from adjacent days (T sorts after the space).
   'two-text-ranges': [{ from: 'AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo', to: "AND ((r.created_at >= @createdFrom AND r.created_at < @createdTo) OR (r.created_at >= replace(@createdFrom,' ','T') AND r.created_at < replace(@createdTo,' ','T')))" }],
+  // The seek upper bound stops a day short of what +14:00 rows need (the review's mutant), so rows near the END of the period vanish.
+  'seek-margin-too-small': [{ from: 'const SEEK_MARGIN_HOURS = 14', to: 'const SEEK_MARGIN_HOURS = 10' }],
   // The page ignores the Free bound.
   'free-bound-ignored': [{ from: 'getPlanLimits(c.env).d1QueriesPerInvocation < 200 ? RETURN_EXPORT_PAGE_MAX_FREE : RETURN_EXPORT_PAGE_MAX', to: 'RETURN_EXPORT_PAGE_MAX' }],
   // A page is served under a token that no longer matches.
@@ -130,7 +132,9 @@ const expectedOrder = (db, { scope = 'customer', ids = null } = {}) => db.db.pre
 function shapesOf(ms) {
   const base = new Date(ms).toISOString().slice(0, 19)
   const local = (hours, sign) => new Date(ms + hours * 3600e3).toISOString().slice(0, 19)
-  return { space: base.replace('T', ' '), isoZ: base + 'Z', fraction: base + '.123Z', micro: base.replace('T', ' ') + '.123456', plus7: local(7) + '+07:00', minus5: local(-5) + '-05:00', longFraction: base + '.123456789Z' }
+  return { space: base.replace('T', ' '), isoZ: base + 'Z', fraction: base + '.123Z', micro: base.replace('T', ' ') + '.123456', plus7: local(7) + '+07:00', minus5: local(-5) + '-05:00', longFraction: base + '.123456789Z',
+    // the widest offsets in use: +14:00 puts the local text 14h AHEAD of the UTC time (past the period's last day), -12:00 puts it 12h behind
+    plus14: local(14) + '+14:00', minus12: local(-12) + '-12:00' }
 }
 
 const cases = [

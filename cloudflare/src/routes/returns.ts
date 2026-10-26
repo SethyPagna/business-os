@@ -802,12 +802,15 @@ function decodeReturnExportCursor(value: string): { sortAt: string; id: number; 
   } catch { /* falls through to null */ }
   return null
 }
-/** 'YYYY-MM-DD' of a UTC SQL timestamp shifted by whole days. A value past year 9999 becomes '~', which sorts after every stored text. */
-function seekDay(sqlUtc: string, plusDays: number): string {
+/** The seek bounds are plain TEXT on the raw column. A stored value is the local clock text of its instant, so it lies within +-14h of the UTC time (the widest offsets). The lower bound is written
+ * with a space (the smallest separator, so an ISO-shaped row on the bound's date still passes) and the upper bound with 'T' (the largest, so a space-shaped row on its date still passes): both
+ * errors only ADMIT extra rows, which the exact residual then rejects; no member is ever excluded. A value past year 9999 becomes '~', which sorts after every stored text. */
+const SEEK_MARGIN_HOURS = 14
+function seekBound(sqlUtc: string, hours: number, separator: ' ' | 'T'): string {
   const d = new Date(sqlUtc.replace(' ', 'T') + 'Z')
-  d.setUTCDate(d.getUTCDate() + plusDays)
+  d.setTime(d.getTime() + hours * 3600e3)
   const iso = d.toISOString()
-  return iso.startsWith('+') ? '~' : iso.slice(0, 10)
+  return iso.startsWith('+') ? '~' : iso.slice(0, 10) + separator + iso.slice(11, 19)
 }
 
 app.get('/export', async (c) => {
@@ -841,10 +844,10 @@ app.get('/export', async (c) => {
   }
 
   // Exact membership = the LIST's own test: datetime(created_at) inside [createdFrom, createdTo), which reads every stored shape (space, ISO, fractions, offsets) the same way.
-  // The index does the seeking, on the RAW column: a range that covers every shape of the period -- the text of an instant is at most a day away from its UTC date (offsets
-  // reach +-14h), so from-1 day up to to+2 days as plain dates -- and ONE upper bound (the cursor's raw value on later pages). The datetime() test is a residual over only
+  // The index does the seeking, on the RAW column: a range that covers every shape of the period -- the text of an instant is at most 14h from its UTC time (offsets
+  // reach +-14h), so from-14h up to to+14h as plain text (seekBound) -- and ONE upper bound (the cursor's raw value on later pages). The datetime() test is a residual over only
   // the rows that range reads (test-sargable-date-filters-pure carries the allowlist entry); it never drives a scan.
-  const seekFrom = seekDay(window.createdFrom, -1), seekTo = seekDay(window.createdTo, 2)
+  const seekFrom = seekBound(window.createdFrom, -SEEK_MARGIN_HOURS, ' '), seekTo = seekBound(window.createdTo, SEEK_MARGIN_HOURS, 'T')
   const buildFilter = (upper: string) => {
     const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } })
     if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }

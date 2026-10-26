@@ -458,7 +458,7 @@ const ALLOWLIST = [
   {
     file: 'src/routes/returns.ts', table: 'returns', column: 'created_at', alias: 'r',
     reason: "the complete Returns statement export (GET /export). returns.created_at carries several stored shapes (space, ISO Z, fractions, +07:00 offsets) and the export must hold exactly the rows the list holds, whose test is datetime(created_at) inside the window -- so the wrap is required for CORRECTNESS. "
-      + "It is a RESIDUAL: the call site ANDs it with bare raw bounds on r.created_at (a covering plain-date range, from-1 day to to+2 days, and on later pages the cursor's raw value as the single upper bound), which is what gives the planner its seek into idx_returns_created_pg / idx_returns_scope_created_pg and "
+      + "It is a RESIDUAL: the call site ANDs it with bare raw bounds on r.created_at (a covering plain-text range, from-14h to to+14h, and on later pages the cursor's raw value as the single upper bound), which is what gives the planner its seek into idx_returns_created_pg / idx_returns_scope_created_pg and "
       + "keeps rows read per page at about the page size. Pinned by test-returns-statement-export-paged-native.cjs (EXPLAIN QUERY PLAN on the migrated schema: SEARCH ... USING INDEX, no TEMP B-TREE, no SCAN; rows read per page measured; exact membership against an independent oracle and the list).",
   },
   {

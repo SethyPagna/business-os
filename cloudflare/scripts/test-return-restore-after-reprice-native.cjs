@@ -179,6 +179,10 @@ async function repricedRefusal(f, action, label) {
   assert.equal(f.batches(), batches, `${label}: refused before any write batch`)
 }
 
+// n ledger entries for sale line 101, all long before the return (the ledger is append-only, so each case fills its own fixture).
+function fillLedger(f, n) {
+  f.sql.exec("INSERT INTO sale_amendments(sale_id,kind,sale_item_id,created_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<" + n + ") SELECT 1,'line_updated',101,'2000-01-01 00:00:00' FROM n")
+}
 // A legacy (v0) return: no refund snapshot, money_precision_version 0 -- nothing in it to compare the sale line with.
 function makeLegacy(f) {
   f.sql.exec('DELETE FROM return_item_batch_allocations WHERE return_item_id=10; DELETE FROM return_items WHERE return_id=10; DELETE FROM returns WHERE id=10; UPDATE sales SET money_precision_version=0 WHERE id=1')
@@ -312,6 +316,22 @@ const cases = [
     f.sql.prepare('UPDATE return_items SET refund_snapshot_json=? WHERE return_id=10').run(JSON.stringify(snapshot))
     for (const id of [101, 102]) f.sql.prepare('UPDATE sale_items SET pricing_snapshot_json=? WHERE id=?').run(snapshotOf(KEYS[id], { membership: 3 }), id)
     await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-split-moved')), 'discount share moved to the membership discount')
+  }],
+  // The ledger read is capped (LIMIT 1001): a truncated read cannot prove a line is unchanged, so it refuses -- even though every entry here predates the return.
+  ['ledger-overflow-refuses', async f => {
+    makeLegacy(f)
+    await cancelA(f)
+    f.sql.exec('UPDATE sale_items SET pricing_snapshot_json=NULL WHERE id=101')
+    fillLedger(f, 1001)
+    await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-ledger-overflow')), '1001 ledger entries')
+  }],
+  ['ledger-of-exactly-1000-old-entries-is-a-complete-read', async f => {
+    makeLegacy(f)
+    await cancelA(f)
+    f.sql.exec('UPDATE sale_items SET pricing_snapshot_json=NULL WHERE id=101')
+    fillLedger(f, 1000)
+    const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-ledger-1000'))
+    assert.deepEqual(result.changedIds, [10], 'exactly 1000 entries, all older than the return, prove nothing changed after it')
   }],
   ['units-sold-changed-is-a-reprice', async f => {
     await cancelA(f)
