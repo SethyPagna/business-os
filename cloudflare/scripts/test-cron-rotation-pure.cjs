@@ -312,6 +312,34 @@ async function main() {
   assert.strictEqual(sRuns, 3, 'ran at 0 h, 5 h and 10 h')
   ok()
 
+  // W: only the SAME slot is a duplicate. A stored slot AHEAD of this firing (clock stepped back, or a firing delivered late)
+  // must not wedge the cron; a ">=" compare would skip every tick until time caught up.
+  const wbox = { text: JSON.stringify({ ...rot.emptyRotationState(), version: 3, cursor: 0, lastSlot: 5000 }) }
+  const wstore = { load: async () => rot.parseRotationState(wbox.text), save: async (s, e) => casSave(wbox, s, e) }
+  let wRuns = 0
+  const wres = await rot.runRotationTick([{ id: 'w', run: async () => { wRuns += 1 } }], wstore, T0, { slot: 4990 })
+  assert.strictEqual(wRuns, 1); assert.strictEqual(wres.skipped, undefined)
+  assert.strictEqual(rot.parseRotationState(wbox.text).lastSlot, 4990, 'and the slot follows the firing')
+  ok()
+
+  // PD1-3: 'pending' only for a never-written state on a build younger than one tick (+30 min), and only if the build time is known.
+  const emptyS = rot.emptyRotationState()
+  const nowP = Date.parse('2026-10-26T12:00:00Z')
+  const tick15 = rot.CRON_ROTATION_TICK_MS
+  const young = rot.evaluateCronHealth(emptyS, ids, nowP, tick15, nowP - 20 * 60 * 1000)
+  assert.strictEqual(young.pending, true); assert.strictEqual(young.healthy, true)
+  const oldB = rot.evaluateCronHealth(emptyS, ids, nowP, tick15, nowP - 2 * 3600 * 1000)
+  assert.strictEqual(oldB.pending, false, 'a 2 h old build with no state is a real problem for the 15-minute rotation')
+  assert.strictEqual(oldB.healthy, false)
+  const written = rot.evaluateCronHealth({ ...emptyS, updatedAt: new Date(nowP - 8 * 3600 * 1000).toISOString() }, ids, nowP, tick15, nowP - 60 * 1000)
+  assert.strictEqual(written.pending, false, 'a state that exists is judged on its own age')
+  assert.strictEqual(written.healthy, false)
+  for (const unknown of [undefined, NaN]) {
+    const u = rot.evaluateCronHealth(emptyS, ids, nowP, tick15, unknown)
+    assert.strictEqual(u.pending, false, 'an unstamped build is never pending'); assert.strictEqual(u.healthy, false)
+  }
+  ok()
+
   // N: the scheduled-backup gate (backup.ts) is above the 3 h heavy tick and below the 6 h revisit.
   const backupMod = load(path.join(SRC, 'lib/backup.ts'))
   const HOUR = 3600 * 1000

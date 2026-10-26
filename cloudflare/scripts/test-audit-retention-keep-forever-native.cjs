@@ -95,8 +95,12 @@ async function main() {
       const worker = await world.mf.getWorker()
       // The cron runs ONE rotation step per tick: tick until the audit step
       // has had its turn (a full rotation is at most 13 ticks).
+      // Each tick is its OWN firing: a real cron gives every firing a distinct
+      // scheduledTime, and the rotation drops a second delivery of the same slot
+      // as a duplicate. Reusing one time would skip every tick after the first.
+      const firstFiring = Date.now()
       for (let tick = 0; tick < 13; tick += 1) {
-        await worker.scheduled({ scheduledTime: new Date(), cron: '*/15 * * * *' })
+        await worker.scheduled({ scheduledTime: new Date(firstFiring + tick * 15 * 60 * 1000), cron: '*/15 * * * *' })
         for (let i = 0; i < 40; i += 1) {
           if (await world.first("SELECT 1 AS x FROM settings WHERE key = 'audit_log_retention_last_run'")) break
           await new Promise((resolve) => setTimeout(resolve, 250))
