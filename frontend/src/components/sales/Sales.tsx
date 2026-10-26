@@ -4,8 +4,6 @@ import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
-import ChevronsDown from 'lucide-react/dist/esm/icons/chevrons-down.js'
-import { browserStorage, planSalesLoad, readShowAllPreference, SHOW_ALL_MAX_PAGES, showAllEligible, walkSalesPages, writeShowAllPreference, type ShowAllNote, type ShowAllSnapshot } from '../../utils/salesShowAll.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
@@ -130,8 +128,7 @@ type MoneyFormatter = (value: number | string) => string
 type SalesGroupMode = 'time' | 'time+action'
 type SortDirection = 'asc' | 'desc'
 
-// explicit: a deliberate Retry/Refresh, which re-reads the whole Show-all list even for the same query.
-type PendingSalesLoad = { silent: boolean; explicit?: boolean }
+type PendingSalesLoad = { silent: boolean }
 
 // A trailing load represents newer filters or a sync event that arrived while
 // the current request was in flight. It is safe to replay after a successful
@@ -618,17 +615,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const salesSortDirection: SortDirection = salesSortSpec.field === 'date' ? salesSortSpec.direction : 'desc'
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
-  // S4R6-2#422: "Show all" reads every sale of one business day in bounded pages (utils/salesShowAll.ts has the rules and
-  // the read budget). Off by default; each viewer's choice is remembered on this device.
-  const showAllViewer = user?.id ?? null
-  const [showAllPreference, setShowAllPreference] = useState(() => readShowAllPreference(browserStorage(), showAllViewer))
-  useEffect(() => { setShowAllPreference(readShowAllPreference(browserStorage(), showAllViewer)) }, [showAllViewer])
-  // The note for the list now shown by Show all: capped, partly loaded, or possibly out of date. Set only by loadSales.
-  const [showAllStatus, setShowAllStatus] = useState<{ note: Exclude<ShowAllNote, 'single_day'>; count: number } | null>(null)
-  // What the published Show-all list is (query key, rows, whole list or not). Written in loadSales in the same step that
-  // publishes the rows -- never from a render effect -- and cleared by any publish that is not a Show-all walk.
-  const showAllSnapshotRef = useRef<ShowAllSnapshot | null>(null)
-  // The query the newest loadSales call asked for. A load whose query is no longer this publishes nothing.
+  // The query the newest loadSales call asked for (filters, sort, page). A load whose query is no longer this publishes nothing.
   const latestQueryKeyRef = useRef('')
   const loadKeyRef = useRef('')
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
@@ -647,7 +634,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // found"). Products already uses the same one-slot trailing-load pattern:
   // coalesce bursts, then run once more with the latest callback/filters.
   const pendingLoadRef = useRef<PendingSalesLoad | null>(null)
-  const latestLoadRef = useRef<((silent?: boolean, explicit?: boolean) => Promise<void>) | null>(null)
+  const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const loadWatchdogRef = useRef<number | undefined>(undefined)
   const statusActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
@@ -746,20 +733,18 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     return out
   }, [stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
-  const showAllDayRange = showAllEligible(salesDateRange)
-  const showAllActive = showAllPreference && showAllDayRange
 
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
     loadWatchdogRef.current = undefined
   }, [])
 
-  const loadSales = useCallback(async (silent = false, explicit = false): Promise<void> => {
+  const loadSales = useCallback(async (silent = false): Promise<void> => {
     const requestSecurity = statusSecurityScope
     if (requestSecurity !== statusSecurityRef.current) return
     // A closure an async handler kept from before a filter change reads with the newest filters, never its own old ones.
     const newestLoad = latestLoadRef.current
-    if (newestLoad && newestLoad !== loadSales) return newestLoad(silent, explicit)
+    if (newestLoad && newestLoad !== loadSales) return newestLoad(silent)
     if (loadSecurityRef.current !== requestSecurity) {
       // Detach the prior authority's read before coalescing. Its finally must
       // not consume this scope's queue or clear its watchdog.
@@ -782,23 +767,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       sortBy: salesSortSpec.field,
       sortDir: salesSortSpec.direction,
     }
-    // The query generation: viewer authority, mode and every filter. Show all ignores the pager's page.
-    const queryKey = JSON.stringify([requestSecurity, showAllActive, showAllActive ? { ...params, page: 0, limit: 0 } : params])
+    // The query generation: viewer authority, every filter, the sort and the page.
+    const queryKey = JSON.stringify([requestSecurity, params])
     latestQueryKeyRef.current = queryKey
-    // A different query supersedes the read in flight: stop its requests now. It publishes nothing; the queued load reads this query.
+    // A different query supersedes the read in flight: stop its request now. It publishes nothing; the queued load reads this query.
     if (loadPromiseRef.current) {
       if (loadKeyRef.current !== queryKey) loadAbortRef.current?.abort()
-      const pending = pendingLoadRef.current || { silent: true, explicit: false }
+      const pending = pendingLoadRef.current || { silent: true }
       pending.silent = pending.silent && silent
-      pending.explicit = Boolean(pending.explicit || explicit)
       pendingLoadRef.current = pending
       return loadPromiseRef.current
-    }
-    const plan = planSalesLoad({ showAll: showAllActive, explicit, key: queryKey, last: showAllSnapshotRef.current })
-    if (plan === 'skip') {
-      // The Show-all list held cannot be refreshed exactly without another walk: read nothing and say it may be out of date.
-      setShowAllStatus((current) => current?.note === 'partial' ? current : { note: 'stale', count: 0 })
-      return
     }
     loadKeyRef.current = queryKey
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -828,49 +806,20 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
       }
       try {
-        if (plan === 'page') {
-          const result = await withLoaderTimeout(
-            () => fetchSales(params, { signal: controller.signal }),
-            'Sales',
-            SALES_LIST_REQUEST_TIMEOUT_MS,
-          )
-          if (!isCurrent()) { superseded = isOwnRequest(); return }
-          const rows = normalizeSaleRows(result)
-          if (rows.length || Array.isArray(result)) {
-            showAllSnapshotRef.current = null
-            setShowAllStatus(null)
-            publishRows(rows)
-            setLoadError(null)
-            completedSuccessfully = true
-          }
-          return
-        }
-        const { page: _page, limit: _limit, ...filters } = params
-        if (plan === 'walk') setShowAllStatus(null)
-        const walk = await walkSalesPages<SaleRecord>(async (page, limit) => normalizeSaleRows(await withLoaderTimeout(
-          () => fetchSales({ ...filters, page, limit }, { signal: controller.signal }),
+        const result = await withLoaderTimeout(
+          () => fetchSales(params, { signal: controller.signal }),
           'Sales',
           SALES_LIST_REQUEST_TIMEOUT_MS,
-        )), {
-          // A probe is one page: short means it is the whole list, so it equals a fresh walk.
-          maxPages: plan === 'probe' ? 1 : SHOW_ALL_MAX_PAGES,
-          isCancelled: () => !isCurrent(),
-          // A walk paints each page as it lands; a probe publishes only once it is known to be the whole list.
-          onPage: plan === 'walk' ? (rows) => { if (isCurrent()) publishRows(rows) } : undefined,
-        })
-        if (!walk || !isCurrent()) { superseded = isOwnRequest() && !isLatestQuery(); return }
-        completedSuccessfully = true
-        if (plan === 'probe' && !walk.complete) {
-          // The list grew past one page: it cannot be refreshed exactly. Keep it, say so, and stop probing until a walk.
-          showAllSnapshotRef.current = { key: queryKey, rows: walk.rows.length, complete: false }
-          setShowAllStatus({ note: 'stale', count: 0 })
-          return
+        )
+        if (!isCurrent()) { superseded = isOwnRequest(); return }
+        const rows = normalizeSaleRows(result)
+        if (rows.length || Array.isArray(result)) {
+          // The page read replaces the page shown, never merges into it: a refresh equals a fresh load of this page, so a
+          // sale that left the filter goes and the order is the server's for the active sort.
+          publishRows(rows)
+          setLoadError(null)
+          completedSuccessfully = true
         }
-        showAllSnapshotRef.current = { key: queryKey, rows: walk.rows.length, complete: walk.complete }
-        setShowAllStatus(walk.error ? { note: 'partial', count: walk.rows.length } : walk.truncated ? { note: 'truncated', count: walk.rows.length } : null)
-        if (walk.error) console.error('[Sales] show-all page failed:', getErrorMessage(walk.error, 'Unknown sales load error'))
-        publishRows(walk.rows)
-        setLoadError(null)
       } catch (error) {
         if (!isCurrent()) { superseded = isOwnRequest() && !isLatestQuery(); return }
         console.error('[Sales] load failed:', getErrorMessage(error, 'Unknown sales load error'))
@@ -907,13 +856,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         queueMicrotask(() => {
           if (requestSecurity !== statusSecurityRef.current) return
           const nextLoad = latestLoadRef.current || loadSales
-          nextLoad(Boolean(pending.silent), Boolean(pending.explicit)).catch(() => {})
+          nextLoad(Boolean(pending.silent)).catch(() => {})
         })
       }
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, showAllActive, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -1074,7 +1023,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     // React to each sync event once. This effect also re-runs whenever loadSales changes (every filter, date, sort or
-    // Show-all change); without this guard each of those re-sent the LAST event as a second, silent read right behind the
+    // page change); without this guard each of those re-sent the LAST event as a second, silent read right behind the
     // foreground one. An event that lands while Sales is hidden is covered by the read that runs when it is shown again.
     const syncKey = syncChannel?.channel ? `${syncChannel.channel}:${String(syncChannel.ts ?? '')}` : ''
     if (!syncKey || handledSyncRef.current === syncKey) return
@@ -1793,14 +1742,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
   const totalSalesCount = salesStats?.total_count ?? allVisibleSales.length
-  // Show all: one pager page holding exactly the rows on screen, so its range never claims more than is shown and both
-  // arrows are dead. A capped or partly loaded day says so in the note under the pager instead.
-  const pagerPage = showAllActive ? 1 : salesPage
-  const pagerPageSize = showAllActive ? Math.max(1, allVisibleSales.length) : salesPageSize
-  const pagerTotal = showAllActive ? allVisibleSales.length : totalSalesCount
-  const showAllNote: { note: ShowAllNote; count: number } | null = !showAllPreference ? null
-    : !showAllDayRange ? { note: 'single_day', count: 0 }
-      : showAllStatus
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, totalSalesCount, salesPageSize))
@@ -2742,7 +2683,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <div className="text-4xl">!</div>
         <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
-        <button type="button" onClick={() => loadSales(false, true)} className="btn-primary">
+        <button type="button" onClick={() => loadSales(false)} className="btn-primary">
           {t('retry') || 'Retry'}
         </button>
       </div>
@@ -2794,22 +2735,6 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         // or open. History now occupies the stable trailing pager slot below.
         rangeActions={(
           <>
-            <button
-              type="button"
-              data-testid="sales-show-all-toggle"
-              aria-pressed={showAllPreference}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${showAllPreference ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`}
-              aria-label={translateOr('sales_show_all', 'Show all sales')}
-              title={translateOr('sales_show_all', 'Show all sales')}
-              onClick={() => {
-                const next = !showAllPreference
-                writeShowAllPreference(browserStorage(), showAllViewer, next)
-                setShowAllPreference(next)
-                setSalesPage(1)
-              }}
-            >
-              <ChevronsDown className="h-5 w-5 shrink-0" />
-            </button>
             {canExportSales ? (
               <SectionExportAction>
                 <LazyPortalMenu
@@ -2916,9 +2841,9 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           compact
           rangeAsPageSize
           compactCentered
-          page={pagerPage}
-          pageSize={pagerPageSize}
-          totalItems={pagerTotal}
+          page={salesPage}
+          pageSize={salesPageSize}
+          totalItems={totalSalesCount}
           label={t('sales') || 'sales'}
           t={t}
           onPageChange={setSalesPage}
@@ -2928,19 +2853,6 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           }}
         />
       </PagerActionRow>
-      {showAllNote ? (
-        <div role="status" data-testid="sales-show-all-note" data-note={showAllNote.note} className="mb-2 flex flex-wrap items-center justify-center gap-2 text-center text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-          <span>{showAllNote.note === 'single_day' ? translateOr('sales_show_all_one_day', 'Show all works on one day. Pick a single day to see every sale.')
-            : showAllNote.note === 'truncated' ? translateOr('sales_show_all_truncated', 'Showing the first 1,000 sales. Narrow the filters to see the rest.')
-              : showAllNote.note === 'partial' ? translateOr('sales_show_all_partial', 'Some sales could not load. Showing {count}.').replace('{count}', showAllNote.count.toLocaleString())
-                : translateOr('sales_show_all_stale', 'Sales may have changed since this list loaded.')}</span>
-          {showAllNote.note === 'partial' || showAllNote.note === 'stale' ? (
-            <button type="button" data-testid="sales-show-all-reload" onClick={() => { void loadSales(false, true) }} className="btn-secondary px-3 py-1 text-xs">
-              {showAllNote.note === 'partial' ? (t('retry') || 'Retry') : (t('refresh') || 'Refresh')}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       {!directStatusSaving && activePendingDirectStatus && String(detailSale?.id) !== activePendingDirectStatus.entityId ? (
         <div role="status" data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
@@ -2984,7 +2896,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       {loadError && !loading ? (
         <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           <span>{loadError}</span>
-          <button type="button" onClick={() => loadSales(false, true)} className="btn-secondary px-3 py-1 text-xs">
+          <button type="button" onClick={() => loadSales(false)} className="btn-secondary px-3 py-1 text-xs">
             {t('retry') || 'Retry'}
           </button>
         </div>
@@ -3026,7 +2938,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       />
 
       <div data-sales-bottom-pager="" className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize compactCentered page={pagerPage} pageSize={pagerPageSize} totalItems={pagerTotal} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
       </div>
 
       {exportDialog ? (

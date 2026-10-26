@@ -4,7 +4,6 @@ import { transformSync } from 'esbuild'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
-import { planSalesLoad, walkSalesPages, SHOW_ALL_MAX_PAGES } from '../src/utils/salesShowAll.ts'
 
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const helper = fs.readFileSync(new URL('../src/components/sales/saleSettlementConfig.ts', import.meta.url), 'utf8')
@@ -229,9 +228,8 @@ const readEnv: any = {
   clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
   window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
   salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
-  // Show all off here (tests/salesShowAll.test.ts runs this callback with it on); the real planner keeps the paged read.
-  showAllActive: false, planSalesLoad, walkSalesPages, SHOW_ALL_MAX_PAGES, setShowAllStatus: () => {},
-  showAllSnapshotRef: { current: null }, latestQueryKeyRef: { current: '' }, loadKeyRef: { current: '' }, salesRef: { current: [] },
+  // The query generation refs (tests/salesPagedLoad.test.ts drives supersede and refresh with them).
+  latestQueryKeyRef: { current: '' }, loadKeyRef: { current: '' }, salesRef: { current: [] },
   fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
   withLoaderTimeout: (read: () => Promise<unknown>) => read(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
   normalizeSaleRows: (rows: unknown) => rows, setSales: (rows: unknown) => published.push(rows),
