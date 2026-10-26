@@ -32,6 +32,8 @@ interface ExportOptionsDialogProps {
   notify?: (message: string, tone?: string) => void
   /** Optional live authority check; guarded callers recheck after lazy imports. */
   canExport?: () => boolean
+  /** Optional asynchronous snapshot check immediately before the file side effect (a paged statement proves it did not move while it was read). */
+  beforeExport?: () => Promise<void>
 }
 
 function tr(t: TranslateFn, key: string, fallback: string): string {
@@ -48,9 +50,13 @@ export default function ExportOptionsDialog({
   onClose,
   notify,
   canExport,
+  beforeExport,
 }: ExportOptionsDialogProps) {
   const exportAuthorityRef = useRef(canExport)
   exportAuthorityRef.current = canExport
+  const beforeExportRef = useRef(beforeExport)
+  beforeExportRef.current = beforeExport
+  const exportBusyRef = useRef(false)
   const mountedRef = useRef(true)
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const exportAllowed = () => !exportAuthorityRef.current || (mountedRef.current && exportAuthorityRef.current())
@@ -72,12 +78,20 @@ export default function ExportOptionsDialog({
   }
 
   const runExport = async () => {
+    if (exportBusyRef.current) return
     if (!exportAllowed()) return
     if (!selected.size) {
       notify?.(tr(t, 'export_pick_columns', 'Pick at least one column.'), 'error')
       return
     }
+    exportBusyRef.current = true
     setBusy(true)
+    const capturedBeforeExport = beforeExportRef.current
+    const verifyBeforeDownload = async () => {
+      if (!exportAllowed()) return false
+      await capturedBeforeExport?.()
+      return exportAllowed()
+    }
     try {
       const projected = projectExportRows(rows, columns, selected)
       // Business-day stamp, not the raw UTC date -- an export taken between
@@ -87,15 +101,15 @@ export default function ExportOptionsDialog({
       const filename = `${fileBaseName}-${stamp}`
       if (format === 'csv') {
         const { downloadCSV } = await import('../../utils/csv.ts')
-        if (!exportAllowed()) return
+        if (!(await verifyBeforeDownload())) return
         downloadCSV(`${filename}.csv`, projected)
       } else if (format === 'xlsx') {
         const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
-        if (!exportAllowed()) return
+        if (!(await verifyBeforeDownload())) return
         downloadXLSX(`${filename}.xlsx`, projected)
       } else {
         const headers = columns.filter((column) => selected.has(column.key)).map((column) => column.label)
-        if (!exportAllowed()) return
+        if (!(await verifyBeforeDownload())) return
         const opened = openPrintExport({
           title,
           subtitle: `${rows.length} ${tr(t, 'records', 'records')} · ${stamp}`,
@@ -109,8 +123,11 @@ export default function ExportOptionsDialog({
       }
       saveRememberedColumns(rememberKey, selected)
       onClose()
+    } catch (error) {
+      if (!(error instanceof Error && error.name === 'AbortError')) notify?.(error instanceof Error ? error.message : tr(t, 'error', 'Error'), 'error')
     } finally {
-      setBusy(false)
+      exportBusyRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
   }
 
