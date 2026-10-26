@@ -260,6 +260,7 @@ const returnsRouteOverrides = {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', activeUser); return next() } },
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async (...args) => { auditCalls.push(args) } },
   '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [] },
+  '../lib/stockCrossingAlert': { recordStockCrossings: async () => ({ crossings: 0, claimed: 0, sent: 0 }) },
   '../lib/permissions': permissions,
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },

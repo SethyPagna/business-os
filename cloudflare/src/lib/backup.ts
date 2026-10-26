@@ -1284,7 +1284,7 @@ async function discoverRestoreSchema(env: Env): Promise<RestoreSchema> {
     WHERE m.type = 'table' AND m.name IN (SELECT value FROM json_each(?))
     ORDER BY m.name, f.id, f.seq
     LIMIT ${MAX_RESTORE_SCHEMA_ROWS + 1}
-  `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations', STOCK_CROSSING_ALERTS_TABLE])).all<RestoreSchemaRow>()
+  `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations'])).all<RestoreSchemaRow>()
   const references = result.results || []
   if (references.length > MAX_RESTORE_SCHEMA_ROWS) throw new Error('Restore schema exceeds the safe discovery limit; no database rows have been changed.')
   return { tables: new Set(references.map(row => row.table_name)), references, hasCostReview: references.some(row => row.has_cost_review === 1) }
@@ -1614,10 +1614,13 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   try {
     let statementCount = 0
     const deletes: D1PreparedStatement[] = []
+    // Not a backup table, so the schema discovery above does not list it: ask for it directly (older databases lack it).
+    const hasCrossingLog = orderedTables.includes('inventory_movements')
+      && !!(await env.DB.prepare("SELECT 1 AS hit FROM sqlite_master WHERE type = 'table' AND name = ?").bind(STOCK_CROSSING_ALERTS_TABLE).first())
     for (const table of clearedOptionalTables) deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     // 0272: the crossing log is not backed up, but its claim keys embed movement and sale ids that this restore rolls back;
     // leaving its rows would let an old key swallow the first crossing after the restore. Cleared whenever the movements are.
-    if (liveSchema.tables.has(STOCK_CROSSING_ALERTS_TABLE) && orderedTables.includes('inventory_movements')) deletes.push(env.DB.prepare(`DELETE FROM ${qid(STOCK_CROSSING_ALERTS_TABLE)}`))
+    if (hasCrossingLog) deletes.push(env.DB.prepare(`DELETE FROM ${qid(STOCK_CROSSING_ALERTS_TABLE)}`))
     for (const table of [...orderedTables].reverse()) {
       if (table === 'products') {
         // This is the existing snapshot-replacement path: child ledgers have
