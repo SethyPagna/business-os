@@ -1046,7 +1046,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   )
   assert.match(
     productWriteTransportSource,
-    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void\)[\s\S]*const body = \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
+    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void\)[\s\S]*const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product-edit'\)[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
     'product update preserves the caller payload and concurrency metadata on the product route',
   )
   assert.doesNotMatch(productWriteTransportSource, /ensureSupplierExists|apiFetch\('POST', '\/api\/suppliers'/,
