@@ -723,6 +723,16 @@ app.post('/payment-methods/replace', async (c) => {
     return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
   }
   if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
+  // Rewriting the method on every linked sale is a bulk edit of money records,
+  // so it asks for the caller's current password, as the other destructive
+  // routes (lib/destructiveStepUp.ts). A settings-only rename touches the
+  // configured list alone, which the ordinary settings save already allows.
+  // After the cheap validation, before any read of sales or any write.
+  if (scope === 'linked') {
+    const { denyUnlessCurrentPassword } = await import('../lib/destructiveStepUp')
+    const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+    if (passwordDenied) return passwordDenied
+  }
   const fromKey = normalizeReferenceName(from)
   const toKey = normalizeReferenceName(to)
   if (fromKey === toKey && scope !== 'linked') {

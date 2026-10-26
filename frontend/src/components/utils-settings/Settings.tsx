@@ -533,9 +533,18 @@ function SettingsSection({
   )
 }
 
+// A coded step-up refusal has a same-named key in both language packs; null when the error is something else.
+const STEP_UP_REFUSAL_CODES = ['current_password_required', 'incorrect_password', 'current_password_rate_limited']
+function stepUpRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code !== 'string' || !STEP_UP_REFUSAL_CODES.includes(code)) return null
+  const translated = t(code)
+  return translated && translated !== code ? translated : (error instanceof Error && error.message) || code
+}
+
 export default function Settings() {
   const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone, getPermissionTier } = useApp()
-  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const { askToConfirm, askForPassword, confirmDialog } = useConfirmDialog(t)
   // Part 557: 'settings' is a view-tier section. A View-only grant can open
   // this page (reading settings is open to any signed-in user) but cannot
   // save -- the Save button is disabled and the backend refuses the POST
@@ -898,7 +907,7 @@ export default function Settings() {
       const linked = Number(impact.linked_records || 0)
       const isCaseOnlyRename = to.toLocaleLowerCase() === from.toLocaleLowerCase()
       const scope: PaymentMethodRenameScope = isCaseOnlyRename || linked > 0 ? 'linked' : 'settings_only'
-      if (scope === 'linked' && !(await askToConfirm({
+      const request = {
         title: t('rename_payment_method') || 'Rename payment method',
         message: impact.target_exists && !isCaseOnlyRename
           ? (t('payment_method_merge_note') || '"{to}" already exists, so the configured choices will merge.').replace('{to}', to)
@@ -910,16 +919,38 @@ export default function Settings() {
         ],
         note: t('payment_method_audit_unchanged') || 'Historical audit records stay unchanged.',
         confirmLabel: t('rename') || 'Rename',
-      }))) return
+      }
       const expectedUpdatedAt = typeof impact.settings_updated_at === 'string' && impact.settings_updated_at.trim()
         ? impact.settings_updated_at
         : undefined
-      const result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt })
+      let result: Awaited<ReturnType<typeof replacePaymentMethod>> | undefined
+      if (scope === 'linked') {
+        // Linked scope rewrites past sales, so the review dialog also asks for the current password (the Worker enforces
+        // it). The dialog stays open on a refused password (inline text, field cleared and refocused) and on the rate
+        // limit; any other failure closes it and is reported below.
+        let otherFailure: unknown = null
+        const done = await askForPassword(request, async (currentPassword) => {
+          try {
+            result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt, currentPassword })
+            return null
+          } catch (attemptError) {
+            const refusal = stepUpRefusalText(attemptError, t)
+            if (refusal) return refusal
+            otherFailure = attemptError
+            return null
+          }
+        })
+        if (!done) return
+        if (otherFailure) throw otherFailure
+      } else {
+        result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt })
+      }
+      if (!result) return
       setPmList(normalizePaymentMethods(result.methods))
       await loadSettings({ force: true })
       notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to rename payment method', 'error')
+      notify(stepUpRefusalText(error, t) || (error instanceof Error ? error.message : 'Failed to rename payment method'), 'error')
     }
   }
 

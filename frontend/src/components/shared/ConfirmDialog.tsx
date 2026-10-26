@@ -99,6 +99,7 @@ export default function ConfirmDialog({
       onClose={onClose}
       size="sm"
       layer={resolvedLayer}
+      closeDisabled={working}
       unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         {danger ? (

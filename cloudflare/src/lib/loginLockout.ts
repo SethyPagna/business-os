@@ -96,20 +96,26 @@ export async function getLoginLockoutState(env: Env, username: string): Promise<
 export async function recordFailedLogin(env: Env, username: string): Promise<LoginLockoutState> {
   const db = getDb(env)
   const key = lockoutKey(username)
-  const existing = await db.prepare(`SELECT failed_count FROM login_lockouts WHERE username = ?`).get<{ failed_count: number }>([key])
-  const failedCount = (existing?.failed_count || 0) + 1
+  // One atomic statement: the increment, the escalated lock time (computed in
+  // SQL from the NEW count -- the right-hand sides of an upsert's SET see the
+  // old row, so "failed_count + 1" is the new count) and the answer all come
+  // from the same row write. A read-then-write here let concurrent failures
+  // read the same count and each write back count+1, losing attempts. The SQL
+  // wait mirrors computeWaitSeconds (30s * 2^(n-6), capped at 1800s; 2^6*30
+  // already exceeds the cap so the shift stops at 6); a pure test pins them
+  // equal for every count.
+  const row = await db.prepare(`
+    INSERT INTO login_lockouts (username, failed_count, locked_until) VALUES (?, 1, NULL)
+    ON CONFLICT(username) DO UPDATE SET
+      failed_count = failed_count + 1,
+      locked_until = CASE WHEN failed_count + 1 > ${FREE_ATTEMPTS}
+        THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || MIN(${LOCKOUT_MAX_SECONDS}, ${LOCKOUT_BASE_SECONDS} * (1 << MIN(failed_count + 1 - ${FREE_ATTEMPTS + 1}, 6))) || ' seconds')
+        ELSE NULL END,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING failed_count
+  `).get<{ failed_count: number }>([key])
+  const failedCount = Number(row?.failed_count) || 1
   const waitSeconds = computeWaitSeconds(failedCount)
-  const lockedUntil = waitSeconds > 0 ? new Date(Date.now() + waitSeconds * 1000).toISOString() : null
-
-  if (existing) {
-    await db.prepare(`
-      UPDATE login_lockouts SET failed_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?
-    `).run([failedCount, lockedUntil, key])
-  } else {
-    await db.prepare(`
-      INSERT INTO login_lockouts (username, failed_count, locked_until) VALUES (?, ?, ?)
-    `).run([key, failedCount, lockedUntil])
-  }
 
   return { locked: waitSeconds > 0, failedCount, retryAfterSeconds: waitSeconds }
 }

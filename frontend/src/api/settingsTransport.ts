@@ -59,6 +59,8 @@ export interface PaymentMethodImpact {
 }
 
 export interface PaymentMethodReplacePayload {
+  /** Required by the Worker when scope is 'linked' (it rewrites past sales). */
+  currentPassword?: string
   expected_updated_at?: string
   from: string
   scope: PaymentMethodRenameScope
@@ -266,6 +268,7 @@ export function getPaymentMethodImpact(from: string, to: string): Promise<Paymen
 }
 
 export async function replacePaymentMethod(payload: PaymentMethodReplacePayload): Promise<PaymentMethodReplaceResult> {
+  if (payload.scope === 'linked' && !payload.currentPassword) throw new Error('Renaming a payment method on past sales requires the current password.')
   const result = asSettingsPayload(await apiFetch('POST', '/api/settings/payment-methods/replace', payload))
   if (!Array.isArray(result.methods) || !result.methods.every((method) => typeof method === 'string')) {
     throw new Error('Payment method rename returned no canonical method list')
