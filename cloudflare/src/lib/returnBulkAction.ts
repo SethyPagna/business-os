@@ -8,7 +8,7 @@ import { getPlanLimits } from './planTier'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
-import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, sha256Hex } from './saleRecordEvents'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { multiplyMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
@@ -1061,7 +1061,39 @@ async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, re
   }
 }
 
-async function buildMembers(db: D1Compat, sent: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
+/**
+ * Finding G (owner, 12-13 Oct 2026): a cancelled return is not restored once its sale was repriced -- the refund it recorded was computed from the
+ * pricing the sale had then, so bringing it back would book a refund the sale no longer supports (and a sale could end up unreturnable). Staff record a
+ * new return instead. A customer return of the exact-money contract keeps, on each line, the digest of the sale line's pricing snapshot it was priced from
+ * (refund_snapshot_json.source_pricing_snapshot_digest); the sale line's pricing snapshot is rewritten by every reprice (line edit, header discount or tax,
+ * added lines), so a digest that no longer matches is the proof. The sale-revision guard of the batch fences a reprice that lands after this read.
+ * Lines without a recorded digest (legacy v0 returns) or whose sale line carries no pricing snapshot cannot be compared and are not refused here; a line
+ * that is gone is the entitlement check's refusal. Applies to every path that brings a cancelled return back: the list restore, Undo of a cancel, and
+ * Redo of a restore.
+ */
+export const RETURN_RESTORE_SALE_REPRICED_CODE = 'return_restore_sale_repriced'
+async function refuseReactivationAfterReprice(db: D1Compat, returnIds: number[]): Promise<void> {
+  if (!returnIds.length) return
+  const rows = await rowsForIds<{ return_id: number; digest: string | null; pricing_snapshot_json: string | null }>(db, returnIds, (marks) => `SELECT ri.return_id,json_extract(ri.refund_snapshot_json,'$.source_pricing_snapshot_digest') AS digest,si.pricing_snapshot_json
+    FROM return_items ri JOIN returns r ON r.id=ri.return_id JOIN sale_items si ON si.id=ri.sale_item_id AND si.sale_id=r.sale_id
+    WHERE ri.return_id IN (${marks}) AND COALESCE(r.return_scope,'customer')='customer' AND ri.refund_snapshot_json IS NOT NULL ORDER BY ri.id LIMIT 401`)
+  if (rows.length > 400) fail('Select fewer return lines (maximum 400).', 400)
+  for (const row of rows) {
+    if (typeof row.digest !== 'string' || !row.digest || !row.pricing_snapshot_json) continue
+    if (await sha256Hex(String(row.pricing_snapshot_json)) !== row.digest) {
+      fail('The sale was repriced after this return was recorded, so it cannot be restored. Record a new return instead. Nothing was changed.', 409, RETURN_RESTORE_SALE_REPRICED_CODE)
+    }
+  }
+}
+
+/** The members a status change brings back from cancelled to completed. A take-back return linked by an exchange cancel is already completed when the cancel is applied, so it is never a restore there. */
+function reactivatedIds(members: Member[], toward: 'before' | 'after', applying: boolean): number[] {
+  const from = toward === 'before' ? 'after' : 'before'
+  return members.filter((member) => member.changed && member.scope === 'customer' && !(applying && member.linked)
+    && member[toward].status === 'completed' && member[from].status === 'cancelled').map((member) => member.id)
+}
+
+async function buildMembers(db: D1Compat, sent: BulkRequest,redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
   const request = await withFoundTakeBacks(db, sent)
   const ids = request.items.map((item) => item.id)
   // The returns the till made to take replacement units back are read, guarded and stocked together with the selected ones.
@@ -1323,6 +1355,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
   const { members, guards, replacement, memberGuards } = await buildMembers(db, request, redirectTarget, user)
+  if (request.field === 'status') await refuseReactivationAfterReprice(db, reactivatedIds(members, 'after', true))
   // What the operator selected is what the receipt, the counts and the Telegram alert speak of; the linked replacement returns ride in the snapshot.
   const selected = members.filter((member) => !member.linked)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
@@ -1436,6 +1469,8 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
   const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  // Undo of a cancel and Redo of a restore both bring a cancelled return back: refused the same way as the list restore once the sale was repriced.
+  await refuseReactivationAfterReprice(db, reactivatedIds(snapshot.members, direction === 'undo' ? 'before' : 'after', false))
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   const replayGuards: Statement[] = []

@@ -43,9 +43,11 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_exchange_line_no_lot': 'This item has no received date, so it can be returned but not exchanged here. Record the return, then sell the replacement at the POS.',
   'return_cancel_exchange_change': 'This exchange gave change back. Cancel its replacement sale in Sales first, then cancel this return.',
   'return_restore_exchange_credit': 'This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.',
+  'return_restore_sale_repriced': 'The sale was repriced after this return was recorded, so it cannot be restored. Record a new return instead. Nothing was changed.',
 }
 
 //   return_restore_exchange_credit   409  POST /api/returns/bulk restoring an exchange return whose refund credit was moved to Not Paid by its cancel (6.0.963); Undo of the cancel is the way back
+//   return_restore_sale_repriced   409  POST /api/returns/bulk and its undo/redo bringing a cancelled return back after its sale was repriced (finding G, owner 12 Oct): record a new return instead
 //   return_exchange_line_no_lot   409  POST /api/returns an exchange of a sale line that has no received date (lot): a retry can never succeed, so it says what to do instead (6.0.965)
 //   return_cancel_exchange_change   409  POST /api/returns/bulk cancelling an exchange return that handed change back to the customer (6.0.964): the cash handed out would be unaccounted for
 // A refusal whose sentence names values the Worker sends as `params`
