@@ -342,7 +342,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
         <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
         <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{editLock === 'exact_return'
           ? T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')
-          : T('return_legacy_edit_unavailable', 'This return uses an older money format than its sale, so it cannot be edited here. Its saved refund stays unchanged.')}</p>
+          : T('return_legacy_edit_unavailable', 'This return uses an older money format than its sale, so it cannot be edited here. Its saved refund stays unchanged. An admin can review and convert it.')}</p>
         <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
         <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
       </div>

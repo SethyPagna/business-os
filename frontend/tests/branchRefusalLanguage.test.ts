@@ -196,7 +196,9 @@ await runTest('money_precision_review_needed: six Worker sites, one accurate cla
   for (const text of [EN.money_precision_review_needed]) assert.doesNotMatch(text, /out of date|restart|reload|update the app|older app|old app/i)
   assert.match(EN.money_precision_review_needed, /nothing was saved/i)
   assert.match(EN.money_precision_review_needed, /older money format/i)
-  assert.match(EN.money_precision_review_needed, /admin/i)
+  assert.match(EN.money_precision_review_needed, /an admin can review and convert it/i, 'stays true once admins can convert (lane 6.0.992)')
+  // POST /sales refuses a sale that does not exist yet, so the sentence names no sale.
+  assert.doesNotMatch(EN.money_precision_review_needed, /this sale/i)
   assert.doesNotMatch(KM.money_precision_review_needed, /ចាប់ផ្តើមឡើងវិញ|ផ្ទុកកម្មវិធីឡើងវិញ/, 'Khmer does not say restart or reload either')
   assert.ok(!sales.includes(EN.money_precision_review_needed) && !returns.includes(EN.money_precision_review_needed), 'a class sentence, not one Worker sentence')
   uiLanguage = 'km'; packServed = KM
