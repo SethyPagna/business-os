@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { returnsStatementParams } from '../src/utils/returnsExportWindow.ts'
+import { returnsStatementParams, returnsStatementRangeOrDefault } from '../src/utils/returnsExportWindow.ts'
 import { readCompleteReturnStatement, type ReturnStatementPage } from '../src/api/returnsStatementTransport.ts'
 import { invalidateActorReadChannel, resetActorReadSession } from '../src/api/actorReadScope.ts'
 
@@ -127,3 +127,21 @@ for (const kind of ['token', 'total', 'cursor', 'network']) {
   assert.equal(count, 2, 'No automatic retry combining cohorts')
 }
 console.log('PASS statement windows and candidate transport: 21001 rows, bounded sequential requests, complete-only handoff, scope/cancel/generation/failure fences')
+
+// A period export never refuses for its dates: an unusable filter defaults to the last year up to its end date (or today), and says so.
+const today = '2026-10-26'
+const keep = returnsStatementRangeOrDefault({ startDate: '2026-09-20', endDate: '2026-09-20' }, today)
+assert.deepEqual(keep, { range: { startDate: '2026-09-20', endDate: '2026-09-20' }, defaulted: false }, 'a usable filter is used as it is')
+for (const unusable of [
+  { startDate: '', endDate: '' }, { startDate: '2026-09-20', endDate: '' }, { startDate: '', endDate: '2026-09-20' },
+  { startDate: '2026-09-21', endDate: '2026-09-20' }, { startDate: '2020-01-01', endDate: '2026-10-01' }, { startDate: 'x', endDate: 'y' },
+]) {
+  const result = returnsStatementRangeOrDefault(unusable, today)
+  assert.equal(result.defaulted, true, JSON.stringify(unusable))
+  assert.doesNotThrow(() => returnsStatementParams(result.range), 'the default is itself an acceptable statement window')
+}
+assert.deepEqual(returnsStatementRangeOrDefault({ startDate: '', endDate: '' }, today).range, { startDate: '2025-10-27', endDate: today }, 'no dates: the last 12 months ending today')
+assert.deepEqual(returnsStatementRangeOrDefault({ startDate: '2020-01-01', endDate: '2026-10-01' }, today).range, { startDate: '2025-10-02', endDate: '2026-10-01' }, 'too long: the last year before the filter\'s own end date')
+assert.deepEqual(returnsStatementRangeOrDefault({ startDate: '2020-01-01', endDate: '2030-01-01' }, today).range.endDate, today, 'an end date in the future is capped at today')
+assert.deepEqual(returnsStatementRangeOrDefault({ startDate: '', endDate: '2024-02-29' }, today).range, { startDate: '2023-03-01', endDate: '2024-02-29' }, 'a leap-day end reaches back to Mar 1 of the year before')
+console.log('PASS period exports default to a one-year window instead of refusing')

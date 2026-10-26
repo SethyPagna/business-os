@@ -133,8 +133,11 @@ const loadReturnsParamsSection = returnsSource.slice(
   returnsSource.indexOf('const loadReturns = useCallback') + 1200,
 )
 assert.doesNotMatch(loadReturnsParamsSection, /typeFilter !== 'all' \? \{ type: typeFilter \}/, 'Returns should not send the type filter to the server -- it would narrow `rows` itself and break the scope stat tiles')
-assert.match(returnsSource, /const searchFiltered = useMemo\(/, 'Returns should compute a search-only (no type) view of the data for the scope stat tiles')
-assert.match(returnsSource, /for \(const ret of searchFiltered\)/, 'Returns scope stat tiles should sum from the search-only filtered view, not the type-filtered list view')
+// RETURNS-ENDPOINT / STATEMENT-EXPORTS: the scope entries export the COMPLETE period statement from the server (search kept, the client type chip not applied),
+// not whatever the capped list had loaded; the stat tiles come from the range-driven server report.
+assert.match(returnsSource, /exportStatement\('returns-supplier', \{ scope: 'supplier', includeType: false \}\)/, 'supplier scope export reads every server match without narrowing by the client type selection')
+assert.match(returnsSource, /exportStatement\('returns-customer', \{ scope: 'customer', includeType: false \}\)/, 'customer scope export likewise preserves its search-only cohort')
+assert.match(returnsSource, /getReturnsReport\(/, 'range-driven server stat tiles remain independent of complete export loading')
 
 console.log('PASS returns type filter stays client-side so scope stat tiles and type options always reflect the full dataset')
 

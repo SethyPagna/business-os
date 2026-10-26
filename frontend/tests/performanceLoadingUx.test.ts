@@ -2074,11 +2074,14 @@ assert.match(
   /countSelectedIds\(normalized, selectedIds\) === normalized\.length/,
   'returns grouped selection should count selected ids without repeated every/map conversions',
 )
+// RETURNS-ENDPOINT / STATEMENT-EXPORTS: the customer/supplier period exports no longer re-split the capped loaded rows in the page; they read the complete
+// statement of that scope from the server (search kept, the client type chip not applied), so there is no per-render split left to keep single-pass.
 assert.match(
   returns,
-  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]{0,200}for \(const ret of searchFiltered\)[\s\S]{0,200}summary\.supplierRows\.push\(ret\)[\s\S]{0,100}summary\.customerRows\.push\(ret\)/,
-  'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
+  /exportStatement\('returns-customer', \{ scope: 'customer', includeType: false \}\)[\s\S]{0,400}exportStatement\('returns-supplier', \{ scope: 'supplier', includeType: false \}\)|exportStatement\('returns-supplier', \{ scope: 'supplier', includeType: false \}\)[\s\S]{0,400}exportStatement\('returns-customer', \{ scope: 'customer', includeType: false \}\)/,
+  'returns scope exports should read the complete server statement of the scope without narrowing by the client type selection',
 )
+assert.doesNotMatch(returns, /returnScopeSummary/, 'the loaded-rows scope split is gone; nothing re-filters the capped list for an export')
 // Scope (customer vs supplier) is a mandatory view with no neutral option,
 // while type, grouping, and sort all expose a default plus deviations inside
 // FilterMenu. The badge must count exactly those three behavioral deviations.

@@ -281,6 +281,7 @@ const returnsRouteOverrides = {
   '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
+  '../lib/returnExportWindow': { returnExportWindow: () => { throw new Error('export window is not part of this test') } },
   // Migration 0260: the route splits a refund into the debt it lowers and the cash it pays,
   // and its report sums drawer cash with the shift kernel's own SQL.
   '../lib/returnRefundSplit': bundledKernel('lib/returnRefundSplit.ts'),
