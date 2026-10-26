@@ -475,6 +475,14 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // 403 review_action_full_required names the grant the reviewer lacks (fees:delete, product_cost_edit, ...), so the
   // refusal can be restated in the operator's language (api/branchRuleErrors.ts reviewApprovalRefusalText).
   error.permission = typeof parsed?.permission === 'string' ? parsed.permission : null
+  // 409 review_identity_conflict names the product a queued rename now matches, so the Review page can ask the approver to
+  // confirm the merge into exactly that product (api/reviewQueueTransport.ts approvePendingAction confirmMergeInto).
+  // 409 review_merge_confirm_required / review_merge_target_changed carry the merge preview the approver confirms.
+  error.preview = parsed?.preview && typeof parsed.preview === 'object' && !Array.isArray(parsed.preview) ? parsed.preview : null
+  const existingProductId = Number(parsed?.existing_product_id)
+  error.existingProduct = Number.isSafeInteger(existingProductId) && existingProductId > 0
+    ? { id: existingProductId, name: typeof parsed?.existing_product_name === 'string' ? parsed.existing_product_name : null }
+    : null
   // RET-D: the record that blocked a stock Revert / Undo / line edit, and
   // where to open it (cloudflare/src/lib/stockRefusalBlocker.ts ->
   // utils/stockRefusal.ts), so the refusal can say WHY and link WHERE.

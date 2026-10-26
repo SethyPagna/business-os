@@ -306,11 +306,15 @@ async function main() {
     assert.equal(stored(h, 1).barcode, ASCII)
   })
 
-  await check('review update: an approved queued edit onto the Khmer spelling of a sibling code is refused as an identity conflict, nothing stored', async () => {
+  // REVQ-A: approving an edit that lands on another product's identity merges, but only once the approver names the survivor;
+  // until then the answer is the merge preview (review_merge_confirm_required) and nothing is stored.
+  await check('review update: an approved queued edit onto the Khmer spelling of a sibling code needs the merge confirmed, nothing stored', async () => {
     const h = productsWorld()
     seed(h.raw, "INSERT INTO products (id, name, barcode, is_active, cost_price_usd) VALUES (1, 'Queued Conflict', @code, 1, 5)", { code: ASCII })
     seed(h.raw, "INSERT INTO products (id, name, barcode, is_active, cost_price_usd) VALUES (2, 'Queued Conflict', @code, 1, 5)", { code: OTHER })
-    await assert.rejects(() => approve(h, queued(h, 'update', 2, { name: 'Queued Conflict', barcode: KHMER })), (error) => error.code === 'review_identity_conflict')
+    const mergeApprover = { id: 9, username: 'rev', name: 'Reviewer', organization_id: null, role_id: null, is_active: 1, permissions: JSON.stringify({ products: true }) }
+    await assert.rejects(() => h.load('lib/reviewApply.ts').applyApprovedPendingAction({ DB: d1Shim(h.raw) }, queued(h, 'update', 2, { name: 'Queued Conflict', barcode: KHMER }), { id: 9, name: 'Reviewer' }, mergeApprover),
+      (error) => error.code === 'review_merge_confirm_required' && error.details.preview.survivorId === 1)
     assert.equal(stored(h, 2).barcode, OTHER)
   })
 

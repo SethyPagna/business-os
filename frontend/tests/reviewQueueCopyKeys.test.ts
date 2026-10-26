@@ -28,6 +28,10 @@ const SLOTS: Record<string, string[]> = {
   review_merge_confirm_stock_moved: [],
   review_merge_confirm_price_after: [],
   review_merge_confirm_sessions_closing: ['{n}'],
+  review_merge_permission_required: [],
+  review_merge_state_conflict: [],
+  review_merge_group_row: [],
+  review_merge_confirm_rest_unapplied: [],
 }
 const slotsOf = (value: string): string[] => [...new Set(value.match(/\{[a-zA-Z0-9_]+\}/g) ?? [])].sort()
 const KHMER = /[ក-៿]/
@@ -58,7 +62,7 @@ for (const key of ['review_merge_confirm_survivor', 'review_merge_confirm_stock_
 }
 const NOTHING_APPLIED = 'មិនមានអ្វីត្រូវបានអនុវត្តទេ'
 assert.ok(km.review_identity_conflict.includes(NOTHING_APPLIED), 'the sibling refusal still uses the pinned phrase')
-for (const key of ['review_merge_target_changed', 'request_permission_revoked', 'review_merge_plan_budget', 'review_product_has_stock']) {
+for (const key of ['review_merge_target_changed', 'request_permission_revoked', 'review_merge_plan_budget', 'review_product_has_stock', 'review_merge_permission_required', 'review_merge_state_conflict', 'review_merge_group_row']) {
   assert.ok(km[key].includes(NOTHING_APPLIED), `${key}: a refusal that writes nothing must say so in the pack’s own words`)
   assert.match(en[key], /nothing was applied/i, `${key}: English refusal must say nothing was applied`)
 }

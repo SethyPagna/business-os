@@ -915,7 +915,7 @@ export const IMAGE_ONLY_WRITABLE_FIELDS = new Set(['image_path', 'image_gallery'
 // forbidden field" check below. Mirrors PRODUCT_SKIP_KEYS above, but named
 // separately since that set is about what insertRow/updateRow persist, not
 // about what this restricted role is allowed to even send.
-const IMAGE_ONLY_METADATA_KEYS = new Set([
+export const IMAGE_ONLY_METADATA_KEYS = new Set([
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
   'client_request_id', 'deviceName', 'device_name', 'deviceTz', 'device_tz',
   'clientTime', 'client_time',

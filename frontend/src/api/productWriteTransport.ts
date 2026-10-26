@@ -307,7 +307,9 @@ export async function updateProduct(id: string | number, payload: ProductPayload
   const scope = captureActorReadScope('products')
   const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
   check()
-  const body = { ...getDevicePayload(), ...(payload || {}) }
+  // client_request_id: a queued edit (Review Required) is stored with it, so a retried request answers with the row the first
+  // attempt queued instead of queueing a second one (cloudflare/src/lib/pendingActions.ts createPendingActionOnce).
+  const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product-edit')
   delete body.is_active
   const result = await route(
     'products:update',

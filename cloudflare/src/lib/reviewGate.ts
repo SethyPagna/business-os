@@ -24,7 +24,7 @@
 // id -- the caller must NOT perform the write, and should return that id
 // to the client (202, `{ pending: true, pendingActionId }`) instead.
 
-import { createPendingAction } from './pendingActions'
+import { createPendingActionOnce } from './pendingActions'
 import { getPermissionTier, type PermissionUser } from './permissions'
 import type { Env } from '../index'
 import { actorSnapshot } from './actorSnapshot'
@@ -61,7 +61,7 @@ export async function maybeQueueForReview(
   const tier = getPermissionTier(user, section)
   if (tier !== 'review') return null
   const requestedByName = actorSnapshot(user)
-  const pendingId = await createPendingAction(env, {
+  const { id: pendingId, created } = await createPendingActionOnce(env, {
     section,
     actionType: input.actionType,
     entityType: input.entityType,
@@ -72,6 +72,8 @@ export async function maybeQueueForReview(
     requestedBy: user?.id ?? null,
     requestedByName,
   })
+  // F5: a retry of an already-queued request (same client_request_id) answers with the existing row and sends no second alert.
+  if (!created) return pendingId
   // After the insert, so a request that was not queued sends nothing. Never reads the summary (it holds amounts).
   try {
     await reviewAlertHook()?.announce(env, {

@@ -46,6 +46,8 @@ export interface CreatePendingActionInput {
   summary?: string | null
   requestedBy?: number | null
   requestedByName?: string | null
+  /** The client's retry key; defaults to payload.client_request_id. See createPendingActionOnce. */
+  clientRequestId?: string | null
 }
 
 // Inserts a new open pending-action row. Returns the created row's id.
@@ -53,8 +55,92 @@ export interface CreatePendingActionInput {
 // circular structure, which no caller in this codebase should ever pass
 // (a write route's own request body, already parsed from real JSON).
 export async function createPendingAction(env: Env, input: CreatePendingActionInput): Promise<number> {
+  return (await createPendingActionOnce(env, input)).id
+}
+
+// F5: the retry key. An explicit input.clientRequestId wins; otherwise the payload's own client_request_id (the
+// write routes queue the request body they received). Only a non-empty string of sane length counts.
+function pendingRequestKey(input: CreatePendingActionInput): string | null {
+  const explicit = input.clientRequestId
+  const fromPayload = input.payload && typeof input.payload === 'object' && !Array.isArray(input.payload)
+    ? (input.payload as Record<string, unknown>).client_request_id : undefined
+  const key = typeof explicit === 'string' ? explicit : typeof fromPayload === 'string' ? fromPayload : ''
+  const trimmed = key.trim()
+  return trimmed && trimmed.length <= 200 ? trimmed : null
+}
+
+// Idempotent insert. A retry of the same request (same requester, same target, same client_request_id) returns the
+// row the first attempt queued and reports created=false, so the caller sends no second alert. The existence test and
+// the insert are ONE statement (INSERT ... SELECT ... WHERE NOT EXISTS), so two retries racing each other cannot both
+// insert; no unique index (and so no migration) is needed. A request without a key is always a new row.
+// The same retry key used for a different request (another payload): refused, never answered with the first request.
+export class PendingActionIdempotencyError extends Error {
+  readonly code = 'idempotency_conflict'
+  constructor() {
+    super('This request id was already used for a different request.')
+    this.name = 'PendingActionIdempotencyError'
+  }
+}
+
+// The payload as the retry key sees it: server-added markers (a leading underscore, the money-policy version) are not part
+// of what the client sent, and key order is not significant.
+function payloadFingerprint(json: string): string {
+  try {
+    const parsed = JSON.parse(json) as unknown
+    const strip = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(strip)
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+          .filter(([key]) => !key.startsWith('_') && key !== 'product_money_policy_version')
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, part]) => [key, strip(part)]))
+      }
+      return value
+    }
+    return JSON.stringify(strip(parsed))
+  } catch { return json }
+}
+
+export async function createPendingActionOnce(env: Env, input: CreatePendingActionInput): Promise<{ id: number; created: boolean }> {
   const db = getDb(env)
   const payloadJson = JSON.stringify(input.payload ?? {})
+  const requestKey = pendingRequestKey(input)
+  const params: Record<string, unknown> = {
+    section: input.section,
+    action_type: input.actionType,
+    entity_type: input.entityType,
+    entity_id: input.entityId ?? null,
+    payload_json: payloadJson,
+    summary: input.summary ?? null,
+    requested_by: input.requestedBy ?? null,
+    requested_by_name: input.requestedByName ?? null,
+    ...(input.expectedEntityStateJson === undefined ? {} : { expected_entity_state_json: input.expectedEntityStateJson }),
+  }
+  if (requestKey && input.requestedBy != null) {
+    const sameRequest = `requested_by = @requested_by AND section = @section AND action_type = @action_type
+      AND entity_type = @entity_type AND entity_id IS @entity_id
+      AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.client_request_id') END = @request_key`
+    const inserted = await db.prepare(`
+      INSERT INTO pending_actions (
+        section, action_type, entity_type, entity_id, payload_json, summary,
+        status, requested_by, requested_by_name${input.expectedEntityStateJson === undefined ? '' : ', expected_entity_state_json'}
+      ) SELECT
+        @section, @action_type, @entity_type, @entity_id, @payload_json, @summary,
+        'open', @requested_by, @requested_by_name${input.expectedEntityStateJson === undefined ? '' : ', @expected_entity_state_json'}
+      WHERE NOT EXISTS (SELECT 1 FROM pending_actions WHERE ${sameRequest})
+    `).run({ ...params, request_key: requestKey })
+    if (inserted.changes > 0) {
+      if (inserted.lastInsertRowid) return { id: inserted.lastInsertRowid, created: true }
+      const row = await db.prepare(`SELECT id FROM pending_actions WHERE ${sameRequest} ORDER BY id DESC LIMIT 1`)
+        .get<{ id: number }>({ section: params.section, action_type: params.action_type, entity_type: params.entity_type,
+          entity_id: params.entity_id, requested_by: params.requested_by, request_key: requestKey })
+      return { id: row?.id ?? 0, created: true }
+    }
+    const existing = await db.prepare(`SELECT id, payload_json FROM pending_actions WHERE ${sameRequest} ORDER BY id ASC LIMIT 1`)
+      .get<{ id: number; payload_json: string }>({ section: params.section, action_type: params.action_type, entity_type: params.entity_type,
+        entity_id: params.entity_id, requested_by: params.requested_by, request_key: requestKey })
+    if (existing && payloadFingerprint(existing.payload_json) !== payloadFingerprint(payloadJson)) throw new PendingActionIdempotencyError()
+    return { id: existing?.id ?? 0, created: false }
+  }
   const result = await db.prepare(`
     INSERT INTO pending_actions (
       section, action_type, entity_type, entity_id, payload_json, summary,
@@ -74,12 +160,12 @@ export async function createPendingAction(env: Env, input: CreatePendingActionIn
     requested_by_name: input.requestedByName ?? null,
     ...(input.expectedEntityStateJson === undefined ? {} : { expected_entity_state_json: input.expectedEntityStateJson }),
   })
-  if (result.lastInsertRowid) return result.lastInsertRowid
+  if (result.lastInsertRowid) return { id: result.lastInsertRowid, created: true }
   // Fallback for a fake/test D1 adapter that doesn't populate
   // meta.last_row_id -- real D1 always does, so this branch is
   // test-harness-only.
   const row = await db.prepare('SELECT id FROM pending_actions ORDER BY id DESC LIMIT 1').get<{ id: number }>()
-  return row?.id ?? 0
+  return { id: row?.id ?? 0, created: true }
 }
 
 export interface ListPendingActionsOptions {

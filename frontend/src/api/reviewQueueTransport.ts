@@ -59,13 +59,27 @@ export function getPendingAction(id: number): Promise<{ data: PendingActionRow }
 // outcomes a caller should surface as-is rather than swallow -- apiFetch
 // already throws on non-2xx with the server's own error message attached,
 // same as every other write in this codebase.
-export function approvePendingAction(id: number): Promise<{ success: boolean; data: PendingActionRow }> {
+//
+// confirmMergeInto: the product the approver confirmed as the survivor of a queued rename that now matches it
+// (409 review_merge_confirm_required names it). The Worker merges only into exactly that id, and only if the preview's
+// fingerprint is still current; absent = not confirmed.
+export type ApprovePendingActionResult = {
+  success: boolean
+  data: PendingActionRow
+  // Set when the approval merged a renamed product into another (POST /api/review/:id/approve).
+  merged_into?: { id: number | null; name: string | null }
+  // The queued changes the merge did not apply to the kept product, as field names.
+  rest_unapplied?: string[]
+}
+
+export function approvePendingAction(id: number, confirmMergeInto?: number, confirmFingerprint?: string): Promise<ApprovePendingActionResult> {
   return route(
     'review:approve',
-    () => apiFetch('POST', `/api/review/${encodeURIComponent(String(id))}/approve`),
+    () => apiFetch('POST', `/api/review/${encodeURIComponent(String(id))}/approve`,
+      confirmMergeInto === undefined ? undefined : { confirm_merge_into: confirmMergeInto, ...(confirmFingerprint ? { confirm_fingerprint: confirmFingerprint } : {}) }),
     null,
     true,
-  ) as Promise<{ success: boolean; data: PendingActionRow }>
+  ) as Promise<ApprovePendingActionResult>
 }
 
 export async function approveProductCreatePendingAction(id: number, scope: ActorReadScope): Promise<unknown> {

@@ -3833,7 +3833,7 @@ const MERGE_CONFLICT_RETRY_MESSAGE = 'Stock on one of these products changed whi
 const MERGE_TOO_LARGE_MESSAGE = 'This product has too many linked stock or history rows for one safe merge and remains unchanged.'
 
 // Definite refusals leave the fold untouched and use the existing coded 409s.
-function mergeFoldRefusal(error: unknown): { code: string; error: string; retryable?: true } | null {
+export function mergeFoldRefusal(error: unknown): { code: string; error: string; retryable?: true } | null {
   const stockError = productStockGuardError(error)
   if (stockError) return { code: stockError.code, error: stockError.message }
   const text = String(error)
