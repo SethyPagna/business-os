@@ -170,7 +170,7 @@ async function main() {
     const disconnect = drive.slice(drive.indexOf('export async function disconnectDrive'))
     assert.match(disconnect.slice(0, 600), /\[DRIVE_SYNC_AUTHORIZED_BY_KEY, ''\]/)
     const index = src('index.ts')
-    const cronAt = index.indexOf("runStep('drive-sync'")
+    const cronAt = index.indexOf("step('drive-sync'")
     const cron = index.slice(cronAt, cronAt + 900)
     assert.ok(cron.indexOf('checkDriveSyncAuthorizer(env)') > -1 && cron.indexOf('checkDriveSyncAuthorizer(env)') < cron.indexOf("enqueueDriveSyncJob(env, 'scheduled')"), 'cron re-checks before enqueueing')
     const queue = src('lib/driveSyncQueue.ts')

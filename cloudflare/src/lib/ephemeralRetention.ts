@@ -112,16 +112,35 @@ async function setSettingValue(env: Env, key: string, value: string): Promise<vo
 
 type Db = ReturnType<typeof getDb>
 
+// Bounded work per scheduled visit. A cron invocation has the same 10 ms CPU
+// budget as a request on Free, so a sweep takes at most this many bounded
+// statements per visit and reports `more` when it stopped with work left;
+// the rotating cron (lib/cronRotation.ts) resumes it on the next tick and the
+// last-run stamp is NOT written, so nothing is skipped.
+export const MAX_BATCHES_PER_VISIT = 3
+
+class Budget {
+  more = false
+  private left: number
+  constructor(batches: number) { this.left = batches }
+  /** Take one bounded statement; false (and `more`) once none are left. */
+  take(): boolean {
+    if (this.left > 0) { this.left -= 1; return true }
+    this.more = true
+    return false
+  }
+}
+
 // Bounded delete for tables that have an integer `id` PK: repeatedly delete a
 // capped slice matching `where` until fewer than a full batch remain.
-async function batchDeleteById(env: Env, db: Db, table: string, where: string, params: Record<string, unknown>): Promise<number> {
+async function batchDeleteById(env: Env, db: Db, table: string, where: string, params: Record<string, unknown>, budget: Budget): Promise<number> {
   // Rows per bounded DELETE, tier-aware -- see lib/planTier.ts. Free gets
   // 1000 instead of 5000: it keeps one statement inside the 10 ms cron
   // budget, and stops a log sweep spending a noticeable slice of the
   // 100,000-rows-written-per-day D1 ceiling on pruning alone.
   const deleteBatch = getPlanLimits(env).ephemeralDeleteBatch
   let total = 0
-  for (;;) {
+  while (budget.take()) {
     const result = await db
       .prepare(`DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} WHERE ${where} LIMIT ${deleteBatch})`)
       .run(params)
@@ -143,7 +162,14 @@ export interface EphemeralRetentionResult {
   skipped: boolean
   reason?: string
   deleted?: Record<string, number>
+  /** Stopped at the per-visit bound with work left; run again soon. */
+  more?: boolean
 }
+
+// Scheduled slices. Each is one cron visit; the legacy no-argument call still
+// runs everything (kept for tests and manual use).
+export const EPHEMERAL_RETENTION_GROUPS = ['rate_limit', 'auth', 'logs', 'history', 'submissions'] as const
+export type EphemeralRetentionGroup = typeof EPHEMERAL_RETENTION_GROUPS[number]
 
 // ---------------------------------------------------------------------------
 // action_history is a PARENT table. Operation receipts point at it through
@@ -207,9 +233,9 @@ export function actionHistoryReferenceExclusion(references: ForeignReference[]):
   }).join('') + SNAPSHOT_HISTORY_EXCLUSION
 }
 
-async function pruneActionHistory(env: Env, db: Db): Promise<number> {
+async function pruneActionHistory(env: Env, db: Db, budget: Budget): Promise<number> {
   const references = await discoverActionHistoryReferences(db)
-  return batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) })
+  return batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }, budget)
 }
 
 // Collect the R2 keys a set of submission rows points at. Only keys under
@@ -241,9 +267,9 @@ async function deleteSubmissionObjects(env: Env, keys: string[]): Promise<void> 
 // Reviewed long enough ago: drop the images, keep the row (and its points).
 // `screenshots_json` is emptied in the same pass, which is also what makes
 // this idempotent -- an emptied row no longer matches.
-async function pruneSubmissionImages(env: Env, db: Db): Promise<number> {
+async function pruneSubmissionImages(env: Env, db: Db, budget: Budget): Promise<number> {
   let total = 0
-  for (;;) {
+  while (budget.take()) {
     const rows = await db.prepare(`
       SELECT id, screenshots_json FROM customer_share_submissions
       WHERE reviewed_at IS NOT NULL AND reviewed_at < @cutoff
@@ -266,9 +292,9 @@ async function pruneSubmissionImages(env: Env, db: Db): Promise<number> {
 
 // Never reviewed and older than the outer window: no points were ever
 // awarded, so nothing is lost by removing the row with its images.
-async function pruneUnreviewedSubmissions(env: Env, db: Db): Promise<number> {
+async function pruneUnreviewedSubmissions(env: Env, db: Db, budget: Budget): Promise<number> {
   let total = 0
-  for (;;) {
+  while (budget.take()) {
     const rows = await db.prepare(`
       SELECT id, screenshots_json FROM customer_share_submissions
       WHERE reviewed_at IS NULL AND created_at < @cutoff
@@ -286,8 +312,11 @@ async function pruneUnreviewedSubmissions(env: Env, db: Db): Promise<number> {
   return total
 }
 
-export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<EphemeralRetentionResult> {
-  const lastRunRaw = await getSettingValue(env, LAST_RUN_KEY)
+export async function maybeRunScheduledEphemeralRetention(env: Env, group?: EphemeralRetentionGroup): Promise<EphemeralRetentionResult> {
+  // One stamp per slice, so a slice that stopped early is retried on its own
+  // while finished slices stay quiet. No group = the whole sweep, legacy key.
+  const lastRunKey = group ? `${LAST_RUN_KEY}:${group}` : LAST_RUN_KEY
+  const lastRunRaw = await getSettingValue(env, lastRunKey)
   const lastRun = lastRunRaw ? Date.parse(lastRunRaw) : 0
   if (lastRun && Date.now() - lastRun < MIN_INTERVAL_MS) {
     return { skipped: true, reason: 'ran-recently' }
@@ -295,32 +324,52 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
 
   const db = getDb(env)
   const deleted: Record<string, number> = {}
+  let more = false
+  const want = (name: EphemeralRetentionGroup) => !group || group === name
   // Each table guarded independently: a table missing on a not-yet-migrated
-  // local DB, or a transient error on one, must not stop the others.
-  const step = async (label: string, fn: () => Promise<number>) => {
-    try { deleted[label] = await fn() } catch (error) { console.error(`[ephemeral-retention] ${label} failed`, (error as Error)?.message || error) }
+  // local DB, or a transient error on one, must not stop the others. The
+  // table's own bounded budget is collected into `more`.
+  const step = async (label: string, fn: (budget: Budget) => Promise<number>, batches: number = MAX_BATCHES_PER_VISIT) => {
+    const budget = new Budget(batches)
+    try { deleted[label] = await fn(budget) } catch (error) { console.error(`[ephemeral-retention] ${label} failed`, (error as Error)?.message || error) }
+    if (budget.more) more = true
+  }
+  // Tables that share one visit get one statement each; a slice with a single
+  // heavy table gets the full per-visit bound.
+  const shared = group ? 1 : MAX_BATCHES_PER_VISIT
+
+  if (want('rate_limit')) {
+    await step('rate_limit_events', (b) => batchDeleteById(env, db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }, b))
+  }
+  if (want('auth')) {
+    await step('user_sessions', (b) => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}, b), shared)
+    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}, b), shared)
+    const verificationNow = Date.now()
+    await step('verification_codes', (b) => batchDeleteById(env, db, 'verification_codes', `
+      created_at <= @historyCutoff
+      AND (consumed_at IS NOT NULL OR julianday(expires_at) <= julianday(@now))
+    `, {
+      historyCutoff: sqliteUtcTimestamp(verificationNow - VERIFICATION_HISTORY_MS),
+      now: sqliteUtcTimestamp(verificationNow),
+    }, b), shared)
+    await step('trusted_devices', (b) => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }, b), shared)
+    await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
+    await step('portal_auth_lockouts', () => directDelete(db, 'portal_auth_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
+  }
+  if (want('logs')) {
+    const aiLogCutoff = mixedFormatOlderThan('created_at', AI_LOG_TTL_DAYS) // portal.ts writes toISOString()
+    await step('ai_response_logs', (b) => batchDeleteById(env, db, 'ai_response_logs', aiLogCutoff.where, aiLogCutoff.params, b))
+  }
+  if (want('history')) {
+    await step('action_history', (b) => pruneActionHistory(env, db, b))
+  }
+  if (want('submissions')) {
+    await step('share_submission_images', (b) => pruneSubmissionImages(env, db, b), shared + 1)
+    await step('share_submissions_unreviewed', (b) => pruneUnreviewedSubmissions(env, db, b), shared + 1)
   }
 
-  await step('rate_limit_events', () => batchDeleteById(env, db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
-  await step('user_sessions', () => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
-  await step('portal_sessions', () => batchDeleteById(env, db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
-  const verificationNow = Date.now()
-  await step('verification_codes', () => batchDeleteById(env, db, 'verification_codes', `
-    created_at <= @historyCutoff
-    AND (consumed_at IS NOT NULL OR julianday(expires_at) <= julianday(@now))
-  `, {
-    historyCutoff: sqliteUtcTimestamp(verificationNow - VERIFICATION_HISTORY_MS),
-    now: sqliteUtcTimestamp(verificationNow),
-  }))
-  await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
-  const aiLogCutoff = mixedFormatOlderThan('created_at', AI_LOG_TTL_DAYS) // portal.ts writes toISOString()
-  await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', aiLogCutoff.where, aiLogCutoff.params))
-  await step('action_history', () => pruneActionHistory(env, db))
-  await step('share_submission_images', () => pruneSubmissionImages(env, db))
-  await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
-  await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
-  await step('portal_auth_lockouts', () => directDelete(db, 'portal_auth_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
-
-  await setSettingValue(env, LAST_RUN_KEY, new Date().toISOString())
-  return { skipped: false, deleted }
+  // Not stamped while work remains: the next visit resumes instead of waiting
+  // out the interval.
+  if (!more) await setSettingValue(env, lastRunKey, new Date().toISOString())
+  return { skipped: false, deleted, ...(more ? { more: true } : {}) }
 }

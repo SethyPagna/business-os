@@ -93,10 +93,15 @@ async function main() {
       await seed(world, 'daily')
       await world.run("DELETE FROM settings WHERE key = 'audit_log_retention_last_run'")
       const worker = await world.mf.getWorker()
-      await worker.scheduled({ scheduledTime: new Date(), cron: '0 */6 * * *' })
-      for (let i = 0; i < 240; i += 1) {
+      // The cron runs ONE rotation step per tick: tick until the audit step
+      // has had its turn (a full rotation is at most 13 ticks).
+      for (let tick = 0; tick < 13; tick += 1) {
+        await worker.scheduled({ scheduledTime: new Date(), cron: '*/15 * * * *' })
+        for (let i = 0; i < 40; i += 1) {
+          if (await world.first("SELECT 1 AS x FROM settings WHERE key = 'audit_log_retention_last_run'")) break
+          await new Promise((resolve) => setTimeout(resolve, 250))
+        }
         if (await world.first("SELECT 1 AS x FROM settings WHERE key = 'audit_log_retention_last_run'")) break
-        await new Promise((resolve) => setTimeout(resolve, 250))
       }
       t.ok('the purge ran', !!(await world.first("SELECT 1 AS x FROM settings WHERE key = 'audit_log_retention_last_run'")))
       compare(t, await survivors(world, 'daily'), 'daily', 'daily purge')

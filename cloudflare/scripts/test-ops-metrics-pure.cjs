@@ -123,18 +123,16 @@ function fakeAnalytics(answers) {
   })
 
   await check('the cron runs inside the trading window are bg rows that latency and errors leave out, and the window\'s comment names them', () => {
-    const cron = /^crons = \["0 \*\/(\d+) \* \* \*"\]$/m.exec(read('cloudflare', 'wrangler.toml').replace(/\r\n/g, '\n'))
-    assert.ok(cron, 'wrangler.toml runs the cron every N hours on the hour')
-    const everyHours = Number(cron[1])
-    const inside = Array.from({ length: 24 / everyHours }, (_, run) => run * everyHours)
-      .filter((hour) => hour >= metrics.TRADING_HOURS_UTC.start && hour < metrics.TRADING_HOURS_UTC.end)
+    const cron = /^crons = \[(.*)\]$/m.exec(read('cloudflare', 'wrangler.toml').replace(/\r\n/g, '\n'))
+    assert.ok(cron, 'wrangler.toml has crons')
+    const minutes = [...cron[1].matchAll(/"\*\/(\d+) \* \* \* \*"/g)].map((m) => Number(m[1]))
+    assert.ok(minutes.length >= 1 && minutes.every((n) => n > 0 && n <= 60), 'wrangler.toml runs its crons every N minutes (the rotating cron)')
     const source = read('ops', 'scripts', 'ops-metrics.mjs').replace(/\r\n/g, '\n').split('\n')
     const at = source.findIndex((line) => line.startsWith('export const TRADING_HOURS_UTC'))
     let first = at
     while (first > 0 && source[first - 1].startsWith('//')) first -= 1
     const comment = source.slice(first, at).join(' ')
-    assert.ok(inside.length > 0, 'no cron run falls inside the window; this check would prove nothing')
-    for (const hour of inside) assert.ok(comment.includes(`${String(hour).padStart(2, '0')}:00`), `the comment must name the ${hour}:00 UTC cron run inside the window: ${comment}`)
+    for (const n of minutes) assert.ok(new RegExp(`every ${n}\\b`).test(comment), `the comment must name the every-${n}-minutes cron run: ${comment}`)
     assert.ok(!/cron[^.;]*fall outside/.test(comment), `the comment still says the cron falls outside: ${comment}`)
     const rm = requestMetricsModule()
     const cronPoint = { kind: 'bg', template: 'cron', method: '', status: '', cache: '', flags: '', wallMs: 1, weight: 1, acc: rm.createRequestMetrics('bg', 'cron', 0) }
