@@ -33,6 +33,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
+import { countProductDataGaps, listProductDataGaps, parseProductDataGapKind } from '../lib/productDataGaps'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -6238,6 +6239,30 @@ app.get('/possible-duplicates', async (c) => {
   const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
   return c.json({ success: true, clusters })
+})
+
+// Conflicts' other two sections: products whose cost was never recorded and products with no barcode
+// (lib/productDataGaps.ts holds the rule). Same gate as the sweep above, which is what shows the tab. The counts are
+// cached on the products version (one pass over the table); a page is a keyset read that stops when it is full.
+app.get('/data-gaps/counts', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  const counts = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env)))
+  return c.json({ success: true, counts })
+})
+
+app.get('/data-gaps', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  const kind = parseProductDataGapKind(c.req.query('kind'))
+  if (!kind) return c.json({ success: false, error: 'kind (unknown_cost|empty_barcode) is required' }, 400)
+  const page = await listProductDataGaps(getDb(c.env), kind, { after: c.req.query('after'), limit: c.req.query('limit') })
+  return c.json({ success: true, ...page })
 })
 
 app.post('/possible-duplicates/dismiss', async (c) => {
