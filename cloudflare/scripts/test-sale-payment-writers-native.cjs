@@ -34,6 +34,9 @@
 //   correction_change_from_columns  the correction takes back the sale's change columns, not the events' net (M1 must go red)
 //   receipt_keeps_search      the settlement receipt stores search_normalized (P4 must go red)
 //   search_from_snapshot      the replay writes the snapshot's search text instead of recomputing it (P4 must go red)
+//   reversal_current_method   the exchange-cancel reversal takes the method of the sale's current credit row (R1 must go red)
+//   relabel_moves_credit      bulk relabel rewrites the refund_credit row's method (R2/R3 must go red)
+//   rename_moves_credit       the linked Settings rename rewrites the refund_credit row's method (R4 must go red)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -67,6 +70,15 @@ const MUTATIONS = {
     to: 'beforeJson: JSON.stringify(snapshot.before), afterJson: JSON.stringify(snapshot.after),' }],
   search_from_snapshot: [{ name: 'search_from_snapshot', file: 'src/lib/saleSettlementAction.ts',
     from: 'search_normalized: settlementSearchNormalized(eventRows[0] ?? {}, target.payment_method)', to: 'search_normalized: target.search_normalized ?? null' }],
+  reversal_current_method: [{ name: 'reversal_current_method', file: 'src/lib/returnBulkAction.ts',
+    from: "${anchorMethod}, json_set(json_extract(u.value,'$.details'),'$[0].method',${anchorMethod}),", to: "json_extract(u.value,'$.method'), json_extract(u.value,'$.details')," }],
+  relabel_moves_credit: [{ name: 'relabel_moves_credit_match', file: 'src/lib/saleBulkUpdate.ts',
+    from: 'matches = details.some((detail) => normalized(detail.method) === source && detail.refund_credit !== true)', to: 'matches = details.some((detail) => normalized(detail.method) === source)' },
+  { name: 'relabel_moves_credit_write', file: 'src/lib/saleBulkUpdate.ts',
+    from: 'normalized(detail.method) === source && detail.refund_credit !== true ? { ...detail, method: targetMethod } : detail', to: 'normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail' }],
+  rename_moves_credit: [{ name: 'rename_moves_credit', file: 'src/routes/settings.ts',
+    from: "IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1\n      THEN json_set(detail.value,'$.method',@target)",
+    to: "IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))\n      THEN json_set(detail.value,'$.method',@target)" }],
   overpay_accepted: [{ name: 'overpay_accepted', file: 'src/routes/sales.ts',
     from: "if (!statedChange && error.code === 'invalid_actual_change_total') {", to: "if (false) {" }],
 }
@@ -585,6 +597,7 @@ async function main() {
     await h.mf.dispose()
   }
   await staleReadRace(r)
+  await creditMethodSurvives(r)
   const failed = r.results.filter((result) => !result.ok)
   console.log(`${failed.length ? 'RED' : 'GREEN'} sale payment writers: ${r.results.length - failed.length}/${r.results.length} checks hold${mutation ? ` (PAY_MUTATION=${mutation}, expected RED)` : ''}`)
   if (failed.length) process.exitCode = 1
@@ -606,6 +619,108 @@ const RACE_HOOKS = [
   { name: 'release-settle', file: 'src/routes/sales.ts', from: '      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)\n',
     to: `      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)\n      if (String(settlementRequestId || '').startsWith('release-')) ${RELEASE}\n` },
 ]
+
+// R. The refund credit keeps the method it was booked under (release review round 5). A bulk relabel or a linked Settings rename of
+// that method must leave the credit row alone, and the exchange cancel must reverse the credit by the method on the credit row of the
+// event that recorded it -- so the drawer's EXPECTED cash does not move across relabel + cancel, on version 1 and version 0 sales.
+async function creditMethodSurvives(r) {
+  const h = await H.startWorker({ patches: mutation ? MUTATIONS[mutation] : [] })
+  const shiftReader = await loadShiftReader()
+  const env = { DB: h.db }
+  const session = { scope_mode: 'shop_wide', user_id: 901, branch_id: 1, opened_at: '2000-01-01 00:00:00', closed_at: null, cancelled_at: null, opening_float_usd: 0, opening_float_khr: 0 }
+  const expectedCash = async () => { const result = await shiftReader.loadShiftReconciliation(env, session, Date.now() + 5000); return (result.reconciliation || result).expected.usd }
+  const mismatch = async () => (await h.db.prepare(healthSql()).all()).results[0].payment_events_mismatch
+  const tender = async (id) => JSON.parse((await h.one('SELECT payment_details FROM sales WHERE id=?', id)).payment_details || '[]')
+  const creditRow = async (id) => (await tender(id)).find((row) => row.refund_credit === true) || null
+  try {
+    await H.seedProduct(h, 406, 'PAY Lip', 10, 200)
+    await H.seedProduct(h, 407, 'PAY Palette', 16, 200)
+    const exchange = async (key) => {
+      const original = await H.createSale(h, { key, status: 'awaiting_payment', lines: [{ productId: 406, quantity: 2 }], paymentDetails: [{ method: 'Cash', amount_usd: 15, amount_khr: 0 }], label: `${key}: Not Paid $20, $15 paid` })
+      const [line] = await h.all('SELECT id FROM sale_items WHERE sale_id=?', original.body.id)
+      const quote = await h.call('POST', '/api/returns/quote', { sale_id: original.body.id, items: [{ sale_item_id: line.id, quantity: 1 }], replacement_items: [{ branch_id: 1, product_id: 407, quantity: 1 }] }, `${key}: quote`)
+      const { customer_return_create_version: _c, customer_return_edit_version: _e, exchange: quoted, ...expected } = quote.body
+      const created = await h.call('POST', '/api/returns', { client_request_id: `${key}-return`, money_precision_version: 1, sale_id: original.body.id, reason: 'pay exchange', expected_quote: expected, expected_exchange: quoted,
+        exchange_payment: { details: [], change_currency: 'USD' }, items: [{ sale_item_id: line.id, quantity: 1, stock_action: 'restock', branch_id: 1 }], replacement_items: [{ branch_id: 1, product_id: 407, quantity: 1 }] }, `${key}: exchange`)
+      assert.equal(created.status, 200, JSON.stringify(created.body).slice(0, 300))
+      const returnRow = await h.one('SELECT * FROM returns WHERE id=?', created.body.id)
+      return { returnId: Number(returnRow.id), saleId: Number(returnRow.replacement_sale_id) }
+    }
+    const cancelExchange = async (returnId, key) => {
+      const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', returnId)
+      return h.call('POST', '/api/returns/bulk', { client_request_id: key, field: 'status', source: 'completed', target: 'cancelled',
+        items: [{ id: returnId, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null, replacement: { return_ids: [] } }] }, key)
+    }
+    const relabel = async (id, key) => {
+      const row = await h.one('SELECT updated_at FROM sales WHERE id=?', id)
+      return h.call('POST', '/api/sales/bulk-update', { client_request_id: key, items: [{ id, expected_updated_at: row.updated_at }], action: { kind: 'payment_method', source: 'Cash', target: 'ABA' } }, `${key}: relabel Cash -> ABA`)
+    }
+    const instalment = (id, key) => h.call('POST', `/api/sales/${id}/payments`, { client_request_id: key, expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }] }, `${key}: instalment $2 cash`)
+    const reversalMethod = async (id) => (await h.one("SELECT payment_method FROM sale_payment_events WHERE sale_id=? AND note='exchange refund credit reversed' ORDER BY id DESC LIMIT 1", id))?.payment_method ?? null
+
+    // R1. A credit row relabelled BEFORE this fix (old data, written here directly): the reversal still goes out by the method on the event.
+    const old = await exchange('pay-r1')
+    const oldPay = await instalment(old.saleId, 'pay-r1-pay')
+    await h.db.prepare("UPDATE sales SET payment_details=json_set(payment_details,'$[0].method','ABA') WHERE id=?").bind(old.saleId).run()
+    const r1Before = await expectedCash()
+    const r1Cancel = await cancelExchange(old.returnId, 'pay-r1-cancel')
+    const r1After = await expectedCash()
+    const r1Method = await reversalMethod(old.saleId)
+    const r1Mismatch = await mismatch()
+    r.check(`R1 an old relabelled credit is still reversed by its recorded method: out Cash, expected cash unchanged (pay ${oldPay.status}, cancel ${r1Cancel.status}; method ${r1Method}; expected ${r1Before} -> ${r1After}; mismatch ${r1Mismatch})`, () => {
+      assert.deepEqual([oldPay.status, r1Cancel.status], [200, 200])
+      assert.equal(r1Method, 'Cash')
+      assert.equal(r1After, r1Before)
+      assert.equal(r1Mismatch, 0)
+    })
+
+    // R2. Version 1: credit $5 + instalment $2 cash, relabel Cash -> ABA, cancel the exchange.
+    const v1 = await exchange('pay-r2')
+    const v1Pay = await instalment(v1.saleId, 'pay-r2-pay')
+    const r2Before = await expectedCash()
+    const r2Relabel = await relabel(v1.saleId, 'pay-r2-relabel')
+    const r2Rows = await tender(v1.saleId)
+    const r2Cancel = await cancelExchange(v1.returnId, 'pay-r2-cancel')
+    const r2After = await expectedCash()
+    const r2Mismatch = await mismatch()
+    r.check(`R2 v1: the relabel leaves the credit on Cash and moves only the customer's $2; relabel + cancel leave expected cash unchanged (pay ${v1Pay.status}, relabel ${r2Relabel.status}, rows ${JSON.stringify(r2Rows)}, cancel ${r2Cancel.status}; expected ${r2Before} -> ${r2After}; mismatch ${r2Mismatch})`, () => {
+      assert.deepEqual([v1Pay.status, r2Relabel.status, r2Cancel.status], [200, 200, 200])
+      assert.deepEqual(r2Rows.map((row) => [row.method, row.refund_credit === true]), [['Cash', true], ['ABA', false]])
+      assert.equal(r2After, r2Before)
+      assert.equal(r2Mismatch, 0)
+    })
+
+    // R3. Version 0: the credit is the only tender, read from the columns. A relabel must not move it to digital.
+    const v0 = await exchange('pay-r3')
+    const r3Before = await expectedCash()
+    const r3Relabel = await relabel(v0.saleId, 'pay-r3-relabel')
+    const r3Mid = await expectedCash()
+    const r3Credit = await creditRow(v0.saleId)
+    const r3Cancel = await cancelExchange(v0.returnId, 'pay-r3-cancel')
+    const r3After = await expectedCash()
+    const r3Version = (await h.one('SELECT payments_version FROM sales WHERE id=?', v0.saleId)).payments_version
+    r.check(`R3 v0: the relabel leaves the credit on Cash; expected cash moves neither after the relabel nor after the cancel (relabel ${r3Relabel.status}, cancel ${r3Cancel.status}, v${r3Version}; expected ${r3Before} -> ${r3Mid} -> ${r3After})`, () => {
+      assert.equal(r3Version, 0, 'fixture: the replacement sale is still version 0')
+      assert.equal(r3Credit && r3Credit.method, 'Cash')
+      assert.equal(r3Cancel.status, 200, JSON.stringify(r3Cancel.body).slice(0, 200))
+      assert.deepEqual([r3Mid, r3After], [r3Before, r3Before])
+    })
+
+    // R4. The linked Settings rename Cash -> Cash USD renames the customer's rows, never the credit row.
+    const r4 = await exchange('pay-r4')
+    const r4Pay = await instalment(r4.saleId, 'pay-r4-pay')
+    const preview = await h.call('GET', '/api/settings/payment-methods/impact?from=Cash&to=Cash%20USD', undefined, 'rename preview')
+    const renamed = await h.call('POST', '/api/settings/payment-methods/replace', { from: 'Cash', to: 'Cash USD', scope: 'linked', expected_updated_at: preview.body.settings_updated_at }, 'linked rename Cash -> Cash USD')
+    const r4Rows = await tender(r4.saleId)
+    r.check(`R4 a linked Settings rename leaves the credit row's method alone and renames the customer's row (pay ${r4Pay.status}, preview ${preview.status}, rename ${renamed.status} ${renamed.body.code || ''}; rows ${JSON.stringify(r4Rows)})`, () => {
+      assert.equal(r4Pay.status, 200)
+      assert.equal(renamed.status, 200, JSON.stringify(renamed.body).slice(0, 200))
+      assert.deepEqual(r4Rows.map((row) => [row.method, row.refund_credit === true]), [['Cash', true], ['Cash USD', false]])
+    })
+  } finally {
+    await h.mf.dispose()
+  }
+}
 
 async function staleReadRace(r) {
   const h = await H.startWorker({ patches: [...RACE_HOOKS, ...(mutation ? MUTATIONS[mutation] : [])] })

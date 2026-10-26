@@ -481,12 +481,17 @@ function creditPaymentEventStatement(members: readonly Member[], direction: 1 | 
   })
   const anchor = (column: string) => `(SELECT a.${column} FROM sale_payment_events a WHERE a.sale_id=s.id AND a.direction='in'
       AND EXISTS(SELECT 1 FROM json_each(a.payment_details) j WHERE json_extract(j.value,'$.refund_credit')=1) ORDER BY a.id LIMIT 1)`
+  // The method is the one RECORDED on the credit row of that same anchor event, not the sale's current row: a relabel or a Settings rename after the
+  // exchange must not move the reversal into another drawer kind (6.0.982 release review round 5). The current row's method is only the fallback for
+  // a sale with no anchor event, which the version 1 join cannot reach anyway.
+  const anchorMethod = `COALESCE((SELECT json_extract(j.value,'$.method') FROM sale_payment_events a, json_each(a.payment_details) j WHERE a.sale_id=s.id
+      AND a.direction='in' AND json_extract(j.value,'$.refund_credit')=1 ORDER BY a.id, CAST(j.key AS INTEGER) LIMIT 1),json_extract(u.value,'$.method'))`
   return {
     sql: `INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,covers_operation_id,operation_id,reverses_event_id,payment_method,payment_details,
         amount_paid_usd,amount_paid_khr,change_usd,change_khr,change_is_actual,change_exchange_rate,exchange_rate,drawer_effect,received_at,branch_id,cashier_id,cashier_name,note)
       SELECT 'credit:'||s.id||':'||@creditNonce, s.id, @creditDirection, 'correction', NULL, NULL,
         (SELECT p.event_id FROM sale_payment_events p WHERE p.sale_id=s.id AND p.note=@creditOppositeNote ORDER BY p.id DESC LIMIT 1),
-        json_extract(u.value,'$.method'), json_extract(u.value,'$.details'), json_extract(u.value,'$.usd'), json_extract(u.value,'$.khr'), 0, 0, 0, NULL,
+        ${anchorMethod}, json_set(json_extract(u.value,'$.details'),'$[0].method',${anchorMethod}), json_extract(u.value,'$.usd'), json_extract(u.value,'$.khr'), 0, 0, 0, NULL,
         s.exchange_rate, COALESCE(${anchor('drawer_effect')},1), COALESCE(${anchor('received_at')},strftime('%Y-%m-%d %H:%M:%S',s.created_at)),
         COALESCE(${anchor('branch_id')},s.branch_id), COALESCE(${anchor('cashier_id')},s.cashier_id), COALESCE(${anchor('cashier_name')},s.cashier_name), @creditNote
       FROM json_each(@creditEvents) u JOIN sales s ON s.id=json_extract(u.value,'$.saleId') AND s.payments_version=1

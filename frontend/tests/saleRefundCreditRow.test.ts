@@ -147,7 +147,7 @@ const mutants: Array<{ name: string; patches: Patch[]; check: 'correction' | 'se
   { name: 'payload rounds the credit to cents (settle)', check: 'settle', patches: [{ file: SETTLEMENT, from: 'amount_usd: roundUsd(amount(row.usd)), amount_khr: roundLegacyKhr(amount(row.khr)), refund_credit: true as const }', to: 'amount_usd: Math.round(amount(row.usd) * 100) / 100, amount_khr: roundLegacyKhr(amount(row.khr)), refund_credit: true as const }' }] },
   { name: 'editor unlocks the credit in correction mode', check: 'editor', patches: [{ file: EDITOR, from: 'const locked = row.refundCredit === true || (', to: 'const locked = (' }] },
   { name: 'editor lets the credit be removed', check: 'editor', patches: [{ file: EDITOR, from: 'disabled={saving || row.refundCredit === true || (', to: 'disabled={saving || (' }] },
-  { name: 'editor drops the Refund credit label', check: 'editor', patches: [{ file: EDITOR, from: "translate('sale_refund_credit_row', 'Refund credit', 'ឥណទានសងវិញ')", to: "translate('recorded', 'Recorded', 'បានកត់ត្រា')" }] },
+  { name: 'editor drops the Refund credit label', check: 'editor', patches: [{ file: EDITOR, from: "translate('refund_credit', 'Refund credit', 'ប្រាក់សងវិញ')", to: "translate('recorded', 'Recorded', 'បានកត់ត្រា')" }] },
 ]
 for (const mutant of mutants) {
   const mutatedS = await load<Settlement>('../src/components/sales/saleSettlement.ts', mutant.patches)

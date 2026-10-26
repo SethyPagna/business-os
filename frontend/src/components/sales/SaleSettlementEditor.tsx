@@ -93,7 +93,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
               <span className="min-w-0 detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">
                 {row.method || translate('payment_method', 'Payment method', 'វិធីទូទាត់')}
                 {row.refundCredit === true
-                  ? <span className="ml-2 text-xs font-normal text-gray-400" data-refund-credit-label>{translate('sale_refund_credit_row', 'Refund credit', 'ឥណទានសងវិញ')}</span>
+                  ? <span className="ml-2 text-xs font-normal text-gray-400" data-refund-credit-label>{translate('refund_credit', 'Refund credit', 'ប្រាក់សងវិញ')}</span>
                   : row.id.startsWith('recorded-') ? <span className="ml-2 text-xs font-normal text-gray-400">{translate('recorded', 'Recorded', 'បានកត់ត្រា')}</span> : null}
               </span>
               <button

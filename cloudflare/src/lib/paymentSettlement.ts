@@ -431,7 +431,8 @@ export function renameSalePaymentMethod(
   const next = parsed.map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const detail = { ...(entry as Record<string, unknown>) }
-    if (paymentMethodKey(detail.method) === fromKey) {
+    // An exchange refund credit keeps the method it was booked under (6.0.982): the Settings rename skips it, as its SQL does.
+    if (paymentMethodKey(detail.method) === fromKey && detail.refund_credit !== true) {
       detailMatches += 1
       if (String(detail.method ?? '') !== target) detailsChanged = true
       detail.method = target

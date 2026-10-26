@@ -373,9 +373,11 @@ const VALID_PAYMENT_DETAILS_SQL = `(
   AND json_valid(s.payment_details) AND json_type(s.payment_details)='array'
 )`
 
+// An exchange refund credit row keeps the method it was booked under (6.0.982 release review): a rename is a relabel of tender
+// the customer handed over, and the exchange cancel reverses the credit by the method recorded on its own row.
 const PAYMENT_DETAILS_RENAME_SQL = `(
   SELECT json_group_array(json(
-    CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))
+    CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1
       THEN json_set(detail.value,'$.method',@target)
       ELSE detail.value END
   ))
@@ -385,9 +387,9 @@ const PAYMENT_DETAILS_RENAME_SQL = `(
 const PAYMENT_SUMMARY_FROM_DETAILS_SQL = `(
   SELECT group_concat(method,' + ') FROM (
     SELECT method,MIN(ordinal) AS first_ordinal FROM (
-      SELECT CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))
+      SELECT CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1
         THEN @target ELSE trim(COALESCE(json_extract(detail.value,'$.method'),'')) END AS method,
-        CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))
+        CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1
           THEN '__target__' ELSE lower(trim(COALESCE(json_extract(detail.value,'$.method'),''))) END AS identity,
         CAST(detail.key AS INTEGER) AS ordinal
       FROM json_each(s.payment_details) detail
@@ -824,7 +826,7 @@ app.post('/payment-methods/replace', async (c) => {
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name,device_tz,created_at)
             SELECT @userId,@userName,'replace','payment_method',@operationId,
               json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
-                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
+                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1)` : '0'}),
               'payment_method',@operationId,@old_value,@new_value,
               (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),

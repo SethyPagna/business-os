@@ -419,7 +419,9 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
         }
       }
       paymentDetails.set(expected.id, details)
-      matches = details.some((detail) => normalized(detail.method) === source) || (!details.length && topLevelMatched)
+      // An exchange refund credit row is never relabelled (6.0.982): the exchange cancel reverses it by its own recorded method, and a relabel
+      // would move the credit into another drawer kind (cash read as digital).
+      matches = details.some((detail) => normalized(detail.method) === source && detail.refund_credit !== true) || (!details.length && topLevelMatched)
     } else if (request.action.kind === 'delivery_contact') {
       matches = (sale.delivery_contact_id == null ? null : Number(sale.delivery_contact_id)) === request.action.source_id && Number(sale.is_delivery || 0) === 1
     } else {
@@ -489,7 +491,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       const source = normalized(request.action.source)
       const details = paymentDetails.get(expected.id) || []
       sourceMatched = matchedAtRead
-      const updatedDetails = details.map((detail) => normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail)
+      const updatedDetails = details.map((detail) => normalized(detail.method) === source && detail.refund_credit !== true ? { ...detail, method: targetMethod } : detail)
       const updatedSummary = updatedDetails.length
         ? Array.from(new Set(updatedDetails.map((detail) => String(detail.method || '').trim()).filter(Boolean))).join(' + ')
         : targetMethod
