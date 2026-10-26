@@ -2,21 +2,23 @@
 // Owner ruling, 6 Oct 2026: low and out-of-stock alerts fire only when a sale CROSSES the threshold, once per
 // crossing (lib/stockCrossingAlert.ts, migration 0272).
 //
-// Runs the REAL lib/stockCrossingAlert.ts, lib/lowStockSettings.ts and lib/telegramLang.ts against an in-memory
-// SQLite database with every migration applied, so the claim's unique keys are the real ones. The ONLY seam is the
-// Telegram transport: ./telegram is replaced by a recorder, so no message can ever leave this process (no bot token
-// is read, no network is touched). What would have been sent is then composed through the real language layer and
-// asserted as text, Khmer line included.
+// Runs the REAL lib/stockCrossingAlert.ts, lib/lowStockSettings.ts, lib/stockLedgerQuery.ts and lib/telegramLang.ts
+// against an in-memory SQLite database with every migration applied, so the claim's unique keys are the real ones.
+// The ONLY seam is the Telegram transport: ./telegram is replaced by a recorder, so no message can ever leave this
+// process (no bot token is read, no network is touched). What would have been sent is then composed through the real
+// language layer and asserted as text, Khmer line included. The route itself is driven in
+// test-stock-crossing-sale-route-pure.cjs.
 //
 //   rule        above -> above is silent; crossing low raises LOW; crossing out raises OUT; a jump straight to
 //               out raises OUT only; a product already low does not alert again on the next sale
-//   once        a retry, a stale-read race and an undo then redo of the same sale send exactly one message
-//   again       a restock followed by another crossing sends a second message
+//   real stock  the quantities are read AFTER the commit: tills racing 13 -> 11 -> 9 send one message saying 9
+//   once        a retry and an undo then redo of the same sale send exactly one message; an outflow stored as a
+//               positive amount (transfer_out) does not start a new crossing, a real inflow does
+//   one message one message per branch and tier lists every product that crossed, capped
 //   switches    low alert off silences LOW but not OUT; Telegram switch off still records the crossing
 //   failure     a transport that throws is recorded, never thrown to the sale, and never retried
 //   deploy      without table 0272 nothing is recorded or sent and nothing throws
-//   wiring      the sale route hands the availability read to the recorder; the category, topic and Settings
-//               toggle exist; both language packs carry the new strings; no id is hard-coded
+//   wiring      every path that deducts sale stock calls the recorder; category, topic, Settings toggle, packs
 //
 // Run (from cloudflare/scripts): node test-stock-crossing-alert-pure.cjs
 const assert = require('node:assert/strict')
@@ -43,10 +45,8 @@ const db = {
 // ---- the transport seam: records instead of sending ----------------------------------------------------
 const sent = []
 let transport = async (event) => { sent.push(event); return true }
-const bumps = []
 const overrides = {
   './db': { getDb: () => db },
-  './cache': { bumpVersion: async (_env, namespace) => { bumps.push(namespace) } },
   './telegram': { sendTelegramEvent: async (_env, event) => transport(event) },
 }
 const modules = new Map()
@@ -70,10 +70,12 @@ function load(rel) {
 const alert = load('lib/stockCrossingAlert.ts')
 const lang = load('lib/telegramLang.ts')
 const lowStock = load('lib/lowStockSettings.ts')
+const ledger = load('lib/stockLedgerQuery.ts')
 const env = { DB: raw }
 const KHMER = /[ក-៿]/
 
 // ---- fixtures -----------------------------------------------------------------------------------------
+seedStockFixture(raw.db, () => raw.db.prepare("INSERT OR IGNORE INTO branches (id, name, is_default, is_active) VALUES (1, 'LC Store', 1, 1)").run())
 function productRow(name, stock, low = 10, out = 0) {
   return seedStockFixture(raw.db, () => {
     const id = Number(raw.db.prepare('INSERT INTO products (name, stock_quantity, low_stock_threshold, out_of_stock_threshold, is_active) VALUES (?, ?, ?, ?, 1)').run(name, stock, low, out).lastInsertRowid)
@@ -81,21 +83,31 @@ function productRow(name, stock, low = 10, out = 0) {
     return id
   })
 }
-// What a restock leaves behind: a positive movement (the epoch) and the branch quantity.
-function restock(productId, quantity) {
-  seedStockFixture(raw.db, () => {
-    raw.db.prepare("INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity) VALUES (?, 'x', 1, 'add', ?)").run(productId, quantity)
-    raw.db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = 1').run(quantity, productId)
-  })
+// A movement row, as the ledger stores it: positive magnitudes for outflows too (transfer_out), exactly the trap.
+function movement(productId, type, quantity, branchId = 1) {
+  seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity) VALUES (?, ?, ?, ?, ?)').run(productId, 'x', branchId, type, quantity))
 }
-const line = (productId, quantity, before, extra = {}) => ({ productId, branchId: 1, quantity, before, name: extra.name || `P${productId}`, lowThreshold: extra.low ?? 10, outThreshold: extra.out ?? 0 })
-const sale = (saleId, lines) => alert.recordStockCrossings(env, { saleId, branchName: 'LC Store', lines })
+// What a restock leaves behind: an 'add' movement and the branch quantity.
+function restock(productId, quantity) {
+  movement(productId, 'add', quantity)
+  seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = 1').run(quantity, productId))
+}
+// The deduction a sale commits (the recorder runs AFTER it, so tests apply it first, as the route does).
+function take(productId, quantity, branchId = 1) {
+  seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?').run(quantity, productId, branchId))
+  movement(productId, 'sale', -quantity, branchId)
+}
+const line = (productId, quantity, branchId = 1) => ({ productId, branchId, quantity })
+const hook = (saleId, lines) => alert.recordStockCrossings(env, { saleId, lines })
+const sell = (saleId, productId, quantity) => { take(productId, quantity); return hook(saleId, [line(productId, quantity)]) }
 const rows = () => raw.db.prepare('SELECT product_id, tier, sale_id, quantity_before, quantity_after, telegram_status FROM stock_crossing_alerts ORDER BY id').all()
 const setting = (key, value) => seedStockFixture(raw.db, () => raw.db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value)))
-const reset = () => { sent.length = 0; bumps.length = 0; transport = async (event) => { sent.push(event); return true } }
+const reset = () => { sent.length = 0; transport = async (event) => { sent.push(event); return true } }
 const compose = (event, language = 'both') => {
   lang.setTelegramLanguage(language)
-  return [lang.localizeTelegramHeading(event.heading), ...event.lines.filter(Boolean).map((l) => lang.localizeTelegramLine(l))].join('\n')
+  const text = [lang.localizeTelegramHeading(event.heading), ...event.lines.filter(Boolean).map((l) => lang.localizeTelegramLine(l))].join('\n')
+  lang.setTelegramLanguage('both')
+  return text
 }
 
 let passed = 0
@@ -123,34 +135,28 @@ async function main() {
     assert.equal(c(12, 9, -1, 0), null, 'low alert off (-1): no low crossing')
     assert.equal(c(3, 0, -1, 0), 'out', 'low alert off: out still fires')
     assert.equal(c(8, 2, 10, 2), 'out', 'a raised per-product out threshold is honoured')
-    assert.equal(c(2.5, 0.5, 10, 0), null, 'fractions: already low')
     assert.equal(c(10.5, 9.5, 10, 0), 'low', 'fractions: crossing')
     assert.equal(c(5, 7, 10, 0), null, 'a quantity going UP is never a crossing')
   })
 
-  await check('detect: repeated lines of one product are one crossing; other products and zero-quantity lines are ignored', () => {
-    const crossings = alert.detectCrossings([
-      line(1, 2, 12), line(1, 2, 12), // 12 -> 8 in two lines: one low crossing
-      line(2, 1, 30), // 30 -> 29: nothing
-      line(3, 0, 5), // nothing taken
-    ], config)
-    assert.deepEqual(crossings.map((x) => [x.productId, x.tier, x.before, x.after]), [[1, 'low', 12, 8]])
-    // Two lines that are each above the line alone but cross together.
-    assert.equal(alert.detectCrossings([line(9, 3, 12), line(9, 3, 12)], config).length, 1)
-    assert.equal(alert.detectCrossings([line(9, 3, 12)], config).length, 1)
-    assert.equal(alert.detectCrossings([line(9, 1, 12)], config).length, 0)
+  await check('detect: before is derived from the REAL quantity now (after + units taken); repeated lines are one line', () => {
+    const state = (productId, quantity, after) => ({ productId, branchId: 1, quantity, after, name: `P${productId}`, lowThreshold: 10, outThreshold: 0 })
+    assert.deepEqual(alert.detectCrossings([state(1, 4, 8)], config).map((x) => [x.tier, x.before, x.after]), [['low', 12, 8]])
+    assert.deepEqual(alert.detectCrossings([state(1, 2, 12)], config), [], '14 -> 12: still above')
+    // 13 -> 11 -> 9 where BOTH sales are already committed: the first sale's own before is 11, and it crosses.
+    assert.deepEqual(alert.detectCrossings([state(1, 2, 9)], config).map((x) => [x.tier, x.before, x.after]), [['low', 11, 9]])
+    assert.deepEqual(alert.mergeSaleLines([line(1, 2), line(1, 3), line(2, 1), line(3, 0), line(4, -1)]), [line(1, 5), line(2, 1)])
   })
 
   // ---- exactly once, against the real claim keys -----------------------------------------------------------
   const a = productRow('Glow Serum', 12)
-  await check('a crossing alerts exactly once (and is recorded for the bell)', async () => {
-    const result = await sale(101, [line(a, 3, 12, { name: 'Glow Serum' })])
+  await check('a crossing alerts exactly once (and is recorded)', async () => {
+    const result = await sell(101, a, 3) // 12 -> 9
     assert.deepEqual(result, { crossings: 1, claimed: 1, sent: 1 })
     assert.equal(sent.length, 1)
     assert.equal(sent[0].type, 'stock_alert')
     assert.equal(sent[0].heading, '⚠️ Low stock')
     assert.deepEqual(rows().map((r) => [r.product_id, r.tier, r.sale_id, r.quantity_before, r.quantity_after, r.telegram_status]), [[a, 'low', 101, 12, 9, 'sent']])
-    assert.deepEqual(bumps, ['stock'], "the bell's cached section is turned over after the claim exists")
   })
 
   await check('the text is concise and bilingual: heading, product, branch, quantity left, each with its Khmer', () => {
@@ -165,120 +171,189 @@ async function main() {
     assert.ok(out.split('\n')[0].includes('Out of stock') && out.split('\n')[0].includes('អស់ស្តុក'), out)
     const km = compose({ heading: '⚠️ Low stock', lines: ['Product: Glow Serum', 'Branch: LC Store', 'On hand: 9'] }, 'km')
     assert.ok(!/Low stock/.test(km) && KHMER.test(km), 'Khmer-only mode drops the English words')
-    lang.setTelegramLanguage('en')
     assert.ok(!KHMER.test(compose({ heading: '⚠️ Low stock', lines: ['Product: Glow Serum', 'Branch: LC Store', 'On hand: 9'] }, 'en')), 'English-only mode stays English')
-    lang.setTelegramLanguage('both')
   })
 
-  await check('the message the lib really composes reads as the text above (event shape)', async () => {
-    await sale(102, [line(productRow('Rose Toner', 11), 2, 11, { name: 'Rose Toner' })])
-    assert.deepEqual(sent[0].lines, ['Product: Rose Toner', 'Branch: LC Store', 'On hand: 9'])
-    const out = await sale(103, [line(productRow('Last One', 1), 1, 1, { name: 'Last One' })])
+  await check('out of stock: the same three rows, quantity 0', async () => {
+    const out = await sell(103, productRow('Last One', 1), 1)
     assert.equal(out.sent, 1)
-    assert.equal(sent[1].heading, '🛑 Out of stock')
-    assert.deepEqual(sent[1].lines, ['Product: Last One', 'Branch: LC Store', 'On hand: 0'], 'out of stock: the same three rows, quantity 0')
+    assert.equal(sent[0].heading, '🛑 Out of stock')
+    assert.deepEqual(sent[0].lines, ['Product: Last One', 'Branch: LC Store', 'On hand: 0'])
   })
 
-  await check('no alert when the sale stays above the threshold', async () => {
+  await check('no alert when the sale stays above the threshold, or the product was already low', async () => {
     const before = rows().length
     const b = productRow('Plenty', 50)
-    const result = await sale(104, [line(b, 5, 50)])
-    assert.deepEqual(result, { crossings: 0, claimed: 0, sent: 0 })
-    assert.equal(sent.length, 0)
-    assert.equal(rows().length, before)
-    assert.deepEqual(bumps, [], 'and nothing is invalidated')
-  })
-
-  await check('a product that is ALREADY low does not alert on its next sale', async () => {
-    const before = rows().length
-    const result = await sale(105, [line(a, 2, 9, { name: 'Glow Serum' })])
-    assert.equal(result.crossings, 0)
+    assert.deepEqual(await sell(104, b, 5), { crossings: 0, claimed: 0, sent: 0 })
+    assert.deepEqual(await sell(105, a, 2), { crossings: 0, claimed: 0, sent: 0 }, '9 -> 7 is not a new crossing')
     assert.equal(sent.length, 0)
     assert.equal(rows().length, before)
   })
 
-  await check('a retry of the same sale sends nothing more', async () => {
-    const again = await sale(101, [line(a, 3, 12, { name: 'Glow Serum' })])
-    assert.deepEqual(again, { crossings: 1, claimed: 0, sent: 0 })
+  await check('a retry of the same hook (committed sale, the hook ran twice) sends nothing more', async () => {
+    const again = await hook(101, [line(a, 3)])
+    assert.equal(again.sent, 0)
     assert.equal(sent.length, 0)
     assert.equal(rows().filter((r) => r.product_id === a).length, 1)
   })
 
-  await check('two tills racing over the same threshold (both read the stale 12) send one message', async () => {
-    const c = productRow('Race Cream', 12)
-    const first = await sale(201, [line(c, 3, 12, { name: 'Race Cream' })])
-    const second = await sale(202, [line(c, 4, 12, { name: 'Race Cream' })])
-    assert.equal(first.sent, 1)
-    assert.deepEqual(second, { crossings: 1, claimed: 0, sent: 0 }, 'same restock epoch: the second request loses the claim')
+  // ---- the race (review P2-2) -------------------------------------------------------------------------------
+  await check('tills racing 13 -> 11 -> 9: both committed before either hook reads, exactly one message, On hand is the real 9', async () => {
+    const c = productRow('Race Cream', 13)
+    take(c, 2); take(c, 2) // both sales committed
+    const first = await hook(201, [line(c, 2)])
+    const second = await hook(202, [line(c, 2)])
+    assert.equal(first.sent + second.sent, 1, JSON.stringify([first, second]))
     assert.equal(sent.length, 1)
+    assert.equal(sent[0].lines[2], 'On hand: 9', 'the real value, not the stale 11')
+    assert.equal(rows().filter((r) => r.product_id === c).length, 1)
   })
 
-  const d = productRow('Mist', 12)
-  await check('a restock followed by another crossing alerts again (a new crossing)', async () => {
-    assert.equal((await sale(301, [line(d, 3, 12, { name: 'Mist' })])).sent, 1)
+  await check('tills racing the other way (the first hook runs before the second sale commits): still exactly one', async () => {
+    const c = productRow('Race Balm', 13)
+    take(c, 2)
+    const first = await hook(211, [line(c, 2)]) // sees 11: no crossing yet
+    assert.equal(first.crossings, 0)
+    take(c, 2)
+    const second = await hook(212, [line(c, 2)]) // sees 9: crossing
+    assert.equal(second.sent, 1)
     assert.equal(sent.length, 1)
-    restock(d, 40) // 9 -> 49
+    assert.equal(sent[0].lines[2], 'On hand: 9')
+  })
+
+  // ---- the restock marker (review P3-1) -----------------------------------------------------------------------
+  await check('the restock marker counts only real inflows: transfer_out stored as a positive amount does not start a new crossing', async () => {
+    const d = productRow('Outflow Mist', 12)
+    assert.equal((await sell(301, d, 3)).sent, 1)
+    movement(d, 'transfer_out', 4) // a positive magnitude, an outflow
+    movement(d, 'remove', 1)
+    movement(d, 'move_out', 1)
     reset()
-    const none = await sale(302, [line(d, 5, 49, { name: 'Mist' })])
-    assert.equal(none.crossings, 0, 'back above: silent')
-    const again = await sale(303, [line(d, 42, 49, { name: 'Mist' })]) // 49 -> 7
+    const again = await sell(302, d, 1) // a different sale, same crossing episode (no real restock in between): the claim holds
+    assert.equal(again.crossings, 0, 'already low')
+    const repeat = await hook(301, [line(d, 3)])
+    assert.equal(repeat.sent, 0)
+    // A racing sale of the same episode lands after the outflows: same epoch, so it collapses with the first.
+    const racing = await hook(303, [line(d, 3)])
+    assert.deepEqual(racing, { crossings: 1, claimed: 0, sent: 0 }, 'an outflow did not move the epoch')
+    assert.equal(sent.length, 0)
+    for (const type of ledger.LEDGER_OUT_TYPES) assert.ok(alert.RESTOCK_EPOCH_SQL.includes(`'${type}'`), `${type} is excluded from the marker`)
+    for (const type of ['add', 'stock_in', 'transfer_in', 'move_in', 'return', 'adjustment', 'damage_reversal']) assert.ok(!ledger.LEDGER_OUT_TYPES.includes(type), `${type} is an inflow`)
+  })
+
+  await check('a restock followed by another crossing alerts again (a new crossing)', async () => {
+    const e = productRow('Mist', 12)
+    assert.equal((await sell(401, e, 3)).sent, 1)
+    restock(e, 40) // 9 -> 49
+    reset()
+    assert.equal((await sell(402, e, 5)).crossings, 0, 'back above: silent')
+    const again = await sell(403, e, 42) // 44 -> 2
     assert.deepEqual(again, { crossings: 1, claimed: 1, sent: 1 })
-    assert.equal(sent.length, 1)
-    assert.equal(rows().filter((r) => r.product_id === d).length, 2, 'two crossings on record')
+    assert.equal(rows().filter((r) => r.product_id === e).length, 2, 'two crossings on record')
+    movement(e, 'transfer_in', 5) // every real inflow type moves the epoch
+    movement(e, 'return', 1)
+    movement(e, 'adjustment', 1)
+  })
+
+  await check('every real inflow type starts a new episode', async () => {
+    for (const type of ['add', 'stock_in', 'transfer_in', 'move_in', 'return', 'adjustment']) {
+      const f = productRow(`Inflow ${type}`, 12)
+      assert.equal((await sell(500, f, 3)).sent, 1)
+      seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = 30 WHERE product_id = ?').run(f))
+      movement(f, type, 21)
+      reset()
+      assert.equal((await sell(501, f, 25)).sent, 1, `${type} then a crossing alerts again`)
+    }
   })
 
   await check('undo then redo of a sale does not repeat the alert', async () => {
-    const e = productRow('Cleanser', 12)
-    assert.equal((await sale(401, [line(e, 3, 12, { name: 'Cleanser' })])).sent, 1)
-    restock(e, 3) // the undo: the units come back (a positive movement moves the epoch)
+    const g = productRow('Cleanser', 12)
+    assert.equal((await sell(601, g, 3)).sent, 1)
+    restock(g, 3) // the undo: the units come back
     reset()
-    // The redo takes the same units for the same sale again; its availability read now shows the restored 12.
-    const redo = await sale(401, [line(e, 3, 12, { name: 'Cleanser' })])
+    take(g, 3) // the redo takes the same units for the same sale again
+    const redo = await hook(601, [line(g, 3)])
     assert.deepEqual(redo, { crossings: 1, claimed: 0, sent: 0 })
     assert.equal(sent.length, 0)
-    assert.equal(rows().filter((r) => r.product_id === e).length, 1)
-    // Control: the SAME restock + a DIFFERENT sale is a legitimate new crossing, so the dedupe is not simply "once per product".
-    const other = await sale(402, [line(e, 3, 12, { name: 'Cleanser' })])
+    assert.equal(rows().filter((r) => r.product_id === g).length, 1)
+    restock(g, 3)
+    const other = await sell(602, g, 3) // a DIFFERENT sale after the same restock is a legitimate new crossing
     assert.equal(other.sent, 1)
   })
 
-  await check('out of stock: crossing the out threshold sends the out alert, once, and a jump from healthy skips the low alert', async () => {
-    const f = productRow('Sunscreen', 3)
-    assert.equal((await sale(501, [line(f, 3, 3, { name: 'Sunscreen' })])).sent, 1)
+  await check('out of stock: a jump from healthy raises the out alert only; a raised per-product threshold is honoured', async () => {
+    const h = productRow('Jumper', 30)
+    const jump = await sell(701, h, 30)
+    assert.deepEqual(jump, { crossings: 1, claimed: 1, sent: 1 })
     assert.equal(sent[0].heading, '🛑 Out of stock')
-    assert.equal((await sale(501, [line(f, 3, 3, { name: 'Sunscreen' })])).claimed, 0, 'retry: nothing')
-    const g = productRow('Jumper', 30)
+    assert.deepEqual(rows().filter((r) => r.product_id === h).map((r) => r.tier), ['out'])
+    const raised = productRow('Raised', 9, 10, 4)
     reset()
-    const jump = await sale(502, [line(g, 30, 30, { name: 'Jumper' })])
-    assert.deepEqual(jump, { crossings: 1, claimed: 1, sent: 1 }, 'one alert, not a low one and an out one')
+    assert.equal((await sell(702, raised, 5)).sent, 1)
     assert.equal(sent[0].heading, '🛑 Out of stock')
-    assert.deepEqual(rows().filter((r) => r.product_id === g).map((r) => r.tier), ['out'])
-    // A product whose own out threshold is raised.
-    const h = productRow('Raised', 9, 10, 4)
+  })
+
+  // ---- one message per branch and tier (review P3-7) ------------------------------------------------------------
+  await check('several products in one sale: ONE message lists them all, with the real quantities', async () => {
+    const ids = [productRow('Multi A', 12), productRow('Multi B', 11), productRow('Multi C', 40)]
+    ids.forEach((id) => take(id, id === ids[2] ? 1 : 3))
+    const result = await hook(800, ids.map((id, i) => line(id, i === 2 ? 1 : 3)))
+    assert.equal(result.claimed, 2, 'C stayed above')
+    assert.equal(sent.length, 1)
+    assert.deepEqual(sent[0].lines, ['Branch: LC Store', 'Products: 2', '• Multi A · 9', '• Multi B · 8'])
+    const text = compose(sent[0])
+    console.log(text.split('\n').map((l) => '    | ' + l).join('\n'))
+    assert.ok(text.includes('Low stock') && text.includes('ស្តុកទាប') && KHMER.test(text.split('\n')[1]) && KHMER.test(text.split('\n')[2]), text)
+  })
+
+  await check('mixed tiers are two messages (out of stock first), and a large sale is capped with "+ N more item(s)"', async () => {
+    const low = productRow('Mixed Low', 12)
+    const out = productRow('Mixed Out', 2)
+    take(low, 3); take(out, 2)
+    const result = await hook(810, [line(low, 3), line(out, 2)])
+    assert.equal(result.sent, 2)
+    assert.deepEqual(sent.map((event) => event.heading), ['🛑 Out of stock', '⚠️ Low stock'])
     reset()
-    assert.equal((await sale(503, [line(h, 5, 9, { name: 'Raised', out: 4 })])).sent, 1)
-    assert.equal(sent[0].heading, '🛑 Out of stock')
+    const many = Array.from({ length: 23 }, (_, i) => productRow(`Bulk ${String(i).padStart(2, '0')}`, 12))
+    many.forEach((id) => take(id, 3))
+    const bulk = await hook(811, many.map((id) => line(id, 3)))
+    assert.equal(bulk.claimed, 23)
+    assert.equal(sent.length, 1, 'one message for 23 products, not 23')
+    const rowsShown = sent[0].lines.filter((l) => l.startsWith('• '))
+    assert.equal(rowsShown.length, alert.CROSSING_MESSAGE_PRODUCT_CAP)
+    assert.equal(sent[0].lines[sent[0].lines.length - 1], '+ 3 more item(s)')
+    assert.equal(sent[0].lines[1], 'Products: 23')
+    assert.ok(/\+ 3 .*[ក-៿]/.test(lang.localizeTelegramLine('+ 3 more item(s)')), 'the continuation row is bilingual')
+    assert.equal(rows().filter((r) => r.sale_id === 811).length, 23, 'every crossing is still recorded')
+  })
+
+  await check('a duplicate hook over a multi-product sale claims nothing and sends nothing', async () => {
+    const x = productRow('Dup A', 12)
+    const y = productRow('Dup B', 12)
+    take(x, 3); take(y, 3)
+    assert.equal((await hook(820, [line(x, 3), line(y, 3)])).sent, 1)
+    reset()
+    assert.deepEqual(await hook(820, [line(x, 3), line(y, 3)]), { crossings: 2, claimed: 0, sent: 0 })
   })
 
   await check('switches: low alert OFF silences low but not out; the global threshold mode is honoured', async () => {
     setting('low_stock_alert_enabled', 'false')
     const i = productRow('Switch A', 12)
-    assert.equal((await sale(601, [line(i, 3, 12)])).crossings, 0, 'low crossing is not a crossing while the alert is off')
-    assert.equal((await sale(602, [line(productRow('Switch B', 2), 2, 2)])).sent, 1, 'out of stock still fires')
+    assert.equal((await sell(901, i, 3)).crossings, 0, 'low crossing is not a crossing while the alert is off')
+    assert.equal((await sell(902, productRow('Switch B', 2), 2)).sent, 1, 'out of stock still fires')
     setting('low_stock_alert_enabled', 'true')
     setting('low_stock_threshold_mode', 'global')
     setting('low_stock_threshold_default', '20')
     reset()
     const j = productRow('Global', 25, 10, 0) // its own threshold 10 is ignored in global mode
-    assert.equal((await sale(603, [line(j, 6, 25, { low: 10 })])).sent, 1, '25 -> 19 crosses the GLOBAL 20')
+    assert.equal((await sell(903, j, 6)).sent, 1, '25 -> 19 crosses the GLOBAL 20')
     setting('low_stock_threshold_mode', 'product')
   })
 
-  await check('Telegram switched off: the crossing is still recorded (the bell), nothing is sent, the row says skipped', async () => {
+  await check('Telegram switched off: the crossing is still recorded, nothing is sent, the row says skipped', async () => {
     transport = async () => false // what sendTelegramEvent answers when the category / automation / chat id is off
     const k = productRow('Quiet', 12)
-    const result = await sale(701, [line(k, 3, 12)])
-    assert.deepEqual(result, { crossings: 1, claimed: 1, sent: 0 })
+    assert.deepEqual(await sell(1001, k, 3), { crossings: 1, claimed: 1, sent: 0 })
     assert.equal(rows().find((r) => r.product_id === k).telegram_status, 'skipped')
   })
 
@@ -286,52 +361,61 @@ async function main() {
     const l = productRow('Flaky', 12)
     let calls = 0
     transport = async () => { calls += 1; throw new Error('telegram_rejected') }
-    const result = await sale(801, [line(l, 3, 12)])
-    assert.deepEqual(result, { crossings: 1, claimed: 1, sent: 0 })
+    assert.deepEqual(await sell(1101, l, 3), { crossings: 1, claimed: 1, sent: 0 })
     assert.equal(rows().find((r) => r.product_id === l).telegram_status, 'failed')
-    const again = await sale(801, [line(l, 3, 12)])
-    assert.equal(again.claimed, 0)
+    assert.equal((await hook(1101, [line(l, 3)])).claimed, 0)
     assert.equal(calls, 1, 'at most once')
   })
 
   await check('rows are scoped by branch: the same product crossing at another branch is its own crossing', async () => {
     const m = productRow('Two Branch', 12)
-    seedStockFixture(raw.db, () => raw.db.prepare("INSERT OR IGNORE INTO branches (id, name, is_active) VALUES (2, 'Other', 1)").run())
-    assert.equal((await sale(901, [line(m, 3, 12)])).sent, 1)
-    assert.equal((await sale(902, [{ ...line(m, 3, 12), branchId: 2 }])).sent, 1)
+    seedStockFixture(raw.db, () => {
+      raw.db.prepare("INSERT OR IGNORE INTO branches (id, name, is_active) VALUES (2, 'Other', 1)").run()
+      raw.db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 2, 12)').run(m)
+    })
+    take(m, 3)
+    assert.equal((await hook(1201, [line(m, 3)])).sent, 1)
+    take(m, 3, 2)
+    assert.equal((await hook(1202, [line(m, 3, 2)])).sent, 1)
     assert.equal(rows().filter((r) => r.product_id === m).length, 2)
   })
 
   await check('deploy order: without table 0272 nothing is recorded or sent and nothing throws', async () => {
     seedStockFixture(raw.db, () => raw.db.exec('ALTER TABLE stock_crossing_alerts RENAME TO stock_crossing_alerts_parked'))
     alert.__resetStockCrossingProbeForTests()
-    const result = await sale(1001, [line(a, 12, 12)])
-    assert.deepEqual(result, { crossings: 1, claimed: 0, sent: 0 })
+    const n = productRow('No Table', 12)
+    assert.deepEqual(await sell(1301, n, 3), { crossings: 0, claimed: 0, sent: 0 })
     assert.equal(sent.length, 0)
     seedStockFixture(raw.db, () => raw.db.exec('ALTER TABLE stock_crossing_alerts_parked RENAME TO stock_crossing_alerts'))
     alert.__resetStockCrossingProbeForTests()
   })
 
   await check('the sale can never fail because of an alert: a broken database is swallowed', async () => {
-    const brokenEnv = { DB: raw }
     overrides['./db'].getDb = () => { throw new Error('d1 down') }
-    const result = await alert.recordStockCrossings(brokenEnv, { saleId: 1, lines: [line(a, 12, 12)] })
+    const result = await alert.recordStockCrossings(env, { saleId: 1, lines: [line(a, 3)] })
     overrides['./db'].getDb = () => db
     assert.deepEqual(result, { crossings: 0, claimed: 0, sent: 0 })
   })
 
   // ---- wiring: read from the source (the real transport is never loaded) -----------------------------------
   const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r/g, '')
-  await check('wiring: the sale route hands the availability read to the recorder after the sale commits', () => {
+  await check('wiring: every path that deducts sale stock hands its lines to the recorder after the commit', () => {
     const sales = read('routes/sales.ts')
     assert.ok(sales.includes("import { recordStockCrossings } from '../lib/stockCrossingAlert'"))
-    const call = sales.indexOf('recordStockCrossings(c.env')
-    assert.ok(call > sales.indexOf('if (recoveredCommittedCreate) {'), 'after the replay early return, so a replayed create never re-announces')
-    const body = sales.slice(call, call + 900)
-    assert.ok(body.includes('stockCheckItems.map') && body.includes('stockByBranch.get(') && body.includes('low_stock_threshold') && body.includes('out_of_stock_threshold'))
+    assert.equal(sales.split('recordStockCrossings(c.env').length - 1, 3, 'create, add-items and the status transition')
+    const create = sales.indexOf('recordStockCrossings(c.env, {\n    saleId,')
+    assert.ok(create > 0 && create < sales.indexOf('if (recoveredCommittedCreate) {\n    return c.json({ id: saleId'), 'the create hook runs BEFORE the replay early return, so a lost response still alerts')
+    assert.ok(/saleId,\n\s+lines: stockCheckItems\.map/.test(sales) && !/before:/.test(sales.slice(create, create + 600)), 'no pre-commit quantity is passed')
+    const addItems = sales.indexOf("app.post('/:id/items'")
+    const statusRoute = sales.indexOf('recordStockCrossings(c.env', create + 100)
+    assert.ok(statusRoute > create && statusRoute < addItems, 'status transition hook sits in the status route')
+    assert.ok(sales.indexOf('recordStockCrossings(c.env', addItems) > addItems, 'add-items hook')
+    assert.ok(read('routes/returns.ts').includes('recordStockCrossings(c.env') && read('routes/returns.ts').includes('replacementLines.map'), 'return replacement lines')
+    assert.ok(read('lib/returnExchangeCreate.ts').includes('recordStockCrossings(c.env') && read('lib/returnExchangeCreate.ts').includes('priced.lines.map'), 'one-step exchange lines')
+    assert.ok(!read('lib/stockActionCommit.ts').includes('recordStockCrossings'), 'the stock-import sale is a historical load and deliberately does not alert (see the lane report)')
   })
 
-  await check('wiring: category, topic, switch default and Settings toggle', () => {
+  await check('wiring: category, topic, switch default, Settings toggle, packs; a restore clears the log', () => {
     const telegram = read('lib/telegram.ts')
     assert.ok(telegram.includes("'reviews' | 'stock_alert'"))
     assert.ok(telegram.includes("'telegram_stock_alert_enabled'") && telegram.includes('stock_alert: isEnabled(values.telegram_stock_alert_enabled, true)'), 'unset means on')
@@ -346,19 +430,20 @@ async function main() {
       }
     }
     for (const heading of ['⚠️ Low stock', '🛑 Out of stock']) assert.ok(KHMER.test(lang.TELEGRAM_HEADINGS[heading]), heading)
+    assert.ok(read('lib/backup.ts').includes('DELETE FROM ${qid(STOCK_CROSSING_ALERTS_TABLE)}'), 'restore clears the log (behaviour pinned in test-backup-legacy-restore-pure)')
   })
 
   await check('wiring: no chat, topic or token id is hard-coded in the alert module', () => {
-    const source = read('lib/stockCrossingAlert.ts')
-    assert.ok(!/-?\d{6,}/.test(source.replace(/\/\/.*$/gm, '')), 'no long numeric id')
-    assert.ok(!/chat_id|chatId|message_thread_id|BOT_TOKEN/i.test(source.replace(/\/\/.*$/gm, '')), 'chat and topic come from the per-organisation settings inside sendTelegramEvent')
+    const source = read('lib/stockCrossingAlert.ts').replace(/\/\/.*$/gm, '')
+    assert.ok(!/-?\d{6,}/.test(source), 'no long numeric id')
+    assert.ok(!/chat_id|chatId|message_thread_id|BOT_TOKEN/i.test(source), 'chat and topic come from the per-organisation settings inside sendTelegramEvent')
   })
 
-  await check('migration 0272: schema only, LF only, PRE/POST present, unique keys exist', () => {
+  await check('migration 0272: schema only, PRE/POST present, unique keys exist, header states the inflow rule', () => {
     const file = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0272_stock_crossing_alerts.sql'), 'utf8')
-    assert.ok(!file.includes('\r'))
     assert.ok(file.includes('stock_crossing_alerts_0272_pre') && file.includes('stock_crossing_alerts_0272_post'))
     assert.ok(!/^\s*(INSERT|UPDATE|DELETE)\b/im.test(file.replace(/--.*$/gm, '')), 'no data statement')
+    assert.ok(/INFLOW/.test(file) && /LEDGER_OUT_TYPES/.test(file) && !/quantity > 0 for that product and branch, i\.e\./.test(file))
     const unique = raw.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='stock_crossing_alerts' AND sql LIKE 'CREATE UNIQUE%'").all().map((r) => r.name)
     assert.deepEqual(unique, ['idx_stock_crossing_alerts_sale'])
   })

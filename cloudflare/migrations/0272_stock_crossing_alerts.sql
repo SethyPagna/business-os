@@ -3,18 +3,20 @@
 --
 -- One row per CROSSING: a sale took a product at a branch from above a threshold to at or below it
 -- (tier 'low' = crossed the low-stock threshold, tier 'out' = crossed the out-of-stock threshold). The row is
--- written by the Worker right after the sale commits, and it does two jobs:
+-- written by the Worker right after the deduction commits, and it does two jobs:
 --   1. It is the idempotency claim. `INSERT OR IGNORE` against the two unique keys below is the only gate in
 --      front of the Telegram send, so a retry, a replay, two tills racing across the same threshold, or a sale
 --      that is undone and redone can never send a second message for the same crossing.
 --        alert_key  'stock-crossing:<tier>:<branch>:<product>:<epoch>' where <epoch> is the id of the newest
---                   inventory_movements row with quantity > 0 for that product and branch, i.e. the last
---                   restock. Racing sales share the epoch and collapse to one row; a restock moves the epoch,
---                   so the next crossing is a new row and a new message.
+--                   inventory_movements row for that product and branch that is a real INFLOW: quantity > 0 AND a
+--                   movement_type that is not an outflow (the Stock Change ledger's own LEDGER_OUT_TYPES; transfer_out
+--                   and the like are stored as positive magnitudes, so the sign alone is not enough). That is the last
+--                   restock. Racing sales share the epoch and collapse to one row; a restock moves the epoch, so the
+--                   next crossing is a new row and a new message.
 --        sale key   (sale_id, product_id, branch_id, tier): the same sale never claims the same crossing twice,
 --                   even when an undo (a restock) moved the epoch in between.
---   2. It is the notification bell's list of alerts (routes/notifications.ts): the bell shows the crossings whose
---      product is still at or below the threshold, instead of walking the whole catalog on every refresh.
+--   2. It is a log of every crossing (which sale or addition, how much before and after, and what became of the
+--      Telegram message). Nothing reads it yet; the notification bell still shows the standing low-stock list.
 -- telegram_status records what became of the send. Delivery is AT MOST ONCE and inline (no queue, no drain):
 -- a row is never re-sent, so a copied database can never replay old alerts into a chat.
 --
@@ -25,12 +27,12 @@
 -- Pinned by scripts/test-stock-crossing-alert-pure.cjs.
 --
 -- Deploy order: EITHER order is safe. lib/stockCrossingAlert.ts probes for the table (memoising only a positive
--- result) and, while it is absent, records and sends nothing; the notification bell keeps its previous
--- standing list until the table exists.
+-- result) and, while it is absent, records and sends nothing.
 -- RECOVERY: roll the Worker back; the table is inert without it. DROP TABLE IF EXISTS stock_crossing_alerts.
 -- Retention: one row per crossing, at most one per product and branch between two restocks. No pruner.
 -- Backup: deliberately NOT in lib/backup.ts BACKUP_TABLES. It is an alert log, not business data; a restore
---       that brought it back would show alerts for stock that has since changed.
+--       CLEARS it (lib/backup.ts), because the keys embed movement and sale ids that a restore rolls back.
+--       Bringing its rows back would suppress the first crossing after the restore.
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE name = 'stock_crossing_alerts') = 0
 THEN 1 ELSE json_extract('[]','$[stock_crossing_alerts_0272_pre]') END;

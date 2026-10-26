@@ -1913,6 +1913,14 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
+  // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
+  // recordStockCrossings reads the branch quantity AFTER the commit, inside this waitUntil (never before the
+  // response), so two tills selling at the same moment cannot hide a crossing from each other. It also runs for a
+  // replayed create (a lost response): the claim keys make that safe, and the first attempt's hook may never have run.
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, {
+    saleId,
+    lines: stockCheckItems.map((item) => ({ productId: item.product_id, branchId: item.branch_id as number, quantity: item.quantity })),
+  }))
   if (recoveredCommittedCreate) {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
@@ -1924,25 +1932,6 @@ app.post('/', async (c) => {
     registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
       .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
   )
-  // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
-  // The before-quantities are the availability read above, so detection costs no extra read; the claim row that
-  // makes it once-only is written by recordStockCrossings (lib/stockCrossingAlert.ts), which never throws.
-  c.executionCtx.waitUntil(recordStockCrossings(c.env, {
-    saleId,
-    branchName: branchRow?.name || null,
-    lines: stockCheckItems.map((item) => {
-      const product = productMap.get(item.product_id)
-      return {
-        productId: item.product_id,
-        branchId: item.branch_id as number,
-        quantity: item.quantity,
-        before: stockByBranch.get(item.branch_id as number)?.get(item.product_id) || 0,
-        name: String(product?.name || `#${item.product_id}`),
-        lowThreshold: product?.low_stock_threshold,
-        outThreshold: product?.out_of_stock_threshold,
-      }
-    }),
-  }))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
@@ -3018,6 +3007,11 @@ app.patch('/:id/status', async (c) => {
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
   ]))
+  // Restoring a cancelled sale (or any transition that takes stock back out) deducts like the sale did: same alert rule.
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, {
+    saleId: null,
+    lines: plan.deductions.map((entry) => ({ productId: entry.product_id, branchId: entry.branch_id, quantity: entry.quantity })),
+  }))
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = settlementResponse || directStatusResponse || updated || { id: Number(id), sale_status: saleStatus }
   // S4-6: name who made the change. The actor is the request's authenticated
@@ -3942,6 +3936,12 @@ app.post('/:id/items', async (c) => {
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
+  // Lines added to a sale take stock like the sale did (owner ruling 6 Oct 2026: alert when a deduction crosses the threshold).
+  // sale_id stays null: the sale's own create already holds the sale key for these products.
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, {
+    saleId: null,
+    lines: plan.deductions.map((entry) => ({ productId: entry.product_id, branchId: entry.branch_id, quantity: entry.quantity })),
+  }))
 
   const committed = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?')
     .get<{ response_json: string }>([addItemsOperationId])

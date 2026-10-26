@@ -1251,6 +1251,8 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
 // back. sale_payment_events (0271): after a Sales restore its rows would otherwise sit against sales whose
 // payments_version has gone back to 0, and the next money write's opening:<sale_id> event would collide.
 export const SALE_REPLAY_OPTIONAL_TABLES = ['sale_payment_events'] as const
+/** Not a backup table (an alert log); a restore that rolls inventory_movements back clears it. See migration 0272. */
+export const STOCK_CROSSING_ALERTS_TABLE = 'stock_crossing_alerts'
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
@@ -1282,7 +1284,7 @@ async function discoverRestoreSchema(env: Env): Promise<RestoreSchema> {
     WHERE m.type = 'table' AND m.name IN (SELECT value FROM json_each(?))
     ORDER BY m.name, f.id, f.seq
     LIMIT ${MAX_RESTORE_SCHEMA_ROWS + 1}
-  `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations'])).all<RestoreSchemaRow>()
+  `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations', STOCK_CROSSING_ALERTS_TABLE])).all<RestoreSchemaRow>()
   const references = result.results || []
   if (references.length > MAX_RESTORE_SCHEMA_ROWS) throw new Error('Restore schema exceeds the safe discovery limit; no database rows have been changed.')
   return { tables: new Set(references.map(row => row.table_name)), references, hasCostReview: references.some(row => row.has_cost_review === 1) }
@@ -1613,6 +1615,9 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     let statementCount = 0
     const deletes: D1PreparedStatement[] = []
     for (const table of clearedOptionalTables) deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
+    // 0272: the crossing log is not backed up, but its claim keys embed movement and sale ids that this restore rolls back;
+    // leaving its rows would let an old key swallow the first crossing after the restore. Cleared whenever the movements are.
+    if (liveSchema.tables.has(STOCK_CROSSING_ALERTS_TABLE) && orderedTables.includes('inventory_movements')) deletes.push(env.DB.prepare(`DELETE FROM ${qid(STOCK_CROSSING_ALERTS_TABLE)}`))
     for (const table of [...orderedTables].reverse()) {
       if (table === 'products') {
         // This is the existing snapshot-replacement path: child ledgers have

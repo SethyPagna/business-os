@@ -5,7 +5,6 @@ import { getDb } from '../lib/db'
 import { deliveryPendingSaleSql, notPaidSaleSql } from '../lib/salesStatus'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockGuard'
-import { stockCrossingTableAvailable } from '../lib/stockCrossingAlert'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
 import { requestMetricsOf } from '../lib/requestMetrics'
@@ -219,58 +218,11 @@ function lowStockCacheInput(config: LowStockConfig): string {
   return `${config.enabled ? 1 : 0}:${config.mode}:${config.threshold}`
 }
 
-// Owner ruling, 6 Oct 2026: low and out-of-stock alerts fire only when a sale crosses the threshold. The bell therefore
-// lists CROSSINGS (stock_crossing_alerts, migration 0272), not the whole catalog's standing low-stock state: a
-// crossing stays on the bell while its product is still at or below that threshold at that branch, for at most
-// CROSSING_WINDOW_DAYS, and drops off the moment it is restocked. A new crossing after a restock is a new row and a
-// new item id, so the panel announces it again. The standing list stays one tap away in Inventory (stock filters).
-// It also answers the cost: the old query walked every visible product on every refresh (the roughly 56k rows per
-// call, with expiry); this one reads only the recent crossings and their products. Until 0272 is applied the
-// previous standing list is served, so the deploy order does not matter.
-export const CROSSING_WINDOW_DAYS = 30
-
-async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
-  if (!(await stockCrossingTableAvailable(env))) return buildStandingInventorySection(env, config, itemLimit)
-  const db = getDb(env)
-  const lowThresholdSql = lowStockThresholdSql(config, 'p.low_stock_threshold')
-  const since = new Date(Date.now() - CROSSING_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  // One row per product, branch and tier (the newest crossing), kept only while it is still true: out = at or below the
-  // out-of-stock threshold; low = above it and at or below the low threshold. With the low alert off the low fragment is
-  // -1, so only out-of-stock crossings remain, exactly as the standing list's OR did.
-  const rows = await db.prepare(`
-    SELECT event_id, product_id, name, quantity, is_out,
-      SUM(is_out) OVER () AS out_total,
-      COUNT(*) OVER () AS flagged_total
-    FROM (
-      SELECT MAX(a.id) AS event_id, a.product_id, p.name, COALESCE(bs.quantity, 0) AS quantity,
-        CASE WHEN a.tier = 'out' THEN 1 ELSE 0 END AS is_out
-      FROM stock_crossing_alerts a INDEXED BY idx_stock_crossing_alerts_recent
-      JOIN products p ON p.id = a.product_id
-      LEFT JOIN branch_stock bs ON bs.product_id = a.product_id AND bs.branch_id = a.branch_id
-      WHERE a.created_at >= @since
-        AND ${stockVisibleProductSql()}
-        AND ((a.tier = 'out' AND COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0))
-          OR (a.tier = 'low' AND COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)
-              AND COALESCE(bs.quantity, 0) <= ${lowThresholdSql}))
-      GROUP BY a.product_id, a.branch_id, a.tier
-    )
-    ORDER BY is_out DESC, quantity ASC, name ASC, event_id ASC
-    LIMIT @itemLimit
-  `).all<{ event_id: number; product_id: number; name: string; quantity: number; is_out: number; out_total: number; flagged_total: number }>({ since, itemLimit })
-  if (!rows.length) return null
-  // The item id carries the crossing's id: a new crossing after a restock is a new id, which the panel treats as a new alert.
-  return inventorySectionFrom(
-    rows.map((row) => ({ key: Number(row.event_id), productId: Number(row.product_id), name: row.name, quantity: Number(row.quantity || 0), isOut: Number(row.is_out) === 1 })),
-    Number(rows[0].out_total || 0), Number(rows[0].flagged_total || 0))
-}
-
 // `itemLimit` is how many rows come back (the section's `count` is always the
 // exact size). The totals ride on the same single pass as window aggregates, so
 // asking for 50 rows reads the catalog once, exactly as asking for 5,000 did --
-// it just stops shipping 4,950 rows nobody scrolled to. This is the standing list
-// the bell showed before the crossing alerts; it remains the fallback while
-// migration 0272 is not applied.
-async function buildStandingInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
+// it just stops shipping 4,950 rows nobody scrolled to.
+async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
   const db = getDb(env)
   const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')
   // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
@@ -294,16 +246,8 @@ async function buildStandingInventorySection(env: Env, config: LowStockConfig, i
   `).all<{ id: number; name: string; stock_quantity: number; is_out: number; out_total: number; flagged_total: number }>({ itemLimit })
   if (!rows.length) return null
 
-  return inventorySectionFrom(
-    rows.map((row) => ({ key: Number(row.id), productId: Number(row.id), name: row.name, quantity: Number(row.stock_quantity || 0), isOut: Number(row.is_out) === 1 })),
-    Number(rows[0].out_total || 0), Number(rows[0].flagged_total || 0))
-}
-
-type InventoryAlertRow = { key: number; productId: number; name: string; quantity: number; isOut: boolean }
-
-// Both sources (crossings, and the standing list before 0272) become the same section here.
-function inventorySectionFrom(rows: InventoryAlertRow[], outCount: number, flaggedTotal: number): NotificationSection {
-  const lowCount = Math.max(0, flaggedTotal - outCount)
+  const outCount = Number(rows[0].out_total || 0)
+  const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)
   const count = outCount + lowCount
 
   // anchor: 'product-<id>' -- lets Inventory.tsx scroll to and briefly
@@ -312,24 +256,24 @@ function inventorySectionFrom(rows: InventoryAlertRow[], outCount: number, flagg
   // Inventory.tsx's `#product-` hash handling). pageId stays 'inventory'
   // either way so a click still works even if the row can't be located
   // (e.g. it was restocked between the notification firing and the click).
-  const items: NotificationItem[] = rows.map((product) => (product.isOut
+  const items: NotificationItem[] = rows.map((product) => (Number(product.is_out) === 1
     ? {
-        id: `out-${product.key}`,
+        id: `out-${product.id}`,
         tone: 'danger' as const,
         label: product.name,
         meta: 'Out of stock',
         kind: 'inventory_out_of_stock',
         pageId: 'inventory',
-        anchor: `product-${product.productId}`,
+        anchor: `product-${product.id}`,
       }
     : {
-        id: `low-${product.key}`,
+        id: `low-${product.id}`,
         tone: 'warning' as const,
         label: product.name,
-        meta: `Low stock (${product.quantity})`,
+        meta: `Low stock (${Number(product.stock_quantity || 0)})`,
         kind: 'inventory_low_stock',
         pageId: 'inventory',
-        anchor: `product-${product.productId}`,
+        anchor: `product-${product.id}`,
       }))
 
   return {
