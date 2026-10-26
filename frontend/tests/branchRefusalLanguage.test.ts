@@ -72,6 +72,7 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   return_export_too_large: ['routes/returns.ts', 'return_export_too_large', 400],
   return_statement_changed: ['routes/returns.ts', 'return_statement_changed', 409],
   return_export_maintenance: ['routes/returns.ts', 'return_export_maintenance', 503],
+  return_export_cursor_invalid: ['routes/returns.ts', 'return_export_cursor_invalid', 400],
   // 6.0.964: cancelling an exchange that handed change back; the sentence is the Worker's word for word.
   return_cancel_exchange_change: ['lib/returnBulkAction.ts', 'return_cancel_exchange_change', 409],
   // 6.0.965: an exchange of a sale line with no lot; the sentence is the Worker's word for word.
@@ -85,7 +86,8 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
 }
 // idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
 // transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).
-const SHARED_CODES = ['idempotency_conflict']
+// return_export_range_invalid / return_export_ids_invalid: the Worker words each refusal differently (six range sentences, one ids sentence with the limit in it), so the pack carries one operator-language sentence per code.
+const SHARED_CODES = ['idempotency_conflict', 'return_export_range_invalid', 'return_export_ids_invalid']
 CODES.push(...Object.keys(WORKER_SENTENCE_CODES), ...SHARED_CODES)
 
 await runTest('return money and supplier refusals carry the Worker sentence as English and a real Khmer pair', async () => {
