@@ -194,6 +194,7 @@ const EXCLUDED = new Map([
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
   ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],
   ['sale_cost_repair_0200.product_id', 'provenance: backup of held migration 0200 (sale line cost before/after; recovery keys on sale_item_id)'],
+  ['stock_crossing_alerts.product_id', 'provenance: alert log of which product crossed a threshold; its claim keys embed the id'],
   ['product_cost_mirror_0269.product_id', 'provenance: repair ledger of migration 0269 (purchase_price twin before/after per product)'],
   // The ask said the merge moves EVERY linked record, stock_session_members
   // included. It is excluded instead because the column is the replay DRIVER

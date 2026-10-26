@@ -547,6 +547,9 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     a data migration (before-values and applied flags per product id); the
 //     same provenance rule as stock_row_moves: they say what was repaired, they
 //     are not a live link.
+//   stock_crossing_alerts (0272) -- an alert log: which product crossed its low / out-of-stock threshold, when, and what
+//     became of the Telegram message. Its claim keys embed the product id, so repointing a row would rewrite
+//     history (and could collide with the keeper's own keys); the keeper alerts afresh under its own id.
 //   sale_amendments.product_id -- a SNAPSHOT, not a link. 0115:73 says so in
 //     the schema itself ("product_id/product_name are snapshotted here and not
 //     looked up"), so the amendment must keep naming the row the amendment was
