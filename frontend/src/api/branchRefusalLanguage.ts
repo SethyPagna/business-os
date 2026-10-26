@@ -37,7 +37,9 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // Return and supplier-return refusals (6.0.926 follow-up). The last three are the Worker's own sentence word for word; idempotency_conflict is shared by every request-id
   // refusal (about fifteen Worker sentences), so its pack text is one operator-language sentence for the whole class, not any one of them.
   idempotency_conflict: 'idempotency_conflict',
-  // A pending sale, basket, amendment or return written by an older app version (four Worker sites, four sentences): one class sentence telling staff to restart or reload.
+  // Six Worker sites (sales.ts: new sale, added lines, amendment; returns.ts: create twice, edit), four sentences, one meaning: the request or the
+  // stored return is in the older money format and the sale no longer accepts it. The current app always sends v1, so the reader is never on an
+  // old app -- one class sentence: nothing saved, keep the record, ask an admin. EditReturnModal shows the stored-return case before any edit.
   money_precision_review_needed: 'money_precision_review_needed',
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',

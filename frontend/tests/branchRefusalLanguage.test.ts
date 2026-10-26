@@ -180,11 +180,24 @@ await runTest('changed import authority keeps conflict status and localizes the 
   assert.equal(localizeBranchRuleError(error, key => KM[key]), KM.import_apply_permission_revoked)
 })
 
-await runTest('money_precision_review_needed is restated at all four Worker sites with one restart-or-reload sentence', async () => {
+await runTest('money_precision_review_needed: six Worker sites, one accurate class sentence that never blames the app version', async () => {
   const sales = read(WORKER, 'routes', 'sales.ts'), returns = read(WORKER, 'routes', 'returns.ts')
-  assert.equal((sales.match(/code: 'money_precision_review_needed'/g) || []).length, 3, 'POST /sales, POST /sales/:id/items and amendments')
-  assert.equal((returns.match(/code: 'money_precision_review_needed'/g) || []).length, 1, 'returns create and edit share one constant')
-  assert.match(EN.money_precision_review_needed, /restart or reload/i)
+  // sales.ts: new sale, added lines, amendment -- each refuses a request body that is not v1.
+  assert.equal((sales.match(/if \(body\.money_precision_version !== 1\) return c\.json\(\{ error: '[^']+', code: 'money_precision_review_needed' \}, ?409\)/g) || []).length, 3, 'POST /sales, POST /sales/:id/items and amendments')
+  assert.equal((sales.match(/code: 'money_precision_review_needed'/g) || []).length, 3, 'no fourth sales site')
+  // returns.ts: one constant, three refusal sites -- create twice (a non-v1 body on a v1 sale) and edit, where STORED data decides.
+  assert.equal((returns.match(/code: 'money_precision_review_needed'/g) || []).length, 1, 'one constant')
+  assert.equal((returns.match(/c\.json\(\{ \.\.\.MONEY_PRECISION_REVIEW_NEEDED \}, 409\)/g) || []).length, 3, 'create (twice) and edit refuse with the constant')
+  assert.match(returns, /if \(Number\(linkedSale\?\.money_precision_version\) === 1\) \{\s*return c\.json\(\{ \.\.\.MONEY_PRECISION_REVIEW_NEEDED \}, 409\)/, 'the edit site is decided by the stored sale, not the request')
+  // The text is bundled into the app and the current app always sends v1, so whoever reads it is on the current app:
+  // the sentence must say what happened (older money format, nothing saved) and what to do, never "restart / out of date".
+  assert.match(read(FRONTEND, 'src', 'api', 'returnsTransport.ts'), /money_precision_version: 1, expected_quote: expected/)
+  assert.equal((read(FRONTEND, 'src', 'components', 'sales', 'SaleDetailModal.tsx').match(/money_precision_version: 1,/g) || []).length, 2, 'amendment and added lines send v1')
+  for (const text of [EN.money_precision_review_needed]) assert.doesNotMatch(text, /out of date|restart|reload|update the app|older app|old app/i)
+  assert.match(EN.money_precision_review_needed, /nothing was saved/i)
+  assert.match(EN.money_precision_review_needed, /older money format/i)
+  assert.match(EN.money_precision_review_needed, /admin/i)
+  assert.doesNotMatch(KM.money_precision_review_needed, /ចាប់ផ្តើមឡើងវិញ|ផ្ទុកកម្មវិធីឡើងវិញ/, 'Khmer does not say restart or reload either')
   assert.ok(!sales.includes(EN.money_precision_review_needed) && !returns.includes(EN.money_precision_review_needed), 'a class sentence, not one Worker sentence')
   uiLanguage = 'km'; packServed = KM
   for (const worker of ['Keep this return and review it with the current app before recording it.', 'Preserve the pending request and review this basket with the current app.']) {

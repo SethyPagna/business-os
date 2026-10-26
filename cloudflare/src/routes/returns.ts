@@ -1090,12 +1090,16 @@ app.get('/capabilities', (c) => {
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
+  // sale_money_precision_version is the linked sale's money version: the Edit Return form reads it to show, before any edit,
+  // the refusal PUT /:id gives a v0 return on a v1 sale (MONEY_PRECISION_REVIEW_NEEDED). One primary-key join, no extra read.
   const row = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       replacement_sale.total_usd AS replacement_total_usd,
+      origin_sale.money_precision_version AS sale_money_precision_version,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    LEFT JOIN sales origin_sale ON origin_sale.id = r.sale_id
     WHERE r.id = ?
   `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
