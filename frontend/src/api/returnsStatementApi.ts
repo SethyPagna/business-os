@@ -23,7 +23,7 @@ export async function loadReturnStatement<T extends { id: number }>(range: Retur
     signal: options.signal,
     readPage: async (query, cursor, snapshotToken, signal) => {
       options.assertAllowed()
-      const response = await apiFetch('GET', appendQuery('/api/returns/export', buildQueryString({ ...query, ...(cursor ? { cursor } : {}), ...(snapshotToken ? { snapshotToken } : {}) })), undefined, 30000, { signal }) as ReturnStatementPage<T>
+      const response = await apiFetch('GET', appendQuery('/api/returns/export', buildQueryString({ ...query, ...(cursor ? { cursor, total: totalForVerify } : {}), ...(snapshotToken ? { snapshotToken } : {}) })), undefined, 30000, { signal }) as ReturnStatementPage<T>
       options.assertAllowed()
       queryForVerify = query
       tokenForVerify = response.snapshotToken

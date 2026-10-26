@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
+import { returnsStatementRangeOrDefault } from '../src/utils/returnsExportWindow.ts'
 
 const source = fs.readFileSync(new URL('../src/components/shared/ExportOptionsDialog.tsx', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('ExportOptionsDialog.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -53,7 +54,7 @@ function statementFixture(overrides: Record<string, unknown> = {}) {
   let dialog: any = null, progress: any = null, next: Promise<any> | null = null
   const env: any = {
     exportRequestRef: { current: null }, exportScope: 'A', exportScopeRef: { current: 'A' }, isActive: true, canViewReturns: true, canExportReturns: true, canViewCosts: false,
-    captureActorReadScope: () => 'A', assertActorReadScope: () => {},
+    captureActorReadScope: () => 'A', assertActorReadScope: () => {}, returnsStatementRangeOrDefault, todayStr: () => '2026-10-26',
     scope: 'customer', debouncedSearch: ' current search ', typeFilter: 'damaged', returnsDateRange: { startDate: '2026-09-20', endDate: '2026-09-20', startTime: '08:00', endTime: '09:00' },
     tr: (_key: string, fallback: string) => fallback, notify: (message: string) => messages.push(message), exportReturnRows: (rows: unknown) => rows,
     setExportProgress: (value: unknown) => { progress = value }, setExportDialog: (value: unknown) => { dialog = value },
@@ -78,6 +79,12 @@ full.env.exportScopeRef.current = 'B'; assert.equal(full.dialog().allowed(), fal
 
 const supplier = statementFixture(); await supplier.run('returns-supplier', { scope: 'supplier', includeType: false })
 assert.deepEqual(supplier.requests[0].filters, { scope: 'supplier', search: 'current search' }, 'the scope entry exports that scope and ignores the type chip')
+
+const open = statementFixture({ returnsDateRange: { startDate: '', endDate: '' } }); await open.run('returns-customer', { scope: 'customer', includeType: false })
+assert.equal(open.messages.length, 0, 'no refusal for a missing date filter')
+assert.deepEqual(open.requests[0].range, { startDate: '2025-10-27', endDate: '2026-10-26' }, 'the last 12 months ending today')
+assert.match(open.dialog().note, /2025-10-27 to 2026-10-26/, 'the dialog says which period the export covers')
+assert.equal(full.dialog().note, undefined, 'a usable filter needs no note')
 
 const denied = statementFixture({ canExportReturns: false }); await denied.run('returns-filtered')
 assert.equal(denied.requests.length, 0, 'no request without returns:export'); assert.deepEqual(denied.messages, ['You do not have permission to perform this action.'])

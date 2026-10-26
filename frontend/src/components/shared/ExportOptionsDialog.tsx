@@ -34,6 +34,8 @@ interface ExportOptionsDialogProps {
   canExport?: () => boolean
   /** Optional asynchronous snapshot check immediately before the file side effect (a paged statement proves it did not move while it was read). */
   beforeExport?: () => Promise<void>
+  /** One line shown under the title, e.g. the period a statement export had to default to. */
+  note?: string
 }
 
 function tr(t: TranslateFn, key: string, fallback: string): string {
@@ -51,6 +53,7 @@ export default function ExportOptionsDialog({
   notify,
   canExport,
   beforeExport,
+  note,
 }: ExportOptionsDialogProps) {
   const exportAuthorityRef = useRef(canExport)
   exportAuthorityRef.current = canExport
@@ -148,6 +151,7 @@ export default function ExportOptionsDialog({
   return (
     <Modal title={title} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-3">
+        {note ? <p className="text-xs text-slate-600 dark:text-slate-300" role="status">{note}</p> : null}
         <div className="flex gap-2">
           {formatButton('xlsx', tr(t, 'export_format_excel', 'Excel'), tr(t, 'export_format_excel_hint', '.xlsx — opens in Excel, Khmer-safe'))}
           {formatButton('csv', tr(t, 'export_format_csv', 'CSV'), tr(t, 'export_format_csv_hint', '.csv — for re-import/machines; opening in Excel can break barcodes'))}

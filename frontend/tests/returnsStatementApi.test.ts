@@ -21,6 +21,8 @@ function fixture() {
       return { rows: [], total: rows.length, snapshotToken: 'token', nextCursor: null }
     }
     const start = Number(url.searchParams.get('cursor') || 0)
+    if (start) assert.equal(url.searchParams.get('total'), String(rows.length), 'a later page carries the statement total the first page reported')
+    else assert.equal(url.searchParams.get('total'), null)
     if (start && failPage) throw new Error('page failed')
     return { rows: rows.slice(start, start + 500), total: rows.length, snapshotToken: changeToken && start ? 'changed' : 'token', nextCursor: start + 500 < rows.length ? String(start + 500) : null }
   } }

@@ -31,3 +31,21 @@ export function returnsStatementParams(range: ReturnsStatementRange): Record<str
   }
   return { startDate: range.startDate, endDate: range.endDate, createdFrom, createdTo }
 }
+
+/**
+ * The window a period export uses when the page's date filter cannot be one (no dates, an end before the start, or more than one calendar year): never a refusal.
+ * It keeps the filter's end date when it has one (otherwise today) and reaches back one calendar year from it, in whole days. `defaulted` tells the dialog to say so.
+ */
+export function returnsStatementRangeOrDefault(range: ReturnsStatementRange, todayYmd: string): { range: ReturnsStatementRange; defaulted: boolean } {
+  try { returnsStatementParams(range); return { range, defaulted: false } } catch { /* falls through to the default window */ }
+  const isDay = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + 'T00:00:00Z'))
+  const endDate = isDay(range.endDate) && range.endDate <= todayYmd ? range.endDate : todayYmd
+  const start = new Date(endDate + 'T00:00:00Z')
+  const month = start.getUTCMonth()
+  start.setUTCFullYear(start.getUTCFullYear() - 1)
+  if (start.getUTCMonth() !== month) start.setUTCDate(0)
+  start.setUTCDate(start.getUTCDate() + 1)
+  const fallback = { startDate: start.toISOString().slice(0, 10), endDate }
+  returnsStatementParams(fallback)
+  return { range: fallback, defaulted: true }
+}

@@ -62,7 +62,7 @@ const base = {
   withLoaderTimeout: (work: () => unknown) => work(), fetchReturns: async (params: unknown) => { assert.deepEqual(params, { scope: 'customer', ...returnRangeParams(currentRange) }); return suppliedRows },
   setRows: (value: any[]) => { rows = value }, stripRequestRef: { current: 0 }, setStripLoading: () => {},
   getReturnsReport: async (params: unknown) => { assert.deepEqual(params, { scope: 'customer', ...returnRangeParams(currentRange) }); return { count: suppliedRows.length } },
-  setStripData: (value: unknown) => { stats = value }, tr: (key: string) => key,
+  setStripData: (value: unknown) => { stats = value }, tr: (key: string) => key, setLoadedSearch: (_value: string) => {},
 }
 let currentRange = range
 const makeRange = () => evaluate(variable('returnsDateRange'), { ...hooks, stripRange: currentRange })
@@ -133,3 +133,16 @@ const deniedColumns = actualColumns(false)
 assert.ok(deniedColumns.every((column: { key: string }) => !/^(Compensation|Business_Loss)_/.test(column.key)))
 assert.ok(projectExportRows(exportControls, deniedColumns, new Set(keys)).every(row => !Object.keys(row).some(key => /^(Compensation|Business Loss) /.test(key))))
 console.log('PASS Returns continuous times: Reports parity, cache identity, actual page request/reset/export flow, safe invalid drafts')
+
+// The list shows exactly what the server (and the statement export) returned for the search: once rows for the current search have arrived, the page does not
+// re-filter them locally (the server also matches SKU/barcode/brand, which the loaded rows do not carry). Only the interim preview before they arrive is local.
+{
+  const skuOnly = [{ id: 1, return_type: 'refund', return_number: 'RET-1', items: [{ product_name: 'Tea' }] }]
+  const filteredOf = (loadedSearch: string, debouncedSearch: string) => evaluate(variable('filtered'), {
+    ...hooks, rows: skuOnly, typeFilter: 'all', matchesMulti: () => true, getReturnTypeKey: () => 'refund', searchTerms: [['barcode-8851234']], loadedSearch, debouncedSearch,
+    buildReturnHaystack: () => 'ret-1 tea', matchesSearchTermGroups: () => false,
+  })
+  assert.equal(filteredOf('barcode-8851234', 'barcode-8851234').length, 1, 'rows the server returned for this search stay, even when the local haystack cannot see the barcode')
+  assert.equal(filteredOf('', 'barcode-8851234').length, 0, 'before the response lands the local preview still narrows')
+}
+console.log('PASS Returns list is not re-filtered locally once the server answered the same search')

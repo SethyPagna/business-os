@@ -15,7 +15,9 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const FILE = 'routes/returns.ts'
 const MUTANTS = {
   // The keyset forgets the id tiebreak: rows that share a second are skipped at a page edge.
-  'cursor-without-id-tiebreak': [{ from: "(${RETURN_EXPORT_SORT_AT} = @cursorAt AND r.id < @cursorId)", to: '(1=0)' }],
+  'cursor-without-id-tiebreak': [{ from: "(${RETURN_EXPORT_SORT_AT}, r.id) < (@cursorAt, @cursorId)", to: "(${RETURN_EXPORT_SORT_AT}) < (@cursorAt)" }],
+  // The page seeks from the top of the period instead of the cursor: every page re-reads what the earlier pages served.
+  'cursor-bound-ignored': [{ from: "cursor ? buildFilter('<= @cursorAt') : filter", to: 'filter' }],
   // The page ignores the Free bound.
   'free-bound-ignored': [{ from: 'getPlanLimits(c.env).d1QueriesPerInvocation < 200 ? RETURN_EXPORT_PAGE_MAX_FREE : RETURN_EXPORT_PAGE_MAX', to: 'RETURN_EXPORT_PAGE_MAX' }],
   // A page is served under a token that no longer matches.
@@ -102,16 +104,16 @@ async function get(db, user, qs, env = {}) {
 }
 async function walk(db, user, qs, env) {
   const pages = []
-  let cursor = null, token = null
+  let cursor = null, token = null, total = null
   do {
-    const r = await get(db, user, { ...DAY, ...qs, ...(cursor ? { cursor } : {}), ...(token ? { snapshotToken: token } : {}) }, env)
+    const r = await get(db, user, { ...DAY, ...qs, ...(cursor ? { cursor, total } : {}), ...(token ? { snapshotToken: token } : {}) }, env)
     assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300))
-    pages.push(r.body); token = r.body.snapshotToken; cursor = r.body.nextCursor
+    pages.push(r.body); token = r.body.snapshotToken; total = r.body.total; cursor = r.body.nextCursor
   } while (cursor)
   return pages
 }
-const expectedOrder = (db, extra = '') => db.db.prepare(`SELECT id FROM returns WHERE datetime(created_at)>='2026-09-19 17:00:00' AND datetime(created_at)<'2026-09-20 17:00:00'
-  AND COALESCE(return_scope,'customer')='customer' ${extra} ORDER BY datetime(created_at) DESC, id DESC`).all().map(row => row.id)
+const expectedOrder = (db, extra = '') => db.db.prepare(`SELECT id FROM returns WHERE ((created_at>='2026-09-19 17:00:00' AND created_at<'2026-09-20 17:00:00') OR (created_at>='2026-09-19T17:00:00' AND created_at<'2026-09-20T17:00:00'))
+  AND COALESCE(return_scope,'customer')='customer' ${extra} ORDER BY created_at DESC, id DESC`).all().map(row => row.id)
 
 const cases = [
   ['complete-over-the-list-cap-and-stable-order', async () => {
@@ -189,11 +191,69 @@ const cases = [
       const copy = newDb(); seed(copy, 600)
       const a = await get(copy, exporter, DAY)
       copy.db.exec(change)
-      const nextPage = await get(copy, exporter, { ...DAY, cursor: a.body.nextCursor, snapshotToken: a.body.snapshotToken })
-      assert.equal(nextPage.status, 409, label); assert.equal(nextPage.body.code, 'return_statement_changed', label)
+      // The first page under the old token is refused, and so is the final verify the client runs before it publishes a file.
+      const again = await get(copy, exporter, { ...DAY, snapshotToken: a.body.snapshotToken })
+      assert.equal(again.status, 409, label); assert.equal(again.body.code, 'return_statement_changed', label)
       const check = await get(copy, exporter, { ...DAY, snapshotToken: a.body.snapshotToken, verify: '1' })
       assert.equal(check.status, 409, `${label}: verify refuses too`)
       copy.db.close()
+    }
+    db.db.close()
+  }],
+  ['later-pages-are-shape-checked-and-echo-the-token', async () => {
+    const db = newDb(); seed(db, 600)
+    const first = await get(db, exporter, DAY)
+    const next = await get(db, exporter, { ...DAY, cursor: first.body.nextCursor, snapshotToken: first.body.snapshotToken, total: first.body.total })
+    assert.equal(next.status, 200); assert.equal(next.body.snapshotToken, first.body.snapshotToken); assert.equal(next.body.total, first.body.total)
+    for (const bad of [{}, { snapshotToken: 'x', total: '600' }, { snapshotToken: first.body.snapshotToken }, { snapshotToken: first.body.snapshotToken, total: '-1' }, { snapshotToken: first.body.snapshotToken, total: '20001' }]) {
+      const r = await get(db, exporter, { ...DAY, cursor: first.body.nextCursor, ...bad })
+      assert.equal(r.status, 400, JSON.stringify(bad)); assert.equal(r.body.code, 'return_export_cursor_invalid')
+    }
+    db.db.close()
+  }],
+  ['pages-seek-the-created-at-index-and-read-about-a-page', async () => {
+    // A long history OUTSIDE the period (3 years of other returns) plus the period itself: a page must read about its own size, not the history.
+    const db = newDb(); seed(db, 1203)
+    db.db.exec('BEGIN')
+    const old = db.db.prepare("INSERT INTO returns(id,return_number,return_scope,status,return_type,reason,created_at,updated_at) VALUES(@id,@n,'customer','completed','refund','old',@at,@at)")
+    for (let i = 0; i < 30000; i++) old.run({ id: 100000 + i, n: 'OLD-' + i, at: '2023-' + String(1 + (i % 12)).padStart(2, '0') + '-' + String(1 + (i % 28)).padStart(2, '0') + ' 05:' + String(i % 60).padStart(2, '0') + ':00' })
+    // Decoys the exact window must reject but the index range still passes over: ISO-shaped rows early on the first day, space-shaped rows late on the last day.
+    for (const [i, at] of ['2026-09-19T03:00:00Z', '2026-09-19T04:00:00Z', '2026-09-20 18:00:00', '2026-09-20 19:00:00'].entries()) {
+      old.run({ id: 200000 + i, n: 'DECOY-' + i, at })
+    }
+    db.db.exec('COMMIT')
+    let probes = 0
+    db.db.function('probe', { varargs: true }, () => { probes++; return 1 })
+    const seen = []
+    const instrumented = new Proxy(db, { get(target, prop) {
+      if (prop !== 'prepare') return Reflect.get(target, prop)
+      return sql => {
+        const isPage = /ORDER BY r\.created_at DESC, r\.id DESC LIMIT/.test(sql)
+        const text = isPage ? sql.replace(/FROM returns r\s+LEFT JOIN sales replacement_sale[\s\S]*?WHERE /, match => match + 'probe(r.id)=1 AND ') : sql
+        const stmt = target.prepare(text)
+        const wrap = method => params => { seen.push({ sql: text, params, page: isPage }); return stmt[method](params) }
+        return { all: wrap('all'), get: wrap('get'), run: params => stmt.run(params), bind: p => stmt.bind(p) }
+      }
+    } })
+    for (const qs of [{}, { scope: 'all' }]) {
+      probes = 0; seen.length = 0
+      const perPage = []
+      let cursor = null, token = null, total = null, ids = []
+      do {
+        const before = probes
+        const r = await get(instrumented, exporter, { ...DAY, ...qs, ...(cursor ? { cursor, total, snapshotToken: token } : {}) })
+        assert.equal(r.status, 200)
+        perPage.push(probes - before); ids = ids.concat(r.body.rows.map(row => row.id))
+        token = r.body.snapshotToken; total = r.body.total; cursor = r.body.nextCursor
+      } while (cursor)
+      assert.ok(ids.length >= 1203 && new Set(ids).size === ids.length, 'the statement is still complete')
+      assert.ok(perPage.every(n => n <= 251 + 44), "rows read per page: " + perPage.join(",") + " (page size 250, plus rows sharing the cursor instant (40 in this fixture) and 4 decoys inside the index range) -- not the 31000-row history")
+      for (const entry of seen.filter(entry => entry.page || /COUNT\(\*\) AS total/.test(entry.sql))) {
+        const plan = db.prepare('EXPLAIN QUERY PLAN ' + entry.sql).all(entry.params || {}).map(row => row.detail).join(' | ')
+        assert.match(plan, /SEARCH r USING (COVERING )?INDEX idx_returns_(scope_)?created_pg/, 'the created_at index drives the read: ' + plan)
+        assert.doesNotMatch(plan, /TEMP B-TREE/, 'no sort of the history: ' + plan)
+        assert.doesNotMatch(plan, /SCAN r\b/, 'no table scan: ' + plan)
+      }
     }
     db.db.close()
   }],

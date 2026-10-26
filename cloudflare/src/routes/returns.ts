@@ -768,16 +768,23 @@ app.get('/', async (c) => {
 // GET /api/returns/export -- the COMPLETE Returns statement for a bounded period, read in cursor pages (RETURNS-ENDPOINT / STATEMENT-EXPORTS, 26 Oct 2026).
 // The list above is capped by the rows it loaded (500 by default, 1000 at most), so an export built from it silently stopped at the cap. This route walks the
 // same filters (returnsFilter) in a total order -- the entry time, then the id, both descending -- with an opaque keyset cursor, so no row is skipped or repeated
-// across pages and the order is the same on every run. Each request is bounded (a Free invocation runs at most 50 queries: this one runs two, and reads
-// at most RETURN_EXPORT_PAGE_MAX_FREE rows); the whole statement is bounded by RETURN_EXPORT_ROWS_MAX and by the one-calendar-year window (returnExportWindow).
-// snapshotToken is a digest of what the pages are made of: the filter, the matched returns' count, ids, write revisions (a return, its lines, its products
-// and its replacement sale each bump one) and update stamps, and the customer marker that has no revision of its own. A page asked for under a token that no
-// longer matches is refused, and verify=1 re-reads the token alone so the client can prove nothing moved between the first page and the file.
+// across pages and the order is the same on every run.
+// Cost: every page is a keyset seek on the indexed created_at column (idx_returns_created_pg, or idx_returns_scope_created_pg when a scope is named) in index order, so a page
+// reads about its own size, not the whole history. A request runs at most three D1 queries (maintenance flag, the snapshot aggregate, the page); the Free plan allows 1000
+// per invocation, so the bound that matters is rows: RETURN_EXPORT_PAGE_MAX_FREE per request, RETURN_EXPORT_ROWS_MAX per statement, one calendar year (returnExportWindow).
+// snapshotToken is a digest of what the pages are made of: the filter, the matched returns' count, ids, write revisions (a return, its lines, its products and its
+// replacement sale each bump one), update stamps, and the customer marker that has no revision of its own. It is computed from the whole matched set, which is one pass over
+// the statement, so it is computed twice per export -- on the first page and on verify=1 (the final and file-click check) -- never per page. Pages after the first
+// echo the token and total the client presents (shape-checked); a change anywhere in the statement while it was read makes the final verify refuse the file.
 const RETURN_EXPORT_PAGE_MAX = 500
 const RETURN_EXPORT_PAGE_MAX_FREE = 250
 const RETURN_EXPORT_ROWS_MAX = 20000
 const RETURN_EXPORT_IDS_MAX = 1000
-const RETURN_EXPORT_SORT_AT = 'datetime(r.created_at)'
+// The RAW indexed column (idx_returns_created_pg): never wrapped in a function. Stored timestamps come in two shapes ('YYYY-MM-DD HH:MM:SS' and ISO 'YYYY-MM-DDTHH:MM:SS...Z'),
+// so the window is the union of one bound range per shape (the ISO bounds are the same instants with a 'T'), and the order is the raw text order -- a total order
+// with the id tiebreak that is the same on every run (within one day, ISO-shaped rows sort after space-shaped ones; ISO offsets other than Z are not windowed).
+const RETURN_EXPORT_SORT_AT = 'r.created_at'
+const HEX64 = /^[0-9a-f]{64}$/
 
 function encodeReturnExportCursor(sortAt: string, id: number): string {
   return btoa(JSON.stringify([sortAt, id])).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -786,7 +793,7 @@ function decodeReturnExportCursor(value: string): { sortAt: string; id: number }
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(value)) return null
   try {
     const parsed = JSON.parse(atob(value.replace(/-/g, '+').replace(/_/g, '/'))) as unknown
-    if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(parsed[0])
+    if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[0-9.]{0,5}[Zz]?$/.test(parsed[0])
       && Number.isSafeInteger(parsed[1]) && (parsed[1] as number) > 0) return { sortAt: parsed[0], id: parsed[1] as number }
   } catch { /* falls through to null */ }
   return null
@@ -822,41 +829,60 @@ app.get('/export', async (c) => {
     return c.json({ error: 'Returns cannot be exported while a restore is running. Try again shortly.', code: 'return_export_maintenance' }, 503)
   }
 
-  const filter = returnsFilter(query, { sql: `${RETURN_EXPORT_SORT_AT} >= @createdFrom AND ${RETURN_EXPORT_SORT_AT} < @createdTo`, params: { ...window } })
-  if (ids) { filter.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); filter.params.exportIds = JSON.stringify(ids) }
+  // The window is one range on the raw indexed column (lower bound, and ONE upper bound -- SQLite's index range takes a single upper term) plus the exact two-shape
+  // membership test as a residual. A later page makes its cursor the upper bound, so the index seek starts at the cursor instead of at the top of the period.
+  const buildFilter = (upper: string) => {
+    const built = returnsFilter(query, { sql: `r.created_at >= @createdFrom AND r.created_at ${upper} AND ((r.created_at >= @createdFrom AND r.created_at < @createdTo) OR (r.created_at >= @createdFromT AND r.created_at < @createdToT))`, params: { ...window, createdFromT: window.createdFrom.replace(' ', 'T'), createdToT: window.createdTo.replace(' ', 'T') } })
+    if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }
+    return built
+  }
+  const filter = buildFilter('< @createdToT')
   const whereSql = filter.where.join(' AND ')
-  const stamp = await db.prepare(`
-    SELECT COUNT(*) AS total, COALESCE(SUM(r.id), 0) AS id_sum, COALESCE(SUM(COALESCE(v.revision, 0)), 0) AS revision_sum,
-      COALESCE(MAX(r.updated_at), '') AS updated_max,
-      COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id = r.customer_id AND ic.is_anonymous = 1) THEN 1 ELSE 0 END), 0) AS anonymous_count,
-      COALESCE(SUM(COALESCE(sv.revision, 0)), 0) AS replacement_revision_sum
-    FROM returns r
-    LEFT JOIN return_write_revisions v ON v.return_id = r.id
-    LEFT JOIN sale_write_revisions sv ON sv.sale_id = r.replacement_sale_id
-    WHERE ${whereSql}
-  `).get<Record<string, unknown>>(filter.params)
-  const total = Number(stamp?.total) || 0
-  if (total > RETURN_EXPORT_ROWS_MAX) {
-    return c.json({ error: 'This period has too many returns to export at once. Choose a shorter period and export again.', code: 'return_export_too_large', total }, 400)
-  }
-  const sortedParams = Object.keys(filter.params).sort().map((key) => [key, filter.params[key]])
-  const snapshotToken = await sha256Hex(JSON.stringify([whereSql, sortedParams, total, stamp?.id_sum, stamp?.revision_sum, stamp?.updated_max, stamp?.anonymous_count, stamp?.replacement_revision_sum]))
+  const verifying = ['1', 'true', 'yes'].includes(String(query.verify || '').trim().toLowerCase())
   const presented = String(query.snapshotToken || '')
-  if (presented && presented !== snapshotToken) {
-    return c.json({ error: 'The returns changed while the statement was being read. Restart the download.', code: 'return_statement_changed' }, 409)
-  }
-  if (['1', 'true', 'yes'].includes(String(query.verify || '').trim().toLowerCase())) {
-    return c.json({ rows: [], total, snapshotToken, nextCursor: null })
+  let total: number
+  let snapshotToken: string
+  if (cursor && !verifying) {
+    // A later page: the statement-wide aggregate was taken on the first page and is re-taken by verify. Here the client's own copy is echoed so every page of one export
+    // carries the same token and total.
+    const echoedTotal = Number(query.total)
+    if (!HEX64.test(presented) || !Number.isSafeInteger(echoedTotal) || echoedTotal < 0 || echoedTotal > RETURN_EXPORT_ROWS_MAX) {
+      return c.json({ error: 'The export cursor is not valid. Restart the download.', code: 'return_export_cursor_invalid' }, 400)
+    }
+    total = echoedTotal; snapshotToken = presented
+  } else {
+    const stamp = await db.prepare(`
+      SELECT COUNT(*) AS total, COALESCE(SUM(r.id), 0) AS id_sum, COALESCE(SUM(COALESCE(v.revision, 0)), 0) AS revision_sum,
+        COALESCE(MAX(r.updated_at), '') AS updated_max,
+        COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id = r.customer_id AND ic.is_anonymous = 1) THEN 1 ELSE 0 END), 0) AS anonymous_count,
+        COALESCE(SUM(COALESCE(sv.revision, 0)), 0) AS replacement_revision_sum
+      FROM returns r
+      LEFT JOIN return_write_revisions v ON v.return_id = r.id
+      LEFT JOIN sale_write_revisions sv ON sv.sale_id = r.replacement_sale_id
+      WHERE ${whereSql}
+    `).get<Record<string, unknown>>(filter.params)
+    total = Number(stamp?.total) || 0
+    if (total > RETURN_EXPORT_ROWS_MAX) {
+      return c.json({ error: 'This period has too many returns to export at once. Choose a shorter period and export again.', code: 'return_export_too_large', total }, 400)
+    }
+    const sortedParams = Object.keys(filter.params).sort().map((key) => [key, filter.params[key]])
+    snapshotToken = await sha256Hex(JSON.stringify([whereSql, sortedParams, total, stamp?.id_sum, stamp?.revision_sum, stamp?.updated_max, stamp?.anonymous_count, stamp?.replacement_revision_sum]))
+    if (presented && presented !== snapshotToken) {
+      return c.json({ error: 'The returns changed while the statement was being read. Restart the download.', code: 'return_statement_changed' }, 409)
+    }
+    if (verifying) return c.json({ rows: [], total, snapshotToken, nextCursor: null })
   }
 
-  const params: Record<string, unknown> = { ...filter.params, pageLimit: pageLimit + 1 }
-  let pageWhere = whereSql
+  const pageFilter = cursor ? buildFilter('<= @cursorAt') : filter
+  const params: Record<string, unknown> = { ...pageFilter.params, pageLimit: pageLimit + 1 }
+  let pageWhere = pageFilter.where.join(' AND ')
   if (cursor) {
-    pageWhere += ` AND (${RETURN_EXPORT_SORT_AT} < @cursorAt OR (${RETURN_EXPORT_SORT_AT} = @cursorAt AND r.id < @cursorId))`
+    // The keyset seek: the index range already ends at the cursor's time; the row value drops the rows of that instant that were already served.
+    pageWhere += ` AND (${RETURN_EXPORT_SORT_AT}, r.id) < (@cursorAt, @cursorId)`
     params.cursorAt = cursor.sortAt; params.cursorId = cursor.id
   }
   const fetched = await db.prepare(`
-    SELECT r.*, ${RETURN_EXPORT_SORT_AT} AS export_sort_at,
+    SELECT r.*, r.created_at AS export_sort_at,
       EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       replacement_sale.total_usd AS replacement_total_usd,
       ${DAMAGED_ITEM_COUNT_SQL}

@@ -7398,6 +7398,7 @@
   "return_statement_changed": "The returns changed while the statement was being read. Restart the download.",
   "return_export_maintenance": "Returns cannot be exported while a restore is running. Try again shortly.",
   "returns_export_range_limit": "Choose valid dates covering at most one year in the existing date filter, then export again.",
+  "returns_export_window_note": "The date filter is not a single period of at most one year, so this export covers {from} to {to}.",
   "return_cancel_replacement_taken": "These items are already returned. Apply again to finish the cancel.",
   "return_cancel_replacement_reason": "Replacement items cancelled with the return",
   "return_cancel_replacement_changed": "The replacement items changed after part of this was already done. Close this window and start again.",

@@ -6,6 +6,8 @@ import { formatSupplierCostTotal } from '../../utils/costDisplay.ts'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { captureActorReadScope, assertActorReadScope } from '../../api/actorReadScope.ts'
+import { returnsStatementRangeOrDefault } from '../../utils/returnsExportWindow.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
@@ -427,6 +429,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // live inside the shared date/time picker so there is one range control.
   const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [typeFilter, setTypeFilter] = useState('all')
+  // The search the loaded rows were fetched with. The server's search also matches SKU, barcode and brand, which the loaded rows do not carry, so once rows for the current search
+  // have arrived the page must not re-filter them locally -- it would drop rows the server (and the statement export) return. The local filter is only the interim preview.
+  const [loadedSearch, setLoadedSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --
   // checkboxes only exist while something is selected; long-press a
@@ -588,6 +593,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         const result = await withLoaderTimeout(() => fetchReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         setRows(Array.isArray(result) ? result as ReturnRow[] : [])
+        setLoadedSearch(debouncedSearch)
         loadedOnceRef.current = true
         setLoadError(null)
       } catch (error: unknown) {
@@ -1162,9 +1168,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }
   const filtered = useMemo(() => rows.filter((ret) => {
     if (!matchesMulti(typeFilter, getReturnTypeKey(ret))) return false
-    if (!searchTerms.length) return true
+    if (!searchTerms.length || loadedSearch === debouncedSearch) return true
     return matchesSearchTermGroups(buildReturnHaystack(ret), searchTerms, 'AND')
-  }), [rows, searchTerms, typeFilter])
+  }), [rows, searchTerms, typeFilter, loadedSearch, debouncedSearch])
 
   const returnSortFields = useMemo<SortField<ReturnRow>[]>(() => {
     const labels: Record<string, string> = {
@@ -1462,7 +1468,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   exportScopeRef.current = exportScope
   const exportRequestRef = useRef<{ controller: AbortController; scope: string } | null>(null)
   const [exportProgress, setExportProgress] = useState<{ scope: string; received: number; total: number } | null>(null)
-  const [exportDialog, setExportDialog] = useState<{ scope: string; rows: Array<Record<string, unknown>>; baseName: string; allowed: () => boolean; verify: () => Promise<void> } | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ scope: string; rows: Array<Record<string, unknown>>; baseName: string; note?: string; allowed: () => boolean; verify: () => Promise<void> } | null>(null)
   const closeExport = useCallback(() => {
     exportRequestRef.current?.controller.abort()
     exportRequestRef.current = null
@@ -1488,7 +1494,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       assertAllowed()
       const { loadReturnStatement } = await import('../../api/returnsStatementApi.ts')
       assertAllowed()
-      const complete = await loadReturnStatement<ReturnRow & { id: number }>(returnsDateRange, {
+      // A period the date filter cannot express (empty, reversed or over a year) exports the last year up to its end date instead of refusing; the dialog says so.
+      const period = returnsStatementRangeOrDefault(returnsDateRange, todayStr())
+      const complete = await loadReturnStatement<ReturnRow & { id: number }>(period.range, {
         scope: options.scope ?? scope, ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
         ...(options.includeType !== false && typeFilter !== 'all' ? { type: typeFilter } : {}),
       }, {
@@ -1498,7 +1506,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       assertAllowed()
       if (!complete.rows.length) { notify(tr('no_data_to_export', 'No data to export'), 'error'); closeExport(); return }
       const allowed = () => { try { assertAllowed(); complete.assertCurrent(); return true } catch { return false } }
-      setExportDialog({ scope: request.scope, rows: exportReturnRows(complete.rows, tr, canViewCosts), baseName: prefix, allowed, verify: complete.verifyBeforeExport })
+      setExportDialog({ scope: request.scope, rows: exportReturnRows(complete.rows, tr, canViewCosts), baseName: prefix, allowed, verify: complete.verifyBeforeExport,
+        note: period.defaulted ? tr('returns_export_window_note', 'The date filter is not a single period of at most one year, so this export covers {from} to {to}.', 'តម្រងកាលបរិច្ឆេទមិនមែនជារយៈពេលតែមួយដែលមិនលើសពីមួយឆ្នាំទេ ដូច្នេះការនាំចេញនេះគ្របដណ្តប់ពី {from} ដល់ {to}។').replace("{from}", period.range.startDate).replace("{to}", period.range.endDate) : undefined })
       setExportProgress(null)
     } catch (error) {
       if (exportRequestRef.current === request) {
@@ -1843,6 +1852,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             t={t}
             notify={notify}
             canExport={exportDialog.allowed}
+            note={exportDialog.note}
             beforeExport={exportDialog.verify}
             onClose={closeExport}
           />

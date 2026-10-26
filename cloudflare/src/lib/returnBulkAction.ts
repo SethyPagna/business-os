@@ -8,7 +8,8 @@ import { getPlanLimits } from './planTier'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
-import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, sha256Hex } from './saleRecordEvents'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
+import { parseSaleItemPricing } from './saleItemPricing'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { multiplyMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
@@ -1064,25 +1065,58 @@ async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, re
 /**
  * Finding G (owner, 12-13 Oct 2026): a cancelled return is not restored once its sale was repriced -- the refund it recorded was computed from the
  * pricing the sale had then, so bringing it back would book a refund the sale no longer supports (and a sale could end up unreturnable). Staff record a
- * new return instead. A customer return of the exact-money contract keeps, on each line, the digest of the sale line's pricing snapshot it was priced from
- * (refund_snapshot_json.source_pricing_snapshot_digest); the sale line's pricing snapshot is rewritten by every reprice (line edit, header discount or tax,
- * added lines), so a digest that no longer matches is the proof. The sale-revision guard of the batch fences a reprice that lands after this read.
- * Lines without a recorded digest (legacy v0 returns) or whose sale line carries no pricing snapshot cannot be compared and are not refused here; a line
- * that is gone is the entitlement check's refusal. Applies to every path that brings a cancelled return back: the list restore, Undo of a cancel, and
- * Redo of a restore.
+ * new return instead. Applies to every path that brings a cancelled return back: the list restore, Undo of a cancel, and Redo of a restore.
+ *
+ * What "repriced" means, per return line:
+ *  - A customer return of the exact-money contract records, in refund_snapshot_json, what it was priced from: the line key, the pricing pool, the units sold and the
+ *    line's receipt allocation (its share of the header discount, membership discount and tax, and the net entitlement). The sale line's CURRENT pricing snapshot
+ *    is compared to those fields -- not to a digest of the whole string, because adding an unrelated item rewrites every line's snapshot (the allocation context lists
+ *    all lines) without moving this line's entitlement, and that must not block a restore. When the added item DOES move the line's share (a header discount or tax
+ *    is prorated over the lines), the allocation differs and the restore is refused: the line was repriced.
+ *  - A line with nothing comparable (a legacy v0 return with no recorded snapshot, a historical v0 sale whose lines carry no pricing snapshot) is judged by the
+ *    sale amendment ledger: a quantity or price change recorded for that sale line after the return was entered is a reprice. Header-level changes on a v0 sale
+ *    leave no line record and are not detected.
+ * A delivery-fee change (planDeliveryFeeChange) rewrites no line and moves no line entitlement, so it is not a reprice. A line that is gone is the entitlement check's
+ * refusal. The sale-revision guard of the batch fences a change that lands after this read.
  */
 export const RETURN_RESTORE_SALE_REPRICED_CODE = 'return_restore_sale_repriced'
+const LEDGER_LINE_KINDS = ['line_quantity_increased', 'line_quantity_decreased', 'line_updated']
+function repricedRefusal(): never {
+  return fail('The sale was repriced after this return was recorded, so it cannot be restored. Record a new return instead. Nothing was changed.', 409, RETURN_RESTORE_SALE_REPRICED_CODE)
+}
+function sameAllocation(a: unknown, b: unknown): boolean {
+  const left = a as Record<string, unknown> | null, right = b as Record<string, unknown> | null
+  if (!left || !right) return false
+  return ['discount_usd', 'membership_discount_usd', 'tax_usd', 'net_entitlement_usd'].every((key) => Number(left[key]) === Number(right[key]))
+}
 async function refuseReactivationAfterReprice(db: D1Compat, returnIds: number[]): Promise<void> {
   if (!returnIds.length) return
-  const rows = await rowsForIds<{ return_id: number; digest: string | null; pricing_snapshot_json: string | null }>(db, returnIds, (marks) => `SELECT ri.return_id,json_extract(ri.refund_snapshot_json,'$.source_pricing_snapshot_digest') AS digest,si.pricing_snapshot_json
+  const rows = await rowsForIds<{ return_id: number; sale_item_id: number; return_at: string | null; refund_snapshot_json: string | null; sold_quantity: number; pricing_snapshot_json: string | null }>(db, returnIds, (marks) => `SELECT ri.return_id,ri.sale_item_id,r.created_at AS return_at,ri.refund_snapshot_json,si.quantity AS sold_quantity,si.pricing_snapshot_json
     FROM return_items ri JOIN returns r ON r.id=ri.return_id JOIN sale_items si ON si.id=ri.sale_item_id AND si.sale_id=r.sale_id
-    WHERE ri.return_id IN (${marks}) AND COALESCE(r.return_scope,'customer')='customer' AND ri.refund_snapshot_json IS NOT NULL ORDER BY ri.id LIMIT 401`)
+    WHERE ri.return_id IN (${marks}) AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 401`)
   if (rows.length > 400) fail('Select fewer return lines (maximum 400).', 400)
+  const needLedger: typeof rows = []
   for (const row of rows) {
-    if (typeof row.digest !== 'string' || !row.digest || !row.pricing_snapshot_json) continue
-    if (await sha256Hex(String(row.pricing_snapshot_json)) !== row.digest) {
-      fail('The sale was repriced after this return was recorded, so it cannot be restored. Record a new return instead. Nothing was changed.', 409, RETURN_RESTORE_SALE_REPRICED_CODE)
-    }
+    let recorded: Record<string, unknown> | null = null
+    try { recorded = row.refund_snapshot_json ? JSON.parse(String(row.refund_snapshot_json)) as Record<string, unknown> : null } catch { recorded = null }
+    let current: ReturnType<typeof parseSaleItemPricing> = null
+    try { current = row.pricing_snapshot_json ? parseSaleItemPricing(String(row.pricing_snapshot_json)) : null } catch { current = null }
+    // The units sold are on the sale line itself, so they are compared even when its pricing snapshot is gone.
+    if (recorded && recorded.sold_quantity != null && Number(recorded.sold_quantity) !== Number(row.sold_quantity)) repricedRefusal()
+    if (!recorded || !current || !recorded.receipt_allocation) { needLedger.push(row); continue }
+    if (recorded.line_key !== current.line_key || recorded.pool_key !== current.pool.pool_key
+      || !sameAllocation(recorded.receipt_allocation, current.receipt_allocation)
+      || Number(recorded.net_entitlement_usd) !== Number(current.receipt_allocation.net_entitlement_usd)) repricedRefusal()
+  }
+  if (!needLedger.length) return
+  const itemIds = JSON.stringify([...new Set(needLedger.map((row) => Number(row.sale_item_id)))])
+  const ledger = await db.prepare(`SELECT sale_item_id,created_at FROM sale_amendments
+    WHERE sale_item_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids)) AND kind IN (${LEDGER_LINE_KINDS.map((kind) => `'${kind}'`).join(',')}) LIMIT 1001`).all<{ sale_item_id: number; created_at: string | null }>({ ids: itemIds })
+  const stamp = (value: unknown): number => Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(value)) ? String(value).replace(' ', 'T') : `${String(value).replace(' ', 'T')}Z`)
+  for (const row of needLedger) {
+    const returnedAt = stamp(row.return_at)
+    if (!Number.isFinite(returnedAt)) continue
+    if (ledger.some((entry) => Number(entry.sale_item_id) === Number(row.sale_item_id) && stamp(entry.created_at) > returnedAt)) repricedRefusal()
   }
 }
 

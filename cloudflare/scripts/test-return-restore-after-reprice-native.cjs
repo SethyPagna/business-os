@@ -10,7 +10,6 @@ function returnWord(f, id) {
   assert.ok(!['partial_return', 'returned'].includes(row.sale_status), `sale ${id} carries a retired word: ${row.sale_status}`)
   return row.return_state === 'full' ? 'returned' : row.return_state === 'partial' ? 'partial_return' : row.sale_status
 }
-const crypto = require('node:crypto')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 
@@ -47,9 +46,21 @@ const tables = ['returns', 'return_items', 'return_item_batch_allocations', 'sal
   'inventory_movements', 'undo_snapshots', 'action_history', 'return_bulk_operations', 'return_bulk_members',
   'return_bulk_guards', 'return_write_revisions', 'sale_write_revisions', 'audit_logs', 'sale_record_events']
 
-const digest = text => crypto.createHash('sha256').update(text).digest('hex')
-const PRICING_101 = '{"line":101,"price":10}'
-const PRICING_102 = '{"line":102,"price":20}'
+// Real v1 pricing snapshots (the Worker's own serializer), not placeholders: a check that only skipped empty snapshots, or hashed the wrong text, would pass a fixture of ''.
+const pricing = load('lib/saleItemPricing.ts')
+const KEYS = { 101: 'a', 102: 'b' }
+const PRICES = { a: 10, b: 20 }
+// prices: unit price per line key; extra: lines added to the sale later; discount: header discount prorated over all lines.
+function snapshotOf(lineKey, { prices = PRICES, extra = {}, discount = 0 } = {}) {
+  const all = { ...prices, ...extra }
+  const pool = { version: 1, pool_key: 'sale-AB-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [],
+    lines: Object.keys(all).map(key => ({ line_key: key, source: 'selling', product: { id: 7, selling_price_usd: all[key], selling_price_khr: 1 }, selling_price_input_usd: null, manual: { type: 'none', value: 0 } })) }
+  const quantities = Object.fromEntries(Object.keys(all).map(key => [key, 1]))
+  return pricing.serializeSaleItemPricing(pool, quantities, lineKey, { version: 1, lines: Object.keys(all).map(key => ({ line_key: key, amount: all[key] })),
+    discount_usd: discount, membership_discount_usd: 0, tax_usd: 0 })
+}
+const PRICING_101 = snapshotOf('a')
+const PRICING_102 = snapshotOf('b')
 function fixture() {
   const sql = new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
@@ -91,17 +102,17 @@ function fixture() {
       calculated_total_usd,rounding_adjustment_usd,total_usd,updated_at)
       VALUES(1,'SALE-AB','partial_return','completed',1,30,0,30,'sale-AB');
     INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,total_usd,pricing_snapshot_json)
-      VALUES(101,1,1,'A',1,1,10,10,''),(102,1,2,'B',1,1,20,20,'');
+      VALUES(101,1,1,'A',1,1,10,10,'${PRICING_101}'),(102,1,2,'B',1,1,20,20,'${PRICING_102}');
   `))
   insertReturn(sql, 10, 101, 1, 'completed')
   return { sql, env, batches: () => batches, beforeBatch: hook => { beforeBatch = hook } }
 }
 
-function insertReturn(sql, id, saleItemId, productId, status) {
+function insertReturn(sql, id, saleItemId, productId, status, legacy = false) {
   const amount = productId === 1 ? 10 : 20
   const snapshot = JSON.stringify({ version: 1, sale_id: 1, sale_item_id: saleItemId,
-    line_key: `line-${saleItemId}`, pool_key: 'sale-AB-pool', source_sale_revision: 0,
-    source_pricing_snapshot_digest: digest(saleItemId === 101 ? PRICING_101 : PRICING_102), sold_quantity: 1, return_quantity: 1,
+    line_key: KEYS[saleItemId], pool_key: 'sale-AB-pool', source_sale_revision: 0,
+    source_pricing_snapshot_digest: 'a'.repeat(64), sold_quantity: 1, return_quantity: 1,
     returned_quantity_before: 0, returned_quantity_after: 1,
     receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: amount },
     net_entitlement_usd: amount, calculated_refund_before_usd: 0, calculated_refund_after_usd: amount,
@@ -109,13 +120,13 @@ function insertReturn(sql, id, saleItemId, productId, status) {
     sale_product_entitlement_usd: 30, sale_product_payout_cap_usd: 30 })
   sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,
     money_precision_version,calculated_refund_usd,rounding_adjustment_usd,total_refund_usd,total_refund_khr)
-    VALUES(?,?,1,'customer',?,'refund',1,?,1,?,0,?,?)`)
-    .run(id, `RET-${id}`, status, `return-${id}`, amount, amount, amount * 4000)
+    VALUES(?,?,1,'customer',?,'refund',1,?,?,?,0,?,?)`)
+    .run(id, `RET-${id}`, status, `return-${id}`, legacy ? 0 : 1, legacy ? null : amount, amount, amount * 4000)
   sql.prepare(`INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,total_usd,
     total_khr,applied_price_usd,applied_price_khr,stock_action,return_to_stock,branch_id,batch_id,refund_snapshot_json)
     VALUES(?,?,?,?,?,1,?,?,?,?,'restock',1,1,?,?)`)
     .run(id, id, saleItemId, productId, productId === 1 ? 'A' : 'B', amount, amount * 4000,
-      amount, amount * 4000, productId, snapshot)
+      amount, amount * 4000, productId, legacy ? null : snapshot)
   sql.prepare('INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity) VALUES(?,?,1,1)')
     .run(id, productId)
 }
@@ -153,7 +164,12 @@ async function refused(f, action, label) {
 // Finding G (owner, 12-13 Oct 2026): a cancelled return is not restored after its sale was repriced; staff record a new return.
 // A reprice rewrites the sale line's pricing snapshot, whose sha-256 the return recorded when it was priced.
 const CODE = 'return_restore_sale_repriced'
-const reprice = (f, id = 101) => f.sql.prepare('UPDATE sale_items SET pricing_snapshot_json=? WHERE id=?').run(`{"line":${id},"price":99}`, id)
+// A real reprice: the line's unit price changes, so its total, its allocation and its snapshot change.
+const reprice = (f, id = 101) => f.sql.prepare('UPDATE sale_items SET pricing_snapshot_json=? WHERE id=?').run(snapshotOf(KEYS[id], { prices: { ...PRICES, [KEYS[id]]: 99 } }), id)
+// Every line's snapshot is rewritten when another item is added to the sale (the allocation context lists all lines).
+const addUnrelatedItem = (f, discount = 0) => {
+  for (const id of [101, 102]) f.sql.prepare('UPDATE sale_items SET pricing_snapshot_json=? WHERE id=?').run(snapshotOf(KEYS[id], { extra: { c: 30 }, discount }), id)
+}
 async function repricedRefusal(f, action, label) {
   const before = state(f)
   const batches = f.batches()
@@ -161,6 +177,12 @@ async function repricedRefusal(f, action, label) {
     && /record a new return/i.test(error.message), label)
   assert.equal(state(f), before, `${label}: nothing changed`)
   assert.equal(f.batches(), batches, `${label}: refused before any write batch`)
+}
+
+// A legacy (v0) return: no refund snapshot, money_precision_version 0 -- nothing in it to compare the sale line with.
+function makeLegacy(f) {
+  f.sql.exec('DELETE FROM return_item_batch_allocations WHERE return_item_id=10; DELETE FROM return_items WHERE return_id=10; DELETE FROM returns WHERE id=10; UPDATE sales SET money_precision_version=0 WHERE id=1')
+  insertReturn(f.sql, 10, 101, 1, 'completed', true)
 }
 
 const cases = [
@@ -238,12 +260,50 @@ const cases = [
     const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-after-note'))
     assert.deepEqual(result.changedIds, [10])
   }],
-  ['legacy-return-without-digest-is-not-refused', async f => {
+  ['empty-snapshot-legacy-line-is-not-refused-without-a-ledger-entry', async f => {
+    makeLegacy(f)
     await cancelA(f)
-    f.sql.exec(`UPDATE return_items SET refund_snapshot_json=json_remove(refund_snapshot_json,'$.source_pricing_snapshot_digest') WHERE return_id=10`)
-    reprice(f)
-    // No recorded digest: this check cannot tell, so it leaves the decision to the entitlement checks (which accept this fixture).
-    await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-no-digest')).catch(error => assert.notEqual(error.code, CODE))
+    f.sql.exec("UPDATE sale_items SET pricing_snapshot_json='' WHERE id=101")
+    const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-legacy'))
+    assert.deepEqual(result.changedIds, [10], 'nothing comparable and no recorded line change: the legacy line restores')
+  }],
+  ['historical-sale-line-changed-after-the-return-is-refused', async f => {
+    makeLegacy(f)
+    await cancelA(f)
+    f.sql.exec("UPDATE sale_items SET pricing_snapshot_json=NULL WHERE id=101")
+    f.sql.exec("INSERT INTO sale_amendments(sale_id,kind,sale_item_id,created_at) VALUES(1,'line_updated',101,'2999-01-01 00:00:00')")
+    await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-v0-edited')), 'v0 line edited after the return')
+  }],
+  ['historical-sale-line-changed-before-the-return-is-not-refused', async f => {
+    makeLegacy(f)
+    await cancelA(f)
+    f.sql.exec("UPDATE sale_items SET pricing_snapshot_json=NULL WHERE id=101")
+    f.sql.exec("INSERT INTO sale_amendments(sale_id,kind,sale_item_id,created_at) VALUES(1,'line_updated',101,'2000-01-01 00:00:00')")
+    const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-v0-old-edit'))
+    assert.deepEqual(result.changedIds, [10])
+  }],
+  ['adding-an-unrelated-item-does-not-block-the-restore', async f => {
+    await cancelA(f)
+    addUnrelatedItem(f)
+    const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-after-add'))
+    assert.deepEqual(result.changedIds, [10])
+  }],
+  ['adding-an-item-that-moves-the-header-discount-share-is-a-reprice', async f => {
+    await cancelA(f)
+    addUnrelatedItem(f, 3)
+    await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-after-discounted-add')), 'discount share changed')
+  }],
+  // planDeliveryFeeChange rewrites the sale header only (no line snapshot, no line entitlement; the refund cap is min(total, product entitlement) and the fee only raises the total).
+  ['delivery-fee-change-is-not-a-reprice', async f => {
+    await cancelA(f)
+    f.sql.exec("UPDATE sales SET delivery_fee_usd=2.5,delivery_fee_khr=10000,delivery_fee_paid_by='customer' WHERE id=1")
+    const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-after-fee'))
+    assert.deepEqual(result.changedIds, [10])
+  }],
+  ['units-sold-changed-is-a-reprice', async f => {
+    await cancelA(f)
+    f.sql.exec('UPDATE sale_items SET quantity=2 WHERE id=101')
+    await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-qty-changed')), 'quantity changed')
   }],
   ['reprice-landing-before-the-write-is-fenced', async f => {
     await cancelA(f)
