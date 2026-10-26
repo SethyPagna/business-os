@@ -24,7 +24,7 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput } from './productWrites'
+import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput, PRODUCT_MONEY_VERSION } from './productWrites'
 import { foldCreateIntoExisting, foldCreateWithStockInWrite, type FoldDuplicate } from './createFold'
 import type { RedirectTarget } from './branchRedirectWrite'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
@@ -36,7 +36,7 @@ import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemove
   ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
 import { findSameIdentityProduct, resolveProductIdentityEdit } from './productIdentity'
 import type { SessionUser } from './auth'
-import type { PendingActionRow } from './pendingActions'
+import { pendingActionApprovalStatements, type PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
 
 export class NoReviewApplierError extends Error {
@@ -52,15 +52,25 @@ export interface ReviewerInfo {
   // The active branch the approver confirmed for a request addressed to a branch that has since been disabled
   // (X-Branch-Redirect on the approval).
   redirectTarget?: RedirectTarget
+  // The product id the approver confirmed as the survivor of a queued rename that now matches an existing product
+  // (approve body { confirm_merge_into }). Absent = not confirmed, and the approval is refused with the survivor named.
+  confirmMergeInto?: number
 }
 
-export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean; replayedBranchAction?: PendingActionRow }
+export type ReviewApplyOutcome = {
+  pendingActionMarkedAtomically: boolean
+  replayedBranchAction?: PendingActionRow
+  // Set when the approval merged the edited product into another: names for the alert, ids for the response.
+  mergedInto?: { survivorId: number; survivorName: string | null; mergedName: string | null }
+  // Fields the request changed that the merge did not apply to the kept product (see applyApprovedIdentityMerge).
+  restUnapplied?: string[]
+}
 // The approving request's waitUntil. Supplied by routes/reviewQueue.ts so a
 // broadcast never holds the approval response; without one (tests, any
 // non-request caller) the broadcast is awaited as before. broadcast() never
 // rejects, so deferring it cannot hide an error the response would carry.
 export type ReviewWaitUntil = (promise: Promise<unknown>) => void
-type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo, waitUntil?: ReviewWaitUntil) => Promise<void | ReviewApplyOutcome>
+type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo, waitUntil?: ReviewWaitUntil, reviewerUser?: SessionUser) => Promise<void | ReviewApplyOutcome>
 
 async function notify(env: Env, waitUntil: ReviewWaitUntil | undefined, channel: Parameters<typeof broadcast>[1], payload: unknown): Promise<void> {
   const sent = broadcast(env, channel, payload)
@@ -86,14 +96,12 @@ export class ReviewRequesterPermissionError extends Error {
   }
 }
 
-// Finding I (13 Oct 2026): approving a queued product EDIT that moves a row's
-// identity must never mint a second active row with another product's identity
-// (no index stops it). The direct route folds such an edit into the existing
-// product; the applier does not run that fold -- it is a product merge
-// (merge_duplicates Full, its own preflight, undo receipt and stock
-// disposition). Approval is refused instead: nothing is written and the
-// request stays open, to be rejected and redone directly (which folds under
-// the reviewer's own authority). routes/reviewQueue.ts answers 409.
+// Finding I (13 Oct 2026): approving a queued product EDIT that moves a row's identity must never mint a second
+// active row with another product's identity (no index stops it). Since REVQ-A (owner 12-13 Oct: approving performs
+// the merge) such an approval MERGES the row into the existing product (applyApprovedIdentityMerge) once the approver
+// has named that product (approve body { confirm_merge_into }). Without that confirmation, or with another id, this
+// error is the answer: nothing is written, the request stays open, and routes/reviewQueue.ts answers 409 with the
+// survivor's id and name so the Review page can ask the approver to confirm.
 //
 // A queued CREATE that now matches an existing product no longer takes that
 // refusal: it was only refused because the create-fold dropped the queued
@@ -102,10 +110,12 @@ export class ReviewRequesterPermissionError extends Error {
 export class ReviewIdentityConflictError extends Error {
   readonly code = 'review_identity_conflict'
   readonly existingProductId: number
-  constructor(existingProductId: number) {
-    super('This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.')
+  readonly existingProductName: string | null
+  constructor(existingProductId: number, existingProductName: string | null = null) {
+    super('This request now matches an existing product. Approving it merges this product into that one: confirm the product to merge into and approve again. Nothing was applied.')
     this.name = 'ReviewIdentityConflictError'
     this.existingProductId = existingProductId
+    this.existingProductName = existingProductName
   }
 }
 
@@ -321,11 +331,157 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   return { pendingActionMarkedAtomically: true }
 })
 
+// A refusal the approve route answers as-is (routes/reviewQueue.ts reviewCodedRefusal matches it by name and shape).
+export class ReviewCodedRefusal extends Error {
+  readonly code: string
+  readonly status: 403 | 409 | 503
+  readonly details?: Record<string, unknown>
+  constructor(code: string, status: 403 | 409 | 503, message: string, details?: Record<string, unknown>) {
+    super(message)
+    this.name = 'ReviewCodedRefusal'
+    this.code = code
+    this.status = status
+    this.details = details
+  }
+}
+
+// REVQ-A (owner 12-13 Oct 2026: review is queue-first, approving performs the merge with a full permissions audit).
+// Approving a queued product edit that moves the row onto another active product's identity folds it into that
+// product through the same merge the direct route runs (routes/products.ts foldDuplicateProductInto: lots, stock,
+// sales, cost, undo snapshot, action history, merge audit row), under the APPROVER's authority:
+//   - the approver names the survivor they saw (confirm_merge_into); an absent or different id is the old 409
+//     review_identity_conflict, nothing written, the request stays open;
+//   - the approver needs products:merge_duplicates Full (and products:image Full when the merge moves an image);
+//     the requester must still hold a merge grant (checked again, as images are);
+//   - the request's approved mark rides in the merge's own D1 batch, so a request decided meanwhile rolls the whole
+//     merge back and a retry cannot merge twice;
+//   - the audit/undo record carries the rename before/after, the request id and the requester.
+// Other fields queued with the rename (prices, images, ...) are NOT applied to the survivor and are named in the
+// audit record (not_applied_fields); the survivor keeps its own values, as the create-fold does.
+async function applyApprovedIdentityMerge(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  reviewerUser: SessionUser | undefined,
+  twin: { id: number; name: string | null },
+  nextName: string,
+  nextBarcode: string | null,
+  body: Record<string, unknown>,
+  waitUntil?: ReviewWaitUntil,
+): Promise<ReviewApplyOutcome> {
+  const id = Number(row.entity_id)
+  // The grant first: an approver who may not merge is refused outright, not asked to confirm a merge they cannot make.
+  if (!reviewerUser || getActionTier(reviewerUser, 'products', 'merge_duplicates') !== 'full') {
+    throw new ReviewCodedRefusal('review_merge_permission_required', 403,
+      'Approving this request merges the product into an existing one. Only someone who can merge products can approve it.')
+  }
+  if (reviewer.confirmMergeInto !== twin.id) {
+    // Nothing is written. The preview is what the approver confirms: the kept product, the stock that moves onto it,
+    // the price it ends with and the stock-in sessions whose Undo the merge closes.
+    const preview = await identityMergePreview(env, id, twin)
+    throw reviewer.confirmMergeInto === undefined
+      ? new ReviewCodedRefusal('review_merge_confirm_required', 409, 'Approving this request merges two products. Review the merge and confirm to continue.', { preview })
+      : new ReviewCodedRefusal('review_merge_target_changed', 409, 'The product this request would merge into is no longer the one you confirmed. Nothing was applied. Approve again to review the merge as it is now.', { preview })
+  }
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'merge_duplicates') === 'none') {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to merge products.')
+  }
+  const db = getDb(env)
+  const dupRow = await db.prepare('SELECT id, name, barcode, updated_at, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id AND is_active = 1')
+    .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null; image_path: string | null; is_group: number }>({ id })
+  if (!dupRow) throw new ReviewDecisionConflictError()
+  if (dupRow.is_group) {
+    throw new ReviewCodedRefusal('review_merge_group_row', 409, 'Group rows cannot be merged. Reject this request and merge the variant products instead.')
+  }
+  const { productMergeChangesImages, foldDuplicateProductInto, mergeFoldRefusal } = await import('../routes/products')
+  if (getActionTier(reviewerUser, 'products', 'image') !== 'full') {
+    const keeper = await db.prepare('SELECT id, image_path FROM products WHERE id = @id').get<{ id: number; image_path: string | null }>({ id: twin.id })
+    if (await productMergeChangesImages(db, [{ keeper: keeper ?? { id: twin.id, image_path: null }, discarded: dupRow }])) {
+      throw new ReviewCodedRefusal('review_action_full_required', 403, 'Full products:image permission is required to approve this request.', { permission: 'products:image' })
+    }
+  }
+  // What else the request changed on the renamed product. None of it is applied to the kept product (the merge keeps
+  // its own values, as the create-fold does); it is named in the audit record and in the answer, so the approver can
+  // edit the kept product. Only fields that differ from the stored row count: a whole-form save repeats the rest.
+  const stored = await db.prepare('SELECT * FROM products WHERE id = @id').get<Record<string, unknown>>({ id }) ?? {}
+  const notApplied = Object.keys(body).filter(key => !key.startsWith('_') && !['name', 'barcode', 'expected_updated_at', 'client_request_id', 'stock_quantity', PRODUCT_MONEY_VERSION].includes(key)
+    && (!(key in stored) || String(body[key] ?? '') !== String(stored[key] ?? '')))
+  // The fold requires both rows to carry the same identity already, so the edited identity is written first -- after
+  // every refusal above, never before one -- and put back if the merge writes nothing.
+  await db.batch([productStockGuardStatement([id, twin.id], 'active'), {
+    sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active = 1',
+    params: { name: nextName, barcode: nextBarcode, id },
+  }])
+  const restoreIdentity = () => db.prepare(`UPDATE products SET name = @name, barcode = @barcode, updated_at = @updatedAt
+    WHERE id = @id AND name = @nextName AND COALESCE(barcode, '') = COALESCE(@nextBarcode, '')`)
+    .run({ name: dupRow.name, barcode: dupRow.barcode, updatedAt: dupRow.updated_at, id, nextName, nextBarcode })
+  try {
+    const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+    await foldDuplicateProductInto(
+      env, db, reviewerUser,
+      { id: twin.id, name: twin.name },
+      { id, name: dupRow.name, image_path: dupRow.image_path },
+      new Map(branchRows.map(branch => [branch.id, branch.name])),
+      'review approval identity fold', 'merge', undefined,
+      {
+        operationId: crypto.randomUUID(),
+        costAuthorityVersion: 3,
+        additionalStatements: pendingActionApprovalStatements(row, { reviewedBy: reviewer.id, reviewedByName: reviewer.name }),
+        auditContext: {
+          source: 'review_identity_fold',
+          pending_action_id: row.id,
+          requested_by: row.requested_by,
+          requested_by_name: row.requested_by_name,
+          approved_by: reviewer.id,
+          rename: { before: { name: dupRow.name, barcode: dupRow.barcode }, after: { name: nextName, barcode: nextBarcode } },
+          not_applied_fields: notApplied,
+        },
+      },
+    )
+  } catch (error) {
+    const decided = /product_create_review_conflict/.test(String(error))
+    const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
+    const refusal = mergeFoldRefusal(error)
+    if (decided || stateConflict || refusal) await restoreIdentity()
+    if (decided) throw new ReviewDecisionConflictError()
+    if (stateConflict) throw new ReviewCodedRefusal('merge_state_conflict', 409, 'One of these products changed while the approval was being applied. Refresh and try again.')
+    if (refusal && !productStockGuardError(error)) {
+      // A Free-plan statement budget cannot hold this merge in one step: the request is refused whole, not half done.
+      const code = refusal.code === 'merge_case_exceeds_safe_limit' ? 'review_merge_plan_budget' : refusal.code
+      throw new ReviewCodedRefusal(code, 409, refusal.error)
+    }
+    throw error
+  }
+  await bumpVersion(env, 'products')
+  await notify(env, waitUntil, 'products', { action: 'update', id: twin.id })
+  return { pendingActionMarkedAtomically: true, restUnapplied: notApplied, mergedInto: { survivorId: twin.id, survivorName: twin.name, mergedName: dupRow.name } }
+}
+
+// What the approver is asked to confirm. Read only; product names and quantities, nothing about a person.
+async function identityMergePreview(env: Env, sourceId: number, twin: { id: number; name: string | null }): Promise<Record<string, unknown>> {
+  const db = getDb(env)
+  const prices = await db.prepare('SELECT id, selling_price_usd FROM products WHERE id IN (@a, @b)')
+    .all<{ id: number; selling_price_usd: number | null }>({ a: sourceId, b: twin.id })
+  const priceOf = (productId: number) => Number(prices.find(row => Number(row.id) === productId)?.selling_price_usd) || 0
+  const moved = await db.prepare('SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock WHERE product_id = @id').get<{ n: number }>({ id: sourceId })
+  const { readOpenStockSessions } = await import('./undoAppliers')
+  const sessions = await readOpenStockSessions(db, [sourceId, twin.id])
+  return {
+    survivorId: twin.id,
+    survivorName: twin.name,
+    stockMoved: Number(moved?.n) || 0,
+    // The standing merge rule: the highest selling price of the merged products stays.
+    priceAfter: Math.max(priceOf(sourceId), priceOf(twin.id)),
+    sessionsClosing: sessions.length,
+  }
+}
+
 // --- products / update / product -----------------------------------
 // Mirrors routes/products.ts's own PUT /:id direct-write branch. A 404
 // (product deleted by some other path since this was queued) is treated
 // as a safe no-op, same reasoning as the fees applier above.
-registerApplier('products', 'update', 'product', async (env, row, reviewer, waitUntil) => {
+registerApplier('products', 'update', 'product', async (env, row, reviewer, waitUntil, reviewerUser) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
@@ -343,7 +499,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
       .get<{ name: string | null; barcode: string | null }>({ id })
     const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)
     const identityTwin = changesIdentity ? await findSameIdentityProduct(getDb(env), nextName, nextBarcode, Number(id)) : null
-    if (identityTwin) throw new ReviewIdentityConflictError(identityTwin.id)
+    if (identityTwin) return applyApprovedIdentityMerge(env, row, reviewer, reviewerUser, identityTwin, nextName, nextBarcode == null ? null : String(nextBarcode), body, waitUntil)
   }
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
@@ -565,6 +721,6 @@ export async function applyApprovedPendingAction(
   if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser, waitUntil)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)
-  const outcome = await fn(env, row, reviewer, waitUntil)
+  const outcome = await fn(env, row, reviewer, waitUntil, reviewerUser)
   return outcome ?? { pendingActionMarkedAtomically: false }
 }

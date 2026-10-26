@@ -691,7 +691,7 @@ async function main() {
 
     // T5. Approval half. A reviewer (the admin here; never the requester) approves a queued request that lands on an
     // existing product's identity. The applier must never mint a twin. For an EDIT that moves the identity it refuses
-    // with 409 review_identity_conflict, writes nothing and leaves the request open (lib/reviewApply.ts). For a CREATE
+    // with 409 review_merge_confirm_required (REVQ-A: approving merges once the approver confirms the survivor; test-review-queue-merge-native.cjs), writes nothing and leaves the request open (lib/reviewApply.ts). For a CREATE
     // it folds into the existing product (owner rulings 9 and 16, 13 Oct: the refusal existed only because the fold
     // dropped the queued starting quantity, which test-create-fold-stock-in-native.cjs now proves it records).
     // "Window" cases queue a request that collides with nothing and create the collision before approval, so they test
@@ -701,7 +701,7 @@ async function main() {
     const activeWithIdentity = async (name, barcode) => (await H.q1('SELECT COUNT(*) n FROM products WHERE is_active=1 AND name=? AND barcode=?', name, barcode)).n
     const refusedClean = (t, r) => {
       t.eq('approval HTTP status', r.status, 409)
-      t.eq('refusal code', r.body && r.body.code, 'review_identity_conflict')
+      t.eq('refusal code', r.body && r.body.code, 'review_merge_confirm_required')
     }
 
     await check('I-T5-edit-approve', 'T5: approving a queued identity edit onto an existing product is refused (409); exactly one active row keeps that identity', 'high', async (t) => {

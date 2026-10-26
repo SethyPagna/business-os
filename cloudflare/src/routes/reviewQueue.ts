@@ -93,6 +93,14 @@ function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; stat
   return { body: { ...extra, success: false, error: err.message, code }, status }
 }
 
+// F3: ?fields= is 'targets' or absent. An empty value (?fields=) and a repeated parameter (?fields=targets&fields=targets)
+// are refused, not read as absent or as the first value.
+const INVALID_FIELDS_BODY = { success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." } as const
+function readFieldsParam(values: string[] | undefined): 'targets' | undefined | 'invalid' {
+  if (values === undefined) return undefined
+  return values.length === 1 && values[0] === 'targets' ? 'targets' : 'invalid'
+}
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
@@ -120,8 +128,8 @@ app.get('/mine', async (c) => {
   // submitter's question is "what happened to my requests?", and the
   // rejected ones -- the only place the reviewer's reason is visible -- are
   // exactly the rows they most need to see.
-  const fields = c.req.query('fields')
-  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const fields = readFieldsParam(c.req.queries('fields'))
+  if (fields === 'invalid') return c.json(INVALID_FIELDS_BODY, 400)
   const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
@@ -232,8 +240,8 @@ app.get('/', async (c) => {
     ? (statusParam as PendingActionStatus | 'all')
     : 'open'
   const section = c.req.query('section') || null
-  const fields = c.req.query('fields')
-  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const fields = readFieldsParam(c.req.queries('fields'))
+  if (fields === 'invalid') return c.json(INVALID_FIELDS_BODY, 400)
   const options: ListPendingActionsOptions = { status, section }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
@@ -275,6 +283,7 @@ app.post('/:id/approve', async (c) => {
   let pendingActionMarkedAtomically = false
   let recordNameBefore: string | null = null
   let mergedInto: ReviewMergedInto | undefined
+  let restUnapplied: string[] = []
   try {
     // Finding H: the reviewer's CURRENT grant for this exact action and for each of its effects (price,
     // cost, image), checked before any receipt replay or write (lib/reviewApprovalPermission.ts).
@@ -313,6 +322,7 @@ app.post('/:id/approve', async (c) => {
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
     mergedInto = (outcome as { mergedInto?: ReviewMergedInto }).mergedInto
+    restUnapplied = outcome.restUnapplied ?? []
   } catch (err) {
     const coded = reviewCodedRefusal(err)
     if (coded) return c.json(coded.body, coded.status)
@@ -322,7 +332,8 @@ app.post('/:id/approve', async (c) => {
     // duplicate product; nothing was written and it stays open.
     if (err instanceof Error && (err as { code?: unknown }).code === 'review_identity_conflict') {
       return c.json({ success: false, error: err.message, code: 'review_identity_conflict',
-        existing_product_id: (err as { existingProductId?: unknown }).existingProductId ?? null }, 409)
+        existing_product_id: (err as { existingProductId?: unknown }).existingProductId ?? null,
+        existing_product_name: (err as { existingProductName?: unknown }).existingProductName ?? null }, 409)
     }
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       const response = productCreateErrorResponse(err)
@@ -370,7 +381,8 @@ app.post('/:id/approve', async (c) => {
     kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,
     merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,
   })
-  return c.json({ success: true, data: updatedRow })
+  return c.json({ success: true, data: updatedRow,
+    ...(mergedInto ? { merged_into: { id: mergedInto.survivorId ?? null, name: mergedInto.survivorName ?? null }, rest_unapplied: restUnapplied } : {}) })
 })
 
 app.post('/:id/reject', async (c) => {
