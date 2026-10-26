@@ -180,6 +180,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
+  '../lib/returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', canConvertLegacyReturns: () => false, notifyLegacyReturnConversion: async () => {}, planLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, applyLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, ReturnLegacyConvertError: class ReturnLegacyConvertError extends Error {} },
   '../lib/saleBulkStatus': { bulkAssertion: () => ({ sql: 'SELECT 1', params: {} }), saleRevisionGuard: () => ({ sql: 'SELECT 1', params: {} }) },
   '../lib/saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }), SaleRecordEventError: class SaleRecordEventError extends Error {}, sha256Hex: async () => '' },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },

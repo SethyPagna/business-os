@@ -108,6 +108,7 @@ function loadUndoAppliers(d1) {
   }
   const stubs = {
     './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
+    './returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') } }, // 6.0.992; replay covered natively
     // undoAppliers.ts now imports the exact money kernels; Module._load only
     // maps listed keys, so unlisted relative requests would resolve against this
     // test file and fail.
