@@ -80,6 +80,7 @@ const FLAG_ALIASES = {
   retries: 'retries', ci: 'ci', 'release-dir': 'releaseDir', releasedir: 'releaseDir',
   'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply',
   target: 'target', db: 'db', bookmark: 'bookmark', 'version-id': 'versionId', versionid: 'versionId',
+  'previous-sha': 'previousSha', previoussha: 'previousSha',
   help: 'help', h: 'help',
 }
 const BOOLEAN_FLAGS = new Set(['dryRun', 'ci', 'useCert', 'noApply', 'help'])
@@ -147,6 +148,10 @@ const commandCatalog = {
     return npm(`migrations-apply:${db}`, 'cloudflare', entry.applyScript, 'typeYES')
   },
   deploy: (plan) => npm(`deploy:${plan}`, 'cloudflare', plan === 'free' ? 'deploy:free' : 'deploy', 'typeYES'),
+  // CAUTION (6.0.984, enforced 6.0.993): cron triggers are not part of a Worker version, so a bare rollback
+  // leaves the CURRENT release's crons (*/5, */15, 17 */3) in place. release.cjs therefore calls this only after
+  // cronRollbackCheck() shows the target sha's crons equal the current ones; otherwise the only safe undo is to
+  // redeploy the previous sha through deploy.yml so ITS wrangler tomls apply.
   rollbackWorker: (versionId, ci = false) => wrangler('rollback-worker', [
     'rollback', ...(versionId ? [versionId] : []), '--name', WORKER_NAME,
     '--message', 'Rollback from the release kit', ...(ci ? ['--yes'] : []),
@@ -157,6 +162,34 @@ const commandCatalog = {
     return wrangler(`restore:${db}`, ['d1', 'time-travel', 'restore', db, '--bookmark', bookmark], 'double')
   },
   fullAutomationBat: () => ({ id: 'full-automation-bat', kind: 'bat', args: ['full-automation.bat'], gate: 'typeYES' }),
+}
+
+// ---------------------------------------------------- rollback cron guard
+
+// Cron triggers belong to the deployed config, not to a Worker version, so a version rollback keeps whatever
+// crons the CURRENT release applied. The old code's scheduled() ignores which cron fired and runs every sweep
+// (the full backup included) on each tick of a newer cron set. The tooling therefore refuses a bare version
+// rollback unless the target sha's crons equal the current ones, for both plan tomls. Fail closed: a toml that
+// cannot be read, or has no crons line, is not "equal".
+function parseCrons(toml) {
+  const m = /^\s*crons\s*=\s*\[([^\]]*)\]/m.exec(String(toml || ''))
+  if (!m) return null
+  const list = [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => (x[1] != null ? x[1] : x[2]).trim().replace(/\s+/g, ' '))
+  return list.sort()
+}
+const ROLLBACK_REDEPLOY_ADVICE = 'Cron triggers are not part of a Worker version, so a version rollback would keep the current crons firing the older code, which runs every sweep (including the full backup) on every tick. Redeploy the previous sha through deploy.yml instead (Actions, Deploy, ref = the previous sha): it applies that sha\'s own wrangler tomls.'
+// current/target: { 'wrangler.toml': text, 'wrangler.free.toml': text }
+function cronRollbackCheck(current, target) {
+  const names = ['wrangler.toml', 'wrangler.free.toml']
+  const problems = []
+  for (const name of names) {
+    const c = parseCrons(current && current[name])
+    const t = parseCrons(target && target[name])
+    if (!c) problems.push(`${name}: the current release has no readable crons line`)
+    else if (!t) problems.push(`${name}: the target sha has no readable crons line`)
+    else if (c.join('|') !== t.join('|')) problems.push(`${name}: crons differ (now [${c.join(', ')}], target [${t.join(', ')}])`)
+  }
+  return { ok: problems.length === 0, problems, advice: ROLLBACK_REDEPLOY_ADVICE }
 }
 
 // One instance of every catalogue entry, for the offline test.
@@ -483,6 +516,7 @@ module.exports = {
   GUARD_MIGRATIONS, guardStageConfig, validateGuardFiles, guardStateSql, validateGuardState,
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
+  parseCrons, cronRollbackCheck, ROLLBACK_REDEPLOY_ADVICE,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,

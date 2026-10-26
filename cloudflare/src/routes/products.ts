@@ -895,7 +895,9 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
   const [liveRows, withBranchStock] = await Promise.all([
     selectInChunks(ids, 0, (chunk) => {
       const { sql, params } = buildInClause('id', chunk)
-      return db.prepare(`SELECT ${PRODUCT_SEARCH_SELECT_SQL} FROM products p WHERE p.id IN (${sql}) AND ${catalogProductSql()}`).all<Record<string, unknown>>(params)
+      // Primary-key seeks for the page's ids. The indexed `is_active = 1` made the planner walk the is_active index
+      // (every active product, a table read each) and test the id list on each row: a whole-catalogue read per hit.
+      return db.prepare(`SELECT ${PRODUCT_SEARCH_SELECT_SQL} FROM products p WHERE p.id IN (${sql}) AND ${catalogProductSql('p', false)}`).all<Record<string, unknown>>(params)
     }),
     attachBranchStock(env, items),
     attachBatchCounts(db, items),
@@ -909,6 +911,8 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
   })
   return items.filter(item => liveById.has(Number(item.id))).map(normalProductRow)
 }
+
+const SEEK_PAGE_MIN_RANKED_IDS = 300
 
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
@@ -958,6 +962,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
   const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
+  // The keyed page fetch pays for itself on catalogue-wide reads and on long ranked-id lists. A by-id read or a short
+  // ranked-id hydration (the till's per-keystroke lookup) is already tiny, and the extra CTEs cost it 4-8 ms of SQL
+  // time (lab medians: 8 ids 2 -> 7 ms, 60 ids 4 -> 9 ms, 300 ids 13 vs 16 ms, 1,500 ids 130 vs 120 ms), so it keeps
+  // the default statements below SEEK_PAGE_MIN_RANKED_IDS.
+  const rankedIdCount = parseRankedIds(query.rankIds, query.rankTiers)?.ids.length ?? 0
+  const seekPageRead = !Object.hasOwn(params, 'byId0') && (rankedIdCount === 0 || rankedIdCount >= SEEK_PAGE_MIN_RANKED_IDS)
   const promotedRankSql = options.imageOnly ? undefined : `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -1044,6 +1054,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // browsing (category/brand/branch/stock filters, no typed search)
     // keeps the prior per-row-filtered behavior; nothing reported there.
     familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
+    // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
+    seekPage: seekPageRead,
   })
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
@@ -1182,6 +1194,10 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
       where.push(`p.id IN (${placeholders.join(', ')})`)
     }
   }
+  // A by-id read is primary-key seeks. The indexed `is_active = 1` lets the planner walk the is_active index (the
+  // whole catalogue) and test the id list on every entry instead. Kept outside the `ids` block above, which
+  // scripts/test-products-by-id-lookup-pure.cjs executes on its own.
+  if (Object.hasOwn(params, 'byId0')) where[0] = catalogProductSql('p', false)
 
   // `search` accepted as a third alias alongside query/q. A caller that
   // spells the term with a synonym used to get the WHOLE unfiltered catalog
@@ -1426,6 +1442,9 @@ export async function buildProductSearchIndexPage(env: Env, page: number, versio
   const hi = lo + SEARCH_INDEX_PAGE_IDS
   // Occupied ranges by a primary-key skip walk: one MIN(id) probe per
   // occupied range, never a scan.
+  // The page is a PRIMARY-KEY range. `+is_active` keeps the planner on that range: with the indexed predicate it
+  // walks the is_active index (every active product, plus a table read each) and discards the rows outside the id
+  // window -- a whole-catalogue read for a 2,000-id page.
   const [bucketRows, rows] = await Promise.all([
     db.prepare(`WITH RECURSIVE bucket(n) AS (
         SELECT CAST((SELECT MIN(id) FROM products WHERE id >= 0) / @size AS INTEGER)
@@ -1433,7 +1452,7 @@ export async function buildProductSearchIndexPage(env: Env, page: number, versio
         SELECT CAST((SELECT MIN(id) FROM products WHERE id >= (n + 1) * @size) / @size AS INTEGER) FROM bucket WHERE n IS NOT NULL LIMIT 10000
       ) SELECT n FROM bucket WHERE n IS NOT NULL`).all<{ n: number }>({ size: SEARCH_INDEX_PAGE_IDS }),
     db.prepare(`SELECT id, name, brand, category, barcode, sku FROM products
-      WHERE id >= @lo AND id < @hi AND ${catalogProductSql('products')} ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
+      WHERE id >= @lo AND id < @hi AND ${catalogProductSql('products', false)} ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
   ])
   const text = (value: unknown): string => (value == null ? '' : String(value))
   const packed = rows.map((row) => [Number(row.id), text(row.name), text(row.brand), text(row.category), text(row.barcode), text(row.sku)])

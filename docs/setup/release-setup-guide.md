@@ -120,6 +120,15 @@ The names must be exactly as written, in capitals.
 2. **What to put back**:
    - `worker` puts the website back. Leave the version id empty to go back
      one version, or paste "Worker version before" from the Deploy summary.
+     Also paste the full 40-character sha you are returning to in
+     **previous_sha**. Cron triggers are not part of a Worker version, so a
+     version rollback keeps the current release's crons firing the older code
+     (which runs every sweep, the full backup included, on every tick). The
+     run therefore **refuses** unless that sha's cron triggers equal the
+     checked-out release's, in both `wrangler.toml` and `wrangler.free.toml`.
+     If it refuses, do not retry: run **Deploy** with the previous sha as the
+     ref instead, which applies that sha's own config. The same check guards
+     option 1 of `run\release.bat` ("Undo a release"; pass `-PreviousSha`).
    - `database` puts a database back to the restore point from the Deploy
      summary. **Every sale and change made after that moment is lost.**
      Only do this when Claude says so.

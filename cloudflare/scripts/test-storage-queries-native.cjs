@@ -197,9 +197,19 @@ async function main() {
   await check('retention-health reads the settings keys the retention sweeps write', () => {
     const { sql } = load('retention-health')
     const keys = [...sql.matchAll(/FROM settings WHERE key = '([a-z0-9_]+)'/g)].map((m) => m[1])
-    assert.ok(keys.length >= 5, `only ${keys.length} settings keys read`)
+    assert.ok(keys.length >= 4, `only ${keys.length} settings keys read`)
     const source = RETENTION_SOURCES.map((file) => fs.readFileSync(file, 'utf8')).join('\n')
     assert.deepEqual(keys.filter((key) => !source.includes(`'${key}'`)), [], 'no retention sweep writes these settings keys')
+  })
+
+  await check('retention-health reports every ephemeral slice the scheduler stamps, and not the frozen whole-sweep key', () => {
+    const { sql } = load('retention-health')
+    const slices = [...sql.matchAll(/key = 'ephemeral_retention_last_run:([a-z_]+)'/g)].map((m) => m[1])
+    const source = fs.readFileSync(path.join(ROOT, 'cloudflare', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
+    const groups = [...(/EPHEMERAL_RETENTION_GROUPS = \[([^\]]*)\]/.exec(source)?.[1] || '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+    assert.ok(groups.length >= 5)
+    assert.deepEqual(slices, groups, 'one column per slice, in order')
+    assert.doesNotMatch(sql, /key = 'ephemeral_retention_last_run'/, 'the unsliced key no longer updates')
   })
 
   if (process.exitCode) console.error(`test-storage-queries-native: FAILED (${passed} passed)`)

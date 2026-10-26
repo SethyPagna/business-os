@@ -109,7 +109,7 @@ export type ImageInfo = { format?: string; fileSize?: number; width?: number; he
  * Reads an image's real dimensions and size.
  *
  * Free on Cloudflare's side -- `.info()` is explicitly not billed -- which is
- * what lets the 6-hourly audit inspect the whole library without spending
+ * what lets the scheduled audit inspect the whole library without spending
  * transformation quota. Returns null when the binding is absent or the object
  * is not a decodable image; the caller treats that as "cannot assess", never
  * as "fine".

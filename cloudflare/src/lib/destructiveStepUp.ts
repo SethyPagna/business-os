@@ -10,7 +10,8 @@ import { actorSnapshot } from './actorSnapshot'
 //   - denyUnlessCurrentPassword: those two, plus routes/system.ts (integrity
 //     repair), routes/backups.ts (forced maintenance clear),
 //     routes/compat.ts (audit-log purge) and routes/settings.ts (audit-log
-//     retention).
+//     retention, and the linked payment-method replace that rewrites past
+//     sales).
 //   - denyUnlessRepairPermission: routes/system.ts (integrity repair), which
 //     rewrites stock and sale statuses and so needs the Restore permission; the
 //     route passes whether the caller holds it, so this refusal is audited and

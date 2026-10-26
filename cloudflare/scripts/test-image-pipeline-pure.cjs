@@ -211,13 +211,19 @@ check('the audit cannot break the backup chain', async () => {
   // a .then() chain to sequential awaits; Part 574 wrapped each in its own
   // runStep(label, () => fn(env)) guard so one throw can no longer abort the
   // rest. The ORDER is still the invariant, so that is what gets pinned now.)
-  const scheduled = index.slice(index.indexOf('async scheduled('))
-  const backupAt = scheduled.indexOf("runStep('backup', () => maybeRunScheduledBackup(env))")
-  const retentionAt = scheduled.indexOf("runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))")
-  const auditAt = scheduled.indexOf("runStep('image-audit', () => maybeRunScheduledImageAudit(env))")
-  assert.ok(backupAt >= 0, 'the backup must run in the scheduled tick')
-  assert.ok(retentionAt > backupAt, 'audit-log retention must run after the backup')
-  assert.ok(auditAt > retentionAt, 'the image audit must run last')
+  // Part 6.0.984: the tick now runs ONE rotation step per invocation
+  // (lib/cronRotation.ts), so the audit cannot even share an invocation with
+  // the backup; the list order is still the rotation order.
+  // The backup and the image audit now live on their own hourly-or-slower
+  // trigger (cronHeavySteps), backup first, audit last; the retention
+  // rotation holds neither.
+  const rotation = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export function cronHeavySteps'))
+  const heavy = index.slice(index.indexOf('export function cronHeavySteps'), index.indexOf('export default {'))
+  const backupAt = heavy.indexOf("step('backup', () => maybeRunScheduledBackup(env))")
+  const auditAt = heavy.indexOf("step('image-audit', () => maybeRunScheduledImageAudit(env))")
+  assert.ok(backupAt >= 0, 'the backup must be in the heavy scheduled steps')
+  assert.ok(auditAt > backupAt, 'the image audit must run after the backup')
+  assert.ok(!/step\('(backup|image-audit)'/.test(rotation), 'the 15-minute rotation holds neither heavy step')
   assert.match(audit, /catch \(error\) \{\s*\n\s*console\.error\('\[image-audit\] pass failed'/)
 })
 

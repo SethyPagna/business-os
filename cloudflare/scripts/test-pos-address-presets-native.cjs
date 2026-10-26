@@ -66,7 +66,7 @@ const settingsRoute = loadReal('routes/settings.ts', {
   // The real P1-3 admin-only-key guard (pure, no imports of its own).
   '../lib/settingsAdminKeys': loadReal('lib/settingsAdminKeys.ts'),
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
-  '../lib/settingsVisibility': loadReal('lib/settingsVisibility.ts', { './permissions': permissions }),
+  '../lib/settingsVisibility': loadReal('lib/settingsVisibility.ts', { './permissions': permissions, './settingsSensitive': loadReal('lib/settingsSensitive.ts') }),
   '../lib/portalText': loadReal('lib/portalText.ts'),
   '../lib/searchMatch': { normalizedHaystackSql: (expression) => expression },
   '../lib/settingsSensitive': { stripSensitiveSettings: (value) => value },

@@ -42,7 +42,7 @@ const DETAIL_RETENTION_SETTING_KEY = 'import_detail_retention_hours'
 const SUMMARY_RETENTION_SETTING_KEY = 'import_summary_retention_days'
 const IMPORT_RETENTION_LAST_RUN_KEY = 'import_retention_last_run'
 
-// The scheduled worker ticks every 6h. 5h (not 6h exactly) so ordinary
+// The rotating cron revisits each step every 2.75 h. 5h (not 6h) so ordinary
 // timing jitter between ticks can never make every second tick skip.
 const IMPORT_RETENTION_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 

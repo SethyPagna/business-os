@@ -575,11 +575,36 @@ export async function productImportChangesPrice(env: Env, job: ImportApplyJob): 
   return productImportResultsChangePrice(getDb(env), await analyzedProductImportRows(env, job, ['update', 'create']), job.policy_json)
 }
 
+export const CONTACT_IMPORT_ADD_DENIED_CODE = 'contact_import_add_not_allowed'
+export const CONTACT_IMPORT_EDIT_DENIED_CODE = 'contact_import_edit_not_allowed'
+
+/**
+ * Per-row Add/Edit enforcement for a contacts import: a row that would create needs contacts:add, a row that would update
+ * needs contacts:edit. A refused row is skipped (never written) and carries a code the review restates in either language.
+ */
+export function applyContactImportActionGates(results: ImportRowResult[], allowCreates: boolean, allowUpdates: boolean): number {
+  let refused = 0
+  for (const result of results) {
+    const denied = result.action === 'create' && !allowCreates ? CONTACT_IMPORT_ADD_DENIED_CODE
+      : result.action === 'update' && !allowUpdates ? CONTACT_IMPORT_EDIT_DENIED_CODE
+      : null
+    if (!denied) continue
+    result.action = 'skip'
+    result.code = denied
+    result.params = {}
+    result.message = denied === CONTACT_IMPORT_ADD_DENIED_CODE
+      ? 'Skipped: your role cannot add contacts.'
+      : 'Skipped: your role cannot edit contacts.'
+    refused += 1
+  }
+  return refused
+}
+
 export async function assertCurrentImportApplyAuthority(
   env: Env,
   job: ImportApplyJob,
   db = getDb(env),
-): Promise<{ actor: SessionUser; allowProductImageWrites: boolean; allowProductSupplierWrites: boolean; allowProductPriceWrites: boolean; allowProductStockWrites: boolean }> {
+): Promise<{ actor: SessionUser; allowProductImageWrites: boolean; allowProductSupplierWrites: boolean; allowProductPriceWrites: boolean; allowProductStockWrites: boolean; allowContactCreates: boolean; allowContactUpdates: boolean }> {
   const policy = parsePolicyObject(job.policy_json)
   const actorId = Number(policy.apply_authorized_by_id)
   if (!Number.isInteger(actorId) || actorId <= 0) {
@@ -614,7 +639,14 @@ export async function assertCurrentImportApplyAuthority(
   // Stock is an inventory adjust, which only a full grant holds (like a fold's starting quantity and a stock session).
   // The same grant gates an inventory or stock-actions file: inventory:import alone never allowed it to move stock.
   const allowProductStockWrites = !isStockAdjustImportType(job.type) || getActionTier(actor, 'inventory', 'adjust') === 'full'
-  return { actor, allowProductImageWrites, allowProductSupplierWrites, allowProductPriceWrites, allowProductStockWrites }
+  // A contacts file may only create rows for a user who holds contacts:add and only update rows for one who holds
+  // contacts:edit (the same per-action switches POST and PUT on the contact routes read). Judged per row at apply.
+  const allowContactCreates = section !== 'contacts' || getActionTier(actor, 'contacts', 'add') !== 'none'
+  const allowContactUpdates = section !== 'contacts' || getActionTier(actor, 'contacts', 'edit') !== 'none'
+  if (!allowContactCreates && !allowContactUpdates) {
+    throw new ImportApplyAuthorizationError('contacts:add', 'The user who authorized this import has neither contacts:add nor contacts:edit permission.')
+  }
+  return { actor, allowProductImageWrites, allowProductSupplierWrites, allowProductPriceWrites, allowProductStockWrites, allowContactCreates, allowContactUpdates }
 }
 
 function withProductImportCommitAuthority(db: D1Compat, job: ImportApplyJob, actor: SessionUser): D1Compat {
@@ -6905,6 +6937,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       if (unresolvedTarget) {
         throw new Error(`Contact import row ${unresolvedTarget.rowNumber} has an ambiguous or changed merge target. Review the row again before applying.`)
       }
+    }
+    if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
+      applyContactImportActionGates(results, authority.allowContactCreates, authority.allowContactUpdates)
     }
     if (job.type === 'products' && !authority.allowProductImageWrites) {
       if (await productImportResultsChangeImages(db, results, job.policy_json)) {

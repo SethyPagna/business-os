@@ -44,7 +44,7 @@ function load(relative, dependencies = {}) {
 }
 
 const settingsSensitive = load('lib/settingsSensitive.ts')
-const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts') })
+const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts'), './settingsSensitive': settingsSensitive })
 const SETTINGS_ROWS = [
   { key: 'business_name', value: 'Leang', updated_at: '2026-09-01 00:00:00' },
   { key: 'google_drive_refresh_token', value: 'secret-token', updated_at: '2026-09-02 00:00:00' },
@@ -59,7 +59,7 @@ function answer(sql) {
     if (trace.settingsFail) throw new Error('D1_ERROR: settings read failed')
     return SETTINGS_ROWS.map(({ key, value }) => ({ key, value }))
   }
-  if (/^SELECT MAX\(updated_at\) AS updated_at FROM settings$/.test(sql.trim())) return [{ updated_at: MAX_UPDATED_AT }]
+  if (/^SELECT MAX\(updated_at\) AS updated_at FROM settings( WHERE .*)?$/.test(sql.trim())) return [{ updated_at: MAX_UPDATED_AT }]
   throw new Error(`unexpected SQL: ${sql}`)
 }
 

@@ -52,26 +52,28 @@ export async function getPortalLockoutState(env: Env, scope: PortalLockoutScope,
 export async function recordPortalFailure(env: Env, scope: PortalLockoutScope, key: string): Promise<PortalLockoutState> {
   const k = normKey(scope, key)
   if (!k.key) return { locked: false, failedCount: 0, retryAfterSeconds: 0 }
-  const db = getDb(env)
-  const existing = await db.prepare(
-    'SELECT failed_count, locked_until FROM portal_auth_lockouts WHERE scope = @scope AND key = @key',
-  ).get<{ failed_count: number; locked_until: string | null }>(k)
-
-  // A previous lock whose cooldown has elapsed resets the window.
-  const priorExpired = existing?.locked_until ? new Date(existing.locked_until).getTime() <= Date.now() : false
-  const base = existing && !priorExpired ? existing.failed_count : 0
-  const failedCount = base + 1
-  const lockedUntil = failedCount >= MAX_FAILURES ? new Date(Date.now() + COOLDOWN_SECONDS * 1000).toISOString() : null
-
-  if (existing) {
-    await db.prepare(
-      'UPDATE portal_auth_lockouts SET failed_count = @failed_count, locked_until = @locked_until, updated_at = CURRENT_TIMESTAMP WHERE scope = @scope AND key = @key',
-    ).run({ ...k, failed_count: failedCount, locked_until: lockedUntil })
-  } else {
-    await db.prepare(
-      'INSERT INTO portal_auth_lockouts (scope, key, failed_count, locked_until) VALUES (@scope, @key, @failed_count, @locked_until)',
-    ).run({ ...k, failed_count: failedCount, locked_until: lockedUntil })
-  }
+  // One atomic statement (the same fix lib/loginLockout.ts got in 6.0.986): a
+  // read-then-write let concurrent failures read the same count and each write
+  // back count+1, losing attempts. The right-hand sides of an upsert's SET see
+  // the OLD row, so the "window restarts" test (a lock whose cooldown has
+  // elapsed) is repeated for the count and for the lock time. The lock time is
+  // written in the same ISO shape Date.toISOString() produced before, so the
+  // stored text, the read-only check above and the 10/30-minute thresholds are
+  // unchanged.
+  const restarted = `(locked_until IS NOT NULL AND locked_until <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  const nextCount = `(CASE WHEN ${restarted} THEN 1 ELSE failed_count + 1 END)`
+  const row = await getDb(env).prepare(`
+    INSERT INTO portal_auth_lockouts (scope, key, failed_count, locked_until) VALUES (@scope, @key, 1, NULL)
+    ON CONFLICT(scope, key) DO UPDATE SET
+      failed_count = ${nextCount},
+      locked_until = CASE WHEN ${nextCount} >= ${MAX_FAILURES}
+        THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${COOLDOWN_SECONDS} seconds')
+        ELSE NULL END,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING failed_count, locked_until
+  `).get<{ failed_count: number; locked_until: string | null }>(k)
+  const failedCount = Number(row?.failed_count) || 1
+  const lockedUntil = row?.locked_until || null
   return {
     locked: !!lockedUntil,
     failedCount,

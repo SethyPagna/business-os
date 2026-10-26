@@ -11,7 +11,7 @@ export const DEFAULT_AUDIT_LOG_RETENTION_DAYS = 21
 const AUDIT_LOG_RETENTION_SETTING_KEY = 'audit_log_retention_days'
 const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // Deleting is a full-table scan on created_at, so the scheduled worker
-// (which ticks every 6h per wrangler.toml's cron trigger) only actually
+// (the rotating cron, one step per 15-minute tick) only actually
 // performs a delete pass once per day -- frequent enough that the log table
 // never grows much past the configured retention window, infrequent enough
 // to not do needless work on every tick.
@@ -455,6 +455,8 @@ async function setSettingValue(env: Env, key: string, value: string): Promise<vo
   `).run({ key, value })
 }
 
+export const AUDIT_RETENTION_MAX_BATCHES_PER_VISIT = 3
+
 export async function getAuditLogRetentionDays(env: Env): Promise<number> {
   const raw = await getSettingValue(env, AUDIT_LOG_RETENTION_SETTING_KEY)
   const parsed = raw ? Number.parseInt(raw, 10) : NaN
@@ -463,9 +465,9 @@ export async function getAuditLogRetentionDays(env: Env): Promise<number> {
 
 // Runs on the scheduled worker tick. Deletes audit_logs rows older than the
 // configured retention window (default 21 days, see DEFAULT_AUDIT_LOG_RETENTION_DAYS),
-// throttled to at most once per day so a 6h cron tick doesn't re-scan the
+// throttled to at most once per day so the rotating cron's visits (every 2.75 h) don't re-scan the
 // table for nothing.
-export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number }> {
+export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number; more?: boolean }> {
   const lastRunRaw = await getSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY)
   const lastRun = lastRunRaw ? Date.parse(lastRunRaw) : 0
   if (lastRun && Date.now() - lastRun < AUDIT_LOG_RETENTION_MIN_INTERVAL_MS) {
@@ -482,15 +484,22 @@ export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ sk
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const db = getDb(env)
   let deleted = 0
-  for (;;) {
+  // At most AUDIT_RETENTION_MAX_BATCHES_PER_VISIT statements per scheduled
+  // visit (10 ms CPU on Free). A full last batch means more is waiting: the
+  // run is not stamped, so the rotating cron resumes it instead of waiting out
+  // the daily interval. What is deleted (and what is kept forever) is decided
+  // by buildAuditLogRetentionDeleteSql alone and is unchanged.
+  let more = false
+  for (let batch = 0; ; batch += 1) {
+    if (batch >= AUDIT_RETENTION_MAX_BATCHES_PER_VISIT) { more = true; break }
     const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
     const n = result.changes ?? 0
     deleted += n
     if (n < 5000) break
   }
-  await setSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY, new Date().toISOString())
+  if (!more) await setSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY, new Date().toISOString())
   if (deleted > 0) {
     await audit(env, null, null, 'audit_log_retention_auto_delete', 'audit_log', null, { retentionDays, cutoffDate: cutoff, deleted })
   }
-  return { skipped: false, deleted, retentionDays }
+  return { skipped: false, deleted, retentionDays, ...(more ? { more: true } : {}) }
 }

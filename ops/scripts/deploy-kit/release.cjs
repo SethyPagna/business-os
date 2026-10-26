@@ -22,7 +22,7 @@
 //   -Site <url>           default https://admin.leangbeauty.com
 //   -Jobs <n>             test files run in parallel (default 3)
 //   -Retries <n>          extra tries for a red test file (default 2)
-//   rollback: -Target worker|database  -VersionId <id>  -Db <name>  -Bookmark <b>
+//   rollback: -Target worker|database  -VersionId <id>  -PreviousSha <40-hex sha being returned to (worker)>  -Db <name>  -Bookmark <b>
 //   CI only: -CI -ReleaseDir <checkout> -NoApply
 //
 // <home> is BUSINESS_OS_HOME, else the folder holding the main git checkout.
@@ -805,6 +805,27 @@ async function stepRollback(ctx) {
     if (t === 'worker') {
       const versionId = ctx.args.versionId || snap.previousVersionId || ''
       if (versionId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(versionId)) { log.say(`STOP: ${versionId} is not a Worker version id.`); ok = false; continue }
+      // Cron triggers are not part of a Worker version: refuse unless the target sha's crons equal the current ones.
+      if (!ctx.dryRun) {
+        let prev = String(ctx.args.previousSha || '').trim()
+        if (!prev && !ctx.ci) prev = String(await ex.ask('Full 40-character sha of the release you are going back to: ')).trim()
+        if (!/^[0-9a-f]{40}$/i.test(prev)) { log.say(`STOP: give the full 40-character sha being returned to with -PreviousSha, so its cron triggers can be compared. ${lib.ROLLBACK_REDEPLOY_ADVICE}`); ok = false; continue }
+        const files = ['wrangler.toml', 'wrangler.free.toml']
+        const current = {}
+        const targetToml = {}
+        for (const f of files) {
+          try { current[f] = fs.readFileSync(path.join(ctx.releaseDir, 'cloudflare', f), 'utf8') } catch { current[f] = '' }
+          targetToml[f] = ex.gitRead(['show', `${prev}:cloudflare/${f}`], ctx.releaseDir)
+        }
+        const guard = lib.cronRollbackCheck(current, targetToml)
+        if (!guard.ok) {
+          for (const p of guard.problems) log.say(`  PROBLEM: ${p}`)
+          log.say(`STOP: refusing the version rollback. ${guard.advice}`)
+          ok = false
+          continue
+        }
+        log.say('  Cron triggers match the target sha, so a version rollback is safe.')
+      }
       log.say(versionId ? `The version that was live before the release: ${versionId}` : 'No saved version; Cloudflare will go back to the previous version.')
       const approval = await ex.confirm(ctx, 'double', 'Put the website back to the version before this release?', 'ROLLBACK')
       if (!approval.ok) { log.say('Stopped. Nothing was changed.'); ok = false; continue }

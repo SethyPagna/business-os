@@ -7,7 +7,7 @@ import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
+import { stripSensitiveSettings, isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
@@ -69,7 +69,8 @@ async function getSettingsUpdatedAt(env: Env, keys?: string[]): Promise<string |
     ).get<{ updated_at: string | null }>({ keysJson: JSON.stringify(keys) })
     if (row?.updated_at) return row.updated_at
   }
-  const row = await db.prepare('SELECT MAX(updated_at) AS updated_at FROM settings').get<{ updated_at: string | null }>()
+  // System-owned rows (cron state, *_last_run) are not user edits: they never move this stamp.
+  const row = await db.prepare(`SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}`).get<{ updated_at: string | null }>()
   return row?.updated_at || new Date().toISOString()
 }
 
@@ -117,7 +118,7 @@ app.get('/', async (c) => {
   // when the table has no timestamp.
   const [rowsResult, updatedAtResult] = await db.batch([
     { sql: 'SELECT key, value FROM settings' },
-    { sql: 'SELECT MAX(updated_at) AS updated_at FROM settings' },
+    { sql: `SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}` },
   ])
   const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
   const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at
@@ -723,6 +724,16 @@ app.post('/payment-methods/replace', async (c) => {
     return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
   }
   if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
+  // Rewriting the method on every linked sale is a bulk edit of money records,
+  // so it asks for the caller's current password, as the other destructive
+  // routes (lib/destructiveStepUp.ts). A settings-only rename touches the
+  // configured list alone, which the ordinary settings save already allows.
+  // After the cheap validation, before any read of sales or any write.
+  if (scope === 'linked') {
+    const { denyUnlessCurrentPassword } = await import('../lib/destructiveStepUp')
+    const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+    if (passwordDenied) return passwordDenied
+  }
   const fromKey = normalizeReferenceName(from)
   const toKey = normalizeReferenceName(to)
   if (fromKey === toKey && scope !== 'linked') {
@@ -1047,6 +1058,17 @@ app.post('/', async (c) => {
       error: `"${dedicatedKey}" must be changed through its dedicated endpoint.`,
       code: 'dedicated_setting_endpoint_required',
     }, 400)
+  }
+
+  // System-owned rows (cron state, *_last_run stamps) are written only by the
+  // Worker's cron code, directly. GET never returns them, so a genuine form
+  // cannot carry one back: refuse for everyone, administrators included.
+  const systemOwnedKey = attemptedKeys.find(isSystemOwnedSettingKey)
+  if (systemOwnedKey) {
+    return c.json({
+      error: 'That setting is maintained by the system and cannot be changed.',
+      code: 'system_owned_setting',
+    }, 403)
   }
 
   // No shortcuts on writes: this is an all-or-nothing check across every

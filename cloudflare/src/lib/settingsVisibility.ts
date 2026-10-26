@@ -1,4 +1,5 @@
 import { getPermissionTier, hasPermission, type PermissionUser } from './permissions'
+import { isSystemOwnedSettingKey } from './settingsSensitive'
 
 // GET /api/settings hands the settings table to every signed-in account,
 // because the POS, receipts, sales, returns, shifts, the notification bell, the
@@ -30,6 +31,8 @@ function normalizedKey(key: string): string {
   return String(key || '').trim().toLowerCase()
 }
 
+// System-owned rows (cron state, *_last_run stamps; lib/settingsSensitive.ts) are
+// readable by nobody through the settings maps, a Settings account included.
 function isSettingsOnlyKey(key: string): boolean {
   return SETTINGS_ONLY_KEYS.has(key) || SETTINGS_ONLY_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
 }
@@ -37,11 +40,11 @@ function isSettingsOnlyKey(key: string): boolean {
 type SettingsReader = (key: string) => boolean
 
 function settingsReaderFor(user: PermissionUser): SettingsReader {
-  if (getPermissionTier(user, 'settings') !== 'none') return () => true
+  if (getPermissionTier(user, 'settings') !== 'none') return (key) => !isSystemOwnedSettingKey(key)
   const portalEditor = hasPermission(user, 'customer_portal')
   return (key) => {
     const normalized = normalizedKey(key)
-    if (isSettingsOnlyKey(normalized)) return false
+    if (isSystemOwnedSettingKey(normalized) || isSettingsOnlyKey(normalized)) return false
     return portalEditor || !PORTAL_ASSISTANT_KEYS.has(normalized)
   }
 }

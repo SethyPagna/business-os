@@ -128,7 +128,7 @@ export function windowKeyFor(window: 'day' | 'month', now = new Date()): string 
 // without: an image that misses its optimisation pass is merely larger than
 // ideal and gets picked up by the next sweep, whereas a video that cannot be
 // processed is a feature that does not work. Left to compete freely, the
-// 6-hourly image sweep would spend the whole month's allowance in its first
+// scheduled image sweep would spend the whole month's allowance in its first
 // day or two -- it has thousands of candidates and video has a handful.
 //
 // So image callers ask for the RESERVED zone, which treats the ceiling as

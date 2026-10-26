@@ -1881,7 +1881,7 @@ export async function sendTelegramStaleShiftAlert(env: Env, shiftId: number, now
 //   3. Fallback, used when the binding is absent or `send` throws: the row
 //      stays `dispatch='fallback'` and is drained by the next /api request
 //      after it falls due (index.ts, at most once per 20 s per isolate, off
-//      the response path) or by the 6-hourly cron. NOT ctx.waitUntil with a
+//      the response path) or by the every-5-minutes cron (CRON_TELEGRAM). NOT ctx.waitUntil with a
 //      60 s sleep: waitUntil work is cut 30 s after the response on both
 //      plans, so the sleep would be killed before it sent -- a timer that
 //      looks like a mechanism and is not one. A pending row the queue never
@@ -2355,18 +2355,28 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
  * by the request drain and the cron. Bounded, and a no-op without 0194.
  */
 export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = Date.now(), options: { limit?: number; sweepStale?: boolean } = {}): Promise<number> {
-  if (!(await scheduledSendsAvailable(env))) return 0
+  // No schema probe here: this runs on the every-5-minutes cron and a cold
+  // isolate's SELECT ... FROM sqlite_master is a full scan of ~700 schema rows
+  // (up to ~200k rows a day on an idle shop). The statements below name the
+  // table themselves, so a deployment without 0194 fails with "no such
+  // table", which is the same answer for free: nothing to send.
   const db = getDb(env)
   const now = new Date(nowMs).toISOString()
   const limit = options.limit ?? 3
-  // The cron only: the request drain stays a single indexed read.
-  if (options.sweepStale) {
-    await db.prepare(`UPDATE telegram_scheduled_sends SET status = 'failed', last_error = 'abandoned mid-send; not retried (at most once)'
-      WHERE status = 'sending' AND claimed_at < @stale`).run({ stale: new Date(nowMs - SHIFT_OVERVIEW_STALE_CLAIM_MS).toISOString() })
+  let due: Array<{ send_key: string }>
+  try {
+    // The cron only: the request drain stays a single indexed read.
+    if (options.sweepStale) {
+      await db.prepare(`UPDATE telegram_scheduled_sends SET status = 'failed', last_error = 'abandoned mid-send; not retried (at most once)'
+        WHERE status = 'sending' AND claimed_at < @stale`).run({ stale: new Date(nowMs - SHIFT_OVERVIEW_STALE_CLAIM_MS).toISOString() })
+    }
+    due = await db.prepare(`SELECT send_key FROM telegram_scheduled_sends
+      WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
+      ORDER BY due_at LIMIT @limit`).all<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_OVERVIEW_QUEUE_GRACE_MS).toISOString(), limit })
+  } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return 0
+    throw error
   }
-  const due = await db.prepare(`SELECT send_key FROM telegram_scheduled_sends
-    WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
-    ORDER BY due_at LIMIT @limit`).all<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_OVERVIEW_QUEUE_GRACE_MS).toISOString(), limit })
   let sent = 0
   for (const row of due) if ((await deliverTelegramShiftOverview(env, row.send_key, nowMs)) === 'sent') sent += 1
   return sent

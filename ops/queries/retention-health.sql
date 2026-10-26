@@ -15,7 +15,12 @@ SELECT
   (SELECT value FROM settings WHERE key = 'import_summary_retention_days') AS import_summary_days_setting,
   (SELECT MIN(created_at) FROM import_jobs WHERE status IN ('completed', 'completed_with_errors', 'failed', 'cancelled')) AS import_terminal_oldest,
   (SELECT COUNT(*) FROM import_jobs WHERE status IN ('completed', 'completed_with_errors', 'failed', 'cancelled') AND details_pruned_at IS NULL AND COALESCE(finished_at, updated_at) < datetime('now', '-2 days')) AS import_unpruned_over_2d,
-  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run') AS ephemeral_last_run,
+  -- Since 6.0.984 the sweep runs as five slices, each stamped on its own (a slice that stopped early is not stamped).
+  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run:rate_limit') AS ephemeral_rate_limit_last_run,
+  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run:auth') AS ephemeral_auth_last_run,
+  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run:logs') AS ephemeral_logs_last_run,
+  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run:history') AS ephemeral_history_last_run,
+  (SELECT value FROM settings WHERE key = 'ephemeral_retention_last_run:submissions') AS ephemeral_submissions_last_run,
   (SELECT MIN(created_at) FROM rate_limit_events) AS rate_limit_oldest,
   (SELECT MIN(created_at) FROM verification_codes) AS verification_oldest,
   (SELECT MIN(created_at) FROM ai_response_logs) AS ai_log_oldest,

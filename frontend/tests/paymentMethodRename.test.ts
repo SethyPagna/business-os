@@ -23,7 +23,7 @@ assert.match(settingsSource, /const isCaseOnlyRename = to\.toLocaleLowerCase\(\)
 assert.match(settingsSource, /const scope: PaymentMethodRenameScope = isCaseOnlyRename \|\| linked > 0 \? 'linked' : 'settings_only'/)
 // FX-ui: the linked-rename question is the shared ConfirmDialog (before/after),
 // never window.confirm; declining still returns before replacePaymentMethod.
-assert.match(settingsSource, /if \(scope === 'linked' && !\(await askToConfirm\(\{[\s\S]*?\}\)\)\) return[\s\S]*?await replacePaymentMethod\(/)
+assert.match(settingsSource, /if \(scope === 'linked'\) \{[\s\S]*?await askForPassword\(request, async \(currentPassword\) => \{[\s\S]*?await replacePaymentMethod\(\{[^}]*currentPassword/)
 assert.doesNotMatch(settingsSource, /window\.confirm\(/)
 
 // Configured choices keep one case-insensitive identity. A cashier cannot add
@@ -60,6 +60,7 @@ globalThis.fetch = ((...args: FetchCall) => {
     to: 'FCB',
     scope: 'linked',
     expected_updated_at: '2026-09-05 15:30:00',
+    currentPassword: 'typed-in-the-dialog',
   })
   return Promise.resolve(new Response(JSON.stringify({
     success: true,
@@ -76,6 +77,7 @@ try {
     to: 'FCB',
     scope: 'linked',
     expected_updated_at: impact.settings_updated_at || undefined,
+    currentPassword: 'typed-in-the-dialog',
   })
   assert.deepEqual(result.methods, ['Cash', 'FCB'])
   assert.equal(calls.length, 2)
@@ -88,9 +90,19 @@ try {
     headers: { 'Content-Type': 'application/json' },
   }))) as typeof fetch
   await assert.rejects(
-    () => replacePaymentMethod({ from: 'Card', to: 'CARD', scope: 'linked' }),
+    () => replacePaymentMethod({ from: 'Card', to: 'CARD', scope: 'linked', currentPassword: 'typed-in-the-dialog' }),
     /returned no canonical method list/,
   )
+  // Browser half of the step-up: a linked rename without the password never reaches the network.
+  const callsBefore = calls.length
+  await assert.rejects(() => replacePaymentMethod({ from: 'Card', to: 'CARD', scope: 'linked' }), /requires the current password/)
+  assert.equal(calls.length, callsBefore)
+  // A settings-only rename rewrites no sale, so it carries no password.
+  globalThis.fetch = ((_url: unknown, init?: RequestInit) => {
+    assert.equal('currentPassword' in JSON.parse(String(init?.body || '{}')), false)
+    return Promise.resolve(new Response(JSON.stringify({ success: true, methods: ['Cash'] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  }) as typeof fetch
+  await replacePaymentMethod({ from: 'Card', to: 'Debit', scope: 'settings_only' })
 } finally {
   globalThis.fetch = originalFetch
   resetApiState()

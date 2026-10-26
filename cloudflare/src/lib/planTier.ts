@@ -128,7 +128,7 @@ export type PlanLimits = {
   // model" -- and is what fits Free's 50 external-subrequest ceiling.
   maxAssetsPerBackup: number
 
-  // Whether the 6-hourly CRON may create a full D1 backup.
+  // Whether the scheduled CRON may create a full D1 backup.
   //
   // Paid true (today's behaviour, unchanged). Free FALSE: a cron trigger on
   // Free gets the same fixed 10 ms CPU budget as any other invocation, and
@@ -164,7 +164,7 @@ export type PlanLimits = {
   // ---- Retention sweeps (scheduled) --------------------------------------
 
   // importRetention.ts IMPORT_RETENTION_MAX_JOBS_PER_TIER -- jobs pruned
-  // per tier per 6-hourly tick. Paid 20 is the current value. Free 5 keeps
+  // per tier per scheduled visit. Paid 20 is the current value. Free 5 keeps
   // one tick's D1/R2 work inside the 10 ms cron budget; the sweep simply
   // continues on later ticks until it reaches steady state, which is
   // already how it is designed to drain a backlog.

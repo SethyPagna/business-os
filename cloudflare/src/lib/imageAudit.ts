@@ -1,4 +1,4 @@
-// The 6-hourly image audit, and the reprocessing pass it feeds.
+// The scheduled image audit (the heavy cron, CRON_HEAVY: every 6 h), and the reprocessing pass it feeds.
 //
 // Two separate jobs on purpose:
 //

@@ -14,8 +14,8 @@ export const METRICS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)
 export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions'])
 export const MIN_ROWS_FOR_P95 = 100
 export const MAX_DAYS = 7
-// The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron's 06:00 and 12:00 UTC runs fall
-// inside as blob1 'bg' rows: the latency and error queries read 'api' only, and just the builds list counts them.
+// The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron runs every 5 and every 15 minutes
+// all day, so its runs fall inside as blob1 'bg' rows: the latency and error queries read 'api' only, and just the builds list counts them.
 export const TRADING_HOURS_UTC = Object.freeze({ start: 1, end: 13 })
 const REVISION = /^[A-Za-z0-9._-]{1,64}$/
 const ACCOUNT_ID = /^[0-9a-f]{32}$/

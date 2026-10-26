@@ -40,7 +40,16 @@ export type ConfirmRequest = {
   layer?: ConfirmDialogLayer
 }
 
-type PendingConfirm = ConfirmRequest & { resolve: (confirmed: boolean) => void }
+// attempt: a password ask runs the action itself while the dialog stays open. It answers null when the action
+// went through (or failed for a reason the caller handles outside the dialog) and the sentence to show inline
+// when the password was refused, so staff can retype it.
+type PasswordAttempt = (password: string) => Promise<string | null>
+type PendingConfirm = ConfirmRequest & { resolve: (confirmed: boolean) => void; attempt?: PasswordAttempt }
+
+// Every outcome but Confirm answers false.
+function cancelPending(pending: PendingConfirm | null) {
+  pending?.resolve(false)
+}
 
 export function useConfirmDialog(t?: Translate) {
   // A host that passes no t still gets Cancel/Confirm in the operator's language.
@@ -48,23 +57,56 @@ export function useConfirmDialog(t?: Translate) {
   const translate = t ?? appT
   const [pending, setPending] = useState<PendingConfirm | null>(null)
   const pendingRef = useRef<PendingConfirm | null>(null)
+  const [password, setPassword] = useState('')
+  const passwordRef = useRef('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordWorking, setPasswordWorking] = useState(false)
+  // The guard reads this, not the render closure: two submits in one tick (Enter then a click) both see the old state.
+  const workingRef = useRef(false)
+  const passwordInputRef = useRef<HTMLInputElement | null>(null)
 
   const settle = useCallback((confirmed: boolean) => {
     const current = pendingRef.current
     pendingRef.current = null
+    passwordRef.current = ''
     setPending(null)
+    setPassword('')
+    setPasswordError('')
+    workingRef.current = false
+    setPasswordWorking(false)
     current?.resolve(confirmed)
   }, [])
 
   const askToConfirm = useCallback((request: ConfirmRequest) => new Promise<boolean>((resolve) => {
-    pendingRef.current?.resolve(false)
+    cancelPending(pendingRef.current)
+    passwordRef.current = ''
+    setPassword('')
+    setPasswordError('')
     const next = { ...request, resolve }
     pendingRef.current = next
     setPending(next)
   }), [])
 
+  // The same dialog with a current-password field (the step-up the Worker asks
+  // for before a destructive write). Confirm stays disabled until one is typed,
+  // then runs `attempt` with the dialog still open. A refusal comes back as a
+  // sentence shown inline; the field is cleared and refocused for a retry, and
+  // Cancel/X/Escape stay available (a way out). Resolves true once the attempt
+  // answers null, false on every dismissal.
+  const askForPassword = useCallback((request: ConfirmRequest, attempt: PasswordAttempt) => new Promise<boolean>((resolve) => {
+    cancelPending(pendingRef.current)
+    passwordRef.current = ''
+    setPassword('')
+    setPasswordError('')
+    workingRef.current = false
+    setPasswordWorking(false)
+    const next = { ...request, resolve, attempt }
+    pendingRef.current = next
+    setPending(next)
+  }), [])
+
   useEffect(() => () => {
-    pendingRef.current?.resolve(false)
+    cancelPending(pendingRef.current)
     pendingRef.current = null
   }, [])
 
@@ -76,11 +118,32 @@ export function useConfirmDialog(t?: Translate) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
+      // Mid-attempt the write may still commit, so Escape must not report "cancelled" (the X and Cancel are disabled too).
+      if (workingRef.current) return
       settle(false)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [open, settle])
+
+  const submitPassword = async () => {
+    const current = pendingRef.current
+    const typed = passwordRef.current
+    if (!current?.attempt || !typed || workingRef.current) return
+    workingRef.current = true
+    setPasswordWorking(true)
+    setPasswordError('')
+    let refusal: string | null = null
+    try { refusal = await current.attempt(typed) } catch (error) { refusal = error instanceof Error && error.message ? error.message : 'Failed' }
+    if (pendingRef.current !== current) return
+    if (refusal === null) { settle(true); return }
+    workingRef.current = false
+    passwordRef.current = ''
+    setPassword('')
+    setPasswordError(refusal)
+    setPasswordWorking(false)
+    setTimeout(() => passwordInputRef.current?.focus(), 0)
+  }
 
   const confirmDialog = pending ? (
     <ConfirmDialog
@@ -92,12 +155,37 @@ export function useConfirmDialog(t?: Translate) {
       cancelLabel={pending.cancelLabel}
       danger={pending.danger}
       layer={pending.layer ?? 'nested'}
-      keyboard
+      keyboard={!pending.attempt}
+      confirmDisabled={pending.attempt ? !password : false}
+      working={pending.attempt ? passwordWorking : false}
       t={translate}
-      onConfirm={() => settle(true)}
+      onConfirm={() => { if (pending.attempt) void submitPassword(); else settle(true) }}
       onClose={() => settle(false)}
-    />
+    >
+      {pending.attempt ? (
+        <div>
+          <label htmlFor="confirm-dialog-current-password" className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+            {translate?.('current_password') || 'Current password'}
+          </label>
+          <input
+            id="confirm-dialog-current-password"
+            name="current_password"
+            type="password"
+            autoComplete="current-password"
+            autoFocus
+            ref={passwordInputRef}
+            disabled={passwordWorking}
+            aria-invalid={passwordError ? true : undefined}
+            className="input w-full"
+            value={password}
+            onChange={(event) => { passwordRef.current = event.target.value; setPassword(event.target.value) }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && passwordRef.current) { event.preventDefault(); void submitPassword() } }}
+          />
+          {passwordError ? <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{passwordError}</p> : null}
+        </div>
+      ) : null}
+    </ConfirmDialog>
   ) : null
 
-  return { askToConfirm, confirmDialog }
+  return { askToConfirm, askForPassword, confirmDialog }
 }

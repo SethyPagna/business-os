@@ -821,6 +821,8 @@
   "inventory_import_zero_receipt": "Zero quantity: no receipt needed.",
   "inventory_import_zero_removal": "Zero quantity: no removal needed.",
   "inventory_import_quantity_zero": "Quantity must be non-zero",
+  "contact_import_add_not_allowed": "Skipped: your role cannot add contacts.",
+  "contact_import_edit_not_allowed": "Skipped: your role cannot edit contacts.",
   "inventory_import_branch_unmatched": "Branch \"{branch}\" must uniquely match an existing active Shop or Warehouse.",
   "inventory_import_branch_required": "A blank branch requires exactly one active canonical default Shop or Warehouse.",
   "inventory_import_already_at_count": "Already at {quantity} -- no movement needed.",

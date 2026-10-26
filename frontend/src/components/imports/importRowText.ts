@@ -61,6 +61,8 @@ export const IMPORT_ROW_CODES: Readonly<Record<string, readonly RowCodeSpec[]>> 
   inventory_import_zero_receipt: [{ key: 'inventory_import_zero_receipt', params: [] }],
   inventory_import_zero_removal: [{ key: 'inventory_import_zero_removal', params: [] }],
   inventory_import_quantity_zero: [{ key: 'inventory_import_quantity_zero', params: [] }],
+  contact_import_add_not_allowed: [{ key: 'contact_import_add_not_allowed', params: [] }],
+  contact_import_edit_not_allowed: [{ key: 'contact_import_edit_not_allowed', params: [] }],
   inventory_import_branch_unmatched: [{ key: 'inventory_import_branch_unmatched', params: ['branch'] }],
   inventory_import_branch_required: [{ key: 'inventory_import_branch_required', params: [] }],
   inventory_import_already_at_count: [{ key: 'inventory_import_already_at_count', params: ['quantity'] }],

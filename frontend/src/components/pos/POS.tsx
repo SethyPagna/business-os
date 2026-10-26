@@ -748,6 +748,8 @@ export default function POS() {
   const { blocked: savingBlocked, reason: savingBlockedText } = useSavingGate()
   const canAddCustomer = can('contacts', 'add')
   const canEditCustomer = can('contacts', 'edit')
+  // Delivery contacts live in the same contacts section, so the same Add switch governs the rider quick-add.
+  const canAddDeliveryContact = can('contacts', 'add')
   const moneyCapabilityEnabled = Boolean(user && authReady)
   const moneyCapability = useSaleMoneyCapability(moneyCapabilityEnabled, saleSecurityFingerprint(user, authReady))
   // The first catalog read waits for the capability answer (ready or failed) so
@@ -4315,7 +4317,7 @@ export default function POS() {
                       <span className="text-xs text-gray-400">{t('rider_contact')||'Rider / Contact'}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400">{t('delivery_fee')||'Delivery fee'}</span>
-                        <button onClick={() => setShowAddDelivery(true)} className="text-xs text-orange-500 hover:text-orange-700 font-medium">{t('add_new')||'+ New'}</button>
+                        {canAddDeliveryContact ? <button onClick={() => setShowAddDelivery(true)} className="text-xs text-orange-500 hover:text-orange-700 font-medium">{t('add_new')||'+ New'}</button> : null}
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
@@ -4344,7 +4346,7 @@ export default function POS() {
                       </div>
                     </div>
                     {deliveryContacts.length === 0 && (
-                      <p className="text-xs text-gray-400 mt-1">{t('no_contacts_yet')||'No contacts yet.'} <button className="text-orange-500 underline" onClick={() => setShowAddDelivery(true)}>{t('add_one')||'Add one'}</button></p>
+                      <p className="text-xs text-gray-400 mt-1">{t('no_contacts_yet')||'No contacts yet.'} {canAddDeliveryContact ? <button className="text-orange-500 underline" onClick={() => setShowAddDelivery(true)}>{t('add_one')||'Add one'}</button> : null}</p>
                     )}
                   </div>
 
