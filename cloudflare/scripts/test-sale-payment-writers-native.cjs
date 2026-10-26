@@ -26,6 +26,10 @@
 //   undo_without_event   the undo restores the columns and writes no reversal event
 //   overpay_accepted     the instalment skips the "more than is owed" refusal
 //   no_revision_guard    the instalment batch does not pin the revision it read (I2 must go red)
+//   correction_first_payment  a correction is dated at the FIRST live payment (L1 must go red)
+//   correction_dated_now      a correction is dated now (L1 must go red)
+//   credit_without_event      an exchange cancel moves the credit in the columns only (X must go red)
+//   credit_flag_dropped       a settle drops the refund_credit marker of a repeated row (X must go red)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -40,6 +44,16 @@ const MUTATIONS = {
     from: '...replayEvents.map((event) => paymentEventInsertStatement(event)),', to: '' }],
   no_revision_guard: [{ name: 'no_revision_guard', file: 'src/routes/sales.ts',
     from: '    saleRevisionGuard(id, Number(sale.write_revision)),\n    ...openingStatements,', to: '    ...openingStatements,' }],
+  correction_first_payment: [{ name: 'correction_first_payment', file: 'src/lib/salePaymentWriters.ts',
+    from: 'const latest = ins[ins.length - 1]', to: 'const latest = ins[0]' }],
+  correction_dated_now: [{ name: 'correction_dated_now', file: 'src/lib/salePaymentWriters.ts',
+    from: 'receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,', to: 'receivedAt: input.actor.receivedAt,' },
+  { name: 'correction_out_dated_now', file: 'src/lib/salePaymentWriters.ts',
+    from: 'reversesEventId: null, receivedAt: anchor.received_at,', to: 'reversesEventId: null, receivedAt: input.actor.receivedAt,' }],
+  credit_without_event: [{ name: 'credit_without_event', file: 'src/lib/returnBulkAction.ts',
+    from: 'return [creditPaymentEventStatement(members, direction), {', to: 'return [{' }],
+  credit_flag_dropped: [{ name: 'credit_flag_dropped', file: 'src/lib/paymentSettlement.ts',
+    from: '      ...(preserved ? preserved.markers : {}),\n', to: '' }],
   overpay_accepted: [{ name: 'overpay_accepted', file: 'src/routes/sales.ts',
     from: "if (!statedChange && error.code === 'invalid_actual_change_total') {", to: "if (false) {" }],
 }
@@ -290,6 +304,124 @@ async function main() {
       assert.deepEqual(twoAfter.slice(2).map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]),
         [['out', 'correction', 10, collect.received_at], ['in', 'correction', 10, collect.received_at]])
       assert.deepEqual(net(twoAfter), { usd: 10, khr: 0 })
+    })
+
+    // ---- L. correction dating, discriminating (release review P2-2) -----------------------------------------
+    // A v0 deposit on 20 Aug (opening event), a settle whose event is moved to 10 Sep (restore mode: the only way an
+    // append-only row can be re-dated in a fixture), then a correction. It must land at 10 Sep, the latest live payment.
+    const dated = await H.importSale(h, 3, 'awaiting_payment', [{ productId: 403, name: 'PAY Mask', quantity: 5, price: 2 }], { paidUsd: 2, createdAt: '2026-08-20T03:00:00.000Z' })
+    const datedId = Number(dated.sale.id)
+    const datedSettle = await settle(datedId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'Cash', amount_usd: 8, amount_khr: 0 }], {}, 'settle the dated sale $8 cash')
+    const collectRow = (await events(datedId)).find((event) => event.origin === 'collect')
+    const { id: _collectId, created_at: _created, ...collectColumns } = collectRow
+    const backdated = { ...collectColumns, received_at: '2026-09-10 05:00:00' }
+    // The maintenance flag is guarded like stock: it is set and cleared under the transient stock permit, in one batch.
+    const permit = "INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"
+    await h.db.batch([
+      h.db.prepare(permit),
+      h.db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"restore\"}')"),
+      h.db.prepare('DELETE FROM sale_payment_events WHERE id=?').bind(collectRow.id),
+      h.db.prepare(`INSERT INTO sale_payment_events(${Object.keys(backdated).join(',')}) VALUES(${Object.keys(backdated).map(() => '?').join(',')})`).bind(...Object.values(backdated)),
+      h.db.prepare("DELETE FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')"),
+    ])
+    const augShift = () => shiftCash('2026-08-20 02:00:00', '2026-08-20 04:00:00')
+    const sepShift = () => shiftCash('2026-09-10 04:00:00', '2026-09-10 06:00:00')
+    const [augBefore, sepBefore, nowBefore] = [await augShift(), await sepShift(), await shiftCash(canonical(Date.now() - 3600 * 1000), null)]
+    const datedReopen = await h.call('PATCH', `/api/sales/${datedId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-l-reopen' }, 'reopen the dated sale')
+    const datedCorrect = await settle(datedId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'ABA', amount_usd: 8, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the $8 to ABA')
+    const datedEvents = await events(datedId)
+    const [augAfter, sepAfter, nowAfter] = [await augShift(), await sepShift(), await shiftCash(canonical(Date.now() - 3600 * 1000), null)]
+    r.check(`L1 the correction lands at the latest live payment (10 Sep), not the deposit (20 Aug) or now (settle ${datedSettle.status}, reopen ${datedReopen.status}, correct ${datedCorrect.status}; ${JSON.stringify(datedEvents.map((e) => [e.direction, e.origin, e.received_at]))})`, () => {
+      assert.equal(datedCorrect.status, 200, JSON.stringify(datedCorrect.body).slice(0, 200))
+      assert.deepEqual(datedEvents.filter((e) => e.origin === 'correction').map((e) => [e.direction, e.received_at, e.amount_paid_usd]),
+        [['out', '2026-09-10 05:00:00', 10], ['in', '2026-09-10 05:00:00', 10]])
+    })
+    r.check(`L2 only the 10 Sep shift moves: cash 8 -> 0, ABA +8; 20 Aug and now unchanged (aug ${JSON.stringify(augBefore)} -> ${JSON.stringify(augAfter)}; sep ${JSON.stringify(sepBefore)} -> ${JSON.stringify(sepAfter)})`, () => {
+      assert.deepEqual(augAfter, augBefore)
+      assert.deepEqual([sepBefore.usd, sepBefore.digital.usd, sepAfter.usd, sepAfter.digital.usd], [8, 0, 0, 8])
+      assert.deepEqual([nowAfter.usd, nowAfter.digital.usd], [nowBefore.usd, nowBefore.digital.usd])
+    })
+
+    // ---- X. exchange refund credit through instalment, settle, cancel and its undo (release review P2-1) --------
+    await H.seedProduct(h, 406, 'PAY Lip', 10, 200)
+    await H.seedProduct(h, 407, 'PAY Palette', 16, 200)
+    const exchange = async (key) => {
+      const original = await H.createSale(h, { key, status: 'awaiting_payment', lines: [{ productId: 406, quantity: 2 }], paymentDetails: [{ method: 'Cash', amount_usd: 15, amount_khr: 0 }], label: `${key}: Not Paid $20, $15 paid` })
+      const [line] = await h.all('SELECT id FROM sale_items WHERE sale_id=?', original.body.id)
+      const quote = await h.call('POST', '/api/returns/quote', { sale_id: original.body.id, items: [{ sale_item_id: line.id, quantity: 1 }], replacement_items: [{ branch_id: 1, product_id: 407, quantity: 1 }] }, `${key}: quote`)
+      const { customer_return_create_version: _c, customer_return_edit_version: _e, exchange: quoted, ...expected } = quote.body
+      const created = await h.call('POST', '/api/returns', { client_request_id: `${key}-return`, money_precision_version: 1, sale_id: original.body.id, reason: 'pay exchange', expected_quote: expected, expected_exchange: quoted,
+        exchange_payment: { details: [], change_currency: 'USD' }, items: [{ sale_item_id: line.id, quantity: 1, stock_action: 'restock', branch_id: 1 }], replacement_items: [{ branch_id: 1, product_id: 407, quantity: 1 }] }, `${key}: exchange`)
+      assert.equal(created.status, 200, JSON.stringify(created.body).slice(0, 300))
+      const returnRow = await h.one('SELECT * FROM returns WHERE id=?', created.body.id)
+      return { returnId: Number(returnRow.id), saleId: Number(returnRow.replacement_sale_id) }
+    }
+    const cancelExchange = async (returnId, key) => {
+      const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', returnId)
+      return h.call('POST', '/api/returns/bulk', { client_request_id: key, field: 'status', source: 'completed', target: 'cancelled',
+        items: [{ id: returnId, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null, replacement: { return_ids: [] } }] }, key)
+    }
+    const owing = async (id) => { const row = await sale(id); const total = (await h.one('SELECT total_usd FROM sales WHERE id=?', id)).total_usd; return { status: row.sale_status, paid: row.amount_paid_usd, owes: Number((total - row.amount_paid_usd).toFixed(4)), version: row.payments_version } }
+    const mismatch = async () => (await health()).payment_events_mismatch
+    const recentShift = () => shiftCash(canonical(Date.now() - 3600 * 1000), null)
+
+    const xi = await exchange('pay-x-instalment')
+    const xiBorn = await owing(xi.saleId)
+    const xiPay = await pay(xi.saleId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], {}, 'instalment $2 on the replacement sale')
+    const xiPaid = await owing(xi.saleId)
+    const xiShiftBefore = await recentShift()
+    const xiCancel = await cancelExchange(xi.returnId, 'pay-x-cancel-1')
+    const xiCancelled = await owing(xi.saleId)
+    const xiShiftAfter = await recentShift()
+    const xiMismatch = await mismatch()
+    r.check(`X1 credit $5 + instalment $2, cancel the exchange: paid 2, owes 14, the credit left the drawer, mismatch 0 (born ${JSON.stringify(xiBorn)}, pay ${xiPay.status}, after ${JSON.stringify(xiPaid)}, cancel ${xiCancel.status} -> ${JSON.stringify(xiCancelled)}; cash ${xiShiftBefore.usd} -> ${xiShiftAfter.usd}; mismatch ${xiMismatch})`, () => {
+      assert.deepEqual([xiBorn.paid, xiBorn.owes, xiPay.status, xiPaid.paid, xiPaid.version], [5, 11, 200, 7, 1])
+      assert.equal(xiCancel.status, 200, JSON.stringify(xiCancel.body).slice(0, 200))
+      assert.deepEqual([xiCancelled.status, xiCancelled.paid, xiCancelled.owes], ['awaiting_payment', 2, 14])
+      assert.equal(Number((xiShiftBefore.usd - xiShiftAfter.usd).toFixed(2)), 5)
+      assert.equal(xiMismatch, 0)
+    })
+    const xiHistory = Number(xiCancel.body.actionHistoryId || (await h.one("SELECT id FROM action_history WHERE label LIKE '%refund credit%' ORDER BY id DESC LIMIT 1")).id)
+    const xiUndo = await H.historyStep(h, xiHistory, 'undo', 0, 'undo the exchange cancel')
+    const xiRestored = await owing(xi.saleId)
+    const xiUndoMismatch = await mismatch()
+    const xiRedo = await H.historyStep(h, xiHistory, 'redo', 1, 'redo the exchange cancel')
+    const xiRedone = await owing(xi.saleId)
+    const xiRedoMismatch = await mismatch()
+    const xiEvents = (await events(xi.saleId)).filter((e) => e.note && e.note.startsWith('exchange refund credit'))
+    r.check(`X2 undo puts the credit back as an in, redo takes it out again; mismatch 0 each time (undo ${xiUndo.status} ${JSON.stringify(xiRestored)} ${xiUndoMismatch}; redo ${xiRedo.status} ${JSON.stringify(xiRedone)} ${xiRedoMismatch}; ${JSON.stringify(xiEvents.map((e) => [e.direction, e.amount_paid_usd, !!e.reverses_event_id]))})`, () => {
+      assert.equal(xiUndo.status, 200, JSON.stringify(xiUndo.body).slice(0, 200))
+      assert.deepEqual([xiRestored.paid, xiRestored.owes, xiUndoMismatch], [7, 9, 0])
+      assert.equal(xiRedo.status, 200, JSON.stringify(xiRedo.body).slice(0, 200))
+      assert.deepEqual([xiRedone.paid, xiRedone.owes, xiRedoMismatch], [2, 14, 0])
+      assert.deepEqual(xiEvents.map((e) => [e.direction, e.amount_paid_usd, !!e.reverses_event_id]), [['out', 5, false], ['in', 5, true], ['out', 5, true]])
+    })
+
+    const xs = await exchange('pay-x-settle')
+    const xsStored = JSON.parse((await sale(xs.saleId)).payment_details)
+    const xsSettle = await settle(xs.saleId, [...xsStored.map((row) => ({ method: row.method, amount_usd: row.amount_usd, amount_khr: row.amount_khr })), { method: 'ABA', amount_usd: 11, amount_khr: 0 }], {}, 'settle the replacement sale $11 ABA')
+    const xsKept = JSON.parse((await sale(xs.saleId)).payment_details)
+    const xsCancel = await cancelExchange(xs.returnId, 'pay-x-cancel-2')
+    const xsCancelled = await owing(xs.saleId)
+    const xsMismatch = await mismatch()
+    r.check(`X3 a settle keeps the refund_credit marker, so the cancel still finds the credit: paid 11, owes 5, mismatch 0 (settle ${xsSettle.status}; rows ${JSON.stringify(xsKept)}; cancel ${xsCancel.status} -> ${JSON.stringify(xsCancelled)}; ${xsMismatch})`, () => {
+      assert.equal(xsSettle.status, 200, JSON.stringify(xsSettle.body).slice(0, 200))
+      assert.ok(xsKept.some((row) => row.refund_credit === true), 'the settle kept the flag')
+      assert.equal(xsCancel.status, 200, JSON.stringify(xsCancel.body).slice(0, 200))
+      assert.deepEqual([xsCancelled.status, xsCancelled.paid, xsCancelled.owes, xsMismatch], ['awaiting_payment', 11, 5, 0])
+    })
+
+    // ---- P3: audit rows of the money writers carry no personal fields -----------------------------------------
+    const named = await H.createSale(h, { key: 'pay-p3-named', status: 'awaiting_payment', lines: [{ productId: 402, quantity: 1 }], extra: { customer_name: 'Payprobe Person', customer_phone: '012999888' }, label: 'Not Paid $2 with a customer name and phone' })
+    await pay(Number(named.body.id), [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], {}, 'instalment on the named sale')
+    await settle(Number(named.body.id), [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }, { method: 'Cash', amount_usd: 1, amount_khr: 0 }], {}, 'settle the named sale')
+    const namedAudit = await h.all("SELECT details FROM audit_logs WHERE action='sale_settlement' AND entity_id=?", String(named.body.id))
+    r.check(`P3 the settle and instalment audit rows hold ids and money only (${namedAudit.length} rows)`, () => {
+      assert.equal(namedAudit.length, 2)
+      for (const row of namedAudit) {
+        assert.ok(!/payprobe|012999888|search_normalized/i.test(row.details), row.details.slice(0, 300))
+        assert.ok(/amount_paid_usd/.test(row.details))
+      }
     })
 
     // ---- H. permissions -------------------------------------------------------------------------------------

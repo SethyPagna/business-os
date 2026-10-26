@@ -98,4 +98,18 @@ check('the checkout event is copied from the sale row in SQL, canonical time, on
   assert.match(sql, /COALESCE\(s\.amount_paid_usd,0\)>0 OR COALESCE\(s\.amount_paid_khr,0\)>0/)
 })
 
+check('a refund_credit row is never merged and keeps its flag; plain rows still merge (red: rebuilt as method + amounts)', () => {
+  const rows = W.storedTenderRows('[{"method":"Cash","amount_usd":5,"amount_khr":0,"refund_credit":true},{"method":"Cash","amount_usd":2,"amount_khr":0},{"method":"cash","amount_usd":1,"amount_khr":0}]')
+  assert.deepEqual(W.mergeTenderRows(rows), [{ method: 'Cash', amount_usd: 5, amount_khr: 0, refund_credit: true }, { method: 'Cash', amount_usd: 3, amount_khr: 0 }])
+})
+
+check('the change a correction takes back is the net change of the events, not the sale columns (red: only the last payment change)', () => {
+  const evs = [event({ event_id: 'a', change_usd: 1, change_is_actual: 1, change_exchange_rate: 4000 }), event({ event_id: 'b', change_usd: 2, change_is_actual: 1, change_exchange_rate: 4100 }),
+    event({ event_id: 'c', direction: 'out', origin: 'undo', reverses_event_id: 'zz', change_usd: 0.5, change_is_actual: 1, change_exchange_rate: 4000 })]
+  assert.deepEqual(W.netEventChange(evs), { change_usd: 2.5, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 })
+  assert.equal(W.netEventChange([...evs, event({ event_id: 'd', change_usd: 1, change_is_actual: 0 })]).change_is_actual, 0)
+  const anchor = W.correctionAnchor(evs.slice(0, 2), event({ event_id: 'tender', change_usd: 2, change_is_actual: 1 }))
+  assert.equal(anchor.tender.change_usd, 3)
+})
+
 console.log(`${passed} checks passed`)

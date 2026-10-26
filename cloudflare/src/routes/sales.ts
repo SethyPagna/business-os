@@ -53,6 +53,7 @@ import {
   saleMutationGuard,
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
+  type SaleSettlementState,
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { deriveSalePaymentState, PaymentEventError } from '../lib/salePayments'
@@ -69,6 +70,7 @@ import {
   settlementEventId,
   storedPaymentEvents,
   storedTenderRows,
+  type StoredTenderRow,
   type CorrectionAnchor,
 } from '../lib/salePaymentWriters'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
@@ -2097,6 +2099,11 @@ export function saleStatusReceiptCanonical(id: number, body: Record<string, unkn
  * extra revision bump of each payment event is counted, never assumed), the Sales Records event and the audit row.
  * The history row is first: the receipt takes its id from last_insert_rowid().
  */
+function auditMoneyState(state: SaleSettlementState): Omit<SaleSettlementState, 'search_normalized'> {
+  const { search_normalized: _personal, ...money } = state
+  return money
+}
+
 function saleSettlementCommitStatements(input: {
   user: SessionUser
   snapshot: SaleSettlementSnapshot
@@ -2154,8 +2161,9 @@ function saleSettlementCommitStatements(input: {
         details: JSON.stringify({
           operationId: snapshot.operationId,
           ...input.auditDetails,
-          before: snapshot.before,
-          after: snapshot.after,
+          // Ids and money only: search_normalized folds the customer's name and phone into the row (release review P3).
+          before: auditMoneyState(snapshot.before),
+          after: auditMoneyState(snapshot.after),
           record_event: { source_kind: 'sale_settlement', source_id: snapshot.operationId, generation: 0, sale_id: snapshot.saleId },
         }),
       },
@@ -3209,7 +3217,7 @@ app.post('/:id/payments', async (c) => {
   // outgrows the row limit), which lets the settlement planner prove it unchanged and tell the new rows apart.
   const storedRows = storedTenderRows(sale.payment_details)
   const paidBefore = { usd: Number(sale.amount_paid_usd) || 0, khr: Number(sale.amount_paid_khr) || 0 }
-  let existingSubmission: Array<{ method: string; amount_usd: number; amount_khr: number }> = []
+  let existingSubmission: StoredTenderRow[] = []
   let existingDetailsRaw: unknown = sale.payment_details
   if (storedRows && storedRows.length) {
     existingSubmission = mergeTenderRows(storedRows)
@@ -3277,7 +3285,7 @@ app.post('/:id/payments', async (c) => {
   }
   const target = { ...current, saleStatus: derived.saleStatus }
   const merged = mergeTenderRows(plan.paymentDetails)
-  const mergedMethod = merged.map((row) => row.method).join(' + ')
+  const mergedMethod = plan.paymentMethod
   const before = await readSaleSettlementState(db, id)
   if (!before) return c.json({ error: 'Sale not found' }, 404)
   const after = buildSaleSettlementAfterState(before, sale, target, {

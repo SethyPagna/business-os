@@ -21,6 +21,19 @@ export type NativeTenderRow = {
   method: string
   amount_usd: number
   amount_khr: number
+  /** The exchange's refund credit row (returnExchange.ts): not money handed over; an exchange cancel removes it. */
+  refund_credit?: true
+}
+
+/**
+ * The keys of a stored tender row beyond method and amounts (refund_credit, and any marker a later writer adds).
+ * A recorded row that a settlement repeats keeps them: dropping one silently turns an exchange's refund credit into
+ * a cash payment that an exchange cancel can no longer find (release review 6.0.982 P2-1).
+ */
+export function tenderRowMarkers(row: Record<string, unknown>): Record<string, unknown> {
+  const markers: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) if (key !== 'method' && key !== 'amount_usd' && key !== 'amount_khr') markers[key] = value
+  return markers
 }
 
 export type SettlementErrorCode =
@@ -144,7 +157,7 @@ export function planSaleSettlement(input: {
   } catch {
     fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid')
   }
-  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean }
+  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean; markers: Record<string, unknown> }
   const existingRows: ExistingRow[] = []
   let storedDetails: unknown = input.existingPaymentDetailsRaw
   const storedDetailsSupplied = Array.isArray(storedDetails) || (typeof storedDetails === 'string' && Boolean(storedDetails.trim()))
@@ -170,6 +183,7 @@ export function planSaleSettlement(input: {
           usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
           khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
           matched: false,
+          markers: tenderRowMarkers(detail),
         }
         if (row.usdUnits < 0n || row.khrUnits < 0n) throw new Error('negative')
         existingRows.push(row)
@@ -196,7 +210,7 @@ export function planSaleSettlement(input: {
         existingRows.push({
           key: paymentMethodKey(tokens[0]), method: tokens[0],
           usdUnits: existingUsdUnits,
-          khrUnits: existingKhrUnits, matched: false,
+          khrUnits: existingKhrUnits, matched: false, markers: {},
         })
       } catch { fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid') }
     }
@@ -252,7 +266,8 @@ export function planSaleSettlement(input: {
     }
     paidUsdUnits += usdUnits
     paidKhrUnits += khrUnits
-    const row = {
+    const row: NativeTenderRow = {
+      ...(preserved ? preserved.markers : {}),
       method,
       amount_usd: calculationUnitsValue(usdUnits),
       amount_khr: calculationUnitsValue(khrUnits),

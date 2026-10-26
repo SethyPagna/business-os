@@ -140,6 +140,13 @@ const instalment = { configuredMethodsRaw: '["Cash"]', paymentDetailsRaw: [{ met
 assert.throws(() => planSaleSettlement(instalment), error => error.code === 'insufficient_payment')
 assert.equal(planSaleSettlement({ ...instalment, requireCoverage: false }).amountPaidUsd, 1)
 console.log('PASS addedDetails excludes the repeated recorded rows; requireCoverage:false plans an instalment')
+// Release review 6.0.982 P2-1: a repeated recorded row keeps its markers (an exchange's refund_credit); a new row never gets one.
+const flagged = planSaleSettlement({ configuredMethodsRaw: '["Cash","ABA"]', existingPaidUsd: 5, existingPaidKhr: 0,
+  existingPaymentDetailsRaw: '[{"method":"Cash","amount_usd":5,"amount_khr":0,"refund_credit":true}]', totalUsd: 16, exchangeRate: 4000,
+  paymentDetailsRaw: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 11, amount_khr: 0 }] })
+assert.deepEqual(flagged.paymentDetails, [{ refund_credit: true, method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 11, amount_khr: 0 }])
+assert.deepEqual(flagged.addedDetails, [{ method: 'ABA', amount_usd: 11, amount_khr: 0 }])
+console.log('PASS a repeated refund_credit row keeps its flag through a settlement')
 
 const legacyKhr = planSaleSettlement({
   configuredMethodsRaw: '["Cash"]',

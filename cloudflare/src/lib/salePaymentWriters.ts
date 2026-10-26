@@ -26,6 +26,7 @@ import {
   type PaymentTenderRow,
 } from './salePayments'
 import { paymentMethodKey } from './paymentMethodRegistry'
+import { tenderRowMarkers } from './paymentSettlement'
 
 type Statement = { sql: string; params: Record<string, unknown> }
 
@@ -154,7 +155,36 @@ export type CorrectionAnchor = { event: PaymentEventInsert; tender: PaymentEvent
 export function correctionAnchor(events: readonly PaymentEventInsert[], tender: PaymentEventInsert | null): CorrectionAnchor {
   const ins = livePaymentEvents(events).filter((event) => event.direction === 'in')
   const latest = ins[ins.length - 1]
-  return latest ? { event: latest, tender } : null
+  // The change to take back with the tender is the change the recorded payments handed out, net of reversals, read from
+  // the events: the sale's change columns hold only the last payment's change (an instalment overwrites them).
+  return latest ? { event: latest, tender: tender ? { ...tender, ...netEventChange(events) } : null } : null
+}
+
+/**
+ * The change the events handed back, net (an out subtracts the change it copied). Actual only when every event that
+ * carries change marks it actual, as the shift reader requires; the rate is the latest actual one.
+ */
+export function netEventChange(events: readonly PaymentEventInsert[]): Pick<PaymentEventInsert, 'change_usd' | 'change_khr' | 'change_is_actual' | 'change_exchange_rate'> {
+  let usd = 0
+  let khr = 0
+  let actual = true
+  let rate: number | null = null
+  for (const event of events) {
+    const eventUsd = Number(event.change_usd) || 0
+    const eventKhr = Number(event.change_khr) || 0
+    if (!eventUsd && !eventKhr) continue
+    const sign = event.direction === 'out' ? -1 : 1
+    usd += sign * eventUsd
+    khr += sign * eventKhr
+    if (Number(event.change_is_actual) !== 1) actual = false
+    else if (event.change_exchange_rate != null) rate = Number(event.change_exchange_rate)
+  }
+  usd = Math.max(0, Number(usd.toFixed(4)))
+  khr = Math.max(0, Number(khr.toFixed(4)))
+  if (!usd && !khr) return { change_usd: 0, change_khr: 0, change_is_actual: 0, change_exchange_rate: null }
+  return actual && rate != null
+    ? { change_usd: usd, change_khr: khr, change_is_actual: 1, change_exchange_rate: rate }
+    : { change_usd: usd, change_khr: khr, change_is_actual: 0, change_exchange_rate: null }
 }
 
 /** A copy of `target`'s money (amounts, details, change) as a new event; nothing is re-summed. */
@@ -299,11 +329,24 @@ export function settlementReplayEvents(input: {
   })
 }
 
-/** Stored tender rows summed per method (first label and first-seen order kept), so instalments never grow the list past the method count. */
-export function mergeTenderRows(rows: readonly PaymentTenderRow[]): PaymentTenderRow[] {
-  const merged: PaymentTenderRow[] = []
-  const byKey = new Map<string, PaymentTenderRow>()
+/** A tender row as stored: method and amounts, plus any marker the writer put on it (refund_credit). */
+export type StoredTenderRow = PaymentTenderRow & Record<string, unknown>
+
+const hasMarkers = (row: Record<string, unknown>): boolean => Object.keys(tenderRowMarkers(row)).length > 0
+
+/**
+ * Stored tender rows summed per method (first label and first-seen order kept), so instalments never grow the list past
+ * the method count. A row that carries a marker (an exchange's refund_credit) is never merged and keeps its marker: it is
+ * a different kind of money, and an exchange cancel finds it only by the flag (release review 6.0.982 P2-1).
+ */
+export function mergeTenderRows(rows: readonly StoredTenderRow[]): StoredTenderRow[] {
+  const merged: StoredTenderRow[] = []
+  const byKey = new Map<string, StoredTenderRow>()
   for (const row of rows) {
+    if (hasMarkers(row)) {
+      merged.push({ ...row, method: String(row.method), amount_usd: Number(row.amount_usd) || 0, amount_khr: Number(row.amount_khr) || 0 })
+      continue
+    }
     const key = paymentMethodKey(row.method)
     const found = byKey.get(key)
     if (found) {
@@ -318,17 +361,17 @@ export function mergeTenderRows(rows: readonly PaymentTenderRow[]): PaymentTende
   return merged
 }
 
-/** A stored payment_details text as tender rows when it is a readable array of rows, else null (left to the planner to refuse). */
-export function storedTenderRows(raw: unknown): PaymentTenderRow[] | null {
+/** A stored payment_details text as tender rows (markers kept) when it is a readable array of rows, else null (left to the planner to refuse). */
+export function storedTenderRows(raw: unknown): StoredTenderRow[] | null {
   if (raw == null || (typeof raw === 'string' && !raw.trim())) return []
   try {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!Array.isArray(parsed)) return null
-    const rows: PaymentTenderRow[] = []
+    const rows: StoredTenderRow[] = []
     for (const entry of parsed) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
       const value = entry as Record<string, unknown>
-      rows.push({ method: String(value.method ?? ''), amount_usd: Number(value.amount_usd ?? 0), amount_khr: Number(value.amount_khr ?? 0) })
+      rows.push({ ...value, method: String(value.method ?? ''), amount_usd: Number(value.amount_usd ?? 0), amount_khr: Number(value.amount_khr ?? 0) })
     }
     return rows
   } catch {

@@ -449,8 +449,53 @@ function creditStatements(members: readonly Member[], direction: 1 | -1, stamp: 
   })
   if (!rows.length) return []
   const pick = (path: string) => `(SELECT json_extract(u.value,'$.${path}') FROM json_each(@rows) u WHERE json_extract(u.value,'$.saleId')=sales.id)`
-  return [{ sql: `UPDATE sales SET payment_method=${pick('pm')},payment_details=${pick('pd')},amount_paid_usd=${pick('pu')},amount_paid_khr=${pick('pk')},sale_status=${pick('st')},updated_at=@stamp
+  return [creditPaymentEventStatement(members, direction), { sql: `UPDATE sales SET payment_method=${pick('pm')},payment_details=${pick('pd')},amount_paid_usd=${pick('pu')},amount_paid_khr=${pick('pk')},sale_status=${pick('st')},updated_at=@stamp
       WHERE id IN (SELECT json_extract(u.value,'$.saleId') FROM json_each(@rows) u)`, params: { rows: JSON.stringify(rows), stamp } }]
+}
+
+const CREDIT_REVERSED_NOTE = 'exchange refund credit reversed'
+const CREDIT_RESTORED_NOTE = 'exchange refund credit restored'
+
+/**
+ * The payment event of a credit move (6.0.982, release review P2-1). A replacement sale on payments_version 1 (it took a later payment, so its
+ * tender is events) must not lose or regain its refund credit in the columns alone: payment_events_mismatch would rise and the drawer would keep
+ * a credit the cancelled refund no longer offsets. The cancel (apply, redo) writes a `correction` out of exactly the paid amount the columns
+ * lose; its undo writes the `correction` in that puts it back. The credit row was booked into the drawer that recorded it, against the refund
+ * counted out of that same drawer, so the event is dated at, and lands in the drawer of, the payment event that carries the credit row (its
+ * opening or checkout); cancelling the return removes the refund from that drawer, and this removes the credit from it, so the drawer nets as
+ * before. A version 0 sale writes nothing (the INSERT joins on payments_version = 1): its tender is still read from the columns.
+ */
+function creditPaymentEventStatement(members: readonly Member[], direction: 1 | -1): Statement {
+  const events = members.flatMap((member) => {
+    const credit = member.credit
+    if (!credit) return []
+    const usd = Math.abs(money4(Number(credit.before.amount_paid_usd || 0) - Number(credit.after.amount_paid_usd || 0)))
+    const khr = Math.abs(money4(Number(credit.before.amount_paid_khr || 0) - Number(credit.after.amount_paid_khr || 0)))
+    let creditRow: TenderRow | undefined
+    try {
+      const parsed = JSON.parse(String(credit.before.payment_details || '[]'))
+      if (Array.isArray(parsed)) creditRow = parsed[creditRowIndex(parsed)]
+    } catch { creditRow = undefined }
+    const method = String(creditRow?.method ?? '').trim() || 'Cash'
+    return [{ saleId: credit.saleId, usd, khr, method, details: JSON.stringify([{ method, amount_usd: usd, amount_khr: khr, refund_credit: true }]) }]
+  })
+  const anchor = (column: string) => `(SELECT a.${column} FROM sale_payment_events a WHERE a.sale_id=s.id AND a.direction='in'
+      AND EXISTS(SELECT 1 FROM json_each(a.payment_details) j WHERE json_extract(j.value,'$.refund_credit')=1) ORDER BY a.id LIMIT 1)`
+  return {
+    sql: `INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,covers_operation_id,operation_id,reverses_event_id,payment_method,payment_details,
+        amount_paid_usd,amount_paid_khr,change_usd,change_khr,change_is_actual,change_exchange_rate,exchange_rate,drawer_effect,received_at,branch_id,cashier_id,cashier_name,note)
+      SELECT 'credit:'||s.id||':'||@creditNonce, s.id, @creditDirection, 'correction', NULL, NULL,
+        (SELECT p.event_id FROM sale_payment_events p WHERE p.sale_id=s.id AND p.note=@creditOppositeNote ORDER BY p.id DESC LIMIT 1),
+        json_extract(u.value,'$.method'), json_extract(u.value,'$.details'), json_extract(u.value,'$.usd'), json_extract(u.value,'$.khr'), 0, 0, 0, NULL,
+        s.exchange_rate, COALESCE(${anchor('drawer_effect')},1), COALESCE(${anchor('received_at')},strftime('%Y-%m-%d %H:%M:%S',s.created_at)),
+        COALESCE(${anchor('branch_id')},s.branch_id), COALESCE(${anchor('cashier_id')},s.cashier_id), COALESCE(${anchor('cashier_name')},s.cashier_name), @creditNote
+      FROM json_each(@creditEvents) u JOIN sales s ON s.id=json_extract(u.value,'$.saleId') AND s.payments_version=1
+      WHERE json_extract(u.value,'$.usd')>0 OR json_extract(u.value,'$.khr')>0`,
+    params: {
+      creditEvents: JSON.stringify(events), creditNonce: crypto.randomUUID(), creditDirection: direction > 0 ? 'out' : 'in',
+      creditNote: direction > 0 ? CREDIT_REVERSED_NOTE : CREDIT_RESTORED_NOTE, creditOppositeNote: direction > 0 ? CREDIT_RESTORED_NOTE : CREDIT_REVERSED_NOTE,
+    },
+  }
 }
 
 // What a replay or an apply writes for its members, in a count that does not grow with them: ONE stock group for all, the credit move of each exchange return
