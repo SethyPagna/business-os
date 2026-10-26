@@ -821,6 +821,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           completedSuccessfully = true
         }
       } catch (error) {
+        // This read was aborted because a newer query superseded it. That holds even when the user has since come back to
+        // this same query (A -> B -> A): the abort is a hand-over, never a failure, and the queued load reads the query now.
+        if (controller.signal.aborted) { superseded = isOwnRequest(); return }
         if (!isCurrent()) { superseded = isOwnRequest() && !isLatestQuery(); return }
         console.error('[Sales] load failed:', getErrorMessage(error, 'Unknown sales load error'))
         if (!silent && !loadedOnceRef.current) {

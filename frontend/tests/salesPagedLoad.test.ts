@@ -129,6 +129,20 @@ await test('a filter change during a read stops it: it aborts, publishes nothing
   assert.equal(h.view.loading.at(-1), false, 'the spinner ends')
 })
 
+await test('A -> B -> A before the aborted read settles: the abort is a hand-over, not an error, and A is read again', async () => {
+  const api = server([...day('T', 30, 1), ...day('Y', 5, 1000)]); const h = harness(api)
+  const open = api.hold()
+  h.commit({ date: 'T' }); await settle()
+  h.commit({ date: 'Y' })
+  h.commit({ date: 'T' })                     // back to the first query while its aborted read is still pending
+  assert.equal(api.calls[0].signal.aborted, true)
+  open(); await settle()
+  assert.equal(h.view.errors.length, 0, 'no "could not refresh" for a read this page cancelled itself')
+  assert.ok(h.view.sales.length === 20 && h.view.sales.every((row) => row.date === 'T'), 'the queued load ran and shows the query on screen')
+  assert.deepEqual(api.calls.map((call) => call.date), ['T', 'T'], 'one fresh read of the query now on screen')
+  assert.equal(h.view.loading.at(-1), false, 'the spinner ends')
+})
+
 await test('a closure kept from before a filter change reads the newest query, never its own', async () => {
   const api = server([...day('Y', 8, 1000), ...day('T', 30, 1)]); const h = harness(api)
   const loadY = h.commit({ date: 'Y' }); await settle()
