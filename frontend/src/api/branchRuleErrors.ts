@@ -99,6 +99,8 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
   product_supplier_edit_required: 'product_supplier_edit_required',
   idempotency_conflict: 'idempotency_conflict',
+  // A pending sale, basket, amendment or return written by an older app version (four Worker sites, four sentences): one class sentence telling staff to restart or reload.
+  money_precision_review_needed: 'money_precision_review_needed',
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',
   return_restore_exchange_credit: 'return_restore_exchange_credit',

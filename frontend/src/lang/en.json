@@ -4793,6 +4793,7 @@
   "return_refund_price_ambiguous": "This product was sold at different prices on this sale. Pick the exact sale item being returned.",
   "return_refund_sale_line_required": "Each return line needs a sale item or a product.",
   "idempotency_conflict": "This request was already used for different details, so nothing was changed. Check the record before trying again.",
+  "money_precision_review_needed": "This app is out of date, so nothing was saved. Restart or reload the app, then check the record before trying again.",
   "return_edit_replacement_floor": "This change would leave the replacement below its allowed price. Record the extra unit as a separate return.",
   "return_replacement_price_forbidden": "You do not have permission to change the price of a replacement item. It is sold at the catalog price, its promotion price, or the price on the original sale.",
   "supplier_return_failed": "The supplier return could not be recorded. Nothing was saved. Try again.",

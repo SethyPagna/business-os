@@ -81,7 +81,7 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
 }
 // idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
 // transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).
-const SHARED_CODES = ['idempotency_conflict']
+const SHARED_CODES = ['idempotency_conflict', 'money_precision_review_needed']
 CODES.push(...Object.keys(WORKER_SENTENCE_CODES), ...SHARED_CODES)
 
 await runTest('return money and supplier refusals carry the Worker sentence as English and a real Khmer pair', async () => {
@@ -178,6 +178,22 @@ await runTest('changed import authority keeps conflict status and localizes the 
   assert.equal(error.status, 409)
   assert.equal(error.code, 'import_apply_permission_revoked')
   assert.equal(localizeBranchRuleError(error, key => KM[key]), KM.import_apply_permission_revoked)
+})
+
+await runTest('money_precision_review_needed is restated at all four Worker sites with one restart-or-reload sentence', async () => {
+  const sales = read(WORKER, 'routes', 'sales.ts'), returns = read(WORKER, 'routes', 'returns.ts')
+  assert.equal((sales.match(/code: 'money_precision_review_needed'/g) || []).length, 3, 'POST /sales, POST /sales/:id/items and amendments')
+  assert.equal((returns.match(/code: 'money_precision_review_needed'/g) || []).length, 1, 'returns create and edit share one constant')
+  assert.match(EN.money_precision_review_needed, /restart or reload/i)
+  assert.ok(!sales.includes(EN.money_precision_review_needed) && !returns.includes(EN.money_precision_review_needed), 'a class sentence, not one Worker sentence')
+  uiLanguage = 'km'; packServed = KM
+  for (const worker of ['Keep this return and review it with the current app before recording it.', 'Preserve the pending request and review this basket with the current app.']) {
+    const error = refusal('money_precision_review_needed', worker, 409)
+    assert.equal((await lang.restateBranchRefusal(error)).message, KM.money_precision_review_needed, worker)
+    assert.equal(error.code, 'money_precision_review_needed'); assert.equal((error as { status?: number }).status, 409)
+  }
+  assert.equal(localizeBranchRuleError(refusal('money_precision_review_needed', 'x', 409), key => KM[key]), KM.money_precision_review_needed)
+  uiLanguage = 'en'
 })
 
 await runTest('the restated codes match the Worker refusals and their language pack keys', () => {
