@@ -68,7 +68,7 @@ check('the other silently-dropped business tables are covered too', () => {
   for (const table of [
     'fees', 'loyalty_point_adjustments', 'return_replacement_items', 'promotion_rules',
     'user_notes', 'pending_actions', 'customer_share_submissions',
-    'product_duplicate_dismissals', 'contact_duplicate_dismissals',
+    'product_duplicate_dismissals', 'product_conflict_marks', 'contact_duplicate_dismissals',
     'dated_stock_count_batch_actions', 'rfid_tags', 'ai_provider_configs',
     'import_auto_merges', 'import_sales_commits', 'import_stock_action_commits',
     'import_stock_action_groups', 'import_stock_action_guards',
