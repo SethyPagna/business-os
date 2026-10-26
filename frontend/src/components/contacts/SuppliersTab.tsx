@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { getRenameImpact } from '../../api/renameCascadeTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import type { ComponentProps } from 'react'
@@ -498,14 +499,15 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   // Add and Edit imply View (owner, 30 Sep 2026), so a role with either one
   // still reaches this tab; the Worker refuses POST/PUT without the matching
   // action, so the controls are withheld rather than rendered and 403'd.
-  const canAddContact = can('contacts', 'add')
-  const canEditContact = can('contacts', 'edit')
+  const contactWrite = contactWriteAccess(can)
+  const { canAdd: canAddContact, canEdit: canEditContact } = contactWrite
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
-  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  // Import creates (Add) and updates (Edit) rows; the Worker decides per row, so offer it to a role that can do either.
+  const canImportContacts = canBulkContacts && can('contacts', 'import') && (canAddContact || canEditContact)
   const canImportContactsRef = useRef(canImportContacts)
   canImportContactsRef.current = canImportContacts
   // Export is assembled client-side from already-loaded rows; gating it
@@ -1517,7 +1519,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       </>
       )}
 
-      {modal === 'form' && (selected ? canEditContact : canAddContact) ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
+      {modal === 'form' && isContactFormAllowed(contactWrite, selected) ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
       {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />

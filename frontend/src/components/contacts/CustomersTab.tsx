@@ -43,6 +43,7 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
+import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 
@@ -320,14 +321,15 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // Add and Edit imply View (owner, 30 Sep 2026), so a role with either one
   // still reaches this tab; the Worker refuses POST/PUT without the matching
   // action, so the controls are withheld rather than rendered and 403'd.
-  const canAddContact = can('contacts', 'add')
-  const canEditContact = can('contacts', 'edit')
+  const contactWrite = contactWriteAccess(can)
+  const { canAdd: canAddContact, canEdit: canEditContact } = contactWrite
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
-  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  // Import creates (Add) and updates (Edit) rows; the Worker decides per row, so offer it to a role that can do either.
+  const canImportContacts = canBulkContacts && can('contacts', 'import') && (canAddContact || canEditContact)
   const canImportContactsRef = useRef(canImportContacts)
   canImportContactsRef.current = canImportContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
@@ -1444,7 +1446,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       </>
       )}
 
-      {modal === 'form' && (selected ? canEditContact : canAddContact) ? (
+      {modal === 'form' && isContactFormAllowed(contactWrite, selected) ? (
         <Suspense fallback={null}>
           <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} savingBlockedText={savingGate.reason} t={t} />
         </Suspense>

@@ -41,6 +41,8 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
   const canRelinkSales = can('contacts', 'relink_sales')
+  // Creating a customer from a conflict row is a contacts Add; linking to an existing one is not.
+  const canAddContact = can('contacts', 'add')
   // Spend and sale counts per group are contact financial history: the server
   // omits both without this action (GET /customers/link-conflicts), so the card
   // shows only the date range and count-free action labels.
@@ -349,7 +351,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
                     </div>
                   ) : null}
                 </div>
-                {canRelinkSales ? <div className="mt-1.5">
+                {canRelinkSales && (linkExisting || canAddContact) ? <div className="mt-1.5">
                   <button
                     type="button"
                     onClick={() => void handleResolveMissing(row)}

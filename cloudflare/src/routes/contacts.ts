@@ -3164,6 +3164,8 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
     targetId = target.id
   } else {
+    // No target given means this route creates the customer: that is a contacts Add, same as POST /customers.
+    if (getActionTier(user, 'contacts', 'add') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     const storedPhone = formatPhoneP8(phone)
     const duplicateDecision = await checkContactDuplicateBlock(c.env, CUSTOMERS, { name: name || storedPhone, phone: storedPhone, address: null }, null)
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)

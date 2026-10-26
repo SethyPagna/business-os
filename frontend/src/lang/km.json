@@ -821,6 +821,8 @@
   "inventory_import_zero_receipt": "ចំនួនសូន្យ៖ មិនចាំបាច់ទទួលស្តុកទេ។",
   "inventory_import_zero_removal": "ចំនួនសូន្យ៖ មិនចាំបាច់ដកចេញទេ។",
   "inventory_import_quantity_zero": "ចំនួនមិនអាចជាសូន្យបានទេ",
+  "contact_import_add_not_allowed": "រំលង៖ តួនាទីរបស់អ្នកមិនអាចបន្ថែមទំនាក់ទំនងបានទេ។",
+  "contact_import_edit_not_allowed": "រំលង៖ តួនាទីរបស់អ្នកមិនអាចកែទំនាក់ទំនងបានទេ។",
   "inventory_import_branch_unmatched": "សាខា \"{branch}\" ត្រូវតែត្រូវនឹងហាង ឬឃ្លាំងដែលមានស្រាប់ និងសកម្មតែមួយគត់។",
   "inventory_import_branch_required": "សាខាទទេ ត្រូវការហាង ឬឃ្លាំងលំនាំដើមដែលសកម្មតែមួយគត់។",
   "inventory_import_already_at_count": "មានចំនួន {quantity} រួចហើយ — មិនចាំបាច់ផ្លាស់ទីស្តុកទេ។",
