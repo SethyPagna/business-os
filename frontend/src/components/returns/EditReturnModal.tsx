@@ -22,6 +22,8 @@ import {
 } from '../../utils/directMutationRequest.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import { ReturnLegacyLockPanel } from './ReturnLegacyConvert.tsx'
+import { isLegacyReturnOnExactSale } from './helpers/returnLegacyConvert.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
@@ -103,6 +105,8 @@ interface EditReturnModalProps {
   onClose: () => void
   onSuccess?: (result?: unknown) => void | Promise<void>
   onReloadLatest?: () => void
+  /** 6.0.992: an admin converted this locked old-format return (ReturnLegacyLockPanel). */
+  onLegacyConverted?: () => void
   fmtUSD: MoneyFormatter
   notify: NotifyFn
 }
@@ -152,7 +156,7 @@ function isWriteConflict(error: unknown): boolean {
   return !!candidate?.conflict || candidate?.code === 'write_conflict'
 }
 
-export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, fmtUSD, notify }: EditReturnModalProps) {
+export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, onLegacyConverted, fmtUSD, notify }: EditReturnModalProps) {
   const { user, t } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
@@ -325,6 +329,9 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     ret.id ?? null,
   )
   const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
+  // 6.0.992: an old-format return on a current-format sale is refused by the Worker's edit route; show why and, for an
+  // admin, Convert -- never the form. After every hook, before any other panel.
+  if (isLegacyReturnOnExactSale(ret)) return <ReturnLegacyLockPanel ret={ret} onClose={onClose} fmtUSD={fmtUSD} notify={notify} onConverted={onLegacyConverted} />
 
   // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {

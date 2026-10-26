@@ -74,6 +74,9 @@ import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
+import { useLegacyReturnConvert } from './ReturnLegacyConvert.tsx'
+import { canConvertLegacyReturns, isLegacyReturnOnExactSale } from './helpers/returnLegacyConvert.ts'
+import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
 import { parseOutstanding, takeBackReplacement, takeBackRequestId, validateTakeBack, type ReplacementLine, type ReplacementOutstanding, type TakeBackDeps } from './helpers/returnReplacementCancel.ts'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
@@ -610,6 +613,11 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
   }, [clearLoadWatchdog, debouncedSearch, returnsDateRange, scope, tr])
+
+  // 6.0.992: Convert to current format -- one flow for the list row, the bulk bar and the Edit Return lock panel.
+  const canConvertLegacy = canConvertLegacyReturns(user)
+  const afterLegacyConvert = () => { void loadReturns(true); actionHistory.refreshServerItems() }
+  const legacyConvert = useLegacyReturnConvert({ notify, onConverted: afterLegacyConvert })
 
   useEffect(() => {
     if (!isActive) {
@@ -1629,6 +1637,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <div className="bulk-toolbar mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedReturns.length} {tr('selected', 'Selected')}</span>
           <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={!!pendingBulkRequest || selectedReturns.length > RETURN_BULK_LIMIT} onClick={() => setBulkActionSnapshot({ rows: selectedReturns.map((row) => ({ ...row })), scope })}>{tr('change_selected', 'Change selected', 'កែប្រែការជ្រើសរើស')}</button>
+          {canConvertLegacy && selectedReturns.some(isLegacyReturnOnExactSale) ? (
+            <button type="button" className={toolbarIconButtonClassName} disabled={legacyConvert.busy || selectedReturns.length > RETURN_BULK_LIMIT}
+              onClick={() => { void legacyConvert.startConvert(selectedReturns.filter(isLegacyReturnOnExactSale).map((row) => Number(row.id))) }}
+              aria-label={tr('return_convert_title', 'Convert to current format')} title={tr('return_convert_title', 'Convert to current format')}>
+              <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
           {selectedReturns.length > RETURN_BULK_LIMIT ? <span className="text-xs font-medium text-red-600 dark:text-red-300">{tr('return_bulk_limit', `Select at most ${RETURN_BULK_LIMIT} returns.`, `ជ្រើសរើសការត្រឡប់មិនលើស ${RETURN_BULK_LIMIT}។`)}</span> : null}
           <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
             {tr('clear', 'Clear')}
@@ -1774,6 +1789,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         selectionModeActive={selectionModeActive}
         getReturnLongPressState={getReturnLongPressState}
         setDetailRet={(ret) => { void openReturnDetail(ret as ReturnRow) }}
+        onConvertLegacy={canConvertLegacy ? (id) => { void legacyConvert.startConvert([id]) } : undefined}
         showReturnActionGroups={showReturnActionGroups}
         SUPPLIER_SCOPE={SUPPLIER_SCOPE}
         t={t}
@@ -1847,6 +1863,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             key={`${editRet.id}:${editRet.updated_at ?? ''}`}
             ret={editRet}
             onReloadLatest={() => { void handleOpenEdit(editRet) }}
+            onLegacyConverted={afterLegacyConvert}
             onClose={() => setEditRet(null)}
             onSuccess={(result) => handleReturnMutationSuccess({
               kind: 'edit',
@@ -1932,6 +1949,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
       {confirmDialog}
+      {legacyConvert.dialog}
     </div>
   )
 }
