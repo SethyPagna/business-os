@@ -62,13 +62,13 @@ const BUDGET = 10 // ms of CPU per invocation (Workers Free)
 const BOOKKEEPING = 1 // two settings writes + one read per rotation tick
 // Cost per step: each fits alone; together they are three times the budget.
 const COST = {
-  'backup': 4, 'drive-sync': 2, 'audit-log-retention': 3, 'reap-stalled-imports': 2, 'import-retention': 3,
+  'drive-sync': 2, 'audit-log-retention': 3, 'reap-stalled-imports': 2, 'import-retention': 3,
   'import-incoming-sweep': 2, 'orphan-staging-cleanup': 2, 'ephemeral-retention:rate_limit': 2, 'ephemeral-retention:auth': 3,
-  'ephemeral-retention:logs': 2, 'ephemeral-retention:history': 3, 'ephemeral-retention:submissions': 2, 'image-audit': 3,
+  'ephemeral-retention:logs': 2, 'ephemeral-retention:history': 3, 'ephemeral-retention:submissions': 2,
 }
 assert.deepStrictEqual(Object.keys(COST), [...ids], 'simulation covers exactly the shipped step ids')
 const TOTAL = Object.values(COST).reduce((a, b) => a + b, 0)
-assert.ok(TOTAL > 3 * BUDGET, 'all steps together are far over one invocation budget')
+assert.ok(TOTAL > 2 * BUDGET, 'all steps together are over twice one invocation budget')
 assert.ok(Math.max(...Object.values(COST)) + BOOKKEEPING <= BUDGET, 'each step fits one invocation on its own')
 ok()
 
@@ -144,8 +144,8 @@ async function main() {
   const oldDone = await oldDesign(200)
   const starved = ids.filter((id) => !oldDone[id])
   assert.ok(starved.length >= 5, `old design starves steps: ${starved.join(', ')}`)
-  assert.ok(starved.includes('image-audit') && starved.includes('ephemeral-retention:history'), 'retention and image audit starve')
-  assert.ok(!starved.includes('backup'), 'control sanity: the first steps do run')
+  assert.ok(starved.includes('ephemeral-retention:submissions') && starved.includes('ephemeral-retention:history'), 'retention starves')
+  assert.ok(!starved.includes('drive-sync'), 'control sanity: the first steps do run')
   ok()
 
   // 3. cursor survives a throwing step and a step that is killed every visit
@@ -228,7 +228,7 @@ async function main() {
   for (let i = 0; i < 4; i += 1) await rot.runRotationTick(gsteps, gstore, at + (21 + i) * 15 * 60 * 1000 + 5 * 3600 * 1000)
   assert.ok(gated >= 2, 'after the interval it runs again')
   const ungated = stepsSrcOf(read('src/index.ts'))
-  for (const id of ['reap-stalled-imports', 'import-incoming-sweep', 'orphan-staging-cleanup', 'image-audit']) {
+  for (const id of ['reap-stalled-imports', 'import-incoming-sweep', 'orphan-staging-cleanup']) {
     const line = ungated.split('\n').find((l) => l.includes(`step('${id}'`))
     assert.ok(line && line.includes('UNGATED_STEP_MIN_INTERVAL_MS'), id + ' keeps a min interval')
   }
@@ -247,16 +247,35 @@ async function main() {
   }
   const index = read('src/index.ts')
   const scheduled = index.slice(index.indexOf('async scheduled('))
-  assert.ok(/controller\?\.cron === CRON_TELEGRAM[\s\S]*?drainDueTelegramShiftOverviews\(env, Date\.now\(\), \{ limit: 10, sweepStale: true \}\)[\s\S]*?return\n\s*\}\s*\n\s*await runRotationTick/.test(scheduled),
-    'telegram tick drains and returns; every other tick runs ONE rotation step')
-  const stepsSrc = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export default {'))
+  const tg = scheduled.slice(scheduled.indexOf('CRON_TELEGRAM)'), scheduled.indexOf('CRON_HEAVY)'))
+  assert.ok(tg.includes('drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })') && /return\n\s*\}/.test(tg) && !tg.includes('runRotationTick'),
+    'telegram tick drains and returns; no rotation step shares its invocation')
+  const stepsSrc = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export function cronHeavySteps'))
+  const heavySrc = index.slice(index.indexOf('export function cronHeavySteps'), index.indexOf('export default {'))
   assert.ok(!/telegram/i.test(stepsSrc), 'telegram is not part of the rotation')
-  assert.strictEqual((scheduled.match(/runRotationTick\(/g) || []).length, 1)
+  assert.strictEqual((scheduled.match(/runRotationTick\(/g) || []).length, 2, 'one rotation tick for the heavy trigger, one for the retention rotation')
+  assert.ok(scheduled.includes('settingsRotationStore(env, CRON_HEAVY_STATE_KEY)'), 'the heavy trigger keeps its own cursor')
   assert.ok(!/await runStep\(/.test(scheduled), 'no sequential runStep chain left')
   // The shipped step ids are the ids the health route reports on, in order.
   const shipped = [...stepsSrc.matchAll(/step\('([a-z-]+)'/g)].map((x) => x[1])
-  const withGroups = shipped.flatMap((id) => (id === 'image-audit' ? [...retention.EPHEMERAL_RETENTION_GROUPS.map((g) => `ephemeral-retention:${g}`), id] : [id]))
+  const withGroups = shipped.flatMap((id) => (id === 'orphan-staging-cleanup' ? [id, ...retention.EPHEMERAL_RETENTION_GROUPS.map((g) => `ephemeral-retention:${g}`)] : [id]))
   assert.deepStrictEqual(withGroups, [...ids], 'cronStepIds matches cronRotationSteps()')
+  const heavyIds = load(path.join(SRC, 'lib/cronStepIds.ts')).HEAVY_STEP_IDS
+  assert.deepStrictEqual([...heavySrc.matchAll(/step\('([a-z-]+)'/g)].map((x) => x[1]), [...heavyIds], 'HEAVY_STEP_IDS matches cronHeavySteps()')
+  assert.deepStrictEqual([...heavyIds], ['backup', 'image-audit'])
+  assert.ok(!ids.some((id) => heavyIds.includes(id)), 'no step is in both')
+  // Paid CPU: a trigger under 1 hour gets 30 s, 1 hour or more gets 15 minutes. The heavy trigger must be >= 1 h.
+  const heavyParts = /^(\d+) \*\/(\d+) \* \* \*$/.exec(rot.CRON_HEAVY)
+  assert.ok(heavyParts && Number(heavyParts[2]) >= 1, 'CRON_HEAVY runs every N >= 1 hours at a fixed minute')
+  assert.ok(rot.CRON_HEAVY_TICK_MS >= 3600 * 1000 && Number(heavyParts[2]) * 3600 * 1000 === rot.CRON_HEAVY_TICK_MS)
+  assert.strictEqual(rot.CRON_SCHEDULES.length, 3)
+  // Heavy steps alternate on their own cursor, one per tick, each every 2 ticks (6 h).
+  const hbox = { text: null }
+  const hstore = { load: async () => (hbox.text ? rot.parseRotationState(hbox.text) : null), save: async (s, e) => casSave(hbox, s, e) }
+  const hran = []
+  const hsteps = heavyIds.map((id) => ({ id, run: async () => { hran.push(id) } }))
+  for (let i = 0; i < 4; i += 1) await rot.runRotationTick(hsteps, hstore, i * rot.CRON_HEAVY_TICK_MS)
+  assert.deepStrictEqual(hran, ['backup', 'image-audit', 'backup', 'image-audit'])
   ok()
 
   // 8. nothing the owner keeps is touched by the scheduler files

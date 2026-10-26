@@ -5,8 +5,8 @@ import { hasPermission } from '../lib/permissions'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
-import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY } from '../lib/cronRotation'
-import { ROTATION_STEP_IDS } from '../lib/cronStepIds'
+import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS } from '../lib/cronRotation'
+import { ROTATION_STEP_IDS, HEAVY_STEP_IDS } from '../lib/cronStepIds'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/runtime.ts. Three endpoints the Settings
@@ -84,8 +84,20 @@ app.get('/cron-health', async (c) => {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'settings' }, 403)
   }
   try {
-    const row = await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: CRON_STATE_KEY })
-    return c.json({ success: true, ...evaluateCronHealth(parseRotationState(row?.value), ROTATION_STEP_IDS, Date.now()) })
+    const db = getDb(c.env)
+    const read = async (key: string) => (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key }))?.value
+    const now = Date.now()
+    const rotation = evaluateCronHealth(parseRotationState(await read(CRON_STATE_KEY)), ROTATION_STEP_IDS, now)
+    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS)
+    return c.json({
+      success: true,
+      healthy: rotation.healthy && heavy.healthy,
+      problems: [...rotation.problems, ...heavy.problems],
+      stateUpdatedAt: rotation.stateUpdatedAt,
+      stale: rotation.stale,
+      steps: [...rotation.steps, ...heavy.steps],
+      heavy: { stateUpdatedAt: heavy.stateUpdatedAt, stale: heavy.stale },
+    })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to read cron health' }, 500)
   }

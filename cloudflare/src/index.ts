@@ -64,7 +64,7 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
-import { CRON_TELEGRAM, runRotationTick, type RotationStep } from './lib/cronRotation'
+import { CRON_TELEGRAM, CRON_HEAVY, CRON_HEAVY_STATE_KEY, runRotationTick, type RotationStep } from './lib/cronRotation'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
@@ -639,7 +639,6 @@ const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 export function cronRotationSteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
   const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
-    step('backup', () => maybeRunScheduledBackup(env)),
     step('drive-sync', async () => {
       const schedule = await driveSyncScheduleDue(env)
       if (!schedule.due) return schedule
@@ -659,8 +658,25 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
     step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }), UNGATED_STEP_MIN_INTERVAL_MS),
     ...EPHEMERAL_RETENTION_GROUPS.map((group) => step(`ephemeral-retention:${group}`, () => maybeRunScheduledEphemeralRetention(env, group))),
-    // Last on purpose: it is the only one of these optional to the business.
-    step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
+  ]
+}
+
+/**
+ * The CPU-heavy steps, on their OWN trigger (CRON_HEAVY, every 3 hours, i.e.
+ * hourly-or-slower). Cloudflare gives a cron trigger 15 minutes of CPU on Paid
+ * when its interval is 1 hour or more, but only 30 seconds when it is more
+ * frequent (wall time is 15 minutes either way); a full D1 backup and image
+ * reprocessing must keep the larger budget, so they cannot ride the 15-minute
+ * rotation. Same rule as the rotation: ONE step per invocation, cursor in
+ * settings under its own key, so on Free (10 ms) they still never share an
+ * invocation. 3 h per tick = each step every 6 h, the cadence they had.
+ * Image audit last: it is the only one optional to the business.
+ */
+export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
+  const step = (id: string, run: () => Promise<unknown>): RotationStep => ({ id, run: label(id, run) })
+  return [
+    step('backup', () => maybeRunScheduledBackup(env)),
+    step('image-audit', () => maybeRunScheduledImageAudit(env)),
   ]
 }
 
@@ -723,6 +739,9 @@ export default {
       //   - CRON_TELEGRAM fires every few minutes and only drains due
       //     Telegram shift overviews, so a scheduled summary is never waiting
       //     behind retention or a backup;
+      //   - CRON_HEAVY runs the next CPU-heavy step (full backup, image audit)
+      //     from its own hourly-or-slower trigger, so Paid keeps the 15-minute
+      //     CPU budget those need (a trigger under 1 hour gets 30 seconds);
       //   - CRON_ROTATION (and any other expression, e.g. the old 6-hourly
       //     trigger during a rollout) runs the NEXT rotation step, chosen by a
       //     cursor saved in settings before the step starts.
@@ -738,6 +757,10 @@ export default {
         // The backstop for a shift overview nothing else has sent (the
         // request path drains too, but only while someone is using the app).
         try { await label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true }))() } catch { /* logged */ }
+        return
+      }
+      if (controller?.cron === CRON_HEAVY) {
+        await runRotationTick(cronHeavySteps(env, label), settingsRotationStore(env, CRON_HEAVY_STATE_KEY))
         return
       }
       await runRotationTick(cronRotationSteps(env, label), settingsRotationStore(env))

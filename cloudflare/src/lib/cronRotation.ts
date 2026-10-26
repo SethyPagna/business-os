@@ -21,17 +21,24 @@
 //
 // Telegram is deliberately NOT in the rotation: it has its own, more frequent
 // trigger (CRON_TELEGRAM) so a scheduled after-shift summary is never waiting
-// behind retention. Both triggers must stay in wrangler.toml and
-// wrangler.free.toml (Free allows 5 per account); a test pins that.
+// behind retention. All three triggers (CRON_SCHEDULES) must stay in wrangler.toml and
+// wrangler.free.toml (Free allows 5 per ACCOUNT, shared with any other Worker on it);
+// a test pins that.
 //
 // Pure: the step list and the state store are injected so the simulation test
 // can run it without a Worker.
 
 export const CRON_TELEGRAM = '*/5 * * * *'
 export const CRON_ROTATION = '*/15 * * * *'
-export const CRON_SCHEDULES: readonly string[] = [CRON_TELEGRAM, CRON_ROTATION]
+// The CPU-heavy steps (full backup, image audit) run on this trigger alone. Interval
+// must stay >= 1 hour: Workers Paid grants a cron trigger 15 minutes of CPU at
+// >= 1 hour and 30 seconds below it (wall time is 15 minutes for every cron).
+export const CRON_HEAVY = '17 */3 * * *'
+export const CRON_HEAVY_TICK_MS = 3 * 60 * 60 * 1000
+export const CRON_SCHEDULES: readonly string[] = [CRON_TELEGRAM, CRON_ROTATION, CRON_HEAVY]
 export const CRON_ROTATION_TICK_MS = 15 * 60 * 1000
 export const CRON_STATE_KEY = 'cron_rotation_state'
+export const CRON_HEAVY_STATE_KEY = 'cron_heavy_state'
 export const MAX_RESUME_STREAK = 2
 /** A step not started for this many full cycles (+ slack) is starved. */
 export const STARVED_CYCLES = 2
