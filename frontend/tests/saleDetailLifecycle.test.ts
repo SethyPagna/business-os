@@ -227,7 +227,7 @@ const readEnv: any = {
   beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent,
   clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
   window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
-  salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
+  salesDateRange: {}, salesPage: 1, salesPageSize: 25, showAllSales: false, setShowAllTruncated: () => {}, loadAllSalesPages: async () => ({ rows: [], pages: 0, truncated: false }), salesSortSpec: { field: 'date', direction: 'desc' },
   fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
   withLoaderTimeout: (read: () => Promise<unknown>) => read(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
   normalizeSaleRows: (rows: unknown) => rows, setSales: (rows: unknown) => published.push(rows),
