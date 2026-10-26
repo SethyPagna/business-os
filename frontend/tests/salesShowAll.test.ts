@@ -4,7 +4,7 @@
 // Run: node tests/salesShowAll.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { loadAllSalesPages, SHOW_ALL_MAX_PAGES, SHOW_ALL_PAGE_SIZE } from '../src/utils/salesShowAll.ts'
+import { loadAllSalesPages, mergeFirstPage, showAllEligible, SHOW_ALL_MAX_PAGES, SHOW_ALL_MAX_ROWS, SHOW_ALL_PAGE_SIZE } from '../src/utils/salesShowAll.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 let failed = 0
@@ -44,7 +44,7 @@ await test('the walk is bounded: a list longer than the cap stops and says it is
   const api = endpoint(10_000_000)
   const result = await loadAllSalesPages(api.fetchPage)
   assert.equal(api.calls.length, SHOW_ALL_MAX_PAGES)
-  assert.equal(result.rows.length, SHOW_ALL_MAX_PAGES * SHOW_ALL_PAGE_SIZE)
+  assert.equal(result.rows.length, SHOW_ALL_MAX_ROWS)
   assert.equal(result.truncated, true)
 })
 
@@ -70,14 +70,40 @@ await test('a failing page rejects instead of returning a partial list as comple
   await assert.rejects(loadAllSalesPages(async () => { call += 1; if (call === 2) throw new Error('page failed'); return Array.from({ length: 100 }, (_, i) => ({ id: call * 1000 + i })) }), /page failed/)
 })
 
+await test('a background refresh makes at most one request and merges it into the rows already shown', async () => {
+  const api = endpoint(950)
+  const existing = Array.from({ length: 950 }, (_, i) => ({ id: i + 1, v: 'old' }))
+  const refreshed = await loadAllSalesPages(async (page, limit) => (await api.fetchPage(page, limit)).map((row) => ({ ...row, v: row.id === 5 ? 'new' : 'old' })), { refreshOnly: { existing } })
+  assert.equal(api.calls.length, 1, 'one request, however many rows are held')
+  assert.deepEqual(api.calls[0], [1, SHOW_ALL_PAGE_SIZE])
+  assert.equal(refreshed.rows.length, 950); assert.equal(refreshed.truncated, null)
+  assert.equal(refreshed.rows.find((row) => row.id === 5)?.v, 'new'); assert.equal(refreshed.rows.find((row) => row.id === 900)?.v, 'old', 'rows beyond page 1 are kept')
+})
+
+await test('mergeFirstPage adds a new sale at the front and keeps the rest in place', () => {
+  const merged = mergeFirstPage([{ id: 2 }, { id: 1 }], [{ id: 3 }, { id: 2 }])
+  assert.deepEqual(merged.map((row) => row.id), [3, 2, 1])
+})
+
+await test('Show all is offered for one business day, or a wider range only while the count stays within the cap', () => {
+  assert.equal(SHOW_ALL_MAX_ROWS, 1000)
+  assert.equal(showAllEligible({ startDate: '2026-10-26', endDate: '2026-10-26' }, 50000), true, 'one day, any count (the walk is still bounded)')
+  assert.equal(showAllEligible({ startDate: '2026-10-01', endDate: '2026-10-26' }, 1000), true)
+  assert.equal(showAllEligible({ startDate: '2026-10-01', endDate: '2026-10-26' }, 1001), false)
+  assert.equal(showAllEligible({ startDate: '2026-10-01', endDate: '2026-10-26' }, null), false, 'unknown count is not trusted')
+  assert.equal(showAllEligible({}, undefined), false)
+})
+
 await test('the Sales page wires Show all through the paged helper with a translated icon-only toggle', () => {
   const sales = read('../src/components/sales/Sales.tsx')
   assert.match(sales, /loadAllSalesPages<SaleRecord>\(/)
-  assert.match(sales, /if \(showAllSales\) \{[\s\S]*?\{ \.\.\.filters, page, limit \}/, 'show-all requests carry the same filters, one bounded page at a time')
-  assert.match(sales, /data-testid="sales-show-all-toggle"[\s\S]*?aria-pressed=\{showAllSales\}[\s\S]*?title=\{showAllSales \? translateOr\('sales_show_pages'/)
+  assert.match(sales, /if \(showAllActive\) \{[\s\S]*?\{ \.\.\.filters, page, limit \}/, 'show-all requests carry the same filters, one bounded page at a time')
+  assert.match(sales, /data-testid="sales-show-all-toggle"[\s\S]*?aria-pressed=\{showAllActive\}[\s\S]*?title=\{showAllActive \? translateOr\('sales_show_pages'/)
   assert.match(sales, /pageSize=\{pagerPageSize\}/); assert.match(sales, /pageSize=\{pagerPageSize\} totalItems/)
-  assert.match(sales, /showAllSales \? Math\.max\(salesPageSize, totalSalesCount, allVisibleSales\.length\)/)
+  assert.match(sales, /showAllActive \? Math\.max\(salesPageSize, totalSalesCount, allVisibleSales\.length\)/)
   assert.match(sales, /sales-show-all-truncated/)
+  assert.match(sales, /refreshOnly: { existing: salesRef.current }/, 'a silent refresh reads the first page only')
+  assert.ok(sales.includes('const [showAllSales, setShowAllSales] = useState(true)'), 'Show all defaults on, scoped to the day')
   assert.ok(!/limit: *(Infinity|99999|[0-9]{4,})/.test(sales), 'no unbounded list request')
 })
 

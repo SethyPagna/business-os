@@ -5,7 +5,7 @@ import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import ChevronsDown from 'lucide-react/dist/esm/icons/chevrons-down.js'
-import { loadAllSalesPages } from '../../utils/salesShowAll.ts'
+import { loadAllSalesPages, showAllEligible } from '../../utils/salesShowAll.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
@@ -616,7 +616,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
   // S4R6-2#422: "Show all" reads every matching sale in bounded pages (utils/salesShowAll.ts); the pager then shows one page.
-  const [showAllSales, setShowAllSales] = useState(false)
+  // Default ON: the page opens on today, and Show all is scoped to the current date filter (one business day, or a range of at most 1,000 sales).
+  const [showAllSales, setShowAllSales] = useState(true)
+  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; revenue_without_not_paid_usd: number | null; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
   const [showAllTruncated, setShowAllTruncated] = useState(false)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
@@ -733,6 +735,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     return out
   }, [stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
+  const showAllAllowed = showAllEligible(salesDateRange, salesStats?.total_count)
+  const showAllActive = showAllSales && showAllAllowed
 
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
@@ -789,14 +793,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
         const isCurrent = () => aliveRef.current && requestSecurity === statusSecurityRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)
         let result: unknown
-        let showAllCapped = false
-        if (showAllSales) {
+        let showAllCapped: boolean | null = false
+        if (showAllActive) {
           const { page: _page, limit: _limit, ...filters } = params
           const all = await loadAllSalesPages<SaleRecord>(async (page, limit) => normalizeSaleRows(await withLoaderTimeout(
             () => fetchSales({ ...filters, page, limit }, { signal: controller.signal }),
             'Sales',
             SALES_LIST_REQUEST_TIMEOUT_MS,
-          )), { isCancelled: () => !isCurrent() })
+          )), { isCancelled: () => !isCurrent(), ...(silent && loadedOnceRef.current ? { refreshOnly: { existing: salesRef.current } } : {}) })
           result = all.rows
           showAllCapped = all.truncated
         } else {
@@ -807,7 +811,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           )
         }
         if (!isCurrent()) return
-        setShowAllTruncated(showAllCapped)
+        if (showAllCapped !== null) setShowAllTruncated(showAllCapped)
+        else if (!showAllActive) setShowAllTruncated(false)
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
           setSales(rows)
@@ -854,7 +859,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, showAllSales, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, showAllActive, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -864,7 +869,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `sales` above is capped at the list endpoint's page limit, so the
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
-  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; revenue_without_not_paid_usd: number | null; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
 
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
@@ -1729,7 +1733,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   const totalSalesCount = salesStats?.total_count ?? allVisibleSales.length
   // Show all: one pager page as long as the whole list, so its range reads 1-N and both arrows are dead.
-  const pagerPageSize = showAllSales ? Math.max(salesPageSize, totalSalesCount, allVisibleSales.length) : salesPageSize
+  const pagerPageSize = showAllActive ? Math.max(salesPageSize, totalSalesCount, allVisibleSales.length) : salesPageSize
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, totalSalesCount, salesPageSize))
@@ -2726,10 +2730,11 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             <button
               type="button"
               data-testid="sales-show-all-toggle"
-              aria-pressed={showAllSales}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${showAllSales ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`}
-              aria-label={showAllSales ? translateOr('sales_show_pages', 'Show pages') : translateOr('sales_show_all', 'Show all sales')}
-              title={showAllSales ? translateOr('sales_show_pages', 'Show pages') : translateOr('sales_show_all', 'Show all sales')}
+              aria-pressed={showAllActive}
+              disabled={!showAllAllowed}
+              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${showAllActive ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`}
+              aria-label={showAllActive ? translateOr('sales_show_pages', 'Show pages') : translateOr('sales_show_all', 'Show all sales')}
+              title={showAllActive ? translateOr('sales_show_pages', 'Show pages') : translateOr('sales_show_all', 'Show all sales')}
               onClick={() => { setShowAllSales((current) => !current); setSalesPage(1) }}
             >
               <ChevronsDown className="h-5 w-5 shrink-0" />
@@ -2840,7 +2845,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           compact
           rangeAsPageSize
           compactCentered
-          page={showAllSales ? 1 : salesPage}
+          page={showAllActive ? 1 : salesPage}
           pageSize={pagerPageSize}
           totalItems={totalSalesCount}
           label={t('sales') || 'sales'}
@@ -2852,7 +2857,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           }}
         />
       </PagerActionRow>
-      {showAllSales && showAllTruncated ? <p role="status" data-testid="sales-show-all-truncated" className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">{translateOr('sales_show_all_truncated', 'Showing the first 10,000 sales. Narrow the filters to see the rest.')}</p> : null}
+      {(showAllActive && showAllTruncated) || (showAllSales && !showAllAllowed) ? <p role="status" data-testid="sales-show-all-truncated" className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">{translateOr('sales_show_all_truncated', 'Show all covers one day or up to 1,000 sales. Narrow the filters to see everything.')}</p> : null}
 
       {!directStatusSaving && activePendingDirectStatus && String(detailSale?.id) !== activePendingDirectStatus.entityId ? (
         <div role="status" data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
@@ -2938,7 +2943,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       />
 
       <div data-sales-bottom-pager="" className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize compactCentered page={showAllSales ? 1 : salesPage} pageSize={pagerPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={showAllActive ? 1 : salesPage} pageSize={pagerPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
       </div>
 
       {exportDialog ? (

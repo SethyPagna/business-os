@@ -2140,7 +2140,7 @@
   "exchange_rate_forward_only_note": "A new rate applies to new sales only. Past sales keep the rate they were recorded with.",
   "sales_show_all": "Show all sales",
   "sales_show_pages": "Show pages",
-  "sales_show_all_truncated": "Showing the first 10,000 sales. Narrow the filters to see the rest.",
+  "sales_show_all_truncated": "Show all covers one day or up to 1,000 sales. Narrow the filters to see everything.",
   "existing_catalog": "Existing catalog",
   "existing_lot_keeps_date": "Tops up the selected received date — that date stays.",
   "existing_matches_count": "Existing (matched)",
