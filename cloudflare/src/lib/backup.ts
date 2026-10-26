@@ -1091,6 +1091,17 @@ async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
   return removed
 }
 
+/**
+ * A scheduled backup is skipped while the newest finalized one is younger than
+ * this. It is also what turns a duplicate delivery of the heavy cron (3 h
+ * apart, or the same firing twice) into a no-op: it must stay above the 3 h
+ * tick and below the 6 h a backup comes round, so every visit that is due runs.
+ */
+export const SCHEDULED_BACKUP_MIN_INTERVAL_MS = 5.5 * 60 * 60 * 1000
+export function scheduledBackupIsRecent(newestMs: number, nowMs: number): boolean {
+  return !!newestMs && nowMs - newestMs < SCHEDULED_BACKUP_MIN_INTERVAL_MS
+}
+
 export async function maybeRunScheduledBackup(env: Env) {
   const backups = await listCloudflareBackups(env)
   const newestFinalized = backups.find((item) => item.finalized)
@@ -1149,7 +1160,7 @@ export async function maybeRunScheduledBackup(env: Env) {
   if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
     return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
   }
-  if (newest && Date.now() - newest < 5.5 * 60 * 60 * 1000) {
+  if (scheduledBackupIsRecent(newest, Date.now())) {
     return { skipped: true, reason: 'recent-backup-exists', latest: newestFinalized, retention }
   }
   const backup = await createCloudflareBackup(env, 'scheduled')

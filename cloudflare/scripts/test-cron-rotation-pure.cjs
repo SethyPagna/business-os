@@ -60,7 +60,7 @@ const ok = () => { passed += 1 }
 // ---- simulation ------------------------------------------------------------
 const BUDGET = 10 // ms of CPU per invocation (Workers Free)
 const BOOKKEEPING = 1 // two settings writes + one read per rotation tick
-// Cost per step: each fits alone; together they are three times the budget.
+// Cost per step: each fits alone; together they are more than twice the budget.
 const COST = {
   'drive-sync': 2, 'audit-log-retention': 3, 'reap-stalled-imports': 2, 'import-retention': 3,
   'import-incoming-sweep': 2, 'orphan-staging-cleanup': 2, 'ephemeral-retention:rate_limit': 2, 'ephemeral-retention:auth': 3,
@@ -234,6 +234,95 @@ async function main() {
   }
   ok()
 
+  // 6d. The dispatcher, driven for real with fake steps and a shared fake settings table.
+  const dispatch = load(path.join(SRC, 'lib/cronDispatch.ts'))
+  const table = {} // settings key -> state text
+  const keysUsed = []
+  const casFor = (key) => ({
+    load: async () => (table[key] ? rot.parseRotationState(table[key]) : null),
+    save: async (s, e) => { const stored = table[key] ? rot.parseRotationState(table[key]).version : null; if (stored !== e) return false; table[key] = JSON.stringify(s); return true },
+  })
+  const dran = { tg: 0, heavy: [], rot: [] }
+  const deps = (overrides = {}) => ({
+    drainTelegram: async () => { dran.tg += 1 },
+    heavySteps: () => ['backup', 'image-audit'].map((id) => ({ id, run: async () => { dran.heavy.push(id) } })),
+    rotationSteps: () => ['r1', 'r2', 'r3'].map((id) => ({ id, run: async () => { dran.rot.push(id) } })),
+    storeFor: (key) => { keysUsed.push(key); return casFor(key) },
+    ...overrides,
+  })
+  const T0 = Date.parse('2026-10-26T00:17:00Z')
+  const H3 = rot.CRON_HEAVY_TICK_MS
+  // A: a heavy firing runs exactly one HEAVY step and never a rotation step; telegram runs neither.
+  await dispatch.dispatchCron(rot.CRON_HEAVY, T0, deps())
+  assert.deepStrictEqual(dran, { tg: 0, heavy: ['backup'], rot: [] }, 'heavy tick: one heavy step, no rotation step')
+  await dispatch.dispatchCron(rot.CRON_TELEGRAM, T0, deps())
+  assert.deepStrictEqual(dran, { tg: 1, heavy: ['backup'], rot: [] }, 'telegram tick: only the drain')
+  await dispatch.dispatchCron(rot.CRON_ROTATION, T0, deps())
+  assert.deepStrictEqual(dran, { tg: 1, heavy: ['backup'], rot: ['r1'] }, 'rotation tick: one rotation step, no heavy step')
+  await dispatch.dispatchCron('0 */6 * * *', T0 + 15 * 60 * 1000, deps())
+  assert.deepStrictEqual(dran.rot, ['r1', 'r2'], 'the retired 6-hourly expression goes to the rotation, never to heavy')
+  assert.deepStrictEqual(dran.heavy, ['backup'])
+  // G: the two cursors live under different keys and do not move each other.
+  assert.notStrictEqual(rot.CRON_HEAVY_STATE_KEY, rot.CRON_STATE_KEY)
+  assert.ok(table[rot.CRON_HEAVY_STATE_KEY] && table[rot.CRON_STATE_KEY], 'both rows exist')
+  assert.strictEqual(rot.parseRotationState(table[rot.CRON_HEAVY_STATE_KEY]).cursor, 1)
+  assert.strictEqual(rot.parseRotationState(table[rot.CRON_STATE_KEY]).cursor, 2)
+  assert.ok(keysUsed.includes(rot.CRON_HEAVY_STATE_KEY) && keysUsed.includes(rot.CRON_STATE_KEY))
+  ok()
+
+  // P3-b: duplicate deliveries of ONE firing (same scheduledTime) run the slot once and do not shift the alternation.
+  for (const key of Object.keys(table)) delete table[key]
+  dran.heavy.length = 0
+  const first = await dispatch.dispatchCron(rot.CRON_HEAVY, T0, deps())
+  const dup2 = await dispatch.dispatchCron(rot.CRON_HEAVY, T0, deps())
+  const dup3 = await dispatch.dispatchCron(rot.CRON_HEAVY, T0, deps())
+  assert.strictEqual(first.tick.skipped, undefined); assert.strictEqual(dup2.tick.skipped, 'duplicate'); assert.strictEqual(dup3.tick.skipped, 'duplicate')
+  assert.deepStrictEqual(dran.heavy, ['backup'], 'three deliveries, one backup (no reliance on the 5.5 h gate)')
+  await dispatch.dispatchCron(rot.CRON_HEAVY, T0 + H3, deps())
+  await dispatch.dispatchCron(rot.CRON_HEAVY, T0 + H3, deps())
+  await dispatch.dispatchCron(rot.CRON_HEAVY, T0 + 2 * H3, deps())
+  assert.deepStrictEqual(dran.heavy, ['backup', 'image-audit', 'backup'], 'the next firings still alternate')
+  ok()
+
+  // E: a save that throws must not run the step unclaimed.
+  let unclaimedRuns = 0
+  const throwingSave = { load: async () => null, save: async () => { throw new Error('d1 write failed') } }
+  const e1 = await rot.runRotationTick([{ id: 'backup', run: async () => { unclaimedRuns += 1 } }], throwingSave, T0, { slot: 1 })
+  assert.strictEqual(unclaimedRuns, 0, 'an unconfirmed claim is a skip')
+  assert.strictEqual(e1.skipped, 'lost-race')
+  ok()
+
+  // P3-c: an unreadable cursor falls back to the firing's slot, so the heavy cron alternates (it used to pick image-audit always).
+  const fallbackRan = []
+  const fsteps = ['backup', 'image-audit'].map((id) => ({ id, run: async () => { fallbackRan.push(id) } }))
+  const unreadable = { load: async () => { throw new Error('d1 down') }, save: async () => true }
+  for (let i = 0; i < 4; i += 1) await rot.runRotationTick(fsteps, unreadable, T0 + i * H3, { slot: Math.floor((T0 + i * H3) / H3) })
+  assert.deepStrictEqual(new Set(fallbackRan), new Set(['backup', 'image-audit']), 'both heavy steps get a turn')
+  assert.strictEqual(fallbackRan[0] === fallbackRan[1], false, 'and they alternate')
+  ok()
+
+  // S: the interval gate must be keyed on the last OK run. Visited every 30 minutes for 12 h, a 5 h gate must let the step run at
+  // 0 h, 5 h and 10 h; a gate keyed on the skip-refreshed finishedAt would skip forever after the first run.
+  const sbox = { text: null }
+  const sstore = { load: async () => (sbox.text ? rot.parseRotationState(sbox.text) : null), save: async (s, e) => casSave(sbox, s, e) }
+  let sRuns = 0
+  const ssteps = [{ id: 'g', minIntervalMs: 5 * 3600 * 1000, run: async () => { sRuns += 1 } }]
+  const s0 = Date.parse('2026-10-26T00:00:00Z')
+  for (let i = 0; i <= 24; i += 1) await rot.runRotationTick(ssteps, sstore, s0 + i * 30 * 60 * 1000, { slot: i })
+  assert.strictEqual(sRuns, 3, 'ran at 0 h, 5 h and 10 h')
+  ok()
+
+  // N: the scheduled-backup gate (backup.ts) is above the 3 h heavy tick and below the 6 h revisit.
+  const backupMod = load(path.join(SRC, 'lib/backup.ts'))
+  const HOUR = 3600 * 1000
+  const nowB = Date.parse('2026-10-26T12:00:00Z')
+  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 3 * HOUR, nowB), true, 'a 3 h old backup blocks the next heavy tick')
+  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 5 * HOUR, nowB), true)
+  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 6 * HOUR, nowB), false, 'a 6 h old backup is due')
+  assert.strictEqual(backupMod.scheduledBackupIsRecent(0, nowB), false, 'no backup at all is due')
+  assert.ok(fs.readFileSync(path.join(SRC, 'lib/backup.ts'), 'utf8').includes('if (scheduledBackupIsRecent(newest, Date.now())) {'), 'maybeRunScheduledBackup uses it')
+  ok()
+
   // 7. Telegram timing preserved: dedicated, frequent trigger; rotation excludes it
   const everyMin = (expr) => Number((/^\*\/(\d+) \* \* \* \*$/.exec(expr) || [])[1])
   assert.ok(everyMin(rot.CRON_TELEGRAM) > 0 && everyMin(rot.CRON_TELEGRAM) <= 5, 'telegram backstop within 5 minutes (was 6 hours)')
@@ -247,14 +336,13 @@ async function main() {
   }
   const index = read('src/index.ts')
   const scheduled = index.slice(index.indexOf('async scheduled('))
-  const tg = scheduled.slice(scheduled.indexOf('CRON_TELEGRAM)'), scheduled.indexOf('CRON_HEAVY)'))
-  assert.ok(tg.includes('drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })') && /return\n\s*\}/.test(tg) && !tg.includes('runRotationTick'),
-    'telegram tick drains and returns; no rotation step shares its invocation')
+  assert.ok(scheduled.includes('drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })'), 'the telegram lane drains with the cron limits')
+  assert.strictEqual((scheduled.match(/dispatchCron\(/g) || []).length, 1, 'scheduled() hands every firing to the tested dispatcher')
+  assert.ok(scheduled.includes('storeFor: (key) => settingsRotationStore(env, key)') && scheduled.includes('controller?.scheduledTime'), 'the dispatcher gets the firing time and a keyed settings store')
   const stepsSrc = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export function cronHeavySteps'))
   const heavySrc = index.slice(index.indexOf('export function cronHeavySteps'), index.indexOf('export default {'))
   assert.ok(!/telegram/i.test(stepsSrc), 'telegram is not part of the rotation')
-  assert.strictEqual((scheduled.match(/runRotationTick\(/g) || []).length, 2, 'one rotation tick for the heavy trigger, one for the retention rotation')
-  assert.ok(scheduled.includes('settingsRotationStore(env, CRON_HEAVY_STATE_KEY)'), 'the heavy trigger keeps its own cursor')
+  assert.ok(!scheduled.includes('runRotationTick'), 'scheduled() runs no step itself')
   assert.ok(!/await runStep\(/.test(scheduled), 'no sequential runStep chain left')
   // The shipped step ids are the ids the health route reports on, in order.
   const shipped = [...stepsSrc.matchAll(/step\('([a-z-]+)'/g)].map((x) => x[1])

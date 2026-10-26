@@ -31,8 +31,10 @@
 export const CRON_TELEGRAM = '*/5 * * * *'
 export const CRON_ROTATION = '*/15 * * * *'
 // The CPU-heavy steps (full backup, image audit) run on this trigger alone. Interval
-// must stay >= 1 hour: Workers Paid grants a cron trigger 15 minutes of CPU at
-// >= 1 hour and 30 seconds below it (wall time is 15 minutes for every cron).
+// must stay >= 1 hour: Workers Paid grants a cron trigger up to 15 minutes of CPU at
+// >= 1 hour and only 30 seconds below it (wall time is 15 minutes for every cron).
+// In practice the ceiling is the [limits] cpu_ms in wrangler.toml (5 minutes), still far
+// above 30 s.
 export const CRON_HEAVY = '17 */3 * * *'
 export const CRON_HEAVY_TICK_MS = 3 * 60 * 60 * 1000
 export const CRON_SCHEDULES: readonly string[] = [CRON_TELEGRAM, CRON_ROTATION, CRON_HEAVY]
@@ -60,6 +62,8 @@ export interface RotationState {
   resumeStreak: number
   steps: Record<string, StepState>
   updatedAt: string | null
+  /** The scheduled slot (floor(scheduledTime / tick)) last claimed; a second delivery of one firing shares it. */
+  lastSlot: number | null
   /** Bumped by every successful save; the store only writes over the version it was loaded at. */
   version: number
 }
@@ -87,13 +91,13 @@ export interface TickResult {
   more: boolean
   error?: string
   /** Not run: gated by minIntervalMs, or another tick took this position. */
-  skipped?: 'recent' | 'lost-race'
+  skipped?: 'recent' | 'lost-race' | 'duplicate' | 'claim-failed'
 }
 
 const emptyStep = (): StepState => ({ startedAt: null, finishedAt: null, okAt: null, error: null, failures: 0, killed: 0, runs: 0 })
 
 export function emptyRotationState(): RotationState {
-  return { cursor: 0, resumeStreak: 0, steps: {}, updatedAt: null, version: 0 }
+  return { cursor: 0, resumeStreak: 0, steps: {}, updatedAt: null, lastSlot: null, version: 0 }
 }
 
 function sanitize(raw: unknown): RotationState {
@@ -103,6 +107,7 @@ function sanitize(raw: unknown): RotationState {
   base.cursor = Number.isInteger(src.cursor) && (src.cursor as number) >= 0 ? (src.cursor as number) : 0
   base.resumeStreak = Number.isInteger(src.resumeStreak) && (src.resumeStreak as number) >= 0 ? (src.resumeStreak as number) : 0
   base.updatedAt = typeof src.updatedAt === 'string' ? src.updatedAt : null
+  base.lastSlot = Number.isInteger(src.lastSlot) ? (src.lastSlot as number) : null
   base.version = Number.isInteger(src.version) && (src.version as number) >= 0 ? (src.version as number) : 0
   if (src.steps && typeof src.steps === 'object') {
     for (const [id, value] of Object.entries(src.steps)) {
@@ -133,9 +138,10 @@ const shortError = (error: unknown) => String((error as Error)?.message || error
  * time-derived position (still rotates, only loses resume and health), and a
  * step failure is recorded and swallowed.
  */
-export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now()): Promise<TickResult> {
+export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now(), options: { slot?: number } = {}): Promise<TickResult> {
   if (!steps.length) return { stepId: null, ok: true, more: false }
   const nowIso = new Date(nowMs).toISOString()
+  const realStart = Date.now()
 
   let state: RotationState | null = null
   let persisted = true
@@ -144,22 +150,29 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   let expected: number | null = state ? sanitize(state).version : null
   const current = state ? sanitize(state) : emptyRotationState()
   // No readable cursor: derive one from the clock so rotation still advances.
-  const index = persisted ? current.cursor % steps.length : Math.floor(nowMs / CRON_ROTATION_TICK_MS) % steps.length
+  // (the slot, when given, is the scheduled firing's own number, so it alternates per trigger).
+  const slot = options.slot
+  // A second delivery of the SAME firing (Cloudflare may deliver a cron more than once) shares its
+  // scheduledTime, hence its slot: it must not take the next step, shifting the alternation.
+  if (persisted && slot !== undefined && current.lastSlot === slot) return { stepId: null, ok: true, more: false, skipped: 'duplicate' }
+  const index = persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
   const step = steps[index]
   const record = current.steps[step.id] ?? emptyStep()
   // Write the state over the version we read. A false answer means another
   // overlapping tick moved the cursor first: this one must neither rewind it
   // nor run the step that tick already claimed (a scheduled paid backup must
-  // not run twice). A thrown save is only a missing health row, not a reason
-  // to skip the job.
+  // not run twice). A save that THROWS is treated the same way: with the claim
+  // unconfirmed, skipping is safe (the step is picked up on its next visit) and
+  // running could duplicate a backup, which is the worse outcome.
   const commit = async (): Promise<boolean> => {
     if (!persisted) { try { await store.save(current, null) } catch { /* best effort */ } return true }
     current.version = (expected ?? -1) + 1
+    if (slot !== undefined) current.lastSlot = slot
     try {
       const won = await store.save(current, expected)
       if (won) expected = current.version
       return won
-    } catch { return true }
+    } catch { return false }
   }
   // Gated step, visited too soon: advance past it and do nothing else.
   if (step.minIntervalMs && record.okAt && nowMs - Date.parse(record.okAt) < step.minIntervalMs) {
@@ -196,7 +209,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
     error = shortError(caught)
   }
 
-  record.finishedAt = new Date(Math.max(Date.now(), nowMs)).toISOString()
+  record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
   if (ok) { record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
@@ -225,16 +238,20 @@ export interface CronHealth {
   healthy: boolean
   stateUpdatedAt: string | null
   stale: boolean
+  /** No state yet, but the deploy is younger than the first scheduled visit: nothing is wrong. */
+  pending: boolean
   steps: CronHealthRow[]
   problems: string[]
 }
 
 /** Classify every rotation step; `problems` lists the ids that need a look. */
-export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS): CronHealth {
+export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS, deployedAtMs?: number): CronHealth {
   const cycleMs = Math.max(1, stepIds.length) * tickMs
   const limit = cycleMs * STARVED_CYCLES + tickMs * (MAX_RESUME_STREAK + 1)
   const updated = state.updatedAt ? Date.parse(state.updatedAt) : NaN
   const stale = !Number.isFinite(updated) || nowMs - updated > limit
+  // Never written, and this build is younger than one tick (+30 min slack): the first visit has not had its turn.
+  const pending = !state.updatedAt && deployedAtMs !== undefined && Number.isFinite(deployedAtMs) && nowMs - deployedAtMs < tickMs + 30 * 60 * 1000
   const rows: CronHealthRow[] = stepIds.map((id) => {
     const s = state.steps[id] ?? emptyStep()
     const started = s.startedAt ? Date.parse(s.startedAt) : NaN
@@ -248,5 +265,6 @@ export function evaluateCronHealth(state: RotationState, stepIds: readonly strin
   })
   // 'never' is only a problem once a whole cycle should have visited it.
   const problems = rows.filter((r) => r.status !== 'ok' && (r.status !== 'never' || stale)).map((r) => r.id)
-  return { healthy: !stale && problems.length === 0, stateUpdatedAt: state.updatedAt, stale, steps: rows, problems }
+  if (pending) return { healthy: true, stateUpdatedAt: null, stale: false, pending: true, steps: rows, problems: [] }
+  return { healthy: !stale && problems.length === 0, stateUpdatedAt: state.updatedAt, stale, pending: false, steps: rows, problems }
 }

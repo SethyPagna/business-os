@@ -465,7 +465,7 @@ export async function getAuditLogRetentionDays(env: Env): Promise<number> {
 
 // Runs on the scheduled worker tick. Deletes audit_logs rows older than the
 // configured retention window (default 21 days, see DEFAULT_AUDIT_LOG_RETENTION_DAYS),
-// throttled to at most once per day so the rotating cron's visits (every ~3 h) don't re-scan the
+// throttled to at most once per day so the rotating cron's visits (every 2.75 h) don't re-scan the
 // table for nothing.
 export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number; more?: boolean }> {
   const lastRunRaw = await getSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY)

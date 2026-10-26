@@ -132,7 +132,7 @@ check('the preflight response names its own cap, its tier and a partial code', a
 // --------------------------------------------------------------------------
 // Catalog integrity: bounded window, executed for real against both tiers.
 // --------------------------------------------------------------------------
-function loadRuntimeRoute(products) {
+function loadRuntimeRoute(products, extra = {}) {
   const captured = []
   const db = {
     prepare(sql) {
@@ -144,7 +144,11 @@ function loadRuntimeRoute(products) {
           const limit = limitMatch ? Number(limitMatch[1]) : products.length
           return products.slice(0, limit)
         },
-        get: async () => (/FROM settings/.test(sql) ? { value: '[]' } : null),
+        get: async (p) => {
+          if (!/FROM settings/.test(sql)) return null
+          if (!extra.settings) return { value: '[]' }
+          return p && p.key in extra.settings ? { value: extra.settings[p.key] } : undefined
+        },
         run: async () => ({}),
       }
     },
@@ -157,7 +161,7 @@ function loadRuntimeRoute(products) {
     // and are what decide whether this route runs at all.
     '../lib/permissions': load('lib/permissions.ts'),
     '../lib/catalogText': load('lib/catalogText.ts'),
-    '../lib/buildStamp': { getBuildStamp: () => ({ revision: 'test', sourceHash: 'test', builtAt: '2026-09-14T00:00:00Z' }) },
+    '../lib/buildStamp': { getBuildStamp: () => ({ revision: 'test', sourceHash: 'test', builtAt: extra.builtAt || '2026-09-14T00:00:00Z' }) },
     '../lib/cronRotation': load('lib/cronRotation.ts'),
     '../lib/cronStepIds': load('lib/cronStepIds.ts'),
     '../index': {},
@@ -201,6 +205,42 @@ check('POSITIVE CONTROL: the same catalog is not partial on paid', async () => {
   assert.equal(body.partial, false, 'if this were also partial, the check above would be proving nothing')
   assert.equal(body.partialCode, null)
   assert.equal(body.checkedProducts, freeCap + 50)
+})
+
+// --------------------------------------------------------------------------
+// Cron health: the heavy steps are judged by the HEAVY (3 h) tick, not the 15-minute one.
+// --------------------------------------------------------------------------
+check('cron-health judges heavy steps by the heavy interval, and says pending right after a deploy', async () => {
+  const cr = load('lib/cronRotation.ts')
+  const ids = load('lib/cronStepIds.ts')
+  const now = Date.now()
+  const iso = (agoMs) => new Date(now - agoMs).toISOString()
+  const H = 3600 * 1000
+  const stateFor = (stepIds, agoMs) => JSON.stringify({
+    cursor: 0, resumeStreak: 0, version: 5, lastSlot: 1, updatedAt: iso(agoMs),
+    steps: Object.fromEntries(stepIds.map((id) => [id, { startedAt: iso(agoMs), finishedAt: iso(agoMs), okAt: iso(agoMs), error: null, failures: 0, killed: 0, runs: 3 }])),
+  })
+  const get = async (settings, extra2 = {}) => {
+    const { app } = loadRuntimeRoute([], { settings, ...extra2 })
+    const res = await app.request('/api/runtime/cron-health', {}, { PLAN_TIER: 'paid' })
+    return { status: res.status, body: await res.json() }
+  }
+  // Heavy steps last ran 7 h ago (normal: they are 6 h apart); the rotation ran a minute ago.
+  const fine = await get({ [cr.CRON_STATE_KEY]: stateFor(ids.ROTATION_STEP_IDS, 60 * 1000), [cr.CRON_HEAVY_STATE_KEY]: stateFor(ids.HEAVY_STEP_IDS, 7 * H) })
+  assert.equal(fine.status, 200)
+  assert.equal(fine.body.healthy, true, JSON.stringify(fine.body.problems))
+  assert.deepEqual(fine.body.problems, [])
+  // The same 7 h under the 15-minute tick would be 'starved'; 30 h is starved under the heavy interval too.
+  const starved = await get({ [cr.CRON_STATE_KEY]: stateFor(ids.ROTATION_STEP_IDS, 60 * 1000), [cr.CRON_HEAVY_STATE_KEY]: stateFor(ids.HEAVY_STEP_IDS, 30 * H) })
+  assert.equal(starved.body.healthy, false)
+  assert.deepEqual([...starved.body.problems].sort(), ['backup', 'image-audit'])
+  // Nothing written yet: pending (not unhealthy) while the build is younger than a tick, unhealthy once it is older.
+  const young = await get({}, { builtAt: iso(20 * 60 * 1000) })
+  assert.equal(young.body.pending, true)
+  assert.equal(young.body.healthy, true)
+  const old = await get({}, { builtAt: iso(30 * H) })
+  assert.equal(old.body.pending, false)
+  assert.equal(old.body.healthy, false)
 })
 
 // --------------------------------------------------------------------------

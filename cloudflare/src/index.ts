@@ -64,7 +64,8 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
-import { CRON_TELEGRAM, CRON_HEAVY, CRON_HEAVY_STATE_KEY, runRotationTick, type RotationStep } from './lib/cronRotation'
+import type { RotationStep } from './lib/cronRotation'
+import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
@@ -622,7 +623,7 @@ export { BroadcastHub } from './durable-objects/broadcastHub'
 
 /**
  * These four steps have no interval gate of their own (they used to ride the
- * 6-hourly tick, about 4 runs a day). The rotation now comes round every ~3.25 h,
+ * 6-hourly tick, about 4 runs a day). The rotation now comes round every 2.75 h (11 steps x 15 min),
  * so each is held to the old cadence or slower by the rotation's own record
  * of its last OK run (no extra D1 read). 5 h, not 6 h, so jitter between
  * visits cannot make it skip every second round.
@@ -663,8 +664,9 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
 
 /**
  * The CPU-heavy steps, on their OWN trigger (CRON_HEAVY, every 3 hours, i.e.
- * hourly-or-slower). Cloudflare gives a cron trigger 15 minutes of CPU on Paid
- * when its interval is 1 hour or more, but only 30 seconds when it is more
+ * hourly-or-slower). Cloudflare gives a cron trigger up to 15 minutes of CPU
+ * on Paid when its interval is 1 hour or more (in practice the [limits] cpu_ms
+ * cap in wrangler.toml, 5 minutes), but only 30 seconds when it is more
  * frequent (wall time is 15 minutes either way); a full D1 backup and image
  * reprocessing must keep the larger budget, so they cannot ride the 15-minute
  * rotation. Same rule as the rotation: ONE step per invocation, cursor in
@@ -740,8 +742,9 @@ export default {
       //     Telegram shift overviews, so a scheduled summary is never waiting
       //     behind retention or a backup;
       //   - CRON_HEAVY runs the next CPU-heavy step (full backup, image audit)
-      //     from its own hourly-or-slower trigger, so Paid keeps the 15-minute
-      //     CPU budget those need (a trigger under 1 hour gets 30 seconds);
+      //     from its own hourly-or-slower trigger, so Paid keeps the
+      //     CPU budget those need (up to the cpu_ms cap; a trigger under 1 hour
+      //     gets only 30 seconds);
       //   - CRON_ROTATION (and any other expression, e.g. the old 6-hourly
       //     trigger during a rollout) runs the NEXT rotation step, chosen by a
       //     cursor saved in settings before the step starts.
@@ -753,17 +756,14 @@ export default {
           throw error
         }
       }
-      if (controller?.cron === CRON_TELEGRAM) {
-        // The backstop for a shift overview nothing else has sent (the
-        // request path drains too, but only while someone is using the app).
-        try { await label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true }))() } catch { /* logged */ }
-        return
-      }
-      if (controller?.cron === CRON_HEAVY) {
-        await runRotationTick(cronHeavySteps(env, label), settingsRotationStore(env, CRON_HEAVY_STATE_KEY))
-        return
-      }
-      await runRotationTick(cronRotationSteps(env, label), settingsRotationStore(env))
+      await dispatchCron(controller?.cron, controller?.scheduledTime ?? Date.now(), {
+        // The backstop for a shift overview nothing else has sent (the request
+        // path drains too, but only while someone is using the app).
+        drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
+        heavySteps: () => cronHeavySteps(env, label),
+        rotationSteps: () => cronRotationSteps(env, label),
+        storeFor: (key) => settingsRotationStore(env, key),
+      })
     })())
   },
 }

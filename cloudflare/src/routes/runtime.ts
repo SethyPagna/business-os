@@ -5,7 +5,7 @@ import { hasPermission } from '../lib/permissions'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
-import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS } from '../lib/cronRotation'
+import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS, CRON_ROTATION_TICK_MS } from '../lib/cronRotation'
 import { ROTATION_STEP_IDS, HEAVY_STEP_IDS } from '../lib/cronStepIds'
 import type { Env } from '../index'
 
@@ -87,14 +87,17 @@ app.get('/cron-health', async (c) => {
     const db = getDb(c.env)
     const read = async (key: string) => (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key }))?.value
     const now = Date.now()
-    const rotation = evaluateCronHealth(parseRotationState(await read(CRON_STATE_KEY)), ROTATION_STEP_IDS, now)
-    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS)
+    // A state that has never been written is 'pending', not unhealthy, until this build is older than one tick.
+    const deployedAt = Date.parse(getBuildStamp().builtAt)
+    const rotation = evaluateCronHealth(parseRotationState(await read(CRON_STATE_KEY)), ROTATION_STEP_IDS, now, CRON_ROTATION_TICK_MS, deployedAt)
+    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS, deployedAt)
     return c.json({
       success: true,
       healthy: rotation.healthy && heavy.healthy,
       problems: [...rotation.problems, ...heavy.problems],
       stateUpdatedAt: rotation.stateUpdatedAt,
       stale: rotation.stale,
+      pending: rotation.pending || heavy.pending,
       steps: [...rotation.steps, ...heavy.steps],
       heavy: { stateUpdatedAt: heavy.stateUpdatedAt, stale: heavy.stale },
     })
