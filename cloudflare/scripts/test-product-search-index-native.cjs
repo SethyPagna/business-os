@@ -167,19 +167,30 @@ const rankParams = (result, limit = 1500) => {
   await check('depth and plan: 1,500 ranked ids parse at depth 100; the paged statements read products by primary key', async () => {
     const many = Array.from({ length: 1500 }, (_, i) => rows[i % rows.length].id + (i >= rows.length ? 100000 : 0))
     const statements = []
+    // 1,500 ranked ids take the keyed page fetch (seekPage): ONE statement through prepare().all(), not the old
+    // count + page batch. Shorter ranked lists keep the batch (see SEEK_PAGE_MIN_RANKED_IDS), so both are recorded.
     const rawBatch = h.raw.batch.bind(h.raw)
+    const rawPrepare = h.raw.prepare.bind(h.raw)
     h.raw.batch = (items) => { for (const item of items) statements.push(item); return rawBatch(items) }
+    h.raw.prepare = (sql) => {
+      const stmt = rawPrepare(sql)
+      const all = stmt.all.bind(stmt)
+      stmt.all = (params) => { statements.push({ sql, params: params ?? {} }); return all(params) }
+      return stmt
+    }
     let res
     try {
       res = await h.request('GET', `/search?rankIds=${many.join(',')}&rankTiers=${'3'.repeat(1500)}&pageSize=20`)
     } finally {
       h.raw.batch = rawBatch
+      h.raw.prepare = rawPrepare
     }
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.ok(res.json.total > 0)
     const paged = statements.filter((item) => /rankIdList/.test(item.sql))
-    assert.equal(paged.length, 2, 'count + page statements')
-    assert.ok(/rankCsv/.test(paged[1].sql) && !/rankCsv/.test(paged[0].sql), 'only the page statement computes the rank')
+    assert.equal(paged.length, 1, 'one statement ranks the families, counts them and fetches the page')
+    assert.ok(/page_candidates/.test(paged[0].sql) && /COUNT\(\*\) OVER \(\)/.test(paged[0].sql), 'keyed page fetch with the count riding along')
+    assert.ok(/rankCsv/.test(paged[0].sql), 'the page statement computes the rank')
     for (const item of paged) {
       const used = {}
       for (const match of item.sql.matchAll(/@(\w+)/g)) used[match[1]] = item.params[match[1]] ?? null
