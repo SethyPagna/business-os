@@ -429,6 +429,41 @@ export function getPossiblySameProducts(options: { fresh?: boolean } = {}): Prom
   )
 }
 
+// Conflicts' other two sections (cloudflare/src/lib/productDataGaps.ts): products whose cost was never recorded and
+// products with no barcode. Always read fresh: the list shrinks the moment a row is fixed.
+export type ProductDataGapKind = 'unknown_cost' | 'empty_barcode'
+export type ProductDataGapRow = {
+  id: number
+  name: string | null
+  barcode: string | null
+  sku: string | null
+  brand: string | null
+  category: string | null
+  stock_quantity: number
+  image_path: string | null
+}
+export type ProductDataGapPage = { items: ProductDataGapRow[]; has_more: boolean; next_after: number | null }
+export type ProductDataGapCounts = Record<ProductDataGapKind, number>
+
+export function getProductDataGaps(kind: ProductDataGapKind, after: number | null): Promise<ProductDataGapPage> {
+  const query = `kind=${kind}${after ? `&after=${after}` : ''}`
+  return route(
+    `products:dataGaps:${query}`,
+    (signal?: AbortSignal) => apiFetch('GET', `/api/products/data-gaps?${query}`, undefined, undefined, signal ? { signal } : undefined),
+    null,
+    { raceLocalFallback: false, bypassCache: true },
+  ) as Promise<ProductDataGapPage>
+}
+
+export function getProductDataGapCounts(): Promise<ProductDataGapCounts> {
+  return route(
+    'products:dataGapCounts',
+    (signal?: AbortSignal) => apiFetch('GET', '/api/products/data-gaps/counts', undefined, undefined, signal ? { signal } : undefined),
+    null,
+    { raceLocalFallback: false, bypassCache: true },
+  ).then((payload) => (payload as { counts: ProductDataGapCounts }).counts)
+}
+
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',
