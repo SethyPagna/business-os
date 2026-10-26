@@ -26,7 +26,7 @@ function load(relative, dependencies = {}) {
 }
 
 const permissions = load('lib/permissions.ts')
-const { canReadSettingKey, settingsReadableBy } = load('lib/settingsVisibility.ts', { './permissions': permissions })
+const { canReadSettingKey, settingsReadableBy } = load('lib/settingsVisibility.ts', { './permissions': permissions, './settingsSensitive': load('lib/settingsSensitive.ts') })
 
 const account = (granted, roleCode = 'staff') => ({ username: 'someone', role_code: roleCode, permissions: '{}', role_permissions: JSON.stringify(granted) })
 const nobody = account({})

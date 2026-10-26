@@ -26,8 +26,24 @@ const SENSITIVE_KEYS = new Set([
   'pos_address_presets_v1',
 ])
 
+// System-owned rows (6.0.993): written and read only by the Worker's own cron
+// code, never by a person. They hold the rotating cron's cursor and per-step
+// error text (lib/cronRotation.ts) and the retention sweeps' last-run stamps
+// (audit_log_retention_last_run, import_retention_last_run,
+// ephemeral_retention_last_run[:group]). No screen reads them (cron health has
+// its own Settings-gated endpoint, /api/runtime/cron-health, which reads the
+// rows directly), so they are withheld from every settings map for everyone and
+// POST /api/settings refuses them for everyone, administrators included.
+const SYSTEM_OWNED_KEYS = new Set(['cron_rotation_state', 'cron_heavy_state'])
+
+export function isSystemOwnedSettingKey(key: string): boolean {
+  const normalized = String(key || '').trim().toLowerCase()
+  return SYSTEM_OWNED_KEYS.has(normalized) || /_last_run(:|$)/.test(normalized)
+}
+
 export function isSensitiveSettingKey(key: string): boolean {
   const normalized = String(key || '').toLowerCase()
+  if (isSystemOwnedSettingKey(normalized)) return true
   if (SENSITIVE_KEYS.has(normalized)) return true
   return SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
 }

@@ -44,7 +44,7 @@ function load(relative, dependencies = {}) {
 }
 
 const settingsSensitive = load('lib/settingsSensitive.ts')
-const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts') })
+const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts'), './settingsSensitive': settingsSensitive })
 const SETTINGS_ROWS = [
   { key: 'business_name', value: 'Leang', updated_at: '2026-09-01 00:00:00' },
   { key: 'google_drive_refresh_token', value: 'secret-token', updated_at: '2026-09-02 00:00:00' },

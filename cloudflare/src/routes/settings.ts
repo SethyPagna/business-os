@@ -7,7 +7,7 @@ import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
+import { stripSensitiveSettings, isSensitiveSettingKey, isSystemOwnedSettingKey } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
@@ -1057,6 +1057,17 @@ app.post('/', async (c) => {
       error: `"${dedicatedKey}" must be changed through its dedicated endpoint.`,
       code: 'dedicated_setting_endpoint_required',
     }, 400)
+  }
+
+  // System-owned rows (cron state, *_last_run stamps) are written only by the
+  // Worker's cron code, directly. GET never returns them, so a genuine form
+  // cannot carry one back: refuse for everyone, administrators included.
+  const systemOwnedKey = attemptedKeys.find(isSystemOwnedSettingKey)
+  if (systemOwnedKey) {
+    return c.json({
+      error: 'That setting is maintained by the system and cannot be changed.',
+      code: 'system_owned_setting',
+    }, 403)
   }
 
   // No shortcuts on writes: this is an all-or-nothing check across every

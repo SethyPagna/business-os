@@ -102,7 +102,9 @@ app.get('/cron-health', async (c) => {
       heavy: { stateUpdatedAt: heavy.stateUpdatedAt, stale: heavy.stale },
     })
   } catch (error) {
-    return c.json({ success: false, error: (error as Error)?.message || 'Failed to read cron health' }, 500)
+    // The detail stays in the Worker log; the response carries nothing from the database or runtime.
+    console.error('[runtime/cron-health] failed:', (error as Error)?.message || error)
+    return c.json({ success: false, error: 'Failed to read cron health' }, 500)
   }
 })
 
