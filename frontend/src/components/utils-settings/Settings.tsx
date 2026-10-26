@@ -535,7 +535,7 @@ function SettingsSection({
 
 export default function Settings() {
   const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone, getPermissionTier } = useApp()
-  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const { askToConfirm, askForPassword, confirmDialog } = useConfirmDialog(t)
   // Part 557: 'settings' is a view-tier section. A View-only grant can open
   // this page (reading settings is open to any signed-in user) but cannot
   // save -- the Save button is disabled and the backend refuses the POST
@@ -898,7 +898,8 @@ export default function Settings() {
       const linked = Number(impact.linked_records || 0)
       const isCaseOnlyRename = to.toLocaleLowerCase() === from.toLocaleLowerCase()
       const scope: PaymentMethodRenameScope = isCaseOnlyRename || linked > 0 ? 'linked' : 'settings_only'
-      if (scope === 'linked' && !(await askToConfirm({
+      // Linked scope rewrites past sales, so the same review dialog also asks for the current password (the Worker enforces it).
+      const currentPassword = scope === 'linked' ? await askForPassword({
         title: t('rename_payment_method') || 'Rename payment method',
         message: impact.target_exists && !isCaseOnlyRename
           ? (t('payment_method_merge_note') || '"{to}" already exists, so the configured choices will merge.').replace('{to}', to)
@@ -910,16 +911,21 @@ export default function Settings() {
         ],
         note: t('payment_method_audit_unchanged') || 'Historical audit records stay unchanged.',
         confirmLabel: t('rename') || 'Rename',
-      }))) return
+      }) : ''
+      if (scope === 'linked' && !currentPassword) return
       const expectedUpdatedAt = typeof impact.settings_updated_at === 'string' && impact.settings_updated_at.trim()
         ? impact.settings_updated_at
         : undefined
-      const result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt })
+      const result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt, ...(currentPassword ? { currentPassword } : {}) })
       setPmList(normalizePaymentMethods(result.methods))
       await loadSettings({ force: true })
       notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to rename payment method', 'error')
+      // A coded step-up refusal has a same-named key in both language packs.
+      const code = (error as { code?: unknown } | null)?.code
+      const stepUpCodes = ['current_password_required', 'incorrect_password', 'current_password_rate_limited']
+      const translated = typeof code === 'string' && stepUpCodes.includes(code) ? t(code) : ''
+      notify(translated && translated !== code ? translated : error instanceof Error ? error.message : 'Failed to rename payment method', 'error')
     }
   }
 
