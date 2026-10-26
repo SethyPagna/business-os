@@ -128,6 +128,18 @@ assert.equal(plan.paymentCurrency, 'MIXED')
 assert.equal(plan.changeUsd, 0.23)
 assert.equal(plan.changeKhr, 938)
 console.log('PASS canonical configured methods, repeated rows, native 4dp USD + whole KHR and derived totals')
+// Slice S4: the payment event of a settle is built from the rows the request ADDS. The repeated deposit row is not one
+// of them, even though a second identical-method row is (red: every submitted row, which would count the deposit twice).
+assert.deepEqual(plan.addedDetails, [
+  { method: 'Cash', amount_usd: 1, amount_khr: 0 },
+  { method: 'ABA Bank', amount_usd: 0, amount_khr: 12600 },
+])
+// An instalment (requireCoverage: false) plans a short tender; the default still refuses it.
+const instalment = { configuredMethodsRaw: '["Cash"]', paymentDetailsRaw: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }],
+  existingPaidUsd: 0, existingPaidKhr: 0, totalUsd: 5, exchangeRate: 4000 }
+assert.throws(() => planSaleSettlement(instalment), error => error.code === 'insufficient_payment')
+assert.equal(planSaleSettlement({ ...instalment, requireCoverage: false }).amountPaidUsd, 1)
+console.log('PASS addedDetails excludes the repeated recorded rows; requireCoverage:false plans an instalment')
 
 const legacyKhr = planSaleSettlement({
   configuredMethodsRaw: '["Cash"]',

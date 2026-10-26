@@ -1,0 +1,413 @@
+'use strict'
+// Sale payment WRITERS (lane 6.0.982, slice S4 of DESIGN-SALE-ADDITIONS-PAYMENTS), against the whole Worker on
+// workerd + D1 with every migration (harness/al_money_native.cjs: real src/index.ts, real login, statements
+// counted per request). The shift figures are read by the REAL lib/shiftReconciliation.ts over the same D1.
+//
+// What each block proves, and the plausible wrong implementation it is red against:
+//   A. checkout writes ONE checkout event that copies the sale's tender and moves it to payments_version 1
+//      (red: no event, or an event at a different time/branch than the v0 reading of the sale).
+//   B. settling a v0 Not Paid sale later writes an opening event at its created_at (canonical, though the stored
+//      created_at is 'T...Z') and a collect event NOW: the old shift keeps the deposit, the later shift gets the
+//      money (red: the v0 rule, which moves the whole tender into the old shift; or an opening that copies
+//      created_at raw).
+//   C. instalments stay Not Paid with the Part paid reading until covered, then Completed (red: status left alone).
+//   D. more than is owed is refused unless the change is stated and reconciles (red: any tender accepted).
+//   E. a retry with the same client_request_id answers the first result and writes nothing (red: a second event).
+//   F. undo appends an out that reverses the collect, redo an in; undoing an older payment under a newer one is
+//      refused (red: undo restores the columns only, and the health check goes red).
+//   G. payment_events_mismatch of ops/queries/health-sale-money.sql stays 0, with a positive control.
+//   H. an account without sales:status Full is refused on both writers.
+//   I. a settle and an instalment racing on one sale never both land on the same revision.
+//   J. a payment correction writes its pair at the corrected payment's own time; undo answers both.
+//   K. a v0 sale whose created_at cannot be read still settles (stays version 0, no events).
+//
+// Mutation controls (each must turn this file red; run with PAY_MUTATION=<name>):
+//   collect_at_creation  the collect event is dated at the sale's creation (the v0 rule)
+//   undo_without_event   the undo restores the columns and writes no reversal event
+//   overpay_accepted     the instalment skips the "more than is owed" refusal
+//   no_revision_guard    the instalment batch does not pin the revision it read (I2 must go red)
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { build } = require('esbuild')
+const H = require('./harness/al_money_native.cjs')
+
+const root = path.resolve(__dirname, '..')
+const MUTATIONS = {
+  collect_at_creation: [{ name: 'collect_at_creation', file: 'src/lib/salePaymentWriters.ts',
+    from: 'receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,', to: 'receivedAt: anchor ? anchor.received_at : (input as any).saleCreatedAt ?? \'2026-08-20 03:00:00\',' }],
+  undo_without_event: [{ name: 'undo_without_event', file: 'src/lib/saleSettlementAction.ts',
+    from: '...replayEvents.map((event) => paymentEventInsertStatement(event)),', to: '' }],
+  no_revision_guard: [{ name: 'no_revision_guard', file: 'src/routes/sales.ts',
+    from: '    saleRevisionGuard(id, Number(sale.write_revision)),\n    ...openingStatements,', to: '    ...openingStatements,' }],
+  overpay_accepted: [{ name: 'overpay_accepted', file: 'src/routes/sales.ts',
+    from: "if (!statedChange && error.code === 'invalid_actual_change_total') {", to: "if (false) {" }],
+}
+const mutation = process.env.PAY_MUTATION || ''
+if (mutation && !MUTATIONS[mutation]) throw new Error(`unknown PAY_MUTATION ${mutation}`)
+
+async function loadShiftReader() {
+  const out = await build({ entryPoints: [path.join(root, 'src/lib/shiftReconciliation.ts')], bundle: true, write: false,
+    platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'silent' })
+  const m = { exports: {} }
+  new Function('require', 'module', 'exports', out.outputFiles[0].text)(require, m, m.exports)
+  return m.exports
+}
+
+function healthSql() {
+  const text = fs.readFileSync(path.join(root, '..', 'ops', 'queries', 'health-sale-money.sql'), 'utf8')
+  return text.split(/\r?\n/).filter((line) => !line.trim().startsWith('--')).join('\n')
+}
+
+const canonical = (value) => new Date(value).toISOString().slice(0, 19).replace('T', ' ')
+
+async function main() {
+  const h = await H.startWorker({ patches: mutation ? MUTATIONS[mutation] : [] })
+  const r = H.recorder(mutation ? `PAY [mutation ${mutation}]` : 'PAY')
+  const shiftReader = await loadShiftReader()
+  const env = { DB: h.db }
+  const cashOptions = { kinds: {}, configuredMethods: ['Cash', 'ABA'] }
+  // An open shift reads up to now at whole-second precision; read 5 s ahead so a payment taken this second is in.
+  const shiftCash = async (openedAt, closedAt) => {
+    const cash = await shiftReader.shiftCashSales(env, { scope_mode: 'shop_wide', user_id: 901, branch_id: 1, opened_at: openedAt, closed_at: closedAt,
+      cancelled_at: null, opening_float_usd: 0, opening_float_khr: 0 }, Date.now() + 5000, cashOptions)
+    return { usd: cash.usd, khr: cash.khr, digital: cash.digital }
+  }
+  const events = (saleId) => h.all('SELECT * FROM sale_payment_events WHERE sale_id=? ORDER BY id', saleId)
+  const sale = (saleId) => h.one('SELECT id,sale_status,payments_version,amount_paid_usd,amount_paid_khr,payment_method,payment_details,created_at,change_usd,change_khr,change_is_actual FROM sales WHERE id=?', saleId)
+  const revision = async (saleId) => Number((await h.one('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS r', saleId)).r)
+  const health = async () => (await h.db.prepare(healthSql()).all()).results[0]
+  const net = (rows) => rows.reduce((sum, row) => ({ usd: sum.usd + (row.direction === 'out' ? -1 : 1) * row.amount_paid_usd,
+    khr: sum.khr + (row.direction === 'out' ? -1 : 1) * row.amount_paid_khr }), { usd: 0, khr: 0 })
+  let requestCounter = 0
+  const pay = (saleId, details, extra = {}, label) => h.call('POST', `/api/sales/${saleId}/payments`, { client_request_id: `pay-${++requestCounter}`,
+    expected_exchange_rate: extra.rate ?? 4000, payment_details: details, ...extra.body }, label || `pay ${saleId}`)
+  const settle = (saleId, details, extra = {}, label) => h.call('PATCH', `/api/sales/${saleId}/status`, { sale_status: 'completed',
+    client_request_id: `settle-${++requestCounter}`, expected_exchange_rate: 4000, payment_details: details, ...extra }, label || `settle ${saleId}`)
+
+  try {
+    for (const [id, name] of [[401, 'PAY Balm'], [402, 'PAY Serum'], [403, 'PAY Mask'], [404, 'PAY Oil'], [405, 'PAY Toner']]) {
+      await H.seedProduct(h, id, name, 2, 200)
+    }
+
+    // ---- A. checkout ----------------------------------------------------------------------------------------
+    const paidSale = await H.createSale(h, { key: 'pay-a-paid', lines: [{ productId: 401, quantity: 5 }],
+      paymentDetails: [{ method: 'Cash', amount_usd: 6, amount_khr: 16000 }], label: 'checkout $10 paid $6 + 16000 riel' })
+    assert.equal(paidSale.status, 200, JSON.stringify(paidSale.body).slice(0, 300))
+    const paidId = Number(paidSale.body.id)
+    const paidRow = await sale(paidId)
+    const paidEvents = await events(paidId)
+    r.check(`A1 checkout writes one checkout event copying the tender, version 1 (${JSON.stringify(paidEvents.map((e) => [e.origin, e.amount_paid_usd, e.amount_paid_khr, e.received_at]))})`, () => {
+      assert.equal(paidRow.payments_version, 1)
+      assert.equal(paidEvents.length, 1)
+      const [event] = paidEvents
+      assert.deepEqual([event.event_id, event.origin, event.direction, event.drawer_effect], [`checkout:${paidId}`, 'checkout', 'in', 1])
+      assert.deepEqual([event.amount_paid_usd, event.amount_paid_khr, event.payment_details, event.payment_method],
+        [paidRow.amount_paid_usd, paidRow.amount_paid_khr, paidRow.payment_details, paidRow.payment_method])
+      assert.equal(event.received_at, canonical(`${String(paidRow.created_at).replace(' ', 'T')}Z`))
+      assert.deepEqual([event.branch_id, event.cashier_id], [1, 901])
+    })
+    const unpaid = await H.createSale(h, { key: 'pay-a-unpaid', status: 'awaiting_payment', lines: [{ productId: 402, quantity: 5 }], label: 'checkout Not Paid $10, nothing paid' })
+    const unpaidId = Number(unpaid.body.id)
+    const unpaidRow = await sale(unpaidId)
+    const unpaidEvents = await events(unpaidId)
+    r.check('A2 a Not Paid checkout with nothing paid is version 1 with no event', () => {
+      assert.equal(unpaid.status, 200, JSON.stringify(unpaid.body).slice(0, 300))
+      assert.equal(unpaidRow.payments_version, 1)
+      assert.equal(unpaidEvents.length, 0)
+    })
+
+    // ---- C. instalments on the version 1 sale (owes $10) ---------------------------------------------------
+    const p1 = await pay(unpaidId, [{ method: 'Cash', amount_usd: 3, amount_khr: 0 }], {}, 'instalment 1: $3 cash')
+    const afterP1 = await sale(unpaidId)
+    r.check(`C1 a $3 instalment keeps it Not Paid, Part paid, owing $7 (got ${p1.status} ${JSON.stringify(p1.body).slice(0, 200)})`, () => {
+      assert.equal(p1.status, 200)
+      assert.deepEqual([afterP1.sale_status, afterP1.amount_paid_usd, p1.body.owed_usd, p1.body.part_paid, p1.body.covered], ['awaiting_payment', 3, 7, true, false])
+    })
+    const p2 = await pay(unpaidId, [{ method: 'ABA', amount_usd: 4, amount_khr: 0 }], {}, 'instalment 2: $4 ABA')
+    r.check('C2 a $4 instalment: still Not Paid, owing $3', () => {
+      assert.equal(p2.status, 200, JSON.stringify(p2.body).slice(0, 200))
+      assert.deepEqual([p2.body.sale_status, p2.body.owed_usd], ['awaiting_payment', 3])
+    })
+
+    // ---- D. over-payment ------------------------------------------------------------------------------------
+    const revBefore = await revision(unpaidId)
+    const eventsBefore = (await events(unpaidId)).length
+    const over = await pay(unpaidId, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], {}, 'over-payment: $5 against $3 owed, no change stated')
+    r.check(`D1 $5 against $3 owed with no change stated is refused and writes nothing (got ${over.status} ${over.body.code})`, () => {
+      assert.equal(over.status, 400)
+      assert.equal(over.body.code, 'payment_exceeds_owed')
+    })
+    const badChange = await pay(unpaidId, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], { body: { change_is_actual: true, change_usd: 1, change_khr: 0 } }, 'over-payment with wrong change')
+    r.check(`D2 stated change that does not reconcile is refused (got ${badChange.status} ${badChange.body.code})`, () => {
+      assert.equal(badChange.status, 400)
+      assert.equal(badChange.body.code, 'invalid_actual_change_total')
+    })
+    const revAfterRefusals = await revision(unpaidId)
+    const eventsAfterRefusals = (await events(unpaidId)).length
+    r.check('D3 the refusals wrote nothing (same revision, same events)', () => {
+      assert.equal(revAfterRefusals, revBefore)
+      assert.equal(eventsAfterRefusals, eventsBefore)
+    })
+    const p3Body = { client_request_id: 'pay-final-with-change', expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+      change_is_actual: true, change_usd: 2, change_khr: 0 }
+    const p3 = await h.call('POST', `/api/sales/${unpaidId}/payments`, p3Body, 'instalment 3: $5 cash, $2 change -> covered')
+    const afterP3 = await sale(unpaidId)
+    const p3Events = await events(unpaidId)
+    r.check(`C3 the covering instalment completes the sale; its event carries the stated change (got ${p3.status} ${JSON.stringify(p3.body).slice(0, 160)})`, () => {
+      assert.equal(p3.status, 200)
+      assert.deepEqual([afterP3.sale_status, p3.body.covered, p3.body.owed_usd, p3.body.part_paid], ['completed', true, 0, false])
+      assert.equal(afterP3.amount_paid_usd, 12)
+      const last = p3Events[p3Events.length - 1]
+      assert.deepEqual([last.origin, last.amount_paid_usd, last.change_usd, last.change_is_actual], ['collect', 5, 2, 1])
+      assert.deepEqual(JSON.parse(afterP3.payment_details), [{ method: 'Cash', amount_usd: 8, amount_khr: 0 }, { method: 'ABA', amount_usd: 4, amount_khr: 0 }])
+    })
+
+    // ---- E. idempotent retry --------------------------------------------------------------------------------
+    const retry = await h.call('POST', `/api/sales/${unpaidId}/payments`, p3Body, 'retry instalment 3')
+    const retryEvents = await events(unpaidId)
+    const reused = await h.call('POST', `/api/sales/${unpaidId}/payments`, { ...p3Body, payment_details: [{ method: 'Cash', amount_usd: 4, amount_khr: 0 }] }, 'reuse the id with other data')
+    r.check(`E1 the retry answers the first result and writes nothing; reuse with other data is a conflict (${retry.status}, ${reused.status} ${reused.body.code})`, () => {
+      assert.equal(retry.status, 200)
+      assert.equal(retry.body.operationId, p3.body.operationId)
+      assert.equal(retryEvents.length, p3Events.length)
+      assert.equal(reused.status, 409)
+      assert.equal(reused.body.code, 'idempotency_conflict')
+    })
+
+    // ---- F. undo / redo -------------------------------------------------------------------------------------
+    const olderUndo = await H.historyStep(h, Number(p1.body.actionHistoryId), 'undo', 0, 'undo instalment 1 under the later ones')
+    const afterOlderUndo = await events(unpaidId)
+    r.check(`F1 undoing an older payment under newer ones is refused and writes nothing (got ${olderUndo.status})`, () => {
+      assert.equal(olderUndo.status, 409, JSON.stringify(olderUndo.body).slice(0, 200))
+      assert.equal(afterOlderUndo.length, p3Events.length)
+    })
+    const undo3 = await H.historyStep(h, Number(p3.body.actionHistoryId), 'undo', 0, 'undo instalment 3')
+    const afterUndo = await sale(unpaidId)
+    const undoEvents = await events(unpaidId)
+    const undoEvent = undoEvents[undoEvents.length - 1]
+    const collect3 = p3Events[p3Events.length - 1]
+    r.check(`F2 undo appends an out reversing the collect, received now; the sale owes $3 again (got ${undo3.status}; ${JSON.stringify(undoEvent).slice(0, 220)})`, () => {
+      assert.equal(undo3.status, 200, JSON.stringify(undo3.body).slice(0, 200))
+      assert.equal(undoEvents.length, p3Events.length + 1)
+      assert.deepEqual([undoEvent.direction, undoEvent.origin, undoEvent.reverses_event_id, undoEvent.amount_paid_usd, undoEvent.change_usd],
+        ['out', 'undo', collect3.event_id, 5, 2])
+      assert.ok(Math.abs(Date.parse(`${undoEvent.received_at.replace(' ', 'T')}Z`) - Date.now()) < 120000, 'received now')
+      assert.deepEqual([afterUndo.sale_status, afterUndo.amount_paid_usd], ['awaiting_payment', 7])
+      assert.deepEqual(net(undoEvents), { usd: afterUndo.amount_paid_usd, khr: afterUndo.amount_paid_khr })
+    })
+    const redo3 = await H.historyStep(h, Number(p3.body.actionHistoryId), 'redo', 1, 'redo instalment 3')
+    const afterRedo = await sale(unpaidId)
+    const redoEvents = await events(unpaidId)
+    const redoEvent = redoEvents[redoEvents.length - 1]
+    r.check(`F3 redo appends an in reversing the undo; Completed again (got ${redo3.status})`, () => {
+      assert.equal(redo3.status, 200, JSON.stringify(redo3.body).slice(0, 200))
+      assert.deepEqual([redoEvent.direction, redoEvent.origin, redoEvent.reverses_event_id, redoEvent.amount_paid_usd], ['in', 'redo', undoEvent.event_id, 5])
+      assert.deepEqual([afterRedo.sale_status, afterRedo.amount_paid_usd], ['completed', 12])
+      assert.deepEqual(net(redoEvents), { usd: 12, khr: 0 })
+    })
+
+    // ---- B. v0 sale settled in a later shift ----------------------------------------------------------------
+    const legacy = await H.importSale(h, 1, 'awaiting_payment', [{ productId: 403, name: 'PAY Mask', quantity: 5, price: 2 }], { paidUsd: 4, createdAt: '2026-08-20T03:00:00.000Z' })
+    const legacyId = Number(legacy.sale.id)
+    const legacyBefore = await sale(legacyId)
+    const oldShiftBefore = await shiftCash('2026-08-20 02:00:00', '2026-08-20 04:00:00')
+    const nowShiftOpen = canonical(Date.now() - 3600 * 1000)
+    const nowShiftBefore = await shiftCash(nowShiftOpen, null)
+    const settled = await settle(legacyId, [{ method: 'Cash', amount_usd: 4, amount_khr: 0 }, { method: 'Cash', amount_usd: 6, amount_khr: 0 }], {}, 'settle the v0 sale: $6 more')
+    const legacyAfter = await sale(legacyId)
+    const legacyEvents = await events(legacyId)
+    const oldShiftAfter = await shiftCash('2026-08-20 02:00:00', '2026-08-20 04:00:00')
+    const nowShiftAfter = await shiftCash(nowShiftOpen, null)
+    r.check(`B1 fixture: an imported v0 Not Paid sale, created_at stored non-canonical (${legacyBefore.created_at}), $4 deposit`, () => {
+      assert.equal(legacyBefore.payments_version, 0)
+      assert.notEqual(legacyBefore.created_at, '2026-08-20 03:00:00')
+      assert.equal(legacyBefore.amount_paid_usd, 4)
+    })
+    r.check(`B2 the settle writes an opening at the canonical created_at and a collect now (got ${settled.status}; ${JSON.stringify(legacyEvents.map((e) => [e.origin, e.amount_paid_usd, e.received_at, e.drawer_effect]))})`, () => {
+      assert.equal(settled.status, 200, JSON.stringify(settled.body).slice(0, 300))
+      assert.equal(legacyAfter.payments_version, 1)
+      assert.deepEqual(legacyEvents.map((e) => [e.event_id === `opening:${legacyId}` ? 'opening-id' : e.event_id.split(':').slice(1).join(':'), e.origin, e.amount_paid_usd]),
+        [['opening-id', 'opening', 4], ['0:in', 'collect', 6]])
+      assert.equal(legacyEvents[0].received_at, '2026-08-20 03:00:00')
+      assert.deepEqual([legacyEvents[1].branch_id, legacyEvents[1].cashier_id, legacyEvents[1].cashier_name], [1, 901, 'al_admin'])
+    })
+    r.check(`B3 the old shift keeps its $4, the later shift gets the $6 (old ${JSON.stringify(oldShiftBefore)} -> ${JSON.stringify(oldShiftAfter)}; now ${JSON.stringify(nowShiftBefore)} -> ${JSON.stringify(nowShiftAfter)})`, () => {
+      assert.equal(oldShiftBefore.usd, 4)
+      assert.equal(oldShiftAfter.usd, 4, 'the v0 rule would show 10 here')
+      assert.equal(Number((nowShiftAfter.usd - nowShiftBefore.usd).toFixed(2)), 6)
+    })
+
+    // ---- K. an unreadable created_at still settles, on version 0 --------------------------------------------
+    const broken = await H.importSale(h, 2, 'awaiting_payment', [{ productId: 404, name: 'PAY Oil', quantity: 5, price: 2 }], { paidUsd: 0, createdAt: '2026-08-21T03:00:00.000Z' })
+    const brokenId = Number(broken.sale.id)
+    await h.db.prepare("UPDATE sales SET created_at='not a time', amount_paid_usd=1, payment_method='Cash', payment_details='[{\"method\":\"Cash\",\"amount_usd\":1,\"amount_khr\":0}]' WHERE id=?").bind(brokenId).run()
+    const brokenSettle = await settle(brokenId, [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }, { method: 'Cash', amount_usd: 9, amount_khr: 0 }], {}, 'settle a sale whose created_at cannot be read')
+    const brokenAfter = await sale(brokenId)
+    const brokenEvents = await events(brokenId)
+    r.check(`K1 the payment is not failed: it settles on version 0 with no events (got ${brokenSettle.status} ${brokenSettle.body.code || ''})`, () => {
+      assert.equal(brokenSettle.status, 200, JSON.stringify(brokenSettle.body).slice(0, 200))
+      assert.deepEqual([brokenAfter.sale_status, brokenAfter.payments_version, brokenSettle.body.payments_version], ['completed', 0, 0])
+      assert.equal(brokenEvents.length, 0)
+    })
+
+    // ---- J. payment correction ------------------------------------------------------------------------------
+    const mistyped = await H.createSale(h, { key: 'pay-j-mistyped', lines: [{ productId: 405, quantity: 5 }], paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'checkout $10 cash (really ABA)' })
+    const mistypedId = Number(mistyped.body.id)
+    const checkoutEvent = (await events(mistypedId))[0]
+    const reopen = await h.call('PATCH', `/api/sales/${mistypedId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-j-reopen' }, 'reopen for payment correction')
+    const corrected = await settle(mistypedId, [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the tender to ABA')
+    const correctionEvents = await events(mistypedId)
+    r.check(`J1 the correction pair is dated at the corrected checkout and nets to the new tender (reopen ${reopen.status}, correct ${corrected.status}; ${JSON.stringify(correctionEvents.map((e) => [e.direction, e.origin, e.payment_method, e.received_at]))})`, () => {
+      assert.equal(reopen.status, 200, JSON.stringify(reopen.body).slice(0, 200))
+      assert.equal(corrected.status, 200, JSON.stringify(corrected.body).slice(0, 200))
+      assert.deepEqual(correctionEvents.slice(1).map((e) => [e.direction, e.origin, e.payment_method, e.received_at, e.reverses_event_id]),
+        [['out', 'correction', 'Cash', checkoutEvent.received_at, null], ['in', 'correction', 'ABA', checkoutEvent.received_at, null]])
+    })
+    const correctionUndo = await H.historyStep(h, Number(corrected.body.actionHistoryId), 'undo', 0, 'undo the correction')
+    const correctionUndone = await events(mistypedId)
+    const mistypedAfterUndo = await sale(mistypedId)
+    r.check(`J2 undoing the correction answers both events at the same date (got ${correctionUndo.status})`, () => {
+      assert.equal(correctionUndo.status, 200, JSON.stringify(correctionUndo.body).slice(0, 200))
+      assert.deepEqual(correctionUndone.slice(3).map((e) => [e.direction, e.origin, e.received_at]).sort(), [['in', 'correction', checkoutEvent.received_at], ['out', 'correction', checkoutEvent.received_at]])
+      assert.equal(mistypedAfterUndo.payment_method, 'Cash')
+      assert.deepEqual(net(correctionUndone), { usd: 10, khr: 0 })
+    })
+
+    // A deposit at checkout, then the settle keyed wrong: the correction lands at the settle, the deposit stays put.
+    const twoPayments = await H.createSale(h, { key: 'pay-j-two', status: 'awaiting_payment', lines: [{ productId: 405, quantity: 5 }],
+      paymentDetails: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], label: 'checkout Not Paid $10 with a $2 deposit' })
+    const twoId = Number(twoPayments.body.id)
+    const twoSettle = await settle(twoId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'Cash', amount_usd: 8, amount_khr: 0 }], {}, 'settle $8 keyed as cash')
+    const twoBefore = await events(twoId)
+    const twoReopen = await h.call('PATCH', `/api/sales/${twoId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-j-two-reopen' }, 'reopen the two-payment sale')
+    const twoCorrect = await settle(twoId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'ABA', amount_usd: 8, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the $8 to ABA')
+    const twoAfter = await events(twoId)
+    r.check(`J3 with a deposit and a settle the correction is dated at the settle and replaces the whole tender (${twoSettle.status}/${twoReopen.status}/${twoCorrect.status}; ${JSON.stringify(twoAfter.map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]))})`, () => {
+      assert.equal(twoCorrect.status, 200, JSON.stringify(twoCorrect.body).slice(0, 200))
+      const collect = twoBefore[1]
+      assert.equal(collect.origin, 'collect')
+      assert.deepEqual(twoAfter.slice(2).map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]),
+        [['out', 'correction', 10, collect.received_at], ['in', 'correction', 10, collect.received_at]])
+      assert.deepEqual(net(twoAfter), { usd: 10, khr: 0 })
+    })
+
+    // ---- H. permissions -------------------------------------------------------------------------------------
+    const viewer = await h.addEmployee(960, 'pay_viewer', { sales: true, 'sales:status': false })
+    const deniedPay = await h.call('POST', `/api/sales/${legacyId}/payments`, { client_request_id: 'pay-h-1', expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }] }, 'pay without sales:status', { cookie: viewer })
+    const deniedSettle = await h.call('PATCH', `/api/sales/${legacyId}/status`, { sale_status: 'completed', client_request_id: 'pay-h-2', expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }] }, 'settle without sales:status', { cookie: viewer })
+    const owner = await h.addEmployee(961, 'pay_status', { sales: true })
+    const ownNotPaid = await H.createSale(h, { key: 'pay-h-sale', status: 'awaiting_payment', lines: [{ productId: 402, quantity: 1 }], label: 'Not Paid $2 for the permitted employee' })
+    const allowedPay = await h.call('POST', `/api/sales/${ownNotPaid.body.id}/payments`, { client_request_id: 'pay-h-3', expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }] }, 'pay with sales:status Full', { cookie: owner })
+    const [permittedEvent] = await events(Number(ownNotPaid.body.id))
+    r.check(`H1 without sales:status both writers refuse (pay ${deniedPay.status}, settle ${deniedSettle.status}); with it the payment lands (${allowedPay.status}) as that cashier`, () => {
+      assert.equal(deniedPay.status, 403)
+      assert.equal(deniedSettle.status, 403)
+      assert.equal(allowedPay.status, 200, JSON.stringify(allowedPay.body).slice(0, 200))
+      assert.equal(permittedEvent.cashier_id, 961)
+    })
+
+    // ---- I. a settle and an instalment sent together (they serialise here; I2 below forces the stale read) ------
+    const raceResults = []
+    for (let n = 0; n < 4; n++) {
+      const race = await H.createSale(h, { key: `pay-i-${n}`, status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], paymentDetails: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], label: `race sale ${n}` })
+      const raceId = Number(race.body.id)
+      const [a, b] = await Promise.all([
+        settle(raceId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'Cash', amount_usd: 8, amount_khr: 0 }], {}, `race ${n}: settle $8`),
+        pay(raceId, [{ method: 'ABA', amount_usd: 3, amount_khr: 0 }], {}, `race ${n}: instalment $3`),
+      ])
+      const row = await sale(raceId)
+      raceResults.push({ raceId, a: a.status, b: b.status, codes: [a.body.code, b.body.code], paid: row.amount_paid_usd, net: net(await events(raceId)) })
+    }
+    r.check(`I1 never both on one revision: money is never counted twice and the events always equal the sale (${JSON.stringify(raceResults)})`, () => {
+      for (const result of raceResults) {
+        // Exactly one lands: after the settle the sale owes nothing (sale_not_owing); after the instalment the settle no longer
+        // repeats every recorded row (partial_payment_reduced); on one revision the guard refuses the loser (write_conflict).
+        assert.equal([result.a, result.b].filter((status) => status === 200).length, 1)
+        assert.ok(result.paid === (result.a === 200 ? 10 : 5), `paid ${result.paid}`)
+        assert.deepEqual(result.net, { usd: result.paid, khr: 0 })
+      }
+    })
+
+    // ---- G. health ----------------------------------------------------------------------------------------
+    const finalHealth = await health()
+    r.check(`G1 payment_events_mismatch stays 0 after every writer above (${finalHealth.payment_events_mismatch})`, () => assert.equal(finalHealth.payment_events_mismatch, 0))
+    await h.db.prepare('UPDATE sales SET amount_paid_usd=amount_paid_usd+1 WHERE id=?').bind(unpaidId).run()
+    const tampered = await health()
+    await h.db.prepare('UPDATE sales SET amount_paid_usd=amount_paid_usd-1 WHERE id=?').bind(unpaidId).run()
+    r.check(`G2 positive control: a sale paid without its event is counted (${tampered.payment_events_mismatch})`, () => assert.equal(tampered.payment_events_mismatch, 1))
+
+    const budget = H.budgetLine(h.metrics.filter((entry) => /instalment|settle|undo|redo|pay /.test(entry.label)))
+    r.check(`budget: the worst payment request fits the Free plan (${budget.label}: ${budget.statements} statements)`, () => assert.ok(budget.statements <= H.FREE_QUERY_LIMIT))
+  } finally {
+    await h.mf.dispose()
+  }
+  await staleReadRace(r)
+  const failed = r.results.filter((result) => !result.ok)
+  console.log(`${failed.length ? 'RED' : 'GREEN'} sale payment writers: ${r.results.length - failed.length}/${r.results.length} checks hold${mutation ? ` (PAY_MUTATION=${mutation}, expected RED)` : ''}`)
+  if (failed.length) process.exitCode = 1
+}
+
+// I2. A deterministic stale read. A second Worker is bundled with a test-only hold: a writer whose request id starts
+// with "hold-" stops after reading the sale until a writer whose id starts with "release-" has COMMITTED (5 s cap).
+// The held writer then commits on the revision it read before the other write, which is exactly a concurrent
+// settle + instalment on one sale. It must be refused (409 write_conflict) and leave nothing of its own.
+const HOLD = "await new Promise<void>((resolve) => { (globalThis as any).__payRelease = resolve; setTimeout(resolve, 5000) })"
+const RELEASE = '(globalThis as any).__payRelease?.()'
+const RACE_HOOKS = [
+  { name: 'hold-payment', file: 'src/routes/sales.ts', from: '  const before = await readSaleSettlementState(db, id)\n',
+    to: `  const before = await readSaleSettlementState(db, id)\n  if (String(requestId).startsWith('hold-')) ${HOLD}\n` },
+  { name: 'release-payment', file: 'src/routes/sales.ts', from: '    response.actionHistoryId = Number(results[historyIndex]?.meta?.last_row_id || 0)\n',
+    to: `    response.actionHistoryId = Number(results[historyIndex]?.meta?.last_row_id || 0)\n    if (String(requestId).startsWith('release-')) ${RELEASE}\n` },
+  { name: 'hold-settle', file: 'src/routes/sales.ts', from: '    const before = await readSaleSettlementState(db, Number(id))\n',
+    to: `    const before = await readSaleSettlementState(db, Number(id))\n    if (String(settlementRequestId || '').startsWith('hold-')) ${HOLD}\n` },
+  { name: 'release-settle', file: 'src/routes/sales.ts', from: '      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)\n',
+    to: `      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)\n      if (String(settlementRequestId || '').startsWith('release-')) ${RELEASE}\n` },
+]
+
+async function staleReadRace(r) {
+  const h = await H.startWorker({ patches: [...RACE_HOOKS, ...(mutation ? MUTATIONS[mutation] : [])] })
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const row = async (id) => ({
+    sale: await h.one('SELECT sale_status,amount_paid_usd,amount_paid_khr FROM sales WHERE id=?', id),
+    events: await h.all('SELECT direction,origin,amount_paid_usd,amount_paid_khr FROM sale_payment_events WHERE sale_id=? ORDER BY id', id),
+  })
+  const payBody = (key) => ({ client_request_id: key, expected_exchange_rate: 4000, payment_details: [{ method: 'ABA', amount_usd: 3, amount_khr: 0 }] })
+  const settleBody = (key) => ({ sale_status: 'completed', client_request_id: key, expected_exchange_rate: 4000,
+    payment_details: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'Cash', amount_usd: 8, amount_khr: 0 }] })
+  try {
+    await H.seedProduct(h, 401, 'PAY Balm', 2, 200)
+    const results = []
+    for (const order of ['payment-held', 'settle-held']) {
+      const created = await H.createSale(h, { key: `race-${order}`, status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }],
+        paymentDetails: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], label: `race sale (${order})` })
+      const id = Number(created.body.id)
+      const heldPayment = order === 'payment-held'
+      const held = heldPayment
+        ? h.call('POST', `/api/sales/${id}/payments`, payBody(`hold-${order}`), 'held instalment')
+        : h.call('PATCH', `/api/sales/${id}/status`, settleBody(`hold-${order}`), 'held settle')
+      await sleep(400)
+      const winner = heldPayment
+        ? await h.call('PATCH', `/api/sales/${id}/status`, settleBody(`release-${order}`), 'settle that commits first')
+        : await h.call('POST', `/api/sales/${id}/payments`, payBody(`release-${order}`), 'instalment that commits first')
+      const loser = await held
+      const state = await row(id)
+      results.push({ order, winner: winner.status, loser: loser.status, code: loser.body.code, state })
+    }
+    r.check(`I2 the writer that read before the other committed is refused and leaves nothing (${JSON.stringify(results)})`, () => {
+      for (const result of results) {
+        assert.equal(result.winner, 200)
+        assert.equal(result.loser, 409)
+        const paid = result.order === 'payment-held' ? 10 : 5
+        assert.equal(result.state.sale.amount_paid_usd, paid, 'the loser did not overwrite the winner')
+        assert.equal(result.state.sale.sale_status, result.order === 'payment-held' ? 'completed' : 'awaiting_payment')
+        const sum = result.state.events.reduce((total, event) => total + (event.direction === 'out' ? -1 : 1) * event.amount_paid_usd, 0)
+        assert.equal(sum, paid)
+      }
+    })
+  } finally {
+    await h.mf.dispose()
+  }
+}
+
+main().catch((error) => { console.error(error); process.exitCode = 1 })

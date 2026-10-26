@@ -5,7 +5,17 @@ import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import type { SettlementPlan } from './paymentSettlement'
 import { normalizeSearchText } from './searchMatch'
-import { actorSnapshot } from './actorSnapshot'
+import { actorId, actorSnapshot } from './actorSnapshot'
+import { readBranchDirectory } from './branchEffect'
+import type { PaymentEventInsert } from './salePayments'
+import {
+  collectingBranchId,
+  LaterPaymentDependsError,
+  PAYMENT_EVENT_SELECT_SQL,
+  paymentEventInsertStatement,
+  settlementReplayEvents,
+  storedPaymentEvents,
+} from './salePaymentWriters'
 import {
   buildSaleRecordEventsInsert,
   assertSaleRecordBatchBounds,
@@ -237,7 +247,9 @@ export function buildSaleSettlementAfterState(
   before: SaleSettlementState,
   sale: Record<string, unknown>,
   target: SaleStoredState,
-  plan: SettlementPlan,
+  plan: Pick<SettlementPlan, 'paymentMethod' | 'paymentDetailsJson' | 'paymentCurrency' | 'amountPaidUsd' | 'amountPaidKhr' | 'changeUsd' | 'changeKhr'>,
+  /** An instalment records the change it states (native, reconciled); settling keeps the computed, unmarked change. */
+  change: { isActual: 0 | 1; exchangeRate: number | null } = { isActual: 0, exchangeRate: null },
 ): SaleSettlementState {
   return {
     ...(before.money_precision_version === undefined ? {} : {
@@ -263,8 +275,8 @@ export function buildSaleSettlementAfterState(
     amount_paid_khr: plan.amountPaidKhr,
     change_usd: plan.changeUsd,
     change_khr: plan.changeKhr,
-    change_is_actual: 0,
-    change_exchange_rate: null,
+    change_is_actual: change.isActual,
+    change_exchange_rate: change.exchangeRate,
     search_normalized: normalizeSearchText([
       sale.receipt_number,
       sale.cashier_name,
@@ -278,8 +290,14 @@ export function buildSaleSettlementAfterState(
 }
 
 // A retired status in an older snapshot is written in the two-status model; status_before_return is never written.
-export function saleSettlementStateStatements(saleId: number, state: SaleSettlementState, stamp: string): Statement[] {
+// options.previous: the state the sale is proven to hold now (the replay's verified current, the apply's `before`).
+// A line whose money is the same there is not rewritten: settling never re-rates a line, so those UPDATEs wrote
+// the values already stored and only cost a D1 statement (and a revision bump) each.
+// options.paymentsVersion1: the write moves the sale to payments_version 1 (an opening event rides in the batch).
+export function saleSettlementStateStatements(saleId: number, state: SaleSettlementState, stamp: string, options: { previous?: SaleSettlementState; paymentsVersion1?: boolean } = {}): Statement[] {
   const { status_before_return: _beforeReturn, lines: _lines, ...columns } = state
+  const previousLines = new Map((options.previous?.lines ?? []).map((line) => [line.id, JSON.stringify(line)]))
+  const changedLines = options.previous ? state.lines.filter((line) => previousLines.get(line.id) !== JSON.stringify(line)) : state.lines
   return [{
     sql: `UPDATE sales SET ${SALE_STATE_SET_SQL},exchange_rate=@exchange_rate,
           subtotal_khr=@subtotal_khr,discount_khr=@discount_khr,tax_khr=@tax_khr,
@@ -288,10 +306,10 @@ export function saleSettlementStateStatements(saleId: number, state: SaleSettlem
           payment_details=@payment_details,payment_currency=@payment_currency,
           amount_paid_usd=@amount_paid_usd,amount_paid_khr=@amount_paid_khr,
           change_usd=@change_usd,change_khr=@change_khr,change_is_actual=@change_is_actual,
-          change_exchange_rate=@change_exchange_rate,search_normalized=@search_normalized,
+          change_exchange_rate=@change_exchange_rate,search_normalized=@search_normalized,${options.paymentsVersion1 ? 'payments_version=1,' : ''}
           updated_at=@stamp WHERE id=@id`,
     params: { id: saleId, stamp, ...columns, ...saleStateParams(saleStoredState(state)) },
-  }, ...state.lines.map((line) => ({
+  }, ...changedLines.map((line) => ({
     sql: `UPDATE sale_items SET applied_price_khr=@applied_price_khr,total_khr=@total_khr,
           product_discount_khr=@product_discount_khr,base_price_khr=@base_price_khr,
           manual_discount_khr=@manual_discount_khr WHERE id=@id AND sale_id=@saleId`,
@@ -372,6 +390,35 @@ export async function replaySaleSettlementAction(
   const nextHistoryStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
   const nextGeneration = Number(generation) + 1
+  // Payment events (0271, slice S4): the replay never edits an event; it appends the reversal of the events this
+  // operation's current generation wrote. One read: the sale's branch and version with every event of the sale.
+  const eventRows = await db.prepare(`
+    SELECT s.branch_id AS sale_branch_id, s.payments_version AS sale_payments_version, ${PAYMENT_EVENT_SELECT_SQL.split(',').map((column) => `e.${column}`).join(',')}
+    FROM sales s LEFT JOIN sale_payment_events e ON e.sale_id=s.id
+    WHERE s.id=@id ORDER BY e.id
+  `).all<Record<string, unknown>>({ id: saleId })
+  const saleEvents = storedPaymentEvents(eventRows)
+  const ownEvents = saleEvents.filter((event) => event.operation_id === String(operation.id))
+  const moneyMoves = Number(before.amount_paid_usd || 0) !== Number(after.amount_paid_usd || 0)
+    || Number(before.amount_paid_khr || 0) !== Number(after.amount_paid_khr || 0)
+  if (!ownEvents.length && Number(eventRows[0]?.sale_payments_version) === 1 && moneyMoves) {
+    // Settled before the sale's payments were recorded as events, and the sale has moved to events since:
+    // replaying the old tender would leave the events and the tender disagreeing.
+    throw new SaleSettlementReplayConflict('This payment was recorded before payment history existed and the sale has been paid into since. Refresh before reversing it.')
+  }
+  let replayEvents: PaymentEventInsert[] = []
+  if (ownEvents.length) {
+    const directory = await readBranchDirectory(db)
+    try {
+      replayEvents = settlementReplayEvents({
+        operationId: String(operation.id), direction, generation: Number(generation), saleEvents,
+        actor: { receivedAt: stamp, branchId: collectingBranchId(directory, eventRows[0]?.sale_branch_id), cashierId: actorId(user), cashierName: actorSnapshot(user) },
+      })
+    } catch (error) {
+      if (error instanceof LaterPaymentDependsError) throw new SaleSettlementReplayConflict(error.message)
+      throw error
+    }
+  }
   let correction = false
   try { correction = JSON.parse(String(operation.request_json || '{}')).replace_existing_payment === true } catch (_) {}
   const recordEvent = saleSettlementRecordEvent({
@@ -393,7 +440,8 @@ export async function replaySaleSettlementAction(
         AND r.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=r.sale_id),0)
         AND h.status=@historyStatus
     )`, { operation: operation.id, history: historyId, generation, historyStatus: expectedHistoryStatus }),
-    ...saleSettlementStateStatements(saleId, target, stamp),
+    ...saleSettlementStateStatements(saleId, target, stamp, { previous: current }),
+    ...replayEvents.map((event) => paymentEventInsertStatement(event)),
     recordEvent.statement,
     {
       sql: `UPDATE sale_mutation_receipts SET generation=generation+1,

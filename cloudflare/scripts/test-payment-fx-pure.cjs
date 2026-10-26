@@ -36,6 +36,8 @@ const actual = new Set(['loyaltyEligibility','businessMaintenanceGuard','offline
   // saleMoneySchemaReady/readStripMoneyRows now delegate to; no imports of
   // its own, so it is loaded for real rather than stubbed.
   'schemaProbe',
+  // Slice S4: the payment event writers every settle and checkout now calls (pure; their own imports are listed).
+  'salePayments','salePaymentWriters',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

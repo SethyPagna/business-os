@@ -55,6 +55,22 @@ import {
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
+import { deriveSalePaymentState, PaymentEventError } from '../lib/salePayments'
+import {
+  checkoutPaymentEventStatement,
+  collectingBranchId,
+  correctionAnchor,
+  mergeTenderRows,
+  saleTenderEvent,
+  openingDecision,
+  PAYMENT_EVENT_SELECT_SQL,
+  paymentEventInsertStatement,
+  settlementApplyEvents,
+  settlementEventId,
+  storedPaymentEvents,
+  storedTenderRows,
+  type CorrectionAnchor,
+} from '../lib/salePaymentWriters'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
 import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
@@ -1318,7 +1334,7 @@ app.post('/', async (c) => {
         customer_id, customer_name, customer_phone, customer_address,
         payment_method, payment_details, payment_currency, exchange_rate,
         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
-        money_precision_version, calculated_total_usd, rounding_adjustment_usd,
+        money_precision_version, payments_version, calculated_total_usd, rounding_adjustment_usd,
         amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_actual, change_exchange_rate,
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
@@ -1329,7 +1345,7 @@ app.post('/', async (c) => {
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
-        1, @calculated_total_usd, @rounding_adjustment_usd,
+        1, 1, @calculated_total_usd, @rounding_adjustment_usd,
         @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr, @change_is_actual, @change_exchange_rate,
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
@@ -1805,7 +1821,11 @@ app.post('/', async (c) => {
             ), 0) = @item_count
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
-    }, saleCreationAuditStatement)
+    },
+    // Slice S4: the sale is born payments_version 1 and the money taken at the till is its checkout event,
+    // a verbatim copy of the tender columns written above (none when nothing was paid).
+    checkoutPaymentEventStatement(saleWriteKey),
+    saleCreationAuditStatement)
     // Receipt-race retry. A failed batch rolled back completely, so re-running
     // it with a fresh number re-evaluates every guard (stock, pricing,
     // customer) from scratch. Retry ONLY when the failure is attributable to
@@ -2068,6 +2088,78 @@ export function saleStatusReceiptCanonical(id: number, body: Record<string, unkn
     cancel_fee_khr: saleStatus === 'cancelled' ? Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0)) : 0,
     cancel_fee_note: saleStatus === 'cancelled' ? String(body.cancel_fee_note || '').trim() || null : null,
     skip_stock: body.skip_stock === true || String(body.skip_stock ?? '') === 'true',
+  }
+}
+
+/**
+ * The four rows every payment write (settle, payment correction, instalment) commits after its money: the Undo
+ * history row, the idempotency receipt (which pins the sale revision the batch leaves, read in the batch, so the
+ * extra revision bump of each payment event is counted, never assumed), the Sales Records event and the audit row.
+ * The history row is first: the receipt takes its id from last_insert_rowid().
+ */
+function saleSettlementCommitStatements(input: {
+  user: SessionUser
+  snapshot: SaleSettlementSnapshot
+  requestId: string
+  digest: string
+  requestJson: string
+  response: Record<string, unknown>
+  stamp: string
+  kind: 'payment_settled' | 'payment_changed'
+  labels: { label: string; undoLabel: string; redoLabel: string }
+  auditDetails: Record<string, unknown>
+}): { statements: Array<{ sql: string; params: Record<string, unknown> }>; eventsBytes: number } {
+  const { user, snapshot } = input
+  const recordEvent = saleSettlementRecordEvent({
+    snapshot, kind: input.kind, generation: 0, via: 'apply', before: snapshot.before, after: snapshot.after,
+    actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: input.stamp, requestDigest: input.digest,
+  })
+  return {
+    eventsBytes: recordEvent.eventsBytes,
+    statements: [{
+      sql: `INSERT INTO action_history(
+              scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
+              undo_payload,redo_payload,created_by_id,created_by_name
+            ) VALUES(
+              'sales','sale',@saleId,@label,@undoLabel,@redoLabel,1,'undoable',
+              @payload,@payload,@actor,@actorName
+            )`,
+      params: {
+        saleId: String(snapshot.saleId), ...input.labels,
+        payload: JSON.stringify({ applier: SALE_SETTLEMENT_ACTION_KIND, operation_id: snapshot.operationId, generation: 0 }),
+        actor: user.id, actorName: actorSnapshot(user),
+      },
+    }, {
+      sql: `INSERT INTO sale_mutation_receipts(
+              id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+              before_json,after_json,response_json,history_id,generation,sale_revision,updated_at
+            ) VALUES(
+              @operation,@actor,@saleId,'settlement',@request,@digest,@requestJson,
+              @beforeJson,@afterJson,json_set(@responseJson,'$.actionHistoryId',last_insert_rowid()),
+              last_insert_rowid(),0,
+              COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
+            )`,
+      params: {
+        operation: snapshot.operationId, actor: user.id, saleId: snapshot.saleId, request: input.requestId, digest: input.digest,
+        requestJson: input.requestJson, beforeJson: JSON.stringify(snapshot.before), afterJson: JSON.stringify(snapshot.after),
+        responseJson: JSON.stringify(input.response), stamp: input.stamp,
+      },
+    }, recordEvent.statement, {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
+      params: {
+        actor: user.id,
+        actorName: actorSnapshot(user),
+        saleId: String(snapshot.saleId),
+        details: JSON.stringify({
+          operationId: snapshot.operationId,
+          ...input.auditDetails,
+          before: snapshot.before,
+          after: snapshot.after,
+          record_event: { source_kind: 'sale_settlement', source_id: snapshot.operationId, generation: 0, sale_id: snapshot.saleId },
+        }),
+      },
+    }],
   }
 }
 
@@ -2529,6 +2621,11 @@ app.patch('/:id/status', async (c) => {
   let statusEventBytes = 0
   let directStatusResponse: Record<string, unknown> | null = null
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  // The opening event goes BEFORE the sale UPDATE (it is conditional on the sale still being version 0); the
+  // money events go right after it, ahead of the receipt that pins the sale revision the batch leaves.
+  const settlementOpeningStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const settlementEventStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  let settlementPaymentsVersion: 0 | 1 = Number(sale.payments_version) === 1 ? 1 : 0
   let paymentCorrection = false
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = paymentFromStatus === 'awaiting_payment'
@@ -2587,9 +2684,52 @@ app.patch('/:id/status', async (c) => {
       if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
       throw error
     }
+    // Status follows the money (salePayments core): the planner refused a short tender above, and the core,
+    // asked the same question on the same debt, must agree the sale is covered before it is written Completed.
+    try {
+      if (!deriveSalePaymentState({ sale: saleMoney, paidUsd: settlementPlan.amountPaidUsd, paidKhr: settlementPlan.amountPaidKhr,
+        debtLoweredUsd: (saleMoney.refund_usd ?? 0) as string | number, cause: 'payment' }).covered) {
+        return c.json({ error: 'The payment does not cover the sale balance.', code: 'insufficient_payment' }, 400)
+      }
+    } catch {
+      return c.json({ error: 'The sale has invalid stored payment totals and cannot be settled safely.', code: 'stored_payment_invalid' }, 400)
+    }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
     const after = buildSaleSettlementAfterState(before, sale, target, settlementPlan)
+    settlementOperationId = crypto.randomUUID()
+    // Payment events (0271, slice S4). A version 0 sale first gets its opening event (its tender as it stands, at
+    // its own created_at, so no past shift moves); then the money taken now is a collect event received now, in the
+    // collecting branch, by this cashier. A sale whose opening cannot be built stays on version 0 and settles as before.
+    const opening = openingDecision(sale)
+    settlementPaymentsVersion = opening.kind === 'stay_version0' ? 0 : 1
+    if (settlementPaymentsVersion === 1) {
+      let anchor: CorrectionAnchor | undefined
+      if (paymentCorrection) {
+        const recorded = opening.kind === 'open'
+          ? (opening.event ? [opening.event] : [])
+          : storedPaymentEvents(await db.prepare(`SELECT ${PAYMENT_EVENT_SELECT_SQL} FROM sale_payment_events WHERE sale_id=@id ORDER BY id`).all<Record<string, unknown>>({ id: Number(id) }))
+        const latest = correctionAnchor(recorded, null)
+        // The tender being replaced, as the sale's own columns (the opening builder copies them without re-summing).
+        anchor = latest ? correctionAnchor(recorded, saleTenderEvent(sale, latest.event.received_at)) : null
+      }
+      if (opening.kind === 'open' && opening.event) settlementOpeningStatements.push(paymentEventInsertStatement(opening.event, { onlyWhileVersion0: true }))
+      try {
+        settlementEventStatements.push(...settlementApplyEvents({
+          operationId: settlementOperationId,
+          saleId: Number(id),
+          exchangeRate: latestRate,
+          added: settlementPlan.addedDetails,
+          change: { usd: settlementPlan.changeUsd, khr: settlementPlan.changeKhr, isActual: false, exchangeRate: null },
+          actor: { receivedAt: mutationStamp, branchId: collectingBranchId(branchResolver.directory, sale.branch_id), cashierId: actorId(user), cashierName: actorSnapshot(user) },
+          correction: anchor,
+        }).map((event) => paymentEventInsertStatement(event)))
+      } catch (error) {
+        if (error instanceof PaymentEventError) return c.json({ error: error.message, code: error.code }, 400)
+        throw error
+      }
+      updates.push('payments_version = 1')
+    }
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2610,8 +2750,8 @@ app.patch('/:id/status', async (c) => {
       'search_normalized = @search_normalized',
     )
     Object.assign(updateParams, { ...after, lines: undefined, status_before_return: undefined, ...saleStateParams(target) })
-    settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp).slice(1)
-    settlementOperationId = crypto.randomUUID()
+    // Settling never re-rates a line, so after.lines equal before.lines and no line UPDATE is written.
+    settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp, { previous: before }).slice(1)
     settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
     settlementResponse = {
       id: Number(id),
@@ -2631,6 +2771,7 @@ app.patch('/:id/status', async (c) => {
       change_exchange_rate: after.change_exchange_rate,
       actionKind: SALE_SETTLEMENT_ACTION_KIND,
       paymentCorrection,
+      payments_version: settlementPaymentsVersion,
       operationId: settlementOperationId,
       currentReplayGeneration: 0,
     }
@@ -2726,7 +2867,9 @@ app.patch('/:id/status', async (c) => {
     })
     updates.push('cancel_fee_id = last_insert_rowid()')
   }
+  statements.push(...settlementOpeningStatements)
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  statements.push(...settlementEventStatements)
   if (!paymentFieldsSent && statusSourceId && statusDigest) {
     directStatusResponse = {
       // Replay responses are whitelisted (saleRecordEvents.ts RESPONSE_KEYS); tags are read from the sale.
@@ -2830,86 +2973,20 @@ app.patch('/:id/status', async (c) => {
   }
 
   if (settlementSnapshot && settlementResponse && settlementOperationId && settlementRequestId && settlementDigest && settlementCanonical) {
-    const historyPayload = JSON.stringify({
-      applier: SALE_SETTLEMENT_ACTION_KIND,
-      operation_id: settlementOperationId,
-      generation: 0,
+    const saleLabel = sale.receipt_number || `#${id}`
+    const commit = saleSettlementCommitStatements({
+      user, snapshot: settlementSnapshot, requestId: settlementRequestId, digest: settlementDigest, requestJson: settlementCanonical,
+      response: settlementResponse, stamp: mutationStamp, kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
+      labels: {
+        label: `${paymentCorrection ? 'Corrected payment for' : 'Settled'} sale ${saleLabel}`,
+        undoLabel: `Undo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${saleLabel}`,
+        redoLabel: `Redo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${saleLabel}`,
+      },
+      auditDetails: { paymentCorrection },
     })
     settlementHistoryIndex = statements.length
-    statements.push({
-      sql: `INSERT INTO action_history(
-              scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
-              undo_payload,redo_payload,created_by_id,created_by_name
-            ) VALUES(
-              'sales','sale',@saleId,@label,@undoLabel,@redoLabel,1,'undoable',
-              @payload,@payload,@actor,@actorName
-            )`,
-      params: {
-        saleId: String(id),
-        label: `${paymentCorrection ? 'Corrected payment for' : 'Settled'} sale ${sale.receipt_number || `#${id}`}`,
-        undoLabel: `Undo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
-        redoLabel: `Redo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
-        payload: historyPayload,
-        actor: user.id,
-        actorName: actorSnapshot(user),
-      },
-    })
-    statements.push({
-      sql: `INSERT INTO sale_mutation_receipts(
-              id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
-              before_json,after_json,response_json,history_id,generation,sale_revision,updated_at
-            ) VALUES(
-              @operation,@actor,@saleId,'settlement',@request,@digest,@requestJson,
-              @beforeJson,@afterJson,json_set(@responseJson,'$.actionHistoryId',last_insert_rowid()),
-              last_insert_rowid(),0,
-              COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
-            )`,
-      params: {
-        operation: settlementOperationId,
-        actor: user.id,
-        saleId: Number(id),
-        request: settlementRequestId,
-        digest: settlementDigest,
-        requestJson: settlementCanonical,
-        beforeJson: JSON.stringify(settlementSnapshot.before),
-        afterJson: JSON.stringify(settlementSnapshot.after),
-        responseJson: JSON.stringify(settlementResponse),
-        stamp: mutationStamp,
-      },
-    })
-    const recordEvent = saleSettlementRecordEvent({
-      snapshot: settlementSnapshot,
-      kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
-      generation: 0,
-      via: 'apply',
-      before: settlementSnapshot.before,
-      after: settlementSnapshot.after,
-      actorId: user.id,
-      actorUsername: actorSnapshot(user),
-      occurredAt: mutationStamp,
-      requestDigest: settlementDigest,
-    })
-    settlementEventBytes = recordEvent.eventsBytes
-    statements.push(recordEvent.statement)
-    statements.push({
-      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
-            VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
-      params: {
-        actor: user.id,
-        actorName: actorSnapshot(user),
-        saleId: String(id),
-        details: JSON.stringify({
-          operationId: settlementOperationId,
-          paymentCorrection,
-          before: settlementSnapshot.before,
-          after: settlementSnapshot.after,
-          record_event: {
-            source_kind: 'sale_settlement', source_id: settlementOperationId,
-            generation: 0, sale_id: Number(id),
-          },
-        }),
-      },
-    })
+    settlementEventBytes = commit.eventsBytes
+    statements.push(...commit.statements)
   }
 
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
@@ -2950,7 +3027,7 @@ app.patch('/:id/status', async (c) => {
         return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
       }
     }
-    if (/guard_value/i.test(message)) {
+    if (/guard_value|sale_payment_events/i.test(message)) {
       return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
     }
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
@@ -3032,6 +3109,264 @@ app.patch('/:id/status', async (c) => {
   // (and so a scripted caller can assert the flag actually took effect).
   const statusPayload = skipStock ? { ...payload, stock_skipped: 1 } : payload
   return c.json(statusPayload)
+})
+
+// POST /api/sales/:id/payments -- an instalment on a Not Paid sale (owner, 24 Oct 2026: staff may take several
+// payments until the sale is covered; slice S4 of DESIGN-SALE-ADDITIONS-PAYMENTS).
+//
+// Body: { client_request_id, payment_details: [{ method, amount_usd, amount_khr }], expected_exchange_rate,
+//         change_is_actual?: true, change_usd?, change_khr? }
+//   - the rows are the money taken NOW (never the earlier rows); methods must be active, whole cents and riel;
+//   - more than is owed is refused (payment_exceeds_owed) unless the change handed back is stated in $ and riel
+//     and reconciles with the excess exactly as at the till (lib/nativeSaleChange.ts);
+//   - the status follows the money (salePayments.deriveSalePaymentState): Not Paid until covered, then Completed;
+//   - gated like settling (sales:status Full), idempotent on client_request_id, undone through the same
+//     'sale.settlement' history applier (an undo appends an out event, a redo an in).
+const SALE_PAYMENT_FIELDS = new Set(['client_request_id', 'payment_details', 'expected_exchange_rate', 'change_is_actual', 'change_usd', 'change_khr'])
+
+export function salePaymentReceiptCanonical(id: number, body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    kind: 'instalment', sale_id: id, payment_details: body.payment_details, expected_exchange_rate: body.expected_exchange_rate,
+    change_is_actual: body.change_is_actual === true, change_usd: body.change_usd ?? null, change_khr: body.change_khr ?? null,
+  }
+}
+
+app.post('/:id/payments', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'status') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const id = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Sale not found' }, 404)
+  let body: Record<string, unknown>
+  try { body = await c.req.json<Record<string, unknown>>() } catch {
+    return c.json({ error: 'The request body must be valid JSON.', code: 'invalid_json_body' }, 400)
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'The request body must be a JSON object.', code: 'invalid_json_body' }, 400)
+  const unsupported = Object.keys(body).filter((key) => !SALE_PAYMENT_FIELDS.has(key))
+  if (unsupported.length) {
+    return c.json({ error: 'Send only the payment rows, the reviewed rate and any change handed back; totals and status are derived by the server.', code: 'unsupported_payment_field' }, 400)
+  }
+  if (body.change_is_actual !== undefined && typeof body.change_is_actual !== 'boolean') {
+    return c.json({ error: 'Actual change intent must be a boolean.', code: 'invalid_actual_change_intent' }, 400)
+  }
+  const requestId = typeof body.client_request_id === 'string' ? normalizeClientRequestId(body.client_request_id) : null
+  if (!requestId) return c.json({ error: 'client_request_id is required when recording a payment.', code: 'client_request_id_required' }, 400)
+  const canonical = JSON.stringify(salePaymentReceiptCanonical(id, body))
+  const digest = await saleMutationDigest(JSON.parse(canonical))
+  const committed = async (): Promise<Response | null> => {
+    const previous = await db.prepare(`
+      SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request
+    `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: requestId })
+    if (!previous) return null
+    if (previous.request_digest !== digest) return c.json({ error: 'client_request_id was already used with different payment data.', code: 'idempotency_conflict' }, 409)
+    return c.json(JSON.parse(previous.response_json) as Record<string, unknown>)
+  }
+  const earlier = await committed()
+  if (earlier) return earlier
+
+  const sale = await db.prepare('SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE id = ?')
+    .get<Record<string, unknown> & { id: number; receipt_number: string | null; branch_id: number | null; sale_status: string | null }>([id])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+  const current = saleStoredState(sale)
+  if (current.saleStatus !== 'awaiting_payment') {
+    return c.json({ error: 'Only a Not Paid sale takes a payment.', code: 'sale_not_owing', sale_status: current.saleStatus }, 409)
+  }
+  // Owner rule (24 Sep 2026), as settling: the sale keeps the rate it was booked with; the client confirms it reviewed it.
+  const rate = sale.exchange_rate == null ? NaN : Number(sale.exchange_rate)
+  if (!Number.isFinite(rate) || rate <= 0) return c.json({ error: 'money_precision_invalid_rate', code: 'money_precision_invalid_rate' }, 409)
+  const reviewedRate = Number(body.expected_exchange_rate)
+  if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+    return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed payment.', code: 'expected_exchange_rate_required', current_exchange_rate: rate }, 400)
+  }
+  if (reviewedRate !== rate) return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: rate }, 409)
+  if (!Array.isArray(body.payment_details) || body.payment_details.length === 0) {
+    return c.json({ error: 'Add at least one payment row.', code: 'payment_details_required' }, 400)
+  }
+
+  const [debtRows, settingRows, directory] = await Promise.all([
+    db.prepare(`SELECT ${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id = ?
+      AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'`)
+      .all<{ debt_lowered_usd: number | string | null }>([id]),
+    db.prepare(`SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods')`).all<{ key: string; value: string }>(),
+    readBranchDirectory(db),
+  ])
+  const debtLoweredUsd = sumRefundsUsd(debtRows.map((row) => row.debt_lowered_usd ?? 0))
+  const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
+  let owedBefore: ReturnType<typeof deriveSalePaymentState>
+  try {
+    owedBefore = deriveSalePaymentState({ sale, paidUsd: (sale.amount_paid_usd ?? 0) as number, paidKhr: (sale.amount_paid_khr ?? 0) as number, debtLoweredUsd, cause: 'payment' })
+  } catch {
+    return c.json({ error: 'The sale has invalid stored payment totals and cannot take a payment safely.', code: 'stored_payment_invalid' }, 409)
+  }
+  if (owedBefore.covered) {
+    return c.json({ error: 'This sale owes nothing. Mark it Completed instead of recording a payment.', code: 'nothing_owed', owed_usd: 0 }, 409)
+  }
+
+  // The earlier tender is re-submitted ahead of the new rows (merged per method, so a long run of instalments never
+  // outgrows the row limit), which lets the settlement planner prove it unchanged and tell the new rows apart.
+  const storedRows = storedTenderRows(sale.payment_details)
+  const paidBefore = { usd: Number(sale.amount_paid_usd) || 0, khr: Number(sale.amount_paid_khr) || 0 }
+  let existingSubmission: Array<{ method: string; amount_usd: number; amount_khr: number }> = []
+  let existingDetailsRaw: unknown = sale.payment_details
+  if (storedRows && storedRows.length) {
+    existingSubmission = mergeTenderRows(storedRows)
+    existingDetailsRaw = JSON.stringify(existingSubmission)
+  } else if (storedRows && (paidBefore.usd > 0 || paidBefore.khr > 0)) {
+    const tokens = String(sale.payment_method ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+    if (tokens.length === 1) existingSubmission = [{ method: tokens[0], amount_usd: paidBefore.usd, amount_khr: paidBefore.khr }]
+  }
+  let plan: ReturnType<typeof planSaleSettlement>
+  try {
+    plan = planSaleSettlement({
+      moneyPrecisionVersion: hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0]) ? 1 : 0,
+      configuredMethodsRaw: settingMap.pos_payment_methods,
+      paymentDetailsRaw: [...existingSubmission, ...body.payment_details],
+      existingPaidUsd: sale.amount_paid_usd ?? 0,
+      existingPaidKhr: sale.amount_paid_khr ?? 0,
+      existingPaymentDetailsRaw: existingDetailsRaw,
+      existingPaymentMethodRaw: sale.payment_method,
+      totalUsd: sale.total_usd,
+      exchangeRate: rate,
+      changeExchangeRateRaw: settingMap.change_exchange_rate,
+      requireCoverage: false,
+    })
+  } catch (error) {
+    if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
+    throw error
+  }
+  if (!plan.addedDetails.length) return c.json({ error: 'Add the payment taken now.', code: 'payment_details_required' }, 400)
+  const receivedUsd = Number(subtractMoney4(plan.amountPaidUsd, paidBefore.usd))
+  const receivedKhr = Number(subtractMoney4(plan.amountPaidKhr, paidBefore.khr))
+
+  // More than is owed only with the change handed back, stated and reconciled like the till's native change. With
+  // no change stated the check runs with $0 / 0 riel, which still accepts a riel remainder under one note.
+  const statedChange = body.change_is_actual === true
+  let nativeChange: ReturnType<typeof planNativeSaleChange>
+  try {
+    nativeChange = planNativeSaleChange({
+      actualIntent: true,
+      rawChangeUsd: statedChange ? body.change_usd as number | string : 0,
+      rawChangeKhr: statedChange ? body.change_khr as number | string : 0,
+      amountPaidUsd: receivedUsd,
+      amountPaidKhr: receivedKhr,
+      totalUsd: owedBefore.owedUsd,
+      exchangeRate: rate,
+      changeExchangeRate: settingMap.change_exchange_rate,
+      fallbackChangeUsd: 0,
+      fallbackChangeKhr: 0,
+    })
+  } catch (error) {
+    if (error instanceof NativeSaleChangeValidationError) {
+      if (!statedChange && error.code === 'invalid_actual_change_total') {
+        return c.json({ error: 'This payment is more than the sale owes. Enter only what is owed, or record the change handed back.', code: 'payment_exceeds_owed', owed_usd: owedBefore.owedUsd }, 400)
+      }
+      return c.json({ error: error.message, code: error.code, owed_usd: owedBefore.owedUsd }, error.statusCode)
+    }
+    throw error
+  }
+  const changeGiven = statedChange && (nativeChange.changeUsd > 0 || nativeChange.changeKhr > 0)
+
+  let derived: ReturnType<typeof deriveSalePaymentState>
+  try {
+    derived = deriveSalePaymentState({ sale, paidUsd: plan.amountPaidUsd, paidKhr: plan.amountPaidKhr, debtLoweredUsd, cause: 'payment' })
+  } catch {
+    return c.json({ error: 'The sale has invalid stored payment totals and cannot take a payment safely.', code: 'stored_payment_invalid' }, 409)
+  }
+  const target = { ...current, saleStatus: derived.saleStatus }
+  const merged = mergeTenderRows(plan.paymentDetails)
+  const mergedMethod = merged.map((row) => row.method).join(' + ')
+  const before = await readSaleSettlementState(db, id)
+  if (!before) return c.json({ error: 'Sale not found' }, 404)
+  const after = buildSaleSettlementAfterState(before, sale, target, {
+    paymentMethod: mergedMethod,
+    paymentDetailsJson: JSON.stringify(merged),
+    paymentCurrency: plan.paymentCurrency,
+    amountPaidUsd: plan.amountPaidUsd,
+    amountPaidKhr: plan.amountPaidKhr,
+    // The sale's change is the change of the payment that handed some back; otherwise it stays as stored.
+    changeUsd: changeGiven ? nativeChange.changeUsd : Number(sale.change_usd) || 0,
+    changeKhr: changeGiven ? nativeChange.changeKhr : Number(sale.change_khr) || 0,
+  }, changeGiven
+    ? { isActual: 1, exchangeRate: nativeChange.changeExchangeRate }
+    : { isActual: Number(sale.change_is_actual) === 1 ? 1 : 0, exchangeRate: sale.change_exchange_rate == null ? null : Number(sale.change_exchange_rate) })
+
+  const stamp = new Date().toISOString()
+  const operationId = crypto.randomUUID()
+  const opening = openingDecision(sale)
+  const paymentsVersion: 0 | 1 = opening.kind === 'stay_version0' ? 0 : 1
+  const eventStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const openingStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  let paymentEventId: string | null = null
+  if (paymentsVersion === 1) {
+    if (opening.kind === 'open' && opening.event) openingStatements.push(paymentEventInsertStatement(opening.event, { onlyWhileVersion0: true }))
+    try {
+      const events = settlementApplyEvents({
+        operationId, saleId: id, exchangeRate: rate, added: plan.addedDetails,
+        change: changeGiven ? { usd: nativeChange.changeUsd, khr: nativeChange.changeKhr, isActual: true, exchangeRate: nativeChange.changeExchangeRate } : { usd: 0, khr: 0, isActual: false, exchangeRate: null },
+        actor: { receivedAt: stamp, branchId: collectingBranchId(directory, sale.branch_id), cashierId: actorId(user), cashierName: actorSnapshot(user) },
+      })
+      paymentEventId = events.find((event) => event.direction === 'in')?.event_id ?? settlementEventId(operationId, 0, 'in')
+      eventStatements.push(...events.map((event) => paymentEventInsertStatement(event)))
+    } catch (error) {
+      if (error instanceof PaymentEventError) return c.json({ error: error.message, code: error.code }, 400)
+      throw error
+    }
+  }
+  const receiptNumber = sale.receipt_number == null ? null : String(sale.receipt_number)
+  const snapshot: SaleSettlementSnapshot = { version: 1, operationId, saleId: id, receiptNumber, before, after }
+  const response: Record<string, unknown> = {
+    id, sale_status: target.saleStatus, return_state: target.returnState, delivery_pending: target.deliveryPending ? 1 : 0, updated_at: stamp,
+    exchange_rate: after.exchange_rate, payment_method: after.payment_method, payment_details: after.payment_details, payment_currency: after.payment_currency,
+    amount_paid_usd: after.amount_paid_usd, amount_paid_khr: after.amount_paid_khr, change_usd: after.change_usd, change_khr: after.change_khr,
+    change_is_actual: after.change_is_actual, change_exchange_rate: after.change_exchange_rate,
+    received_usd: receivedUsd, received_khr: receivedKhr, owed_usd: derived.owedUsd, covered: derived.covered, part_paid: derived.partPaid,
+    payments_version: paymentsVersion, payment_event_id: paymentsVersion === 1 ? paymentEventId : null,
+    actionKind: SALE_SETTLEMENT_ACTION_KIND, paymentCorrection: false, operationId, currentReplayGeneration: 0,
+  }
+  const saleLabel = receiptNumber || `#${id}`
+  const commit = saleSettlementCommitStatements({
+    user, snapshot, requestId, digest, requestJson: canonical, response, stamp, kind: 'payment_settled',
+    labels: { label: `Recorded payment for sale ${saleLabel}`, undoLabel: `Undo payment for sale ${saleLabel}`, redoLabel: `Redo payment for sale ${saleLabel}` },
+    auditDetails: { kind: 'instalment', paymentCorrection: false },
+  })
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+    { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    saleMutationGuard(`
+      COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+      AND COALESCE((SELECT value FROM settings WHERE key='pos_payment_methods'),'')=@paymentMethods
+    `, { changeRate: settingMap.change_exchange_rate ?? '', paymentMethods: settingMap.pos_payment_methods ?? '' }),
+    saleRevisionGuard(id, Number(sale.write_revision)),
+    ...openingStatements,
+    ...saleSettlementStateStatements(id, after, stamp, { previous: before, paymentsVersion1: paymentsVersion === 1 }),
+    ...eventStatements,
+  ]
+  const historyIndex = statements.length
+  statements.push(...commit.statements,
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    ordinaryBusinessMaintenanceGuard)
+  assertSaleRecordBatchBounds(statements.length, snapshot, commit.eventsBytes)
+  try {
+    const results = await db.batch(statements)
+    response.actionHistoryId = Number(results[historyIndex]?.meta?.last_row_id || 0)
+  } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    const replayed = await committed()
+    if (replayed) return replayed
+    if (/guard_value|sale_payment_events|constraint failed/i.test(String((error as Error)?.message || error))) {
+      return c.json({ error: 'This sale changed while the payment was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
+    }
+    throw error
+  }
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'sales'),
+    broadcast(c.env, 'sales', { action: 'update' }),
+  ]))
+  return c.json(response)
 })
 
 // PATCH /api/sales/:id/customer -- attach/detach a customer or membership on

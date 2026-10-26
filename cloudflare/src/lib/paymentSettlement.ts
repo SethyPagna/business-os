@@ -88,6 +88,12 @@ function isExactNonNegativeAmount(value: unknown, decimals: number): boolean {
 
 export type SettlementPlan = {
   paymentDetails: NativeTenderRow[]
+  /**
+   * The rows this request ADDS: every submitted row that is not one of the previously recorded rows it had to
+   * repeat. Their sum is the money taken now (amountPaid minus the existing tender); a payment correction, which
+   * replaces the tender, adds every row. The payment event of the request is built from exactly these.
+   */
+  addedDetails: NativeTenderRow[]
   paymentDetailsJson: string
   paymentMethod: string
   paymentCurrency: 'USD' | 'KHR' | 'MIXED'
@@ -110,6 +116,11 @@ export function planSaleSettlement(input: {
   totalUsd: unknown
   exchangeRate: unknown
   changeExchangeRateRaw?: unknown
+  /**
+   * false = an instalment (owner, 24 Oct 2026): any positive tender is planned and the caller decides what it
+   * may cover (POST /api/sales/:id/payments refuses more than is owed). Default true: settling must cover.
+   */
+  requireCoverage?: boolean
 }): SettlementPlan {
   const configured = parseConfiguredMethodsStrict(input.configuredMethodsRaw)
   if (!configured.ok) fail('Configured payment methods are unreadable. Repair them in Settings before settling a sale.', 'invalid_payment_methods_setting')
@@ -191,6 +202,7 @@ export function planSaleSettlement(input: {
     }
   }
   const paymentDetails: NativeTenderRow[] = []
+  const addedDetails: NativeTenderRow[] = []
   let paidUsdUnits = 0n
   let paidKhrUnits = 0n
   for (const [index, raw] of input.paymentDetailsRaw.entries()) {
@@ -240,11 +252,13 @@ export function planSaleSettlement(input: {
     }
     paidUsdUnits += usdUnits
     paidKhrUnits += khrUnits
-    paymentDetails.push({
+    const row = {
       method,
       amount_usd: calculationUnitsValue(usdUnits),
       amount_khr: calculationUnitsValue(khrUnits),
-    })
+    }
+    paymentDetails.push(row)
+    if (!preserved) addedDetails.push({ ...row })
   }
 
   if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
@@ -282,7 +296,7 @@ export function planSaleSettlement(input: {
     fail('The sale total or current exchange rate is invalid.', 'invalid_payment_amount')
   }
   const paidCombinedUsd = amountPaidUsd + amountPaidKhr / rate
-  if (!covered) {
+  if (!covered && input.requireCoverage !== false) {
     fail('The payment does not cover the sale balance.', 'insufficient_payment')
   }
   const overpayExactUsd = Math.max(0, paidCombinedUsd - totalUsd)
@@ -306,6 +320,7 @@ export function planSaleSettlement(input: {
   }
   return {
     paymentDetails,
+    addedDetails,
     paymentDetailsJson: JSON.stringify(paymentDetails),
     paymentMethod: distinctMethods.join(' + '),
     paymentCurrency: paidUsdUnits > 0n && paidKhrUnits > 0n ? 'MIXED' : paidKhrUnits > 0n ? 'KHR' : 'USD',
