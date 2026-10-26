@@ -113,7 +113,7 @@ export default function POSQuickAddModals({
   return (
     <>
       {showAddCustomer ? (
-        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} saveDisabled={!!customerDuplicateCheck || !!savingBlockedText} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
+        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} formValue={newCustomerForm} saveDisabled={!!customerDuplicateCheck || !!savingBlockedText} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
           <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={customerDuplicateCheck} entityLabel="customer" saving={savingCustomer} onUseExisting={handleUseExistingCustomer} onCreateSeparate={handleCreateSeparateCustomer} onBack={clearCustomerDuplicateCheck} t={t} />
           <div>
@@ -145,7 +145,7 @@ export default function POSQuickAddModals({
       ) : null}
 
       {showAddDelivery ? (
-        <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck || !!savingBlockedText} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
+        <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} formValue={newDeliveryForm} saveDisabled={!!deliveryDuplicateCheck || !!savingBlockedText} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
           <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={deliveryDuplicateCheck} entityLabel="delivery contact" saving={savingDelivery} onUseExisting={handleUseExistingDelivery} onCreateSeparate={handleCreateSeparateDelivery} onBack={clearDeliveryDuplicateCheck} t={t} />
           <div>
