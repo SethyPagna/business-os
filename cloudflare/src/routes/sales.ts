@@ -161,6 +161,7 @@ import { resolveClientCreatedAt } from '../lib/clientTimestamp'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
+import { recordStockCrossings } from '../lib/stockCrossingAlert'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
@@ -1923,6 +1924,25 @@ app.post('/', async (c) => {
     registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
       .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
   )
+  // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
+  // The before-quantities are the availability read above, so detection costs no extra read; the claim row that
+  // makes it once-only is written by recordStockCrossings (lib/stockCrossingAlert.ts), which never throws.
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, {
+    saleId,
+    branchName: branchRow?.name || null,
+    lines: stockCheckItems.map((item) => {
+      const product = productMap.get(item.product_id)
+      return {
+        productId: item.product_id,
+        branchId: item.branch_id as number,
+        quantity: item.quantity,
+        before: stockByBranch.get(item.branch_id as number)?.get(item.product_id) || 0,
+        name: String(product?.name || `#${item.product_id}`),
+        lowThreshold: product?.low_stock_threshold,
+        outThreshold: product?.out_of_stock_threshold,
+      }
+    }),
+  }))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,

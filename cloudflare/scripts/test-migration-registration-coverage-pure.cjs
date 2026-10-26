@@ -53,6 +53,9 @@ const NAMED_COMPANIONS = {
   269: 'test-migration-0269-cost-mirror-native.cjs',
   270: 'test-migration-0270-permission-extras-native.cjs',
   271: 'test-migration-0271-sale-payment-events-native.cjs',
+  // 0272 creates stock_crossing_alerts, the once-per-crossing claim and the bell's alert list. Its companion applies
+  // the real chain and drives detection, claim, restock, race, undo/redo, out-of-stock and the bell.
+  272: 'test-stock-crossing-alert-pure.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',
