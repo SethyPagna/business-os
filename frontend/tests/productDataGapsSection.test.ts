@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { createDataGapsPager, dataGapsPagerTotal, type DataGapsLoaders } from '../src/utils/productDataGapsPager.ts'
+import { DATA_GAP_REFUSAL_KEYS, createDataGapsPager, dataGapRefusalText, dataGapsPagerTotal, type DataGapsLoaders } from '../src/utils/productDataGapsPager.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8')
 const en = JSON.parse(read('lang/en.json')) as Record<string, string>
@@ -187,10 +187,31 @@ await runTest('wiring: the tab mounts the section with its Refresh token, the se
   assert.match(transport, /\/api\/products\/data-gaps\/marks/)
 })
 
+await runTest('a refused decision is restated from the language pack, in English and in Khmer, never the Worker English', () => {
+  const workerEnglish = 'Worker English sentence'
+  // Literal expectations: the table under test must not be its own oracle.
+  const EXPECTED_KEYS: Record<string, string> = { zero_not_unconfirmed: 'conflict_refusal_zero_not_unconfirmed', barcode_present: 'conflict_refusal_barcode_present', product_changed: 'conflict_refusal_product_changed', product_not_found: 'conflict_refusal_product_not_found' }
+  assert.deepEqual({ ...DATA_GAP_REFUSAL_KEYS }, EXPECTED_KEYS)
+  for (const code of Object.keys(EXPECTED_KEYS)) {
+    const error = Object.assign(new Error(workerEnglish), { code, status: 409 })
+    for (const [lang, pack] of [['en', en], ['km', km]] as const) {
+      const text = dataGapRefusalText(error, (key) => pack[key], 'fallback')
+      assert.equal(text, pack[EXPECTED_KEYS[code]], `${code} ${lang}`)
+      assert.notEqual(text, workerEnglish)
+      assert.ok(text.length > 10)
+    }
+    assert.match(km[EXPECTED_KEYS[code]], /[ក-៿]/, `${code} km has Khmer`)
+    assert.notEqual(km[EXPECTED_KEYS[code]], en[EXPECTED_KEYS[code]])
+  }
+  const unknownCode = Object.assign(new Error(workerEnglish), { code: 'something_else' })
+  assert.equal(dataGapRefusalText(unknownCode, (key) => km[key], 'fallback'), km.product_data_gaps_save_failed, 'a code with no key shows the generic localized line')
+  assert.ok(read('components/products/ProductDataGapsSection.tsx').includes('dataGapRefusalText(error, t,'), 'the section uses the mapping for a failed decision')
+})
+
 await runTest('every new string exists in both packs and Khmer is not an English placeholder', () => {
   const keys = ['product_data_gaps_none_unknown_cost', 'product_data_gaps_none_empty_barcode', 'product_data_gaps_none_placeholder_barcode', 'product_data_gaps_load_failed',
     'product_data_gaps_save_failed', 'conflict_type_unknown_cost', 'conflict_type_empty_barcode', 'conflict_type_placeholder_barcode', 'conflict_unknown_cost_catalog',
-    'conflict_confirm_zero', 'conflict_confirm_zero_message', 'conflict_zero_confirmed_state', 'conflict_mark_no_barcode', 'conflict_mark_no_barcode_message', 'conflict_no_barcode_marked_state']
+    'conflict_refusal_zero_not_unconfirmed', 'conflict_refusal_barcode_present', 'conflict_refusal_product_changed', 'conflict_refusal_product_not_found', 'conflict_confirm_zero', 'conflict_confirm_zero_message', 'conflict_zero_confirmed_state', 'conflict_mark_no_barcode', 'conflict_mark_no_barcode_message', 'conflict_no_barcode_marked_state']
   for (const key of keys) {
     assert.ok(en[key], `${key} en`)
     assert.ok(km[key], `${key} km`)

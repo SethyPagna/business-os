@@ -97,6 +97,23 @@ export function createDataGapsPager(loaders: DataGapsLoaders, initialKind: Produ
   }
 }
 
+// The Worker refuses a Conflicts decision with a stable code (cloudflare/src/lib/productDataGaps.ts ProductConflictMarkError); the screen
+// restates it from the language pack, never the Worker's English. The English message stays only for a code with no key.
+export const DATA_GAP_REFUSAL_KEYS: Readonly<Record<string, string>> = {
+  zero_not_unconfirmed: 'conflict_refusal_zero_not_unconfirmed',
+  barcode_present: 'conflict_refusal_barcode_present',
+  product_changed: 'conflict_refusal_product_changed',
+  product_not_found: 'conflict_refusal_product_not_found',
+}
+
+export function dataGapRefusalText(error: unknown, t: (key: string) => string | undefined, fallback: string): string {
+  const code = String((error as { code?: unknown } | null)?.code || '')
+  const key = Object.prototype.hasOwnProperty.call(DATA_GAP_REFUSAL_KEYS, code) ? DATA_GAP_REFUSAL_KEYS[code] : ''
+  const translated = key ? t(key) : ''
+  if (translated && translated !== key) return translated
+  return t('product_data_gaps_save_failed') || fallback
+}
+
 /** The total the shared pager draws "page / pages" from: the count when it covers what is on screen, else just enough to reach the next page. */
 export function dataGapsPagerTotal(state: DataGapsState, pageSize: number): number {
   const known = state.counts?.[state.kind]

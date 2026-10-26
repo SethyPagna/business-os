@@ -6,7 +6,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
-import { createDataGapsPager, dataGapsPagerTotal, type DataGapsState } from '../../utils/productDataGapsPager.ts'
+import { createDataGapsPager, dataGapRefusalText, dataGapsPagerTotal, type DataGapsState } from '../../utils/productDataGapsPager.ts'
 import { ProductDataGapRowCard } from './ProductDataGapRowCard.tsx'
 import {
   PRODUCT_DATA_GAP_PAGE_SIZE,
@@ -93,7 +93,7 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
       notify(t('conflict_issue_saved') || 'Saved — removed from Conflicts')
       void pagerRef.current?.reload()
     } catch (error) {
-      notify((error as Error)?.message || t('product_data_gaps_save_failed') || 'Could not save this decision', 'error')
+      notify(dataGapRefusalText(error, t, 'Could not save this decision'), 'error')
       void pagerRef.current?.reload()
     } finally {
       setSaving(false)
