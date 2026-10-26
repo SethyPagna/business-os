@@ -34,6 +34,8 @@ assert.throws(() => raw.db.prepare("INSERT INTO products(name) VALUES('unadmitte
 raw.db.limits.exprDepth = 100
 const ledger = []
 function category(sql) {
+  if (/sqlite_master/.test(sql)) return 'other' // the one-off table probe, not a data read
+  if (/stock_crossing_alerts/.test(sql)) return 'inventory'
   if (/out_of_stock_threshold/.test(sql) && /FROM products/.test(sql)) return 'inventory'
   if (/expiry_date/.test(sql) && /FROM products/.test(sql)) return 'expiry'
   if (/credit_due_date/.test(sql) && /FROM product_batches/.test(sql)) return 'supplier_credit'
@@ -136,6 +138,12 @@ function seedProducts() {
   for (let i = 0; i < 210; i += 1) insert.run(`Low ${String(i).padStart(3, '0')}`, 3 + (i % 8), 0, 10, 1) // qty 3..10 -> low
   for (let i = 0; i < 40; i += 1) insert.run(`Healthy ${i}`, 50 + i, 0, 10, 1)
   for (let i = 0; i < 5; i += 1) insert.run(`Retired ${i}`, 0, 0, 10, 0) // inactive: never listed
+  // 0272: the bell lists CROSSINGS, so each of the 330 flagged rows carries one (the sale that took it across), and the
+  // branch quantity the bell checks a crossing against is the product's own.
+  raw.db.exec(`INSERT INTO branch_stock (product_id, branch_id, quantity) SELECT id, 1, stock_quantity FROM products`)
+  raw.db.exec(`INSERT INTO stock_crossing_alerts (alert_key, product_id, branch_id, tier, sale_id, quantity_before, quantity_after, created_at)
+    SELECT 'fixture:' || id, id, 1, CASE WHEN stock_quantity <= out_of_stock_threshold THEN 'out' ELSE 'low' END, NULL, stock_quantity + 1, stock_quantity, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    FROM products WHERE is_active = 1 AND (stock_quantity <= low_stock_threshold OR stock_quantity <= out_of_stock_threshold)`)
   })
 }
 
@@ -165,7 +173,8 @@ function baselineInventory(config) {
     ],
   }
 }
-const pick = (item) => ({ id: item.id, label: item.label, meta: item.meta })
+// Ids are not compared: a crossing item's id is its crossing's id (a new crossing is a new id), not the product's.
+const pick = (item) => ({ label: item.label, meta: item.meta })
 
 let passed = 0
 async function check(name, fn) {
@@ -230,7 +239,11 @@ async function main() {
   })
 
   await check('a stock change is NOT visible before its version bump (the cache is real) and IS right after it', async () => {
-    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run())
+    seedStockFixture(raw.db, () => {
+      raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run()
+      raw.db.prepare("UPDATE branch_stock SET quantity = 0 WHERE product_id = (SELECT id FROM products WHERE name = 'Healthy 0')").run()
+      raw.db.prepare("INSERT INTO stock_crossing_alerts (alert_key, product_id, branch_id, tier, sale_id, quantity_before, quantity_after, created_at) SELECT 'fixture-sale:' || id, id, 1, 'out', NULL, 51, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM products WHERE name = 'Healthy 0'").run()
+    })
     const stale = await summary()
     assert.equal(section(stale, 'inventory').count, 330, 'control: still the cached answer')
     await cacheModule.bumpVersion(env, 'stock') // what a sale does
@@ -350,7 +363,7 @@ async function main() {
     assert.equal(all.json.count, 331)
     assert.equal(all.json.items.length, 331, 'nothing is lost: every flagged product is reachable')
     const baselineNow = baselineInventory(await lowStock.loadLowStockConfig(env))
-    assert.deepEqual(all.json.items.map((item) => item.id), baselineNow.items.map((item) => item.id), 'same order as the old full list')
+    assert.deepEqual(all.json.items.map(pick), baselineNow.items.map(pick), 'same order as the old full list')
     assert.equal((await call('GET', '/summary/items?section=inventory', CASHIER)).status, 403)
     assert.equal((await call('GET', '/summary/items?section=sales', ADMIN)).status, 404)
     const cached = await call('GET', '/summary/items?section=inventory', ADMIN)
@@ -359,7 +372,10 @@ async function main() {
   })
 
   await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
-    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run())
+    seedStockFixture(raw.db, () => {
+      raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run()
+      raw.db.prepare("UPDATE branch_stock SET quantity = 500 WHERE product_id IN (SELECT id FROM products WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001'))").run()
+    })
     await cacheModule.bumpVersion(env, 'products')
     const small = await summary()
     const inventory = section(small, 'inventory')
@@ -378,6 +394,103 @@ async function main() {
     } finally {
       globalThis.caches = saved
     }
+  })
+
+  // ---- 0272: the bell lists crossings, and costs a fraction of the catalog walk it replaced ------------------------
+  const productId = (name) => raw.db.prepare('SELECT id FROM products WHERE name = ?').get(name).id
+  const crossingRow = (key, id, tier, saleId, before, after, at = "strftime('%Y-%m-%dT%H:%M:%fZ','now')") => raw.db.prepare(
+    `INSERT INTO stock_crossing_alerts (alert_key, product_id, branch_id, tier, sale_id, quantity_before, quantity_after, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ${at})`,
+  ).run(key, id, tier, saleId, before, after)
+  const bellItems = async (label) => (section(await summary(), 'inventory')?.items || []).filter((item) => item.label === label)
+  await check('crossings: a product that is low but never crossed in a sale is NOT on the bell (the ruling), a crossing is', async () => {
+    await cacheModule.bumpVersion(env, 'stock')
+    const before = section(await summary(), 'inventory').count
+    seedStockFixture(raw.db, () => {
+      const id = Number(raw.db.prepare("INSERT INTO products (name, stock_quantity, out_of_stock_threshold, low_stock_threshold, is_active) VALUES ('Silent Low', 2, 0, 10, 1)").run().lastInsertRowid)
+      raw.db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 2)').run(id)
+    })
+    await cacheModule.bumpVersion(env, 'stock')
+    const after = await summary()
+    assert.equal(section(after, 'inventory').count, before, 'standing low stock alone adds nothing')
+    assert.ok(!JSON.stringify(section(after, 'inventory')).includes('Silent Low'))
+    seedStockFixture(raw.db, () => crossingRow('t:silent', productId('Silent Low'), 'low', 9001, 12, 2))
+    await cacheModule.bumpVersion(env, 'stock')
+    const crossed = section(await summary(), 'inventory')
+    assert.equal(crossed.count, before + 1)
+    assert.ok(crossed.items.some((item) => item.label === 'Silent Low' && item.meta === 'Low stock (2)'))
+  })
+
+  await check('crossings: a restock takes the product off the bell, and a NEW crossing is a NEW item id', async () => {
+    const id = productId('Silent Low')
+    const first = (await bellItems('Silent Low'))[0]?.id
+    assert.ok(first && first.startsWith('low-'))
+    seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = 40 WHERE product_id = ?').run(id))
+    await cacheModule.bumpVersion(env, 'stock')
+    assert.equal((await bellItems('Silent Low')).length, 0, 'restocked above the threshold: gone from the bell')
+    seedStockFixture(raw.db, () => {
+      raw.db.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id = ?').run(id)
+      crossingRow('t:silent2', id, 'low', 9002, 40, 1)
+    })
+    await cacheModule.bumpVersion(env, 'stock')
+    const second = (await bellItems('Silent Low'))[0]?.id
+    assert.ok(second && second !== first, `the second crossing announces itself again (${first} -> ${second})`)
+  })
+
+  await check('crossings: low rows step aside once the product is out, an old crossing ages out, a retired empty product is not listed', async () => {
+    const id = productId('Silent Low')
+    seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(id))
+    await cacheModule.bumpVersion(env, 'stock')
+    assert.equal((await bellItems('Silent Low')).length, 0, 'only low crossings exist and the product is now out, so they are untrue')
+    seedStockFixture(raw.db, () => crossingRow('t:silent3', id, 'out', 9003, 1, 0, "'2020-01-01T00:00:00.000Z'"))
+    await cacheModule.bumpVersion(env, 'stock')
+    assert.equal((await bellItems('Silent Low')).length, 0, 'older than the window: not listed')
+    seedStockFixture(raw.db, () => crossingRow('t:silent4', id, 'out', 9004, 1, 0))
+    await cacheModule.bumpVersion(env, 'stock')
+    assert.deepEqual((await bellItems('Silent Low')).map((item) => item.meta), ['Out of stock'])
+    seedStockFixture(raw.db, () => { raw.db.prepare('UPDATE products SET stock_quantity = 0 WHERE id = ?').run(id); raw.db.prepare('UPDATE products SET is_active = 0 WHERE id = ?').run(id) })
+    await cacheModule.bumpVersion(env, 'stock')
+    assert.equal((await bellItems('Silent Low')).length, 0, 'a retired, empty product is not listed')
+  })
+
+  await check('cost: the bell statement seeks the recent crossings by index and never scans the catalog', async () => {
+    await cacheModule.bumpVersion(env, 'stock')
+    await summary()
+    const entry = ledger.find((row) => row.category === 'inventory')
+    assert.ok(entry && /stock_crossing_alerts/.test(entry.sql))
+    const plan = raw.db.prepare('EXPLAIN QUERY PLAN ' + entry.sql).all({ since: '2000-01-01T00:00:00.000Z', itemLimit: 50 }).map((row) => row.detail).join(' | ')
+    assert.match(plan, /idx_stock_crossing_alerts_recent/, plan)
+    assert.ok(!/SCAN p\b/.test(plan), 'no scan of the products table: ' + plan)
+    console.log('  plan: ' + plan)
+    console.log(`  measured: bell inventory statement rows returned ${entry.rows} (the standing list walked every visible product on every refresh)`)
+  })
+
+  await check('expiry: the index-assisted statement lists exactly what the removed full scan listed, boundaries included', async () => {
+    const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10)
+    seedStockFixture(raw.db, () => {
+      const insert = raw.db.prepare('INSERT INTO products (name, stock_quantity, out_of_stock_threshold, low_stock_threshold, is_active, expiry_date) VALUES (?, ?, 0, 10, ?, ?)')
+      insert.run('Exp past', 20, 1, '2020-01-01')
+      insert.run('Exp edge in', 20, 1, day(30))
+      insert.run('Exp edge out', 20, 1, day(32))
+      insert.run('Exp timed in', 20, 1, day(29) + ' 23:30:00')
+      insert.run('Exp timed out', 20, 1, day(30) + ' 23:59:00')
+      insert.run('Exp blank', 20, 1, '   ')
+      insert.run('Exp junk', 20, 1, 'not a date')
+      // (an inactive product that still holds stock cannot be written any more -- the product_has_stock guard -- so only the empty one is seeded)
+      insert.run('Exp retired empty', 0, 0, '2020-03-03')
+      insert.run('Exp null empty', 0, null, '2020-05-05')
+    })
+    const removedFullScan = (days) => raw.db.prepare(`SELECT id FROM products p
+      WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>0 OR EXISTS(SELECT 1 FROM branch_stock bs WHERE bs.product_id=p.id AND bs.quantity<>0)))
+        AND expiry_date IS NOT NULL AND trim(expiry_date) != '' AND julianday(expiry_date) - julianday('now') <= @days
+      ORDER BY expiry_date ASC LIMIT 50`).all({ days }).map((row) => row.id)
+    for (const days of [0, 7, 30, 90]) {
+      seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('notifications_expiry_days', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(days)))
+      await cacheModule.bumpVersion(env, 'settings')
+      const listed = (section(await summary(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
+      assert.deepEqual(listed, removedFullScan(days), `days=${days}: same rows in the same order`)
+    }
+    const names = (section(await summary(), 'expiry')?.items || []).map((item) => item.label)
+    assert.ok(names.includes('Exp past') && !names.includes('Exp retired empty') && !names.includes('Exp null empty'), names.join(','))
   })
 
   const failures = []
