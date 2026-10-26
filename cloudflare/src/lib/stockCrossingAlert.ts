@@ -132,17 +132,9 @@ const OUT_TYPE_LIST = LEDGER_OUT_TYPES.map((type) => `'${type}'`).join(',')
 export const RESTOCK_EPOCH_SQL = `SELECT COALESCE(MAX(id), 0) AS epoch FROM inventory_movements
   WHERE product_id = @productId AND branch_id = @branchId AND quantity > 0 AND movement_type NOT IN (${OUT_TYPE_LIST})`
 
-// Memoises only a POSITIVE probe (as lib/telegram.ts scheduledSendsAvailable does): the migration may land after the Worker.
-let tableReady = false
-export function __resetStockCrossingProbeForTests(): void { tableReady = false }
-export async function stockCrossingTableAvailable(env: Env): Promise<boolean> {
-  if (tableReady) return true
-  try {
-    const row = await getDb(env).prepare("SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_crossing_alerts'").get<{ ready: number }>()
-    tableReady = Number(row?.ready ?? 0) > 0
-  } catch { /* a failed read is not evidence the table is missing */ }
-  return tableReady
-}
+// No sqlite_master probe (6.0.993 removed the same scan from telegram.ts for read budget): when migration 0272 has not landed
+// yet the claim INSERT fails with 'no such table', and recordStockCrossings treats exactly that error as 'nothing to record'.
+const MISSING_TABLE = /no such table:?\s*(?:main\.)?stock_crossing_alerts/i
 
 export type RecordCrossingsInput = {
   /** The sale that took the units, or null for a deduction that is not a new sale (an added line, a restore, a replacement). */
@@ -194,8 +186,6 @@ export async function recordStockCrossings(env: Env, input: RecordCrossingsInput
     const { states, config } = await readStates(env, lines)
     const crossings = detectCrossings(states, config)
     if (!crossings.length) return result
-    // The table probe waits until there IS a crossing: the common sale crosses nothing and pays one statement in all.
-    if (!(await stockCrossingTableAvailable(env))) return result
     result.crossings = crossings.length
     const db = getDb(env)
     const claimed: Array<{ crossing: StockCrossing; key: string }> = []
@@ -238,6 +228,8 @@ export async function recordStockCrossings(env: Env, input: RecordCrossingsInput
         .run({ keys: JSON.stringify(group.map((entry) => entry.key)), status, error }).catch(() => undefined)
     }
   } catch (error) {
+    // Deploy order: the Worker is live before 0272. Silent, and nothing was recorded or sent (the INSERT is the first write).
+    if (MISSING_TABLE.test(String((error as Error)?.message || error))) return { crossings: 0, claimed: 0, sent: 0 }
     console.error('[stock] crossing alerts could not be recorded', error)
   }
   return result
