@@ -46,6 +46,7 @@ import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGu
 import { STOCK_SESSION_KIND, replayStockSession, type StockSessionQueryBudget } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
 import { CUSTOMER_GENDER_RESTORATION_KIND, replayCustomerGenderRestoration } from './customerGenderRestoration'
+import { RETURN_LEGACY_CONVERT_KIND, replayLegacyReturnConversion } from './returnLegacyConvert'
 import {
   parseProductMergeClusterPlan,
   resolveProductMergeClusterPlanEconomics,
@@ -3507,6 +3508,8 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
 
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
+  // 6.0.992 return money-format conversion: admin + Returns Edit, checked again inside the replay.
+  [RETURN_LEGACY_CONVERT_KIND]: { permission: 'returns', action: 'edit', run: replayLegacyReturnConversion },
   // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
   // recorded lot and branch delta of one generation and refuses 409 when the
   // lot or branch can no longer cover it.

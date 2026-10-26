@@ -11,6 +11,7 @@ import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedBy
 import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
+import { RETURN_LEGACY_CONVERT_KIND, canConvertLegacyReturns, notifyLegacyReturnConversion } from '../lib/returnLegacyConvert'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -130,6 +131,8 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
       if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
     } else if (applier?.name === CUSTOMER_GENDER_RESTORATION_KIND) {
       if (!canRestoreCustomerGender(user)) return false
+    } else if (applier?.name === RETURN_LEGACY_CONVERT_KIND) {
+      if (!canConvertLegacyReturns(user)) return false
     } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
   return true
@@ -139,7 +142,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === RETURN_LEGACY_CONVERT_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === 'product.merge' && payload.merge_version === 3)
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
@@ -518,6 +521,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
+    const legacyConvertReplay = parseJson(existing.undo_payload)?.applier === RETURN_LEGACY_CONVERT_KIND
     if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
@@ -540,6 +544,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
     if (genderReplay && !canRestoreCustomerGender(user)) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
+    if (legacyConvertReplay && !canConvertLegacyReturns(user)) return c.json({ success: false, error: 'Only an admin with Returns Edit can convert a return to the current format.', code: 'return_convert_forbidden' }, 403)
     if (applier && (applier.name === TRANSFER_OPERATION_KIND
       ? !canReplayTransferPayload(user, payload)
       : applier.name === STOCK_SESSION_KIND
@@ -603,7 +608,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           .run({ last_error: failureMessage, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
-        const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
+        const status = (stockReplay || saleCustomerReplay || genderReplay || legacyConvertReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
         // Every 409 refusal names a machine code, so the client can restate it
         // in the operator's language.
         const refusalCode = status === 409 ? replayRefusalCode(error) : null
@@ -622,6 +627,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (serverManagedReplay && applier) {
       if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
         ? notifyCustomerGenderRestoration(c.env)
+        : applier.name === RETURN_LEGACY_CONVERT_KIND
+        ? notifyLegacyReturnConversion(c.env)
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_LOT_SET_KIND

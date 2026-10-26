@@ -29,6 +29,7 @@ import {
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkActionOutcome, notifyReturnBulkAction, readReplacementOutstanding, ReturnBulkError } from '../lib/returnBulkAction'
+import { applyLegacyReturnConversion, canConvertLegacyReturns, notifyLegacyReturnConversion, planLegacyReturnConversion, ReturnLegacyConvertError } from '../lib/returnLegacyConvert'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -722,12 +723,15 @@ app.get('/', async (c) => {
     where.push(groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0])
   }
 
+  // 6.0.992: the list row shows the old-format lock (a v0 return on a v1 sale) and offers admins Convert; one primary-key join.
   const returns = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       replacement_sale.total_usd AS replacement_total_usd,
+      list_origin_sale.money_precision_version AS sale_money_precision_version,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    LEFT JOIN sales list_origin_sale ON list_origin_sale.id = r.sale_id
     WHERE ${where.join(' AND ')}
     ORDER BY r.created_at DESC LIMIT @limit
   `).all<ReturnRow>(params)
@@ -1078,6 +1082,35 @@ app.post('/bulk', async (c) => {
   }
 })
 
+// 6.0.992: "Convert to current format" -- the admin way out of an old-format return locked on a current-format sale
+// (lib/returnLegacyConvert.ts). Preview is read-only; the apply takes the preview's digest so it writes exactly what
+// the admin reviewed, and records one undoable history entry.
+function legacyConvertFailure(c: Context, error: unknown) {
+  if (error instanceof ReturnLegacyConvertError) {
+    return c.json({ error: error.message, code: error.code, ...(error.params ? { params: error.params } : {}) }, error.statusCode)
+  }
+  throw error
+}
+app.post('/legacy-convert/preview', async (c) => {
+  const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  try {
+    if (!canConvertLegacyReturns(c.get('user'))) {
+      return c.json({ error: 'Only an admin with Returns Edit can convert a return to the current format.', code: 'return_convert_forbidden' }, 403)
+    }
+    const plan = await planLegacyReturnConversion(getDb(c.env), body.return_ids)
+    c.header('Cache-Control', 'no-store')
+    return c.json({ digest: plan.digest, rows: plan.rows, convertible: plan.members.map((member) => member.id) })
+  } catch (error) { return legacyConvertFailure(c, error) }
+})
+app.post('/legacy-convert', async (c) => {
+  const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  try {
+    const result = await applyLegacyReturnConversion(getDb(c.env), c.get('user'), body)
+    if (result.converted.length && !result.replayed) c.executionCtx.waitUntil(notifyLegacyReturnConversion(c.env))
+    return c.json(result)
+  } catch (error) { return legacyConvertFailure(c, error) }
+})
+
 app.get('/capabilities', (c) => {
   if (getActionTier(c.get('user'), 'returns', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -1090,12 +1123,16 @@ app.get('/capabilities', (c) => {
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
+  // sale_money_precision_version is the linked sale's money version: the Edit Return form reads it to show, before any edit,
+  // the refusal PUT /:id gives a v0 return on a v1 sale (MONEY_PRECISION_REVIEW_NEEDED). One primary-key join, no extra read.
   const row = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       replacement_sale.total_usd AS replacement_total_usd,
+      origin_sale.money_precision_version AS sale_money_precision_version,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    LEFT JOIN sales origin_sale ON origin_sale.id = r.sale_id
     WHERE r.id = ?
   `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
