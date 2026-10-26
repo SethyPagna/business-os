@@ -31,7 +31,7 @@ async function main() {
   now += 20_000
   await request('GET')
   assert.equal(drains, 2, 'read polling keeps delayed delivery recovery active')
-  assert.match(source, /runStep\('telegram-shift-overview'/, 'scheduled recovery remains wired')
+  assert.match(source, /label\('telegram-shift-overview'/, 'scheduled recovery remains wired')
   console.log('PASS writes retain their query budget; reads and cron retain Telegram recovery')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -147,6 +147,10 @@ const commandCatalog = {
     return npm(`migrations-apply:${db}`, 'cloudflare', entry.applyScript, 'typeYES')
   },
   deploy: (plan) => npm(`deploy:${plan}`, 'cloudflare', plan === 'free' ? 'deploy:free' : 'deploy', 'typeYES'),
+  // CAUTION (6.0.984): cron triggers are not part of a Worker version, so `wrangler rollback` leaves the
+  // CURRENT release's crons (*/5, */15, 17 */3) in place. When the release being left changed the cron set,
+  // roll back by redeploying the previous sha through deploy.yml so ITS wrangler tomls apply; a bare rollback
+  // would run the old handler on every tick of the new triggers.
   rollbackWorker: (versionId, ci = false) => wrangler('rollback-worker', [
     'rollback', ...(versionId ? [versionId] : []), '--name', WORKER_NAME,
     '--message', 'Rollback from the release kit', ...(ci ? ['--yes'] : []),

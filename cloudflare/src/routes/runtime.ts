@@ -5,6 +5,8 @@ import { hasPermission } from '../lib/permissions'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
+import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS, CRON_ROTATION_TICK_MS } from '../lib/cronRotation'
+import { ROTATION_STEP_IDS, HEAVY_STEP_IDS } from '../lib/cronStepIds'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/runtime.ts. Three endpoints the Settings
@@ -71,6 +73,38 @@ function requireSettingsPermission(user: SessionUser) {
 app.get('/version', (c) => c.json({ success: true, ...getRuntimeVersion(c.env) }))
 
 app.use('/catalog-integrity', requireAuth)
+app.use('/cron-health', requireAuth)
+
+// Health row for the rotating cron: which background step ran when, which are
+// failing, killed mid-step (CPU limit) or starved. Settings permission, like
+// the other diagnostics; no personal data in it.
+app.get('/cron-health', async (c) => {
+  const user = c.get('user')
+  if (!requireSettingsPermission(user)) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'settings' }, 403)
+  }
+  try {
+    const db = getDb(c.env)
+    const read = async (key: string) => (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key }))?.value
+    const now = Date.now()
+    // A state that has never been written is 'pending', not unhealthy, until this build is older than one tick.
+    const deployedAt = Date.parse(getBuildStamp().builtAt)
+    const rotation = evaluateCronHealth(parseRotationState(await read(CRON_STATE_KEY)), ROTATION_STEP_IDS, now, CRON_ROTATION_TICK_MS, deployedAt)
+    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS, deployedAt)
+    return c.json({
+      success: true,
+      healthy: rotation.healthy && heavy.healthy,
+      problems: [...rotation.problems, ...heavy.problems],
+      stateUpdatedAt: rotation.stateUpdatedAt,
+      stale: rotation.stale,
+      pending: rotation.pending || heavy.pending,
+      steps: [...rotation.steps, ...heavy.steps],
+      heavy: { stateUpdatedAt: heavy.stateUpdatedAt, stale: heavy.stale },
+    })
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error)?.message || 'Failed to read cron health' }, 500)
+  }
+})
 
 function createProductFieldCounts(): Record<string, number> {
   const counts: Record<string, number> = {}

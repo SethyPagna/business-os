@@ -54,7 +54,7 @@ import { maybeRunScheduledAuditLogRetention } from './lib/audit'
 import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
 import { sweepStaleImportIncomingFiles } from './lib/importIncomingFiles'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
-import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
+import { maybeRunScheduledEphemeralRetention, EPHEMERAL_RETENTION_GROUPS } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 import { productStockGuardError } from './lib/productStockGuard'
@@ -64,6 +64,9 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
+import type { RotationStep } from './lib/cronRotation'
+import { dispatchCron } from './lib/cronDispatch'
+import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
 
@@ -513,7 +516,7 @@ app.use('/api/*', async (c, next) => {
 // overview whose queue send was unavailable is sent by the next API read
 // after it falls due. Background work shares the invocation's D1 allowance,
 // so writes keep their budget for committing stock and recording receipts.
-// The 6-hourly cron is the backstop for a quiet shop.
+// The every-5-minutes cron (CRON_TELEGRAM) is the backstop for a quiet shop.
 const SHIFT_OVERVIEW_DRAIN_INTERVAL_MS = 20_000
 let lastShiftOverviewDrainMs = 0
 app.use('/api/*', async (c, next) => {
@@ -618,6 +621,67 @@ app.route('/api/sync', createSyncRoute())
 export { SyncUploadSession } from './durable-objects/syncUploadSession'
 export { BroadcastHub } from './durable-objects/broadcastHub'
 
+/**
+ * These four steps have no interval gate of their own (they used to ride the
+ * 6-hourly tick, about 4 runs a day). The rotation now comes round every 2.75 h (11 steps x 15 min),
+ * so each is held to the old cadence or slower by the rotation's own record
+ * of its last OK run (no extra D1 read). 5 h, not 6 h, so jitter between
+ * visits cannot make it skip every second round.
+ */
+const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
+
+/**
+ * The rotation, in order. Order matters only where noted: stalled imports are
+ * reaped before the import retention that prunes them. Each entry is one
+ * bounded job; the heavy ones keep their own interval gates and answer
+ * `{ skipped }` cheaply when not due. The ids are the health-row keys
+ * (GET /api/runtime/cron-health) -- renaming one restarts its history.
+ */
+export function cronRotationSteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
+  const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
+  return [
+    step('drive-sync', async () => {
+      const schedule = await driveSyncScheduleDue(env)
+      if (!schedule.due) return schedule
+      // P1-2: only a destination connected by a user who may still take a
+      // full backup home receives scheduled uploads (re-checked again by
+      // the queue worker at run time).
+      const authority = await checkDriveSyncAuthorizer(env)
+      if (!authority.allowed) {
+        await recordDriveSyncError(env, authority.message)
+        return authority
+      }
+      return enqueueDriveSyncJob(env, 'scheduled')
+    }),
+    step('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env)),
+    step('reap-stalled-imports', () => reapStalledImportJobs(env), UNGATED_STEP_MIN_INTERVAL_MS),
+    step('import-retention', () => maybeRunScheduledImportRetention(env)),
+    step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env), UNGATED_STEP_MIN_INTERVAL_MS),
+    step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }), UNGATED_STEP_MIN_INTERVAL_MS),
+    ...EPHEMERAL_RETENTION_GROUPS.map((group) => step(`ephemeral-retention:${group}`, () => maybeRunScheduledEphemeralRetention(env, group))),
+  ]
+}
+
+/**
+ * The CPU-heavy steps, on their OWN trigger (CRON_HEAVY, every 3 hours, i.e.
+ * hourly-or-slower). Cloudflare gives a cron trigger up to 15 minutes of CPU
+ * on Paid when its interval is 1 hour or more (in practice the [limits] cpu_ms
+ * cap in wrangler.toml, 5 minutes), but only 30 seconds when it is more
+ * frequent (wall time is 15 minutes either way); a full D1 backup and image
+ * reprocessing must keep the larger budget, so they cannot ride the 15-minute
+ * rotation. Same rule as the rotation: ONE step per invocation, cursor in
+ * settings under its own key, so on Free (10 ms) they still never share an
+ * invocation. 3 h per tick = each step every 6 h, the cadence they had.
+ * Image audit last: it is the only one optional to the business.
+ */
+export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
+  const step = (id: string, run: () => Promise<unknown>): RotationStep => ({ id, run: label(id, run) })
+  return [
+    step('backup', () => maybeRunScheduledBackup(env)),
+    step('image-audit', () => maybeRunScheduledImageAudit(env)),
+  ]
+}
+
 export default {
   fetch: app.fetch,
   // Cloudflare routes a queue message batch here based on which queue it
@@ -661,76 +725,45 @@ export default {
       >, env)
     }
   },
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       // Restore maintenance: skip the whole tick. A scheduled backup taken
       // DURING a restore would snapshot the half-restored database as if it
-      // were a good state; the sweeps behind it write too. The next 6h tick
-      // runs normally once maintenance clears.
+      // were a good state; the sweeps behind it write too. The next tick runs
+      // normally once maintenance clears.
       if (await getMaintenance(env)) return
 
-      // Each sweep runs in its OWN guard. These used to be a bare await-chain,
-      // so the FIRST step to throw aborted every step behind it -- and the
-      // heaviest, maybeRunScheduledBackup, is exactly the one that starts
-      // throwing once the database grows large (a full backup on a multi-
-      // hundred-MB D1 can hit the CPU / wall-time ceiling, and its create
-      // path is not internally caught). That silently starved import- and
-      // audit-log retention on every tick, so the import staging those sweeps
-      // prune piled up unbounded -- which made the database larger and the
-      // backup even more likely to fail: a self-reinforcing spiral that took
-      // the production DB to ~661 MB, ~65% stale import staging (see
-      // importRetention.ts). Isolating each step means a failing backup can
-      // no longer stop retention from reclaiming the space that lets the next
-      // backup succeed. Order is unchanged (backup first, image-audit last);
-      // independence changes only what a failure does to the steps after it.
-      const runStep = async (label: string, step: () => Promise<unknown>) => {
+      // ONE job per invocation (lib/cronRotation.ts). This handler used to run
+      // about ten steps in a single invocation; a cron invocation has the same
+      // CPU budget as a request (10 ms on Free) and a Worker killed for CPU
+      // cannot be caught, so everything behind the step that ran out -- the
+      // retention and pruning sweeps -- silently never ran. Now:
+      //   - CRON_TELEGRAM fires every few minutes and only drains due
+      //     Telegram shift overviews, so a scheduled summary is never waiting
+      //     behind retention or a backup;
+      //   - CRON_HEAVY runs the next CPU-heavy step (full backup, image audit)
+      //     from its own hourly-or-slower trigger, so Paid keeps the
+      //     CPU budget those need (up to the cpu_ms cap; a trigger under 1 hour
+      //     gets only 30 seconds);
+      //   - CRON_ROTATION (and any other expression, e.g. the old 6-hourly
+      //     trigger during a rollout) runs the NEXT rotation step, chosen by a
+      //     cursor saved in settings before the step starts.
+      const label = (name: string, step: () => Promise<unknown>) => async () => {
         try {
-          await runBackground(env, `cron:${label}`, step)
+          return await runBackground(env, `cron:${name}`, step)
         } catch (error) {
-          console.error(`[scheduled] ${label} failed`, (error as Error)?.message || error)
+          console.error(`[scheduled] ${name} failed`, (error as Error)?.message || error)
+          throw error
         }
       }
-      // T10: the backstop for a shift overview nothing else has sent. Ahead
-      // of the backup because it is a few indexed statements and the backup
-      // is the step that runs out of budget.
-      await runStep('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true }))
-      await runStep('backup', () => maybeRunScheduledBackup(env))
-      await runStep('drive-sync', async () => {
-        const schedule = await driveSyncScheduleDue(env)
-        if (!schedule.due) return schedule
-        // P1-2: only a destination connected by a user who may still take a
-        // full backup home receives scheduled uploads (re-checked again by
-        // the queue worker at run time).
-        const authority = await checkDriveSyncAuthorizer(env)
-        if (!authority.allowed) {
-          await recordDriveSyncError(env, authority.message)
-          return authority
-        }
-        return enqueueDriveSyncJob(env, 'scheduled')
+      await dispatchCron(controller?.cron, controller?.scheduledTime ?? Date.now(), {
+        // The backstop for a shift overview nothing else has sent (the request
+        // path drains too, but only while someone is using the app).
+        drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
+        heavySteps: () => cronHeavySteps(env, label),
+        rotationSteps: () => cronRotationSteps(env, label),
+        storeFor: (key) => settingsRotationStore(env, key),
       })
-      await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
-      // Reap stalled import jobs into a terminal status BEFORE retention runs,
-      // so a job stuck in analyzing/applying (e.g. a killed queue invocation)
-      // is pruned this same tick. Previously this ran ONLY on the Import Jobs
-      // screen's GET, so a stalled job held its full staging until someone
-      // happened to open that page.
-      await runStep('reap-stalled-imports', () => reapStalledImportJobs(env))
-      // K4: import-artifact retention (24h detail / 7d summary).
-      await runStep('import-retention', () => maybeRunScheduledImportRetention(env))
-      // S-uploads: import files are temporary. Deletes the CSV/ZIP of jobs
-      // terminal for over 1h, of jobs never started after 24h, and any
-      // imports/ object over 24h old whose job is gone or finished.
-      await runStep('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env))
-      // Drain orphan staging automatically (rows whose parent import_jobs row
-      // is already gone) -- previously reachable only via a manual, force-only
-      // admin endpoint, so orphans accumulated with no automatic drain.
-      await runStep('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }))
-      // Prune ephemeral / log / expired-auth tables (rate_limit_events,
-      // sessions, verification_codes, lockouts, ai_response_logs, action_history)
-      // that had no automatic retention at all before the Aug-31 audit.
-      await runStep('ephemeral-retention', () => maybeRunScheduledEphemeralRetention(env))
-      // Last on purpose: it is the only one of these optional to the business.
-      await runStep('image-audit', () => maybeRunScheduledImageAudit(env))
     })())
   },
 }
