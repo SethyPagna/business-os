@@ -176,6 +176,45 @@ async function main() {
     assert.ok(logged.some((line) => line.includes('internal_secret_table_name')), 'the detail is logged')
   })
 
+  await check('a cron row write between load and save does not cause a false conflict (RC1 regression)', async () => {
+    db.prepare("DELETE FROM settings WHERE key = 'last_run_notes'").run()
+    db.prepare("UPDATE settings SET updated_at = '2026-01-01 00:00:00' WHERE key NOT IN ('cron_rotation_state','cron_heavy_state') AND key NOT LIKE '%last_run%'").run()
+    db.prepare("UPDATE settings SET updated_at = '2026-01-02 00:00:00' WHERE key IN ('cron_rotation_state','cron_heavy_state') OR key LIKE '%last_run%'").run()
+    // The Settings screen asks for the version of the keys it is about to write; none exist yet, so
+    // the answer is the table-wide stamp.
+    const meta = await call(MANAGER, 'GET', '/meta?keys=brand_new_key')
+    assert.equal(meta.status, 200)
+    assert.equal(meta.body.updatedAt, '2026-01-01 00:00:00', 'the stamp ignores the cron rows')
+    // The cron ticks (direct write, as cronRotationStore does) before the save lands.
+    db.prepare("UPDATE settings SET updated_at = '2026-01-03 00:00:00', value = '{\"version\":9}' WHERE key = 'cron_rotation_state'").run()
+    db.prepare("UPDATE settings SET updated_at = '2026-01-03 00:00:00' WHERE key = 'audit_log_retention_last_run'").run()
+    const saved = await call(MANAGER, 'POST', '/', { brand_new_key: 'v', expectedUpdatedAt: meta.body.updatedAt })
+    assert.equal(saved.status, 200, 'false 409: ' + JSON.stringify(saved.body))
+    assert.equal(stored('brand_new_key'), 'v')
+  })
+
+  await check('CONTROL: a real user edit of another row between load and save is still a conflict', async () => {
+    db.prepare("UPDATE settings SET updated_at = '2026-01-01 00:00:00' WHERE key = 'business_name'").run()
+    const meta = await call(MANAGER, 'GET', '/meta?keys=another_new_key')
+    db.prepare("UPDATE settings SET updated_at = '2099-02-01 00:00:00' WHERE key = 'business_name'").run()
+    const res = await call(MANAGER, 'POST', '/', { another_new_key: 'v', expectedUpdatedAt: meta.body.updatedAt })
+    assert.equal(res.status, 409, JSON.stringify(res.body))
+  })
+
+  await check('GET /api/settings updatedAt never carries a cron stamp', async () => {
+    db.prepare("UPDATE settings SET updated_at = '2099-01-01 00:00:00' WHERE key = 'cron_heavy_state'").run()
+    const res = await call(MANAGER, 'GET', '/')
+    assert.notEqual(res.body.updatedAt, '2099-01-01 00:00:00')
+  })
+
+  await check('the SQL exclusion and isSystemOwnedSettingKey agree', async () => {
+    const sens = load('lib/settingsSensitive.ts')
+    for (const key of [...SYSTEM_KEYS, 'CRON_ROTATION_STATE', 'x_last_run', 'x_last_run:grp', 'business_name', 'last_run_notes', 'lastrun', 'a_last_runner', 'telegram_chat_id']) {
+      const sqlSaysUser = !!db.prepare('SELECT 1 AS ok FROM (SELECT ? AS key) WHERE ' + sens.NOT_SYSTEM_OWNED_SETTING_SQL).get([key])
+      assert.equal(sqlSaysUser, !sens.isSystemOwnedSettingKey(key), key)
+    }
+  })
+
   if (failures.length) throw new Error(`${failures.length} check(s) failed`)
   console.log(`test-settings-system-owned-pure.cjs: ${passed} checks passed`)
 }

@@ -7,7 +7,7 @@ import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings, isSensitiveSettingKey, isSystemOwnedSettingKey } from '../lib/settingsSensitive'
+import { stripSensitiveSettings, isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
@@ -69,7 +69,8 @@ async function getSettingsUpdatedAt(env: Env, keys?: string[]): Promise<string |
     ).get<{ updated_at: string | null }>({ keysJson: JSON.stringify(keys) })
     if (row?.updated_at) return row.updated_at
   }
-  const row = await db.prepare('SELECT MAX(updated_at) AS updated_at FROM settings').get<{ updated_at: string | null }>()
+  // System-owned rows (cron state, *_last_run) are not user edits: they never move this stamp.
+  const row = await db.prepare(`SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}`).get<{ updated_at: string | null }>()
   return row?.updated_at || new Date().toISOString()
 }
 
@@ -117,7 +118,7 @@ app.get('/', async (c) => {
   // when the table has no timestamp.
   const [rowsResult, updatedAtResult] = await db.batch([
     { sql: 'SELECT key, value FROM settings' },
-    { sql: 'SELECT MAX(updated_at) AS updated_at FROM settings' },
+    { sql: `SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}` },
   ])
   const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
   const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at

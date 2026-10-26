@@ -59,7 +59,7 @@ function answer(sql) {
     if (trace.settingsFail) throw new Error('D1_ERROR: settings read failed')
     return SETTINGS_ROWS.map(({ key, value }) => ({ key, value }))
   }
-  if (/^SELECT MAX\(updated_at\) AS updated_at FROM settings$/.test(sql.trim())) return [{ updated_at: MAX_UPDATED_AT }]
+  if (/^SELECT MAX\(updated_at\) AS updated_at FROM settings( WHERE .*)?$/.test(sql.trim())) return [{ updated_at: MAX_UPDATED_AT }]
   throw new Error(`unexpected SQL: ${sql}`)
 }
 

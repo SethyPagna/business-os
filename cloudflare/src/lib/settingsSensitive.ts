@@ -41,6 +41,12 @@ export function isSystemOwnedSettingKey(key: string): boolean {
   return SYSTEM_OWNED_KEYS.has(normalized) || /_last_run(:|$)/.test(normalized)
 }
 
+// The same rule as a SQL predicate on settings.key, for the table-wide
+// MAX(updated_at) stamps (routes/settings.ts): the cron rewrites its rows every
+// five minutes, and a stamp that moves on its own makes a user's save look
+// stale. A test pins this to isSystemOwnedSettingKey.
+export const NOT_SYSTEM_OWNED_SETTING_SQL = String.raw`lower(key) NOT IN ('cron_rotation_state', 'cron_heavy_state') AND lower(key) NOT LIKE '%\_last\_run' ESCAPE '\' AND lower(key) NOT LIKE '%\_last\_run:%' ESCAPE '\'`
+
 export function isSensitiveSettingKey(key: string): boolean {
   const normalized = String(key || '').toLowerCase()
   if (isSystemOwnedSettingKey(normalized)) return true
