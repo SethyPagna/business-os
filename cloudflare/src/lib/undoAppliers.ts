@@ -4004,10 +4004,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   },
   // Conflicts decisions (lib/productDataGaps.ts): "Confirm $0" and "no barcode" are rows in product_conflict_marks. The payload is the
   // mark itself ({ product_id, mark, set }); undo/redo is the compensating write. Gated like the forward route: products edit at the
-  // full tier, and a $0 confirmation also needs the cost-entry permission (checked in the replay).
+  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs the cost-entry permission (checked in the replay).
   'product.conflict_mark': {
     permission: 'products',
     action: 'edit',
+    // Conflicts access (merge_duplicates) must not be switched off, as for the forward route. The three History gates refuse a role with it
+    // off; the full tier of products edit is the applier's own tier.
+    alsoAction: 'merge_duplicates',
     run: async (payload, ctx) => {
       if (!ctx.user) throw new UndoConflictError('The signed-in user is required to replay this action.')
       const { replayProductConflictMark } = await import('./productDataGaps')

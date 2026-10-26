@@ -7,7 +7,8 @@
 //                         - a held damaged lot with units left has a NULL unit cost;
 //                         - its catalog cost is an UNPROVEN $0 (Q1): $0 on a product that existed when migration 0273 was
 //                           applied (id <= the cost_zero_watermark flag) with no proof it is real. Proof is a "Confirm $0"
-//                           mark, a latest cost entry that is a $0, or an active $0 received date. A $0 on a newer product can
+//                           mark, a latest cost entry that is a $0, or an active $0 received date WITH units on hand (owner Q2: a
+//                           sold-out lot carries no weight). A $0 on a newer product can
 //                           only be one a person typed, so it is a recorded $0 and is not listed.
 //   empty_barcode       NULL, empty or blank barcode (blank = what the app's JavaScript trim() strips, see below).
 //   placeholder_barcode a barcode made only of the character 0 ("0", "000"), the old system's placeholder (Q3).
@@ -68,7 +69,8 @@ const unprovenZero = (alias: string): string => `${alias}.cost_price_usd = 0 AND
       AND NOT ${HAS_MARK('zero_cost_confirmed', alias)}
       AND NOT EXISTS (SELECT 1 FROM product_cost_entries e WHERE e.product_id = ${alias}.id AND e.cost_usd = 0
         AND e.id = (SELECT MAX(id) FROM product_cost_entries WHERE product_id = ${alias}.id))
-      AND NOT EXISTS (SELECT 1 FROM product_batches zb WHERE zb.variant_product_id = ${alias}.id AND zb.is_active = 1 AND zb.unit_cost_usd = 0)`
+      AND NOT EXISTS (SELECT 1 FROM product_batches zb WHERE zb.variant_product_id = ${alias}.id AND zb.is_active = 1 AND zb.unit_cost_usd = 0
+        AND EXISTS (SELECT 1 FROM branch_batch_stock zs WHERE zs.batch_id = zb.id AND zs.quantity > 0))`
 
 // Product ids with any unknown-cost reason, each branch served by its own partial index.
 function unknownCostIdsSql(bounded: boolean): string {

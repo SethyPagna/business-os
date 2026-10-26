@@ -41,7 +41,7 @@ h.setActionTier((...args) => real.getActionTier(...args))
 const lib = h.load('lib/productDataGaps.ts')
 const db = h.raw.db
 
-const WATERMARK = 30
+const WATERMARK = 32
 seedStockFixture(db, () => {
   db.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)")
   const add = db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,is_active,is_group,parent_id,stock_quantity,selling_price_usd) VALUES(?,?,?,?,?,?,?,0,1)')
@@ -56,13 +56,16 @@ seedStockFixture(db, () => {
   const barcodes = [[13, null], [14, ''], [15, '   '], [16, '\t'], [17, ' '], [18, '\n'], [19, '0'], [20, '000'], [21, ' 0 '], [22, '00A'], [24, null]]
   for (const [id, barcode] of barcodes) add.run(id, `Barcode case ${id}`, barcode, 1, 1, 0, null)
   add.run(23, 'Real barcode', '8850000000023', 1, 1, 0, null)
-  for (let id = 25; id <= WATERMARK; id++) add.run(id, `Bulk unknown ${id}`, `885000000${id}`, null, 1, 0, null)
-  add.run(31, 'New zero typed by a person', 'B31', 0, 1, 0, null)
+  for (let id = 25; id <= 30; id++) add.run(id, `Bulk unknown ${id}`, `885000000${id}`, null, 1, 0, null)
+  add.run(31, 'Old zero, only a sold-out $0 lot', 'B31', 0, 1, 0, null)
+  add.run(32, 'Filler at the watermark', 'B32', 1, 1, 0, null)
+  add.run(33, 'New zero typed by a person', 'B33', 0, 1, 0, null)
   const lot = db.prepare('INSERT INTO product_batches(variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(?,?,1,?,?)')
   const stock = db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)')
   stock.run(Number(lot.run(5, 'k5', 0, '2026-10-01').lastInsertRowid), 1, 4)
   stock.run(Number(lot.run(7, 'k7', null, '2026-10-02').lastInsertRowid), 1, 3)
   stock.run(Number(lot.run(8, 'k8', null, '2026-10-02').lastInsertRowid), 1, 0)
+  stock.run(Number(lot.run(31, 'k31', 0, '2026-10-03').lastInsertRowid), 1, 0)
   const held = db.prepare('INSERT INTO damaged_stock_lots(product_id,quantity,quantity_remaining,unit_cost_usd) VALUES(?,?,?,NULL)')
   held.run(9, 2, 2)
   held.run(10, 2, 0)
@@ -71,7 +74,7 @@ seedStockFixture(db, () => {
   db.prepare("INSERT INTO product_conflict_marks(product_id,mark) VALUES(24,'no_barcode')").run()
   // The lot triggers derive catalog costs; restore the fixture's intended catalog costs.
   const set = db.prepare('UPDATE products SET cost_price_usd = ? WHERE id = ?')
-  set.run(0, 5); set.run(2, 7); set.run(2, 8)
+  set.run(0, 5); set.run(2, 7); set.run(2, 8); set.run(0, 31)
   db.prepare("UPDATE system_flags SET value = ? WHERE key = 'cost_zero_watermark'").run(String(WATERMARK))
 })
 assert.equal(db.prepare("SELECT value v FROM system_flags WHERE key = 'cost_zero_watermark'").get().v, String(WATERMARK), 'control: the watermark is set')
@@ -84,7 +87,7 @@ async function check(name, fn) {
 const get = async (path, user = admin) => { h.setUser(user); return h.request('GET', path) }
 const post = async (body, user = admin) => { h.setUser(user); return h.request('POST', '/data-gaps/marks', body) }
 const ids = res => res.json.items.map(item => item.id)
-const UNKNOWN = [1, 2, 7, 9, 25, 26, 27, 28, 29, 30]
+const UNKNOWN = [1, 2, 7, 9, 25, 26, 27, 28, 29, 30, 31]
 const business = () => ({
   products: db.prepare('SELECT * FROM products ORDER BY id').all(),
   lots: db.prepare('SELECT * FROM product_batches ORDER BY id').all(),
@@ -105,13 +108,14 @@ async function main() {
     assert.deepEqual(by(7).reasons, ['lots_unknown'])
     assert.equal(by(7).unknown_lot_count, 1)
     assert.equal(by(7).unknown_units, 3)
+    assert.deepEqual(by(31).reasons, ['zero_unconfirmed'], 'a $0 whose only $0 lot is sold out is still unproven (owner Q2: sold-out lots carry no weight)')
     assert.deepEqual(by(9).reasons, ['held_unknown'])
     assert.equal(by(9).held_unknown_units, 2)
   })
 
   await check('a $0 is NOT listed when it is proven (confirmed, latest cost entry is $0, an active $0 lot) or was typed after the watermark', async () => {
     const list = ids(await get('/data-gaps?kind=unknown_cost&limit=100'))
-    for (const id of [3, 4, 5, 31]) assert.ok(!list.includes(id), `product ${id} is a real $0`)
+    for (const id of [3, 4, 5, 33]) assert.ok(!list.includes(id), `product ${id} is a real $0`)
     for (const id of [8, 10]) assert.ok(!list.includes(id), `product ${id}: a lot with no units / a spent held lot is not an item`)
     for (const id of [11, 12]) assert.ok(!list.includes(id), `product ${id}: inactive and group parent rows are never listed`)
   })
@@ -221,6 +225,29 @@ async function main() {
     assert.equal(again.status, 200)
     assert.equal(again.json.changed, false)
     assert.equal(db.prepare("SELECT COUNT(*) n FROM action_history WHERE entity_id = '2'").get().n, 1, 'no second record')
+  })
+
+  await check('Confirm $0 works on an old $0 whose only $0 lot is sold out', async () => {
+    const done = await post({ product_id: 31, mark: 'zero_cost_confirmed', set: true })
+    assert.equal(done.status, 200, JSON.stringify(done.json))
+    assert.equal(done.json.changed, true)
+    assert.ok(!ids(await get('/data-gaps?kind=unknown_cost&limit=100')).includes(31))
+  })
+
+  await check('Conflicts access gates the decisions too: merge_duplicates off, review tier and a missing cost view are refused with 403 and write nothing', async () => {
+    const marksBefore = db.prepare('SELECT COUNT(*) n FROM product_conflict_marks').get().n
+    const historyBefore = db.prepare('SELECT COUNT(*) n FROM action_history').get().n
+    const employeeShape = role({ products: true, 'products:merge_duplicates': false, product_cost_view: true, product_cost_edit: true })
+    const noCostView = role({ ...MERGE, product_cost_edit: true })
+    for (const [who, user] of [['merge off', employeeShape], ['review tier', role({ products: 'review', 'products:merge_duplicates': true, product_cost_view: true, product_cost_edit: true })]]) {
+      assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, user)).status, 403, `${who}: no barcode`)
+      assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, user)).status, 403, `${who}: confirm $0`)
+    }
+    assert.equal((await post({ product_id: 2, mark: 'zero_cost_confirmed', set: false }, employeeShape)).status, 403, 'merge off: taking a mark back')
+    assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, noCostView)).status, 403, 'a $0 confirmation is cost data: cost view is required')
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM product_conflict_marks').get().n, marksBefore, 'no mark was written')
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM action_history').get().n, historyBefore, 'no undo record was written')
+    assert.ok(ids(await get('/data-gaps?kind=empty_barcode&limit=100')).includes(13), 'the product is still listed')
   })
 
   await check('refusals: a $0 confirmation needs the cost-entry permission, products edit at the full tier; the gap must still exist', async () => {

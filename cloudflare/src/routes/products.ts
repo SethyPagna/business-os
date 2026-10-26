@@ -6280,9 +6280,14 @@ app.get('/data-gaps', async (c) => {
 // queued: a mark is a decision, not a field edit); a $0 confirmation also needs the cost-entry permission.
 app.post('/data-gaps/marks', async (c) => {
   const user = c.get('user')
+  // A decision hides a product from Conflicts for everyone, so it needs the same access the Conflicts reads need (merge_duplicates at the
+  // full tier), plus products edit; a $0 confirmation is cost data, so it also needs cost view and the cost-entry permission.
+  const noConflictsAccess = denyDataGaps(c)
+  if (noConflictsAccess) return noConflictsAccess
   try {
     const input = parseProductConflictMarkInput(await c.req.json().catch(() => null))
-    if (getActionTier(user, 'products', 'edit') !== 'full' || (input.mark === 'zero_cost_confirmed' && !canEditAcquisitionCosts(user))) {
+    if (getActionTier(user, 'products', 'edit') !== 'full'
+      || (input.mark === 'zero_cost_confirmed' && !(canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)))) {
       return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
     }
     const result = await setProductConflictMark(getDb(c.env), { id: actorId(user), name: actorSnapshot(user) }, input)
