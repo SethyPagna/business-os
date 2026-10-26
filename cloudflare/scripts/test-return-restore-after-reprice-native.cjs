@@ -51,13 +51,13 @@ const pricing = load('lib/saleItemPricing.ts')
 const KEYS = { 101: 'a', 102: 'b' }
 const PRICES = { a: 10, b: 20 }
 // prices: unit price per line key; extra: lines added to the sale later; discount: header discount prorated over all lines.
-function snapshotOf(lineKey, { prices = PRICES, extra = {}, discount = 0 } = {}) {
+function snapshotOf(lineKey, { prices = PRICES, extra = {}, discount = 0, membership = 0 } = {}) {
   const all = { ...prices, ...extra }
   const pool = { version: 1, pool_key: 'sale-AB-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [],
     lines: Object.keys(all).map(key => ({ line_key: key, source: 'selling', product: { id: 7, selling_price_usd: all[key], selling_price_khr: 1 }, selling_price_input_usd: null, manual: { type: 'none', value: 0 } })) }
   const quantities = Object.fromEntries(Object.keys(all).map(key => [key, 1]))
   return pricing.serializeSaleItemPricing(pool, quantities, lineKey, { version: 1, lines: Object.keys(all).map(key => ({ line_key: key, amount: all[key] })),
-    discount_usd: discount, membership_discount_usd: 0, tax_usd: 0 })
+    discount_usd: discount, membership_discount_usd: membership, tax_usd: 0 })
 }
 const PRICING_101 = snapshotOf('a')
 const PRICING_102 = snapshotOf('b')
@@ -299,6 +299,19 @@ const cases = [
     f.sql.exec("UPDATE sales SET delivery_fee_usd=2.5,delivery_fee_khr=10000,delivery_fee_paid_by='customer' WHERE id=1")
     const result = await kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-after-fee'))
     assert.deepEqual(result.changedIds, [10])
+  }],
+  // Same net entitlement, different split (header discount -> membership discount): the net comparison cannot see it, the allocation comparison does.
+  ['moving-a-share-between-discount-and-membership-with-the-same-net-is-a-reprice', async f => {
+    const recorded = JSON.parse(snapshotOf('a', { discount: 3 })).receipt_allocation
+    const now = JSON.parse(snapshotOf('a', { membership: 3 })).receipt_allocation
+    assert.equal(recorded.net_entitlement_usd, now.net_entitlement_usd, 'fixture: the same net entitlement')
+    assert.notDeepEqual(recorded, now, 'fixture: a different split')
+    await cancelA(f)
+    const row = f.sql.prepare('SELECT refund_snapshot_json FROM return_items WHERE return_id=10').get()
+    const snapshot = JSON.parse(row.refund_snapshot_json); snapshot.receipt_allocation = recorded; snapshot.net_entitlement_usd = recorded.net_entitlement_usd
+    f.sql.prepare('UPDATE return_items SET refund_snapshot_json=? WHERE return_id=10').run(JSON.stringify(snapshot))
+    for (const id of [101, 102]) f.sql.prepare('UPDATE sale_items SET pricing_snapshot_json=? WHERE id=?').run(snapshotOf(KEYS[id], { membership: 3 }), id)
+    await repricedRefusal(f, () => kernel.applyReturnBulkAction(f.env, admin, request(f, [10], 'cancelled', 'completed', 'restore-split-moved')), 'discount share moved to the membership discount')
   }],
   ['units-sold-changed-is-a-reprice', async f => {
     await cancelA(f)

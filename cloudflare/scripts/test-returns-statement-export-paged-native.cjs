@@ -18,6 +18,8 @@ const MUTANTS = {
   'cursor-without-id-tiebreak': [{ from: "(${RETURN_EXPORT_SORT_AT}, r.id) < (@cursorAt, @cursorId)", to: "(${RETURN_EXPORT_SORT_AT}) < (@cursorAt)" }],
   // The page seeks from the top of the period instead of the cursor: every page re-reads what the earlier pages served.
   'cursor-bound-ignored': [{ from: "cursor ? buildFilter('<= @cursorAt') : filter", to: 'filter' }],
+  // The OLD membership test: two raw text ranges, which admit the other shape's rows from adjacent days (T sorts after the space).
+  'two-text-ranges': [{ from: 'AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo', to: "AND ((r.created_at >= @createdFrom AND r.created_at < @createdTo) OR (r.created_at >= replace(@createdFrom,' ','T') AND r.created_at < replace(@createdTo,' ','T')))" }],
   // The page ignores the Free bound.
   'free-bound-ignored': [{ from: 'getPlanLimits(c.env).d1QueriesPerInvocation < 200 ? RETURN_EXPORT_PAGE_MAX_FREE : RETURN_EXPORT_PAGE_MAX', to: 'RETURN_EXPORT_PAGE_MAX' }],
   // A page is served under a token that no longer matches.
@@ -112,8 +114,24 @@ async function walk(db, user, qs, env) {
   } while (cursor)
   return pages
 }
-const expectedOrder = (db, extra = '') => db.db.prepare(`SELECT id FROM returns WHERE ((created_at>='2026-09-19 17:00:00' AND created_at<'2026-09-20 17:00:00') OR (created_at>='2026-09-19T17:00:00' AND created_at<'2026-09-20T17:00:00'))
-  AND COALESCE(return_scope,'customer')='customer' ${extra} ORDER BY created_at DESC, id DESC`).all().map(row => row.id)
+// INDEPENDENT oracle: no SQL date function and none of the route's filter. Every stored value is parsed by JS Date (space, ISO Z, fractions, microseconds, offsets),
+// truncated to the second exactly as the list's datetime() test does, and kept when its instant lies in [from, to). Order = raw stored text, then id, both descending.
+const WIN_FROM = Date.parse('2026-09-19T17:00:00Z'), WIN_TO = Date.parse('2026-09-20T17:00:00Z')
+function instantOf(stored) {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/.exec(stored)
+  assert.ok(m, 'fixture shape understood: ' + stored)
+  return Date.parse(m[1] + 'T' + m[2] + (m[4] || 'Z'))
+}
+const expectedOrder = (db, { scope = 'customer', ids = null } = {}) => db.db.prepare('SELECT id,created_at,COALESCE(return_scope,\'customer\') AS scope FROM returns').all()
+  .filter(row => row.scope === scope && (!ids || ids.includes(row.id)) && instantOf(row.created_at) >= WIN_FROM && instantOf(row.created_at) < WIN_TO)
+  .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : b.id - a.id))
+  .map(row => row.id)
+// Every stored shape of one instant.
+function shapesOf(ms) {
+  const base = new Date(ms).toISOString().slice(0, 19)
+  const local = (hours, sign) => new Date(ms + hours * 3600e3).toISOString().slice(0, 19)
+  return { space: base.replace('T', ' '), isoZ: base + 'Z', fraction: base + '.123Z', micro: base.replace('T', ' ') + '.123456', plus7: local(7) + '+07:00', minus5: local(-5) + '-05:00', longFraction: base + '.123456789Z' }
+}
 
 const cases = [
   ['complete-over-the-list-cap-and-stable-order', async () => {
@@ -153,7 +171,7 @@ const cases = [
     assert.equal(supplier.length, 30)
     assert.ok(supplier.every(id => id > 1000))
     const selected = (await walk(db, exporter, { ids: '3,5,7,1001,99999' })).flatMap(page => page.rows.map(row => row.id))
-    assert.deepEqual(selected, expectedOrder(db, 'AND id IN (3,5,7,1001,99999)'), 'ids narrow within scope and window')
+    assert.deepEqual(selected, expectedOrder(db, { ids: [3, 5, 7, 1001, 99999] }), 'ids narrow within scope and window')
     assert.deepEqual(selected.slice().sort((a, b) => a - b), [3, 5, 7])
     db.db.close()
   }],
@@ -174,6 +192,52 @@ const cases = [
     const r = await get(db, exporter, DAY)
     assert.equal(r.status, 400); assert.equal(r.body.code, 'return_export_too_large'); assert.equal(r.body.total, 20001)
     assert.equal(r.body.rows, undefined)
+    db.db.close()
+  }],
+  ['exact-membership-for-every-stored-shape-at-both-edges', async () => {
+    // Decoys and members of EVERY stored shape at both edges of the period (and a day beyond each): the export must hold exactly what the oracle -- and the list --
+    // hold, and a small page size must walk cursors over every shape (offsets, long fractions) without a refusal.
+    const db = newDb(); seed(db, 120)
+    const insert = db.db.prepare("INSERT INTO returns(id,return_number,return_scope,status,return_type,reason,created_at,updated_at) VALUES(@id,@n,@scope,'completed','refund','shape',@at,@at)")
+    let id = 5000
+    db.db.exec('BEGIN')
+    for (const ms of [WIN_FROM - 86400e3, WIN_FROM - 3600e3, WIN_FROM - 1000, WIN_FROM, WIN_FROM + 1000, WIN_FROM + 3600e3, WIN_TO - 3600e3, WIN_TO - 1000, WIN_TO, WIN_TO + 1000, WIN_TO + 3600e3, WIN_TO + 86400e3, (WIN_FROM + WIN_TO) / 2]) {
+      for (const [shape, text] of Object.entries(shapesOf(ms))) insert.run({ id: id++, n: 'S-' + id, scope: shape === 'minus5' ? 'supplier' : 'customer', at: text })
+    }
+    // sub-second values that straddle the cut: truncation to the second decides, exactly as the list does
+    for (const text of ['2026-09-20 16:59:59.999', '2026-09-20T17:00:00.000Z', '2026-09-20 17:00:00.500', '2026-09-19 16:59:59.999999', '2026-09-19T17:00:00.0Z']) insert.run({ id: id++, n: 'F-' + id, scope: 'customer', at: text })
+    db.db.exec('COMMIT')
+    const expected = expectedOrder(db)
+    assert.ok(expected.length > 40 && expected.length < db.db.prepare('SELECT COUNT(*) n FROM returns').get().n - 40, 'the fixture has both members and decoys')
+    for (const limit of ['7', '250']) {
+      const exported = (await walk(db, exporter, { limit })).flatMap(page => page.rows.map(row => row.id))
+      assert.deepEqual(exported, expected, 'export (page ' + limit + ') = the oracle, in order')
+    }
+    currentUser = ADMIN
+    const list = await (await app.request('/?' + new URLSearchParams({ scope: 'customer', createdFrom: '2026-09-19 17:00:00', createdTo: '2026-09-20 17:00:00', limit: '1000' }), { method: 'GET' }, { PLAN_TIER: 'free', DB: db }, { waitUntil() {} })).json()
+    assert.deepEqual(list.map(row => row.id).sort((a, b) => a - b), expected.slice().sort((a, b) => a - b), 'the list holds the same rows for the same window')
+    const supplier = (await walk(db, exporter, { scope: 'supplier', limit: '7' })).flatMap(page => page.rows.map(row => row.id))
+    assert.deepEqual(supplier, expectedOrder(db, { scope: 'supplier' }), 'the offset-shaped supplier rows too')
+    db.db.close()
+  }],
+  ['statement-cap-holds-on-a-later-page', async () => {
+    const db = newDb(); seed(db, 30)
+    const cursor = Buffer.from(JSON.stringify(['2026-09-20 05:00:00', 99999, 19990])).toString('base64url')
+    const r = await get(db, exporter, { ...DAY, cursor, snapshotToken: 'a'.repeat(64), total: '20000', limit: '250' })
+    assert.equal(r.status, 400); assert.equal(r.body.code, 'return_export_too_large')
+    const fine = await get(db, exporter, { ...DAY, cursor: Buffer.from(JSON.stringify(['2026-09-20 05:00:00', 99999, 0])).toString('base64url'), snapshotToken: 'a'.repeat(64), total: '30' })
+    assert.equal(fine.status, 200)
+    db.db.close()
+  }],
+  ['a-change-mid-export-is-caught-by-the-final-verify', async () => {
+    // Later pages do not re-read the whole statement (that is the cost the review removed); the guarantee is that no file is published unless the final verify matches.
+    const db = newDb(); seed(db, 600)
+    const first = await get(db, exporter, { ...DAY, limit: '100' })
+    db.db.exec("UPDATE returns SET status='cancelled' WHERE id=7")
+    const later = await get(db, exporter, { ...DAY, limit: '100', cursor: first.body.nextCursor, snapshotToken: first.body.snapshotToken, total: first.body.total })
+    assert.equal(later.status, 200, 'a later page is served')
+    const verify = await get(db, exporter, { ...DAY, snapshotToken: first.body.snapshotToken, verify: '1' })
+    assert.equal(verify.status, 409); assert.equal(verify.body.code, 'return_statement_changed')
     db.db.close()
   }],
   ['snapshot-token-refuses-a-moved-statement', async () => {

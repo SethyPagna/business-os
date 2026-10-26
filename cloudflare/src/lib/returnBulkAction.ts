@@ -1112,6 +1112,8 @@ async function refuseReactivationAfterReprice(db: D1Compat, returnIds: number[])
   const itemIds = JSON.stringify([...new Set(needLedger.map((row) => Number(row.sale_item_id)))])
   const ledger = await db.prepare(`SELECT sale_item_id,created_at FROM sale_amendments
     WHERE sale_item_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids)) AND kind IN (${LEDGER_LINE_KINDS.map((kind) => `'${kind}'`).join(',')}) LIMIT 1001`).all<{ sale_item_id: number; created_at: string | null }>({ ids: itemIds })
+  // A truncated read cannot prove a line is unchanged: refuse rather than guess (the way forward is the same -- record a new return).
+  if (ledger.length > 1000) repricedRefusal()
   const stamp = (value: unknown): number => Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(value)) ? String(value).replace(' ', 'T') : `${String(value).replace(' ', 'T')}Z`)
   for (const row of needLedger) {
     const returnedAt = stamp(row.return_at)

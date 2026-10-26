@@ -786,17 +786,28 @@ const RETURN_EXPORT_IDS_MAX = 1000
 const RETURN_EXPORT_SORT_AT = 'r.created_at'
 const HEX64 = /^[0-9a-f]{64}$/
 
-function encodeReturnExportCursor(sortAt: string, id: number): string {
-  return btoa(JSON.stringify([sortAt, id])).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+// The cursor carries the RAW stored created_at (whatever shape it was written in), the id, and how many rows the statement has served so far (the statement cap holds
+// on every page, whether or not the first one was seen). Nothing validates the shape of the stored value, so no stored shape can fail a download half way.
+function encodeReturnExportCursor(sortAt: string, id: number, served: number): string {
+  return btoa(unescape(encodeURIComponent(JSON.stringify([sortAt, id, served])))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
-function decodeReturnExportCursor(value: string): { sortAt: string; id: number } | null {
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(value)) return null
+function decodeReturnExportCursor(value: string): { sortAt: string; id: number; served: number } | null {
+  if (!/^[A-Za-z0-9_-]{1,400}$/.test(value)) return null
   try {
-    const parsed = JSON.parse(atob(value.replace(/-/g, '+').replace(/_/g, '/'))) as unknown
-    if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[0-9.]{0,5}[Zz]?$/.test(parsed[0])
-      && Number.isSafeInteger(parsed[1]) && (parsed[1] as number) > 0) return { sortAt: parsed[0], id: parsed[1] as number }
+    const parsed = JSON.parse(decodeURIComponent(escape(atob(value.replace(/-/g, '+').replace(/_/g, '/'))))) as unknown
+    if (Array.isArray(parsed) && parsed.length === 3 && typeof parsed[0] === 'string' && parsed[0].length >= 1 && parsed[0].length <= 100
+      && Number.isSafeInteger(parsed[1]) && (parsed[1] as number) > 0 && Number.isSafeInteger(parsed[2]) && (parsed[2] as number) >= 0 && (parsed[2] as number) <= RETURN_EXPORT_ROWS_MAX) {
+      return { sortAt: parsed[0], id: parsed[1] as number, served: parsed[2] as number }
+    }
   } catch { /* falls through to null */ }
   return null
+}
+/** 'YYYY-MM-DD' of a UTC SQL timestamp shifted by whole days. A value past year 9999 becomes '~', which sorts after every stored text. */
+function seekDay(sqlUtc: string, plusDays: number): string {
+  const d = new Date(sqlUtc.replace(' ', 'T') + 'Z')
+  d.setUTCDate(d.getUTCDate() + plusDays)
+  const iso = d.toISOString()
+  return iso.startsWith('+') ? '~' : iso.slice(0, 10)
 }
 
 app.get('/export', async (c) => {
@@ -817,7 +828,7 @@ app.get('/export', async (c) => {
     }
     ids.sort((a, b) => a - b)
   }
-  let cursor: { sortAt: string; id: number } | null = null
+  let cursor: { sortAt: string; id: number; served: number } | null = null
   if (query.cursor) {
     cursor = decodeReturnExportCursor(String(query.cursor))
     if (!cursor) return c.json({ error: 'The export cursor is not valid. Restart the download.', code: 'return_export_cursor_invalid' }, 400)
@@ -829,14 +840,17 @@ app.get('/export', async (c) => {
     return c.json({ error: 'Returns cannot be exported while a restore is running. Try again shortly.', code: 'return_export_maintenance' }, 503)
   }
 
-  // The window is one range on the raw indexed column (lower bound, and ONE upper bound -- SQLite's index range takes a single upper term) plus the exact two-shape
-  // membership test as a residual. A later page makes its cursor the upper bound, so the index seek starts at the cursor instead of at the top of the period.
+  // Exact membership = the LIST's own test: datetime(created_at) inside [createdFrom, createdTo), which reads every stored shape (space, ISO, fractions, offsets) the same way.
+  // The index does the seeking, on the RAW column: a range that covers every shape of the period -- the text of an instant is at most a day away from its UTC date (offsets
+  // reach +-14h), so from-1 day up to to+2 days as plain dates -- and ONE upper bound (the cursor's raw value on later pages). The datetime() test is a residual over only
+  // the rows that range reads (test-sargable-date-filters-pure carries the allowlist entry); it never drives a scan.
+  const seekFrom = seekDay(window.createdFrom, -1), seekTo = seekDay(window.createdTo, 2)
   const buildFilter = (upper: string) => {
-    const built = returnsFilter(query, { sql: `r.created_at >= @createdFrom AND r.created_at ${upper} AND ((r.created_at >= @createdFrom AND r.created_at < @createdTo) OR (r.created_at >= @createdFromT AND r.created_at < @createdToT))`, params: { ...window, createdFromT: window.createdFrom.replace(' ', 'T'), createdToT: window.createdTo.replace(' ', 'T') } })
+    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } })
     if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }
     return built
   }
-  const filter = buildFilter('< @createdToT')
+  const filter = buildFilter('< @seekTo')
   const whereSql = filter.where.join(' AND ')
   const verifying = ['1', 'true', 'yes'].includes(String(query.verify || '').trim().toLowerCase())
   const presented = String(query.snapshotToken || '')
@@ -895,7 +909,11 @@ app.get('/export', async (c) => {
   const page = more ? fetched.slice(0, pageLimit) : fetched
   const last = page[page.length - 1]
   const rows = page.map(({ export_sort_at: _sortAt, ...row }) => row)
-  return c.json({ rows, total, snapshotToken, nextCursor: more && last ? encodeReturnExportCursor(last.export_sort_at, Number(last.id)) : null })
+  const served = (cursor?.served ?? 0) + rows.length
+  if (served > RETURN_EXPORT_ROWS_MAX) {
+    return c.json({ error: 'This period has too many returns to export at once. Choose a shorter period and export again.', code: 'return_export_too_large', total: served }, 400)
+  }
+  return c.json({ rows, total, snapshotToken, nextCursor: more && last ? encodeReturnExportCursor(last.export_sort_at, Number(last.id), served) : null })
 })
 
 // GET /api/returns/damaged-lots?product_id=&branch_id= -- open damaged
