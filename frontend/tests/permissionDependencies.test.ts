@@ -184,7 +184,7 @@ await test('the sale-link conflicts tab offers Relink and Resolve missing only w
   const source = readFileSync(new URL('../src/components/contacts/SaleLinkConflictsSection.tsx', import.meta.url), 'utf8')
   assert.match(source, /const canRelinkSales = can\('contacts', 'relink_sales'\)/)
   assert.match(source, /\{canRelinkSales && suggestion \? \(/, 'Relink')
-  assert.match(source, /\{canRelinkSales \? <div className="mt-1\.5">/, 'Resolve missing')
+  assert.match(source, /\{canRelinkSales && \(linkExisting \|\| canAddContact\) \? <div className="mt-1\.5">/, 'Resolve missing needs relink_sales, plus contacts Add unless linking an existing contact')
   assert.equal((source.match(/canResolveConflicts && row\.dismissed/g) || []).length, 2, 'Reopen stays on resolve_conflicts')
   assert.equal((source.match(/\) : canResolveConflicts \? \(/g) || []).length, 2, 'Keep stays on resolve_conflicts')
 })
