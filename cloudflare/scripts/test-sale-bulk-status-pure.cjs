@@ -25,7 +25,7 @@ function load(rel) {
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
     if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],formatSaleStatusTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}
-    if (name.endsWith('/stockCrossingAlert')) return {recordStockCrossings:async()=>({crossings:0,claimed:0,sent:0})}
+    if (name.endsWith('/stockCrossingAlert')) return {recordStockCrossings:async(_env,input)=>{(globalThis.__crossingCalls ||= []).push(input);return {crossings:0,claimed:0,sent:0}}}
     if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
     if (name.startsWith('.')) {
       const target=path.posix.normalize(path.posix.join(path.posix.dirname(rel),name))+'.ts'
@@ -154,8 +154,13 @@ async function run() {
     assert.equal((await f.call(sales,'/bulk-status',req)).status,500)
     assert.equal(snapshot(f),before,'apply failure must roll back parent activation and all stock/history')
     f.fail(null)
+    ;(globalThis.__crossingCalls ||= []).length=0
     const applied=await f.call(sales,'/bulk-status',req)
     assert.equal(applied.status,200,JSON.stringify(applied))
+    // Restoring a cancelled sale re-takes its stock and must reach the low / out-of-stock alert ONCE for the batch; cancelling gives stock back and must not.
+    const crossingCalls=globalThis.__crossingCalls.splice(0)
+    if(restoringFirst) assert.deepEqual(crossingCalls,[],'cancelling returns stock: no alert')
+    else { assert.equal(crossingCalls.length,1,'one call for the batch'); assert.equal(crossingCalls[0].saleId,null); assert.deepEqual(crossingCalls[0].lines.map(l=>[l.productId,l.branchId]),[[1,1]]); assert.ok(crossingCalls[0].lines[0].quantity>0) }
     for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
       if(positive) seedStockFixture(f.sql, () => f.sql.exec(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=1`))
       const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')

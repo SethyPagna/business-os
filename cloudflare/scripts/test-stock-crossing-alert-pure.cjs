@@ -97,7 +97,7 @@ function take(productId, quantity, branchId = 1) {
   seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?').run(quantity, productId, branchId))
   movement(productId, 'sale', -quantity, branchId)
 }
-const line = (productId, quantity, branchId = 1) => ({ productId, branchId, quantity })
+const line = (productId, quantity, branchId = 1, after) => ({ productId, branchId, quantity, ...(after === undefined ? {} : { after }) })
 const hook = (saleId, lines) => alert.recordStockCrossings(env, { saleId, lines })
 const sell = (saleId, productId, quantity) => { take(productId, quantity); return hook(saleId, [line(productId, quantity)]) }
 const rows = () => raw.db.prepare('SELECT product_id, tier, sale_id, quantity_before, quantity_after, telegram_status FROM stock_crossing_alerts ORDER BY id').all()
@@ -209,6 +209,41 @@ async function main() {
     assert.equal(rows().filter((r) => r.product_id === c).length, 1)
   })
 
+  await check('residual race closed: the quantity each deduction LEFT (RETURNING) makes 13 -> 10 -> 7 alert once even with both hooks after both commits', async () => {
+    const c = productRow('Race Lotion', 13)
+    take(c, 3); take(c, 3) // 13 -> 10 -> 7, both committed
+    // Each sale's own batch told it what it left: 10 and 7. The first one crossed low (13 -> 10), whatever the shelf says now.
+    const first = await hook(221, [line(c, 3, 1, 10)])
+    const second = await hook(222, [line(c, 3, 1, 7)])
+    assert.equal(first.sent + second.sent, 1, JSON.stringify([first, second]))
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].lines[2], 'On hand: 10', "the quantity that sale left, not today's 7")
+    // The fallback (no RETURNING, e.g. a recovered create) reads the shelf after the commit and cannot see this one: it is the
+    // documented limit of the fallback, pinned so nobody mistakes it for the exact path.
+    const d = productRow('Race Fallback', 13)
+    take(d, 3); take(d, 3)
+    reset()
+    const lost = (await hook(231, [line(d, 3)])).sent + (await hook(232, [line(d, 3)])).sent
+    assert.equal(lost, 0)
+  })
+
+  await check('an `after` on the last of several lines of one product wins; a mixed call still reads the shelf for lines without one', async () => {
+    assert.deepEqual(alert.mergeSaleLines([line(1, 2, 1, 11), line(1, 3, 1, 8), line(2, 1)]), [{ productId: 1, branchId: 1, quantity: 5, after: 8 }, line(2, 1)])
+    const e = productRow('Two Line', 13)
+    const f = productRow('Shelf Read', 12)
+    take(e, 5); take(f, 3)
+    const result = await hook(241, [line(e, 2, 1, 11), line(e, 3, 1, 8), line(f, 3)])
+    assert.deepEqual(result, { crossings: 2, claimed: 2, sent: 1 })
+    assert.deepEqual(sent[0].lines.filter((l) => l.startsWith('•')).sort(), ['• Shelf Read · 9', '• Two Line · 8'])
+  })
+
+  await check('the multi-product count row is bilingual with its own short Khmer word', () => {
+    const text = compose({ heading: '⚠️ Low stock', lines: ['Branch: LC Store', 'Product count: 2', '• A · 9', '• B · 8'] })
+    assert.ok(text.includes('Product count') && text.includes('ចំនួនផលិតផល'), text)
+    assert.ok(!text.includes('Products /'), 'not the plain "Products" label, which names the thing and not the count')
+    assert.equal(lang.TELEGRAM_LABELS.activeProducts.km, 'ចំនួនផលិតផល')
+  })
+
   await check('tills racing the other way (the first hook runs before the second sale commits): still exactly one', async () => {
     const c = productRow('Race Balm', 13)
     take(c, 2)
@@ -300,7 +335,7 @@ async function main() {
     const result = await hook(800, ids.map((id, i) => line(id, i === 2 ? 1 : 3)))
     assert.equal(result.claimed, 2, 'C stayed above')
     assert.equal(sent.length, 1)
-    assert.deepEqual(sent[0].lines, ['Branch: LC Store', 'Products: 2', '• Multi A · 9', '• Multi B · 8'])
+    assert.deepEqual(sent[0].lines, ['Branch: LC Store', 'Product count: 2', '• Multi A · 9', '• Multi B · 8'])
     const text = compose(sent[0])
     console.log(text.split('\n').map((l) => '    | ' + l).join('\n'))
     assert.ok(text.includes('Low stock') && text.includes('ស្តុកទាប') && KHMER.test(text.split('\n')[1]) && KHMER.test(text.split('\n')[2]), text)
@@ -322,7 +357,7 @@ async function main() {
     const rowsShown = sent[0].lines.filter((l) => l.startsWith('• '))
     assert.equal(rowsShown.length, alert.CROSSING_MESSAGE_PRODUCT_CAP)
     assert.equal(sent[0].lines[sent[0].lines.length - 1], '+ 3 more item(s)')
-    assert.equal(sent[0].lines[1], 'Products: 23')
+    assert.equal(sent[0].lines[1], 'Product count: 23')
     assert.ok(/\+ 3 .*[ក-៿]/.test(lang.localizeTelegramLine('+ 3 more item(s)')), 'the continuation row is bilingual')
     assert.equal(rows().filter((r) => r.sale_id === 811).length, 23, 'every crossing is still recorded')
   })
@@ -399,20 +434,14 @@ async function main() {
 
   // ---- wiring: read from the source (the real transport is never loaded) -----------------------------------
   const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r/g, '')
-  await check('wiring: every path that deducts sale stock hands its lines to the recorder after the commit', () => {
+  await check('wiring: the create hook runs before the replay return and passes the quantity the batch left (every other path is pinned by test-stock-deduction-paths-pure.cjs)', () => {
     const sales = read('routes/sales.ts')
-    assert.ok(sales.includes("import { recordStockCrossings } from '../lib/stockCrossingAlert'"))
-    assert.equal(sales.split('recordStockCrossings(c.env').length - 1, 3, 'create, add-items and the status transition')
+    assert.ok(sales.includes("import { recordStockCrossings, type StockSaleLine } from '../lib/stockCrossingAlert'"))
     const create = sales.indexOf('recordStockCrossings(c.env, {\n    saleId,')
     assert.ok(create > 0 && create < sales.indexOf('if (recoveredCommittedCreate) {\n    return c.json({ id: saleId'), 'the create hook runs BEFORE the replay early return, so a lost response still alerts')
-    assert.ok(/saleId,\n\s+lines: stockCheckItems\.map/.test(sales) && !/before:/.test(sales.slice(create, create + 600)), 'no pre-commit quantity is passed')
-    const addItems = sales.indexOf("app.post('/:id/items'")
-    const statusRoute = sales.indexOf('recordStockCrossings(c.env', create + 100)
-    assert.ok(statusRoute > create && statusRoute < addItems, 'status transition hook sits in the status route')
-    assert.ok(sales.indexOf('recordStockCrossings(c.env', addItems) > addItems, 'add-items hook')
-    assert.ok(read('routes/returns.ts').includes('recordStockCrossings(c.env') && read('routes/returns.ts').includes('replacementLines.map'), 'return replacement lines')
-    assert.ok(read('lib/returnExchangeCreate.ts').includes('recordStockCrossings(c.env') && read('lib/returnExchangeCreate.ts').includes('priced.lines.map'), 'one-step exchange lines')
-    assert.ok(!read('lib/stockActionCommit.ts').includes('recordStockCrossings'), 'the stock-import sale is a historical load and deliberately does not alert (see the lane report)')
+    assert.ok(/saleId,\n\s+lines: stockCheckItems\.map/.test(sales) && !/before:/.test(sales.slice(create, create + 900)), 'no pre-commit quantity is passed')
+    assert.ok(sales.slice(create, create + 900).includes('createResults['), 'the quantity comes from the batch results')
+    assert.ok(!read('lib/stockActionCommit.ts').includes('recordStockCrossings'), 'the stock-import sale is a historical load and deliberately does not alert')
   })
 
   await check('wiring: category, topic, switch default, Settings toggle, packs; a restore clears the log', () => {

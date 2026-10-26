@@ -25,8 +25,12 @@ import { sendTelegramEvent } from './telegram'
 
 export type CrossingTier = 'low' | 'out'
 
-/** What a caller of a stock deduction knows: the product, the branch it left, and how many units. */
-export type StockSaleLine = { productId: number; branchId: number; quantity: number }
+/**
+ * What a caller of a stock deduction knows: the product, the branch it left, and how many units. `after` is the branch's
+ * quantity straight out of the deduction batch itself (RETURNING on the stock update, so it is exact for THIS write and costs
+ * no statement); a caller that cannot have it omits it and the quantity is read after the commit.
+ */
+export type StockSaleLine = { productId: number; branchId: number; quantity: number; after?: number }
 
 /** A line joined with the branch's quantity NOW (after the commit) and the product's own thresholds. */
 export type StockLineState = StockSaleLine & {
@@ -71,8 +75,12 @@ export function mergeSaleLines(lines: readonly StockSaleLine[]): StockSaleLine[]
     if (!(quantity > 0) || !Number.isSafeInteger(line.productId) || !Number.isSafeInteger(line.branchId)) continue
     const key = `${line.branchId}:${line.productId}`
     const seen = merged.get(key)
-    if (seen) seen.quantity += quantity
-    else merged.set(key, { productId: line.productId, branchId: line.branchId, quantity })
+    const after = Number.isFinite(Number(line.after)) && line.after != null ? Number(line.after) : undefined
+    if (seen) {
+      seen.quantity += quantity
+      // Lines of one product come from one running quantity, so the LAST one's RETURNING is the final figure.
+      if (after !== undefined) seen.after = after
+    } else merged.set(key, { productId: line.productId, branchId: line.branchId, quantity, ...(after !== undefined ? { after } : {}) })
   }
   return [...merged.values()]
 }
@@ -104,7 +112,7 @@ export function formatCrossingMessage(crossings: readonly StockCrossing[], tier:
     heading,
     lines: [
       branchName ? `Branch: ${branchName}` : '',
-      `Products: ${crossings.length}`,
+      `Product count: ${crossings.length}`,
       ...shown.map((crossing) => `• ${crossing.name} · ${crossing.after}`),
       ...(hidden > 0 ? [`+ ${hidden} more item(s)`] : []),
     ],
@@ -159,7 +167,7 @@ async function readStates(env: Env, lines: readonly StockSaleLine[]): Promise<St
   const states: StockLineState[] = []
   for (const line of lines) {
     const row = byKey.get(`${line.branchId}:${line.productId}`)
-    if (row) states.push({ ...line, after: Number(row.quantity) || 0, name: String(row.name || `#${line.productId}`), lowThreshold: row.low_stock_threshold, outThreshold: row.out_of_stock_threshold })
+    if (row) states.push({ ...line, after: line.after !== undefined ? line.after : Number(row.quantity) || 0, name: String(row.name || `#${line.productId}`), lowThreshold: row.low_stock_threshold, outThreshold: row.out_of_stock_threshold })
   }
   return states
 }

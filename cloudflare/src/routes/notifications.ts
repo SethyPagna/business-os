@@ -297,6 +297,9 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
   // (is_active, date(expiry_date)) -- the Dashboard's own expiry statements do the same -- instead of
   // walking every visible product on every refresh. date() can only round a time of day up to its day,
   // so the inner range is a superset and the exact julianday test below keeps the old boundary.
+  // The old rule was "is_active = 1 OR the product holds stock", so "not active" is every value but 1: below 1 (0, negatives,
+  // fractions), above 1 (2, text) and NULL. No writer stores anything but 0 or 1 (and the schema has no CHECK), but each of the
+  // three is an index seek, so the statement matches the old rule for EVERY storable value at no scan.
   const rows = await db.prepare(`
     SELECT id, name, expiry_date,
       CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
@@ -306,7 +309,11 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
         AND date(expiry_date) <= date('now', '+' || @days || ' day')
       UNION ALL
       SELECT id, name, expiry_date FROM products p
-      WHERE p.is_active = 0 AND ${productHasStockSql()} AND expiry_date IS NOT NULL
+      WHERE p.is_active < 1 AND ${productHasStockSql()} AND expiry_date IS NOT NULL
+        AND date(expiry_date) <= date('now', '+' || @days || ' day')
+      UNION ALL
+      SELECT id, name, expiry_date FROM products p
+      WHERE p.is_active > 1 AND ${productHasStockSql()} AND expiry_date IS NOT NULL
         AND date(expiry_date) <= date('now', '+' || @days || ' day')
       UNION ALL
       SELECT id, name, expiry_date FROM products p

@@ -191,6 +191,33 @@ async function check(name, fn) {
     assert.equal(rows(f).length, 1)
   })
 
+  await check('13 -> 10 -> 7 (threshold 10), both hooks after both commits: exactly one message, from the quantity the first sale LEFT', async () => {
+    const f = fixture(13)
+    let open
+    gate = new Promise((resolve) => { open = resolve })
+    assert.equal((await postSale(f.route, request('race-c', 3))).status, 200)
+    assert.equal((await postSale(f.route, request('race-d', 3))).status, 200)
+    assert.equal(f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id = 10').get().quantity, 7)
+    open()
+    await flush()
+    assert.equal(sent.length, 1, 'a read after both commits sees 7 and would find no crossing at all: ' + JSON.stringify(sent))
+    assert.deepEqual(sent[0].lines, ['Product: Powder', 'Branch: Shop', 'On hand: 10'])
+    assert.equal(rows(f).length, 1)
+  })
+
+  await check('the deduction batch itself carries the quantity: the stock upsert RETURNs it, and it adds no statement', async () => {
+    const f = fixture(12)
+    const seen = []
+    const real = f.route.batch
+    f.route.batch = async (statements) => { seen.push(statements.map((s) => s.sql)); return real(statements) }
+    assert.equal((await postSale(f.route, request('returning', 3))).status, 200)
+    const upserts = seen.flat().filter((sql) => /INSERT INTO branch_stock/.test(sql))
+    assert.equal(upserts.length, 1)
+    assert.match(upserts[0], /RETURNING quantity/)
+    await flush()
+    assert.equal(hookReads.length, 1, 'the one read in waitUntil is for the product name and thresholds; the quantity came from the batch')
+  })
+
   await check('the response never waits for the crossing read: the state read happens only after the sale has answered', async () => {
     const f = fixture(12)
     let open

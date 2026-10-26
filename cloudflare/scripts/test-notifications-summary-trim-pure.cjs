@@ -399,10 +399,18 @@ async function main() {
       insert.run('Exp null empty', 0, null, '2020-05-05')
       insert.run('Exp legacy stocked', 5, 1, '2020-02-02')
       insert.run('Exp legacy null stocked', 5, 1, '2020-02-03')
+      // is_active has no CHECK, so every storable value is covered: 2 (above 1), a fraction and a negative (below 1), text, and an EMPTY one of each kind.
+      for (const [name, value, stocked] of [['Exp legacy two', 2, 5], ['Exp legacy half', 0.5, 5], ['Exp legacy neg', -1, 5], ['Exp legacy text', 'x', 5], ['Exp empty two', 2, 0]]) {
+        insert.run(name, stocked, 1, '2020-02-0' + (4 + [...'abcde'].length % 3))
+      }
       const triggers = raw.db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('product_deactivate_stock_0242', 'product_cache_stock_0242')").all()
       for (const trigger of triggers) raw.db.exec(`DROP TRIGGER ${trigger.name}`)
       raw.db.prepare("UPDATE products SET is_active = 0 WHERE name = 'Exp legacy stocked'").run()
       raw.db.prepare("UPDATE products SET is_active = NULL WHERE name = 'Exp legacy null stocked'").run()
+      for (const [name, value] of [['Exp legacy two', 2], ['Exp legacy half', 0.5], ['Exp legacy neg', -1], ['Exp legacy text', 'x'], ['Exp empty two', 2]]) {
+        if (name === 'Exp empty two') raw.db.prepare('UPDATE products SET stock_quantity = 0 WHERE name = ?').run(name)
+        raw.db.prepare('UPDATE products SET is_active = ? WHERE name = ?').run(value, name)
+      }
       for (const trigger of triggers) raw.db.exec(trigger.sql)
     })
     const removedFullScan = (days) => raw.db.prepare(`SELECT id FROM products p
@@ -416,6 +424,8 @@ async function main() {
     }
     const names = (section(await summary(), 'expiry')?.items || []).map((item) => item.label)
     assert.ok(names.includes('Exp past') && names.includes('Exp legacy stocked') && names.includes('Exp legacy null stocked'), 'the legacy inactive rows with stock are listed: ' + names.join(','))
+    for (const name of ['Exp legacy two', 'Exp legacy half', 'Exp legacy neg', 'Exp legacy text']) assert.ok(names.includes(name), `${name}: any is_active other than 1, holding stock, is visible exactly as the old rule said: ` + names.join(','))
+    assert.ok(!names.includes('Exp empty two'), 'an empty product with is_active 2 is not')
     assert.ok(!names.includes('Exp retired empty') && !names.includes('Exp null empty'), 'empty inactive rows are not')
     const plan = raw.db.prepare("EXPLAIN QUERY PLAN SELECT id FROM products p WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+30 day')").all().map((row) => row.detail).join(' | ')
     assert.match(plan, /idx_products_active_expiry_day/, plan)

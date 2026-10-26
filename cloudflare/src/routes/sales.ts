@@ -161,7 +161,7 @@ import { resolveClientCreatedAt } from '../lib/clientTimestamp'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
-import { recordStockCrossings } from '../lib/stockCrossingAlert'
+import { recordStockCrossings, type StockSaleLine } from '../lib/stockCrossingAlert'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
@@ -1450,6 +1450,11 @@ app.post('/', async (c) => {
   // resolve the new auto-generated sale id inside the same D1 transaction. ----
   let saleId = 0
   let recoveredCommittedCreate = false
+  // The branch quantity each deduction left, straight out of the atomic batch (RETURNING on the stock update): exact for THIS
+  // write, no extra statement, and immune to a second till selling a moment later. Empty on a recovered create (no results).
+  const deductionReturns: Array<{ stmt: object; productId: number; branchId: number }> = []
+  let createResults: Array<{ results?: Array<Record<string, unknown>> }> = []
+  let createStatements: object[] = []
   let resolvedReceiptNumber = receiptNumber
   // Set only when every bounded retry lost the receipt race; the catch below
   // then answers receipt_number_conflict instead of guessing from the message.
@@ -1750,11 +1755,13 @@ app.post('/', async (c) => {
         // silently clamped to 0 with stock quietly lost.
         // (The INSERT ... VALUES (..., 0) branch only fires when no row exists,
         // which the availability check already rejects for any positive qty.)
-        statements.push({
+        const deduction = {
           sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
+                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity RETURNING quantity`,
           params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
-        })
+        }
+        statements.push(deduction)
+        deductionReturns.push({ stmt: deduction, productId: item.product_id, branchId: item.branch_id as number })
         // 0084: an explicit lot pick stamps the movement; a no-pick line
         // stamps its single auto-allocated lot only when that lot covered
         // the WHOLE quantity (a partial draw with a legacy-aggregate
@@ -1815,7 +1822,8 @@ app.post('/', async (c) => {
     // now holds the number. Anything else falls through unchanged.
     for (let attempt = 0; ; attempt++) {
       try {
-        await executeStockTransaction(db, statements, 'retry')
+        createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults
+        createStatements = statements
         break
       } catch (batchError) {
         const stockGuard = productStockGuardError(batchError)
@@ -1919,7 +1927,13 @@ app.post('/', async (c) => {
   // replayed create (a lost response): the claim keys make that safe, and the first attempt's hook may never have run.
   c.executionCtx.waitUntil(recordStockCrossings(c.env, {
     saleId,
-    lines: stockCheckItems.map((item) => ({ productId: item.product_id, branchId: item.branch_id as number, quantity: item.quantity })),
+    lines: stockCheckItems.map((item) => {
+      // The quantity this very deduction left (the LAST one for a product on several lines); absent when the create was recovered.
+      const returned = deductionReturns.filter((entry) => entry.productId === item.product_id && entry.branchId === item.branch_id).pop()
+      const row = returned ? createResults[createStatements.indexOf(returned.stmt)]?.results?.[0] : undefined
+      const after = row ? Number(row.quantity) : NaN
+      return { productId: item.product_id, branchId: item.branch_id as number, quantity: item.quantity, ...(Number.isFinite(after) ? { after } : {}) }
+    }),
   }))
   if (recoveredCommittedCreate) {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
@@ -2035,7 +2049,9 @@ function saleBulkFailure(c: Context, error: unknown, fallback: string, code: str
 
 app.post('/bulk-status', async (c) => {
   try {
-    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c))
+    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c),
+      // Restoring sales in bulk takes their stock back out: one alert message per branch and tier for the whole batch.
+      (lines) => c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines })))
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
@@ -3917,7 +3933,11 @@ app.post('/:id/items', async (c) => {
     const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
       WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
       .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
-    if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry?.request_digest === addItemsDigest) {
+      // The additions committed and only the answer was lost: the hook may never have run, and its claim keys make a second run safe.
+      c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: plan.deductions.map((entry) => ({ productId: entry.product_id, branchId: entry.branch_id, quantity: entry.quantity })) }))
+      return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    }
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
     if (/malformed JSON/i.test(message)) {
@@ -4854,6 +4874,11 @@ app.post('/:id/amendments', async (c) => {
   let historicalSubtotalTerms: number[] | null = null
   let unitsMoved = 0
   let writesStock = false
+  // Units this amendment TAKES from the shelf, per product and branch, for the low / out-of-stock alert after the commit.
+  const amendCrossingLines: StockSaleLine[] = []
+  const noteLineTaken = (moved: number) => {
+    if (moved < 0 && line.branch_id) amendCrossingLines.push({ productId: Number(line.product_id), branchId: Number(line.branch_id), quantity: -moved })
+  }
   let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
   const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
   const historicalBasket=Number((sale as Record<string,unknown>).money_precision_version)===0
@@ -4883,7 +4908,7 @@ app.post('/:id/amendments', async (c) => {
         exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:increaseAllocations})
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
-      statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
+      statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved;noteLineTaken(quantityPlan.unitsMoved)
       writesStock ||= quantityPlan.unitsMoved !== 0
     }
     const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
@@ -4972,6 +4997,7 @@ app.post('/:id/amendments', async (c) => {
       }
       statements.push(...quantityPlan.statements)
       unitsMoved += quantityPlan.unitsMoved
+      noteLineTaken(quantityPlan.unitsMoved)
       writesStock ||= quantityPlan.unitsMoved !== 0
     }
 
@@ -5022,6 +5048,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
+    noteLineTaken(plan.unitsMoved)
     writesStock ||= plan.unitsMoved !== 0
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
@@ -5151,6 +5178,7 @@ app.post('/:id/amendments', async (c) => {
       replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
     unitsMoved += -additionPlan.deductedUnits || 0
+    for (const entry of additionPlan.deductions) amendCrossingLines.push({ productId: entry.product_id, branchId: entry.branch_id, quantity: entry.quantity })
     writesStock ||= additionPlan.deductedUnits !== 0
     ledgerEntries.push({
       saleId, kind: 'line_added', groupId,
@@ -5309,7 +5337,10 @@ app.post('/:id/amendments', async (c) => {
     const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
       WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
       .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
-    if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry?.request_digest === amendmentDigest) {
+      c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: amendCrossingLines }))
+      return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    }
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
     if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
@@ -5318,6 +5349,8 @@ app.post('/:id/amendments', async (c) => {
     return c.json(unexpectedFailureBody('sales', error, 'Failed to amend this sale.', 'sale_amend_failed'), 500)
   }
 
+  // A raised quantity or a replacement line takes stock like a sale: same low / out-of-stock alert (owner ruling 6 Oct 2026).
+  c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: amendCrossingLines }))
   await auditAmendment(c, user, saleId, sale, {
     kind,
     sale_item_id: lineId,
