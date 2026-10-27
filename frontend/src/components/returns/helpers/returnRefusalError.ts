@@ -27,6 +27,8 @@
 //   return_edit_replacement_floor              403  PATCH /api/returns/:id that would leave the return's recorded replacement under its allowed price (fewer units
 //                                         returned, or a dearer line covering it) by a caller who may not set prices; the extra unit is a separate return (6.0.958)
 //   return_bulk_over_plan_budget     400  POST /api/returns/bulk and its undo/redo: a selection too large for one Free-plan invocation (6.0.958)
+//   return_stock_action_required     400  PATCH /api/returns/:id: a line names no stock_action where the legacy restock default would change what the
+//                                         return holds (a stored damaged or no-restock line). Reached by an Undo/Redo body an older build stored or sent (6.0.999)
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
@@ -43,6 +45,7 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_exchange_line_no_lot': 'This item has no received date, so it can be returned but not exchanged here. Record the return, then sell the replacement at the POS.',
   'return_cancel_exchange_change': 'This exchange gave change back. Cancel its replacement sale in Sales first, then cancel this return.',
   'return_restore_exchange_credit': 'This exchange return was cancelled and its refund credit was moved to Not Paid. Undo that cancel from the history instead of restoring the return here. Nothing was changed.',
+  'return_stock_action_required': 'This change came from an older version of the app and does not say how the stock of one line was handled. Refresh the app and try again. Nothing was changed.',
 }
 
 //   return_restore_exchange_credit   409  POST /api/returns/bulk restoring an exchange return whose refund credit was moved to Not Paid by its cancel (6.0.963); Undo of the cancel is the way back

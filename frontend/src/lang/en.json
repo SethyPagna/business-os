@@ -4789,6 +4789,8 @@
   "return_edit_empty": "A return must keep at least one line. To undo the whole return, cancel it instead.",
   "return_edit_load_failed": "The lines of this return could not be loaded, so it cannot be edited yet. Nothing was changed.",
   "return_history_lines_unavailable": "The lines of this return were not loaded when this change was recorded, so it cannot be undone or redone here. Nothing was changed.",
+  "return_history_damaged_unavailable": "The damaged-stock details of this return were not available when this change was recorded, so it cannot be undone or redone here. Nothing was changed.",
+  "return_stock_action_required": "This change came from an older version of the app and does not say how the stock of one line was handled. Refresh the app and try again. Nothing was changed.",
   "return_restore_over_capacity": "Cannot restore: more units would count as returned than the sale sold. Nothing was changed.",
   "return_restore_over_capacity_detail": "Cannot restore: {returned} of {product} would count as returned, but the sale sold only {sold}. Nothing was changed.",
   "return_refund_price_ambiguous": "This product was sold at different prices on this sale. Pick the exact sale item being returned.",

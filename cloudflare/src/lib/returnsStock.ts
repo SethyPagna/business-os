@@ -84,6 +84,118 @@ export function resolveDamagedReturnChoice(item: { condition_tag?: unknown; dama
   return { ok: true, tag: tagResult.tag ?? DEFAULT_STOCK_CONDITION_TAG, disposition: dispositionResult.disposition }
 }
 
+// ---------------------------------------------------------------------------
+// 6.0.999: PATCH /:id re-applies a whole line set, and that is also how Undo and Redo of a return edit replay a
+// snapshot. A replay must therefore say, line by line, what the stock handling was -- restock, damaged (with its
+// condition tag) or no restock -- and the server must not fill a gap with the legacy boolean's default (restock):
+// that turned stored damaged and no-restock lines into sellable stock.
+// ---------------------------------------------------------------------------
+
+/** What a STORED return_items row did to stock. A stored row's flag is the integer 0/1 the database holds, so 0 means
+ *  "not restocked" here -- unlike the wire default in normalizeStockAction, where only `false` does. null: the row says
+ *  neither way. */
+export function storedStockAction(row: { stock_action?: unknown; return_to_stock?: unknown }): ReturnStockAction | null {
+  const explicit = String(row.stock_action ?? '').trim().toLowerCase()
+  if (explicit === 'none' || explicit === 'restock' || explicit === 'damaged') return explicit
+  const flag = row.return_to_stock
+  if (flag === true || flag === 1 || flag === '1') return 'restock'
+  if (flag === false || flag === 0 || flag === '0') return 'none'
+  return null
+}
+
+function namesStockAction(line: { stock_action?: unknown }): boolean {
+  const explicit = String(line.stock_action ?? '').trim().toLowerCase()
+  return explicit === 'none' || explicit === 'restock' || explicit === 'damaged'
+}
+
+function isPresent(value: unknown): boolean {
+  return value != null && String(value).trim() !== ''
+}
+
+/**
+ * The index of the first posted line whose stock handling the server would have to GUESS, or -1.
+ *
+ * A line that names no valid stock_action is read as the legacy return_to_stock boolean (see normalizeStockAction).
+ * That is only harmless where the guess equals what the return already holds for that product / sale line. It is
+ * refused where it would change it -- a stored damaged line read as restock puts the units on the shelf and drops the
+ * lot; a stored no-restock line read as restock does the same -- and whenever the line carries damaged data
+ * (condition_tag / damaged_disposition) without the action that gives it meaning. A line with nothing stored to
+ * contradict (a new line, or a return of other products) keeps the legacy default, so older clients mid-deploy and
+ * every existing test payload behave as before.
+ */
+export function firstLineWithGuessedStockAction(
+  lines: ReadonlyArray<{ stock_action?: unknown; return_to_stock?: unknown; product_id?: unknown; sale_item_id?: unknown; condition_tag?: unknown; damaged_disposition?: unknown }>,
+  stored: ReadonlyArray<{ stock_action?: unknown; return_to_stock?: unknown; product_id?: unknown; sale_item_id?: unknown }>,
+): number {
+  for (const [index, line] of lines.entries()) {
+    if (namesStockAction(line)) continue
+    if (isPresent(line.condition_tag) || isPresent(line.damaged_disposition)) return index
+    const guessed = normalizeStockAction(line)
+    const productId = Number(line.product_id) || 0
+    const saleItemId = Number(line.sale_item_id) || 0
+    const named = productId > 0 || saleItemId > 0
+    const contradicted = stored.some((row) => {
+      if (named && !((productId > 0 && Number(row.product_id) === productId) || (saleItemId > 0 && Number(row.sale_item_id) === saleItemId))) return false
+      const held = storedStockAction(row)
+      return held !== null && held !== guessed
+    })
+    if (contradicted) return index
+  }
+  return -1
+}
+
+/** The condition a stored damaged line was recorded with, as GET /:id shows it and an edit or replay sends it back. */
+export type StoredDamagedChoice = { condition_tag: StockConditionTag; damaged_disposition?: 'keep' }
+
+/**
+ * For each stored return line, in order, the tag of the damaged lot it opened, or null (not a damaged line, or no lot
+ * that provably belongs to it).
+ *
+ * return_items has no condition_tag column; the tag lives on damaged_stock_lots, keyed by return_id. The create and the
+ * edit write one lot per damaged line in the same loop order as the lines, so the Nth damaged line of a product is the
+ * Nth lot of that product. The match is by product, not branch (the branch consolidation can move a lot to the
+ * successor branch), and a pair whose quantities differ is not matched: no tag is better than another line's tag.
+ *
+ * damaged_disposition 'keep' is reported only for a lot still whole (quantity_remaining = quantity). A lot that was
+ * drawn or destroyed has no disposition a replay may reuse, so none is reported -- a replay never destroys stock.
+ */
+export function storedDamagedChoices(
+  lines: ReadonlyArray<{ product_id?: unknown; quantity?: unknown; stock_action?: unknown; return_to_stock?: unknown }>,
+  lots: ReadonlyArray<{ id: number; product_id: number | null; quantity: number; quantity_remaining: number; condition_tag: string | null }>,
+): Array<StoredDamagedChoice | null> {
+  const queues = new Map<number, Array<(typeof lots)[number]>>()
+  for (const lot of [...lots].sort((a, b) => Number(a.id) - Number(b.id))) {
+    const key = Number(lot.product_id) || 0
+    queues.set(key, [...(queues.get(key) || []), lot])
+  }
+  return lines.map((line) => {
+    if (storedStockAction(line) !== 'damaged') return null
+    const lot = queues.get(Number(line.product_id) || 0)?.shift()
+    if (!lot || Math.abs(Number(lot.quantity) - Number(line.quantity)) > 1e-9) return null
+    const parsed = parseStockConditionTag(lot.condition_tag)
+    if (!parsed.ok || !parsed.tag) return null
+    return Number(lot.quantity_remaining) >= Number(lot.quantity)
+      ? { condition_tag: parsed.tag, damaged_disposition: 'keep' }
+      : { condition_tag: parsed.tag }
+  })
+}
+
+/** The return's lines with each damaged one carrying the tag (and 'keep') it was stored with. One read, and only when a
+ *  line is damaged. Lines come back in the order given; pass them ORDER BY id. */
+export async function attachStoredDamagedChoices<T extends { product_id?: unknown; quantity?: unknown; stock_action?: unknown; return_to_stock?: unknown }>(
+  db: D1Compat,
+  returnId: number | string,
+  rows: readonly T[],
+): Promise<Array<T | (T & StoredDamagedChoice)>> {
+  if (!rows.some((row) => storedStockAction(row) === 'damaged')) return [...rows]
+  const lots = await db.prepare(`
+    SELECT id, product_id, quantity, quantity_remaining, condition_tag
+    FROM damaged_stock_lots WHERE return_id = @return_id ORDER BY id
+  `).all<{ id: number; product_id: number | null; quantity: number; quantity_remaining: number; condition_tag: string | null }>({ return_id: returnId })
+  const choices = storedDamagedChoices(rows, lots)
+  return rows.map((row, index) => (choices[index] ? { ...row, ...choices[index]! } : row))
+}
+
 // What one returned line refunds. The ONLY authority is the price the
 // ORIGINAL sale line charged -- not the product's current selling price, and
 // not whatever the client posted. A manual return (no sale on file at all)

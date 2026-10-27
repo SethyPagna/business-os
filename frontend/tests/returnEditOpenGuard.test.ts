@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { accessibleText, createHarness, type MemoryNode } from './mountedComponentHarness.ts'
 import { cloneHistorySnapshot } from '../src/utils/historyHelpers.ts'
+import { returnHistoryPayloadFromSnapshot } from '../src/components/returns/helpers/returnHistoryPayload.ts'
 
 // A customer return must never be edited, undone or redone from a row whose
 // lines were not loaded (OPUS-REVIEW-RETURN-EDIT-7077 finding 2, 12 Oct 2026).
@@ -173,7 +174,7 @@ function pageCallback(name: string, scope: Record<string, unknown>): (...args: a
 }
 const hasLoadedReturnLines = moduleFunction('hasLoadedReturnLines')
 const tr = (key: string, fallback: string) => en[key] ?? fallback
-const buildReturnHistoryPayload = pageCallback('buildReturnHistoryPayload', { hasLoadedReturnLines, tr })
+const buildReturnHistoryPayload = pageCallback('buildReturnHistoryPayload', { hasLoadedReturnLines, returnHistoryPayloadFromSnapshot, tr })
 
 function restoreHarness() {
   const calls: string[] = []
@@ -220,6 +221,53 @@ await runTest('a snapshot with its lines is still replayed whole', async () => {
   const body = submitted[0] as { items: Array<Record<string, unknown>>; expected_updated_at: string }
   assert.deepEqual(body.items.map((item) => [item.sale_item_id, item.product_id, item.quantity]), [[11, 5, 1], [12, 6, 1]])
   assert.equal(body.expected_updated_at, 'current-version')
+})
+
+// 6.0.999. The snapshot is what GET /api/returns/:id returns: the database row, where return_to_stock is the integer 0 or 1
+// (so `!== false` read a damaged and a no-restock line as a restock) and a damaged line carries the tag of its lot.
+const DAMAGED_UNAVAILABLE = 'The damaged-stock details of this return were not available when this change was recorded, so it cannot be undone or redone here. Nothing was changed.'
+const storedMix = [
+  { id: 1, sale_item_id: 11, product_id: 5, product_name: 'Serum', quantity: 1, applied_price_usd: 5, applied_price_khr: 20500, return_to_stock: 1, stock_action: 'restock', branch_id: 1 },
+  { id: 2, sale_item_id: 12, product_id: 6, product_name: 'Toner', quantity: 2, applied_price_usd: 5, applied_price_khr: 20500, return_to_stock: 0, stock_action: 'damaged', condition_tag: 'expired', damaged_disposition: 'keep', branch_id: 1 },
+  { id: 3, sale_item_id: 13, product_id: 7, product_name: 'Cream', quantity: 1, applied_price_usd: 5, applied_price_khr: 20500, return_to_stock: 0, stock_action: 'none', branch_id: 1 },
+]
+
+await runTest('the damaged-stock messages exist in English and Khmer', () => {
+  assert.equal(en.return_history_damaged_unavailable, DAMAGED_UNAVAILABLE)
+  for (const key of ['return_history_damaged_unavailable', 'return_stock_action_required']) {
+    assert.ok(String(en[key] || '').trim(), `en.${key} is non-empty`)
+    assert.match(String(km[key] || ''), /[ក-៿]/, `km.${key} is Khmer`)
+  }
+})
+
+await runTest('Undo/Redo replays each line with the stock handling it was stored with, never as a plain restock', async () => {
+  const { submitted, restore } = restoreHarness()
+  await restore({ ...structuredClone(detail), items: structuredClone(storedMix) }, 'Undo return edit', history)
+  assert.equal(submitted.length, 1)
+  const body = submitted[0] as { items: Array<Record<string, unknown>> }
+  assert.deepEqual(body.items.map((item) => [item.product_id, item.stock_action, item.return_to_stock]),
+    [[5, 'restock', true], [6, 'damaged', false], [7, 'none', false]],
+    'the integer 0 of a damaged and of a no-restock line is not read as restock')
+  assert.deepEqual([body.items[1].condition_tag, body.items[1].damaged_disposition], ['expired', 'keep'], 'a damaged line goes back with the tag it was stored with')
+  assert.equal('condition_tag' in body.items[0] || 'condition_tag' in body.items[2], false, 'only a damaged line carries a tag')
+})
+
+await runTest('a damaged line whose tag the snapshot does not carry is refused with its own message and sends nothing', async () => {
+  const variants: Array<[string, Record<string, unknown>]> = [
+    ['no tag', { condition_tag: undefined }],
+    ['no disposition (the lot was drawn)', { damaged_disposition: undefined }],
+    ['a destroyed lot', { damaged_disposition: 'remove' }],
+  ]
+  for (const [label, change] of variants) {
+    const { calls, submitted, restore } = restoreHarness()
+    const items = structuredClone(storedMix).map((item) => (item.stock_action === 'damaged' ? { ...item, ...change } : item))
+    await assert.rejects(() => restore({ ...structuredClone(detail), items }, 'Redo return edit', { entryId: 'entry-41', direction: 'redo' }), (error: Error) => {
+      assert.equal(error.message, DAMAGED_UNAVAILABLE, `${label}: the operator is told why`)
+      return true
+    }, `${label} must be refused`)
+    assert.deepEqual(submitted, [], `${label}: no body is sent`)
+    assert.equal(calls.filter((call) => call !== 'read').length, 0, `${label}: nothing is prepared, stored or sent (${calls.join(',')})`)
+  }
 })
 
 function recorderHarness(latestRead: () => Promise<unknown>) {
