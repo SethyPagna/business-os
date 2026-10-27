@@ -92,7 +92,7 @@ const loadAuthRoute = (authModule) => load('routes/auth.ts', {
   '../lib/rateLimit': rateLimit,
   '../lib/currentPasswordGuard': {},
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
-  '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
+  '../lib/settingsVisibility': { settingsVisibleTo: (_user, v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': { recordFailedLogin: noop, getLoginLockoutState: async () => ({ locked: false }), clearLoginLockout: noop },
   '../lib/deviceTrust': { requiresDeviceApproval: () => false, checkDeviceTrust: async () => ({ status: 'approved' }) },
