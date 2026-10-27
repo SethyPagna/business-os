@@ -379,8 +379,11 @@ export function cacheInvalidate(prefix: string, options: { precaution?: boolean 
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
   for (const k of Object.keys(_inflight)) {
     if (!k.startsWith(prefix)) continue
-    // invalidateActorReadChannel above moved the scope the read began under; a precaution re-stamps it so the read stays shareable.
-    if (options.precaution) _inflightScopes.set(_inflight[k], captureActorReadScope(k))
+    // invalidateActorReadChannel above moved the scope the read began under; a precaution re-stamps it so the read stays
+    // shareable, but only for the same account: a read begun under another one is retired like any other.
+    const began = _inflightScopes.get(_inflight[k])
+    const now = captureActorReadScope(k)
+    if (options.precaution && began && began.authority === now.authority) _inflightScopes.set(_inflight[k], now)
     else clearInflight(k)
   }
   if (!options.precaution) _readEpoch++
@@ -456,16 +459,39 @@ function getClientMetaHeaders(): Record<string, string> {
   return sharedGetClientMetaHeaders()
 }
 
-// The English text of the pack key server_error_page (km.json has the Khmer; restateServerErrorPage swaps it in).
+// What a body that is not the app's JSON says, by status. The English text is the pack key word for word (km.json has the
+// Khmer; restateForeignBodyError swaps it in by error.messageKey). Only a 5xx says the server is unavailable.
 export const SERVER_ERROR_PAGE_MESSAGE = 'Server unavailable. Please try again.'
+export const FOREIGN_BODY_ERRORS = {
+  tooLarge: { key: 'request_too_large', message: 'The request is too large.' },
+  rateLimited: { key: 'request_rate_limited', message: 'Too many requests. Please wait a moment and try again.' },
+  notFound: { key: 'request_not_found', message: 'Not found.' },
+  unavailable: { key: 'server_error_page', message: SERVER_ERROR_PAGE_MESSAGE },
+  failed: { key: 'request_failed_page', message: 'The request failed. Please try again.' },
+} as const
+
+function foreignBodyError(status: number): { key: string; message: string } {
+  if (status === 413) return FOREIGN_BODY_ERRORS.tooLarge
+  if (status === 429) return FOREIGN_BODY_ERRORS.rateLimited
+  if (status === 404) return FOREIGN_BODY_ERRORS.notFound
+  return status >= 500 ? FOREIGN_BODY_ERRORS.unavailable : FOREIGN_BODY_ERRORS.failed
+}
+
+async function restateInKhmer(error: ApiRuntimeError): Promise<void> {
+  if (typeof document === 'undefined' || !String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) return
+  const language = await import('./branchRefusalLanguage.ts')
+  await language.restateBranchRefusal(error)
+  await language.restateForeignBodyError(error)
+}
 
 function createApiError(status: number, parsed: LooseRecord | null, text: string): ApiRuntimeError {
   // Every route of this app answers a failure as a JSON object, so a body that is not one came from a layer in front
   // of it (an HTML 503 or 1102 page). Never show that markup to the operator.
-  const foreignBody = !(parsed && typeof parsed === 'object') && !!String(text || '').trim()
-  const error = new Error(foreignBody ? SERVER_ERROR_PAGE_MESSAGE : (parsed?.error || text || `HTTP ${status}`)) as ApiRuntimeError
+  const foreignBody = !(parsed && typeof parsed === 'object') && !!String(text || '').trim() ? foreignBodyError(status) : null
+  const error = new Error(foreignBody ? foreignBody.message : (parsed?.error || text || `HTTP ${status}`)) as ApiRuntimeError
   error.status = status
-  error.code = foreignBody ? 'server_error_page' : (parsed?.code || null)
+  error.code = foreignBody ? foreignBody.key : (parsed?.code || null)
+  if (foreignBody) error.messageKey = foreignBody.key
   if (parsed?.outcome === 'unknown' || parsed?.outcome === 'not_dispatched') error.outcome = parsed.outcome
   if (['refresh_before_create', 'refresh_before_edit', 'retry_same_request'].includes(parsed?.action)) error.action = parsed?.action
   // A refusal that states a wait (a sign-in lockout) keeps it, so the sign-in
@@ -583,6 +609,11 @@ function createEdgeInterferenceError(path: unknown, status: number): ApiRuntimeE
     + 'This usually clears up after a refresh; if it keeps happening, check any edge/proxy access policy in front of this domain.',
   ) as ApiRuntimeError
   error.status = status
+  // A 404 from the edge says what the operator can act on; the 401/403 sentence above stays.
+  if (status === 404) {
+    error.message = FOREIGN_BODY_ERRORS.notFound.message
+    error.messageKey = FOREIGN_BODY_ERRORS.notFound.key
+  }
   error.code = 'edge_interference'
   error.path = normalizeApiPath(path)
   error.reason = 'edge_interference'
@@ -1092,6 +1123,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       }
       if (looksLikeEdgeInterferenceResponse(res.status, parsed, text)) {
         const edgeError = createEdgeInterferenceError(path, res.status)
+        await restateInKhmer(edgeError)
         // Deliberately does NOT call dispatchUnauthorized: an edge/proxy
         // layer answering on the app's behalf is not evidence the user's
         // actual session is invalid, so we shouldn't force a logout for it.
@@ -1111,11 +1143,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
         dispatchPasswordChangeRequired(path, requestSequence)
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
-      if (apiError && typeof document !== 'undefined' && String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) {
-        const language = await import('./branchRefusalLanguage.ts')
-        await language.restateBranchRefusal(apiError)
-        await language.restateServerErrorPage(apiError)
-      }
+      if (apiError) await restateInKhmer(apiError)
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
     const result = await res.json()

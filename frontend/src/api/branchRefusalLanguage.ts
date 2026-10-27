@@ -79,10 +79,12 @@ async function kmPackValue(key: string): Promise<string | null> {
   }
 }
 
-/** A failure answered by something in front of the app (an HTML 503 page, a 1102): api/http.ts gives it the English sentence and this the Khmer one. */
-export async function restateServerErrorPage<T extends Error & { code?: unknown }>(error: T): Promise<T> {
-  if (error?.code !== 'server_error_page') return error
-  const value = await kmPackValue('server_error_page')
+/** A failure answered by something in front of the app (an HTML 503 page, a 1102, a 413...) or a daily-limit refusal: api/http.ts gives it the English
+ *  sentence and the pack key in error.messageKey; this swaps in the Khmer one. */
+export async function restateForeignBodyError<T extends Error & { messageKey?: unknown }>(error: T): Promise<T> {
+  const key = typeof error?.messageKey === 'string' ? error.messageKey : ''
+  if (!key) return error
+  const value = await kmPackValue(key)
   if (value) error.message = value
   return error
 }
