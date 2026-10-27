@@ -2545,6 +2545,8 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       if (!retryRequest && isKnownUncommittedSaleCustomerChangeError(error)) savePendingBulkFieldRequest(null)
       notify((error as { code?: string } | null)?.code === 'loyalty_reassignment_requires_reconciliation'
         ? translateOr('sale_customer_loyalty_blocked', 'This customer change affects loyalty points and needs reconciliation. The sale was not changed. Ask an administrator to review it.')
+        // A relabel to cash of riel that is not whole 100៛ notes (6.0.1006): a group action has no field to mark.
+        : (error as { code?: string } | null)?.code === 'riel_cash_not_hundreds' ? translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.')
         : saleCancelledRefusal(error) ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
       return false
     } finally { finishSingleAction(bulkStatusInFlightRef); setBulkFieldSaving(false); setSaleCustomerSaving(false) }

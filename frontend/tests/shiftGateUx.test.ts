@@ -38,7 +38,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import * as actorReadScope from '../src/api/actorReadScope.ts'
-import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
+import { openShift, shiftCountPairBlocker, shiftOpeningCounts, shiftRielCountInvalid } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -218,7 +218,7 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('shared/Modal')) return { default: ModalMarker }
   if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
   if (name.includes('formatters')) return { fmtDateTime24: String, parseServerTimestampMs: Date.parse }
-  if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
+  if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null, shiftRielCountInvalid,
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
   if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }

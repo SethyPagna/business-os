@@ -89,6 +89,7 @@ import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
 import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
+import { parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import {
   mergeSaleProductSearchCandidates,
   normalizeSaleProductSearchPage,
@@ -479,6 +480,7 @@ export default function SaleDetailModal({
   const rawMethodsVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).pos_payment_methods ?? '') : ''
   const rawRateVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).exchange_rate ?? '') : ''
   const paymentConfigLoaded = paymentConfig.scope === detailScope && paymentConfig.status === 'ready'
+  const settlementMethodKinds = parsePaymentMethodKinds(settings && typeof settings === 'object' ? (settings as Record<string, unknown>).pos_payment_method_kinds : undefined)
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
@@ -1759,7 +1761,9 @@ export default function SaleDetailModal({
         return
       }
       const payload = buildSettlementPayload(settlementRows, settlementSession.configuredMethods, paymentCorrection)
-      const rowIssue = settlementRowsIssue(settlementRows, settlementSession.configuredMethods, paymentCorrection)
+      const rowIssue = settlementRowsIssue(settlementRows, settlementSession.configuredMethods, paymentCorrection, settlementMethodKinds)
+      // The row says it inline (SaleSettlementEditor); nothing is sent.
+      if (rowIssue === 'riel_cash') return
       if (rowIssue === 'method') {
         setPayError(translateOr('sale_settlement_method_unavailable', 'Choose an active configured payment method for every row.', 'សូមជ្រើសវិធីទូទាត់សកម្មដែលបានកំណត់ សម្រាប់គ្រប់បន្ទាត់។'))
         return
@@ -3092,6 +3096,7 @@ export default function SaleDetailModal({
                   error={payError}
                   recordedIssue={settlementSession.recordedIssue}
                   allowRecordedEdits={paymentCorrection}
+                  methodKinds={settlementMethodKinds}
                   translate={translateOr}
                   fmtUSD={fmtUSD}
                   fmtKHR={fmtKHR}

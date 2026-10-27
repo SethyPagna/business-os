@@ -83,6 +83,7 @@ import {
 import type { QueryParams } from '../../api/query.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
+import { isCashPaymentMethod, parsePaymentMethodKinds, rielCashFieldInvalid } from '../../utils/paymentMethodKind.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -190,6 +191,7 @@ type AppSettings = Record<string, unknown> & {
   customer_portal_redeem_value_usd?: string | number
   language?: string
   pos_payment_methods?: string
+  pos_payment_method_kinds?: string
   product_brand_options?: string
   tax_rate?: string | number
   tax_enabled?: string | number
@@ -3220,6 +3222,9 @@ export default function POS() {
   const activePaymentDetails = active.paymentDetails.length
     ? active.paymentDetails
     : [{ id: 'legacy-payment', method: active.paymentMethod || 'Cash', usd: active.paidUsd, khr: active.paidKhr }]
+  // Riel paid in cash is whole 100៛ notes (owner, 27 Oct 2026); POST /sales refuses the rest (riel_cash_not_hundreds).
+  const posMethodKinds = parsePaymentMethodKinds(settings.pos_payment_method_kinds)
+  const rielCashInvalidRows = new Set(activePaymentDetails.filter((detail) => rielCashFieldInvalid(detail.method, detail.khr, posMethodKinds)).map((detail) => detail.id))
   const newNativeTender = (() => {
     if (moneyVersion !== 1) return null
     try { return posV1Tender(activePaymentDetails) } catch { return null }
@@ -3274,7 +3279,7 @@ export default function POS() {
   // payment or any walk-in is exact); change always rounds DOWN. See
   // utils/rielRounding.ts.
   const isWalkInSale = !active.isDelivery
-  const isCashPayment = activePaymentDetails.every((d) => String(d.method || '').trim().toLowerCase() === 'cash')
+  const isCashPayment = activePaymentDetails.every((d) => isCashPaymentMethod(d.method, posMethodKinds))
   const cashCollectKhr = cashierCollectKhr(totalKhr, { isCashPayment, isWalkIn: isWalkInSale })
   const cashChangeKhr = cashierChangeKhr(changeKhr)
 
@@ -3417,6 +3422,8 @@ export default function POS() {
     // gate: posTenderCovers, the one definition of paid POST /sales also
     // enforces, so a sale this gate lets through -- online or queued
     // offline -- is never answered with a 400 by the Worker.
+    // The row says it inline; nothing is sent.
+    if (rielCashInvalidRows.size) return
     if (saleStatus !== 'awaiting_payment' && !posTenderCovers) return notify(t('insufficient_amount'), 'error')
     // S4-41: the cashier could tender the full amount and still pick
     // "Not Paid", recording a settled sale as a debt. Resolve it here, with
@@ -4442,10 +4449,11 @@ export default function POS() {
                         autoComplete="off"
                       />
                       <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input aria-label={`${t('amount_paid') || 'Amount paid'} USD ${index + 1}`} className="input w-full py-1 pl-5 text-xs" type="number" step="any" placeholder="0.00" value={detail.usd} onChange={(event) => updatePaymentDetail(detail.id, { usd: event.target.value })} autoComplete="off" /></div>
-                      <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} className="input w-full py-1 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                      <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} aria-invalid={rielCashInvalidRows.has(detail.id) || undefined} className="input w-full py-1 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
                       {/* Compact button, LEGIBLE icon — it was an h-8 box
                           drawing a text-xs '×' (huge button, tiny icon). */}
                       <button type="button" className="flex h-7 w-7 items-center justify-center self-center rounded text-lg leading-none text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20" disabled={activePaymentDetails.length === 1} onClick={() => updatePaymentDetails((details) => details.filter((entry) => entry.id !== detail.id))} aria-label={`${t('remove') || 'Remove'} ${detail.method || index + 1}`}>×</button>
+                      {rielCashInvalidRows.has(detail.id) ? <p className="col-span-4 text-right text-xs font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{t('riel_cash_not_hundreds') || 'Cash riel must be whole 100៛ notes.'}</p> : null}
                     </div>
                   ))}
                 </div>

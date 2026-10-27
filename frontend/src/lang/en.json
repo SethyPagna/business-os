@@ -3987,6 +3987,7 @@
   "pos_cash_change": "Change (cash)",
   "pos_cash_collect": "Collect (cash)",
   "pos_cash_round_hint": "Physical cash in whole 100៛ notes. The saved sale and the printed receipt keep the exact amount.",
+  "riel_cash_not_hundreds": "Cash riel must be whole 100៛ notes.",
   "pos_customer": "Customer",
   "pos_delivery": "Delivery",
   "pos_settings": "POS Settings",

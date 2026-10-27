@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
 import { nativeChangeAmounts, roundMoney2 } from '../src/utils/moneyPrecision.ts'
+import { rielCashAmountValid } from '../src/utils/saleStatusResolution.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
@@ -91,11 +92,12 @@ for (const id of ['fee-amount-usd', 'fee-amount-khr']) {
   assert.match(input, /step="any"/, 'native input must permit the raw decimal and historical value before submit normalization')
 }
 const saveSource = stripTypeScriptTypes(formSource.slice(formSource.indexOf('  const handleSave = async () => {'), formSource.indexOf('  const discardPending = () => {')))
-const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState, authority, isDraftAuthorityCurrent, setAuthorityRefused } = scope; ${saveSource}; return handleSave()`)
+const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, rielCashInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState, authority, isDraftAuthorityCurrent, setAuthorityRefused } = scope; ${saveSource}; return handleSave()`)
 async function submitAmounts(usd: string, khr: string, existing: any = null, pending: any = null) {
   const form = { fee_type: 'expense', label: 'Physical expense', amount_usd: usd, amount_khr: khr, fee_date: '2026-09-13', sale_id: '', branch_id: '2', notes: 'Unchanged details' }
   const money = feeFormMoney(form, existing), payloads: any[] = []
   await runSave({ savingRef: { current: false }, setTouched() {}, amountsInvalid: !money.valid || (money.amountUsd <= 0 && money.amountKhr <= 0), dateInvalid: false,
+    rielCashInvalid: money.valid && !money.unchangedKhr && !rielCashAmountValid(money.amountKhr),
     form, pendingCreate: pending, fee: existing, money, amountUsd: money.amountUsd, amountKhr: money.amountKhr, setSaving() {}, onSave(payload: any) { payloads.push(payload) },
     savedRef: { current: false }, dirtyRef: { current: true }, restoredDraftRef: { current: null }, clearWorkDraft() {}, draftKey: 'fixture', onClose() {}, actorId: 7,
     getPendingFeeCreate() { return pending }, setPendingCreate() {}, setForm() {}, feeCreateBodyToFormState: formHelpers.feeCreateBodyToFormState,
@@ -105,10 +107,13 @@ async function submitAmounts(usd: string, khr: string, existing: any = null, pen
 assert.equal((await submitAmounts('1.2301', '0'))[0].amount_usd, 1.23, 'actual submit uses physical nearest cents, not selling ceil')
 for (const [input, expected] of [['1.235', 1.24], ['10.075', 10.08], ['1.234999999999', 1.23]] as const)
   assert.equal((await submitAmounts(input, '0'))[0].amount_usd, expected)
-assert.equal((await submitAmounts('0', '1.499999999999999999'))[0].amount_khr, 1, 'whole KHR rounds raw decimal only once')
-assert.equal((await submitAmounts('0', '1.5'))[0].amount_khr, 2)
+assert.equal((await submitAmounts('0', '100.499999999999999999'))[0].amount_khr, 100, 'whole KHR rounds raw decimal only once')
+assert.equal((await submitAmounts('0', '99.5'))[0].amount_khr, 100)
+// Riel paid out of the drawer is whole 100-riel notes (owner, 27 Oct 2026): the rounded amount is asked, as the Worker asks it.
+assert.ok(formSource.includes('const rielCashInvalid = money.valid && !money.unchangedKhr && !rielCashAmountValid(amountKhr)'), 'the form asks the rounded riel, as this fixture does')
+for (const bad of ['1.5', '50', '39950', '100.5']) assert.deepEqual(await submitAmounts('1', bad), [], `riel ${bad} is not whole 100-riel notes`)
 for (const bad of ['-0.0000001', '-1e-99', 'invalid', '0x10', 'Infinity', '100000000001']) {
-  assert.deepEqual(await submitAmounts(bad, '20'), [], `invalid USD ${bad} cannot hide behind positive KHR`)
+  assert.deepEqual(await submitAmounts(bad, '2000'), [], `invalid USD ${bad} cannot hide behind positive KHR`)
   assert.deepEqual(await submitAmounts('1', bad), [], `invalid KHR ${bad} cannot hide behind positive USD`)
 }
 assert.deepEqual(await submitAmounts('', ''), [], 'blank amounts remain invalid')
@@ -126,11 +131,11 @@ const retried = await submitAmounts('invalid', '-5', null, { client_request_id: 
 assert.equal(retried[0], frozenBody, 'actual retry forwards original body, not the displayed/re-normalized form')
 assert.equal(JSON.stringify(retried[0]), frozenJson)
 const { normalizeFeeCreateBody } = await import('../src/api/feesTransport.ts')
-assert.equal((await submitAmounts('1', '20'))[0].fee_money_version, 1, 'fresh actual submit opts into backend denomination policy')
+assert.equal((await submitAmounts('1', '2000'))[0].fee_money_version, 1, 'fresh actual submit opts into backend denomination policy')
 assert.equal(Object.hasOwn(retried[0], 'fee_money_version'), false, 'legacy actual retry never gains a version marker')
-assert.equal(normalizeFeeCreateBody((await submitAmounts('1.2301', '1.5'))[0]).amount_usd, 1.23, 'actual create transport preserves prepared cent amount')
-assert.equal(normalizeFeeCreateBody((await submitAmounts('10.075', '1.5'))[0]).amount_usd, 10.08)
-assert.equal(normalizeFeeCreateBody((await submitAmounts('1', '1.5'))[0]).amount_khr, 2)
+assert.equal(normalizeFeeCreateBody((await submitAmounts('1.2301', '100.4'))[0]).amount_usd, 1.23, 'actual create transport preserves prepared cent amount')
+assert.equal(normalizeFeeCreateBody((await submitAmounts('10.075', '100.4'))[0]).amount_usd, 10.08)
+assert.equal(normalizeFeeCreateBody((await submitAmounts('1', '99.5'))[0]).amount_khr, 100)
 assert.equal(JSON.stringify(normalizeFeeCreateBody(frozenBody)), frozenJson, 'existing legacy request normalization/digest representation is unchanged')
 const backendFees = read('../../cloudflare/src/routes/fees.ts')
 const nativeUpdateMoney = new Function('body', 'existing', 'toNumber', 'nativeChangeAmounts', `${extractFunction(backendFees, 'round2')}\n${extractFunction(backendFees, 'feeMoneyVersion')}\n${extractFunction(backendFees, 'feeMoney')}\nconst version=feeMoneyVersion(body); return { amount_usd: feeMoney(body,'usd',version,existing.amount_usd), amount_khr: feeMoney(body,'khr',version,existing.amount_khr) }`)

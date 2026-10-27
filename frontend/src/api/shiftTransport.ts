@@ -2,6 +2,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { parseServerTimestampMs } from '../utils/formatters.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
 import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
+import { rielCashAmountValid } from '../utils/saleStatusResolution.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
 async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true, actorId?: number | string): Promise<T | null> {
@@ -423,7 +424,18 @@ export function parseShiftCount(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
-export type ShiftCountBlocker = 'both_blank' | 'invalid'
+export type ShiftCountBlocker = 'both_blank' | 'invalid' | 'riel_cash'
+
+/**
+ * A riel count typed into a shift form that is not whole 100-riel notes: drawer cash (owner, 27 Oct 2026; the Worker
+ * refuses it with riel_cash_not_hundreds). A count stored before the rule and left unchanged (`storedKhr`) is kept.
+ */
+export function shiftRielCountInvalid(khr: unknown, storedKhr?: unknown): boolean {
+  if (typeof khr === 'string' && khr.trim() === '') return false
+  const typed = parseShiftCount(khr)
+  if (typed != null && storedKhr != null && storedKhr !== '' && Math.abs(typed - Number(storedKhr)) < 0.5) return false
+  return !rielCashAmountValid(khr)
+}
 
 /**
  * Why a two-currency count pair cannot be submitted yet, or null when it can.
@@ -438,13 +450,14 @@ export type ShiftCountBlocker = 'both_blank' | 'invalid'
 export function shiftCountPairBlocker(
   usd: unknown,
   khr: unknown,
-  options: { blankMeansUncounted?: boolean } = {},
+  options: { blankMeansUncounted?: boolean; storedKhr?: unknown } = {},
 ): ShiftCountBlocker | null {
   const usdBlank = typeof usd === 'string' && usd.trim() === ''
   const khrBlank = typeof khr === 'string' && khr.trim() === ''
   if (usdBlank && khrBlank) return options.blankMeansUncounted ? null : 'both_blank'
   if ((!usdBlank && parseShiftCount(usd) == null) || (!khrBlank && parseShiftCount(khr) == null)) return 'invalid'
   if (!options.blankMeansUncounted && (usdBlank || khrBlank)) return 'invalid'
+  if (shiftRielCountInvalid(khr, options.storedKhr)) return 'riel_cash'
   return null
 }
 

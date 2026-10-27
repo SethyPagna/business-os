@@ -29,6 +29,7 @@ import {
   SHIFT_SEARCH_MAX_LENGTH,
   shiftClosingCounts,
   shiftCountPairBlocker,
+  shiftRielCountInvalid,
   shiftOpeningCounts,
   shiftLocalDateTimeFromMs,
   shiftLocalDateTimeToIso,
@@ -413,6 +414,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     if (closingCountInvalid(edit.openingUsd) || closingCountInvalid(edit.openingKhr)
       || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)
         || closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)))) return
+    if (editRielInvalid) return
     const base = editDraft(selected)
     const openedChanged = edit.openedAt !== base.openedAt
     const closedChanged = edit.closedAt !== base.closedAt
@@ -451,6 +453,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     const closing = shiftClosingCounts(close.closingUsd, close.closingKhr)
     if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr)) return
+    if (shiftRielCountInvalid(close.closingKhr) || shiftRielCountInvalid(close.additionalKhr)) return
     const isCurrent = beginMutation()
     if (!isCurrent) return
     try {
@@ -532,14 +535,18 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   // button by ShiftSubmitRow, never hidden in a bare `disabled`. The count
   // rule is the shared one (blank is unknown, explicit 0 is counted); the other
   // reasons are the form's own required fields, in the order they appear.
+  // Only a riel count the amend changes is asked (the Worker keeps a stored one as it is).
+  const editRielInvalid = !!edit && (shiftRielCountInvalid(edit.openingKhr, selected?.opening_float_khr)
+    || (!!edit.closedAt && (shiftRielCountInvalid(edit.closingKhr, selected?.closing_counted_khr) || shiftRielCountInvalid(edit.additionalKhr, selected?.additional_cash_khr))))
   const editCountBlocker = edit
-    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr, { blankMeansUncounted: true })
+    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr, { blankMeansUncounted: true, storedKhr: selected?.opening_float_khr })
     : null
   const editReason = !edit ? null
     : !edit.openedAt ? t('shift_opened_at_required')
       : editCountBlocker ? t(shiftCountBlockerKey(editCountBlocker))
         : edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)) ? t(shiftCountBlockerKey('invalid'))
         : edit.closedAt && (closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)) ? t(shiftCountBlockerKey('invalid'))
+        : editRielInvalid ? t(shiftCountBlockerKey('riel_cash'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
   const closeReason = action !== 'close' ? null
@@ -547,6 +554,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     : canChooseShiftTime() && !close.closedAt ? t('shift_close_time_required')
     : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('invalid'))
+    : shiftRielCountInvalid(close.closingKhr) || shiftRielCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('riel_cash'))
       : null
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
     : selected && selected.closing_counted_usd == null && selected.closing_counted_khr == null ? t('shift_reopen_needs_count')
@@ -601,9 +609,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                         <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} disabled={!canChooseShiftTime()} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
                         <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at || !canChooseShiftTime()} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         {canChooseShiftTime() ? null : <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300 sm:col-span-2">{t('shift_time_admin_only')}</p>}
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={edit.additionalUsd} khr={edit.additionalKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} storedKhr={selected?.opening_float_khr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={edit.additionalUsd} khr={edit.additionalKhr} storedKhr={selected?.additional_cash_khr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} storedKhr={selected?.closing_counted_khr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={edit.openingNote} onChange={(event) => setEdit({ ...edit, openingNote: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reason_required')}<textarea className="input mt-1 min-h-20" required value={edit.reason} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} /></label>

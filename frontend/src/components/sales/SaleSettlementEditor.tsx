@@ -1,7 +1,8 @@
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { SettlementRow } from './saleSettlement.ts'
-import { paymentMethodIdentity, settlementOutstandingUsd, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
+import { paymentMethodIdentity, settlementOutstandingUsd, settlementRowRielCashInvalid, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
+import type { PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
 
 type Props = {
   rows: SettlementRow[]
@@ -14,6 +15,8 @@ type Props = {
   error: string
   recordedIssue: 'malformed' | 'mismatch' | 'allocation' | null
   allowRecordedEdits?: boolean
+  /** The shop's pos_payment_method_kinds pins: which methods are drawer cash. */
+  methodKinds?: PaymentMethodKindMap
   translate: (key: string, english: string, khmer?: string) => string
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -22,7 +25,7 @@ type Props = {
 
 export const MAX_SETTLEMENT_ROWS = 12
 
-export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, translate, fmtUSD, fmtKHR, onChange }: Props) {
+export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, methodKinds = {}, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
   // Outstanding is the one definition of paid read as an amount: a tender
   // inside the half-cent band owes nothing (it completes the sale), so it is
@@ -31,7 +34,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
   const change = Math.max(0, totals.paidEquivalentUsd - totalUsd)
   const balance = remaining > 0 ? remaining : change
   const balanceText = balance > 0 && balance < 0.01 ? `${balance.toFixed(4)} USD` : fmtUSD(balance)
-  const rowIssue = settlementRowsIssue(rows, configuredMethods, allowRecordedEdits)
+  const rowIssue = settlementRowsIssue(rows, configuredMethods, allowRecordedEdits, methodKinds)
   const rateText = exchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })
   const rowsLimitMessage = translate('sale_settlement_rows_limit', 'This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.', 'ការលក់នេះមានបន្ទាត់ការទូទាត់ដែលបានកត់ត្រា {count}។ ការបញ្ចប់ការទូទាត់គាំទ្រអតិបរមា {max} បន្ទាត់ ហើយមិនបានដកបន្ទាត់ដែលបានកត់ត្រាណាមួយទេ។ សូមកែទិន្នន័យ មុនបញ្ចប់។')
     .replace('{count}', String(rows.length))
@@ -87,6 +90,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         {rows.map((row, index) => {
           // A refund credit row is locked in every mode, payment corrections included (allowRecordedEdits).
           const locked = row.refundCredit === true || (row.id.startsWith('recorded-') && !allowRecordedEdits)
+          const rielCashInvalid = settlementRowRielCashInvalid(row, allowRecordedEdits, methodKinds)
           return (
           <div key={row.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800/80">
             <div className="mb-2 flex min-h-11 items-center justify-between gap-2">
@@ -130,10 +134,12 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                   step="1"
                   inputMode="numeric"
                   aria-label={`${row.method} KHR ${index + 1}`}
+                  aria-invalid={rielCashInvalid || undefined}
                   disabled={saving || locked}
                   value={row.khr}
                   onChange={(event) => patchRow(row.id, { khr: event.target.value })}
                 />
+                {rielCashInvalid ? <span className="mt-1 block font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{translate('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។')}</span> : null}
               </label>
             </div>
           </div>

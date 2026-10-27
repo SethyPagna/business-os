@@ -5,6 +5,8 @@
 import type { ExchangePaymentV1, ExchangeQuoteV1, ReplacementItemV1 } from '../../../api/returnsTransport.ts'
 import { buildSettlementPayload, settlementOutstandingUsd, settlementRowsIssue, settlementTotals, type SettlementRow } from '../../sales/saleSettlement.ts'
 import type { ReplacementPart } from './replacementPricing.ts'
+import { rielCashFloor } from '../../../utils/saleStatusResolution.ts'
+import type { PaymentMethodKindMap } from '../../../utils/paymentMethodKind.ts'
 
 export type ExchangeChangeCurrency = 'USD' | 'KHR'
 
@@ -71,16 +73,16 @@ export function exchangeOverpaymentUsd(rows: readonly SettlementRow[], exchange:
 
 /** What a give-back or an overpayment comes to in riel: at the quote's change rate (`change_exchange_rate`), rounded DOWN to 100 (the drawer never hands out more than is owed). */
 export function changeRielRoundedDown(usd: number, exchangeRate: number): number {
-  return Math.floor((Number(usd) || 0) * (Number(exchangeRate) || 0) / 100 + 1e-9) * 100
+  return rielCashFloor((Number(usd) || 0) * (Number(exchangeRate) || 0))
 }
 
-export type ExchangePayIssue = 'method' | 'amount' | 'short' | null
+export type ExchangePayIssue = 'method' | 'amount' | 'riel_cash' | 'short' | null
 
 /** Why the payment cannot be sent yet, or null. A Not Paid original, an even exchange and a give-back need no payment rows. */
-export function exchangePaymentIssue(rows: readonly SettlementRow[], exchange: Pick<ExchangeQuoteV1, 'net_usd' | 'exchange_rate' | 'not_paid'>, configured: readonly string[]): ExchangePayIssue {
+export function exchangePaymentIssue(rows: readonly SettlementRow[], exchange: Pick<ExchangeQuoteV1, 'net_usd' | 'exchange_rate' | 'not_paid'>, configured: readonly string[], kinds: PaymentMethodKindMap = {}): ExchangePayIssue {
   const due = exchangeDue(exchange)
-  if (due.kind !== 'pay' || exchange.not_paid) return rows.length ? settlementRowsIssue(rows, configured) : null
-  const rowIssue = settlementRowsIssue(rows, configured)
+  if (due.kind !== 'pay' || exchange.not_paid) return rows.length ? settlementRowsIssue(rows, configured, false, kinds) : null
+  const rowIssue = settlementRowsIssue(rows, configured, false, kinds)
   if (rowIssue) return rowIssue
   return exchangeOutstandingUsd(rows, exchange) > 0 ? 'short' : null
 }

@@ -6,15 +6,19 @@
 // keep the EXACT calculation -- nothing here is persisted or printed.
 //
 // Directional matrix (confirmed by the business owner):
-//   - Amount to collect, cash payment OR walk-in sale   -> exact (no rounding)
+//   - Amount to collect, cash payment                   -> round DOWN to 100៛ (27 Oct 2026: cash riel is whole
+//     100៛ notes, and a riel tender short by under 100៛ is fully paid)
+//   - Amount to collect, non-cash walk-in sale          -> exact (no rounding)
 //   - Amount to collect, non-cash payment on a delivery -> round UP to 100៛
 //   - Change handed back to the customer (any sale)     -> round DOWN to 100៛
 
-export const RIEL_STEP = 100
+import { RIEL_CASH_STEP_KHR, rielCashFloor } from './saleStatusResolution.ts'
 
+export const RIEL_STEP = RIEL_CASH_STEP_KHR
+
+/** Down to whole 100៛ notes: the shared rielCashFloor (utils/saleStatusResolution.ts). */
 export function roundRielDown(khr: number): number {
-  if (!Number.isFinite(khr) || khr <= 0) return 0
-  return Math.floor(khr / RIEL_STEP) * RIEL_STEP
+  return rielCashFloor(khr)
 }
 
 export function roundRielUp(khr: number): number {
@@ -23,16 +27,17 @@ export function roundRielUp(khr: number): number {
 }
 
 /**
- * The KHR a cashier should physically COLLECT from the customer. Rounds UP to
- * the nearest 100៛ only for a non-cash payment on a delivery order; a cash
- * payment, or any walk-in sale, is collected at the exact whole-riel figure.
+ * The KHR a cashier should physically COLLECT from the customer. Cash rounds
+ * DOWN to whole 100៛ notes; a non-cash payment on a delivery order rounds UP;
+ * a non-cash walk-in sale is collected at the exact whole-riel figure.
  */
 export function cashierCollectKhr(
   totalKhr: number,
   opts: { isCashPayment: boolean; isWalkIn: boolean },
 ): number {
   const exact = Number.isFinite(totalKhr) && totalKhr > 0 ? Math.round(totalKhr) : 0
-  if (opts.isCashPayment || opts.isWalkIn) return exact
+  if (opts.isCashPayment) return roundRielDown(exact)
+  if (opts.isWalkIn) return exact
   return roundRielUp(exact)
 }
 

@@ -8,7 +8,7 @@ import { isAdminControlUser, type PermissionUser } from '../../utils/permissions
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftRielCountInvalid, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
@@ -358,7 +358,8 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
     : canPickTime && draft.closedAt.trim() === ''
     ? 'time' as const
     : closingCountInvalid(draft.countedUsd) || closingCountInvalid(draft.countedKhr)
-      || closingCountInvalid(draft.additionalUsd) || closingCountInvalid(draft.additionalKhr) ? 'invalid' as const : null
+      || closingCountInvalid(draft.additionalUsd) || closingCountInvalid(draft.additionalKhr) ? 'invalid' as const
+    : shiftRielCountInvalid(draft.countedKhr) || shiftRielCountInvalid(draft.additionalKhr) ? 'riel_cash' as const : null
 
   const submit = async () => {
     if (busy || !shift || blocker || adminRequired) return
@@ -803,7 +804,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const carryForm = useCarryOverClose(carryTarget, state?.previous_open_close_before, () => { setCarryTarget(null); setOpen(false) })
 
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
-    || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
+    || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const
+    : shiftRielCountInvalid(countedKhr) || shiftRielCountInvalid(additionalKhr) ? 'riel_cash' as const : null
   const savingGate = useSavingGate()
   // Today's shift cannot end while an earlier day's drawer is still open behind it, and an employee can close neither
   // (they pick no time): say whose move it is instead of offering an End that can only fail.

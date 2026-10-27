@@ -58,6 +58,7 @@ import {
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import StockActionIcon from './StockActionIcon.tsx'
+import { parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -875,7 +876,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const configuredMethods = configuredSettlementMethods(settings?.pos_payment_methods)
   const replacementLinesV1 = isV1Sale ? exchangeReplacementItems(replacements, partsOf) : []
   const exchangeActive = replacementLinesV1.length > 0
-  const exchangePayIssue = exchangeActive && exchangeQuote ? exchangePaymentIssue(payRows, exchangeQuote, configuredMethods) : null
+  const methodKinds = parsePaymentMethodKinds(settings?.pos_payment_method_kinds)
+  const exchangePayIssue = exchangeActive && exchangeQuote ? exchangePaymentIssue(payRows, exchangeQuote, configuredMethods, methodKinds) : null
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
   const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
   const quoteIntentRef = useRef(quoteIntent)
@@ -1072,7 +1074,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         if (!isV1Sale || !quote || reviewedIntentRef.current !== quoteIntent || pendingError) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
         if (!activeItems.length || !finalReason || itemsMissingLot.length || (exchangeActive && !exchangeQuote)) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
         // The payment is checked before anything is frozen: a short or malformed tender is the operator's to fix on this screen, not a saved request.
-        if (exchangeActive && exchangePayIssue) throw Object.assign(new Error('return_exchange_payment'), { code: exchangePayIssue === 'short' ? 'return_exchange_payment_short' : 'return_exchange_payment_invalid' })
+        if (exchangeActive && exchangePayIssue) throw Object.assign(new Error('return_exchange_payment'), { code: exchangePayIssue === 'short' ? 'return_exchange_payment_short' : exchangePayIssue === 'riel_cash' ? 'riel_cash_not_hundreds' : 'return_exchange_payment_invalid' })
         pending = await transport.prepareReturnCreateV1(user?.id, {
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
@@ -1773,6 +1775,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       saving={submitting}
                       error=""
                       recordedIssue={null}
+                      methodKinds={methodKinds}
                       translate={tr}
                       fmtUSD={fmtUSD}
                       fmtKHR={(value) => typeof fmtKHR === 'function' ? fmtKHR(value) : `${value}៛`}

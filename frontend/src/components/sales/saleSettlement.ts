@@ -1,4 +1,5 @@
 import { saleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
+import { rielCashFieldInvalid, type PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
 
 export type SettlementPaymentInput = {
   method?: string | null
@@ -71,7 +72,13 @@ export function configuredSettlementMethods(raw: unknown): string[] {
     })
 }
 
-export function settlementRowsIssue(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false): 'method' | 'amount' | null {
+/** A row the request adds (not a recorded row it repeats) whose riel is paid in cash and is not whole 100-riel notes. */
+export function settlementRowRielCashInvalid(row: SettlementRow, replaceRecorded = false, kinds: PaymentMethodKindMap = {}): boolean {
+  const recorded = row.refundCredit === true || (row.id.startsWith('recorded-') && !replaceRecorded)
+  return !recorded && rielCashFieldInvalid(row.method, row.khr, kinds)
+}
+
+export function settlementRowsIssue(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false, kinds: PaymentMethodKindMap = {}): 'method' | 'amount' | 'riel_cash' | null {
   for (const row of rows) {
     // A refund credit row is always checked as recorded: its stored method and 4-decimal amounts are kept as they are.
     const recorded = row.refundCredit === true || (row.id.startsWith('recorded-') && !replaceRecorded)
@@ -85,6 +92,8 @@ export function settlementRowsIssue(rows: readonly SettlementRow[], configured: 
       : Number.isInteger(khr)
     if (!Number.isFinite(usd) || !Number.isFinite(khr) || usd < 0 || khr < 0 || !validKhrPrecision || (!recorded && !hasCentPrecision) || (usd <= 0 && khr <= 0)) return 'amount'
   }
+  // Riel paid in cash is whole 100-riel notes (owner, 27 Oct 2026); the Worker asks the same rows (lib/paymentSettlement.ts).
+  if (rows.some((row) => settlementRowRielCashInvalid(row, replaceRecorded, kinds))) return 'riel_cash'
   return rows.length ? null : 'amount'
 }
 

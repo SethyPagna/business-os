@@ -30,6 +30,7 @@ import {
 } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { branchCanSell, branchCanSellNow, branchIsActive, resolveSellingSuccessor } from '../../utils/branchRoles.ts'
+import { rielCashAmountValid } from '../../utils/saleStatusResolution.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -430,6 +431,9 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   // At least one currency amount must be a real, positive number -- a
   // fee with both amounts at 0 isn't a meaningful record.
   const amountsInvalid = !money.valid || (amountUsd <= 0 && amountKhr <= 0)
+  // An expense is paid out of the drawer: riel in whole 100៛ notes (owner, 27 Oct 2026), asked of the whole-riel amount the
+  // Worker stores (fees.ts feeMoney, then the same rule). A stored amount left unchanged is kept.
+  const rielCashInvalid = money.valid && !money.unchangedKhr && !rielCashAmountValid(amountKhr)
   const dateInvalid = !form.fee_date.trim()
 
   const branchOptions = (() => {
@@ -450,6 +454,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
     if (!isDraftAuthorityCurrent(authority)) { setAuthorityRefused(true); return }
     setTouched(true)
     if (!pendingCreate && (amountsInvalid || dateInvalid || !form.branch_id.trim())) return
+    if (!pendingCreate && rielCashInvalid) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
     const branchId = form.branch_id.trim() ? Number(form.branch_id.trim()) : null
     try {
@@ -616,7 +621,9 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
             onChange={(event) => set('amount_khr', event.target.value)}
             onBlur={() => setTouched(true)}
             placeholder="0"
+            aria-invalid={rielCashInvalid || undefined}
           />
+          {rielCashInvalid ? <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{t('riel_cash_not_hundreds') || 'Cash riel must be whole 100៛ notes.'}</p> : null}
         </div>
       </div>
       {touched && amountsInvalid ? (

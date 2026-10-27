@@ -1,3 +1,5 @@
+import { rielCashAmountValid } from '../../utils/saleStatusResolution.ts'
+
 // The cancellation answers for ONE sale -- reason, note and the optional lost
 // fee -- shared by the single-sale dialog and every row of the bulk review, so
 // the two can never ask different questions.
@@ -24,9 +26,14 @@ const REASONS: Array<[CancelReason, string, string]> = [
   ['other', 'cancel_reason_other', 'Other'],
 ]
 
+/** A lost fee is paid out of the drawer: its riel is whole 100៛ notes (owner, 27 Oct 2026; riel_cash_not_hundreds). */
+export function cancelFeeRielInvalid(value: Pick<CancelFieldsValue, 'cancel_fee_khr'>): boolean {
+  return !rielCashAmountValid(value.cancel_fee_khr)
+}
+
 /** A sale cannot be cancelled without a reason, and "Other" must say what happened. */
 export function cancelFieldsComplete(value: CancelFieldsValue): boolean {
-  return !!value.cancel_reason && (value.cancel_reason !== 'other' || value.cancel_note.trim().length > 0)
+  return !!value.cancel_reason && (value.cancel_reason !== 'other' || value.cancel_note.trim().length > 0) && !cancelFeeRielInvalid(value)
 }
 
 export function cancelFieldsDirty(value: CancelFieldsValue): boolean {
@@ -79,8 +86,9 @@ export default function CancelSaleFields({ value, onChange, disabled = false, wi
           <div className="text-xs font-medium leading-relaxed text-amber-800 dark:text-amber-200">{feeLabel}</div>
           <div className="grid grid-cols-2 gap-2">
             <input className="input w-full text-sm" disabled={disabled} type="number" min="0" step="any" inputMode="decimal" placeholder="USD" aria-label="USD" value={value.cancel_fee_usd} onChange={(event) => onChange({ cancel_fee_usd: event.target.value })} />
-            <input className="input w-full text-sm" disabled={disabled} type="number" min="0" step="100" inputMode="numeric" placeholder="KHR" aria-label="KHR" value={value.cancel_fee_khr} onChange={(event) => onChange({ cancel_fee_khr: event.target.value })} />
+            <input className="input w-full text-sm" disabled={disabled} type="number" min="0" step="100" inputMode="numeric" placeholder="KHR" aria-label="KHR" aria-invalid={cancelFeeRielInvalid(value) || undefined} value={value.cancel_fee_khr} onChange={(event) => onChange({ cancel_fee_khr: event.target.value })} />
           </div>
+          {cancelFeeRielInvalid(value) ? <p className="text-right text-xs font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{tr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.')}</p> : null}
           <input
             className="input w-full text-sm"
             disabled={disabled}

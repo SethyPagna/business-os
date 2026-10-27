@@ -47,9 +47,12 @@ runTest('roundRielUp ceils to the nearest 100, never below zero', () => {
   assert.equal(roundRielUp(Number.NaN), 0)
 })
 
-runTest('cash payment is collected exact, never rounded up', () => {
-  assert.equal(cashierCollectKhr(4150, { isCashPayment: true, isWalkIn: false }), 4150)
-  assert.equal(cashierCollectKhr(4150, { isCashPayment: true, isWalkIn: true }), 4150)
+// Owner, 27 Oct 2026: cash riel is whole 100៛ notes, so the exact 4,150 cannot be handed over in cash; 4,100 is short
+// by 50, which counts as fully paid (saleStatusResolution.ts). Exact (4,150) or up (4,200) is the wrong direction.
+runTest('cash payment is collected rounded DOWN to whole 100៛ notes', () => {
+  assert.equal(cashierCollectKhr(4150, { isCashPayment: true, isWalkIn: false }), 4100)
+  assert.equal(cashierCollectKhr(4150, { isCashPayment: true, isWalkIn: true }), 4100)
+  assert.equal(cashierCollectKhr(4100, { isCashPayment: true, isWalkIn: true }), 4100)
 })
 
 runTest('any walk-in sale is collected exact, even when paid by a non-cash method', () => {
